@@ -1,8 +1,9 @@
 /* --- Global Reset & Base --- */
-html, body {
+html,
+body {
     margin: 0;
     padding: 0;
-    font-family: "Arial", sans-serif;
+    font-family: 'Arial', sans-serif;
     overflow: hidden; /* Keep extension popup from scrolling */
 }
 body {
@@ -42,7 +43,6 @@ body {
     opacity: 0.15;
     z-index: 1;
 }
-
 
 /* --- Loading Overlay --- */
 .loading-container {
@@ -99,7 +99,7 @@ body {
     right: 12px;
     width: 28px;
     height: 28px;
-    background: url("assets/default-profile.png") no-repeat center center;
+    background: url('assets/default-profile.png') no-repeat center center;
     background-size: cover;
     cursor: pointer;
     display: none; /* shown only on login */
@@ -125,7 +125,6 @@ body {
 .login-prompt a {
     color: #ea6925;
     text-decoration: none;
-
 }
 .login-button {
     background: #ea6925;
@@ -136,7 +135,7 @@ body {
     border-radius: 8px;
     cursor: pointer;
     transition: background 0.3s ease;
-    box-shadow: 0 3px 8px rgba(0,0,0,0.2);
+    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.2);
 }
 
 /* --- Profile Card --- */
@@ -148,7 +147,7 @@ body {
     height: 80px;
     border-radius: 50%;
     object-fit: cover;
-    box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
 }
 .welcome-message {
     font-size: 18px;
@@ -175,7 +174,7 @@ body {
     cursor: pointer;
     font-size: 14px;
     transition: background 0.3s ease;
-    box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
 }
 .settings-button {
     background: #ea6925;
@@ -205,9 +204,19 @@ body {
     }
 }
 @keyframes bounce {
-    0%, 20%, 50%, 80%, 100% { transform: translateY(0);}
-    40% { transform: translateY(-10px);}
-    60% { transform: translateY(-5px);}
+    0%,
+    20%,
+    50%,
+    80%,
+    100% {
+        transform: translateY(0);
+    }
+    40% {
+        transform: translateY(-10px);
+    }
+    60% {
+        transform: translateY(-5px);
+    }
 }
 .fade-in-up {
     animation: fadeInUp 0.6s ease forwards;
@@ -222,8 +231,6 @@ body {
         transform: translateY(0);
     }
 }
-
-
 
 .login-prompt {
     max-width: 250px;
@@ -271,7 +278,6 @@ body {
     flex-direction: column;
 }
 
-
 .login-form input:focus {
     border-color: #ea6925; /* highlight border on focus */
 }
@@ -289,7 +295,7 @@ body {
 }
 
 .login-button:hover {
-    transform: scale(1.05)
+    transform: scale(1.05);
 }
 
 .error-message {
@@ -305,14 +311,13 @@ body {
     margin-top: 6px;
 }
 
-
 /* -------------- Overall Card -------------- */
 .coupons-profile-card {
     /* Subtle gradient with your brand color (#ea6925) in mind */
     background: linear-gradient(135deg, #fff 50%, #fff3ec 100%);
     padding: 16px;
     border-radius: 12px;
-    box-shadow: 0 4px 14px rgba(0,0,0,0.12);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
     animation: fadeInUp 0.3s ease forwards;
     max-width: 420px;
     margin: 0 auto;
@@ -386,12 +391,17 @@ body {
    - slight background tint
 */
 .coupon-item {
-    cursor: url("data:image/svg+xml;base64,PHN2Zw0KICAgICAgICB3aWR0aD0iNjAiDQogICAgICAgIGhlaWdodD0iMTYiDQogICAgICAgIHZpZXdCb3g9IjAgMCA2MCAxNiINCiAgICAgICAgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIg0KPg0KICAgIDwhLS0gT3ZlcmxhcHBpbmcgc3F1YXJlcyAocmVwcmVzZW50IHRoZSAiY29weSIgaWNvbikgLS0+DQogICAgPHJlY3QNCiAgICAgICAgICAgIHg9IjAiDQogICAgICAgICAgICB5PSIzIg0KICAgICAgICAgICAgd2lkdGg9IjgiDQogICAgICAgICAgICBoZWlnaHQ9IjEwIg0KICAgICAgICAgICAgZmlsbD0ibm9uZSINCiAgICAgICAgICAgIHN0cm9rZT0iI2VhNjkyNSINCiAgICAgICAgICAgIHN0cm9rZS13aWR0aD0iMSINCiAgICAgICAgICAgIHN0cm9rZS1saW5lY2FwPSJyb3VuZCINCiAgICAgICAgICAgIHN0cm9rZS1saW5lam9pbj0icm91bmQiDQogICAgLz4NCiAgICA8cmVjdA0KICAgICAgICAgICAgeD0iMiINCiAgICAgICAgICAgIHk9IjEiDQogICAgICAgICAgICB3aWR0aD0iOCINCiAgICAgICAgICAgIGhlaWdodD0iMTAiDQogICAgICAgICAgICBmaWxsPSJub25lIg0KICAgICAgICAgICAgc3Ryb2tlPSIjZWE2OTI1Ig0KICAgICAgICAgICAgc3Ryb2tlLXdpZHRoPSIxIg0KICAgICAgICAgICAgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIg0KICAgICAgICAgICAgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCINCiAgICAvPg0KDQogICAgPCEtLSBUaGUgd29yZCAiQ29weSIgdG8gdGhlIHJpZ2h0IC0tPg0KICAgIDx0ZXh0DQogICAgICAgICAgICB4PSIxOCINCiAgICAgICAgICAgIHk9IjEyIg0KICAgICAgICAgICAgZmlsbD0iI2VhNjkyNSINCiAgICAgICAgICAgIGZvbnQtc2l6ZT0iMTAiDQogICAgICAgICAgICBmb250LWZhbWlseT0ic2Fucy1zZXJpZiINCiAgICA+DQogICAgICAgIENvcHkNCiAgICA8L3RleHQ+DQo8L3N2Zz4NCg==") 8 8, copy;
+    cursor:
+        url('data:image/svg+xml;base64,PHN2Zw0KICAgICAgICB3aWR0aD0iNjAiDQogICAgICAgIGhlaWdodD0iMTYiDQogICAgICAgIHZpZXdCb3g9IjAgMCA2MCAxNiINCiAgICAgICAgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIg0KPg0KICAgIDwhLS0gT3ZlcmxhcHBpbmcgc3F1YXJlcyAocmVwcmVzZW50IHRoZSAiY29weSIgaWNvbikgLS0+DQogICAgPHJlY3QNCiAgICAgICAgICAgIHg9IjAiDQogICAgICAgICAgICB5PSIzIg0KICAgICAgICAgICAgd2lkdGg9IjgiDQogICAgICAgICAgICBoZWlnaHQ9IjEwIg0KICAgICAgICAgICAgZmlsbD0ibm9uZSINCiAgICAgICAgICAgIHN0cm9rZT0iI2VhNjkyNSINCiAgICAgICAgICAgIHN0cm9rZS13aWR0aD0iMSINCiAgICAgICAgICAgIHN0cm9rZS1saW5lY2FwPSJyb3VuZCINCiAgICAgICAgICAgIHN0cm9rZS1saW5lam9pbj0icm91bmQiDQogICAgLz4NCiAgICA8cmVjdA0KICAgICAgICAgICAgeD0iMiINCiAgICAgICAgICAgIHk9IjEiDQogICAgICAgICAgICB3aWR0aD0iOCINCiAgICAgICAgICAgIGhlaWdodD0iMTAiDQogICAgICAgICAgICBmaWxsPSJub25lIg0KICAgICAgICAgICAgc3Ryb2tlPSIjZWE2OTI1Ig0KICAgICAgICAgICAgc3Ryb2tlLXdpZHRoPSIxIg0KICAgICAgICAgICAgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIg0KICAgICAgICAgICAgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCINCiAgICAvPg0KDQogICAgPCEtLSBUaGUgd29yZCAiQ29weSIgdG8gdGhlIHJpZ2h0IC0tPg0KICAgIDx0ZXh0DQogICAgICAgICAgICB4PSIxOCINCiAgICAgICAgICAgIHk9IjEyIg0KICAgICAgICAgICAgZmlsbD0iI2VhNjkyNSINCiAgICAgICAgICAgIGZvbnQtc2l6ZT0iMTAiDQogICAgICAgICAgICBmb250LWZhbWlseT0ic2Fucy1zZXJpZiINCiAgICA+DQogICAgICAgIENvcHkNCiAgICA8L3RleHQ+DQo8L3N2Zz4NCg==')
+            8 8,
+        copy;
     border: 2px dashed #ea6925;
     border-radius: 8px;
     padding: 10px 14px;
     margin-bottom: 12px;
-    transition: background-color 0.2s, box-shadow 0.2s;
+    transition:
+        background-color 0.2s,
+        box-shadow 0.2s;
     background-color: #fff;
     position: relative;
 }
@@ -399,13 +409,13 @@ body {
 /* Subtle hover effect */
 .coupon-item:hover {
     background-color: #fff8f5;
-    box-shadow: 0 3px 8px rgba(0,0,0,0.07);
+    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.07);
 }
 
 /* Optional "ticket notch" effect (using :before/:after) */
 .coupon-item:before,
 .coupon-item:after {
-    content: "";
+    content: '';
     position: absolute;
     width: 14px;
     height: 14px;
@@ -456,7 +466,9 @@ body {
     cursor: pointer;
     font-size: 14px;
     font-weight: bold;
-    transition: background 0.3s ease, transform 0.1s;
+    transition:
+        background 0.3s ease,
+        transform 0.1s;
 }
 
 .copyBtn:hover {

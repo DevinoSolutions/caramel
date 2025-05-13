@@ -1,52 +1,56 @@
 {
-  "manifest_version": 3,
-  "name": "Caramel",
-  "version": "1.0",
-  "description": "Caramel is your trusted, open-source companion for saving on online purchases. No scams, just sweet deals!",
-  "icons": {
-    "16": "/icons/16.png",
-    "32": "/icons/32.png",
-    "192": "/icons/192.png",
-    "512": "/icons/512.png"
-  },
-  "permissions": [
-    "tabs",
-    "activeTab",
-    "storage",
-    "scripting",
-    "webNavigation"
-  ],
-  "host_permissions": [
-    "https://www.amazon.com/*",
-    "https://*.ebay.com/*",
-    "https://*.codecademy.com/*"
-  ],
-  "web_accessible_resources": [
-    {
-      "resources": ["index.html", "supported.json", "assets/*"],
-      "matches": ["<all_urls>"]
-    }
-  ],
-  "content_scripts": [
-    {
-      "matches": [
+    "manifest_version": 3,
+    "name": "Caramel",
+    "version": "1.0",
+    "description": "Caramel is your trusted, open-source companion for saving on online purchases. No scams, just sweet deals!",
+    "icons": {
+        "16": "/icons/16.png",
+        "19": "/icons/19.png",
+        "32": "/icons/32.png",
+        "38": "/icons/38.png",
+        "192": "/icons/192.png",
+        "512": "/icons/512.png"
+    },
+    "permissions": [
+        "tabs",
+        "activeTab",
+        "storage",
+        "scripting",
+        "webNavigation"
+    ],
+    "host_permissions": [
         "https://www.amazon.com/*",
         "https://*.ebay.com/*",
         "https://*.codecademy.com/*"
-      ],
-      "js": ["shared-utils.js", "inject.js", "amazon.js"]
+    ],
+    "web_accessible_resources": [
+        {
+            "resources": ["index.html", "supported.json", "assets/*"],
+            "matches": ["<all_urls>"]
+        }
+    ],
+    "content_scripts": [
+        {
+            "matches": [
+                "https://www.amazon.com/*",
+                "https://*.ebay.com/*",
+                "https://*.codecademy.com/*"
+            ],
+            "js": ["shared-utils.js", "inject.js", "amazon.js"]
+        }
+    ],
+    "background": {
+        "service_worker": "background.js"
+    },
+    "action": {
+        "default_popup": "index.html",
+        "default_icon": {
+            "16": "/icons/16.png",
+            "19": "/icons/19.png",
+            "32": "/icons/32.png",
+            "38": "/icons/38.png",
+            "192": "/icons/192.png",
+            "512": "/icons/512.png"
+        }
     }
-  ],
-  "background": {
-    "service_worker": "background.js"
-  },
-  "action": {
-    "default_popup": "index.html",
-    "default_icon": {
-      "16": "/icons/16.png",
-      "32": "/icons/32.png",
-      "192": "/icons/192.png",
-      "512": "/icons/512.png"
-    }
-  }
 }

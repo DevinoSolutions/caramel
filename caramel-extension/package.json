@@ -1,0 +1,22 @@
+{
+    "name": "caramel-extension",
+    "version": "1.0.0",
+    "description": "Caramel browser extension",
+    "private": true,
+    "scripts": {
+        "lint": "eslint . --ext .js --ext .html",
+        "prettier-check": "prettier --check '**/*.{js,html,css,json,md}'",
+        "format": "prettier --write '**/*.{js,html,css,json,md}'",
+        "build": "rm -rf dist && mkdir -p dist && rsync -a --exclude='node_modules' --exclude='dist' --exclude='.git' --exclude='*.lock' --exclude='apple-extension' ./ dist/",
+        "package": "zip -r extension.zip ./dist"
+    },
+    "devDependencies": {
+        "eslint": "^9.25.1",
+        "eslint-config-prettier": "^10.1.2",
+        "eslint-plugin-html": "^8.1.2",
+        "eslint-plugin-import": "^2.31.0",
+        "eslint-plugin-prettier": "^5.2.6",
+        "prettier": "^3.5.3",
+        "prettier-plugin-organize-imports": "^4.1.0"
+    }
+}

@@ -1,24 +1,24 @@
 {
-  "supported": [
-    {
-      "domain": "amazon.com",
-      "couponInput": "input[name='ppw-claimCode']",
-      "couponSubmit": "input[name='ppw-claimCodeApplyPressed']",
-      "priceContainer": "div[id='subtotals-marketplace-table']"
-    },
-    {
-      "domain":"ebay.com",
-      "couponInput": "input[name='redemptionCode']",
-      "couponSubmit": "button[data-test-id='INCENTIVES_ADD_BUTTON']",
-      "priceContainer": "dl[data-test-id='TOTAL']"
-    },
-    {
-      "domain":"codecademy.com",
-      "showInput": "button[id='promo-button']",
-      "couponInput": "input[data-testid='promo-input']",
-      "couponSubmit": "button[data-testid='promo-code-submit']",
-      "priceContainer": "div[data-testid='total-after-trial']",
-      "dismissButton": "button[type='button'][aria-label^='Dismiss']"
-    }
-  ]
+    "supported": [
+        {
+            "domain": "amazon.com",
+            "couponInput": "input[name='ppw-claimCode']",
+            "couponSubmit": "input[name='ppw-claimCodeApplyPressed']",
+            "priceContainer": "div[id='subtotals-marketplace-table']"
+        },
+        {
+            "domain": "ebay.com",
+            "couponInput": "input[name='redemptionCode']",
+            "couponSubmit": "button[data-test-id='INCENTIVES_ADD_BUTTON']",
+            "priceContainer": "dl[data-test-id='TOTAL']"
+        },
+        {
+            "domain": "codecademy.com",
+            "showInput": "button[id='promo-button']",
+            "couponInput": "input[data-testid='promo-input']",
+            "couponSubmit": "button[data-testid='promo-code-submit']",
+            "priceContainer": "div[data-testid='total-after-trial']",
+            "dismissButton": "button[type='button'][aria-label^='Dismiss']"
+        }
+    ]
 }
