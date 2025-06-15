@@ -11,6 +11,7 @@ import {useScrollDirection} from "@/hooks/useScrollDirection";
 const links = [
     {name: "Home", url: "/"},
     {name: "Privacy", url: "/privacy"},
+    {name: "Supported Sites", url: "/supported-sites"},
 ];
 
 const Link = motion.create(L);

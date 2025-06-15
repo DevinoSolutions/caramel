@@ -50,6 +50,9 @@ importers:
       jsonwebtoken:
         specifier: ^9.0.2
         version: 9.0.2
+      lodash.debounce:
+        specifier: ^4.0.8
+        version: 4.0.8
       next:
         specifier: 15.1.2
         version: 15.1.2(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(sass@1.83.4)
@@ -1782,6 +1785,9 @@ packages:
 
   lodash-es@4.17.21:
     resolution: {integrity: sha512-mKnC+QJ9pWVzv+C4/U3rRsHapFfHvQFoFB92e52xeyGMcX6/OlIl78je1u8vePzYZSkkogMPJ2yjxxsb89cxyw==}
+
+  lodash.debounce@4.0.8:
+    resolution: {integrity: sha512-FT1yDzDYEoYWhnSGnpE/4Kj1fLZkDFyqRb7fNt6FdYOSxlUWAtp42Eh6Wb0rGIv/m9Bgo7x4GhQbm5Ys4SG5ow==}
 
   lodash.includes@4.3.0:
     resolution: {integrity: sha512-W3Bx6mdkRTGtlJISOvVD/lbqjTlPPUDTMnlXZFnVwi9NKJ6tiAk6LVdlhZMm17VZisqhKcgzpO5Wz91PCt5b0w==}
@@ -4634,6 +4640,8 @@ snapshots:
       p-locate: 5.0.0
 
   lodash-es@4.17.21: {}
+
+  lodash.debounce@4.0.8: {}
 
   lodash.includes@4.3.0: {}
 

@@ -12,8 +12,8 @@ const Loader = () => {
             <Image
                 src={'/logo.png'}
                 alt="logo"
-                height={48}
-                width={48}
+                height={2000}
+                width={20000}
                 priority
                 style={logoStyle}
             />
