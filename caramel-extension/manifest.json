@@ -3,6 +3,11 @@
     "name": "Caramel",
     "version": "1.0",
     "description": "Caramel is your trusted, open-source companion for saving on online purchases. No scams, just sweet deals!",
+    "browser_specific_settings": {
+        "gecko": {
+            "id": "caramel@devino.ca"
+        }
+    },
     "icons": {
         "16": "/icons/16.png",
         "19": "/icons/19.png",
@@ -11,13 +16,7 @@
         "192": "/icons/192.png",
         "512": "/icons/512.png"
     },
-    "permissions": [
-        "tabs",
-        "activeTab",
-        "storage",
-        "scripting",
-        "webNavigation"
-    ],
+    "permissions": ["tabs", "activeTab", "storage", "scripting"],
     "host_permissions": [
         "https://www.amazon.com/*",
         "https://*.ebay.com/*",
@@ -40,7 +39,7 @@
         }
     ],
     "background": {
-        "service_worker": "background.js"
+        "scripts": ["background.js"]
     },
     "action": {
         "default_popup": "index.html",
