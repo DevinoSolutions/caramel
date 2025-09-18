@@ -83,7 +83,7 @@ currentBrowser.runtime.onMessage.addListener(
             })
             sendResponse({ success: true })
         } else if (message.action === 'keepAlive') {
-            console.log('Received keep-alive message from content script')
+            // Received keep-alive message from content script
             sendResponse({ status: 'alive' }) // Respond to the message
         } else if (message.action === 'scrapeAmazonCartKeywords') {
             const originalTab = sender.tab
@@ -114,13 +114,10 @@ currentBrowser.runtime.onMessage.addListener(
                                         productTitleElements,
                                     ).map(element => element.textContent.trim())
                                     const keywords = titles.join(' ').split(' ')
-                                    console.log('Keywords:', keywords)
+                                    // Keywords: keywords
                                     const filteredKeywords =
                                         await window.filterKeywords(keywords)
-                                    console.log(
-                                        'Filtered Keywords:',
-                                        filteredKeywords,
-                                    )
+                                    // Filtered Keywords: filteredKeywords
                                     resolve(filteredKeywords)
                                 } catch (error) {
                                     reject(error)
@@ -128,7 +125,7 @@ currentBrowser.runtime.onMessage.addListener(
                             })
                         },
                     })
-                    console.log('Amazon cart keywords:', result[0].result) // result is wrapped in an array
+                    // Amazon cart keywords: result[0].result
                     sendResponse({ keywords: result[0].result }) // Send filtered keywords as respons
                     currentBrowser.tabs.remove(amazonCartPage.id)
                     currentBrowser.tabs.update(originalTab.id, { active: true })
