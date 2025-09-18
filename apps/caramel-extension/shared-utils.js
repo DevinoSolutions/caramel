@@ -26,15 +26,21 @@ const getAdaptiveTimeout = (domain, baseTimeout = 1500) => {
 }
 
 const recordResponseTime = (domain, responseTime) => {
-    const perf = sitePerformance.get(domain) || { avgResponseTime: 1500, count: 0 }
-    perf.avgResponseTime = (perf.avgResponseTime * perf.count + responseTime) / (perf.count + 1)
+    const perf = sitePerformance.get(domain) || {
+        avgResponseTime: 1500,
+        count: 0,
+    }
+    perf.avgResponseTime =
+        (perf.avgResponseTime * perf.count + responseTime) / (perf.count + 1)
     perf.count++
     sitePerformance.set(domain, perf)
 }
 
 /* ---------- DOM waiters ---------- */
 function waitForElement(sel, timeout = 4000, domain = null) {
-    const adaptiveTimeout = domain ? getAdaptiveTimeout(domain, timeout) : timeout
+    const adaptiveTimeout = domain
+        ? getAdaptiveTimeout(domain, timeout)
+        : timeout
     return new Promise((res, rej) => {
         if (document.querySelector(sel)) return res('found-immediately')
         const startTime = performance.now()
@@ -54,7 +60,9 @@ function waitForElement(sel, timeout = 4000, domain = null) {
     })
 }
 function waitForTextChange(el, timeout = 3000, domain = null) {
-    const adaptiveTimeout = domain ? getAdaptiveTimeout(domain, timeout) : timeout
+    const adaptiveTimeout = domain
+        ? getAdaptiveTimeout(domain, timeout)
+        : timeout
     return new Promise((res, rej) => {
         const start = el.textContent
         const startTime = performance.now()
@@ -92,7 +100,9 @@ function waitForAmazonFetch() {
 
 /* ---------- UI readiness helper (new) ---------- */
 async function waitUntilReady(rec, timeout = 2000, domain = null) {
-    const adaptiveTimeout = domain ? getAdaptiveTimeout(domain, timeout) : timeout
+    const adaptiveTimeout = domain
+        ? getAdaptiveTimeout(domain, timeout)
+        : timeout
     const btn = document.querySelector(rec.couponSubmit)
     const start = performance.now()
     return new Promise(resolve => {
@@ -174,7 +184,7 @@ async function applyCoupon(code, rec) {
     log('► Trying', code)
     const domain = rec.domain || location.hostname
     const startTime = performance.now()
-    
+
     try {
         /* 1] dismiss popup if present */
         if (rec.dismissButton) {
@@ -216,13 +226,13 @@ async function applyCoupon(code, rec) {
         /* 4] smart wait with early success detection */
         const adaptiveTimeout = getAdaptiveTimeout(domain, 3500)
         const waiters = [sleep(adaptiveTimeout).then(() => 'timeout')]
-        
+
         const priceEl =
             document.querySelector(rec.priceContainer) ||
             document.getElementById(
                 rec.priceContainer.match(/\[id=['"]([^'"]+)['"]\]/)?.[1] || '',
             )
-        
+
         if (priceEl && rec.domain !== 'amazon.com') {
             waiters.push(waitForTextChange(priceEl, 3000, domain))
         }
@@ -232,7 +242,9 @@ async function applyCoupon(code, rec) {
 
         // Early success detection - check for immediate price change
         const earlyCheck = setInterval(() => {
-            const currentPrice = getPrice(rec.priceContainer, { returnLargest: true })
+            const currentPrice = getPrice(rec.priceContainer, {
+                returnLargest: true,
+            })
             if (!isNaN(currentPrice) && currentPrice < original) {
                 clearInterval(earlyCheck)
                 // Resolve the promise early
@@ -244,7 +256,7 @@ async function applyCoupon(code, rec) {
 
         const via = await Promise.race(waiters)
         clearInterval(earlyCheck)
-        
+
         const responseTime = performance.now() - startTime
         recordResponseTime(domain, responseTime)
         log('Wait finished via', via, `(${Math.round(responseTime)}ms)`)
@@ -312,12 +324,12 @@ async function startApplyingCoupons(rec) {
             inp.value = ''
             inp.dispatchEvent(new Event('input', { bubbles: true }))
         }
-        
+
         // Use adaptive timing based on site performance
         const domain = rec.domain || location.hostname
         const adaptiveWait = getAdaptiveTimeout(domain, 2000)
         await waitUntilReady(rec, adaptiveWait, domain)
-        
+
         // Shorter pause for fast sites, longer for slow ones
         const pauseTime = getAdaptiveTimeout(domain, 120) < 200 ? 60 : 120
         await sleep(pauseTime)
