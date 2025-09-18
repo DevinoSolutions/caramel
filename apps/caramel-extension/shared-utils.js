@@ -4,13 +4,13 @@
 
 /* --------------------------------------------------  bootstrap */
 const currentBrowser = (() => {
-    if (typeof chrome !== 'undefined') return chrome
-    if (typeof browser !== 'undefined') return browser
-    throw new Error('Browser is not supported!')
-})()
+    if (typeof chrome !== 'undefined') return chrome;
+    if (typeof browser !== 'undefined') return browser;
+    throw new Error('Browser is not supported!');
+})();
 
 /* --------------------------------------------------  tiny helpers */
-const sleep = ms => new Promise(r => setTimeout(r, ms))
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (...a) => console.log('Caramel:', ...a);
 
 /* --------------------------------------------------  adaptive timing system */
