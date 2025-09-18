@@ -13,13 +13,36 @@ const currentBrowser = (() => {
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 const log = (...a) => console.log('Caramel:', ...a)
 
+/* --------------------------------------------------  adaptive timing system */
+const sitePerformance = new Map() // Track site response times
+const getAdaptiveTimeout = (domain, baseTimeout = 1500) => {
+    const perf = sitePerformance.get(domain)
+    if (!perf) return baseTimeout
+    // If site is consistently fast, use shorter timeout
+    if (perf.avgResponseTime < 800) return Math.max(800, baseTimeout * 0.6)
+    // If site is slow, use longer timeout
+    if (perf.avgResponseTime > 2000) return Math.min(4000, baseTimeout * 1.5)
+    return baseTimeout
+}
+
+const recordResponseTime = (domain, responseTime) => {
+    const perf = sitePerformance.get(domain) || { avgResponseTime: 1500, count: 0 }
+    perf.avgResponseTime = (perf.avgResponseTime * perf.count + responseTime) / (perf.count + 1)
+    perf.count++
+    sitePerformance.set(domain, perf)
+}
+
 /* ---------- DOM waiters ---------- */
-function waitForElement(sel, timeout = 4000) {
+function waitForElement(sel, timeout = 4000, domain = null) {
+    const adaptiveTimeout = domain ? getAdaptiveTimeout(domain, timeout) : timeout
     return new Promise((res, rej) => {
         if (document.querySelector(sel)) return res('found-immediately')
+        const startTime = performance.now()
         const mo = new MutationObserver(() => {
             if (document.querySelector(sel)) {
                 mo.disconnect()
+                const responseTime = performance.now() - startTime
+                if (domain) recordResponseTime(domain, responseTime)
                 res('appeared')
             }
         })
@@ -27,15 +50,19 @@ function waitForElement(sel, timeout = 4000) {
         setTimeout(() => {
             mo.disconnect()
             rej(`waitForElement timeout (${sel})`)
-        }, timeout)
+        }, adaptiveTimeout)
     })
 }
-function waitForTextChange(el, timeout = 3000) {
+function waitForTextChange(el, timeout = 3000, domain = null) {
+    const adaptiveTimeout = domain ? getAdaptiveTimeout(domain, timeout) : timeout
     return new Promise((res, rej) => {
         const start = el.textContent
+        const startTime = performance.now()
         const mo = new MutationObserver(() => {
             if (el.textContent !== start) {
                 mo.disconnect()
+                const responseTime = performance.now() - startTime
+                if (domain) recordResponseTime(domain, responseTime)
                 res('text-changed')
             }
         })
@@ -43,7 +70,7 @@ function waitForTextChange(el, timeout = 3000) {
         setTimeout(() => {
             mo.disconnect()
             rej('waitForTextChange timeout')
-        }, timeout)
+        }, adaptiveTimeout)
     })
 }
 function waitForAmazonFetch() {
@@ -64,13 +91,14 @@ function waitForAmazonFetch() {
 }
 
 /* ---------- UI readiness helper (new) ---------- */
-async function waitUntilReady(rec, timeout = 2000) {
+async function waitUntilReady(rec, timeout = 2000, domain = null) {
+    const adaptiveTimeout = domain ? getAdaptiveTimeout(domain, timeout) : timeout
     const btn = document.querySelector(rec.couponSubmit)
     const start = performance.now()
     return new Promise(resolve => {
         ;(function loop() {
             if (!btn || !btn.disabled) return resolve()
-            if (performance.now() - start > timeout) return resolve() // hard fallback
+            if (performance.now() - start > adaptiveTimeout) return resolve() // hard fallback
             requestAnimationFrame(loop)
         })()
     })
@@ -144,6 +172,9 @@ async function tryInitialize() {
 /* --------------------------------------------------  coupon attempt */
 async function applyCoupon(code, rec) {
     log('► Trying', code)
+    const domain = rec.domain || location.hostname
+    const startTime = performance.now()
+    
     try {
         /* 1] dismiss popup if present */
         if (rec.dismissButton) {
@@ -162,7 +193,7 @@ async function applyCoupon(code, rec) {
             if (showBtn) {
                 showBtn.click()
                 try {
-                    await waitForElement(rec.couponInput, 3000)
+                    await waitForElement(rec.couponInput, 3000, domain)
                 } catch (e) {
                     log(e)
                 }
@@ -182,19 +213,41 @@ async function applyCoupon(code, rec) {
         input.dispatchEvent(new Event('input', { bubbles: true }))
         applyBtn.click()
 
-        /* 4] wait for result */
-        const waiters = [sleep(3500).then(() => 'timeout-3.5s')] // shorter fallback
+        /* 4] smart wait with early success detection */
+        const adaptiveTimeout = getAdaptiveTimeout(domain, 3500)
+        const waiters = [sleep(adaptiveTimeout).then(() => 'timeout')]
+        
         const priceEl =
             document.querySelector(rec.priceContainer) ||
             document.getElementById(
                 rec.priceContainer.match(/\[id=['"]([^'"]+)['"]\]/)?.[1] || '',
             )
-        if (priceEl && rec.domain !== 'amazon.com')
-            waiters.push(waitForTextChange(priceEl, 3000))
-        if (rec.domain === 'amazon.com') waiters.push(waitForAmazonFetch())
+        
+        if (priceEl && rec.domain !== 'amazon.com') {
+            waiters.push(waitForTextChange(priceEl, 3000, domain))
+        }
+        if (rec.domain === 'amazon.com') {
+            waiters.push(waitForAmazonFetch())
+        }
+
+        // Early success detection - check for immediate price change
+        const earlyCheck = setInterval(() => {
+            const currentPrice = getPrice(rec.priceContainer, { returnLargest: true })
+            if (!isNaN(currentPrice) && currentPrice < original) {
+                clearInterval(earlyCheck)
+                // Resolve the promise early
+                const responseTime = performance.now() - startTime
+                recordResponseTime(domain, responseTime)
+                log('Early success detected!')
+            }
+        }, 200)
 
         const via = await Promise.race(waiters)
-        log('Wait finished via', via)
+        clearInterval(earlyCheck)
+        
+        const responseTime = performance.now() - startTime
+        recordResponseTime(domain, responseTime)
+        log('Wait finished via', via, `(${Math.round(responseTime)}ms)`)
 
         const newTotal = getPrice(rec.priceContainer, { returnLargest: true })
         return { success: !isNaN(newTotal) && newTotal < original, newTotal }
@@ -259,8 +312,15 @@ async function startApplyingCoupons(rec) {
             inp.value = ''
             inp.dispatchEvent(new Event('input', { bubbles: true }))
         }
-        await waitUntilReady(rec)
-        await sleep(120) // tiny visual pause
+        
+        // Use adaptive timing based on site performance
+        const domain = rec.domain || location.hostname
+        const adaptiveWait = getAdaptiveTimeout(domain, 2000)
+        await waitUntilReady(rec, adaptiveWait, domain)
+        
+        // Shorter pause for fast sites, longer for slow ones
+        const pauseTime = getAdaptiveTimeout(domain, 120) < 200 ? 60 : 120
+        await sleep(pauseTime)
 
         if (res.success) {
             const diff = original - res.newTotal
