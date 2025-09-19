@@ -12,6 +12,8 @@ import dynamic from 'next/dynamic'
 import { useRouter } from 'next/router'
 import { toast, ToastContainer } from 'react-toastify'
 import 'react-toastify/dist/ReactToastify.css'
+import { signIn } from 'next-auth/react'
+import { FcGoogle } from 'react-icons/fc'
 const PasswordChecker = dynamic(
     () => import('@/components/PasswordStrength/PasswordChecker'),
     { ssr: false },
@@ -88,6 +90,22 @@ export default function Signup() {
 
     const { handleSubmit, errors, touched, handleChange, handleBlur, values } =
         formik
+
+    const handleGoogleSignIn = async () => {
+        setLoading(true)
+        const result = await signIn('google', {
+            redirect: false,
+        })
+
+        if (result?.error) {
+            toast.error(result.error || 'Google signup failed!')
+            setLoading(false)
+            return
+        }
+        toast.success('Account created successfully!')
+        router.push('/')
+        setLoading(false)
+    }
     return (
         <>
             <AppHeader
@@ -206,6 +224,22 @@ export default function Signup() {
                             {loading ? 'Loading...' : 'Sign Up'}
                         </button>
                     </form>
+
+                    <div className="my-4 flex items-center">
+                        <div className="flex-1 border-t border-gray-300"></div>
+                        <span className="mx-4 text-sm text-gray-500">or</span>
+                        <div className="flex-1 border-t border-gray-300"></div>
+                    </div>
+
+                    <button
+                        onClick={handleGoogleSignIn}
+                        disabled={loading}
+                        className="flex w-full items-center justify-center gap-3 rounded-md border border-gray-300 bg-white py-2 font-semibold text-gray-700 transition hover:bg-gray-50 hover:scale-105"
+                    >
+                        <FcGoogle className="text-xl" />
+                        Continue with Google
+                    </button>
+
                     <p className="mt-4 text-center text-sm text-gray-600">
                         Already have an account?{' '}
                         <Link

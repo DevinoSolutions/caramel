@@ -1,9 +1,8 @@
-// pages/api/auth/[...nextauth].ts
 import prisma from '@/lib/prisma'
 import { PrismaAdapter } from '@next-auth/prisma-adapter'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
-import NextAuth, { type NextAuthOptions } from 'next-auth'
+import type { NextAuthOptions } from 'next-auth'
 import CredentialsProvider from 'next-auth/providers/credentials'
 import GoogleProvider from 'next-auth/providers/google'
 
@@ -25,42 +24,29 @@ export const authOptions: NextAuthOptions = {
                 password: { label: 'Password', type: 'password' },
             },
             async authorize(credentials: any) {
-                if (!credentials?.email || !credentials?.password) {
+                if (!credentials?.email || !credentials?.password)
                     throw new Error('Missing credentials')
-                }
-
                 const { email, password } = credentials
-
-                // Find user by email (case-insensitive) and include accounts
                 const user = await prisma.user.findUnique({
                     where: { email: email.trim().toLowerCase() },
                     include: { accounts: true },
                 })
-
                 if (!user) throw new Error('User not found')
-
                 if (user.status !== 'ACTIVE_USER')
                     throw new Error('User is inactive')
-
                 if (!user.password)
                     throw new Error('No password set for this user')
-
                 const passwordMatch = bcrypt.compareSync(
                     password,
                     user.password,
                 )
                 if (!passwordMatch) throw new Error('Incorrect password')
-
-                // Set a display name if missing.
                 user.name = user.name || user.username
-                return user
+                return user as any
             },
         }),
     ],
-    session: {
-        strategy: 'jwt',
-    },
-    // Your cookie settings can remain the same.
+    session: { strategy: 'jwt' },
     cookies: {
         csrfToken: {
             name: `next-auth.csrf-token`,
@@ -83,44 +69,27 @@ export const authOptions: NextAuthOptions = {
     },
     secret: process.env.JWT_SECRET,
     callbacks: {
-        // The JWT callback is called whenever a token is created or updated.
         async jwt({ token, user }: any) {
             if (user && process.env.JWT_SECRET) {
-                token.id = user.id
-                // Generate an access token.
-                token.accessToken = jwt.sign(
-                    { id: user.id, username: (user as any).username },
+                ;(token as any).id = (user as any).id
+                ;(token as any).accessToken = jwt.sign(
+                    { id: (user as any).id, username: (user as any).username },
                     process.env.JWT_SECRET,
                     { expiresIn: '1h' },
                 )
             }
             return token
         },
-        // The session callback shapes what is exposed to the client.
         async session({ session, token }: any) {
-            // Retrieve only the relevant fields from the database.
             const dbUser = await prisma.user.findUnique({
-                where: { id: token.id as string },
-                select: {
-                    id: true,
-                    username: true,
-                    email: true,
-                },
+                where: { id: (token as any).id as string },
+                select: { id: true, username: true, email: true },
             })
             if (!dbUser) return session
-
-            // Expose only the minimal user info and the access token.
-            session.user = {
-                ...session.user,
-                ...dbUser,
-            }
-            session.accessToken = token.accessToken as string
+            ;(session as any).user = { ...session.user, ...dbUser }
+            ;(session as any).accessToken = (token as any).accessToken as string
             return session
         },
     },
-    pages: {
-        signIn: '/login',
-    },
+    pages: { signIn: '/login' },
 }
-
-export default NextAuth(authOptions)

@@ -8,6 +8,7 @@ import { useRouter } from 'next/router'
 import { FormEvent, useContext, useState } from 'react'
 import { toast, ToastContainer } from 'react-toastify'
 import 'react-toastify/dist/ReactToastify.css'
+import { FcGoogle } from 'react-icons/fc'
 
 export default function Login() {
     const router = useRouter()
@@ -28,6 +29,22 @@ export default function Login() {
 
         if (result?.error) {
             toast.error(result.error || 'Login failed!')
+            setLoading(false)
+            return
+        }
+        toast.success('Login successful!')
+        router.push('/')
+        setLoading(false)
+    }
+
+    const handleGoogleSignIn = async () => {
+        setLoading(true)
+        const result = await signIn('google', {
+            redirect: false,
+        })
+
+        if (result?.error) {
+            toast.error(result.error || 'Google login failed!')
             setLoading(false)
             return
         }
@@ -99,6 +116,21 @@ export default function Login() {
                             {loading ? 'Logging in...' : 'Login'}
                         </button>
                     </form>
+
+                    <div className="my-4 flex items-center">
+                        <div className="flex-1 border-t border-gray-300"></div>
+                        <span className="mx-4 text-sm text-gray-500">or</span>
+                        <div className="flex-1 border-t border-gray-300"></div>
+                    </div>
+
+                    <button
+                        onClick={handleGoogleSignIn}
+                        disabled={loading}
+                        className="flex w-full items-center justify-center gap-3 rounded-md border border-gray-300 bg-white py-2 font-semibold text-gray-700 transition hover:bg-gray-50 hover:scale-105"
+                    >
+                        <FcGoogle className="text-xl" />
+                        Continue with Google
+                    </button>
 
                     <p className="mt-4 text-center text-sm text-gray-600">
                         Don&apos;t have an account?{' '}
