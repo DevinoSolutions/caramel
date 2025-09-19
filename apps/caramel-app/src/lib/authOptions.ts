@@ -2,11 +2,10 @@ import prisma from '@/lib/prisma'
 import { PrismaAdapter } from '@next-auth/prisma-adapter'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
-import type { NextAuthOptions } from 'next-auth'
 import CredentialsProvider from 'next-auth/providers/credentials'
 import GoogleProvider from 'next-auth/providers/google'
 
-export const authOptions: NextAuthOptions = {
+export const authOptions = {
     adapter: PrismaAdapter(prisma),
     providers: [
         GoogleProvider({

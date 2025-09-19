@@ -3,11 +3,11 @@ import prisma from '@/lib/prisma'
 import { PrismaAdapter } from '@next-auth/prisma-adapter'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
-import NextAuth, { type NextAuthOptions } from 'next-auth'
+import NextAuth from 'next-auth'
 import CredentialsProvider from 'next-auth/providers/credentials'
 import GoogleProvider from 'next-auth/providers/google'
 
-export const authOptions: NextAuthOptions = {
+export const authOptions = {
     adapter: PrismaAdapter(prisma),
     providers: [
         GoogleProvider({
@@ -58,7 +58,7 @@ export const authOptions: NextAuthOptions = {
         }),
     ],
     session: {
-        strategy: 'jwt',
+        strategy: 'jwt' as const,
     },
     // Your cookie settings can remain the same.
     cookies: {
@@ -66,7 +66,7 @@ export const authOptions: NextAuthOptions = {
             name: `next-auth.csrf-token`,
             options: {
                 httpOnly: true,
-                sameSite: 'none',
+                sameSite: 'none' as const,
                 path: '/',
                 secure: true,
             },
@@ -75,7 +75,7 @@ export const authOptions: NextAuthOptions = {
             name: `next-auth.pkce.code_verifier`,
             options: {
                 httpOnly: true,
-                sameSite: 'none',
+                sameSite: 'none' as const,
                 path: '/',
                 secure: true,
             },
