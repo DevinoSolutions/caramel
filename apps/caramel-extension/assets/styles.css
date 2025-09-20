@@ -239,6 +239,13 @@ body {
     font-family: sans-serif;
 }
 
+.login-prompt h3 {
+    margin: 0 0 16px;
+    font-size: 1.4em;
+    color: #ea6925;
+    font-weight: bold;
+}
+
 .login-prompt h2 {
     margin: 0 0 10px;
     font-size: 1.5em;
@@ -276,6 +283,79 @@ body {
 .login-form div {
     display: flex;
     flex-direction: column;
+}
+
+/* OAuth Buttons */
+.oauth-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.oauth-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px 16px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    background: #fff;
+    color: #333;
+}
+
+.oauth-button:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.google-button:hover {
+    background: #f8f9fa;
+    border-color: #dadce0;
+}
+
+.apple-button {
+    background: #000;
+    color: #fff;
+    border-color: #000;
+}
+
+.apple-button:hover {
+    background: #333;
+    border-color: #333;
+}
+
+.oauth-icon {
+    width: 16px;
+    height: 16px;
+}
+
+.divider {
+    position: relative;
+    text-align: center;
+    margin: 16px 0;
+}
+
+.divider::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: #ddd;
+}
+
+.divider span {
+    background: #fff;
+    padding: 0 12px;
+    color: #666;
+    font-size: 12px;
 }
 
 .login-form input:focus {

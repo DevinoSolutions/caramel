@@ -11,6 +11,7 @@ import { useFormik } from 'formik'
 import dynamic from 'next/dynamic'
 import { useRouter } from 'next/router'
 import { toast, ToastContainer } from 'react-toastify'
+import { signIn } from 'next-auth/react'
 import 'react-toastify/dist/ReactToastify.css'
 import { signIn } from 'next-auth/react'
 import { FcGoogle } from 'react-icons/fc'
@@ -132,6 +133,43 @@ export default function Signup() {
                         />
                         <div className="my-auto">account</div>
                     </h2>
+
+                    {/* OAuth Buttons */}
+                    <div className="mb-6 space-y-3">
+                        <button
+                            onClick={() => signIn('google', { callbackUrl: '/' })}
+                            className="flex w-full items-center justify-center gap-3 rounded-md border border-gray-300 bg-white px-4 py-2 text-gray-700 transition hover:bg-gray-50"
+                        >
+                            <Image
+                                src="/chrome.png"
+                                alt="Google"
+                                width={20}
+                                height={20}
+                            />
+                            Continue with Google
+                        </button>
+                        <button
+                            onClick={() => signIn('apple', { callbackUrl: '/' })}
+                            className="flex w-full items-center justify-center gap-3 rounded-md border border-gray-300 bg-black px-4 py-2 text-white transition hover:bg-gray-800"
+                        >
+                            <Image
+                                src="/apple.png"
+                                alt="Apple"
+                                width={20}
+                                height={20}
+                            />
+                            Continue with Apple
+                        </button>
+                    </div>
+
+                    <div className="relative mb-6">
+                        <div className="absolute inset-0 flex items-center">
+                            <div className="w-full border-t border-gray-300" />
+                        </div>
+                        <div className="relative flex justify-center text-sm">
+                            <span className="bg-white px-2 text-gray-500">Or continue with email</span>
+                        </div>
+                    </div>
 
                     <form onSubmit={handleSubmit} className="space-y-4">
                         <div>

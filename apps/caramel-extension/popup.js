@@ -125,6 +125,23 @@ function renderSignInPrompt(backFn) {
 
     container.innerHTML = `
     <div class="login-prompt fade-in-up">
+      <h3>Sign in to Caramel</h3>
+      
+      <!-- OAuth Buttons -->
+      <div class="oauth-buttons">
+        <button id="googleLoginBtn" class="oauth-button google-button">
+          <img src="assets/chrome.png" alt="Google" class="oauth-icon"/>
+          Continue with Google
+        </button>
+        <button id="appleLoginBtn" class="oauth-button apple-button">
+          <img src="assets/apple.png" alt="Apple" class="oauth-icon"/>
+          Continue with Apple
+        </button>
+      </div>
+
+      <div class="divider">
+        <span>or</span>
+      </div>
 
       <form id="loginForm" class="login-form">
         <div id="loginErrorMessage" class="error-message" style="display:none;"></div>
@@ -178,6 +195,21 @@ function renderSignInPrompt(backFn) {
 
     const backBtn = document.getElementById('backBtn')
     if (backBtn && returnView) backBtn.addEventListener('click', returnView)
+
+    // OAuth button handlers
+    const googleLoginBtn = document.getElementById('googleLoginBtn')
+    if (googleLoginBtn) {
+        googleLoginBtn.addEventListener('click', () => {
+            window.open('https://grabcaramel.com/api/auth/signin/google', '_blank')
+        })
+    }
+
+    const appleLoginBtn = document.getElementById('appleLoginBtn')
+    if (appleLoginBtn) {
+        appleLoginBtn.addEventListener('click', () => {
+            window.open('https://grabcaramel.com/api/auth/signin/apple', '_blank')
+        })
+    }
 
     const loginForm = document.getElementById('loginForm')
     loginForm.addEventListener('submit', async e => {
