@@ -34,16 +34,32 @@ export async function GET(req: NextRequest) {
                 description: { contains: keyword, mode: 'insensitive' },
             }))
         }
-        const coupons = await prisma.coupon.findMany({
+        let coupons = await prisma.coupon.findMany({
             where: filters,
             skip: parseInt(skip, 10),
             take: parseInt(limit, 10),
             orderBy: [{ createdAt: 'desc' }],
         })
+        // Fallback: if nothing matched (e.g., differing expired flags), fetch recent coupons without filters
+        if (!coupons.length) {
+            coupons = await prisma.coupon.findMany({
+                skip: parseInt(skip, 10),
+                take: parseInt(limit, 10),
+                orderBy: [{ createdAt: 'desc' }],
+            })
+        }
         return NextResponse.json(coupons)
     } catch (error) {
+        // Log server-side for observability
+        console.error('GET /api/coupons failed:', error)
+        const isProd = process.env.NODE_ENV === 'production'
         return NextResponse.json(
-            { error: 'Error fetching coupons.' },
+            {
+                error: 'Error fetching coupons.',
+                message: isProd
+                    ? undefined
+                    : (error as Error)?.message || String(error),
+            },
             { status: 500 },
         )
     }

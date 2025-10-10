@@ -21,6 +21,7 @@ const links: NavLink[] = [
     { name: 'Home', url: '/' },
     { name: 'Privacy', url: '/privacy' },
     { name: 'Supported Sites', url: '/supported-sites' },
+    { name: 'Coupons', url: '/coupons' },
 ]
 
 const Link = motion.create(L)
