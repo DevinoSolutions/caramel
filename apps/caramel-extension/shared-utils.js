@@ -302,6 +302,7 @@ window.addEventListener('message', ev => {
         )
     }
 })
+
 currentBrowser.runtime.onMessage.addListener(async (req, _s, send) => {
     if (req.action === 'userLoggedIn') {
         const rec = await getDomainRecord(location.hostname)

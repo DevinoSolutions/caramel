@@ -8,7 +8,6 @@ import { useRouter } from 'next/router'
 import { FormEvent, useContext, useState } from 'react'
 import { toast, ToastContainer } from 'react-toastify'
 import 'react-toastify/dist/ReactToastify.css'
-import { FcGoogle } from 'react-icons/fc'
 
 export default function Login() {
     const router = useRouter()
@@ -18,13 +17,28 @@ export default function Login() {
     const [loading, setLoading] = useState(false)
     const { isDarkMode } = useContext(ThemeContext)
 
+    // Determine callback URL based on whether this is for the extension
+    // Use full URL to avoid NextAuth URL construction errors
+    const getCallbackUrl = () => {
+        if (extension === 'true') {
+            const baseUrl = typeof window !== 'undefined'
+                ? window.location.origin
+                : 'https://grabcaramel.com'
+            return `${baseUrl}/auth/extension-callback`
+        }
+        return '/'
+    }
+
     const handleSubmit = async (e: FormEvent) => {
         e.preventDefault()
         setLoading(true)
+
+        const callbackUrl = getCallbackUrl()
         const result = await signIn('credentials', {
             redirect: false,
             email,
             password,
+            callbackUrl,
         })
 
         if (result?.error) {
@@ -33,25 +47,20 @@ export default function Login() {
             return
         }
         toast.success('Login successful!')
-        router.push('/')
-        setLoading(false)
-    }
 
-    const handleGoogleSignIn = async () => {
-        setLoading(true)
-        const result = await signIn('google', {
-            redirect: false,
-        })
-
-        if (result?.error) {
-            toast.error(result.error || 'Google login failed!')
-            setLoading(false)
-            return
+        // For extension login, redirect to callback page
+        if (extension === 'true') {
+            router.push('/auth/extension-callback')
+        } else {
+            router.push('/')
         }
-        toast.success('Login successful!')
-        router.push('/')
         setLoading(false)
     }
+
+    const handleOAuthSignIn = (provider: string) => {
+        signIn(provider, { callbackUrl: getCallbackUrl() })
+    }
+
 
     return (
         <>
@@ -82,7 +91,7 @@ export default function Login() {
                     {/* OAuth Buttons */}
                     <div className="mb-6 space-y-3">
                         <button
-                            onClick={() => signIn('google', { callbackUrl: '/' })}
+                            onClick={() => handleOAuthSignIn('google')}
                             className="flex w-full items-center justify-center gap-3 rounded-md border border-gray-300 bg-white px-4 py-2 text-gray-700 transition hover:bg-gray-50"
                         >
                             <Image
@@ -94,8 +103,8 @@ export default function Login() {
                             Continue with Google
                         </button>
                         <button
-                            onClick={() => signIn('apple', { callbackUrl: '/' })}
-                            className="flex w-full items-center justify-center gap-3 rounded-md border border-gray-300 bg-black px-4 py-2 text-white transition hover:bg-gray-800"
+                            onClick={() => handleOAuthSignIn('apple')}
+                            className="flex w-full items-center justify-center gap-3 rounded-md border border-gray-300 bg-black px-4 py-2 text-white transition hover:bg-gray-50 hover:text-black"
                         >
                             <Image
                                 src="/apple.png"
@@ -154,20 +163,6 @@ export default function Login() {
                         </button>
                     </form>
 
-                    <div className="my-4 flex items-center">
-                        <div className="flex-1 border-t border-gray-300"></div>
-                        <span className="mx-4 text-sm text-gray-500">or</span>
-                        <div className="flex-1 border-t border-gray-300"></div>
-                    </div>
-
-                    <button
-                        onClick={handleGoogleSignIn}
-                        disabled={loading}
-                        className="flex w-full items-center justify-center gap-3 rounded-md border border-gray-300 bg-white py-2 font-semibold text-gray-700 transition hover:bg-gray-50 hover:scale-105"
-                    >
-                        <FcGoogle className="text-xl" />
-                        Continue with Google
-                    </button>
 
                     <p className="mt-4 text-center text-sm text-gray-600">
                         Don&apos;t have an account?{' '}

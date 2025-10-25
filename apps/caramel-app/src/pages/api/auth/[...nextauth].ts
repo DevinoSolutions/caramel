@@ -105,11 +105,6 @@ export const authOptions = {
     secret: secret,
     callbacks: {
         async signIn({ user, account, profile }: { user: any; account: any; profile?: any }) {
-            console.log('SignIn callback:', { 
-                userEmail: user?.email, 
-                accountProvider: account?.provider,
-                userExists: !!user?.email 
-            })
             
             // Ensure user has required fields for OAuth
             if (account?.provider === 'google' || account?.provider === 'apple') {
@@ -122,13 +117,34 @@ export const authOptions = {
             // For credentials, use the existing logic
             return true
         },
+        async redirect({ url, baseUrl }: { url: string; baseUrl: string }) {
+
+            // IMPORTANT: NextAuth loses callbackUrl during OAuth flow
+            // Force all OAuth sign-ins (which come as just baseUrl) to extension-callback
+            // The callback page will handle both extension and web app users
+            if (url === baseUrl || url === `${baseUrl}/`) {
+                return `${baseUrl}/auth/extension-callback`
+            }
+
+            // If URL is for extension callback, allow it
+            if (url.includes('/auth/extension-callback')) {
+                return url
+            }
+
+            // If url is relative, prepend baseUrl
+            if (url.startsWith('/')) {
+                return `${baseUrl}${url}`
+            }
+
+            // If url is on same origin, allow it
+            if (url.startsWith(baseUrl)) {
+                return url
+            }
+
+            // Otherwise redirect to base URL
+            return baseUrl
+        },
         async jwt({ token, user, account }: { token: any; user: any; account: any }) {
-            console.log('JWT callback:', { 
-                userEmail: user?.email, 
-                accountProvider: account?.provider,
-                hasUser: !!user,
-                hasAccount: !!account
-            })
             
             // Handle OAuth sign-ins
             if (account && user) {
@@ -155,7 +171,6 @@ export const authOptions = {
                                     image: user.image,
                                 },
                             })
-                            console.log('Created new OAuth user:', { email: dbUser.email, id: dbUser.id })
                         } else {
                             // Update existing user status if needed
                             if (dbUser.status !== 'ACTIVE_USER') {
@@ -163,9 +178,6 @@ export const authOptions = {
                                     where: { id: dbUser.id },
                                     data: { status: 'ACTIVE_USER' },
                                 })
-                                console.log('Updated user status to ACTIVE_USER:', dbUser.email)
-                            } else {
-                                console.log('Found existing active user:', dbUser.email)
                             }
                         }
 
@@ -191,14 +203,16 @@ export const authOptions = {
                     throw error
                 }
             }
+            
+            // If no user/account but token has data, return existing token
+            // This handles subsequent requests where the token already exists
+            if (!user && !account && token.id) {
+                return token
+            }
+            
             return token
         },
         async session({ session, token }: { session: any; token: any }) {
-            console.log('Session callback:', { 
-                tokenId: token.id, 
-                tokenEmail: token.email,
-                sessionUserEmail: session.user?.email 
-            })
             
             if (token.id) {
                 try {
@@ -219,10 +233,6 @@ export const authOptions = {
                             ...session.user,
                             ...dbUser,
                         }
-                        console.log('Session updated with user data:', { 
-                            email: dbUser.email, 
-                            status: dbUser.status 
-                        })
                     } else {
                         console.error('User not found in database for token.id:', token.id)
                     }
@@ -241,18 +251,6 @@ export const authOptions = {
     pages: {
         signIn: '/login',
         error: '/login', // Redirect to login on OAuth errors
-    },
-    debug: true, // Enable debug mode
-    logger: {
-        error(code: any, metadata: any) {
-            console.error('NextAuth Error:', code, metadata)
-        },
-        warn(code: any) {
-            console.warn('NextAuth Warning:', code)
-        },
-        debug(code: any, metadata: any) {
-            console.log('NextAuth Debug:', code, metadata)
-        },
     },
 }
 

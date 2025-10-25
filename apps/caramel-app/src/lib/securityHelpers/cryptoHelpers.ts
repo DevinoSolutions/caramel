@@ -56,7 +56,7 @@ export function decrypt(base64Text: string, key: string): string {
 
 /**
  * SERVER-SIDE HELPER:
- *  - Reads the 'host' header and removes any port (e.g. "localhost:3000" => "localhost")
+ *  - Reads the 'host' header and removes any port (e.g. "grabcaramel.com:443" => "grabcaramel.com")
  *  - Reads the 'user-agent'
  *  - Encrypts the entire JSON payload as one string
  */

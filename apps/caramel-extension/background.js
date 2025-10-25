@@ -66,7 +66,33 @@ keepAlive()
 
 currentBrowser.runtime.onMessage.addListener(
     (message, sender, sendResponse) => {
-        if (message.action === 'openPopup') {
+        if (message.action === 'storeAuthData') {
+            // Store auth data from extension callback page
+            const { token, user } = message.data
+            currentBrowser.storage.sync.set({ token, user }, () => {
+                sendResponse({ success: true })
+
+                // Close the auth callback tab
+                if (sender.tab?.id) {
+                    currentBrowser.tabs.remove(sender.tab.id)
+                }
+            })
+            return true // Keep the message channel open for async response
+        } else if (message.action === 'authComplete') {
+            // Auth completed via postMessage, close the callback tab
+            // Find and close the extension callback tab
+            currentBrowser.tabs.query(
+                { url: '*://grabcaramel.com/auth/extension-callback*' },
+                tabs => {
+                    if (tabs && tabs.length > 0) {
+                        currentBrowser.tabs.remove(tabs[0].id)
+                    }
+                },
+            )
+
+            sendResponse({ success: true })
+            return true
+        } else if (message.action === 'openPopup') {
             currentBrowser.windows.create({
                 url: currentBrowser.runtime.getURL(
                     'index.html?isPopup=true&callerId=' + sender.tab.id,
@@ -83,7 +109,6 @@ currentBrowser.runtime.onMessage.addListener(
             })
             sendResponse({ success: true })
         } else if (message.action === 'keepAlive') {
-            console.log('Received keep-alive message from content script')
             sendResponse({ status: 'alive' }) // Respond to the message
         } else if (message.action === 'scrapeAmazonCartKeywords') {
             const originalTab = sender.tab
@@ -114,13 +139,8 @@ currentBrowser.runtime.onMessage.addListener(
                                         productTitleElements,
                                     ).map(element => element.textContent.trim())
                                     const keywords = titles.join(' ').split(' ')
-                                    console.log('Keywords:', keywords)
                                     const filteredKeywords =
                                         await window.filterKeywords(keywords)
-                                    console.log(
-                                        'Filtered Keywords:',
-                                        filteredKeywords,
-                                    )
                                     resolve(filteredKeywords)
                                 } catch (error) {
                                     reject(error)
@@ -128,7 +148,6 @@ currentBrowser.runtime.onMessage.addListener(
                             })
                         },
                     })
-                    console.log('Amazon cart keywords:', result[0].result) // result is wrapped in an array
                     sendResponse({ keywords: result[0].result }) // Send filtered keywords as respons
                     currentBrowser.tabs.remove(amazonCartPage.id)
                     currentBrowser.tabs.update(originalTab.id, { active: true })
