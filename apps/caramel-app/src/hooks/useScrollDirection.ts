@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 
-export function useScrollDirection(scrollRef?: React.RefObject<HTMLElement>) {
+export function useScrollDirection(
+    scrollRef?: React.RefObject<HTMLElement | HTMLDivElement | null>,
+) {
     const [isScrollingUp, setIsScrollingUp] = useState(false)
     const [isScrollingDown, setIsScrollingDown] = useState(false)
 

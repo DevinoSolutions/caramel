@@ -1,1 +1,1 @@
-"# Carame extension"
+"# Caramel extension"
