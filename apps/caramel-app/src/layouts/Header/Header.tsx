@@ -2,11 +2,12 @@ import ThemeToggle from '@/components/ThemeToggle'
 import { useScrollDirection } from '@/hooks/useScrollDirection'
 import { useWindowSize } from '@/hooks/useWindowSize'
 import { AnimatePresence, motion } from 'framer-motion'
+import { signOut, useSession } from 'next-auth/react'
 import Image from 'next/image'
 import L from 'next/link'
 import { usePathname } from 'next/navigation'
-import { useEffect, useState } from 'react'
-import { RiCloseFill, RiMenu3Fill } from 'react-icons/ri'
+import { useEffect, useRef, useState } from 'react'
+import { RiCloseFill, RiMenu3Fill, RiUser3Fill } from 'react-icons/ri'
 
 interface HeaderProps {
     scrollRef?: React.RefObject<HTMLElement | HTMLDivElement | null>
@@ -28,8 +29,11 @@ const Link = motion.create(L)
 export default function Header({ scrollRef }: HeaderProps) {
     const [isInView, setIsInView] = useState(true)
     const [isMenuOpen, setIsMenuOpen] = useState(false)
+    const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false)
     const { isScrollingDown, isScrollingUp } = useScrollDirection(scrollRef)
     const { windowSize } = useWindowSize()
+    const { data: session, status } = useSession()
+    const profileMenuRef = useRef<HTMLDivElement>(null)
 
     useEffect(() => {}, [windowSize])
     const pathname = usePathname()
@@ -42,6 +46,31 @@ export default function Header({ scrollRef }: HeaderProps) {
             setIsInView(true)
         }
     }, [isScrollingDown, isScrollingUp])
+
+    // Handle clicking outside profile menu
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (
+                profileMenuRef.current &&
+                !profileMenuRef.current.contains(event.target as Node)
+            ) {
+                setIsProfileMenuOpen(false)
+            }
+        }
+
+        if (isProfileMenuOpen) {
+            document.addEventListener('mousedown', handleClickOutside)
+        }
+
+        return () => {
+            document.removeEventListener('mousedown', handleClickOutside)
+        }
+    }, [isProfileMenuOpen])
+
+    const handleSignOut = async () => {
+        await signOut({ redirect: false })
+        setIsProfileMenuOpen(false)
+    }
 
     return (
         <motion.header
@@ -84,8 +113,84 @@ export default function Header({ scrollRef }: HeaderProps) {
                 })}
             </motion.div>
             <ThemeToggle className="absolute -right-4 lg:relative lg:right-auto lg:ml-auto" />
+
+            {/* Authentication Section - Hidden on mobile */}
+            <div className="absolute right-16 items-center gap-3 lg:relative lg:right-auto lg:ml-4 lg:mr-4 lg:flex">
+                {status === 'loading' ? (
+                    <div className="h-8 w-8 animate-pulse rounded-full bg-gray-300" />
+                ) : (
+                    session ? (
+                        <div className="relative" ref={profileMenuRef}>
+                            <button
+                                onClick={() =>
+                                    setIsProfileMenuOpen(!isProfileMenuOpen)
+                                }
+                                className="bg-caramel hover:bg-caramel/80 flex h-8 w-8 items-center justify-center rounded-full text-white transition"
+                            >
+                                {session.user?.image ? (
+                                    <Image
+                                        src={session.user.image}
+                                        alt="Profile"
+                                        width={32}
+                                        height={32}
+                                        className="h-8 w-8 rounded-full object-cover"
+                                    />
+                                ) : (
+                                    <RiUser3Fill className="text-lg" />
+                                )}
+                            </button>
+
+                            <AnimatePresence>
+                                {isProfileMenuOpen && (
+                                    <motion.div
+                                        initial={{ opacity: 0, y: -10 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        exit={{ opacity: 0, y: -10 }}
+                                        className="absolute right-0 top-full mt-2 w-48 rounded-lg bg-white py-2 shadow-lg dark:bg-gray-800"
+                                    >
+                                        <Link
+                                            href="/profile"
+                                            className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+                                            onClick={() =>
+                                                setIsProfileMenuOpen(false)
+                                            }
+                                        >
+                                            Profile
+                                        </Link>
+                                        <button
+                                            onClick={() => {
+                                                signOut({ callbackUrl: '/' })
+                                                setIsProfileMenuOpen(false)
+                                            }}
+                                            className="block w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+                                        >
+                                            Sign Out
+                                        </button>
+                                    </motion.div>
+                                )}
+                            </AnimatePresence>
+                        </div>
+                    ) : (
+                        <div className="lg:hidden items-center gap-2 flex">
+                            <Link
+                                href="/login"
+                                className="rounded-md px-3 py-1.5 text-sm font-medium text-gray-700 transition hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+                            >
+                                Login
+                            </Link>
+                            <Link
+                                href="/signup"
+                                className="rounded-md bg-caramel px-3 py-1.5 text-sm font-medium text-white transition hover:bg-caramel/80"
+                            >
+                                Sign Up
+                            </Link>
+                        </div>
+                    )
+                )}
+            </div>
+
             <button
-                className="text-caramel ml-3 hidden text-2xl lg:block"
+                className="text-caramel hidden text-2xl lg:block"
                 onClick={() => setIsMenuOpen(!isMenuOpen)}
             >
                 {isMenuOpen ? <RiCloseFill /> : <RiMenu3Fill />}
@@ -111,6 +216,48 @@ export default function Header({ scrollRef }: HeaderProps) {
                                 </Link>
                             )
                         })}
+
+                        {/* Mobile Auth Buttons */}
+                        <div className="mt-4">
+                            {session ? (
+                                <div className="flex flex-col gap-2">
+                                    <Link
+                                        href="/profile"
+                                        onClick={() => setIsMenuOpen(false)}
+                                        className="text-caramel inline-flex cursor-pointer items-center justify-center gap-2.5 rounded-3xl px-[30px] py-2.5 hover:bg-gray-100"
+                                    >
+                                        Profile
+                                    </Link>
+                                    <button
+                                        onClick={() => {
+                                            signOut({ callbackUrl: '/' })
+                                            setIsMenuOpen(false)
+                                        }}
+                                        className="text-caramel inline-flex cursor-pointer items-center justify-center gap-2.5 rounded-3xl px-[30px] py-2.5 hover:bg-gray-100"
+                                    >
+                                        Sign Out
+                                    </button>
+                                </div>
+                            ) : (
+                                <div className="flex items-center justify-center gap-4 rounded-2xl bg-white px-6 py-4">
+                                    <Link
+                                        href="/login"
+                                        onClick={() => setIsMenuOpen(false)}
+                                        className="text-sm font-medium text-gray-700 transition-colors hover:text-gray-900"
+                                    >
+                                        Login
+                                    </Link>
+                                    <Link
+                                        href="/signup"
+                                        onClick={() => setIsMenuOpen(false)}
+                                        className="bg-caramel hover:bg-caramel/90 rounded-lg px-4 py-2 text-sm font-medium text-white transition-colors"
+                                    >
+                                        Sign Up
+                                    </Link>
+                                </div>
+                            )}
+                        </div>
+
                         <div className="h-full" />
                     </motion.div>
                 )}

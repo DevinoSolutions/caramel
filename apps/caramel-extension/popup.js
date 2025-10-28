@@ -1,11 +1,6 @@
 /* global currentBrowser, fetchCoupons */
 
 /* ------------------------------------------------------------ */
-/*  Globals                                                     */
-/* ------------------------------------------------------------ */
-let returnView = null // callback for the “Back” button, set dynamically
-
-/* ------------------------------------------------------------ */
 /*  Bootstrap                                                   */
 /* ------------------------------------------------------------ */
 document.addEventListener('DOMContentLoaded', async () => {
@@ -101,10 +96,7 @@ function renderUnsupportedSite(user) {
 
     /* wiring */
     const loginToggle = document.getElementById('loginToggleBtn')
-    if (loginToggle)
-        loginToggle.addEventListener('click', () =>
-            renderSignInPrompt(() => renderUnsupportedSite(user)),
-        )
+    if (loginToggle) loginToggle.addEventListener('click', handleLogin)
 
     const logout = document.getElementById('logoutBtn')
     if (logout)
@@ -116,90 +108,22 @@ function renderUnsupportedSite(user) {
 }
 
 /* ------------------------------------------------------------ */
-/*  Login prompt                                                */
+/*  Login Handler                                               */
 /* ------------------------------------------------------------ */
-function renderSignInPrompt(backFn) {
-    returnView = typeof backFn === 'function' ? backFn : null
+function handleLogin() {
+    try {
+        // Open login page in a new tab with extension parameter
+        const baseUrl = 'https://grabcaramel.com' // Production URL
+        const loginUrl = `${baseUrl}/login?extension=true`
 
-    const container = document.getElementById('auth-container')
+        // Open login page in a new tab
+        currentBrowser.tabs.create({ url: loginUrl })
 
-    container.innerHTML = `
-    <div class="login-prompt fade-in-up">
-
-      <form id="loginForm" class="login-form">
-        <div id="loginErrorMessage" class="error-message" style="display:none;"></div>
-
-        <div>
-          <label>Email</label>
-          <input type="email" id="email" required/>
-        </div>
-
-        <div>
-          <label>Password</label>
-          <input type="password" id="password" required/>
-        </div>
-
-        <button type="submit" class="login-button">Login</button>
-      </form>
-
-      <p class="mt-6">
-        Don't have an account?
-        <a
-          href="https://grabcaramel.com/signup"
-          target="_blank"
-          rel="noopener noreferrer"
-        >Sign Up</a>
-      </p>
-
-      ${
-          returnView
-              ? '<button id="backBtn" class="back-btn" type="button">← Back</button>'
-              : ''
-      }
-    </div>
-  `
-
-    const settingsIcon = document.getElementById('settingsIcon')
-    if (settingsIcon) settingsIcon.style.display = 'none'
-
-    const backBtn = document.getElementById('backBtn')
-    if (backBtn && returnView) backBtn.addEventListener('click', returnView)
-
-    const loginForm = document.getElementById('loginForm')
-    loginForm.addEventListener('submit', async e => {
-        e.preventDefault()
-
-        const errorBox = document.getElementById('loginErrorMessage')
-        errorBox.style.display = 'none'
-        errorBox.textContent = ''
-
-        try {
-            const email = document.getElementById('email').value.trim()
-            const password = document.getElementById('password').value
-
-            const res = await fetch(
-                'https://grabcaramel.com/api/extension/login',
-                {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ email, password }),
-                },
-            )
-
-            if (!res.ok) {
-                const data = await res.json().catch(() => ({}))
-                throw new Error(data.error || 'Login failed')
-            }
-
-            const { token, username, image } = await res.json()
-            const user = { username, image }
-
-            currentBrowser.storage.sync.set({ token, user }, () => initPopup())
-        } catch (err) {
-            errorBox.textContent = `Login failed: ${err.message}`
-            errorBox.style.display = 'block'
-        }
-    })
+        // Close the popup (it will reopen after auth completes)
+        window.close()
+    } catch (err) {
+        console.error('[Login] Failed to open login page:', err)
+    }
 }
 
 /* ------------------------------------------------------------ */
@@ -291,24 +215,16 @@ function renderCouponsView(coupons, user, domain) {
     <div id="toastContainer" class="copy-toast-container"></div>
   `
 
-    /* save callback for login back-button */
-    const selfCallback = () => renderCouponsView(coupons, user, domain)
-
     /* logout */
     const logoutBtn = document.getElementById('logoutBtn')
     if (logoutBtn)
         logoutBtn.addEventListener('click', () => {
-            currentBrowser.storage.sync.remove(['token', 'user'], () =>
-                renderSignInPrompt(selfCallback),
-            )
+            currentBrowser.storage.sync.remove(['token', 'user'], handleLogin)
         })
 
     /* login toggle (guest) */
     const loginToggle = document.getElementById('loginToggleBtn')
-    if (loginToggle)
-        loginToggle.addEventListener('click', () =>
-            renderSignInPrompt(selfCallback),
-        )
+    if (loginToggle) loginToggle.addEventListener('click', handleLogin)
 
     /* copy-to-clipboard */
     container.querySelectorAll('.coupon-item').forEach(item => {

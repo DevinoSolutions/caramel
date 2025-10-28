@@ -1,18 +1,16 @@
 generator client {
   provider        = "prisma-client-js"
-  previewFeatures = ["postgresqlExtensions"]
 }
 
 datasource db {
-  provider   = "postgresql"
-  url        = env("DATABASE_URL")
-  extensions = [pg_trgm]
+  provider = "sqlite"
+  url      = "file:./dev.db"
 }
 
 model Source {
   id        String       @id @default(cuid())
   source    String
-  websites  String[]
+  websites  String
   status    SourceStatus @default(REQUESTED)
   createdAt DateTime     @default(now())
   updatedAt DateTime     @default(now()) @updatedAt
@@ -72,13 +70,23 @@ model Session {
   @@map("sessions")
 }
 
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
 model User {
   id                String     @id @default(uuid())
   name              String?
   firstName         String?
   lastName          String?
   username          String?    @unique
-  email             String?    @unique
+  email             String     @unique
+  emailVerified     DateTime?
   password          String?
   token             String?    @unique
   image             String?
@@ -88,7 +96,7 @@ model User {
   updatedAt         DateTime   @default(now()) @updatedAt
   deletedAt         DateTime?
   role              Role?      @default(USER)
-  status            UserStatus @default(NOT_VERIFIED)
+  status            UserStatus @default(ACTIVE_USER)
   accounts          Account[]
   sessions          Session[]
 

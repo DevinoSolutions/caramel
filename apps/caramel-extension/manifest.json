@@ -21,7 +21,8 @@
         "https://www.amazon.com/*",
         "https://*.ebay.com/*",
         "https://*.codecademy.com/*",
-        "https://*.grabcaramel.com/*"
+        "https://*.grabcaramel.com/*",
+        "https://grabcaramel.com/*"
     ],
     "web_accessible_resources": [
         {
@@ -37,6 +38,15 @@
                 "https://*.codecademy.com/*"
             ],
             "js": ["shared-utils.js", "UI-helpers.js", "inject.js", "amazon.js"]
+        },
+        {
+            "matches": [
+                "https://grabcaramel.com/*",
+                "https://*.grabcaramel.com/*"
+            ],
+            "js": ["content-script.js"],
+            "run_at": "document_end",
+            "all_frames": false
         }
     ],
     "background": {
