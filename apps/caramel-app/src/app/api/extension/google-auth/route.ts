@@ -16,17 +16,24 @@ interface GoogleAuthResponse {
     image: string | null
 }
 
+// Handle CORS preflight
+export async function OPTIONS() {
+    return new NextResponse(null, {
+        status: 200,
+        headers: {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        },
+    })
+}
+
 export async function POST(req: NextRequest) {
-    // Handle CORS
+    // CORS headers for actual request
     const corsHeaders = {
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS',
         'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    }
-
-    // Handle preflight
-    if (req.method === 'OPTIONS') {
-        return new NextResponse(null, { status: 200, headers: corsHeaders })
     }
 
     try {
