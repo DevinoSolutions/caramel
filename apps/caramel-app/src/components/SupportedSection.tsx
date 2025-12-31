@@ -86,7 +86,7 @@ export default function SupportedSection() {
                     </p>
                     <motion.div className="mt-8">
                         <motion.a
-                            href="/supported-sites"
+                            href="/supported-stores"
                             whileHover={{
                                 scale: 1.05,
                                 transition: { duration: 0.2 },
@@ -94,7 +94,7 @@ export default function SupportedSection() {
                             whileTap={{ scale: 0.95 }}
                             className="from-caramel inline-flex items-center rounded-full bg-gradient-to-r to-orange-600 px-6 py-3 font-semibold text-white shadow-lg transition-all duration-200 hover:shadow-xl"
                         >
-                            View All Supported Sites
+                            View All Supported Stores
                         </motion.a>
                     </motion.div>
                 </motion.div>
