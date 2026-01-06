@@ -20,6 +20,8 @@ interface NavLink {
 
 const links: NavLink[] = [
     { name: 'Home', url: '/' },
+    { name: 'Coupons', url: '/coupons' },
+    { name: 'Pricing', url: '/pricing' },
     { name: 'Privacy', url: '/privacy' },
     { name: 'Supported Sites', url: '/supported-sites' },
 ]

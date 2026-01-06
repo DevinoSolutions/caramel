@@ -1,6 +1,11 @@
 {
     "$schema": "https://unpkg.com/knip@5/schema.json",
-    "entry": ["src/app/**/*.{ts,tsx}", "e2e/**/*.spec.ts", "scripts/*.ts"],
+    "entry": [
+        "src/app/**/*.{ts,tsx}",
+        "src/instrumentation*.ts",
+        "e2e/**/*.spec.ts",
+        "scripts/*.ts"
+    ],
     "project": ["src/**/*.{ts,tsx}", "e2e/**/*.ts"],
     "ignore": [
         "eslint.config.mjs",
@@ -27,7 +32,6 @@
         "eslint-config-next",
         "prettier-plugin-organize-imports",
         "prettier-plugin-tailwindcss",
-        "@heroicons/react",
         "@use-gesture/react",
         "cors",
         "gsap",

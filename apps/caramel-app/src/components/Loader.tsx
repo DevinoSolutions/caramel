@@ -1,34 +1,16 @@
-import Image from 'next/image'
-import { CSSProperties } from 'react'
+interface LoaderProps {
+    label?: string
+}
 
-const Loader = () => {
-    const logoStyle: CSSProperties = {
-        width: '120px',
-        height: '120px',
-        animation: 'pulse 1.5s ease-in-out infinite',
-    }
-
+const Loader = ({ label }: LoaderProps) => {
     return (
-        <div>
-            <Image
-                src={'/logo.png'}
-                alt="logo"
-                height={2000}
-                width={20000}
-                priority
-                style={logoStyle}
-            />
-            <style>{`
-                @keyframes pulse {
-                    0%,
-                    100% {
-                        transform: scale(1);
-                    }
-                    50% {
-                        transform: scale(1.1);
-                    }
-                }
-            `}</style>
+        <div className="flex flex-col items-center gap-3">
+            <div className="h-12 w-12 animate-spin rounded-full border-4 border-orange-100 border-t-orange-500 dark:border-orange-900 dark:border-t-orange-400" />
+            {label ? (
+                <p className="text-sm font-semibold text-gray-600 dark:text-gray-300">
+                    {label}
+                </p>
+            ) : null}
         </div>
     )
 }

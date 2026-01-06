@@ -6,6 +6,28 @@
 
 html {
     scroll-behavior: smooth;
+    /* Reserve gutter so the layout doesn't jump when scrollbars appear/disappear */
+    scrollbar-gutter: stable both-edges;
+}
+
+body {
+    /* Keep a consistent vertical scrollbar to avoid layout shifts as content loads */
+    overflow-y: scroll;
+}
+
+/* Prevent nested scrollbars from react-infinite-scroll-component */
+.infinite-scroll-component__outerdiv,
+.infinite-scroll-component {
+    overflow: visible !important;
+}
+
+.infinite-scroll-component {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+.infinite-scroll-component::-webkit-scrollbar {
+    display: none;
 }
 
 ::-webkit-scrollbar {
