@@ -142,6 +142,29 @@ function renderSignInPrompt(backFn) {
         <button type="submit" class="login-button">Login</button>
       </form>
 
+      <div class="divider">
+        <span>Or continue with</span>
+      </div>
+
+      <div class="oauth-buttons">
+        <button type="button" id="googleLoginBtn" class="oauth-button google-button">
+          <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
+            <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z" fill="#4285F4"/>
+            <path d="M9.003 18c2.43 0 4.467-.806 5.956-2.18L12.05 13.56c-.806.54-1.836.86-3.047.86-2.344 0-4.328-1.584-5.036-3.711H.96v2.332C2.44 15.983 5.485 18 9.003 18z" fill="#34A853"/>
+            <path d="M3.964 10.71c-.18-.54-.282-1.117-.282-1.71s.102-1.17.282-1.71V4.958H.957C.347 6.173 0 7.548 0 9s.348 2.827.957 4.042l3.007-2.332z" fill="#FBBC05"/>
+            <path d="M9.003 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.464.891 11.426 0 9.003 0 5.485 0 2.44 2.017.96 4.958L3.967 7.29c.708-2.127 2.692-3.71 5.036-3.71z" fill="#EA4335"/>
+          </svg>
+          Sign in with Google
+        </button>
+
+        <button type="button" id="appleLoginBtn" class="oauth-button apple-button">
+          <svg width="18" height="18" viewBox="0 0 18 22" xmlns="http://www.w3.org/2000/svg">
+            <path d="M17.769 18.378c-.356.82-.528 1.186-0.988 1.912-.643.999-1.55 2.24-2.674 2.252-1.001.012-1.262-.654-2.627-.647-1.364.008-1.656.66-2.657.647-1.124-.012-1.982-1.116-2.625-2.115-1.797-2.794-1.985-6.073-0.877-7.818.79-1.244 2.041-1.975 3.202-1.975 1.191 0 1.939.655 2.923.655.954 0 1.534-.656 2.906-.656 1.037 0 2.146.566 2.933 1.543-2.577 1.412-2.158 5.089.484 6.202zm-5.084-14.378c.528-.663.912-1.597.766-2.539-.832.051-1.806.587-2.385 1.286-.517.625-.942 1.577-.778 2.489.919.037 1.862-.525 2.397-1.236z" fill="currentColor"/>
+          </svg>
+          Sign in with Apple
+        </button>
+      </div>
+
       <div id="resendVerificationContainer" style="display:none; text-align:center; margin-top:12px;">
         <a
           href="https://grabcaramel.com/verify"
@@ -181,6 +204,7 @@ function renderSignInPrompt(backFn) {
         'resendVerificationContainer',
     )
 
+    // Email/Password login
     const loginForm = document.getElementById('loginForm')
     loginForm.addEventListener('submit', async e => {
         e.preventDefault()
@@ -232,6 +256,61 @@ function renderSignInPrompt(backFn) {
             errorBox.style.display = 'block'
         }
     })
+
+    // OAuth buttons
+    const googleLoginBtn = document.getElementById('googleLoginBtn')
+    const appleLoginBtn = document.getElementById('appleLoginBtn')
+
+    if (googleLoginBtn) {
+        googleLoginBtn.addEventListener('click', () => handleOAuthLogin('google'))
+    }
+
+    if (appleLoginBtn) {
+        appleLoginBtn.addEventListener('click', () => handleOAuthLogin('apple'))
+    }
+}
+
+/* ------------------------------------------------------------ */
+/*  OAuth Login Handler                                         */
+/* ------------------------------------------------------------ */
+function handleOAuthLogin(provider) {
+    const authUrl = `https://grabcaramel.com/api/auth/${provider}?callbackURL=${encodeURIComponent('https://grabcaramel.com/extension-auth-callback')}`
+    
+    // Open OAuth in a popup window
+    const width = 500
+    const height = 600
+    const left = (screen.width - width) / 2
+    const top = (screen.height - height) / 2
+    
+    const popup = window.open(
+        authUrl,
+        'oauth-popup',
+        `width=${width},height=${height},left=${left},top=${top}`
+    )
+
+    // Listen for the OAuth callback
+    const messageListener = (event) => {
+        if (event.origin !== 'https://grabcaramel.com') return
+        
+        if (event.data.type === 'oauth-success' && event.data.token) {
+            const { token, user } = event.data
+            currentBrowser.storage.sync.set({ token, user }, () => {
+                window.removeEventListener('message', messageListener)
+                if (popup) popup.close()
+                initPopup()
+            })
+        }
+    }
+
+    window.addEventListener('message', messageListener)
+
+    // Clean up if popup is closed
+    const checkPopup = setInterval(() => {
+        if (!popup || popup.closed) {
+            clearInterval(checkPopup)
+            window.removeEventListener('message', messageListener)
+        }
+    }, 1000)
 }
 
 /* ------------------------------------------------------------ */
