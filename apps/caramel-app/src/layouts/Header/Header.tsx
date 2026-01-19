@@ -60,6 +60,7 @@ export default function Header({ scrollRef }: HeaderProps) {
     }
 
     const userInitial = session?.user?.name?.charAt(0).toUpperCase() || 'U'
+    const userImage = session?.user?.image || session?.user?.encodedPictureUrl
 
     useEffect(() => {
         if (isScrollingDown) {
@@ -94,52 +95,92 @@ export default function Header({ scrollRef }: HeaderProps) {
                 />
             </Link>
             <motion.div
-                className={`dark:bg-darkerBg mx-auto flex w-full items-center justify-center gap-6 rounded-[28px] bg-white px-[26px] py-[15px] shadow lg:hidden`}
+                className={`dark:bg-darkerBg mx-auto flex w-full items-center justify-between rounded-[28px] bg-white px-[26px] py-[15px] shadow lg:hidden`}
             >
-                {links.map(link => {
-                    const isActive = pathname === link.url
+                {/* Links in the center */}
+                <div className="flex flex-1 justify-center gap-6">
+                    {links.map(link => {
+                        const isActive = pathname === link.url
 
-                    return (
-                        <Link
-                            key={link.name}
-                            href={link.url || ''}
-                            className={`px-[30px] py-2.5 hover:scale-105 ${isActive ? 'bg-caramel text-white' : 'text-caramel'} inline-flex cursor-pointer items-center justify-center gap-2.5 rounded-3xl`}
-                        >
-                            {link.name}
-                        </Link>
-                    )
-                })}
-                {session?.user && (
-                    <div ref={userMenuRef} className="relative">
-                        <button
-                            onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
-                            className="bg-caramel flex h-8 w-8 items-center justify-center rounded-full text-sm font-semibold text-white transition hover:scale-105"
-                        >
-                            {userInitial}
-                        </button>
-                        <AnimatePresence>
-                            {isUserMenuOpen && (
-                                <motion.div
-                                    initial={{ opacity: 0, y: -10 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    exit={{ opacity: 0, y: -10 }}
-                                    className="dark:bg-darkerBg absolute right-0 top-full mt-2 min-w-[150px] rounded-lg bg-white py-2 shadow-lg"
-                                >
-                                    <div className="border-b px-4 py-2 text-sm text-gray-500 dark:text-gray-400">
-                                        {session.user.email}
-                                    </div>
-                                    <button
-                                        onClick={handleSignOut}
-                                        className="text-caramel w-full cursor-pointer px-4 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-800"
+                        return (
+                            <Link
+                                key={link.name}
+                                href={link.url || ''}
+                                className={`px-[30px] py-2.5 hover:scale-105 ${isActive ? 'bg-caramel text-white' : 'text-caramel'} inline-flex cursor-pointer items-center justify-center gap-2.5 rounded-3xl`}
+                            >
+                                {link.name}
+                            </Link>
+                        )
+                    })}
+                </div>
+
+                {/* Auth/Profile section */}
+                <div className="flex items-center gap-3">
+                    {session?.user ? (
+                        <div ref={userMenuRef} className="relative">
+                            <button
+                                onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
+                                className="bg-caramel flex h-8 w-8 items-center justify-center overflow-hidden rounded-full text-sm font-semibold text-white transition hover:scale-105"
+                            >
+                                {userImage ? (
+                                    <Image
+                                        src={userImage}
+                                        alt="Profile"
+                                        width={32}
+                                        height={32}
+                                        className="h-full w-full object-cover"
+                                    />
+                                ) : (
+                                    userInitial
+                                )}
+                            </button>
+                            <AnimatePresence>
+                                {isUserMenuOpen && (
+                                    <motion.div
+                                        initial={{ opacity: 0, y: -10 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        exit={{ opacity: 0, y: -10 }}
+                                        className="dark:bg-darkerBg absolute right-0 top-full mt-2 min-w-[150px] rounded-lg bg-white py-2 shadow-lg"
                                     >
-                                        Sign out
-                                    </button>
-                                </motion.div>
-                            )}
-                        </AnimatePresence>
-                    </div>
-                )}
+                                        <div className="border-b px-4 py-2 text-sm text-gray-500 dark:text-gray-400">
+                                            {session.user.email}
+                                        </div>
+                                        <Link
+                                            href="/profile"
+                                            onClick={() => setIsUserMenuOpen(false)}
+                                            className="text-caramel block w-full cursor-pointer px-4 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-800"
+                                        >
+                                            Profile
+                                        </Link>
+                                        <button
+                                            onClick={handleSignOut}
+                                            className="text-caramel w-full cursor-pointer px-4 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-800"
+                                        >
+                                            Sign out
+                                        </button>
+                                    </motion.div>
+                                )}
+                            </AnimatePresence>
+                        </div>
+                    ) : (
+                        <>
+                            <Link
+                                href="/login"
+                                className="text-caramel inline-flex cursor-pointer items-center justify-center gap-2.5 rounded-3xl px-[20px] py-2 text-sm font-medium hover:scale-105"
+                            >
+                                Login
+                            </Link>
+                            <Link
+                                href="/signup"
+                                className="bg-caramel inline-flex cursor-pointer items-center justify-center gap-2.5 rounded-3xl px-[20px] py-2 text-sm font-medium text-white transition hover:scale-105"
+                            >
+                                Sign Up
+                            </Link>
+                        </>
+                    )}
+                </div>
             </motion.div>
+
             <ThemeToggle className="absolute -right-4 lg:relative lg:right-auto lg:ml-auto" />
             <button
                 className="text-caramel ml-3 hidden text-2xl lg:block"
@@ -168,7 +209,7 @@ export default function Header({ scrollRef }: HeaderProps) {
                                 </Link>
                             )
                         })}
-                        {session?.user && (
+                        {session?.user ? (
                             <button
                                 onClick={() => {
                                     setIsMenuOpen(false)
@@ -178,6 +219,23 @@ export default function Header({ scrollRef }: HeaderProps) {
                             >
                                 Sign out
                             </button>
+                        ) : (
+                            <div className="flex flex-col gap-3">
+                                <Link
+                                    onClick={() => setIsMenuOpen(false)}
+                                    href="/login"
+                                    className="text-caramel inline-flex cursor-pointer items-center justify-center gap-2.5 rounded-3xl border-2 border-caramel px-[30px] py-2.5"
+                                >
+                                    Login
+                                </Link>
+                                <Link
+                                    onClick={() => setIsMenuOpen(false)}
+                                    href="/signup"
+                                    className="bg-caramel inline-flex cursor-pointer items-center justify-center gap-2.5 rounded-3xl px-[30px] py-2.5 text-white"
+                                >
+                                    Sign Up
+                                </Link>
+                            </div>
                         )}
                         <div className="h-full" />
                     </motion.div>

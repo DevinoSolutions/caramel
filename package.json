@@ -23,5 +23,9 @@
         "prettier-plugin-organize-imports": "^4.1.0",
         "prettier-plugin-tailwindcss": "^0.6.14",
         "turbo": "^2.5.4"
+    },
+    "dependencies": {
+        "corepack": "^0.34.5",
+        "pnpm": "^10.28.0"
     }
 }
