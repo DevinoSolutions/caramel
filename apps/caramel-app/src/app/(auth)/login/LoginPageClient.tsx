@@ -45,6 +45,15 @@ export default function LoginPageClient() {
         return () => clearTimeout(timer)
     }, [])
 
+    // Add OAuth button handlers
+    const handleGoogleSignIn = async () => {
+        await signIn.social({ provider: 'google' })
+    }
+
+    const handleAppleSignIn = async () => {
+        await signIn.social({ provider: 'apple' })
+    }
+
     const handleSubmit = async (event: FormEvent) => {
         event.preventDefault()
         setLoading(true)
@@ -152,6 +161,53 @@ export default function LoginPageClient() {
                         {loading ? 'Logging in...' : 'Login'}
                     </button>
                 </form>
+
+                
+                <div className="relative my-4">
+                    <div className="absolute inset-0 flex items-center">
+                        <div className="w-full border-t border-gray-300"></div>
+                    </div>
+                    <div className="relative flex justify-center text-sm">
+                        <span className="bg-white px-2 text-gray-500">Or continue with</span>
+                    </div>
+                </div>
+
+                <div className="flex flex-col gap-3">
+                    {/* Google Sign In */}
+                    <button
+                        type="button"
+                        onClick={handleGoogleSignIn}
+                        className="w-full flex items-center justify-center gap-3 rounded-lg border border-gray-300 bg-white py-2.5 px-4 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 transition-colors"
+                    >
+                        <Image
+                        src="google.png"
+                        width={24}
+                        height={24}
+                        alt="Google"
+                        className="object-contain"
+                        unoptimized
+                        />
+                        Sign in with Google
+                    </button>
+
+                    {/* Apple Sign In */}
+                    <button
+                        type="button"
+                        onClick={handleAppleSignIn}
+                        className="w-full flex items-center justify-center gap-3 rounded-lg border border-gray-300 bg-black py-2.5 px-4 text-sm font-medium text-white shadow-sm hover:bg-gray-900 transition-colors"
+                    >
+                        <Image
+                        src="apple-white.png"
+                        width={24}
+                        height={24}
+                        alt="Apple"
+                        className="object-contain"
+                        unoptimized
+                        />
+                        Sign in with Apple
+                    </button>
+                </div>
+
                 <p className="mt-4 text-center text-sm text-gray-600">
                     Don&apos;t have an account?{' '}
                     <Link className="text-caramel font-semibold" href="/signup">

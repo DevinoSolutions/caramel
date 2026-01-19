@@ -19,6 +19,13 @@ const nextConfig = {
                 port: '',
                 pathname: '/s2/favicons/**',
             },
+            //TODO add also apple images configs
+            {
+                protocol: 'https',
+                hostname: 'lh3.googleusercontent.com',
+                port: '',
+                pathname: '/**',
+            },
         ],
     },
 }

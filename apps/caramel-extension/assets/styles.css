@@ -298,6 +298,73 @@ body {
     transform: scale(1.05);
 }
 
+/* OAuth Buttons Section */
+.divider {
+    position: relative;
+    text-align: center;
+    margin: 16px 0;
+}
+
+.divider::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background-color: #e5e7eb;
+}
+
+.divider span {
+    position: relative;
+    background-color: white;
+    padding: 0 8px;
+    font-size: 12px;
+    color: #6b7280;
+}
+
+.oauth-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.oauth-button {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px 16px;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.google-button {
+    background-color: white;
+    color: #374151;
+}
+
+.google-button:hover {
+    background-color: #f9fafb;
+    border-color: #d1d5db;
+}
+
+.apple-button {
+    background-color: #000000;
+    color: white;
+    border-color: #000000;
+}
+
+.apple-button:hover {
+    background-color: #1f2937;
+}
+
 .error-message {
     padding: 8px;
     margin: 8px 0;
