@@ -97,5 +97,17 @@ export const auth = betterAuth({
     advanced: {
         useSecureCookies: process.env.NODE_ENV === 'production',
     },
+    socialProviders: {
+        google: {
+            //TODO : Add the env variables 
+            prompt: "select_account", 
+            clientId: process.env.GOOGLE_CLIENT_ID!,
+            clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+        },
+        apple: {
+            clientId: process.env.APPLE_CLIENT_ID!,
+            clientSecret: process.env.APPLE_CLIENT_SECRET!,
+        },
+    },
     plugins: [bearer()],
 })
