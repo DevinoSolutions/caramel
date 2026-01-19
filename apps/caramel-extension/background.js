@@ -85,6 +85,26 @@ currentBrowser.runtime.onMessage.addListener(
         } else if (message.action === 'keepAlive') {
             console.log('Received keep-alive message from content script')
             sendResponse({ status: 'alive' }) // Respond to the message
+        } else if (message.action === 'fetchCoupons') {
+            // Fetch coupons via background script (content scripts have CORS restrictions)
+            console.log('Background: Fetching coupons from URL:', message.url)
+            fetch(message.url)
+                .then(response => {
+                    console.log('Background: Fetch response status:', response.status)
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`)
+                    }
+                    return response.json()
+                })
+                .then(data => {
+                    console.log('Background: Fetched data:', data)
+                    sendResponse({ success: true, data: data || [] })
+                })
+                .catch(error => {
+                    console.error('Background: fetchCoupons error:', error)
+                    sendResponse({ success: false, error: error.message, data: [] })
+                })
+            return true // Keep channel open for async response
         } else if (message.action === 'scrapeAmazonCartKeywords') {
             const originalTab = sender.tab
             currentBrowser.tabs
