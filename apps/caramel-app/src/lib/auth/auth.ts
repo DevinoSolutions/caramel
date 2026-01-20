@@ -14,13 +14,14 @@ const baseURL =
     process.env.NEXT_PUBLIC_BASE_URL ||
     fallbackBaseURL
 const trustedOrigins = Array.from(
-    new Set([process.env.NEXT_PUBLIC_BASE_URL || '', baseURL].filter(Boolean)),
+    new Set([process.env.NEXT_PUBLIC_BASE_URL || '', baseURL, "https://appleid.apple.com"].filter(Boolean)), 
 )
 
 export const auth = betterAuth({
     database: prismaAdapter(prisma, {
         provider: 'postgresql',
     }),
+    trustHost: true,
     emailAndPassword: {
         enabled: true,
         requireEmailVerification: true,
@@ -96,6 +97,11 @@ export const auth = betterAuth({
     trustedOrigins,
     advanced: {
         useSecureCookies: process.env.NODE_ENV === 'production',
+        cookiePrefix: 'better-auth',
+        defaultCookieAttributes: {
+            sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+            secure: process.env.NODE_ENV === 'production',
+        },
     },
     socialProviders: {
         google: {
