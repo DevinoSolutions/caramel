@@ -1,4 +1,9 @@
 import { defineConfig, devices } from '@playwright/test'
+import * as dotenv from 'dotenv'
+import * as path from 'path'
+
+// Load environment variables for E2E tests
+dotenv.config({ path: path.resolve(__dirname, '../../local-dev/.env.ports') })
 
 const baseURL =
     process.env.PLAYWRIGHT_BASE_URL ||

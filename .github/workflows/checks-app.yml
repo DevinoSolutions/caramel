@@ -172,6 +172,7 @@ jobs:
         run: pnpm --filter caramel-landing run setup:ci-env
 
       - name: Generate Prisma Client
+        if: github.event_name == 'pull_request'
         run: pnpm --filter caramel-landing exec prisma generate
 
       # PR: Run against local dev server (tests PR changes)
