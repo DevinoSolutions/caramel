@@ -83,22 +83,24 @@ export default function Header({ scrollRef }: HeaderProps) {
             className={`lg:dark:bg-darkerBg sticky top-4 z-[999] mx-auto flex w-full max-w-[min(75rem,93svw)] items-center justify-between rounded-2xl p-4 px-8 py-4 lg:rounded-[28px] lg:bg-white lg:py-3 lg:shadow`}
         >
             <Link
-                href="/"
-                className="absolute ml-5 flex h-full w-[185px] lg:static lg:ml-0"
-            >
-                <Image
-                    src="/full-logo.png"
-                    alt="logo"
-                    height={120}
-                    width={120}
-                    className="mb-auto mt-auto w-4/5 cursor-pointer sm:w-5/12"
-                />
-            </Link>
+                    href="/"
+                    className="absolute ml-6 flex h-full w-[185px] lg:static lg:ml-0"
+                >
+                    <Image
+                        src="/full-logo.png"
+                        alt="logo"
+                        height={120}
+                        width={120}
+                        className="mb-auto mt-auto w-4/5 cursor-pointer sm:w-5/12"
+                    />
+                </Link>
+
             <motion.div
                 className={`dark:bg-darkerBg mx-auto flex w-full items-center justify-between rounded-[28px] bg-white px-[26px] py-[15px] shadow lg:hidden`}
             >
+                <div className="ml-40">   </div>
                 {/* Links in the center */}
-                <div className="flex flex-1 justify-center gap-6">
+                <div className="flex flex-1 justify-center gap-4 ml-30">
                     {links.map(link => {
                         const isActive = pathname === link.url
 
@@ -170,13 +172,13 @@ export default function Header({ scrollRef }: HeaderProps) {
                         <>
                             <Link
                                 href="/login"
-                                className="text-caramel inline-flex cursor-pointer items-center justify-center gap-2.5 rounded-3xl px-[20px] py-2 text-sm font-medium hover:scale-105"
+                                className="text-caramel inline-flex cursor-pointer items-center justify-center gap-1 rounded-3xl px-[15px] py-2 text-sm font-medium hover:scale-105"
                             >
                                 Login
                             </Link>
                             <Link
                                 href="/signup"
-                                className="bg-caramel inline-flex cursor-pointer items-center justify-center gap-2.5 rounded-3xl px-[20px] py-2 text-sm font-medium text-white transition hover:scale-105"
+                                className="bg-caramel inline-flex cursor-pointer items-center justify-center gap-1 rounded-3xl px-[15px] py-2 text-sm font-medium text-white transition hover:scale-105"
                             >
                                 Sign Up
                             </Link>
