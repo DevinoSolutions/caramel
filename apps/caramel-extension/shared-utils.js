@@ -232,7 +232,7 @@ async function applyCoupon(code, rec) {
             document.getElementById(
                 rec.priceContainer.match(/\[id=['"]([^'"]+)['"]\]/)?.[1] || '',
             )
-        
+
         if (priceEl && rec.domain !== 'amazon.com') {
             waiters.push(waitForTextChange(priceEl, 3000, domain))
         }
@@ -242,7 +242,7 @@ async function applyCoupon(code, rec) {
 
         // Early success detection - check for immediate price change
         let earlyCheckInterval = null
-        const earlySuccessPromise = new Promise((resolve) => {
+        const earlySuccessPromise = new Promise(resolve => {
             earlyCheckInterval = setInterval(() => {
                 const currentPrice = getPrice(rec.priceContainer, {
                     returnLargest: true,
@@ -278,19 +278,19 @@ async function fetchCoupons(site, kw) {
     const url = `https://grabcaramel.com/api/coupons?site=${site}&key_words=${encodeURIComponent(kw)}&limit=20`
     log('Fetching coupons for:', site, 'with keywords:', kw)
     log('URL:', url)
-    
+
     try {
         // Use background script to fetch (content scripts have CORS restrictions)
         log('Sending fetchCoupons message to background script...')
         const response = await new Promise(resolve => {
             currentBrowser.runtime.sendMessage(
                 { action: 'fetchCoupons', url },
-                resolve
+                resolve,
             )
         })
-        
+
         log('Response from background:', response)
-        
+
         if (response && response.success) {
             log('Fetched', response.data.length, 'coupons')
             return response.data

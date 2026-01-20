@@ -90,9 +90,14 @@ currentBrowser.runtime.onMessage.addListener(
             console.log('Background: Fetching coupons from URL:', message.url)
             fetch(message.url)
                 .then(response => {
-                    console.log('Background: Fetch response status:', response.status)
+                    console.log(
+                        'Background: Fetch response status:',
+                        response.status,
+                    )
                     if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`)
+                        throw new Error(
+                            `HTTP error! status: ${response.status}`,
+                        )
                     }
                     return response.json()
                 })
@@ -102,7 +107,11 @@ currentBrowser.runtime.onMessage.addListener(
                 })
                 .catch(error => {
                     console.error('Background: fetchCoupons error:', error)
-                    sendResponse({ success: false, error: error.message, data: [] })
+                    sendResponse({
+                        success: false,
+                        error: error.message,
+                        data: [],
+                    })
                 })
             return true // Keep channel open for async response
         } else if (message.action === 'scrapeAmazonCartKeywords') {

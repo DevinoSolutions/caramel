@@ -42,9 +42,9 @@ export default function ProfilePageClient() {
 
         try {
             const response = await fetch('/api/user/profile', {
-                 method: 'PATCH',
-                 headers: { 'Content-Type': 'application/json' },
-                 body: JSON.stringify(formData),
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(formData),
             })
 
             if (!response.ok) throw new Error('Failed to update profile')
@@ -107,7 +107,7 @@ export default function ProfilePageClient() {
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.5 }}
                 >
-                    <div className="bg-gradient-to-r from-caramel to-orange-400 h-32"></div>
+                    <div className="from-caramel h-32 bg-gradient-to-r to-orange-400"></div>
                     <div className="relative px-8 pb-8">
                         <div className="bg-caramel -mt-16 mb-4 flex h-32 w-32 items-center justify-center overflow-hidden rounded-full border-4 border-white text-5xl font-bold text-white shadow-lg">
                             {userImage ? (
@@ -229,7 +229,6 @@ export default function ProfilePageClient() {
                                     </span>
                                 )}
                             </div>
-                        
                         </div>
 
                         {/* Account Status */}
@@ -241,11 +240,14 @@ export default function ProfilePageClient() {
                                 <span className="inline-flex items-center gap-2 text-gray-900">
                                     <span
                                         className={`h-2 w-2 rounded-full ${
-                                            session.user.status === 'ACTIVE_USER'
+                                            session.user.status ===
+                                            'ACTIVE_USER'
                                                 ? 'bg-green-500'
-                                                : session.user.status === 'USER_BANNED'
+                                                : session.user.status ===
+                                                    'USER_BANNED'
                                                   ? 'bg-red-500'
-                                                  : session.user.status === 'DELETE_REQUESTED_BY_USER'
+                                                  : session.user.status ===
+                                                      'DELETE_REQUESTED_BY_USER'
                                                     ? 'bg-orange-500'
                                                     : 'bg-yellow-500'
                                         }`}
@@ -254,9 +256,11 @@ export default function ProfilePageClient() {
                                         ? 'Active'
                                         : session.user.status === 'NOT_VERIFIED'
                                           ? 'Not Verified'
-                                          : session.user.status === 'USER_BANNED'
+                                          : session.user.status ===
+                                              'USER_BANNED'
                                             ? 'Banned'
-                                            : session.user.status === 'DELETE_REQUESTED_BY_USER'
+                                            : session.user.status ===
+                                                'DELETE_REQUESTED_BY_USER'
                                               ? 'Deletion Pending'
                                               : 'Unknown'}
                                 </span>
@@ -305,9 +309,7 @@ export default function ProfilePageClient() {
                         <div className="text-caramel mb-2 text-3xl font-bold">
                             $0
                         </div>
-                        <div className="text-sm text-gray-600">
-                            Total Saved
-                        </div>
+                        <div className="text-sm text-gray-600">Total Saved</div>
                     </div>
                     <div className="rounded-lg bg-white p-6 text-center shadow-lg">
                         <div className="text-caramel mb-2 text-3xl font-bold">

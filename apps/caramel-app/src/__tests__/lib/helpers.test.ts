@@ -115,7 +115,9 @@ describe('Auth Helper Utilities', () => {
         it('should handle recent dates', () => {
             const today = new Date()
             const result = formatMemberSince(today)
-            expect(result).toMatch(/^(January|February|March|April|May|June|July|August|September|October|November|December) \d{4}$/)
+            expect(result).toMatch(
+                /^(January|February|March|April|May|June|July|August|September|October|November|December) \d{4}$/,
+            )
         })
 
         it('should handle old dates', () => {

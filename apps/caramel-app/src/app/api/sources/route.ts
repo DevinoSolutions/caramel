@@ -1,6 +1,9 @@
 import { nextApiResponse } from '@/lib/apiResponseNext'
 import prisma from '@/lib/prisma'
+import { Coupon } from '@/types/coupon'
 import { NextRequest } from 'next/server'
+import type { Prisma } from '@prisma/client'
+
 
 export async function GET(req: NextRequest) {
     try {
@@ -8,12 +11,12 @@ export async function GET(req: NextRequest) {
             where: { status: 'ACTIVE' },
             include: { coupons: true },
         })
-        const sourcesWithMetrics = sources.map(src => {
+        const sourcesWithMetrics = sources.map((src) => {
             const totalUsed = src.coupons.reduce(
-                (acc, c) => acc + c.timesUsed,
+                (acc: number, c: { timesUsed: number }) => acc + c.timesUsed,
                 0,
             )
-            const totalFail = src.coupons.filter(c => c.expired).length
+            const totalFail = src.coupons.filter((c: Coupon) => c.expired).length
             const successRate =
                 totalUsed + totalFail === 0
                     ? 0
@@ -27,7 +30,8 @@ export async function GET(req: NextRequest) {
                 status: src.status,
             }
         })
-        sourcesWithMetrics.sort((a, b) => b.successRate - a.successRate)
+        sourcesWithMetrics.sort(
+            (a: { successRate: number }, b: { successRate: number }) => b.successRate - a.successRate)
         return nextApiResponse(req, 200, 'sources', sourcesWithMetrics)
     } catch (error) {
         return nextApiResponse(req, 500, 'Error fetching sources.', null)

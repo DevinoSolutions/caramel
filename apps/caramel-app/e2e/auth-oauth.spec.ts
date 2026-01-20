@@ -12,13 +12,13 @@ test.describe('OAuth Authentication', () => {
             page,
         }) => {
             await page.goto('/signup')
-            
+
             // Check for Google button
             const googleButton = page.getByRole('button', {
                 name: /sign in with google/i,
             })
             await expect(googleButton).toBeVisible()
-            
+
             // Verify button styling
             await expect(googleButton).toHaveClass(/border-gray-300/)
         })
@@ -63,7 +63,7 @@ test.describe('OAuth Authentication', () => {
 
             // Verify user remains on signup page
             await expect(page).toHaveURL('/signup')
-            
+
             // No error messages should appear
             const errorToast = page.locator('.sonner-toast')
             await expect(errorToast).not.toBeVisible()
@@ -106,9 +106,7 @@ test.describe('OAuth Authentication', () => {
     })
 
     test.describe('OAuth - Login Page', () => {
-        test('should display OAuth buttons on login page', async ({
-            page,
-        }) => {
+        test('should display OAuth buttons on login page', async ({ page }) => {
             await page.goto('/login')
 
             // Both buttons should be visible
@@ -169,9 +167,7 @@ test.describe('OAuth Authentication', () => {
     })
 
     test.describe('OAuth Mobile Responsiveness', () => {
-        test('OAuth buttons should be visible on mobile', async ({
-            page,
-        }) => {
+        test('OAuth buttons should be visible on mobile', async ({ page }) => {
             // Set mobile viewport
             await page.setViewportSize({ width: 375, height: 667 })
             await page.goto('/signup')

@@ -119,7 +119,9 @@ export default function Header({ scrollRef }: HeaderProps) {
                     {session?.user ? (
                         <div ref={userMenuRef} className="relative">
                             <button
-                                onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
+                                onClick={() =>
+                                    setIsUserMenuOpen(!isUserMenuOpen)
+                                }
                                 className="bg-caramel flex h-8 w-8 items-center justify-center overflow-hidden rounded-full text-sm font-semibold text-white transition hover:scale-105"
                             >
                                 {userImage ? (
@@ -147,7 +149,9 @@ export default function Header({ scrollRef }: HeaderProps) {
                                         </div>
                                         <Link
                                             href="/profile"
-                                            onClick={() => setIsUserMenuOpen(false)}
+                                            onClick={() =>
+                                                setIsUserMenuOpen(false)
+                                            }
                                             className="text-caramel block w-full cursor-pointer px-4 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-800"
                                         >
                                             Profile
@@ -224,7 +228,7 @@ export default function Header({ scrollRef }: HeaderProps) {
                                 <Link
                                     onClick={() => setIsMenuOpen(false)}
                                     href="/login"
-                                    className="text-caramel inline-flex cursor-pointer items-center justify-center gap-2.5 rounded-3xl border-2 border-caramel px-[30px] py-2.5"
+                                    className="text-caramel border-caramel inline-flex cursor-pointer items-center justify-center gap-2.5 rounded-3xl border-2 px-[30px] py-2.5"
                                 >
                                     Login
                                 </Link>

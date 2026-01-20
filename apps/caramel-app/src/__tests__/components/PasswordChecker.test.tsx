@@ -1,6 +1,6 @@
+import PasswordChecker from '@/components/PasswordStrength/PasswordChecker'
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import PasswordChecker from '@/components/PasswordStrength/PasswordChecker'
 
 describe('PasswordChecker', () => {
     describe('Password Rules Validation', () => {
@@ -11,9 +11,7 @@ describe('PasswordChecker', () => {
                 screen.getByText('At least 5 characters required'),
             ).toBeInTheDocument()
 
-            render(
-                <PasswordChecker password="Test1" confirmPassword="Test1" />,
-            )
+            render(<PasswordChecker password="Test1" confirmPassword="Test1" />)
 
             expect(
                 screen.getByText('The minimum length is reached'),
@@ -104,9 +102,7 @@ describe('PasswordChecker', () => {
                 />,
             )
 
-            expect(
-                screen.getByText('Passwords must match'),
-            ).toBeInTheDocument()
+            expect(screen.getByText('Passwords must match')).toBeInTheDocument()
         })
 
         it('should validate passwords match', () => {
@@ -123,9 +119,7 @@ describe('PasswordChecker', () => {
         it('should not show passwords match when password is empty', () => {
             render(<PasswordChecker password="" confirmPassword="" />)
 
-            expect(
-                screen.getByText('Passwords must match'),
-            ).toBeInTheDocument()
+            expect(screen.getByText('Passwords must match')).toBeInTheDocument()
         })
     })
 
@@ -213,9 +207,7 @@ describe('PasswordChecker', () => {
                 />,
             )
 
-            expect(
-                screen.getByText('Passwords must match'),
-            ).toBeInTheDocument()
+            expect(screen.getByText('Passwords must match')).toBeInTheDocument()
         })
 
         it('should update validation when confirm password changes', () => {
@@ -226,9 +218,7 @@ describe('PasswordChecker', () => {
                 />,
             )
 
-            expect(
-                screen.getByText('Passwords must match'),
-            ).toBeInTheDocument()
+            expect(screen.getByText('Passwords must match')).toBeInTheDocument()
 
             rerender(
                 <PasswordChecker
@@ -368,10 +358,7 @@ describe('PasswordChecker', () => {
 
             // Match passwords
             rerender(
-                <PasswordChecker
-                    password="Test1!"
-                    confirmPassword="Test1!"
-                />,
+                <PasswordChecker password="Test1!" confirmPassword="Test1!" />,
             )
             expect(screen.getByText('Passwords match')).toBeInTheDocument()
         })

@@ -246,7 +246,9 @@ test.describe('Auth Integration & Session Management', () => {
             await page.click('body')
 
             // Should show validation errors (check multiple possible selectors)
-            const errorElements = page.locator('.text-red-500, .text-destructive, [role="alert"]')
+            const errorElements = page.locator(
+                '.text-red-500, .text-destructive, [role="alert"]',
+            )
             const errorCount = await errorElements.count()
             expect(errorCount).toBeGreaterThan(0)
         })
@@ -280,7 +282,9 @@ test.describe('Auth Integration & Session Management', () => {
             await page.click('button[type="submit"]')
 
             // Should show loading state
-            await expect(page.locator('button:has-text("Logging")')).toBeVisible()
+            await expect(
+                page.locator('button:has-text("Logging")'),
+            ).toBeVisible()
         })
 
         test('should show error for invalid login', async ({ page }) => {
@@ -292,7 +296,9 @@ test.describe('Auth Integration & Session Management', () => {
             await page.click('button[type="submit"]')
 
             // Should show error toast (any error message)
-            const errorToast = page.locator('[data-sonner-toast], .sonner-toast')
+            const errorToast = page.locator(
+                '[data-sonner-toast], .sonner-toast',
+            )
             await expect(errorToast.first()).toBeVisible({ timeout: 5000 })
         })
     })
@@ -418,7 +424,9 @@ test.describe('Auth Integration & Session Management', () => {
             await page.goto('/login')
 
             // Page should have motion/animations (check for framer-motion or transition classes)
-            const animatedElements = page.locator('[class*="motion"], [class*="animate"], [class*="transition"]')
+            const animatedElements = page.locator(
+                '[class*="motion"], [class*="animate"], [class*="transition"]',
+            )
             const exists = await animatedElements.count()
 
             // Forms use framer-motion or CSS transitions for animations

@@ -9,7 +9,7 @@ export async function GET() {
             orderBy: { _count: { id: 'desc' } },
             take: 4,
         })
-        const sites = topSites.map(i => i.site)
+        const sites = topSites.map((i: { site: string }) => i.site)
         return NextResponse.json({ sites })
     } catch (err) {
         return NextResponse.json(

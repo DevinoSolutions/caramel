@@ -195,13 +195,13 @@ export default function SignupPageClient() {
                     </button>
                 </form>
                 <div className="relative my-4">
-                
-                
-                <div className="absolute inset-0 flex items-center">
+                    <div className="absolute inset-0 flex items-center">
                         <div className="w-full border-t border-gray-300"></div>
                     </div>
                     <div className="relative flex justify-center text-sm">
-                        <span className="bg-white px-2 text-gray-500">Or continue with</span>
+                        <span className="bg-white px-2 text-gray-500">
+                            Or continue with
+                        </span>
                     </div>
                 </div>
 
@@ -210,15 +210,15 @@ export default function SignupPageClient() {
                     <button
                         type="button"
                         onClick={handleGoogleSignIn}
-                        className="w-full flex items-center justify-center gap-3 rounded-lg border border-gray-300 bg-white py-2.5 px-4 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 transition-colors"
+                        className="flex w-full items-center justify-center gap-3 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50"
                     >
                         <Image
-                        src="google.png"
-                        width={24}
-                        height={24}
-                        alt="Google"
-                        className="object-contain"
-                        unoptimized
+                            src="google.png"
+                            width={24}
+                            height={24}
+                            alt="Google"
+                            className="object-contain"
+                            unoptimized
                         />
                         Sign in with Google
                     </button>
@@ -227,15 +227,15 @@ export default function SignupPageClient() {
                     <button
                         type="button"
                         onClick={handleAppleSignIn}
-                        className="w-full flex items-center justify-center gap-3 rounded-lg border border-gray-300 bg-black py-2.5 px-4 text-sm font-medium text-white shadow-sm hover:bg-gray-900 transition-colors"
+                        className="flex w-full items-center justify-center gap-3 rounded-lg border border-gray-300 bg-black px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-gray-900"
                     >
                         <Image
-                        src="apple-white.png"
-                        width={24}
-                        height={24}
-                        alt="Apple"
-                        className="object-contain"
-                        unoptimized
+                            src="apple-white.png"
+                            width={24}
+                            height={24}
+                            alt="Apple"
+                            className="object-contain"
+                            unoptimized
                         />
                         Sign in with Apple
                     </button>

@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom'
 import { cleanup } from '@testing-library/react'
-import { afterEach, vi } from 'vitest'
 import * as React from 'react'
+import { afterEach, vi } from 'vitest'
 
 // Cleanup after each test
 afterEach(() => {
@@ -70,7 +70,7 @@ vi.mock('framer-motion', () => ({
 // Mock window.matchMedia
 Object.defineProperty(window, 'matchMedia', {
     writable: true,
-    value: vi.fn().mockImplementation((query) => ({
+    value: vi.fn().mockImplementation(query => ({
         matches: false,
         media: query,
         onchange: null,
@@ -84,13 +84,20 @@ Object.defineProperty(window, 'matchMedia', {
 
 // Mock ThemeToggle component
 vi.mock('@/components/ThemeToggle', () => ({
-    default: () => React.createElement('div', { 'data-testid': 'theme-toggle' }, 'ThemeToggle'),
+    default: () =>
+        React.createElement(
+            'div',
+            { 'data-testid': 'theme-toggle' },
+            'ThemeToggle',
+        ),
 }))
 
 // Mock react-icons
 vi.mock('react-icons/ri', () => ({
-    RiMenu3Fill: () => React.createElement('svg', { 'data-testid': 'menu-icon' }),
-    RiCloseFill: () => React.createElement('svg', { 'data-testid': 'close-icon' }),
+    RiMenu3Fill: () =>
+        React.createElement('svg', { 'data-testid': 'menu-icon' }),
+    RiCloseFill: () =>
+        React.createElement('svg', { 'data-testid': 'close-icon' }),
     RiInstagramFill: () => React.createElement('svg', {}),
 }))
 

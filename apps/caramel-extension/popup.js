@@ -262,7 +262,9 @@ function renderSignInPrompt(backFn) {
     const appleLoginBtn = document.getElementById('appleLoginBtn')
 
     if (googleLoginBtn) {
-        googleLoginBtn.addEventListener('click', () => handleOAuthLogin('google'))
+        googleLoginBtn.addEventListener('click', () =>
+            handleOAuthLogin('google'),
+        )
     }
 
     if (appleLoginBtn) {
@@ -275,23 +277,23 @@ function renderSignInPrompt(backFn) {
 /* ------------------------------------------------------------ */
 function handleOAuthLogin(provider) {
     const authUrl = `https://grabcaramel.com/api/auth/${provider}?callbackURL=${encodeURIComponent('https://grabcaramel.com/extension-auth-callback')}`
-    
+
     // Open OAuth in a popup window
     const width = 500
     const height = 600
     const left = (screen.width - width) / 2
     const top = (screen.height - height) / 2
-    
+
     const popup = window.open(
         authUrl,
         'oauth-popup',
-        `width=${width},height=${height},left=${left},top=${top}`
+        `width=${width},height=${height},left=${left},top=${top}`,
     )
 
     // Listen for the OAuth callback
-    const messageListener = (event) => {
+    const messageListener = event => {
         if (event.origin !== 'https://grabcaramel.com') return
-        
+
         if (event.data.type === 'oauth-success' && event.data.token) {
             const { token, user } = event.data
             currentBrowser.storage.sync.set({ token, user }, () => {

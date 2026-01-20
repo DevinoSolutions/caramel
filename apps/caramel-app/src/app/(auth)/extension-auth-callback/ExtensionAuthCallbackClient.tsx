@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { useEffect, useState } from 'react'
 
 export default function ExtensionAuthCallbackClient() {
     const [status, setStatus] = useState<'loading' | 'success' | 'error'>(
@@ -53,7 +53,7 @@ export default function ExtensionAuthCallbackClient() {
 
     return (
         <div className="flex h-screen items-center justify-center bg-gray-50">
-            <div className="rounded-lg bg-white p-8 shadow-lg text-center">
+            <div className="rounded-lg bg-white p-8 text-center shadow-lg">
                 {status === 'loading' && (
                     <>
                         <div className="mb-4">

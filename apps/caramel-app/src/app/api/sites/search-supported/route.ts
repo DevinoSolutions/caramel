@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
          OR similarity(c.site, ${q}) > 0.25
       ORDER BY sim_score DESC, c.site ASC
     `
-        const sites = rows.map(r => r.site)
+        const sites = rows.map((r: { site: string }) => r.site)
         return NextResponse.json({ sites })
     } catch (err: any) {
         return NextResponse.json(
