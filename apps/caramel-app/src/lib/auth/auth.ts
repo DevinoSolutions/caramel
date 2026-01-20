@@ -14,7 +14,13 @@ const baseURL =
     process.env.NEXT_PUBLIC_BASE_URL ||
     fallbackBaseURL
 const trustedOrigins = Array.from(
-    new Set([process.env.NEXT_PUBLIC_BASE_URL || '', baseURL, "https://appleid.apple.com"].filter(Boolean)), 
+    new Set(
+        [
+            process.env.NEXT_PUBLIC_BASE_URL || '',
+            baseURL,
+            'https://appleid.apple.com',
+        ].filter(Boolean),
+    ),
 )
 
 export const auth = betterAuth({
