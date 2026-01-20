@@ -24,7 +24,9 @@ export async function GET(req: NextRequest) {
             orderBy: { site: 'asc' },
         })
 
-        const sites = sitesRaw.map((s: { site?: string | null }) => s.site).filter(Boolean)
+        const sites = sitesRaw
+            .map((s: { site?: string | null }) => s.site)
+            .filter(Boolean)
 
         return NextResponse.json({ sites })
     } catch (error) {

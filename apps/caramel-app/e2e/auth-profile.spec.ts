@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
+import { expect, test } from '@playwright/test'
 
 test.describe('Profile Page', () => {
     const baseURL = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:58000'

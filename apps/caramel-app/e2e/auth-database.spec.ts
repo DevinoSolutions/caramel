@@ -85,7 +85,8 @@ test.describe('Auth Database Integration', () => {
 
             // better-auth stores password in Account table, not User table
             const credentialAccount = user?.accounts.find(
-                (acc: { providerId: string }) => acc.providerId === 'credential',
+                (acc: { providerId: string }) =>
+                    acc.providerId === 'credential',
             )
 
             // Password should be hashed (not equal to plain password)
