@@ -407,13 +407,16 @@ export default function CouponsSection({
                             },
                         ].map(
                                 browser => (
-                                    <span
+                                    <a
                                         key={browser.name}
-                                        className="inline-flex items-center gap-2 rounded-full bg-gray-50 px-6 py-3 text-center shadow-sm dark:bg-gray-800"
+                                        href={browser.href}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center gap-2 rounded-full bg-gray-50 px-6 py-3 text-center shadow-sm transition hover:bg-gray-100 dark:bg-gray-800 dark:hover:bg-gray-700"
                                     >
                                         {browser.icon}
                                         {browser.name}
-                                    </span>
+                                    </a>
                                 ),
                             )}
                         </div>
