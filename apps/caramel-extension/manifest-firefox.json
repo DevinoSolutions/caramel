@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "Caramel - Trusted Honey Alternative",
-    "version": "1.0.4",
+    "version": "1.0.5",
     "description": "Open‑source coupon extension that auto‑applies deals without selling data or hijacking commissions.",
     "browser_specific_settings": {
         "gecko": {
