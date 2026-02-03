@@ -89,9 +89,13 @@ export default function CouponFilters({
 
     const selectStyles = useMemo(
         () => ({
-            control: (base: any) => ({
+            control: (base: any, state: any) => ({
                 ...base,
-                borderColor: '#fbd0b2',
+                borderColor: state.isFocused
+                    ? isDarkMode
+                        ? '#fb923c' // orange-400 for dark mode focus
+                        : '#ea6925' // caramel for light mode focus
+                    : 'rgba(234, 105, 37, 0.3)', // caramel/30 for default
                 boxShadow: 'none',
                 paddingLeft: '4px',
                 paddingRight: '4px',
