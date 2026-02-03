@@ -13,9 +13,40 @@ const baseURL =
     process.env.BETTER_AUTH_URL ||
     process.env.NEXT_PUBLIC_BASE_URL ||
     fallbackBaseURL
-const trustedOrigins = Array.from(
-    new Set([process.env.NEXT_PUBLIC_BASE_URL || '', baseURL].filter(Boolean)),
-)
+// Build trusted origins - includes base URLs and extension origins
+const baseOrigins = [process.env.NEXT_PUBLIC_BASE_URL || '', baseURL].filter(Boolean)
+
+// Extension origin patterns (dynamic, checked at runtime)
+const extensionOriginPatterns = [
+    /^chrome-extension:\/\//, // Chrome extensions
+    /^moz-extension:\/\//, // Firefox extensions  
+    /^safari-web-extension:\/\//, // Safari extensions
+]
+
+// Function to check if an origin is an extension origin
+const isExtensionOrigin = (origin: string | null | undefined): boolean => {
+    if (!origin) return false
+    return extensionOriginPatterns.some(pattern => pattern.test(origin))
+}
+
+// Dynamic trustedOrigins function that allows extension origins
+const trustedOrigins = async (request?: Request): Promise<string[]> => {
+    // During initialization or auth.api calls, request is undefined
+    if (!request) {
+        return Array.from(new Set(baseOrigins))
+    }
+    
+    // Check the origin header
+    const origin = request.headers.get('origin')
+    
+    // If it's an extension origin, allow it
+    if (isExtensionOrigin(origin)) {
+        return [...baseOrigins, origin!]
+    }
+    
+    // Otherwise, return base origins
+    return Array.from(new Set(baseOrigins))
+}
 
 export const auth = betterAuth({
     database: prismaAdapter(prisma, {
