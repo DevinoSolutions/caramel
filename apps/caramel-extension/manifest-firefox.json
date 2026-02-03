@@ -21,7 +21,8 @@
         "https://www.amazon.com/*",
         "https://*.ebay.com/*",
         "https://*.codecademy.com/*",
-        "https://*.grabcaramel.com/*"
+        "https://*.grabcaramel.com/*",
+        "http://localhost:*/*"
     ],
     "web_accessible_resources": [
         {
