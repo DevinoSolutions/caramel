@@ -3,10 +3,11 @@
 import type { CouponFilters } from '@/types/coupon'
 import { MagnifyingGlassIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import debounce from 'lodash.debounce'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { FaFilter } from 'react-icons/fa'
 import Select from 'react-select'
 import AsyncSelect from 'react-select/async'
+import { ThemeContext } from '@/lib/contexts'
 
 interface CouponFiltersProps {
     filters: CouponFilters
@@ -24,6 +25,7 @@ export default function CouponFilters({
     onClearAll,
 }: CouponFiltersProps) {
     type Option = { value: string; label: string }
+    const { isDarkMode } = useContext(ThemeContext)
     const [localSearch, setLocalSearch] = useState(filters.search)
     const [showFilters, setShowFilters] = useState(false)
 
@@ -85,19 +87,50 @@ export default function CouponFilters({
             ? normalizeOptions([filters.type])[0]
             : null
 
-    const selectStyles = {
-        control: (base: any) => ({
-            ...base,
-            borderColor: '#fbd0b2',
-            boxShadow: 'none',
-            paddingLeft: '4px',
-            paddingRight: '4px',
-            minHeight: '44px',
-            backgroundColor: 'var(--tw-prose-body, white)',
-            width: '100%',
+    const selectStyles = useMemo(
+        () => ({
+            control: (base: any) => ({
+                ...base,
+                borderColor: '#fbd0b2',
+                boxShadow: 'none',
+                paddingLeft: '4px',
+                paddingRight: '4px',
+                minHeight: '44px',
+                backgroundColor: isDarkMode ? '#111827' : '#ffffff',
+                width: '100%',
+            }),
+            menu: (base: any) => ({
+                ...base,
+                zIndex: 20,
+                backgroundColor: isDarkMode ? '#111827' : '#ffffff',
+            }),
+            option: (base: any, state: any) => ({
+                ...base,
+                backgroundColor: state.isFocused
+                    ? isDarkMode
+                        ? '#1f2937'
+                        : '#f3f4f6'
+                    : isDarkMode
+                      ? '#111827'
+                      : '#ffffff',
+                color: isDarkMode ? '#ffffff' : '#111827',
+                cursor: 'pointer',
+            }),
+            singleValue: (base: any) => ({
+                ...base,
+                color: isDarkMode ? '#ffffff' : '#111827',
+            }),
+            input: (base: any) => ({
+                ...base,
+                color: isDarkMode ? '#ffffff' : '#111827',
+            }),
+            placeholder: (base: any) => ({
+                ...base,
+                color: isDarkMode ? '#6b7280' : '#9ca3af',
+            }),
         }),
-        menu: (base: any) => ({ ...base, zIndex: 20 }),
-    }
+        [isDarkMode],
+    )
 
     return (
         <div className="mb-8 space-y-3">
