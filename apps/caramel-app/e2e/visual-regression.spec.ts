@@ -16,10 +16,10 @@ test.describe('Visual Regression - Caramel Public Pages', () => {
         await argosScreenshot(page, 'privacy-page')
     })
 
-    test('supported sites page screenshot', async ({ page }) => {
-        await page.goto('/supported-sites')
+    test('supported stores page screenshot', async ({ page }) => {
+        await page.goto('/supported-stores')
         await page.waitForLoadState('domcontentloaded')
         await page.waitForTimeout(500)
-        await argosScreenshot(page, 'supported-sites-page')
+        await argosScreenshot(page, 'supported-stores-page')
     })
 })

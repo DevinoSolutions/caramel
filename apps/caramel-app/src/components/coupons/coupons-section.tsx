@@ -431,10 +431,10 @@ export default function CouponsSection({
                             works everywhere you shop online.
                         </p>
                         <Link
-                            href="/supported-sites"
+                            href="/supported-stores"
                             className="from-caramel mt-4 inline-flex items-center justify-center rounded-full bg-gradient-to-r to-orange-600 px-4 py-2 text-xs font-semibold text-white shadow-md transition hover:opacity-90"
                         >
-                            View All Supported Sites
+                            View All Supported Stores
                         </Link>
                     </div>
                 </aside>
