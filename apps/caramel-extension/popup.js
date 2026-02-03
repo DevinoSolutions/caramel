@@ -73,12 +73,12 @@ function renderUnsupportedSite(user) {
 
       <div class="no-coupons-actions">
         <a
-          href="https://grabcaramel.com/supported-sites"
+          href="https://grabcaramel.com/supported-stores"
           class="supported-sites-btn"
           target="_blank"
           rel="noopener noreferrer"
         >
-          View Supported Sites
+          View Supported Stores
         </a>
 
         ${
