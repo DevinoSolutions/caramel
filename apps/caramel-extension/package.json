@@ -7,7 +7,9 @@
         "lint": "eslint .",
         "prettier-check": "prettier --check '**/*.{js,html,css,json,md}'",
         "prettier-write": "prettier --write '**/*.{js,html,css,json,md}'",
-        "build": "rm -rf dist && mkdir -p dist && rsync -a --exclude='node_modules' --exclude='dist' --exclude='.git' --exclude='*.lock' --exclude='apple-extension' ./ dist/",
+        "build": "node scripts/inject-config.js && rm -rf dist && mkdir -p dist && rsync -a --exclude='node_modules' --exclude='dist' --exclude='.git' --exclude='*.lock' --exclude='apple-extension' ./ dist/",
+        "build:dev": "EXTENSION_BASE_URL=http://localhost:58000 node scripts/inject-config.js && rm -rf dist && mkdir -p dist && rsync -a --exclude='node_modules' --exclude='dist' --exclude='.git' --exclude='*.lock' --exclude='apple-extension' ./ dist/",
+        "build:prod": "EXTENSION_BASE_URL=https://grabcaramel.com node scripts/inject-config.js && rm -rf dist && mkdir -p dist && rsync -a --exclude='node_modules' --exclude='dist' --exclude='.git' --exclude='*.lock' --exclude='apple-extension' ./ dist/",
         "package": "zip -r extension.zip ./dist",
         "dev": "web-ext run --target=chromium --source-dir=. --watch-file=./**/*"
     },

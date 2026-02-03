@@ -13,6 +13,49 @@ const currentBrowser = (() => {
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 const log = (...a) => console.log('Caramel:', ...a)
 
+/**
+ * Get the base URL from config
+ * Falls back to production URL if config is not available
+ * 
+ * This function works in both popup and content script contexts:
+ * - Popup: reads from window.EXTENSION_CONFIG
+ * - Content scripts: reads from chrome.storage.local (set by popup)
+ */
+function getBaseURL() {
+    // Try popup context first
+    if (typeof window !== 'undefined' && window.EXTENSION_CONFIG) {
+        return window.EXTENSION_CONFIG.BASE_URL
+    }
+    
+    // For content scripts, try to get from storage synchronously
+    // (Note: This is a fallback - content scripts should ideally get it async)
+    // For now, fallback to production URL
+    return 'https://grabcaramel.com'
+}
+
+/**
+ * Async version for content scripts to get base URL from storage
+ */
+async function getBaseURLAsync() {
+    // Try popup context first
+    if (typeof window !== 'undefined' && window.EXTENSION_CONFIG) {
+        return window.EXTENSION_CONFIG.BASE_URL
+    }
+    
+    // Try chrome.storage for content scripts
+    try {
+        const result = await currentBrowser.storage.local.get(['extensionBaseURL'])
+        if (result.extensionBaseURL) {
+            return result.extensionBaseURL
+        }
+    } catch (e) {
+        // Storage not available
+    }
+    
+    // Fallback to production URL
+    return 'https://grabcaramel.com'
+}
+
 /* ---------- DOM waiters ---------- */
 function waitForElement(sel, timeout = 4000) {
     return new Promise((res, rej) => {
@@ -206,7 +249,8 @@ async function applyCoupon(code, rec) {
 
 /* --------------------------------------------------  coupon list */
 async function fetchCoupons(site, kw) {
-    const url = `https://grabcaramel.com/api/coupons?site=${site}&key_words=${encodeURIComponent(kw)}&limit=20`
+    const baseURL = await getBaseURLAsync()
+    const url = `${baseURL}/api/coupons?site=${site}&key_words=${encodeURIComponent(kw)}&limit=20`
     try {
         const r = await fetch(url)
         const d = r.ok ? await r.json() : []
@@ -288,7 +332,9 @@ async function startApplyingCoupons(rec) {
 
 /* --------------------------------------------------  listeners (unchanged) */
 window.addEventListener('message', ev => {
-    if (ev.origin !== 'https://grabcaramel.com') return
+    const baseURL = getBaseURL()
+    const origin = new URL(baseURL).origin
+    if (ev.origin !== origin) return
     if (ev.data?.token) {
         currentBrowser.storage.sync.set(
             {

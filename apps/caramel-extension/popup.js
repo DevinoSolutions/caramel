@@ -12,6 +12,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     const loader = document.getElementById('loading-container')
     if (loader) setTimeout(() => (loader.style.display = 'none'), 400)
 
+    // Store base URL in chrome.storage for content scripts to access
+    const baseURL = getBaseURL()
+    currentBrowser.storage.local.set({ extensionBaseURL: baseURL })
+
+    // Update logo link with base URL from config
+    const logoLink = document.getElementById('logo-link')
+    if (logoLink) {
+        logoLink.href = baseURL
+    }
+
     await initPopup()
 })
 
@@ -56,6 +66,21 @@ async function getActiveTabDomainRecord() {
 }
 
 /* ------------------------------------------------------------ */
+/*  Helper Functions                                             */
+/* ------------------------------------------------------------ */
+/**
+ * Get the base URL from config
+ * Falls back to production URL if config is not available
+ */
+function getBaseURL() {
+    if (typeof window !== 'undefined' && window.EXTENSION_CONFIG) {
+        return window.EXTENSION_CONFIG.BASE_URL
+    }
+    // Fallback to production URL
+    return 'https://grabcaramel.com'
+}
+
+/* ------------------------------------------------------------ */
 /*  Unsupported-site view                                       */
 /* ------------------------------------------------------------ */
 function renderUnsupportedSite(user) {
@@ -73,7 +98,7 @@ function renderUnsupportedSite(user) {
 
       <div class="no-coupons-actions">
         <a
-          href="https://grabcaramel.com/supported-sites"
+          href="${getBaseURL()}/supported-sites"
           class="supported-sites-btn"
           target="_blank"
           rel="noopener noreferrer"
@@ -167,7 +192,7 @@ function renderSignInPrompt(backFn) {
 
       <div id="resendVerificationContainer" style="display:none; text-align:center; margin-top:12px;">
         <a
-          href="https://grabcaramel.com/verify"
+          href="${getBaseURL()}/verify"
           target="_blank"
           rel="noopener noreferrer"
           class="resend-verification-btn"
@@ -180,7 +205,7 @@ function renderSignInPrompt(backFn) {
       <p class="mt-6">
         Don't have an account?
         <a
-          href="https://grabcaramel.com/signup"
+          href="${getBaseURL()}/signup"
           target="_blank"
           rel="noopener noreferrer"
         >Sign Up</a>
@@ -221,7 +246,7 @@ function renderSignInPrompt(backFn) {
             const password = document.getElementById('password').value
 
             const res = await fetch(
-                'https://grabcaramel.com/api/extension/login',
+                `${getBaseURL()}/api/extension/login`,
                 {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -273,44 +298,94 @@ function renderSignInPrompt(backFn) {
 /* ------------------------------------------------------------ */
 /*  OAuth Login Handler                                         */
 /* ------------------------------------------------------------ */
-function handleOAuthLogin(provider) {
-    const authUrl = `https://grabcaramel.com/api/auth/${provider}?callbackURL=${encodeURIComponent('https://grabcaramel.com/extension-auth-callback')}`
+async function handleOAuthLogin(provider) {
+    const baseURL = getBaseURL()
+    console.log('OAuth login - using baseURL:', baseURL)
     
-    // Open OAuth in a popup window
-    const width = 500
-    const height = 600
-    const left = (screen.width - width) / 2
-    const top = (screen.height - height) / 2
-    
-    const popup = window.open(
-        authUrl,
-        'oauth-popup',
-        `width=${width},height=${height},left=${left},top=${top}`
-    )
-
-    // Listen for the OAuth callback
-    const messageListener = (event) => {
-        if (event.origin !== 'https://grabcaramel.com') return
+    try {
+        const apiUrl = `${baseURL}/api/auth/sign-in/social`
+        console.log('OAuth login - calling:', apiUrl)
+        // Make POST request to get the OAuth URL
+        const response = await fetch(apiUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                provider: provider,
+                callbackURL: `${baseURL}/extension-auth-callback`,
+            }),
+        })
         
-        if (event.data.type === 'oauth-success' && event.data.token) {
-            const { token, user } = event.data
-            currentBrowser.storage.sync.set({ token, user }, () => {
-                window.removeEventListener('message', messageListener)
-                if (popup) popup.close()
-                initPopup()
-            })
+        if (!response.ok) {
+            const errorText = await response.text().catch(() => 'Unknown error')
+            console.error('OAuth API error:', response.status, errorText)
+            throw new Error(`Failed to initiate OAuth: ${response.status} - ${errorText}`)
         }
-    }
+        
+        const data = await response.json()
+        const authUrl = data.url || data.redirectUrl
+        
+        if (!authUrl) {
+            throw new Error('No OAuth URL returned from server')
+        }
+        
+        // Open OAuth in a popup window
+        const width = 500
+        const height = 600
+        const left = (screen.width - width) / 2
+        const top = (screen.height - height) / 2
+        
+        const popup = window.open(
+            authUrl,
+            'oauth-popup',
+            `width=${width},height=${height},left=${left},top=${top}`
+        )
+        
+        if (!popup) {
+            throw new Error('Failed to open popup window')
+        }
+        
+        // Listen for the OAuth callback
+        const messageListener = (event) => {
+            const origin = new URL(baseURL).origin
+            if (event.origin !== origin) return
+            
+            if (event.data.type === 'oauth-success' && event.data.token) {
+                const { token, user } = event.data
+                currentBrowser.storage.sync.set({ token, user }, () => {
+                    window.removeEventListener('message', messageListener)
+                    if (popup) popup.close()
+                    initPopup()
+                })
+            }
+        }
 
-    window.addEventListener('message', messageListener)
+        window.addEventListener('message', messageListener)
 
-    // Clean up if popup is closed
-    const checkPopup = setInterval(() => {
-        if (!popup || popup.closed) {
+        // Clean up if popup is closed (with COOP-safe check)
+        const checkPopup = setInterval(() => {
+            try {
+                // Check if popup is closed - wrapped in try-catch for COOP policy
+                if (!popup || popup.closed) {
+                    clearInterval(checkPopup)
+                    window.removeEventListener('message', messageListener)
+                }
+            } catch (e) {
+                // COOP policy blocks access - use timeout as fallback cleanup
+                // The message listener will handle successful auth cleanup
+            }
+        }, 1000)
+        
+        // Fallback cleanup after 5 minutes (in case popup is never closed properly)
+        setTimeout(() => {
             clearInterval(checkPopup)
             window.removeEventListener('message', messageListener)
-        }
-    }, 1000)
+        }, 5 * 60 * 1000)
+    } catch (error) {
+        console.error('OAuth login error:', error)
+        alert(`Failed to sign in with ${provider}: ${error.message}`)
+    }
 }
 
 /* ------------------------------------------------------------ */
@@ -338,7 +413,7 @@ function renderProfileCard(user) {
     if (settingsIcon) {
         settingsIcon.style.display = 'block'
         settingsIcon.onclick = () =>
-            window.open('https://grabcaramel.com/profile', '_blank')
+            window.open(`${getBaseURL()}/profile`, '_blank')
     }
 
     document.getElementById('logoutBtn').addEventListener('click', () => {

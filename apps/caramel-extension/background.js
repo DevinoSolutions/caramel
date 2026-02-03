@@ -147,9 +147,34 @@ currentBrowser.runtime.onMessage.addListener(
                         return
                     }
 
-                    const tabId = tabs[0].id
+                    const tab = tabs[0]
+                    const tabId = tab.id
+                    const tabUrl = tab.url || ''
+
+                    // Check if URL is injectable (not chrome://, edge://, about:, etc.)
+                    const isInjectable =
+                        tabUrl &&
+                        !tabUrl.startsWith('chrome://') &&
+                        !tabUrl.startsWith('chrome-extension://') &&
+                        !tabUrl.startsWith('edge://') &&
+                        !tabUrl.startsWith('about:') &&
+                        !tabUrl.startsWith('moz-extension://') &&
+                        (tabUrl.startsWith('http://') ||
+                            tabUrl.startsWith('https://'))
+
+                    if (!isInjectable) {
+                        sendResponse({ domainRecord: null, url: null })
+                        return
+                    }
 
                     try {
+                        // Verify tab still exists before injecting
+                        const tabExists = await currentBrowser.tabs.get(tabId).catch(() => null)
+                        if (!tabExists) {
+                            sendResponse({ domainRecord: null, url: null })
+                            return
+                        }
+                        
                         await execScript({
                             target: { tabId },
                             files: ['shared-utils.js', 'UI-helpers.js'],
@@ -172,6 +197,15 @@ currentBrowser.runtime.onMessage.addListener(
                         const { domainRecord, url } = result?.result || null
                         sendResponse({ domainRecord, url })
                     } catch (err) {
+                        // Check if error is about tab not existing
+                        const errorMessage = err?.message || String(err)
+                        if (errorMessage.includes('No tab with id') || 
+                            errorMessage.includes('Invalid tab ID')) {
+                            // Tab was closed or doesn't exist - silently fail
+                            sendResponse({ domainRecord: null, url: null })
+                            return
+                        }
+                        
                         console.error(
                             'Error injecting or executing domain-record script:',
                             err,
