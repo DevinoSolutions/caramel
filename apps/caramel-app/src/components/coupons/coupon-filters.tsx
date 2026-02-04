@@ -1,5 +1,6 @@
 'use client'
 
+import { ThemeContext } from '@/lib/contexts'
 import type { CouponFilters } from '@/types/coupon'
 import { MagnifyingGlassIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import debounce from 'lodash.debounce'
@@ -7,7 +8,6 @@ import { useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { FaFilter } from 'react-icons/fa'
 import Select from 'react-select'
 import AsyncSelect from 'react-select/async'
-import { ThemeContext } from '@/lib/contexts'
 
 interface CouponFiltersProps {
     filters: CouponFilters
