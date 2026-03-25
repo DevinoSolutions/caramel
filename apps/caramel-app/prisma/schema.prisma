@@ -40,6 +40,115 @@ model Coupon {
   @@unique([code, site])
 }
 
+model VerificationStore {
+  id        Int      @id @default(autoincrement())
+  storeName String   @unique @map("store_name")
+  storeUrl  String   @map("store_url")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  configs StoreVerificationConfig[]
+  jobs    CouponVerificationJob[]
+  runs    CouponVerificationRun[]
+
+  @@map("verification_stores")
+}
+
+model StoreVerificationConfig {
+  id                     Int      @id @default(autoincrement())
+  storeId                Int      @map("store_id")
+  store                  VerificationStore @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  source                 String
+  priority               Int      @default(0)
+  isActive               Boolean  @default(true) @map("is_active")
+  isVerifiedWorking      Boolean  @default(false) @map("is_verified_working")
+  apiEndpoint            String?  @map("api_endpoint")
+  apiHeaders             Json?    @map("api_headers")
+  apiAuth                Json?    @map("api_auth")
+  apiMethod              String?  @map("api_method")
+  apiPayloadTemplate     Json?    @map("api_payload_template")
+  entryUrl               String?  @map("entry_url")
+  checkoutUrl            String?  @map("checkout_url")
+  discoveryUrls          Json?    @map("discovery_urls")
+  preActions             Json?    @map("pre_actions")
+  discoveryPreActions    Json?    @map("discovery_pre_actions")
+  showInputXpath         String?  @map("show_input_xpath")
+  dismissButtonXpath     String?  @map("dismiss_button_xpath")
+  couponInputXpath       String?  @map("coupon_input_xpath")
+  applyButtonXpath       String?  @map("apply_button_xpath")
+  validationMessageXpath String?  @map("validation_message_xpath")
+  successIndicatorXpath  String?  @map("success_indicator_xpath")
+  errorIndicatorXpath    String?  @map("error_indicator_xpath")
+  waitForElementTimeout  Int      @default(10) @map("wait_for_element_timeout")
+  pageLoadTimeout        Int      @default(30) @map("page_load_timeout")
+  customValidationScript String?  @map("custom_validation_script")
+  metadata               Json?
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @default(now()) @updatedAt @map("updated_at")
+  lastSuccessAt          DateTime? @map("last_success_at")
+  lastFailureAt          DateTime? @map("last_failure_at")
+  lastErrorMessage       String?   @map("last_error_message")
+  verifiedWorkingAt      DateTime? @map("verified_working_at")
+
+  @@unique([storeId, source])
+  @@map("store_verification_configs")
+}
+
+model CouponVerificationJob {
+  id                   Int      @id @default(autoincrement())
+  storeId              Int      @map("store_id")
+  store                VerificationStore @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  source               String
+  externalId           String   @unique @map("external_id")
+  couponCode           String   @map("coupon_code")
+  title                String?
+  description          String?
+  discountType         String?  @map("discount_type")
+  discountAmount       Float?   @map("discount_amount")
+  rating               Float?
+  expiry               String?
+  rawPayload           Json?    @map("raw_payload")
+  status               String   @default("pending")
+  verificationMessage  String?  @map("verification_message")
+  verificationProvider String?  @map("verification_provider")
+  lastVerifiedAt       DateTime? @map("last_verified_at")
+  retryCount           Int      @default(0) @map("retry_count")
+  nextRetryAt          DateTime? @map("next_retry_at")
+  seededAt             DateTime? @map("seeded_at")
+  lastSeedStatus       String?   @map("last_seed_status")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @default(now()) @updatedAt @map("updated_at")
+  lastSeenAt           DateTime @default(now()) @map("last_seen_at")
+
+  runs CouponVerificationRun[]
+
+  @@unique([storeId, couponCode])
+  @@map("coupon_verification_jobs")
+}
+
+model CouponVerificationRun {
+  id                Int      @id @default(autoincrement())
+  verificationJobId Int?     @map("verification_job_id")
+  verificationJob   CouponVerificationJob? @relation(fields: [verificationJobId], references: [id], onDelete: SetNull)
+  storeId           Int      @map("store_id")
+  store             VerificationStore @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  couponCode        String   @map("coupon_code")
+  result            String
+  message           String?
+  providerName      String?  @map("provider_name")
+  configSource      String?  @map("config_source")
+  attemptedUrl      String?  @map("attempted_url")
+  rawResponse       Json?    @map("raw_response")
+  discountAmount    Float?   @map("discount_amount")
+  discountType      String?  @map("discount_type")
+  minimumOrder      Float?   @map("minimum_order")
+  expirationDate    String?  @map("expiration_date")
+  restrictions      String?
+  verifiedAt        DateTime @default(now()) @map("verified_at")
+
+  @@map("coupon_verification_runs")
+}
+
 model Account {
   id                    String    @id @default(cuid())
   accountId             String    @map("provider_account_id")
