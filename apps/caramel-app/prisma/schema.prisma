@@ -50,6 +50,7 @@ model VerificationStore {
   configs StoreVerificationConfig[]
   jobs    CouponVerificationJob[]
   runs    CouponVerificationRun[]
+  sessions StoreVerificationSession[]
 
   @@map("verification_stores")
 }
@@ -62,11 +63,15 @@ model StoreVerificationConfig {
   priority               Int      @default(0)
   isActive               Boolean  @default(true) @map("is_active")
   isVerifiedWorking      Boolean  @default(false) @map("is_verified_working")
+  authRequired           Boolean  @default(false) @map("auth_required")
+  sessionRequired        Boolean  @default(false) @map("session_required")
+  sessionProfile         String?  @map("session_profile")
   apiEndpoint            String?  @map("api_endpoint")
   apiHeaders             Json?    @map("api_headers")
   apiAuth                Json?    @map("api_auth")
   apiMethod              String?  @map("api_method")
   apiPayloadTemplate     Json?    @map("api_payload_template")
+  apiPayloadMode         String?  @map("api_payload_mode")
   entryUrl               String?  @map("entry_url")
   checkoutUrl            String?  @map("checkout_url")
   discoveryUrls          Json?    @map("discovery_urls")
@@ -92,6 +97,25 @@ model StoreVerificationConfig {
 
   @@unique([storeId, source])
   @@map("store_verification_configs")
+}
+
+model StoreVerificationSession {
+  id          Int      @id @default(autoincrement())
+  storeId     Int      @map("store_id")
+  store       VerificationStore @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  profileName String   @map("profile_name")
+  isActive    Boolean  @default(true) @map("is_active")
+  capturedUrl String?  @map("captured_url")
+  cookies     Json?
+  storageState Json?   @map("storage_state")
+  metadata    Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
+  lastUsedAt  DateTime? @map("last_used_at")
+  expiresAt   DateTime? @map("expires_at")
+
+  @@unique([storeId, profileName])
+  @@map("store_verification_sessions")
 }
 
 model CouponVerificationJob {
