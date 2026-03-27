@@ -4,6 +4,10 @@ const currentBrowser = (() => {
     throw new Error('Browser is not supported!')
 })()
 
+const CARAMEL_BASE_URL = 'https://grabcaramel.com'
+const EXTENSION_API_KEY = 'WXqEpm2uOV5jjJXPpnQFyZiNdaPVUrtd2LIrf4kc1JA'
+const caramelUrl = path => new URL(path, `${CARAMEL_BASE_URL}/`).toString()
+
 function isServiceWorkerContext() {
     return (
         typeof ServiceWorkerGlobalScope !== 'undefined' &&
@@ -190,23 +194,42 @@ currentBrowser.runtime.onMessage.addListener(
             return true
         } else if (message.action === 'fetchCoupons') {
             const { site, kw } = message
-            const url = `https://grabcaramel.com/api/coupons?site=${site}&key_words=${encodeURIComponent(
-                kw || '',
-            )}&limit=20`
+            const url = new URL(caramelUrl('api/coupons'))
+            url.searchParams.set('site', site)
+            url.searchParams.set('key_words', kw || '')
+            url.searchParams.set('limit', '20')
             console.log('BACKGROUND: fetchCoupons', {
                 site,
                 kw,
-                url,
+                url: url.toString(),
                 t: Date.now(),
             })
-            fetch(url)
+            fetch(url.toString())
                 .then(async r => {
                     if (!r.ok) return { coupons: [] }
                     const json = await r.json()
-                    return { coupons: json }
+                    return {
+                        coupons: Array.isArray(json) ? json : json.coupons || [],
+                    }
                 })
                 .then(resp => sendResponse(resp))
                 .catch(err => sendResponse({ coupons: [], error: String(err) }))
+
+            return true
+        } else if (message.action === 'fetchSupportedStores') {
+            const url = caramelUrl('api/extension/supported-stores')
+            fetch(url, {
+                headers: { 'x-api-key': EXTENSION_API_KEY },
+            })
+                .then(async r => {
+                    if (!r.ok) return { supported: [] }
+                    return r.json()
+                })
+                .then(resp => sendResponse(resp))
+                .catch(err => {
+                    console.error('fetchSupportedStores error', err)
+                    sendResponse({ supported: [], error: String(err) })
+                })
 
             return true
         } else if (message.action === 'getActiveTabDomainRecord') {
