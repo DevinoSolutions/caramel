@@ -441,7 +441,7 @@ async function startApplyingCoupons(rec) {
     }
     if (!Array.isArray(coupons) || !coupons.length) {
         log('AUTO_INSERT_STOP', { result: 'no-coupons', t: performance.now() })
-        showFinalModal(0, null, 'No coupons found.')
+        showFinalModal(0, null, 'No coupons available for this store right now.')
         return
     }
 

@@ -10,6 +10,37 @@ import { bearer } from 'better-auth/plugins'
 const saltRounds = Number(process.env.BCRYPT_SALT_ROUNDS) || 10
 const fallbackBaseURL = 'http://localhost:3000'
 const appleIdTrustedOrigins = ['https://appleid.apple.com']
+const googleOAuthConfigured = !!(
+    process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
+)
+const appleOAuthConfigured = !!(
+    process.env.APPLE_CLIENT_ID && process.env.APPLE_CLIENT_SECRET
+)
+const socialProviders = {
+    ...(googleOAuthConfigured
+        ? {
+              google: {
+                  clientId: process.env.GOOGLE_CLIENT_ID as string,
+                  clientSecret: process.env.GOOGLE_CLIENT_SECRET as string,
+                  prompt: 'select_account' as const,
+              },
+          }
+        : {}),
+    ...(appleOAuthConfigured
+        ? {
+              apple: {
+                  clientId: process.env.APPLE_CLIENT_ID as string,
+                  clientSecret: process.env.APPLE_CLIENT_SECRET as string,
+                  // Use production domain for Apple redirect URI (Apple doesn't accept localhost)
+                  // The callback will be handled on production, then redirect back to localhost
+                  redirectURI:
+                      process.env.APPLE_REDIRECT_URI ||
+                      'https://grabcaramel.com/api/auth/callback/apple',
+              },
+          }
+        : {}),
+}
+const hasSocialProviders = Object.keys(socialProviders).length > 0
 const baseURL =
     process.env.BETTER_AUTH_URL ||
     process.env.NEXT_PUBLIC_BASE_URL ||
@@ -62,22 +93,7 @@ export const auth = betterAuth({
         },
         callbackOnError: '/verify?error=token_expired',
     },
-    socialProviders: {
-        google: {
-            clientId: process.env.GOOGLE_CLIENT_ID as string,
-            clientSecret: process.env.GOOGLE_CLIENT_SECRET as string,
-            prompt: 'select_account',
-        },
-        apple: {
-            clientId: process.env.APPLE_CLIENT_ID as string,
-            clientSecret: process.env.APPLE_CLIENT_SECRET as string,
-            // Use production domain for Apple redirect URI (Apple doesn't accept localhost)
-            // The callback will be handled on production, then redirect back to localhost
-            redirectURI:
-                process.env.APPLE_REDIRECT_URI ||
-                'https://grabcaramel.com/api/auth/callback/apple',
-        },
-    },
+    ...(hasSocialProviders ? { socialProviders } : {}),
     user: {
         additionalFields: {
             username: {

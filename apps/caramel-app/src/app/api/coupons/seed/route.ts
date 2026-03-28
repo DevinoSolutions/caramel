@@ -13,6 +13,8 @@ interface CouponSeedData {
     expired?: boolean
     timesUsed?: number
     last_time_used?: string
+    verified?: boolean
+    lastVerifiedAt?: string
     sourceId?: string
 }
 

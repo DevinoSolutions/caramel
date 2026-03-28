@@ -58,6 +58,8 @@ async function fetchStoreCoupons(storeParam: string) {
                 expiry: true,
                 expired: true,
                 timesUsed: true,
+                verified: true,
+                lastVerifiedAt: true,
             },
         }),
         prisma.coupon.count({ where: filters }),

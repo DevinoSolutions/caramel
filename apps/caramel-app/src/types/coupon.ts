@@ -10,6 +10,8 @@ export interface Coupon {
     expiry: string
     expired: boolean
     timesUsed: number
+    verified: boolean
+    lastVerifiedAt: string | null
 }
 
 export interface CouponFilters {

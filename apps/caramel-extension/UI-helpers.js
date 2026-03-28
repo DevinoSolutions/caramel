@@ -229,7 +229,7 @@ async function showFinalModal(savingsAmount, code, message, isSignIn = false) {
     // If no savings found, encourage the user that it's already the best price
     const defaultMessage = isSuccess
         ? `We found a coupon that saves you $${savingsAmount.toFixed(2)}!`
-        : "Looks like you're already getting the best deal. Go ahead and buy!"
+        : "We couldn't find any working coupons for this page. You may already have the best price!"
 
     // You can decide whether to use `message` or `defaultMessage` or combine them
     const finalMessage = message || defaultMessage
@@ -256,7 +256,7 @@ async function showFinalModal(savingsAmount, code, message, isSignIn = false) {
       font-size: 24px; 
       font-weight: bold;
     ">
-      ${isSuccess ? '🎉 Savings Found! 🎉' : isSignIn ? 'Oups..' : 'Great News!'}
+      ${isSuccess ? '🎉 Savings Found! 🎉' : isSignIn ? 'Oups..' : 'No Savings This Time'}
     </h2>
     <p style="font-size: 13px; color: #333; margin: 0 0 10px 0;">
       ${finalMessage}

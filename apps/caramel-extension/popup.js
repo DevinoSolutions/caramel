@@ -1,5 +1,8 @@
 /* global currentBrowser, fetchCoupons */
 
+const CARAMEL_BASE_URL = 'http://localhost:58300'
+const caramelUrl = path => new URL(path, `${CARAMEL_BASE_URL}/`).toString()
+
 /* ------------------------------------------------------------ */
 /*  Globals                                                     */
 /* ------------------------------------------------------------ */
@@ -73,7 +76,7 @@ function renderUnsupportedSite(user) {
 
       <div class="no-coupons-actions">
         <a
-          href="https://grabcaramel.com/supported-stores"
+          href="${caramelUrl('supported-stores')}"
           class="supported-sites-btn"
           target="_blank"
           rel="noopener noreferrer"
@@ -139,8 +142,7 @@ async function handleSocialSignIn(provider) {
     }
 
     try {
-        // Base URL - change to 'http://localhost:58000' for local testing
-        const baseURL = 'https://grabcaramel.com'
+        const baseURL = CARAMEL_BASE_URL
 
         // Check if identity API is available
         const identity =
@@ -337,7 +339,7 @@ function renderSignInPrompt(backFn) {
 
       <div id="resendVerificationContainer" style="display:none; text-align:center; margin-top:12px;">
         <a
-          href="https://grabcaramel.com/verify"
+          href="${caramelUrl('verify')}"
           target="_blank"
           rel="noopener noreferrer"
           class="resend-verification-btn"
@@ -350,7 +352,7 @@ function renderSignInPrompt(backFn) {
       <p class="mt-6">
         Don't have an account?
         <a
-          href="https://grabcaramel.com/signup"
+          href="${caramelUrl('signup')}"
           target="_blank"
           rel="noopener noreferrer"
         >Sign Up</a>
@@ -408,7 +410,7 @@ function renderSignInPrompt(backFn) {
             const password = document.getElementById('password').value
 
             const res = await fetch(
-                'https://grabcaramel.com/api/extension/login',
+                caramelUrl('api/extension/login'),
                 {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -470,7 +472,7 @@ function renderProfileCard(user) {
     if (settingsIcon) {
         settingsIcon.style.display = 'block'
         settingsIcon.onclick = () =>
-            window.open('https://grabcaramel.com/profile', '_blank')
+            window.open(caramelUrl('profile'), '_blank')
     }
 
     document.getElementById('logoutBtn').addEventListener('click', () => {
@@ -514,7 +516,7 @@ function renderCouponsView(coupons, user, domain) {
       <div id="couponList" class="coupon-list">
         ${
             coupons.length === 0
-                ? '<p>No coupons found for this site</p>'
+                ? '<p>No coupons available for this store right now.</p>'
                 : coupons
                       .map(
                           c => `

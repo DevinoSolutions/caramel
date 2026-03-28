@@ -63,14 +63,18 @@ export default function CouponCard({ coupon, index }: CouponCardProps) {
                         </p>
                     )}
                     <div className="flex items-center gap-3 text-xs font-semibold text-gray-600 dark:text-gray-300">
-                        <span className="flex items-center gap-1.5">
-                            <HiCheckCircle className="h-4 w-4 text-emerald-500" />
-                            Coupon verified
-                        </span>
-                        <span className="flex items-center gap-1.5">
-                            <HiCheckCircle className="h-4 w-4 text-orange-500" />
-                            {timesUsed} used today
-                        </span>
+                        {coupon.verified && (
+                            <span className="flex items-center gap-1.5">
+                                <HiCheckCircle className="h-4 w-4 text-emerald-500" />
+                                Coupon verified
+                            </span>
+                        )}
+                        {timesUsed > 0 && (
+                            <span className="flex items-center gap-1.5">
+                                <HiCheckCircle className="h-4 w-4 text-orange-500" />
+                                {timesUsed} used today
+                            </span>
+                        )}
                     </div>
                 </div>
 
