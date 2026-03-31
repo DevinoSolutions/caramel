@@ -25,13 +25,21 @@ export default function Footer() {
                             <span className="text-sm text-white">
                                 Powered by
                             </span>
-                            <Image
-                                src="/devino.png"
-                                alt="Devino"
-                                width={60}
-                                height={20}
+                            <a
+                                href="https://devino.ca?utm_source=caramel_landing&utm_medium=footer"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                aria-label="Devino Solutions Website"
                                 className="inline-block"
-                            />
+                            >
+                                <Image
+                                    src="/devino.png"
+                                    alt="Devino Solutions logo"
+                                    width={60}
+                                    height={20}
+                                    className="inline-block"
+                                />
+                            </a>
                         </div>
                     </div>
                 </motion.div>
