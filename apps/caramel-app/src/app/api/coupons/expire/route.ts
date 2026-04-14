@@ -1,7 +1,11 @@
 import { couponsSql } from '@/lib/couponsDb'
+import { checkRateLimit } from '@/lib/rateLimit'
 import { NextRequest, NextResponse } from 'next/server'
 
 export async function POST(req: NextRequest) {
+    const limited = await checkRateLimit(req, 'mutation')
+    if (limited) return limited
+
     const { ids = [] } = (await req.json().catch(() => ({}))) as {
         ids?: string[]
     }

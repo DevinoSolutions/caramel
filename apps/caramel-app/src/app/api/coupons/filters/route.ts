@@ -1,7 +1,11 @@
 import { couponsSql } from '@/lib/couponsDb'
+import { checkRateLimit } from '@/lib/rateLimit'
 import { NextRequest, NextResponse } from 'next/server'
 
 export async function GET(req: NextRequest) {
+    const limited = await checkRateLimit(req, 'read')
+    if (limited) return limited
+
     const url = new URL(req.url)
     const includeSitesParam = url.searchParams.get('includeSites')
     const includeSites = includeSitesParam !== 'false'

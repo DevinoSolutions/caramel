@@ -25,6 +25,9 @@ function getBaseDomain(raw: string): string {
     } catch {
         // fallback to raw slug
     }
+    // Strip anything that isn't a valid hostname character so injection
+    // attempts through the URL slug can't smuggle SQL patterns downstream.
+    if (!/^[a-z0-9.-]+$/i.test(hostname)) return ''
     const parts = hostname.split('.')
     return parts.length > 2 ? parts.slice(-2).join('.') : hostname
 }

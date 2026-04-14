@@ -43,6 +43,7 @@
         "next": "16.1.1",
         "postgres": "^3.4.9",
         "prisma": "^6.14.0",
+        "rate-limiter-flexible": "^11.0.0",
         "react": "19.2.3",
         "react-awesome-button": "^7.0.5",
         "react-dom": "19.2.3",

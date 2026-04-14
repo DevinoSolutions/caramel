@@ -1,5 +1,6 @@
 import { nextApiResponse } from '@/lib/apiResponseNext'
 import { couponsSql } from '@/lib/couponsDb'
+import { checkRateLimit } from '@/lib/rateLimit'
 import { NextRequest } from 'next/server'
 
 type SourceMetrics = {
@@ -12,6 +13,9 @@ type SourceMetrics = {
 }
 
 export async function GET(req: NextRequest) {
+    const limited = await checkRateLimit(req, 'read')
+    if (limited) return limited
+
     try {
         const rows = await couponsSql<
             Array<{
@@ -62,6 +66,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+    const limited = await checkRateLimit(req, 'mutation')
+    if (limited) return limited
+
     try {
         const body = (await req.json().catch(() => ({}))) as {
             website?: string

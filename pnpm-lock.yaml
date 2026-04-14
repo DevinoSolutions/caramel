@@ -98,6 +98,9 @@ importers:
       prisma:
         specifier: ^6.14.0
         version: 6.14.0(typescript@5.9.2)
+      rate-limiter-flexible:
+        specifier: ^11.0.0
+        version: 11.0.0
       react:
         specifier: 19.2.3
         version: 19.2.3
@@ -4756,6 +4759,9 @@ packages:
 
   randombytes@2.1.0:
     resolution: {integrity: sha512-vYl3iOX+4CKUWuxGi9Ukhie6fsqXqS9FE2Zaic4tNFD2N2QQaXOMFbuKK4QmDHC0JO6B1Zp41J0LpT0oR68amQ==}
+
+  rate-limiter-flexible@11.0.0:
+    resolution: {integrity: sha512-UhN3xVeU6Az3y6hAuxMUwFsKcKD1HffhMGK0MknbSxH9vkwslS/p19ovCvJqIVT97pE778nKu2sUgYAcxj4dmQ==}
 
   rc9@2.1.2:
     resolution: {integrity: sha512-btXCnMmRIBINM2LDZoEmOogIZU7Qe7zn4BpomSKZ/ykbLObuBdvG+mFq11DL6fjH1DRwHhrlgtYWG96bJiC7Cg==}
@@ -10753,6 +10759,8 @@ snapshots:
   randombytes@2.1.0:
     dependencies:
       safe-buffer: 5.2.1
+
+  rate-limiter-flexible@11.0.0: {}
 
   rc9@2.1.2:
     dependencies:

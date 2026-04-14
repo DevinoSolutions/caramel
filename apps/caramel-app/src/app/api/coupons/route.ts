@@ -1,19 +1,25 @@
 import { couponsSql } from '@/lib/couponsDb'
+import { checkRateLimit } from '@/lib/rateLimit'
 import { NextRequest, NextResponse } from 'next/server'
 
-function getBaseDomain(raw: string): string {
+function getBaseDomain(raw: string): string | null {
     let hostname = raw
     try {
         const u = new URL(raw.startsWith('http') ? raw : `https://${raw}`)
         hostname = u.hostname
     } catch {
-        throw new Error('Could not find base domain')
+        return null
     }
+    // Hostnames must be ASCII letters, digits, dots, and hyphens only
+    if (!/^[a-z0-9.-]+$/i.test(hostname)) return null
     const parts = hostname.split('.')
     return parts.length > 2 ? parts.slice(-2).join('.') : hostname
 }
 
 export async function GET(req: NextRequest) {
+    const limited = await checkRateLimit(req, 'read')
+    if (limited) return limited
+
     const url = new URL(req.url)
     const site = url.searchParams.get('site') || undefined
     const rawPage = parseInt(url.searchParams.get('page') || '1', 10)
@@ -30,6 +36,12 @@ export async function GET(req: NextRequest) {
 
         if (site) {
             const base = getBaseDomain(site)
+            if (!base) {
+                return NextResponse.json(
+                    { error: 'Invalid site parameter' },
+                    { status: 400 },
+                )
+            }
             conditions.push(
                 couponsSql`(site = ${base} OR site LIKE ${'%.' + base})`,
             )
