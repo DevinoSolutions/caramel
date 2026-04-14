@@ -1,4 +1,4 @@
-import prisma from '@/lib/prisma'
+import { couponsSql } from '@/lib/couponsDb'
 import { NextRequest, NextResponse } from 'next/server'
 
 function getBaseDomain(raw: string): string {
@@ -23,91 +23,60 @@ export async function GET(req: NextRequest) {
         Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 50) : 10
     const search = url.searchParams.get('search') || undefined
     const type = url.searchParams.get('type') || undefined
-    const key_words = url.searchParams.get('key_words') || undefined
+    const keyWords = url.searchParams.get('key_words') || undefined
 
     try {
-        const filters: any = { expired: false }
+        const conditions = [couponsSql`expired = FALSE`]
 
-        // Site filter
         if (site) {
             const base = getBaseDomain(site)
-            filters.AND = [
-                { OR: [{ site: base }, { site: { endsWith: `.${base}` } }] },
-            ]
-        }
-
-        // Search filter (searches across site, title, description)
-        if (search) {
-            filters.OR = [
-                { site: { contains: search, mode: 'insensitive' } },
-                { title: { contains: search, mode: 'insensitive' } },
-                { description: { contains: search, mode: 'insensitive' } },
-                { code: { contains: search, mode: 'insensitive' } },
-            ]
-        }
-
-        // Keywords filter
-        if (key_words) {
-            const keywordsArray = key_words.split(',').map(k => k.trim())
-            if (!filters.OR) {
-                filters.OR = []
-            }
-            filters.OR.push(
-                ...keywordsArray.map(keyword => ({
-                    description: { contains: keyword, mode: 'insensitive' },
-                })),
+            conditions.push(
+                couponsSql`(site = ${base} OR site LIKE ${'%.' + base})`,
             )
         }
 
-        // Discount type filter
-        if (type && type !== 'all') {
-            filters.discount_type = type
+        if (search) {
+            const s = `%${search}%`
+            conditions.push(
+                couponsSql`(site ILIKE ${s} OR title ILIKE ${s} OR description ILIKE ${s} OR code ILIKE ${s})`,
+            )
         }
+
+        if (keyWords) {
+            const patterns = keyWords
+                .split(',')
+                .map(k => `%${k.trim()}%`)
+                .filter(k => k.length > 2)
+            if (patterns.length > 0) {
+                conditions.push(couponsSql`description ILIKE ANY(${patterns})`)
+            }
+        }
+
+        if (type && type !== 'all') {
+            conditions.push(couponsSql`discount_type = ${type}`)
+        }
+
+        const whereClause = conditions.reduce(
+            (acc, cond) => couponsSql`${acc} AND ${cond}`,
+        )
 
         const skip = Math.max(0, (page - 1) * limit)
 
-        console.info('[API][coupons] request', {
-            page,
-            limit,
-            skip,
-            site,
-            search,
-            type,
-            key_words,
-        })
-
-        const [coupons, total] = await prisma.$transaction([
-            prisma.coupon.findMany({
-                where: filters,
-                skip,
-                take: limit,
-                orderBy: [{ rating: 'desc' }, { createdAt: 'desc' }],
-                select: {
-                    id: true,
-                    code: true,
-                    site: true,
-                    title: true,
-                    description: true,
-                    rating: true,
-                    discount_type: true,
-                    discount_amount: true,
-                    expiry: true,
-                    expired: true,
-                    timesUsed: true,
-                },
-            }),
-            prisma.coupon.count({ where: filters }),
+        const [coupons, totalRow] = await Promise.all([
+            couponsSql`
+                SELECT id, code, site, title, description, rating,
+                       discount_type, discount_amount, expiry, expired,
+                       times_used AS "timesUsed"
+                FROM coupons
+                WHERE ${whereClause}
+                ORDER BY rating DESC, created_at DESC
+                LIMIT ${limit} OFFSET ${skip}
+            `,
+            couponsSql`SELECT COUNT(*)::int AS total FROM coupons WHERE ${whereClause}`,
         ])
 
+        const total = (totalRow[0] as { total: number } | undefined)?.total ?? 0
         const hasMore = skip + coupons.length < total
-
-        console.info('[API][coupons] response', {
-            returned: coupons.length,
-            total,
-            hasMore,
-            page,
-            limit,
-        })
 
         return NextResponse.json({ coupons, page, limit, total, hasMore })
     } catch (error) {

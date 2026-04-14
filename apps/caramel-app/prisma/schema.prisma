@@ -1,43 +1,10 @@
 generator client {
-  provider        = "prisma-client-js"
-  previewFeatures = ["postgresqlExtensions"]
+  provider = "prisma-client-js"
 }
 
 datasource db {
-  provider   = "postgresql"
-  url        = env("DATABASE_URL")
-  extensions = [pg_trgm]
-}
-
-model Source {
-  id        String       @id @default(cuid())
-  source    String
-  websites  String[]
-  status    SourceStatus @default(REQUESTED)
-  createdAt DateTime     @default(now())
-  updatedAt DateTime     @default(now()) @updatedAt
-  coupons   Coupon[]
-}
-
-model Coupon {
-  id              String       @id @default(cuid())
-  code            String
-  site            String
-  title           String
-  description     String
-  rating          Float
-  discount_type   DiscountType @default(PERCENTAGE)
-  discount_amount Float?
-  expiry          String
-  expired         Boolean      @default(false)
-  timesUsed       Int          @default(0)
-  last_time_used  DateTime?
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @default(now()) @updatedAt
-  sourceId        String?
-  Source          Source?      @relation(fields: [sourceId], references: [id])
-
-  @@unique([code, site])
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 model Account {
@@ -110,12 +77,6 @@ model User {
   @@map("users")
 }
 
-enum SourceStatus {
-  ACTIVE
-  INACTIVE
-  REQUESTED
-}
-
 enum UserStatus {
   ACTIVE_USER
   DELETE_REQUESTED_BY_USER
@@ -128,10 +89,4 @@ enum Role {
   MODERATOR
   ADMIN
   SUPER_ADMIN
-}
-
-enum DiscountType {
-  PERCENTAGE
-  CASH
-  SAVE
 }

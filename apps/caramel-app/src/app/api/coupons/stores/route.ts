@@ -1,4 +1,4 @@
-import prisma from '@/lib/prisma'
+import { couponsSql } from '@/lib/couponsDb'
 import { NextRequest, NextResponse } from 'next/server'
 
 export async function GET(req: NextRequest) {
@@ -7,24 +7,23 @@ export async function GET(req: NextRequest) {
     const rawLimit = parseInt(url.searchParams.get('limit') || '20', 10)
     const limit = Math.min(Math.max(rawLimit, 1), 50)
 
-    const filters: any = { expired: false }
-    if (q) {
-        filters.OR = [
-            { site: { contains: q, mode: 'insensitive' } },
-            { site: { startsWith: q, mode: 'insensitive' } },
-        ]
-    }
-
     try {
-        const sitesRaw = await prisma.coupon.findMany({
-            where: filters,
-            distinct: ['site'],
-            select: { site: true },
-            take: limit,
-            orderBy: { site: 'asc' },
-        })
+        const rows = q
+            ? await couponsSql<Array<{ site: string }>>`
+                  SELECT DISTINCT site FROM coupons
+                  WHERE expired = FALSE
+                    AND (site ILIKE ${'%' + q + '%'} OR site ILIKE ${q + '%'})
+                  ORDER BY site ASC
+                  LIMIT ${limit}
+              `
+            : await couponsSql<Array<{ site: string }>>`
+                  SELECT DISTINCT site FROM coupons
+                  WHERE expired = FALSE
+                  ORDER BY site ASC
+                  LIMIT ${limit}
+              `
 
-        const sites = sitesRaw.map(s => s.site).filter(Boolean)
+        const sites = rows.map(s => s.site).filter(Boolean)
 
         return NextResponse.json({ sites })
     } catch (error) {

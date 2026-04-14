@@ -1,17 +1,20 @@
-import prisma from '@/lib/prisma'
+import { couponsSql } from '@/lib/couponsDb'
 import { NextResponse } from 'next/server'
 
 export async function GET() {
     try {
-        const topSites = await prisma.coupon.groupBy({
-            by: ['site'],
-            _count: { id: true },
-            orderBy: { _count: { id: 'desc' } },
-            take: 4,
-        })
-        const sites = topSites.map(i => i.site)
+        const rows = await couponsSql<Array<{ site: string }>>`
+            SELECT site, COUNT(*)::int AS coupon_count
+            FROM coupons
+            WHERE expired = FALSE
+            GROUP BY site
+            ORDER BY coupon_count DESC
+            LIMIT 4
+        `
+        const sites = rows.map(r => r.site)
         return NextResponse.json({ sites })
     } catch (err) {
+        console.error('Failed to fetch top sites:', err)
         return NextResponse.json(
             { error: 'Failed to fetch top sites' },
             { status: 500 },

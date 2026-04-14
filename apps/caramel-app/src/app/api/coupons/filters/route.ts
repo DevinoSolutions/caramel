@@ -1,4 +1,4 @@
-import prisma from '@/lib/prisma'
+import { couponsSql } from '@/lib/couponsDb'
 import { NextRequest, NextResponse } from 'next/server'
 
 export async function GET(req: NextRequest) {
@@ -9,42 +9,32 @@ export async function GET(req: NextRequest) {
     const sitesLimit = Math.min(Math.max(rawLimit, 0), 100)
 
     try {
-        const queries: Promise<any>[] = []
+        const sitesPromise: Promise<Array<{ site: string }>> =
+            includeSites && sitesLimit > 0
+                ? couponsSql<Array<{ site: string }>>`
+                      SELECT DISTINCT site FROM coupons
+                      WHERE expired = FALSE AND site IS NOT NULL
+                      ORDER BY site ASC
+                      LIMIT ${sitesLimit}
+                  `
+                : Promise.resolve([])
 
-        if (includeSites && sitesLimit > 0) {
-            queries.push(
-                prisma.coupon.findMany({
-                    where: { expired: false },
-                    distinct: ['site'],
-                    select: { site: true },
-                    orderBy: { site: 'asc' },
-                    take: sitesLimit,
-                }),
-            )
-        } else {
-            queries.push(Promise.resolve([]))
-        }
+        const typesPromise = couponsSql<Array<{ discount_type: string }>>`
+            SELECT DISTINCT discount_type FROM coupons
+            WHERE expired = FALSE AND discount_type IS NOT NULL
+        `
 
-        queries.push(
-            prisma.coupon.findMany({
-                where: { expired: false },
-                distinct: ['discount_type'],
-                select: { discount_type: true },
-            }),
-        )
-
-        const [sitesRaw, discountTypesRaw] = await Promise.all(queries)
+        const [sitesRaw, discountTypesRaw] = await Promise.all([
+            sitesPromise,
+            typesPromise,
+        ])
 
         const sites = sitesRaw
-            .map((s: any) => s.site)
+            .map(s => s.site)
             .filter(Boolean)
-            .sort((a: string, b: string) => a.localeCompare(b))
+            .sort((a, b) => a.localeCompare(b))
         const discountTypes = Array.from(
-            new Set(
-                discountTypesRaw
-                    .map((d: any) => d.discount_type)
-                    .filter(Boolean),
-            ),
+            new Set(discountTypesRaw.map(d => d.discount_type).filter(Boolean)),
         )
 
         return NextResponse.json({ sites, discountTypes })

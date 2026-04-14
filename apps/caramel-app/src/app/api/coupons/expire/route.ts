@@ -1,17 +1,26 @@
-import prisma from '@/lib/prisma'
+import { couponsSql } from '@/lib/couponsDb'
 import { NextRequest, NextResponse } from 'next/server'
 
 export async function POST(req: NextRequest) {
     const { ids = [] } = (await req.json().catch(() => ({}))) as {
         ids?: string[]
     }
+    if (!Array.isArray(ids) || ids.length === 0) {
+        return NextResponse.json({ count: 0 })
+    }
+
     try {
-        const updated = await prisma.coupon.updateMany({
-            where: { id: { in: ids } },
-            data: { expired: true, expiry: new Date().toISOString() },
-        })
-        return NextResponse.json({ count: updated.count })
+        const rows = await couponsSql`
+            UPDATE coupons
+            SET expired = TRUE,
+                expiry = NOW()::text,
+                updated_at = NOW()
+            WHERE id = ANY(${ids}) AND expired = FALSE
+            RETURNING id
+        `
+        return NextResponse.json({ count: rows.length })
     } catch (error) {
+        console.error('Error expiring coupons:', error)
         return NextResponse.json(
             { error: 'Error marking coupons as expired.' },
             { status: 500 },

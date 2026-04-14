@@ -1,5 +1,5 @@
 import CouponsSection from '@/components/coupons/coupons-section'
-import prisma from '@/lib/prisma'
+import { couponsSql } from '@/lib/couponsDb'
 import type { Coupon } from '@/types/coupon'
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
@@ -34,35 +34,28 @@ type StoreParams = { store: string }
 async function fetchStoreCoupons(storeParam: string) {
     const base = getBaseDomain(storeParam)
     if (!base) {
-        return { coupons: [], total: 0, base: storeParam }
-    }
-    const filters: any = {
-        expired: false,
-        AND: [{ OR: [{ site: base }, { site: { endsWith: `.${base}` } }] }],
+        return { coupons: [] as Coupon[], total: 0, base: storeParam }
     }
 
-    const [coupons, total] = await prisma.$transaction([
-        prisma.coupon.findMany({
-            where: filters,
-            take: PAGE_SIZE,
-            orderBy: [{ rating: 'desc' }, { createdAt: 'desc' }],
-            select: {
-                id: true,
-                code: true,
-                site: true,
-                title: true,
-                description: true,
-                rating: true,
-                discount_type: true,
-                discount_amount: true,
-                expiry: true,
-                expired: true,
-                timesUsed: true,
-            },
-        }),
-        prisma.coupon.count({ where: filters }),
+    const [coupons, totalRow] = await Promise.all([
+        couponsSql<Coupon[]>`
+            SELECT id, code, site, title, description, rating,
+                   discount_type, discount_amount, expiry, expired,
+                   times_used AS "timesUsed"
+            FROM coupons
+            WHERE expired = FALSE
+              AND (site = ${base} OR site LIKE ${'%.' + base})
+            ORDER BY rating DESC, created_at DESC
+            LIMIT ${PAGE_SIZE}
+        `,
+        couponsSql`
+            SELECT COUNT(*)::int AS total FROM coupons
+            WHERE expired = FALSE
+              AND (site = ${base} OR site LIKE ${'%.' + base})
+        `,
     ])
 
+    const total = (totalRow[0] as { total: number } | undefined)?.total ?? 0
     return { coupons, total, base }
 }
 
