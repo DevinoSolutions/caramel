@@ -16,7 +16,15 @@ export async function GET(req: NextRequest) {
             LIMIT 4
         `
         const sites = rows.map(r => r.site)
-        return NextResponse.json({ sites })
+        return NextResponse.json(
+            { sites },
+            {
+                headers: {
+                    'Cache-Control':
+                        'public, s-maxage=300, stale-while-revalidate=300',
+                },
+            },
+        )
     } catch (err) {
         console.error('Failed to fetch top sites:', err)
         return NextResponse.json(

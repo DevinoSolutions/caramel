@@ -41,7 +41,15 @@ export async function GET(req: NextRequest) {
             new Set(discountTypesRaw.map(d => d.discount_type).filter(Boolean)),
         )
 
-        return NextResponse.json({ sites, discountTypes })
+        return NextResponse.json(
+            { sites, discountTypes },
+            {
+                headers: {
+                    'Cache-Control':
+                        'public, s-maxage=300, stale-while-revalidate=300',
+                },
+            },
+        )
     } catch (error) {
         console.error('Failed to load coupon filter metadata:', error)
         return NextResponse.json(

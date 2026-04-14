@@ -18,11 +18,19 @@ export async function GET(req: NextRequest) {
             expired: number
         }
 
-        return NextResponse.json({
-            total: row.total,
-            expired: row.expired,
-            active: row.total - row.expired,
-        })
+        return NextResponse.json(
+            {
+                total: row.total,
+                expired: row.expired,
+                active: row.total - row.expired,
+            },
+            {
+                headers: {
+                    'Cache-Control':
+                        'public, s-maxage=300, stale-while-revalidate=300',
+                },
+            },
+        )
     } catch (error) {
         console.error('Failed to fetch coupon stats:', error)
         return NextResponse.json(

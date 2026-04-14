@@ -1,9 +1,26 @@
-import { fileURLToPath } from 'node:url'
-import path from 'node:path'
 import { withSentryConfig } from '@sentry/nextjs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const packageRoot = fileURLToPath(new URL('.', import.meta.url))
 const workspaceRoot = path.resolve(packageRoot, '..', '..')
+
+// Universally-safe security headers. CSP is deliberately NOT included
+// here — it's easy to break third-party scripts (Sentry, GA, RevenueCat)
+// with a wrong policy and it deserves its own rollout.
+const SECURITY_HEADERS = [
+    { key: 'X-Content-Type-Options', value: 'nosniff' },
+    { key: 'X-Frame-Options', value: 'DENY' },
+    { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+    {
+        key: 'Permissions-Policy',
+        value: 'camera=(), microphone=(), geolocation=(), payment=()',
+    },
+    {
+        key: 'Strict-Transport-Security',
+        value: 'max-age=31536000; includeSubDomains',
+    },
+]
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -20,6 +37,9 @@ const nextConfig = {
                 pathname: '/s2/favicons/**',
             },
         ],
+    },
+    async headers() {
+        return [{ source: '/:path*', headers: SECURITY_HEADERS }]
     },
 }
 

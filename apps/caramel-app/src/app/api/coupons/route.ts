@@ -24,12 +24,18 @@ export async function GET(req: NextRequest) {
     const site = url.searchParams.get('site') || undefined
     const rawPage = parseInt(url.searchParams.get('page') || '1', 10)
     const rawLimit = parseInt(url.searchParams.get('limit') || '10', 10)
-    const page = Number.isFinite(rawPage) && rawPage > 0 ? rawPage : 1
+    // Cap page at 500 so scrapers can't walk the catalog indefinitely
+    // with `page=999999`. Real users never paginate that far.
+    const page =
+        Number.isFinite(rawPage) && rawPage > 0 ? Math.min(rawPage, 500) : 1
     const limit =
         Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 50) : 10
-    const search = url.searchParams.get('search') || undefined
+    // Cap search + keyword params to keep ILIKE patterns cheap.
+    const search =
+        (url.searchParams.get('search') || '').slice(0, 100) || undefined
     const type = url.searchParams.get('type') || undefined
-    const keyWords = url.searchParams.get('key_words') || undefined
+    const keyWords =
+        (url.searchParams.get('key_words') || '').slice(0, 200) || undefined
 
     try {
         const conditions = [couponsSql`expired = FALSE`]
@@ -90,7 +96,18 @@ export async function GET(req: NextRequest) {
         const total = (totalRow[0] as { total: number } | undefined)?.total ?? 0
         const hasMore = skip + coupons.length < total
 
-        return NextResponse.json({ coupons, page, limit, total, hasMore })
+        // 60s edge cache with a 60s grace window. Coupons change on a
+        // scrape cycle (minutes-hours), so 60s staleness is invisible
+        // to users and offloads almost all scraping traffic to CDN.
+        return NextResponse.json(
+            { coupons, page, limit, total, hasMore },
+            {
+                headers: {
+                    'Cache-Control':
+                        'public, s-maxage=60, stale-while-revalidate=60',
+                },
+            },
+        )
     } catch (error) {
         console.error('Error fetching coupons:', error)
         return NextResponse.json(

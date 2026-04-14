@@ -28,10 +28,15 @@ const LIMITS: Record<LimitKind, { points: number; duration: number }> = {
     mutation: { points: 30, duration: 60 },
 }
 
+// Short-window burst limiter catches rapid-fire attempts that would
+// otherwise crawl under the per-minute budget (e.g. 15 req/sec for 8s).
+const BURST = { points: 20, duration: 2 }
+
 const limiters: Record<LimitKind, RateLimiterMemory> = {
     read: new RateLimiterMemory(LIMITS.read),
     mutation: new RateLimiterMemory(LIMITS.mutation),
 }
+const burstLimiter = new RateLimiterMemory(BURST)
 
 function getClientIp(req: NextRequest): string {
     // Trusted in order: our own proxy (X-Real-IP), then the first
@@ -83,18 +88,19 @@ export async function checkRateLimit(
     if (isExtensionClient(req)) return null
 
     const ip = getClientIp(req)
+
+    // Burst first — cheaper to reject here than to touch the minute
+    // limiter. A hit against the burst limiter does NOT consume the
+    // minute budget so a brief hiccup doesn't penalise the user
+    // long-term.
     try {
-        const res = await limiters[kind].consume(ip, 1)
-        // Success — we could also return headers here, but merging them
-        // into the success response is up to the caller. Most callers
-        // don't need this, so we just return null.
-        void res
-        return null
+        await burstLimiter.consume(ip, 1)
     } catch (error) {
         const res = (error as RateLimiterRes) ?? null
         const retryAfterSec = res
             ? Math.max(1, Math.ceil(res.msBeforeNext / 1000))
-            : 60
+            : 2
+        logAbuse(req, ip, 'burst', retryAfterSec)
         const headers = buildHeaders(kind, res)
         headers.set('Retry-After', String(retryAfterSec))
         return NextResponse.json(
@@ -105,4 +111,80 @@ export async function checkRateLimit(
             { status: 429, headers },
         )
     }
+
+    try {
+        const res = await limiters[kind].consume(ip, 1)
+        void res
+        return null
+    } catch (error) {
+        const res = (error as RateLimiterRes) ?? null
+        const retryAfterSec = res
+            ? Math.max(1, Math.ceil(res.msBeforeNext / 1000))
+            : 60
+        logAbuse(req, ip, kind, retryAfterSec)
+        const headers = buildHeaders(kind, res)
+        headers.set('Retry-After', String(retryAfterSec))
+        return NextResponse.json(
+            {
+                error: 'Too many requests. Please slow down.',
+                retryAfter: retryAfterSec,
+            },
+            { status: 429, headers },
+        )
+    }
+}
+
+function logAbuse(
+    req: NextRequest,
+    ip: string,
+    kind: string,
+    retryAfterSec: number,
+) {
+    // One-line structured log so you can grep the dev console / prod
+    // log aggregator for "[ratelimit]" to see abuse patterns.
+    const path = new URL(req.url).pathname
+    const ua = req.headers.get('user-agent')?.slice(0, 80) ?? '-'
+    console.warn(
+        `[ratelimit] kind=${kind} ip=${ip} path=${path} retry_after=${retryAfterSec}s ua="${ua}"`,
+    )
+}
+
+/**
+ * Allow-list check for mutation routes. Rejects cross-origin browser
+ * requests from random websites. Accepts:
+ *   - no Origin header (server-to-server, curl)
+ *   - same-origin (our own Host)
+ *   - chrome-extension:// / moz-extension:// / safari-web-extension://
+ *   - any origin listed in ALLOWED_ORIGINS (comma-separated env var)
+ */
+export function isOriginAllowed(req: NextRequest): boolean {
+    const origin = req.headers.get('origin')
+    if (!origin) return true
+
+    try {
+        const originUrl = new URL(origin)
+        // Browser extensions are trusted by protocol.
+        if (
+            originUrl.protocol === 'chrome-extension:' ||
+            originUrl.protocol === 'moz-extension:' ||
+            originUrl.protocol === 'safari-web-extension:'
+        ) {
+            return true
+        }
+        const host = req.headers.get('host')
+        if (host && originUrl.host === host) return true
+
+        const allowed = (process.env.ALLOWED_ORIGINS || '')
+            .split(',')
+            .map(s => s.trim())
+            .filter(Boolean)
+        if (allowed.includes(origin)) return true
+        return false
+    } catch {
+        return false
+    }
+}
+
+export function forbiddenOrigin(): NextResponse {
+    return NextResponse.json({ error: 'Forbidden origin' }, { status: 403 })
 }

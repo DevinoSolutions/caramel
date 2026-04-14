@@ -1,8 +1,13 @@
 import { couponsSql } from '@/lib/couponsDb'
-import { checkRateLimit } from '@/lib/rateLimit'
+import {
+    checkRateLimit,
+    forbiddenOrigin,
+    isOriginAllowed,
+} from '@/lib/rateLimit'
 import { NextRequest, NextResponse } from 'next/server'
 
 export async function GET(req: NextRequest) {
+    if (!isOriginAllowed(req)) return forbiddenOrigin()
     const limited = await checkRateLimit(req, 'mutation')
     if (limited) return limited
 

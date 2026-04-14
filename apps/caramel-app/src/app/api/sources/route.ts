@@ -1,6 +1,10 @@
 import { nextApiResponse } from '@/lib/apiResponseNext'
 import { couponsSql } from '@/lib/couponsDb'
-import { checkRateLimit } from '@/lib/rateLimit'
+import {
+    checkRateLimit,
+    forbiddenOrigin,
+    isOriginAllowed,
+} from '@/lib/rateLimit'
 import { NextRequest } from 'next/server'
 
 type SourceMetrics = {
@@ -66,6 +70,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+    if (!isOriginAllowed(req)) return forbiddenOrigin()
     const limited = await checkRateLimit(req, 'mutation')
     if (limited) return limited
 

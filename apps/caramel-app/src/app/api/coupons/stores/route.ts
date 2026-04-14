@@ -29,7 +29,15 @@ export async function GET(req: NextRequest) {
 
         const sites = rows.map(s => s.site).filter(Boolean)
 
-        return NextResponse.json({ sites })
+        return NextResponse.json(
+            { sites },
+            {
+                headers: {
+                    'Cache-Control':
+                        'public, s-maxage=120, stale-while-revalidate=120',
+                },
+            },
+        )
     } catch (error) {
         console.error('Failed to load store options:', error)
         return NextResponse.json(
