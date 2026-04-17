@@ -66,6 +66,12 @@ if (typeof recordTiming === 'undefined') {
     }
 }
 
+const CARAMEL_ALLOWED_ORIGINS = new Set([
+    'http://localhost:58300',
+    'https://grabcaramel.com',
+    'https://dev.grabcaramel.com',
+])
+
 /* ---------- DOM waiters ---------- */
 function waitForElement(sel, timeout = 4000) {
     return new Promise((res, rej) => {
@@ -181,16 +187,69 @@ function getPrice(selector, { returnLargest } = {}) {
 }
 
 /* --------------------------------------------------  config cache */
+const STORE_CACHE_KEY = 'caramel_supported_stores'
+const STORE_CACHE_TTL = 60 * 60 * 1000 // 1 hour
+
 async function getDomainRecord(domain) {
     if (!getDomainRecord.cache) {
-        const r = await fetch(currentBrowser.runtime.getURL('supported.json'))
-        const dat = await r.json()
-        getDomainRecord.cache = Array.isArray(dat.supported)
-            ? dat.supported
-            : dat
-        log('Loaded supported domains')
+        // Check chrome.storage.local for a recent cached copy first
+        try {
+            const stored = await new Promise(r =>
+                currentBrowser.storage.local.get([STORE_CACHE_KEY], r),
+            )
+            const entry = stored?.[STORE_CACHE_KEY]
+            if (
+                entry?.data?.length &&
+                Date.now() - entry.ts < STORE_CACHE_TTL
+            ) {
+                getDomainRecord.cache = entry.data
+                log('Loaded supported domains from local cache')
+            }
+        } catch (_) {
+            /* storage read failed, proceed to API */
+        }
+
+        // Fetch fresh configs from the backend
+        if (!getDomainRecord.cache) {
+            try {
+                const resp = await new Promise(res =>
+                    currentBrowser.runtime.sendMessage(
+                        { action: 'fetchSupportedStores' },
+                        res,
+                    ),
+                )
+                if (resp?.supported?.length) {
+                    getDomainRecord.cache = resp.supported
+                    currentBrowser.storage.local.set({
+                        [STORE_CACHE_KEY]: {
+                            data: resp.supported,
+                            ts: Date.now(),
+                        },
+                    })
+                    log('Loaded supported domains from API')
+                }
+            } catch (e) {
+                log('fetchSupportedStores error', e)
+            }
+        }
+
+        // If API failed, try expired cache as last resort
+        if (!getDomainRecord.cache) {
+            try {
+                const stored = await new Promise(r =>
+                    currentBrowser.storage.local.get([STORE_CACHE_KEY], r),
+                )
+                const entry = stored?.[STORE_CACHE_KEY]
+                if (entry?.data?.length) {
+                    getDomainRecord.cache = entry.data
+                    log('Loaded supported domains from expired cache')
+                }
+            } catch (_) {
+                /* nothing we can do */
+            }
+        }
     }
-    return getDomainRecord.cache.find(r => domain.includes(r.domain))
+    return getDomainRecord.cache?.find(r => domain.includes(r.domain))
 }
 getDomainRecord.cache = null
 
@@ -312,9 +371,9 @@ async function applyCoupon(code, rec) {
 }
 
 /* --------------------------------------------------  coupon list */
-async function fetchCoupons(site, kw) {
+async function fetchCoupons(site, kw, category) {
     // Delegate network fetch to background/service worker to avoid CORS failures
-    const meta = { site, kw }
+    const meta = { site, kw, category }
     try {
         log(
             'AUTO_INSERT_FETCHCOUPONS_START',
@@ -323,7 +382,7 @@ async function fetchCoupons(site, kw) {
         recordTiming('AUTO_INSERT_FETCHCOUPONS_START', meta)
         const resp = await new Promise(res =>
             currentBrowser.runtime.sendMessage(
-                { action: 'fetchCoupons', site, kw },
+                { action: 'fetchCoupons', site, kw, category },
                 res,
             ),
         )
@@ -354,6 +413,7 @@ async function fetchCoupons(site, kw) {
 }
 async function getCoupons(rec) {
     let kw = ''
+    let category = ''
     if (rec.domain === 'amazon.com') {
         // Use fast in-page scrape (or same-origin cart fetch) instead of opening a new tab
         recordTiming('AUTO_INSERT_AMAZON_SCRAPE_REQUEST')
@@ -364,12 +424,37 @@ async function getCoupons(rec) {
         kw = (titles || []).join(',')
         log('Amazon keywords', kw)
     }
+    // Classify cart category for relevant coupon selection
+    try {
+        const cs = window.CaramelCartSignals
+        if (cs && typeof cs.collectCartSignals === 'function') {
+            const signals = await cs.collectCartSignals()
+            const result = await new Promise(res =>
+                currentBrowser.runtime.sendMessage(
+                    { action: 'classifyCart', signals },
+                    res,
+                ),
+            )
+            if (result && result.primary && !result.error) {
+                category = result.primary
+                log(
+                    'Cart category:',
+                    category,
+                    '(conf:',
+                    result.confidence,
+                    ')',
+                )
+            }
+        }
+    } catch (e) {
+        log('classifyCart non-fatal error', e)
+    }
     // Dev hook: deterministic coupons when using #caramel-test
     if (location.hash && location.hash.includes('caramel-test')) {
         log('DEV MODE: returning mocked coupons')
         return [{ code: 'TEST10' }, { code: 'TEST20' }, { code: 'TEST30' }]
     }
-    return fetchCoupons(rec.domain, kw)
+    return fetchCoupons(rec.domain, kw, category)
 }
 
 /* --------------------------------------------------  main runner */
@@ -461,7 +546,7 @@ async function startApplyingCoupons(rec) {
 
 /* --------------------------------------------------  listeners (unchanged) */
 window.addEventListener('message', ev => {
-    if (ev.origin !== 'https://grabcaramel.com') return
+    if (!CARAMEL_ALLOWED_ORIGINS.has(ev.origin)) return
     if (ev.data?.token) {
         currentBrowser.storage.sync.set(
             {
