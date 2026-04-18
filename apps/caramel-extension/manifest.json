@@ -16,12 +16,20 @@
         "192": "/icons/192.png",
         "512": "/icons/512.png"
     },
-    "permissions": ["tabs", "activeTab", "storage", "scripting", "identity"],
+    "permissions": [
+        "tabs",
+        "activeTab",
+        "storage",
+        "scripting",
+        "identity",
+        "management"
+    ],
     "host_permissions": [
         "https://www.amazon.com/*",
         "https://*.ebay.com/*",
         "https://*.codecademy.com/*",
         "https://*.grabcaramel.com/*",
+        "http://localhost:58000/*",
         "https://accounts.google.com/*",
         "https://appleid.apple.com/*"
     ],

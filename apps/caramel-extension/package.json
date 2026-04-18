@@ -9,13 +9,15 @@
         "prettier-write": "prettier --write '**/*.{js,html,css,json,md}'",
         "build": "rm -rf dist && mkdir -p dist && rsync -a --exclude='node_modules' --exclude='dist' --exclude='.git' --exclude='*.lock' --exclude='apple-extension' ./ dist/",
         "package": "zip -r extension.zip ./dist",
-        "dev": "web-ext run --target=chromium --source-dir=. --watch-file=./**/*"
+        "dev": "web-ext run --target=chromium --source-dir=. --watch-file=./**/*",
+        "test:e2e": "node scripts/test-extension.mjs"
     },
     "devDependencies": {
         "eslint-config-prettier": "^10.1.2",
         "eslint-plugin-html": "^8.1.2",
         "eslint-plugin-import": "^2.31.0",
         "eslint-plugin-prettier": "^5.2.6",
+        "jsdom": "^29.0.2",
         "prettier": "^3.5.3",
         "prettier-plugin-organize-imports": "^4.1.0"
     },

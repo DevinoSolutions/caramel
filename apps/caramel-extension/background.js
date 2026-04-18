@@ -4,9 +4,20 @@ const currentBrowser = (() => {
     throw new Error('Browser is not supported!')
 })()
 
-const CARAMEL_BASE_URL = 'https://grabcaramel.com'
+globalThis.CARAMEL_BASE_URL = 'https://grabcaramel.com'
 const EXTENSION_API_KEY = 'WXqEpm2uOV5jjJXPpnQFyZiNdaPVUrtd2LIrf4kc1JA'
-const caramelUrl = path => new URL(path, `${CARAMEL_BASE_URL}/`).toString()
+const caramelUrl = path =>
+    new URL(path, `${globalThis.CARAMEL_BASE_URL}/`).toString()
+
+// Auto-switch to localhost when loaded as unpacked dev extension
+if (typeof chrome !== 'undefined' && chrome.management) {
+    chrome.management.getSelf(info => {
+        if (info?.installType === 'development') {
+            globalThis.CARAMEL_BASE_URL = 'http://localhost:58000'
+            console.log('[caramel] DEV MODE: API → localhost:58000')
+        }
+    })
+}
 
 function isServiceWorkerContext() {
     return (

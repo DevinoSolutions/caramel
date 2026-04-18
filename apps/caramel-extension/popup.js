@@ -1,7 +1,21 @@
 /* global currentBrowser, fetchCoupons */
 
-const CARAMEL_BASE_URL = 'https://grabcaramel.com'
+let CARAMEL_BASE_URL = 'https://grabcaramel.com'
 const caramelUrl = path => new URL(path, `${CARAMEL_BASE_URL}/`).toString()
+
+async function _detectDevMode() {
+    return new Promise(resolve => {
+        if (typeof chrome === 'undefined' || !chrome.management)
+            return resolve()
+        chrome.management.getSelf(info => {
+            if (info?.installType === 'development') {
+                CARAMEL_BASE_URL = 'http://localhost:58000'
+                console.log('[caramel] DEV MODE: API → localhost:58000')
+            }
+            resolve()
+        })
+    })
+}
 
 /* ------------------------------------------------------------ */
 /*  Globals                                                     */
@@ -12,6 +26,8 @@ let returnView = null // callback for the “Back” button, set dynamically
 /*  Bootstrap                                                   */
 /* ------------------------------------------------------------ */
 document.addEventListener('DOMContentLoaded', async () => {
+    await _detectDevMode()
+
     const loader = document.getElementById('loading-container')
     if (loader) setTimeout(() => (loader.style.display = 'none'), 400)
 
