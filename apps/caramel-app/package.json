@@ -42,6 +42,7 @@
         "lodash.debounce": "^4.0.8",
         "next": "16.1.1",
         "postgres": "^3.4.9",
+        "posthog-js": "^1.399.2",
         "prisma": "^6.14.0",
         "rate-limiter-flexible": "^11.0.0",
         "react": "19.2.3",

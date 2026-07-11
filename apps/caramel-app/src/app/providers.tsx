@@ -6,6 +6,7 @@ import { Loader } from '@react-three/drei'
 import dynamic from 'next/dynamic'
 import { usePathname } from 'next/navigation'
 import Script from 'next/script'
+import { PostHogProvider } from 'posthog-js/react'
 import { ReactNode, useEffect, useMemo, useState } from 'react'
 import { Toaster } from 'sonner'
 
@@ -57,7 +58,7 @@ export default function Providers({ children }: { children: ReactNode }) {
         <Layout>{children}</Layout>
     )
 
-    return (
+    const tree = (
         <>
             <ThemeContext.Provider value={{ isDarkMode, switchTheme }}>
                 {content}
@@ -86,5 +87,26 @@ export default function Providers({ children }: { children: ReactNode }) {
         `}
             </Script>
         </>
+    )
+
+    // PostHog product analytics — no-op unless NEXT_PUBLIC_POSTHOG_KEY is set,
+    // so local/preview builds without the key are unaffected.
+    const posthogKey = process.env.NEXT_PUBLIC_POSTHOG_KEY
+    if (!posthogKey) return tree
+    return (
+        <PostHogProvider
+            apiKey={posthogKey}
+            options={{
+                api_host:
+                    process.env.NEXT_PUBLIC_POSTHOG_HOST ||
+                    'https://posthog.devino.ca',
+                capture_pageview: 'history_change',
+                capture_pageleave: true,
+                autocapture: true,
+                person_profiles: 'identified_only',
+            }}
+        >
+            {tree}
+        </PostHogProvider>
     )
 }
