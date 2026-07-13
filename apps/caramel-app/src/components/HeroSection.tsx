@@ -55,7 +55,7 @@ export default function HeroSection() {
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.6 }}
-                    className="mb-6 flex flex-col justify-center text-5xl font-bold md:text-3xl lg:text-4xl"
+                    className="mb-6 flex flex-col justify-center text-5xl font-bold lg:text-4xl md:text-3xl"
                 >
                     <motion.div
                         initial={{ opacity: 0, y: 20 }}
@@ -93,14 +93,14 @@ export default function HeroSection() {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.6, delay: 0.4 }}
-                    className="mx-auto mb-12 max-w-4xl text-xl leading-relaxed text-gray-600 md:text-base lg:text-lg dark:text-gray-300"
+                    className="mx-auto mb-12 max-w-4xl text-xl leading-relaxed text-gray-600 dark:text-gray-300 lg:text-lg md:text-base"
                 >
                     The{' '}
                     <motion.a
                         href="https://github.com/DevinoSolutions/caramel"
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-caramel cursor-pointer rounded px-1 font-semibold transition-all duration-300 hover:bg-orange-500/10"
+                        className="cursor-pointer rounded px-1 font-semibold text-caramel transition-all duration-300 hover:bg-orange-500/10"
                         whileHover={{
                             backgroundColor: 'rgba(234, 105, 37, 0.1)',
                             scale: 1.02,
@@ -111,7 +111,7 @@ export default function HeroSection() {
                     and{' '}
                     <motion.a
                         href="#why-not"
-                        className="text-caramel cursor-pointer rounded px-1 font-semibold transition-all duration-300 hover:bg-orange-500/10"
+                        className="cursor-pointer rounded px-1 font-semibold text-caramel transition-all duration-300 hover:bg-orange-500/10"
                         whileHover={{
                             backgroundColor: 'rgba(234, 105, 37, 0.1)',
                             scale: 1.02,
@@ -123,7 +123,7 @@ export default function HeroSection() {
                     best coupon codes at checkout —
                     <motion.a
                         href="#why-not"
-                        className="text-caramel cursor-pointer rounded px-1 font-semibold transition-all duration-300 hover:bg-orange-500/10"
+                        className="cursor-pointer rounded px-1 font-semibold text-caramel transition-all duration-300 hover:bg-orange-500/10"
                         whileHover={{
                             backgroundColor: 'rgba(234, 105, 37, 0.1)',
                             scale: 1.02,
@@ -135,7 +135,7 @@ export default function HeroSection() {
                     or{' '}
                     <motion.a
                         href="#why-not"
-                        className="text-caramel cursor-pointer rounded px-1 font-semibold transition-all duration-300 hover:bg-orange-500/10"
+                        className="cursor-pointer rounded px-1 font-semibold text-caramel transition-all duration-300 hover:bg-orange-500/10"
                         whileHover={{
                             backgroundColor: 'rgba(234, 105, 37, 0.1)',
                             scale: 1.02,
@@ -151,7 +151,7 @@ export default function HeroSection() {
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.6, delay: 0.6 }}
-                    className="mb-12 flex items-center justify-center gap-8 sm:flex-col sm:gap-6 md:gap-4 lg:gap-6"
+                    className="mb-12 flex items-center justify-center gap-8 lg:gap-6 md:gap-4 sm:flex-col sm:gap-6"
                 >
                     {[
                         { value: '5,000+', label: 'Supported Stores' },
@@ -169,7 +169,7 @@ export default function HeroSection() {
                                 }}
                                 whileHover={{ scale: 1.05 }}
                             >
-                                <div className="text-caramel text-3xl font-bold md:text-xl lg:text-2xl">
+                                <div className="text-3xl font-bold text-caramel lg:text-2xl md:text-xl">
                                     {stat.value}
                                 </div>
                                 <div className="text-sm text-gray-600 dark:text-gray-400">
@@ -177,7 +177,7 @@ export default function HeroSection() {
                                 </div>
                             </motion.div>
                             {index < 2 && (
-                                <div className="h-12 w-px bg-gray-300 sm:hidden dark:bg-gray-600"></div>
+                                <div className="h-12 w-px bg-gray-300 dark:bg-gray-600 sm:hidden"></div>
                             )}
                         </React.Fragment>
                     ))}
@@ -192,7 +192,7 @@ export default function HeroSection() {
                 >
                     <motion.a
                         href="#install-extension"
-                        className="from-caramel hover:to-caramel rounded-full bg-gradient-to-r to-orange-600 px-8 py-4 font-semibold text-black shadow-lg transition-all duration-300 hover:from-orange-600 hover:shadow-xl"
+                        className="rounded-full bg-gradient-to-r from-caramel to-orange-600 px-8 py-4 font-semibold text-black shadow-lg transition-all duration-300 hover:from-orange-600 hover:to-caramel hover:shadow-xl"
                         initial={{
                             scale: 1,
                             boxShadow: '0 0 10px rgba(234,105,37,0.6)',
@@ -222,7 +222,7 @@ export default function HeroSection() {
                         href="https://github.com/DevinoSolutions/caramel"
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="border-caramel/40 text-caramel hover:bg-caramel hover:border-caramel group inline-flex items-center gap-3 rounded-full border-2 bg-transparent px-6 py-3 text-sm font-semibold backdrop-blur-sm transition-all duration-300 hover:text-white"
+                        className="group inline-flex items-center gap-3 rounded-full border-2 border-caramel/40 bg-transparent px-6 py-3 text-sm font-semibold text-caramel backdrop-blur-sm transition-all duration-300 hover:border-caramel hover:bg-caramel hover:text-white"
                         whileHover={{ scale: 1.05 }}
                         whileTap={{ scale: 0.95 }}
                     >
@@ -231,7 +231,7 @@ export default function HeroSection() {
                     </motion.a>
                     <motion.a
                         href="#features"
-                        className="hover:border-caramel hover:text-caramel rounded-full border-2 border-gray-300/60 bg-transparent px-8 py-4 font-semibold text-gray-700 backdrop-blur-sm transition-all duration-300 dark:border-gray-600/60 dark:text-gray-300"
+                        className="rounded-full border-2 border-gray-300/60 bg-transparent px-8 py-4 font-semibold text-gray-700 backdrop-blur-sm transition-all duration-300 hover:border-caramel hover:text-caramel dark:border-gray-600/60 dark:text-gray-300"
                         whileHover={{
                             scale: 1.05,
                             borderColor: 'rgb(234, 105, 37)',

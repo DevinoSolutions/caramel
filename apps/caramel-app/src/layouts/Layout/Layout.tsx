@@ -14,7 +14,7 @@ export default function Layout({ children }: LayoutProps) {
         <div
             ref={ref}
             className={`flex min-h-screen flex-col overflow-x-hidden scroll-smooth ${
-                isDarkMode ? 'bg-darkBg dark' : 'light bg-gray-50'
+                isDarkMode ? 'dark bg-darkBg' : 'light bg-gray-50'
             } font-Roboto`}
         >
             <Header scrollRef={ref} />

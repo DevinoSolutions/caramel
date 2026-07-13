@@ -1,56 +1,58 @@
-import { couponsSql } from '@/lib/couponsDb'
-import {
-    checkRateLimit,
-    forbiddenOrigin,
-    isOriginAllowed,
-} from '@/lib/rateLimit'
-import { NextRequest, NextResponse } from 'next/server'
+import { handleRouteError } from '@/lib/api/handleRouteError'
+import { withRoute } from '@/lib/api/withRoute'
+import { incrementCouponUsage } from '@/lib/couponsRepo'
+import { NextResponse } from 'next/server'
+import { z } from 'zod'
+
+// Lenient — `id` is coerced/validated by hand below exactly as before
+// (PRESERVED per PLAN-F-007.md §Breaking, not tightened to 422): the
+// schema only needs to accept whatever shape a caller sends without ever
+// rejecting it itself, deferring to the same `!= null ? String(id) : ''`
+// + regex check the route always did.
+const IncrementBodySchema = z.object({
+    id: z.unknown().optional(),
+})
 
 // Usage counter for a coupon. POST (not GET) so it can't be triggered by
 // browser/CDN prefetch — a mutation must never ride a cacheable GET.
 // id accepted via ?id= (back-compat) or JSON body; coupons.id is an integer.
-export async function POST(req: NextRequest) {
-    if (!isOriginAllowed(req)) return forbiddenOrigin()
-    const limited = await checkRateLimit(req, 'mutation')
-    if (limited) return limited
-
-    const url = new URL(req.url)
-    let idRaw = url.searchParams.get('id') || ''
-    if (!idRaw) {
-        const body = (await req.json().catch(() => ({}))) as { id?: unknown }
-        idRaw = body?.id != null ? String(body.id) : ''
-    }
-    if (!/^\d{1,18}$/.test(idRaw)) {
-        return NextResponse.json(
-            { error: 'Invalid or missing coupon ID' },
-            { status: 400 },
-        )
-    }
-    const id = Number(idRaw)
-
-    try {
-        const rows = await couponsSql`
-            UPDATE coupons
-            SET times_used = times_used + 1,
-                last_time_used = NOW(),
-                updated_at = NOW()
-            WHERE id = ${id}
-            RETURNING id, code, site,
-                      times_used AS "timesUsed",
-                      last_time_used AS "last_time_used"
-        `
-        if (rows.length === 0) {
+export const POST = withRoute(
+    {
+        method: 'POST',
+        routeName: 'coupons/increment',
+        rateLimit: 'mutation',
+        origin: true,
+        body: IncrementBodySchema,
+    },
+    async ({ req, body }) => {
+        const url = new URL(req.url)
+        let idRaw = url.searchParams.get('id') || ''
+        if (!idRaw) {
+            idRaw = body?.id != null ? String(body.id) : ''
+        }
+        if (!/^\d{1,18}$/.test(idRaw)) {
             return NextResponse.json(
-                { error: 'Coupon not found' },
-                { status: 404 },
+                { error: 'Invalid or missing coupon ID' },
+                { status: 400 },
             )
         }
-        return NextResponse.json(rows[0])
-    } catch (error) {
-        console.error('Error incrementing coupon usage:', error)
-        return NextResponse.json(
-            { error: 'Error updating coupon usage.' },
-            { status: 500 },
-        )
-    }
-}
+        const id = Number(idRaw)
+
+        try {
+            const row = await incrementCouponUsage(id)
+            if (!row) {
+                return NextResponse.json(
+                    { error: 'Coupon not found' },
+                    { status: 404 },
+                )
+            }
+            return NextResponse.json(row)
+        } catch (error) {
+            console.error('Error incrementing coupon usage:', error)
+            return handleRouteError(error, {
+                req,
+                message: 'Error updating coupon usage.',
+            })
+        }
+    },
+)

@@ -6,10 +6,7 @@
  */
 import { JSDOM } from 'jsdom'
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
-import { createRequire } from 'node:module'
 import { join, resolve } from 'node:path'
-
-const require = createRequire(import.meta.url)
 
 const DEBUG_ROOT = resolve(
     process.argv[2] || 'c:/Users/alaed/Documents/Github/caramel-coupons/debug',

@@ -1,0 +1,51 @@
+# PLAN-F-014 — Dependency health: patch crit/high vulns, drop deprecated dep, pin versions, single lockfile, CI audit gate
+
+**Finding:** F-014 (Medium, dependencies) · **Effort:** M · **Wave:** 4 · **Sequence:** 13 (after F-015) · **Depends-on:** F-015 (package rename caramel-landing→caramel-app already landed — my lockfile regen bakes it in), F-004 (vitest infra — hosts the pinning-invariant guard), F-009 (CI/knip conventions + branch protection — my audit gate extends that guardrail work).
+
+## Premise notes (verified in code — two accurate re-scopings, NOT drive-by)
+
+- **`react-awesome-button` is DEAD, not merely deprecated.** Zero `.tsx` imports the component; the sole reference is `@import 'react-awesome-button/dist/styles.css'` (`apps/caramel-app/src/styles/globals.css:1`); no `aws-btn*` class is applied anywhere (grep across `src`: 0). It sits in `knip.json` `ignoreDependencies:39` masking that. → "Replacement" = **deletion**, behavior/visual-neutral by construction. The brief's "build a local styled button" contingency is unnecessary (there is no rendered button to match).
+- **THREE lockfiles, both nested are fossils.** `pnpm-workspace.yaml` = `packages: ['apps/*']` (root authoritative); **no `.npmrc` exists** repo-wide (no `shared-workspace-lockfile=false`). `apps/caramel-app/pnpm-lock.yaml` + `apps/caramel-extension/pnpm-lock.yaml` are stale pre-workspace-restructure artifacts (tooling §8), not consulted by a root install. Finding text said one nested; reality is two — same fix.
+- **Vuln/outdated counts (83 vulns; 50/51) are tool-sourced, NOT re-verified.** Per hard rules I run NO installs/audit; the executor runs `pnpm audit --prod` fresh at execution time and works from those numbers.
+
+## Executive summary
+
+Delete the dead `react-awesome-button` + its CSS import; delete both nested lockfiles so root is the single lockfile; patch crit/high prod vulns via in-major `pnpm up` + root `pnpm.overrides` (NO major bumps); pin every `^`/`~` range in all 3 manifests to the exact resolved (post-patch) version; switch the two extension workflows to `--frozen-lockfile` + root cache path; add a blocking `pnpm audit --prod` CI gate. ~7 files modified, 2 deleted, 1 guard test added. Breaking: **N** (resolution-neutral pinning + in-major patches only). Riskiest step: in-major minor bumps carrying silent behavior drift (e.g. @sentry/nextjs +47 minors, better-auth +19 patches) — e2e/Argos + build catch it.
+
+## Scope
+
+**Modify:** `package.json` (root: pin devDeps; add `pnpm.overrides`) · `apps/caramel-app/package.json` (pin; remove `react-awesome-button:48`) · `apps/caramel-extension/package.json` (pin) · `apps/caramel-app/src/styles/globals.css` (remove line 1) · `apps/caramel-app/knip.json` (remove `react-awesome-button` from ignoreDependencies:39) · `.github/workflows/checks-extension.yml` (:28 cache path→root, :30 `--frozen-lockfile`, install at repo root) · `.github/workflows/release-extension.yml` (:35 cache path→root, :37 `--frozen-lockfile`, install at repo root) · `.github/workflows/checks-app.yml` (new blocking `audit` job) · `pnpm-lock.yaml` (regenerated, never hand-edited).
+**Delete:** `apps/caramel-app/pnpm-lock.yaml`, `apps/caramel-extension/pnpm-lock.yaml`.
+**Create:** one guard test in the F-004 vitest suite (representative: `apps/caramel-app/tests/deps-pinned.test.ts`) asserting no manifest range floats.
+**OUT of scope (→ named known-debt, next cycle):** ALL major bumps — Prisma 6→7, TypeScript 5→7, Tailwind 3→4, ESLint 9→10, lint-staged 16→17, @argos-ci/cli 3→6, web-ext 8→10, knip 5→6, @react-email/render 1→2, react-infinite-scroll-component 6→7, @types/node 24→26 (each needs its own codemod/pinning strategy). DD2-12 (`--exclude='*.lock'` misses `pnpm-lock.yaml`) becomes **moot** once the nested lock is deleted — note only, no edit.
+
+## Approach
+
+Order: **delete-dead → patch vulns → pin from the patched lockfile → gate**. Pinning LAST so exact pins capture patched versions. Pin mechanism: after remediation, a one-off (uncommitted) Node script rewrites every `dependencies`/`devDependencies` value in the 3 manifests to the exact version reported by `pnpm ls -r --depth 0 --json`, preserving key order + 4-space indent; then `pnpm install` updates only the lockfile importer _specifiers_ — the `packages:` (resolution) block stays byte-identical, which is the zero-resolution-change proof.
+**Rejected:** local styled button (component never rendered — deletion is neutral) · `shared-workspace-lockfile=false` .npmrc (legitimizes the very drift we're removing) · `pnpm up --latest`/`pnpm dedupe` (mass resolution change, pulls majors, breaks the pin guarantee) · doing majors now (out of scope; separate train) · advisory-only `audit ... || true` (a non-blocking gate gets deleted — use a real one at an honest level).
+
+## Sequencing (each step ends with its check)
+
+1. **Baseline fixtures (before any edit):** capture `pnpm ls -r --depth 0 --json` and `pnpm audit --prod --json`; confirm current e2e+Argos baseline green. _Check:_ fixtures saved; baseline visual snapshot exists (makes the react-awesome-button removal diff meaningful).
+2. **Batch A — delete dead + collapse lockfiles:** remove `react-awesome-button` from app package.json:48, `globals.css:1`, knip ignoreDependencies:39; `git rm` both nested lockfiles; `pnpm install` at root → single regenerated root lockfile. _Check:_ `pnpm install --frozen-lockfile` clean; `pnpm -r type-check` 0; `pnpm -r build` ok; `pnpm --filter caramel-app test:e2e` + Argos **0 visual diff**; extension `node scripts/test-extension.mjs` pass. Commit checkpoint.
+3. **Batch B — direct in-major vuln patches:** `pnpm audit --prod --json` fresh; for each crit/high whose fix is within the current major of a DIRECT dep, `pnpm up <pkg>@<highest-in-major>`. _Check:_ type-check + build + e2e green; re-audit, record delta. Commit checkpoint.
+4. **Batch C — transitive pins + residual triage:** for crit/high in transitive deps with no direct bump, add `pnpm.overrides` (root package.json) pinning to a patched in-range version; `pnpm install`. Any crit/high resolvable ONLY by a major bump → **do not bump**; record as accepted-known-debt naming the blocking major. _Check:_ type-check + build + e2e green; `pnpm audit --prod` residual captured (drives step 6's gate level). Commit checkpoint.
+5. **Batch D — pin all ranges:** run the pin script over the 3 manifests (exact = installed); `pnpm install`. _Check:_ `git diff pnpm-lock.yaml` touches only importer specifier lines (no `packages:` churn) = resolution-neutral; `pnpm install --frozen-lockfile` clean; type-check + build green. Delete the script. Commit checkpoint.
+6. **Batch E — CI gate + guard test:** in `checks-extension.yml` set install step `working-directory: ${{ github.workspace }}` + `pnpm install --frozen-lockfile` and cache-dependency-path→`${{ github.workspace }}/pnpm-lock.yaml`; same in `release-extension.yml`. Add job `audit` to `checks-app.yml` (checkout → setup → `pnpm install --frozen-lockfile` → `pnpm audit --prod --audit-level=high`). **If** step-4/5 residual = 0 high+critical → level `high`; **else** level `critical` with an inline comment naming the major-blocked highs (instant-red gate gets deleted; honest gate gets kept). Add the vitest guard: reads all 3 package.json, asserts no value matches `/^[\^~]/`. _Check:_ guard test passes; workflows parse; the `audit` job is green at the chosen level. Commit checkpoint.
+7. **Squash → ONE commit** `fix(F-014): patch crit/high vulns, drop dead react-awesome-button, pin deps to a single root lockfile, add CI audit gate`.
+
+## Breaking changes
+
+None runtime-facing. Pinning is resolution-neutral (proven in step 5); vuln patches stay within current majors. Consumers: CI caching (extension workflows) — mitigated by the cache-path fix in the same commit; the deleted nested locks were consulted by nobody (root install is authoritative). react-awesome-button removal ships zero pixels changed (classes were never applied) — Argos is the tolerance check.
+
+## Test strategy
+
+**Pinning/characterization FIRST (step 1):** `deps.baseline.json` (full resolved tree) + baseline `pnpm audit --prod --json` + green e2e/Argos baseline — these characterize the starting tree and let step-5 prove resolution-neutrality and step-2 prove visual-neutrality. **Guard (step 6, F-004 vitest):** `deps-pinned.test.ts` fails if any of the 3 manifests reintroduces a `^`/`~` range — codifies the v5 no-floating-deps rule as an executable gate. **Per-batch "green" =** `pnpm -r type-check` 0 errors · `pnpm -r build` success · `pnpm --filter caramel-app test:e2e` + Argos 0 visual diff · extension `test:e2e` pass. **Final green =** `pnpm install --frozen-lockfile` from a clean clone succeeds · `pnpm audit --prod --audit-level=<chosen>` exit 0 · guard test passes.
+
+## Rollback
+
+Each batch is an internal checkpoint commit on the fix branch; a failed bump batch → `git reset --hard <prev checkpoint>` restores pins + lockfile with no re-derivation. Manifests + lockfile are tracked, so any step reverts via `git checkout`. Final artifact is one squashed commit; reverting it restores the exact prior dependency state atomically.
+
+## Risk
+
+**Blast radius:** every app+extension dependency — but bounded: pinning changes only specifier strings (packages block unchanged), and vuln bumps never cross a major. **Worst case:** an in-major minor bump (Sentry/better-auth are the widest jumps) breaks runtime silently past tsc — early-warning: Argos visual diff, e2e failure, or build break; mitigation: batches B/C isolate bumps so the offending `pnpm up` reverts alone and that dep moves to known-debt. **Second risk:** a blocking `pnpm audit --prod` gate can go red later with no code change as new advisories publish — accepted and documented; `--prod` + the chosen level bound the noise; advisory-only alternative rejected (gets ignored). **Premises verified-in-code:** caret ranges in all 3 manifests, react-awesome-button dead (deletion-safe), three lockfiles, workspace-root authoritative, no `.npmrc`, CI install/cache lines, DD2-12 glob, F-015 rename dependency. **Assumed (tool-sourced, executor re-runs — I ran no installs per hard rules):** the 83-vuln / 50-51-outdated counts.

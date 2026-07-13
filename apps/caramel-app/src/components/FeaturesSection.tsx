@@ -87,8 +87,8 @@ export default function FeaturesSection() {
         <section id="features" className="relative overflow-hidden py-32">
             {/* Background Elements */}
             <div className="absolute inset-0">
-                <div className="via-caramel/20 absolute left-0 top-0 h-px w-full bg-gradient-to-r from-transparent to-transparent"></div>
-                <div className="via-caramel/20 absolute bottom-0 left-0 h-px w-full bg-gradient-to-r from-transparent to-transparent"></div>
+                <div className="absolute left-0 top-0 h-px w-full bg-gradient-to-r from-transparent via-caramel/20 to-transparent"></div>
+                <div className="absolute bottom-0 left-0 h-px w-full bg-gradient-to-r from-transparent via-caramel/20 to-transparent"></div>
             </div>
 
             <div className="relative z-10 mx-auto max-w-7xl px-6 lg:px-8">
@@ -100,10 +100,10 @@ export default function FeaturesSection() {
                     transition={{ duration: 0.6, ease: 'easeOut' }}
                     className="mb-20 text-center"
                 >
-                    <h2 className="text-caramel mb-8 text-5xl font-extrabold lg:text-4xl">
+                    <h2 className="mb-8 text-5xl font-extrabold text-caramel lg:text-4xl">
                         Why Choose Caramel?
                     </h2>
-                    <p className="mx-auto max-w-3xl text-xl leading-relaxed text-gray-600 lg:text-lg dark:text-gray-300">
+                    <p className="mx-auto max-w-3xl text-xl leading-relaxed text-gray-600 dark:text-gray-300 lg:text-lg">
                         The ethical alternative that puts your privacy first
                         while maximizing your savings
                     </p>
@@ -117,7 +117,7 @@ export default function FeaturesSection() {
                     transition={{ duration: 0.6, delay: 0.2, ease: 'easeOut' }}
                     className="mb-24"
                 >
-                    <div className="grid grid-cols-3 gap-8 sm:grid-cols-1 lg:grid-cols-2">
+                    <div className="grid grid-cols-3 gap-8 lg:grid-cols-2 sm:grid-cols-1">
                         {features.map((feat, index) => (
                             <motion.div
                                 key={feat.title}
@@ -141,7 +141,7 @@ export default function FeaturesSection() {
                                         '0 20px 40px rgba(234,105,37,0.15)',
                                     transition: { duration: 0.2 },
                                 }}
-                                className="from-caramel/5 to-caramel/5 dark:from-caramel/10 dark:to-caramel/10 border-caramel/20 dark:border-caramel/30 group relative overflow-hidden rounded-2xl border bg-gradient-to-br via-orange-50/30 p-8 shadow-md sm:p-6 dark:via-orange-900/20"
+                                className="group relative overflow-hidden rounded-2xl border border-caramel/20 bg-gradient-to-br from-caramel/5 via-orange-50/30 to-caramel/5 p-8 shadow-md dark:border-caramel/30 dark:from-caramel/10 dark:via-orange-900/20 dark:to-caramel/10 sm:p-6"
                             >
                                 {/* Animated Background Pattern */}
                                 <div className="absolute inset-0 opacity-5">
@@ -173,7 +173,7 @@ export default function FeaturesSection() {
                                 <div className="relative z-10 text-center">
                                     {/* Large icon - hidden on lg and down */}
                                     <motion.div
-                                        className="text-caramel mx-auto mb-6 text-6xl transition-transform duration-300 lg:hidden xl:block"
+                                        className="mx-auto mb-6 text-6xl text-caramel transition-transform duration-300 xl:block lg:hidden"
                                         animate={{
                                             rotate: [0, 2, -2, 0],
                                             scale: [1, 1.02, 1],
@@ -192,27 +192,27 @@ export default function FeaturesSection() {
                                     {/* Mobile layout - icon + title in one row */}
                                     <div className="hidden text-left lg:block">
                                         <div className="mb-3 flex items-center">
-                                            <span className="text-caramel mr-3 flex-shrink-0 text-2xl">
+                                            <span className="mr-3 flex-shrink-0 text-2xl text-caramel">
                                                 {feat.icon}
                                             </span>
-                                            <h3 className="text-2xl font-bold tracking-tight text-gray-800 sm:text-xl dark:text-white">
+                                            <h3 className="text-2xl font-bold tracking-tight text-gray-800 dark:text-white sm:text-xl">
                                                 {feat.title}
                                             </h3>
                                         </div>
-                                        <p className="ml-11 text-base leading-relaxed text-gray-600 sm:text-sm dark:text-gray-400">
+                                        <p className="ml-11 text-base leading-relaxed text-gray-600 dark:text-gray-400 sm:text-sm">
                                             {feat.desc}
                                         </p>
                                     </div>
 
                                     {/* Desktop layout - original centered layout */}
-                                    <div className="lg:hidden xl:block">
-                                        <h3 className="mb-4 text-3xl font-bold tracking-tight text-gray-800 sm:text-2xl dark:text-white">
+                                    <div className="xl:block lg:hidden">
+                                        <h3 className="mb-4 text-3xl font-bold tracking-tight text-gray-800 dark:text-white sm:text-2xl">
                                             {feat.title}
                                         </h3>
-                                        <p className="mb-4 text-lg leading-relaxed text-gray-600 sm:text-base dark:text-gray-400">
+                                        <p className="mb-4 text-lg leading-relaxed text-gray-600 dark:text-gray-400 sm:text-base">
                                             {feat.desc}
                                         </p>
-                                        <p className="text-sm leading-relaxed text-gray-500 sm:text-xs dark:text-gray-400">
+                                        <p className="text-sm leading-relaxed text-gray-500 dark:text-gray-400 sm:text-xs">
                                             {feat.detail}
                                         </p>
                                     </div>
@@ -231,7 +231,7 @@ export default function FeaturesSection() {
                     className="mb-24"
                 >
                     <div className="mb-12 text-center">
-                        <h3 className="mb-4 text-3xl font-extrabold text-gray-900 lg:text-2xl dark:text-white">
+                        <h3 className="mb-4 text-3xl font-extrabold text-gray-900 dark:text-white lg:text-2xl">
                             Caramel vs Others
                         </h3>
                         <p className="mx-auto max-w-2xl text-gray-600 dark:text-gray-400">
@@ -252,9 +252,9 @@ export default function FeaturesSection() {
                                     delay: index * 0.1,
                                     ease: 'easeOut',
                                 }}
-                                className="dark:bg-darkerBg dark:border-caramel/30 overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm"
+                                className="overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm dark:border-caramel/30 dark:bg-darkerBg"
                             >
-                                <div className="grid grid-cols-2 sm:grid-cols-1 lg:grid-cols-2">
+                                <div className="grid grid-cols-2 lg:grid-cols-2 sm:grid-cols-1">
                                     {/* Others */}
                                     <div className="flex items-center space-x-4 p-6">
                                         <div className="flex-shrink-0">
@@ -271,12 +271,12 @@ export default function FeaturesSection() {
                                     </div>
 
                                     {/* Caramel */}
-                                    <div className="from-caramel/5 to-caramel/5 dark:from-caramel/10 dark:to-caramel/10 border-caramel/20 flex items-center space-x-4 border-l bg-gradient-to-br via-orange-50/30 p-6 sm:border-l-0 sm:border-t dark:via-orange-900/20">
+                                    <div className="flex items-center space-x-4 border-l border-caramel/20 bg-gradient-to-br from-caramel/5 via-orange-50/30 to-caramel/5 p-6 dark:from-caramel/10 dark:via-orange-900/20 dark:to-caramel/10 sm:border-l-0 sm:border-t">
                                         <div className="flex-shrink-0">
-                                            <HiCheckCircle className="text-caramel h-8 w-8" />
+                                            <HiCheckCircle className="h-8 w-8 text-caramel" />
                                         </div>
                                         <div className="flex-1">
-                                            <h4 className="text-caramel mb-1 text-sm font-medium uppercase tracking-wide">
+                                            <h4 className="mb-1 text-sm font-medium uppercase tracking-wide text-caramel">
                                                 Caramel
                                             </h4>
                                             <p className="font-medium text-gray-900 dark:text-white">
@@ -297,7 +297,7 @@ export default function FeaturesSection() {
                     whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true }}
                     transition={{ duration: 0.6, delay: 0.2, ease: 'easeOut' }}
-                    className="from-caramel rounded-3xl bg-gradient-to-r to-orange-600 p-12 text-center text-black shadow-lg lg:p-8"
+                    className="rounded-3xl bg-gradient-to-r from-caramel to-orange-600 p-12 text-center text-black shadow-lg lg:p-8"
                 >
                     <h3 className="mb-6 text-3xl font-extrabold tracking-tight lg:text-2xl">
                         Available on Your Favorite Browser!
@@ -305,7 +305,7 @@ export default function FeaturesSection() {
                     <p className="mx-auto mb-8 max-w-2xl text-lg leading-relaxed opacity-90">
                         Start saving with Caramel on any browser!
                     </p>
-                    <div className="flex justify-center gap-6 sm:flex-col sm:items-center sm:gap-4 lg:gap-4">
+                    <div className="flex justify-center gap-6 lg:gap-4 sm:flex-col sm:items-center sm:gap-4">
                         {[
                             {
                                 name: 'Chrome',
@@ -355,7 +355,7 @@ export default function FeaturesSection() {
                                             transition: { duration: 0.2 },
                                         }}
                                         whileTap={{ scale: 0.95 }}
-                                        className="text-caramel inline-flex items-center rounded-full bg-white px-8 py-4 font-semibold shadow-md transition-all duration-200 hover:bg-orange-50 hover:shadow-xl md:min-w-[200px]"
+                                        className="inline-flex items-center rounded-full bg-white px-8 py-4 font-semibold text-caramel shadow-md transition-all duration-200 hover:bg-orange-50 hover:shadow-xl md:min-w-[200px]"
                                     >
                                         <span className="mr-3 text-2xl">
                                             {browser.icon}

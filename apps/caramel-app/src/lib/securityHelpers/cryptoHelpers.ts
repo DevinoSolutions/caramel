@@ -60,7 +60,10 @@ export function decrypt(base64Text: string, key: string): string {
  *  - Reads the 'user-agent'
  *  - Encrypts the entire JSON payload as one string
  */
-export function encryptJsonServer(req: NextApiRequest, payload: any): string {
+export function encryptJsonServer(
+    req: NextApiRequest,
+    payload: unknown,
+): string {
     // Extract domain (strip any :port)
     const domain = (req.headers.host || '').replace(/:\d+$/, '')
     // Extract user agent
@@ -79,7 +82,7 @@ export function encryptJsonServer(req: NextApiRequest, payload: any): string {
  *  - Uses window.location.hostname (no port) and navigator.userAgent
  *  - Decrypts the given base64Text to restore the original JSON object
  */
-export function decryptJsonClient(base64Text: string): any {
+export function decryptJsonClient(base64Text: string): unknown {
     // Domain (no port in the browser)
     const domain = window.location.hostname
     // User agent

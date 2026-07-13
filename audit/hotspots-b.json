@@ -1,0 +1,122 @@
+[
+    {
+        "path": "apps/caramel-extension/background.js:23",
+        "reason": "Hardcoded EXTENSION_API_KEY exposed in source: 'WXqEpm2uOV5jjJXPpnQFyZiNdaPVUrtd2LIrf4kc1JA'",
+        "candidate_severity": "Critical",
+        "lenses": ["exposed-secret", "fire-and-forget"]
+    },
+    {
+        "path": "apps/caramel-app/src/lib/securityHelpers/decryptJsonData.ts:20",
+        "reason": "catch block silently returns unencrypted resData on crypto failure, potentially exposing sensitive plaintext",
+        "candidate_severity": "High",
+        "lenses": ["silent-failure", "security-regression"]
+    },
+    {
+        "path": "apps/caramel-extension/background.js:161",
+        "reason": "Fire-and-forget async pattern: fetch().then(r => {...}).then(resp => sendResponse(resp)).catch(...) without await",
+        "candidate_severity": "High",
+        "lenses": ["fire-and-forget", "silent-failure"]
+    },
+    {
+        "path": "apps/caramel-extension/background.js:191",
+        "reason": "Fire-and-forget with fallback to empty array: fetchWithTimeout(...).then(...).catch(err => sendResponse({coupons: []}))",
+        "candidate_severity": "High",
+        "lenses": ["fire-and-forget", "silent-failure"]
+    },
+    {
+        "path": "apps/caramel-app/src/lib/initMiddleware.ts:3",
+        "reason": "Exported function accepts untyped middleware: any parameter, no type safety for decorator pattern",
+        "candidate_severity": "High",
+        "lenses": ["missing-pre-AI-basics", "pointless-coupling"]
+    },
+    {
+        "path": "apps/caramel-app/pnpm-lock.yaml",
+        "reason": "Nested pnpm-lock.yaml in apps/caramel-app violates monorepo rule (root also has pnpm-lock.yaml), causes version drift",
+        "candidate_severity": "High",
+        "lenses": ["version-drift", "duplication"]
+    },
+    {
+        "path": "apps/caramel-extension",
+        "reason": "Extension built with plain JavaScript without TypeScript; no type safety for message schemas (background.js, popup.js, inject.js all untyped)",
+        "candidate_severity": "High",
+        "lenses": ["missing-pre-AI-basics", "producer-consumer-drift"]
+    },
+    {
+        "path": "apps/caramel-app/src/lib/securityHelpers/cryptoHelpers.ts:63",
+        "reason": "encryptJsonServer(req: NextApiRequest, payload: any) accepts untyped payload, no validation before encryption",
+        "candidate_severity": "High",
+        "lenses": ["missing-pre-AI-basics"]
+    },
+    {
+        "path": "apps/caramel-app/src/app/api",
+        "reason": "No request ID / trace ID propagation across API routes to Sentry; extension -> API calls lose correlation context",
+        "candidate_severity": "High",
+        "lenses": ["broken-trace-propagation"]
+    },
+    {
+        "path": "apps/caramel-app/src/app",
+        "reason": "LLM classifier (cart classification via OpenRouter) has no AI quality evals; model degradation undetectable in CI",
+        "candidate_severity": "High",
+        "lenses": ["missing-evals", "unmarked-incomplete"]
+    },
+    {
+        "path": "apps/caramel-app/src",
+        "reason": "No environment validation (zod/dotenv); missing OPENROUTER_API_KEY, EXTENSION_OAUTH_STATE_SECRET, etc. fail at runtime",
+        "candidate_severity": "High",
+        "lenses": ["missing-pre-AI-basics", "trial-and-error-bloat"]
+    },
+    {
+        "path": "apps/caramel-extension/popup.js:0",
+        "reason": "No TypeScript or schema validation; popup<->background message protocol untyped; extension<->app API contracts loose",
+        "candidate_severity": "High",
+        "lenses": ["producer-consumer-drift", "missing-pre-AI-basics"]
+    },
+    {
+        "path": "apps/caramel-app/src/app/api/coupons/expire/route.ts:16",
+        "reason": "EXTENSION_API_KEY via process.env with no validation; route depends on secret being set but no startup check",
+        "candidate_severity": "High",
+        "lenses": ["missing-pre-AI-basics", "trial-and-error-bloat"]
+    },
+    {
+        "path": "apps/caramel-app/src/app/api/classify-cart/route.ts:67",
+        "reason": "req.json().catch(() => null) silently swallows JSON parse errors; payload size check at line 60 can be bypassed",
+        "candidate_severity": "Medium",
+        "lenses": ["silent-failure"]
+    },
+    {
+        "path": "apps/caramel-app/src/app/api/extension/oauth/route.ts:83",
+        "reason": "await req.json().catch(() => ({})) silently swallows errors; missing provider/code checks at lines 92-96 proceed with empty object",
+        "candidate_severity": "Medium",
+        "lenses": ["silent-failure"]
+    },
+    {
+        "path": "apps/caramel-app/src/lib/openrouter.ts:58",
+        "reason": "await res.text().catch(() => '') silently swallows text parsing errors; error detail discarded, makes debugging harder",
+        "candidate_severity": "Medium",
+        "lenses": ["silent-failure"]
+    },
+    {
+        "path": "apps/caramel-extension/background.js:246",
+        "reason": "Empty catch block at line 246 (in extension page URL check), returns early without logging",
+        "candidate_severity": "Medium",
+        "lenses": ["silent-failure"]
+    },
+    {
+        "path": "apps/caramel-app/src/components/coupons/coupon-filters.tsx:92",
+        "reason": "React Select component style props use untyped any callbacks (control, menu, option, singleValue, input, placeholder)",
+        "candidate_severity": "Medium",
+        "lenses": ["missing-pre-AI-basics"]
+    },
+    {
+        "path": "apps/caramel-app/src/lib/apiResponseNext.ts:36",
+        "reason": "apiResponseNext export with untyped any parameters (metadata?: any, viewport?: any)",
+        "candidate_severity": "Medium",
+        "lenses": ["missing-pre-AI-basics"]
+    },
+    {
+        "path": "local-dev/verify_test_small3.txt",
+        "reason": "Stray artifact file in repo (plaintext test data), no clear purpose or cleanup marker",
+        "candidate_severity": "Low",
+        "lenses": ["stray-artifact"]
+    }
+]

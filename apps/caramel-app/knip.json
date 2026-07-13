@@ -6,7 +6,7 @@
         "e2e/**/*.spec.ts",
         "scripts/*.ts"
     ],
-    "project": ["src/**/*.{ts,tsx}", "e2e/**/*.ts"],
+    "project": ["src/**/*.{ts,tsx}", "e2e/**/*.ts", "evals/**/*.ts"],
     "ignore": [
         "eslint.config.mjs",
         "postcss.config.mjs",
@@ -15,28 +15,19 @@
         "public/sw.js",
         "src/components/StoreButtons.tsx",
         "src/lib/capitalizeFirst.ts",
-        "src/lib/cors.ts",
-        "src/lib/initMiddleware.ts",
-        "src/lib/middlewares/**",
-        "src/lib/securityHelpers/apiResponse.ts",
         "src/lib/gtag.ts",
         "src/lib/securityHelpers/cryptoHelpers.ts"
     ],
     "ignoreDependencies": [
         "@argos-ci/cli",
         "@tailwindcss/forms",
-        "@types/cors",
         "@types/gtag.js",
-        "@types/jsonwebtoken",
         "@typescript-eslint/parser",
         "eslint-config-next",
         "prettier-plugin-organize-imports",
         "prettier-plugin-tailwindcss",
         "@use-gesture/react",
-        "cors",
         "gsap",
-        "jsonwebtoken",
-        "react-awesome-button",
         "react-fast-marquee",
         "react-lottie-player",
         "react-type-animation"

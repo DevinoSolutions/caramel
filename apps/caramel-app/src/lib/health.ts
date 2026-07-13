@@ -1,3 +1,5 @@
+import { env } from '@/lib/env'
+
 export interface HealthResult {
     status: 'ok' | 'error'
     service: string
@@ -29,7 +31,7 @@ export async function timedCheck(
 }
 
 export function authorize(request: Request): boolean {
-    const secret = process.env.UPKUMA_HEALTH_SECRET
+    const secret = env.UPKUMA_HEALTH_SECRET
     if (!secret) return false
     const auth = request.headers.get('authorization') || ''
     return auth === `Bearer ${secret}`

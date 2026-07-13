@@ -1,0 +1,32 @@
+[
+    {
+        "id": "F-011",
+        "verdict": "paraphrase",
+        "confidence": 0.85,
+        "note": "README quote is verbatim; error.tsx confirmed absent; but workflows contain 'prisma migrate deploy' (not app deploy/dokploy); Sentry automaticVercelMonitors:true with Dokploy deployment is real config mismatch; no runbook found."
+    },
+    {
+        "id": "F-012",
+        "verdict": "verbatim",
+        "confidence": 0.95,
+        "note": "All citations exact: cartClassifier.ts prompt, openrouter.ts DEFAULT_MODEL='openai/gpt-5-mini'; no eval suite or CI gate for LLM classifier verified."
+    },
+    {
+        "id": "F-013",
+        "verdict": "paraphrase",
+        "confidence": 0.8,
+        "note": "Exported any-typed surfaces confirmed (decryptJsonData, encryptJsonServer, initMiddleware, others); actual count is 23 instances not 26; exported surface coverage claim is accurate."
+    },
+    {
+        "id": "F-014",
+        "verdict": "paraphrase",
+        "confidence": 0.75,
+        "note": "Caret ranges in package.json confirmed; react-awesome-button found; vuln counts (83 critical/high) are tool-sourced, not re-verified; 50/51 outdated not independently verified."
+    },
+    {
+        "id": "F-015",
+        "verdict": "verbatim",
+        "confidence": 0.95,
+        "note": "All 5 sub-claims verified: amazon.js listed in firefox manifest but file absent; verify_test_small3.txt present; nul file tracked at root; caramel-app named caramel-landing; .prettierrc.json uses invalid key tailwindConfigPath."
+    }
+]

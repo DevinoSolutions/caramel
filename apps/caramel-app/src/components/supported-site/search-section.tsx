@@ -71,7 +71,7 @@ export default function SearchSection() {
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.5 }}
-                    className="from-caramel dark:to-caramel mb-10 bg-gradient-to-r to-orange-600 bg-clip-text text-center text-4xl font-extrabold text-transparent md:text-3xl dark:from-orange-400"
+                    className="mb-10 bg-gradient-to-r from-caramel to-orange-600 bg-clip-text text-center text-4xl font-extrabold text-transparent dark:from-orange-400 dark:to-caramel md:text-3xl"
                 >
                     Is your favourite store supported?
                 </motion.h1>
@@ -82,7 +82,7 @@ export default function SearchSection() {
                     value={query}
                     onChange={e => setQuery(e.target.value)}
                     placeholder="https://example.com"
-                    className="border-caramel/30 focus:border-caramel w-full rounded-full border-2 bg-white px-6 py-4 text-lg placeholder-gray-400 shadow-md outline-none transition-all sm:text-base dark:bg-gray-900 dark:text-white dark:placeholder-gray-500 dark:focus:border-orange-400"
+                    className="w-full rounded-full border-2 border-caramel/30 bg-white px-6 py-4 text-lg placeholder-gray-400 shadow-md outline-none transition-all focus:border-caramel dark:bg-gray-900 dark:text-white dark:placeholder-gray-500 dark:focus:border-orange-400 sm:text-base"
                 />
 
                 {/* loader */}
@@ -108,7 +108,7 @@ export default function SearchSection() {
                     >
                         {sites.length ? (
                             <div className="grid grid-cols-2 gap-6 pb-10 md:grid-cols-1">
-                                {sites.map((s, index) => (
+                                {sites.map(s => (
                                     <motion.div
                                         key={s}
                                         initial={{ opacity: 0, y: 20 }}
@@ -145,7 +145,7 @@ export default function SearchSection() {
                                             🏆 Top Supported Websites
                                         </motion.h2>
                                         <div className="grid grid-cols-2 gap-6 pb-10 md:grid-cols-1">
-                                            {topSites.map((s, index) => (
+                                            {topSites.map(s => (
                                                 <motion.div
                                                     key={s}
                                                     initial={{

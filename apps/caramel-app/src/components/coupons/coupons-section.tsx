@@ -56,6 +56,12 @@ export default function CouponsSection({
     const [page, setPage] = useState(1)
     const [isLoadingMore, setIsLoadingMore] = useState(false)
     const [filters, setFilters] = useState<CouponFilters>(initialFiltersState)
+    // `setStoreOptions` is never called (its sibling `setDiscountOptions`
+    // below IS wired up from the same fetch) — `storeOptions` can never
+    // change from `[]`. Flagged as a new-finding candidate (looks like a
+    // forgotten fetch-response field, not dead code); not this finding's
+    // call to fix.
+    // oxlint-disable-next-line no-unused-vars
     const [storeOptions, setStoreOptions] = useState<string[]>([])
     const [discountOptions, setDiscountOptions] = useState<string[]>([])
     const couponsLengthRef = useRef(initialCoupons?.length || 0)
@@ -251,7 +257,7 @@ export default function CouponsSection({
                 transition={{ duration: 0.5 }}
                 className="mb-8 text-center"
             >
-                <h1 className="from-caramel dark:to-caramel mb-4 bg-gradient-to-r to-orange-600 bg-clip-text text-5xl font-extrabold text-transparent sm:text-3xl md:text-4xl dark:from-orange-400">
+                <h1 className="mb-4 bg-gradient-to-r from-caramel to-orange-600 bg-clip-text text-5xl font-extrabold text-transparent dark:from-orange-400 dark:to-caramel md:text-4xl sm:text-3xl">
                     {heroTitle}
                 </h1>
                 {heroSubtitle ? (
@@ -289,7 +295,7 @@ export default function CouponsSection({
                             animate={{ opacity: 1 }}
                             className="flex min-h-[400px] flex-col items-center justify-center rounded-3xl bg-white p-12 shadow-lg dark:bg-gray-900"
                         >
-                            <p className="from-caramel mb-4 bg-gradient-to-r to-orange-600 bg-clip-text text-4xl font-bold text-transparent">
+                            <p className="mb-4 bg-gradient-to-r from-caramel to-orange-600 bg-clip-text text-4xl font-bold text-transparent">
                                 No coupons found
                             </p>
                             <p className="text-gray-600 dark:text-gray-400">
@@ -313,7 +319,7 @@ export default function CouponsSection({
                                 <motion.div
                                     initial={{ opacity: 0 }}
                                     animate={{ opacity: 1 }}
-                                    className="from-caramel mt-8 rounded-3xl bg-gradient-to-r to-orange-600 p-8 text-center text-white shadow-xl"
+                                    className="mt-8 rounded-3xl bg-gradient-to-r from-caramel to-orange-600 p-8 text-center text-white shadow-xl"
                                 >
                                     <p className="text-lg font-semibold">
                                         You&apos;ve seen all available coupons.
@@ -430,7 +436,7 @@ export default function CouponsSection({
                         </p>
                         <Link
                             href="/supported-stores"
-                            className="from-caramel mt-4 inline-flex items-center justify-center rounded-full bg-gradient-to-r to-orange-600 px-4 py-2 text-xs font-semibold text-white shadow-md transition hover:opacity-90"
+                            className="mt-4 inline-flex items-center justify-center rounded-full bg-gradient-to-r from-caramel to-orange-600 px-4 py-2 text-xs font-semibold text-white shadow-md transition hover:opacity-90"
                         >
                             View All Supported Stores
                         </Link>

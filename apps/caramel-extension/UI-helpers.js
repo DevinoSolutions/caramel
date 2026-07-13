@@ -2,6 +2,9 @@
 
 /* -------------------------------------------------- UI prompt   */
 
+// Called from shared-utils.js: content_scripts share one global scope per
+// manifest.json (no ES modules), so per-file analysis can't see this call.
+// oxlint-disable-next-line no-unused-vars
 async function insertCaramelPrompt(domainRecord) {
     if (document.getElementById('caramel-small-prompt')) return
     const container = document.createElement('div')
@@ -37,7 +40,7 @@ async function insertCaramelPrompt(domainRecord) {
                     domain: domainRecord?.domain || location.hostname,
                     t: performance.now(),
                 })
-        } catch (e) {
+        } catch {
             // ignore
         }
         startApplyingCoupons(domainRecord).catch(err => {
@@ -74,6 +77,9 @@ async function insertCaramelPrompt(domainRecord) {
     document.body.appendChild(container)
 }
 
+// Called from shared-utils.js (see insertCaramelPrompt above for why
+// per-file analysis misses this).
+// oxlint-disable-next-line no-unused-vars
 async function showTestingModal(title = '', noLoading = false) {
     const overlay = document.createElement('div')
     overlay.id = 'caramel-testing-overlay'
@@ -123,7 +129,7 @@ async function showTestingModal(title = '', noLoading = false) {
     try {
         modal.tabIndex = -1
         modal.focus()
-    } catch (e) {
+    } catch {
         /* focus is best-effort */
     }
 }
@@ -133,6 +139,9 @@ async function showTestingModal(title = '', noLoading = false) {
  *  - Changes the status text
  *  - Updates the progress bar width based on current vs total
  */
+// Called from shared-utils.js (see insertCaramelPrompt above for why
+// per-file analysis misses this).
+// oxlint-disable-next-line no-unused-vars
 async function updateTestingModal(currentIndex, total, code) {
     // Update status text
     const statusEl = document.getElementById('caramel-test-status')
@@ -165,7 +174,7 @@ async function caramelCopyText(text) {
             await navigator.clipboard.writeText(text)
             return true
         }
-    } catch (e) {
+    } catch {
         // page may block the async clipboard API — fall through to execCommand
     }
     try {
@@ -181,11 +190,14 @@ async function caramelCopyText(text) {
         const ok = document.execCommand('copy')
         document.body.removeChild(ta)
         return ok
-    } catch (e) {
+    } catch {
         return false
     }
 }
 
+// Called from shared-utils.js (see insertCaramelPrompt above for why
+// per-file analysis misses this).
+// oxlint-disable-next-line no-unused-vars
 async function showFinalModal(
     savingsAmount,
     code,
@@ -370,7 +382,7 @@ async function showFinalModal(
     try {
         modal.tabIndex = -1
         modal.focus()
-    } catch (e) {
+    } catch {
         /* focus is best-effort */
     }
 }

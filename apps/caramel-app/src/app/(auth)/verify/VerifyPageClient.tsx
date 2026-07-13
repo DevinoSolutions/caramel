@@ -56,7 +56,7 @@ export default function VerifyPageClient() {
                 'Verification email sent! Please check your inbox and spam folder.',
                 { duration: 5000 },
             )
-        } catch (error) {
+        } catch {
             toast.error('Failed to send verification email. Please try again.')
         } finally {
             setResendingEmail(false)
@@ -71,7 +71,7 @@ export default function VerifyPageClient() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.5 }}
             >
-                <h2 className="text-caramel mb-6 flex justify-center gap-2 text-center text-2xl font-bold">
+                <h2 className="mb-6 flex justify-center gap-2 text-center text-2xl font-bold text-caramel">
                     <div className="my-auto">Verify your</div>
                     <Image
                         src="/full-logo.png"
@@ -107,14 +107,14 @@ export default function VerifyPageClient() {
                             placeholder="Enter your email"
                             value={email}
                             onChange={event => setEmail(event.target.value)}
-                            className="focus:ring-caramel w-full rounded-md border px-4 py-2 focus:outline-none focus:ring-2"
+                            className="w-full rounded-md border px-4 py-2 focus:outline-none focus:ring-2 focus:ring-caramel"
                         />
                     </div>
                     <button
                         type="button"
                         onClick={handleResendVerification}
                         disabled={resendingEmail}
-                        className="bg-caramel w-full rounded-md py-2 font-semibold text-white transition hover:scale-105 disabled:opacity-50"
+                        className="w-full rounded-md bg-caramel py-2 font-semibold text-white transition hover:scale-105 disabled:opacity-50"
                     >
                         {resendingEmail
                             ? 'Sending...'
@@ -124,7 +124,7 @@ export default function VerifyPageClient() {
 
                 <p className="mt-4 text-center text-sm text-gray-600">
                     Already verified?{' '}
-                    <Link className="text-caramel font-semibold" href="/login">
+                    <Link className="font-semibold text-caramel" href="/login">
                         Sign In
                     </Link>
                 </p>

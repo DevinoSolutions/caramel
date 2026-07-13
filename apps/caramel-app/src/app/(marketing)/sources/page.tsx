@@ -17,17 +17,24 @@ import {
 } from 'recharts'
 import { toast } from 'sonner'
 
+// numberOfCoupons/successRate are `number` — matches SourceMetrics in
+// app/api/sources/route.ts (the only producer of this shape). Previously
+// declared `string` here despite the server always sending numbers; the
+// mismatch was masked by `parseInt/parseFloat(x as any)`, which round-trips
+// an already-numeric value unchanged (String() then re-parse). Correcting
+// the type here removes the dead casts below with no behavior change.
 interface Source {
     id: string
     source: string
     websites: string[]
-    numberOfCoupons: string
-    successRate: string
+    numberOfCoupons: number
+    successRate: number
 }
 
 export default function SourcesPage() {
     const [sources, setSources] = useState<Source[]>([])
     const [loading, setLoading] = useState(true)
+    const [loadError, setLoadError] = useState(false)
     const [websitesInput, setWebsitesInput] = useState('')
     const [showModal, setShowModal] = useState(false)
     const [searchTerm, setSearchTerm] = useState('')
@@ -35,13 +42,17 @@ export default function SourcesPage() {
 
     const fetchSources = async () => {
         setLoading(true)
+        setLoadError(false)
         try {
             const res = await fetch('/api/sources')
+            if (!res.ok) throw new Error(`HTTP ${res.status}`)
             const data = await res.json()
-            const plainObj = await decryptJsonData(data)
-            setSources(plainObj.data)
+            const plainObj = await decryptJsonData<{ data?: Source[] }>(data)
+            setSources(Array.isArray(plainObj?.data) ? plainObj.data : [])
         } catch (error) {
             console.error('Error fetching sources:', error)
+            setLoadError(true)
+            toast.error('Could not load sources')
         } finally {
             setLoading(false)
         }
@@ -98,15 +109,15 @@ export default function SourcesPage() {
 
     const chartData = filteredSources.map(src => ({
         name: src.source,
-        coupons: parseInt(src.numberOfCoupons as any, 10),
-        successRate: parseFloat(src.successRate as any),
+        coupons: src.numberOfCoupons,
+        successRate: src.successRate,
     }))
 
     return (
         <main className="relative min-h-screen overflow-x-clip bg-gray-50 p-6 text-gray-800 dark:bg-transparent dark:text-gray-50">
             <Doodles />
             <motion.h1
-                className="text-caramel mb-4 text-center text-4xl font-bold"
+                className="mb-4 text-center text-4xl font-bold text-caramel"
                 initial={{ opacity: 0, y: -20 }}
                 animate={{ opacity: 1, y: 0 }}
             >
@@ -115,7 +126,7 @@ export default function SourcesPage() {
             {showModal && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60">
                     <motion.div
-                        className="dark:bg-darkerBg relative w-1/3 rounded-lg bg-white p-6 shadow md:w-11/12"
+                        className="relative w-1/3 rounded-lg bg-white p-6 shadow dark:bg-darkerBg md:w-11/12"
                         initial={{ opacity: 0, y: -20 }}
                         animate={{ opacity: 1, y: 0 }}
                     >
@@ -144,7 +155,7 @@ export default function SourcesPage() {
                                     onChange={e =>
                                         setWebsitesInput(e.target.value)
                                     }
-                                    className="focus:ring-caramel mt-1 w-full rounded border border-gray-300 p-2 text-black focus:outline-none focus:ring-2"
+                                    className="mt-1 w-full rounded border border-gray-300 p-2 text-black focus:outline-none focus:ring-2 focus:ring-caramel"
                                 />
                             </div>
                             <div className="flex justify-end space-x-2">
@@ -157,7 +168,7 @@ export default function SourcesPage() {
                                 </button>
                                 <button
                                     type="submit"
-                                    className="bg-caramel transform rounded px-4 py-2 font-semibold text-white transition hover:scale-105"
+                                    className="transform rounded bg-caramel px-4 py-2 font-semibold text-white transition hover:scale-105"
                                 >
                                     Submit
                                 </button>
@@ -173,7 +184,7 @@ export default function SourcesPage() {
                     </h2>
                     <button
                         onClick={() => setShowModal(true)}
-                        className="bg-caramel transform rounded px-4 py-2 font-semibold text-white transition hover:scale-105"
+                        className="transform rounded bg-caramel px-4 py-2 font-semibold text-white transition hover:scale-105"
                     >
                         Add New Source
                     </button>
@@ -184,14 +195,14 @@ export default function SourcesPage() {
                         placeholder="Search sources, websites..."
                         value={searchTerm}
                         onChange={e => setSearchTerm(e.target.value)}
-                        className="focus:ring-caramel w-full rounded border border-gray-300 p-2 text-black focus:outline-none focus:ring-2"
+                        className="w-full rounded border border-gray-300 p-2 text-black focus:outline-none focus:ring-2 focus:ring-caramel"
                     />
                 </div>
                 <div className="grid grid-cols-1 gap-6">
-                    <div className="dark:bg-darkerBg overflow-x-auto rounded-lg bg-white p-6 shadow">
+                    <div className="overflow-x-auto rounded-lg bg-white p-6 shadow dark:bg-darkerBg">
                         <table className="w-full text-left">
                             <thead>
-                                <tr className="dark:bg-darkBg bg-gray-100 text-black dark:text-white">
+                                <tr className="bg-gray-100 text-black dark:bg-darkBg dark:text-white">
                                     <th className="px-4 py-2">Source</th>
                                     <th className="px-4 py-2">Websites</th>
                                     <th className="px-4 py-2">Coupons</th>
@@ -209,11 +220,20 @@ export default function SourcesPage() {
                                             Loading...
                                         </td>
                                     </tr>
+                                ) : loadError ? (
+                                    <tr>
+                                        <td
+                                            colSpan={5}
+                                            className="py-4 text-center text-gray-500"
+                                        >
+                                            Couldn&apos;t load sources.
+                                        </td>
+                                    </tr>
                                 ) : filteredSources.length > 0 ? (
                                     filteredSources.map(src => (
                                         <tr
                                             key={src.id}
-                                            className="dark:hover:bg-darkBg/50 border-b hover:bg-gray-50"
+                                            className="border-b hover:bg-gray-50 dark:hover:bg-darkBg/50"
                                         >
                                             <td className="px-4 py-2">
                                                 {src.source}
@@ -222,10 +242,7 @@ export default function SourcesPage() {
                                                 {src.websites.join(', ')}
                                             </td>
                                             <td className="px-4 py-2">
-                                                {parseInt(
-                                                    src.numberOfCoupons as any,
-                                                    10,
-                                                )}
+                                                {src.numberOfCoupons}
                                             </td>
                                             <td className="px-4 py-2">
                                                 {src.successRate}%
@@ -248,7 +265,7 @@ export default function SourcesPage() {
                             </tbody>
                         </table>
                     </div>
-                    <div className="dark:bg-darkerBg rounded-lg bg-white p-6 shadow">
+                    <div className="rounded-lg bg-white p-6 shadow dark:bg-darkerBg">
                         <div className="h-96 w-full">
                             {loading ? (
                                 <div className="flex h-full items-center justify-center text-gray-500">

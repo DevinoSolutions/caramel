@@ -6,7 +6,7 @@ import { motion } from 'framer-motion'
 
 export default function PrivacyPageClient() {
     return (
-        <main className="dark:bg-darkBg relative -mt-[6.7rem] w-full overflow-x-clip">
+        <main className="relative -mt-[6.7rem] w-full overflow-x-clip dark:bg-darkBg">
             <Doodles />
             <div className="scroll-smooth">
                 <section className="text-gray-8 00 relative mt-[5rem] flex min-h-[50vh] flex-col justify-center overflow-hidden px-6 py-16 dark:text-white">
@@ -17,10 +17,10 @@ export default function PrivacyPageClient() {
                             transition={{ duration: 0.6, ease: 'easeOut' }}
                             className="mb-8"
                         >
-                            <h1 className="from-caramel mb-6 bg-gradient-to-r to-orange-600 bg-clip-text text-5xl font-extrabold leading-[90px] tracking-tight text-transparent md:text-3xl lg:text-4xl">
+                            <h1 className="mb-6 bg-gradient-to-r from-caramel to-orange-600 bg-clip-text text-5xl font-extrabold leading-[90px] tracking-tight text-transparent lg:text-4xl md:text-3xl">
                                 Privacy Policy
                             </h1>
-                            <p className="mx-auto max-w-3xl text-xl leading-relaxed text-gray-600 lg:text-lg dark:text-gray-300">
+                            <p className="mx-auto max-w-3xl text-xl leading-relaxed text-gray-600 dark:text-gray-300 lg:text-lg">
                                 We value your privacy and are committed to
                                 protecting your personal information
                             </p>

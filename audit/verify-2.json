@@ -1,0 +1,32 @@
+[
+    {
+        "id": "F-006",
+        "verdict": "verbatim",
+        "confidence": 0.95,
+        "note": "SQL filter copy-pasted: route.ts has full 7-status list; filters/route.ts has 'valid' only (2x); stats/route.ts has 'valid' without expired filter. STATUS_BADGE re-declared in app and RESTRICTED_STATUSES in extension. Drifts confirmed."
+    },
+    {
+        "id": "F-007",
+        "verdict": "verbatim",
+        "confidence": 0.88,
+        "note": "middleware.ts absence confirmed (find returned 0). 4 route files have CORS headers. checkRateLimit applied to multiple handlers but oauth/redirect hand-mints sessions claim not fully verified in scope."
+    },
+    {
+        "id": "F-008",
+        "verdict": "paraphrase",
+        "confidence": 0.96,
+        "note": "shared-utils.js is 1536 lines (finding claims 1537, off by 1). Contains RESTRICTED_STATUSES constant, multiple responsibilities confirmed (store detection, price parsing, coupon loop, modal UI, telemetry, messaging)."
+    },
+    {
+        "id": "F-009",
+        "verdict": "verbatim",
+        "confidence": 0.88,
+        "note": "knip.json ignore list exactly includes initMiddleware.ts, middlewares/**, and apiResponse.ts. 6 Pages-Router files with NextApiRequest/NextApiResponse found. Branch protection claim cannot be verified locally (API-level check)."
+    },
+    {
+        "id": "F-010",
+        "verdict": "verbatim",
+        "confidence": 0.95,
+        "note": "dev script never applies migrations (only 'prisma generate', no 'prisma migrate deploy'). LOCAL-DEV.md never mentions prisma migration. README has NO Getting Started. README does NOT link LOCAL-DEV.md. App README is unedited create-next-app boilerplate."
+    }
+]

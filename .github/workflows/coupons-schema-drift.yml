@@ -1,0 +1,63 @@
+name: Coupons DB – Schema Drift Check
+
+# Manual only (F-001/coupons-repository-pattern migration). No coupons DB is
+# provisioned in CI — this runs every registered query in
+# src/lib/couponsRepo.ts's `couponsQueryProbes` for real (inside one
+# transaction, always rolled back) against a REAL COUPONS_DATABASE_URL
+# (staging/prod or a read replica), so a missing/renamed column throws
+# regardless of row count — the queries themselves are the only contract.
+# Replaces the old EXPECTED_COLUMNS `information_schema.columns`
+# introspection (deleted — see apps/caramel-app/tests/drift/coupons-schema.drift.ts
+# + PLAN-COUPONS-BOUNDARY.md). Stays workflow_dispatch-only, not PR CI: a
+# *writable* private coupons DB reachable from GitHub Actions is an
+# infra/security call outside this migration's scope (Aladdin TODO — see
+# RUNBOOK.md). If a read replica is ever the only CI-reachable target and
+# its writes can't be exercised, the 3 write probes (coupons.increment,
+# coupons.expire, sources.insert — see couponsQueryProbes) would need to
+# swap to `EXPLAIN`-only checks; not built, since none exists yet. Fails
+# loudly up front if the secret isn't configured rather than silently
+# skipping.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check-drift:
+    name: Check coupons DB schema drift
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify COUPONS_DATABASE_URL secret is configured
+        run: |
+          if [ -z "${{ secrets.COUPONS_DATABASE_URL }}" ]; then
+            echo "::error::COUPONS_DATABASE_URL secret is not set on this repository. Add it under Settings -> Secrets and variables -> Actions (pointing at a real coupons DB, ideally a read replica) before dispatching this workflow. See PLAN-F-001.md."
+            exit 1
+          fi
+
+      - name: Run schema drift check
+        working-directory: ./apps/caramel-app
+        env:
+          COUPONS_DATABASE_URL: ${{ secrets.COUPONS_DATABASE_URL }}
+          # Throwaway — env.ts eager-parses these at import time (couponsRepo
+          # -> couponsDb -> env.ts) but the gate never touches the auth DB.
+          # No real auth_db exists in this job (no services: block), and no
+          # migration/session code path runs.
+          DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/unused'
+          BETTER_AUTH_SECRET: 'ci-fixture-unused-by-the-drift-gate'
+        run: pnpm check:coupons-schema

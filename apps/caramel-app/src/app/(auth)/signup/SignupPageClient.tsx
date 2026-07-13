@@ -23,7 +23,7 @@ const validationSchema = object().shape({
         .min(5)
         .matches(/[A-Z]/)
         .matches(/[0-9]/)
-        .matches(/[!@#$%^&*+\-]/)
+        .matches(/[!@#$%^&*+-]/)
         .required(
             'Password must contain at least 5 characters, 1 uppercase, 1 number and 1 special character',
         ),
@@ -94,7 +94,7 @@ export default function SignupPageClient() {
 
             // signIn.social automatically redirects to OAuth provider
             // The callback will handle redirecting back to callbackURL
-        } catch (error) {
+        } catch {
             toast.error('Something went wrong. Please try again later.')
             setOauthLoading(null)
         }
@@ -111,7 +111,7 @@ export default function SignupPageClient() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.5 }}
             >
-                <h2 className="text-caramel mb-6 flex justify-center gap-2 text-center text-2xl font-bold">
+                <h2 className="mb-6 flex justify-center gap-2 text-center text-2xl font-bold text-caramel">
                     <div className="my-auto">Create your</div>
                     <Image
                         src="/full-logo.png"
@@ -127,9 +127,9 @@ export default function SignupPageClient() {
                         type="button"
                         onClick={() => handleSocialSignIn('google')}
                         disabled={!!oauthLoading}
-                        className="hover:bg-caramel/10 hover:border-caramel border-caramel flex w-full items-center justify-center gap-3 rounded-md border bg-white px-4 py-2 font-medium text-gray-700 transition disabled:cursor-not-allowed disabled:opacity-50"
+                        className="flex w-full items-center justify-center gap-3 rounded-md border border-caramel bg-white px-4 py-2 font-medium text-gray-700 transition hover:border-caramel hover:bg-caramel/10 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                        <FaGoogle className="text-caramel h-5 w-5" />
+                        <FaGoogle className="h-5 w-5 text-caramel" />
                         <span>
                             {oauthLoading === 'google'
                                 ? 'Redirecting...'
@@ -140,9 +140,9 @@ export default function SignupPageClient() {
                         type="button"
                         onClick={() => handleSocialSignIn('apple')}
                         disabled={!!oauthLoading}
-                        className="hover:bg-caramel/10 hover:border-caramel border-caramel flex w-full items-center justify-center gap-3 rounded-md border bg-white px-4 py-2 font-medium text-gray-700 transition disabled:cursor-not-allowed disabled:opacity-50"
+                        className="flex w-full items-center justify-center gap-3 rounded-md border border-caramel bg-white px-4 py-2 font-medium text-gray-700 transition hover:border-caramel hover:bg-caramel/10 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                        <FaApple className="text-caramel h-5 w-5" />
+                        <FaApple className="h-5 w-5 text-caramel" />
                         <span>
                             {oauthLoading === 'apple'
                                 ? 'Redirecting...'
@@ -173,7 +173,7 @@ export default function SignupPageClient() {
                             name={'username'}
                             onChange={handleChange}
                             placeholder="@nickname"
-                            className="focus:ring-caramel w-full rounded-md border px-4 py-2 focus:outline-none focus:ring-2"
+                            className="w-full rounded-md border px-4 py-2 focus:outline-none focus:ring-2 focus:ring-caramel"
                         />
                         <div className="ml-2 h-1 pb-2">
                             {errors.username && touched.username && (
@@ -194,7 +194,7 @@ export default function SignupPageClient() {
                             required
                             onChange={handleChange}
                             placeholder="Enter your email"
-                            className="focus:ring-caramel w-full rounded-md border px-4 py-2 focus:outline-none focus:ring-2"
+                            className="w-full rounded-md border px-4 py-2 focus:outline-none focus:ring-2 focus:ring-caramel"
                         />
                         <div className="ml-2 h-1 pb-2">
                             {errors.email && touched.email && (
@@ -216,7 +216,7 @@ export default function SignupPageClient() {
                             required
                             onChange={handleChange}
                             placeholder="Create a password"
-                            className="focus:ring-caramel mb-2 w-full rounded-md border px-4 py-2 focus:outline-none focus:ring-2"
+                            className="mb-2 w-full rounded-md border px-4 py-2 focus:outline-none focus:ring-2 focus:ring-caramel"
                         />
                     </div>
                     <div>
@@ -231,7 +231,7 @@ export default function SignupPageClient() {
                             required
                             onChange={handleChange}
                             placeholder="Re-type Password"
-                            className="focus:ring-caramel w-full rounded-md border px-4 py-2 focus:outline-none focus:ring-2"
+                            className="w-full rounded-md border px-4 py-2 focus:outline-none focus:ring-2 focus:ring-caramel"
                         />
                     </div>
                     <div className="col-span-2 flex justify-end">
@@ -245,14 +245,14 @@ export default function SignupPageClient() {
                     <button
                         disabled={loading || Object.keys(errors).length > 0}
                         type="submit"
-                        className={`w-full ${loading || Object.keys(errors).length > 0 ? 'pointer-events-none bg-opacity-75' : 'hover:scale-105'} bg-caramel rounded-md py-2 font-semibold text-white transition`}
+                        className={`w-full ${loading || Object.keys(errors).length > 0 ? 'pointer-events-none bg-opacity-75' : 'hover:scale-105'} rounded-md bg-caramel py-2 font-semibold text-white transition`}
                     >
                         {loading ? 'Loading...' : 'Sign Up'}
                     </button>
                 </form>
                 <p className="mt-4 text-center text-sm text-gray-600">
                     Already have an account?{' '}
-                    <Link href="/login" className="text-caramel font-semibold">
+                    <Link href="/login" className="font-semibold text-caramel">
                         Login
                     </Link>
                 </p>

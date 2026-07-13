@@ -64,8 +64,8 @@ export default function SupportedSection() {
         <section id="supported" className="relative overflow-hidden py-32">
             {/* Background Elements */}
             <div className="absolute inset-0">
-                <div className="via-caramel/20 absolute left-0 top-0 h-px w-full bg-gradient-to-r from-transparent to-transparent"></div>
-                <div className="via-caramel/20 absolute bottom-0 left-0 h-px w-full bg-gradient-to-r from-transparent to-transparent"></div>
+                <div className="absolute left-0 top-0 h-px w-full bg-gradient-to-r from-transparent via-caramel/20 to-transparent"></div>
+                <div className="absolute bottom-0 left-0 h-px w-full bg-gradient-to-r from-transparent via-caramel/20 to-transparent"></div>
             </div>
 
             <div className="relative z-10 mx-auto max-w-7xl px-6 lg:px-8">
@@ -77,10 +77,10 @@ export default function SupportedSection() {
                     transition={{ duration: 0.6, ease: 'easeOut' }}
                     className="mb-20 text-center"
                 >
-                    <h2 className="from-caramel mb-8 bg-gradient-to-r to-orange-600 bg-clip-text text-5xl font-extrabold leading-[80px] tracking-tight text-transparent lg:text-4xl">
+                    <h2 className="mb-8 bg-gradient-to-r from-caramel to-orange-600 bg-clip-text text-5xl font-extrabold leading-[80px] tracking-tight text-transparent lg:text-4xl">
                         5,000+ Supported Stores
                     </h2>
-                    <p className="max-w mx-auto text-xl leading-relaxed text-gray-600 lg:text-lg dark:text-gray-300">
+                    <p className="max-w mx-auto text-xl leading-relaxed text-gray-600 dark:text-gray-300 lg:text-lg">
                         From major retailers to niche marketplaces, Caramel
                         works everywhere you shop online.
                     </p>
@@ -92,7 +92,7 @@ export default function SupportedSection() {
                                 transition: { duration: 0.2 },
                             }}
                             whileTap={{ scale: 0.95 }}
-                            className="from-caramel inline-flex items-center rounded-full bg-gradient-to-r to-orange-600 px-6 py-3 font-semibold text-white shadow-lg transition-all duration-200 hover:shadow-xl"
+                            className="inline-flex items-center rounded-full bg-gradient-to-r from-caramel to-orange-600 px-6 py-3 font-semibold text-white shadow-lg transition-all duration-200 hover:shadow-xl"
                         >
                             View All Supported Stores
                         </motion.a>
@@ -124,7 +124,7 @@ export default function SupportedSection() {
                                 (store, index) => (
                                     <motion.div
                                         key={`${store.name}-${index}`}
-                                        className="from-caramel/5 to-caramel/5 dark:from-caramel/10 dark:to-caramel/10 border-caramel/20 dark:border-caramel/30 group relative min-w-[280px] flex-shrink-0 overflow-hidden rounded-3xl border bg-gradient-to-br via-orange-50/30 p-8 sm:min-w-[200px] sm:p-6 lg:min-w-[240px] dark:via-orange-900/20"
+                                        className="group relative min-w-[280px] flex-shrink-0 overflow-hidden rounded-3xl border border-caramel/20 bg-gradient-to-br from-caramel/5 via-orange-50/30 to-caramel/5 p-8 dark:border-caramel/30 dark:from-caramel/10 dark:via-orange-900/20 dark:to-caramel/10 lg:min-w-[240px] sm:min-w-[200px] sm:p-6"
                                         whileHover={{
                                             scale: 1.02,
                                             y: -3,
@@ -173,7 +173,7 @@ export default function SupportedSection() {
                                                     className={`object-contain ${isDarkMode ? 'brightness-0 invert' : ''}`}
                                                 />
                                             </div>
-                                            <h3 className="mb-3 text-2xl font-semibold text-gray-800 sm:text-xl dark:text-white">
+                                            <h3 className="mb-3 text-2xl font-semibold text-gray-800 dark:text-white sm:text-xl">
                                                 {store.name}
                                             </h3>
                                             <p className="text-sm leading-relaxed text-gray-600 dark:text-gray-400">
@@ -193,7 +193,7 @@ export default function SupportedSection() {
                     whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true }}
                     transition={{ duration: 0.6, delay: 0.6, ease: 'easeOut' }}
-                    className="from-caramel rounded-3xl bg-gradient-to-r to-orange-600 p-12 text-center text-white shadow-2xl lg:p-8"
+                    className="rounded-3xl bg-gradient-to-r from-caramel to-orange-600 p-12 text-center text-white shadow-2xl lg:p-8"
                 >
                     <h3 className="mb-6 text-3xl font-semibold tracking-tight lg:text-2xl">
                         Donʼt See Your Favorite Store?
@@ -211,7 +211,7 @@ export default function SupportedSection() {
                             transition: { duration: 0.2 },
                         }}
                         whileTap={{ scale: 0.95 }}
-                        className="text-caramel inline-flex items-center rounded-full bg-white px-8 py-4 font-semibold shadow-md transition-all duration-200 hover:bg-orange-50 hover:shadow-xl"
+                        className="inline-flex items-center rounded-full bg-white px-8 py-4 font-semibold text-caramel shadow-md transition-all duration-200 hover:bg-orange-50 hover:shadow-xl"
                     >
                         Request a Store
                     </motion.a>

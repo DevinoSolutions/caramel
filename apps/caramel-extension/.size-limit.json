@@ -1,0 +1,31 @@
+[
+    {
+        "name": "content-scripts (injected)",
+        "path": [
+            "coupon-constants.generated.js",
+            "cart-signals.js",
+            "caramel-base.js",
+            "dom-utils.js",
+            "store-detect.js",
+            "coupon-apply.js",
+            "coupon-fetch.js",
+            "coupon-runner.js",
+            "UI-helpers.js",
+            "inject.js"
+        ],
+        "limit": "98 KB",
+        "brotli": false
+    },
+    {
+        "name": "popup.js",
+        "path": "popup.js",
+        "limit": "34 KB",
+        "brotli": false
+    },
+    {
+        "name": "background.js (sw)",
+        "path": "background.js",
+        "limit": "12 KB",
+        "brotli": false
+    }
+]

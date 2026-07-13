@@ -1,0 +1,122 @@
+name: AI Evals – Cart Classifier
+
+# F-012 — standing eval gate for the repo's only LLM surface (cartClassifier
+# -> openrouter -> /api/classify-cart). Mirrors checks-app.yml's setup
+# steps and coupons-schema-drift.yml's loud-secret-check convention (no
+# silent skip when a required secret is missing — see PLAN-F-012.md).
+#
+# PR: path-filtered to the AI surface so unrelated PRs never pay for (or
+# see a stochastic red from) a live OpenRouter call. Nightly: catches a
+# provider silently degrading/swapping the model with zero code change —
+# the only thing that can. Dispatch: manual re-run / future model-swap
+# comparisons.
+on:
+  pull_request:
+    # audit/dev-2026-07-10 is TEMPORARY — remove when the audit branch
+    # merges (mirrors checks-app.yml's F-009 convention).
+    branches: [main, dev, audit/dev-2026-07-10]
+    paths:
+      - 'apps/caramel-app/src/lib/cartClassifier.ts'
+      - 'apps/caramel-app/src/lib/openrouter.ts'
+      - 'apps/caramel-app/src/lib/env.ts'
+      - 'apps/caramel-app/src/app/api/classify-cart/**'
+      - 'apps/caramel-app/evals/**'
+      - 'apps/caramel-app/vitest.eval.config.ts'
+      - 'apps/caramel-app/package.json'
+      - '.github/workflows/ai-evals.yml'
+  schedule:
+    # 09:00 UTC daily. Only actually arms once this workflow is on the
+    # default branch — GitHub only evaluates `schedule` there (see
+    # PLAN-F-012.md's "Human handoff").
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-evals-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  eval:
+    name: Cart classifier eval
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Fork guard — a `pull_request` (not `pull_request_target`) from a fork
+    # never receives repo secrets anyway, but this makes the intent
+    # explicit and fails fast with a clear reason instead of a confusing
+    # downstream "secret missing" error on every fork PR.
+    if: |
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify OPENROUTER_API_KEY secret is configured
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          if [ -z "$OPENROUTER_API_KEY" ]; then
+            echo "::error::OPENROUTER_API_KEY secret is not set on this repository. Add it under Settings -> Secrets and variables -> Actions before this workflow can pass. See PLAN-F-012.md."
+            exit 1
+          fi
+
+      - name: Run cart-classifier evals
+        working-directory: ./apps/caramel-app
+        shell: bash
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        # Raw vitest invocation, NOT the `eval` package.json script — that
+        # script's env-loading targets a local .env file, which CI never
+        # has; OPENROUTER_API_KEY above is real process env already.
+        # OPENROUTER_MODEL is deliberately NOT set here — leaving it unset
+        # means src/lib/env.ts's own zod default ('openai/gpt-5-mini') is
+        # the single source of truth for which model gets tested, so this
+        # workflow can never itself become a second, silently-drifting
+        # pin (exactly the failure mode F-012 exists to catch).
+        run: pnpm exec vitest run --config vitest.eval.config.ts | tee eval-report.txt
+
+      - name: Upload eval report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: cart-classifier-eval-report
+          path: apps/caramel-app/eval-report.txt
+          retention-days: 14
+
+  notify-on-nightly-failure:
+    name: Open issue on nightly failure
+    needs: eval
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Open provider-drift issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        # No --label: this repo's label set (checked via `gh label list`)
+        # has no AI/eval-specific label, and creating one out-of-band here
+        # would be a second silent failure mode (gh errors on an unknown
+        # label) if it ever drifted. The title makes the issue findable.
+        run: |
+          gh issue create \
+            --repo "${{ github.repository }}" \
+            --title "Nightly AI eval failed: cart classifier ($(date -u +%F))" \
+            --body "The nightly cart-classifier eval run failed on $(date -u +%F' '%T' UTC'). This can mean the OpenRouter model degraded/drifted, the OPENROUTER_API_KEY secret expired or was revoked, or a real regression landed in cartClassifier/openrouter. See the failed run: $RUN_URL"

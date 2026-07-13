@@ -13,15 +13,15 @@ export default function StoreButtons() {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.6 }}
-                className="m-auto w-full text-start text-3xl font-bold text-black drop-shadow-2xl md:text-lg dark:text-white"
+                className="m-auto w-full text-start text-3xl font-bold text-black drop-shadow-2xl dark:text-white md:text-lg"
             >
                 Where to get Caramel?
             </motion.div>
-            <div className="xs:grid-cols-1 grid grid-cols-2 gap-8">
+            <div className="grid grid-cols-2 gap-8 xs:grid-cols-1">
                 <motion.a
                     href="https://chrome.google.com/webstore"
                     target="_blank"
-                    className="hover:bg-caramel hover:border-caramel pointer-events-none flex items-center gap-2 rounded-xl border-[1.5px] border-black px-3 py-1.5 text-black/70 opacity-60 transition-transform duration-200 ease-in-out hover:scale-105 hover:text-white dark:border-white dark:text-white"
+                    className="pointer-events-none flex items-center gap-2 rounded-xl border-[1.5px] border-black px-3 py-1.5 text-black/70 opacity-60 transition-transform duration-200 ease-in-out hover:scale-105 hover:border-caramel hover:bg-caramel hover:text-white dark:border-white dark:text-white"
                 >
                     <div className="w-10">
                         <Image
@@ -44,7 +44,7 @@ export default function StoreButtons() {
                 <motion.a
                     target="_blank"
                     href="https://chrome.google.com/webstore"
-                    className="hover:bg-caramel hover:border-caramel pointer-events-none flex items-center gap-2 rounded-xl border-[1.5px] border-black px-3 py-1.5 text-black/70 opacity-65 transition-transform duration-200 ease-in-out hover:scale-105 hover:text-white dark:border-white dark:text-white"
+                    className="pointer-events-none flex items-center gap-2 rounded-xl border-[1.5px] border-black px-3 py-1.5 text-black/70 opacity-65 transition-transform duration-200 ease-in-out hover:scale-105 hover:border-caramel hover:bg-caramel hover:text-white dark:border-white dark:text-white"
                 >
                     <div className="w-10">
                         <Image

@@ -1,11 +1,12 @@
 import SearchSection from '@/components/supported-site/search-section'
+import { BASE_URL } from '@/lib/env.client'
 import type { Metadata } from 'next'
 
 const title = 'Caramel | Supported Stores'
 const description =
     'Explore the stores supported by Caramel and start saving with our coupon extension.'
 const canonicalUrl = 'https://grabcaramel.com/supported-stores'
-const base = process.env.NEXT_PUBLIC_BASE_URL || 'https://grabcaramel.com'
+const base = BASE_URL
 const banner = `${base}/caramel_banner.png`
 
 export const metadata: Metadata = {

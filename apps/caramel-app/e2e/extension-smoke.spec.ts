@@ -123,7 +123,16 @@ test.describe('Extension — File Integrity', () => {
         'popup.js',
         'background.js',
         'inject.js',
-        'shared-utils.js',
+        // F-008 split shared-utils.js into the 6 files below (load order matters
+        // in the manifests; alphabetical here — this test only checks existence).
+        'caramel-base.js',
+        'dom-utils.js',
+        'store-detect.js',
+        'coupon-apply.js',
+        'coupon-fetch.js',
+        'coupon-runner.js',
+        // F-006 codegen output, loaded before the split files.
+        'coupon-constants.generated.js',
         'UI-helpers.js',
         'supported.json',
         'assets/styles.css',

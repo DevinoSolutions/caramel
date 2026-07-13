@@ -1,11 +1,12 @@
 import CouponsSection from '@/components/coupons/coupons-section'
+import { BASE_URL } from '@/lib/env.client'
 import type { Metadata } from 'next'
 
 const title = 'Caramel | Browse All Coupons'
 const description =
     'Discover thousands of verified coupon codes and promo codes for your favorite stores. Save money on every purchase with Caramel.'
 const canonicalUrl = 'https://grabcaramel.com/coupons'
-const base = process.env.NEXT_PUBLIC_BASE_URL || 'https://grabcaramel.com'
+const base = BASE_URL
 const banner = `${base}/caramel_banner.png`
 
 export const metadata: Metadata = {
@@ -39,7 +40,7 @@ export const metadata: Metadata = {
 
 export default function CouponsPage() {
     return (
-        <main className="dark:bg-darkBg relative min-h-screen px-6 pt-32 lg:px-8">
+        <main className="relative min-h-screen px-6 pt-32 dark:bg-darkBg lg:px-8">
             <CouponsSection />
         </main>
     )

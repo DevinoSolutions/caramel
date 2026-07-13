@@ -12,3 +12,8 @@ coverage
 *.log
 *.env.*
 !.env.ports
+nul
+
+# Internal-only coupons-DB dev tooling (real-schema-adjacent, never
+# committed to the public repo — see DESIGN.md's secrecy forward-rule).
+apps/caramel-app/scripts/internal/

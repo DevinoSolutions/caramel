@@ -40,13 +40,13 @@ export default function ProfilePageClient() {
         <main className="relative -mt-[6.7rem] w-full">
             <div className="container mx-auto px-4 py-16">
                 <div className="mx-auto max-w-2xl">
-                    <h1 className="text-caramel mb-8 text-4xl font-bold">
+                    <h1 className="mb-8 text-4xl font-bold text-caramel">
                         Profile
                     </h1>
 
-                    <div className="dark:bg-darkerBg rounded-2xl bg-white p-8 shadow-lg">
+                    <div className="rounded-2xl bg-white p-8 shadow-lg dark:bg-darkerBg">
                         <div className="mb-6 flex items-center gap-6">
-                            <div className="bg-caramel flex h-20 w-20 items-center justify-center rounded-full text-2xl font-semibold text-white">
+                            <div className="flex h-20 w-20 items-center justify-center rounded-full bg-caramel text-2xl font-semibold text-white">
                                 {userInitial}
                             </div>
                             <div>

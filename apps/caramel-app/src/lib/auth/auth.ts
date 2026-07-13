@@ -1,5 +1,7 @@
 import VerificationRequestTemplate from '@/emails/VerificationRequestTemplate'
 import { sendEmail } from '@/lib/email'
+import { env } from '@/lib/env'
+import { BASE_URL, clientEnv } from '@/lib/env.client'
 import prisma from '@/lib/prisma'
 import { render } from '@react-email/render'
 import bcrypt from 'bcryptjs'
@@ -7,17 +9,13 @@ import { betterAuth } from 'better-auth'
 import { prismaAdapter } from 'better-auth/adapters/prisma'
 import { bearer } from 'better-auth/plugins'
 
-const saltRounds = Number(process.env.BCRYPT_SALT_ROUNDS) || 10
-const fallbackBaseURL = 'http://localhost:3000'
+const saltRounds = env.BCRYPT_SALT_ROUNDS
 const appleIdTrustedOrigins = ['https://appleid.apple.com']
-const baseURL =
-    process.env.BETTER_AUTH_URL ||
-    process.env.NEXT_PUBLIC_BASE_URL ||
-    fallbackBaseURL
+const baseURL = env.BETTER_AUTH_URL || BASE_URL
 const trustedOrigins = Array.from(
     new Set(
         [
-            process.env.NEXT_PUBLIC_BASE_URL || '',
+            clientEnv.NEXT_PUBLIC_BASE_URL || '',
             baseURL,
             ...appleIdTrustedOrigins,
         ].filter(Boolean),
@@ -64,17 +62,17 @@ export const auth = betterAuth({
     },
     socialProviders: {
         google: {
-            clientId: process.env.GOOGLE_CLIENT_ID as string,
-            clientSecret: process.env.GOOGLE_CLIENT_SECRET as string,
+            clientId: env.GOOGLE_CLIENT_ID as string,
+            clientSecret: env.GOOGLE_CLIENT_SECRET as string,
             prompt: 'select_account',
         },
         apple: {
-            clientId: process.env.APPLE_CLIENT_ID as string,
-            clientSecret: process.env.APPLE_CLIENT_SECRET as string,
+            clientId: env.APPLE_CLIENT_ID as string,
+            clientSecret: env.APPLE_CLIENT_SECRET as string,
             // Use production domain for Apple redirect URI (Apple doesn't accept localhost)
             // The callback will be handled on production, then redirect back to localhost
             redirectURI:
-                process.env.APPLE_REDIRECT_URI ||
+                env.APPLE_REDIRECT_URI ||
                 'https://grabcaramel.com/api/auth/callback/apple',
         },
     },
@@ -118,14 +116,10 @@ export const auth = betterAuth({
             maxAge: 5 * 60,
         },
     },
-    secret:
-        process.env.BETTER_AUTH_SECRET ||
-        process.env.JWT_SECRET ||
-        (() => {
-            throw new Error(
-                'BETTER_AUTH_SECRET (or JWT_SECRET) must be set — refusing to start with a hardcoded default signing key',
-            )
-        })(),
+    // env.ts's schema already refines that at least one of these is set
+    // (throws at boot otherwise) — this fallback exists only to satisfy
+    // TypeScript's `string` type and is unreachable in practice.
+    secret: env.BETTER_AUTH_SECRET ?? env.JWT_SECRET ?? '',
     baseURL,
     trustedOrigins,
     advanced: {

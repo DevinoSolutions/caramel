@@ -1,11 +1,8 @@
+import { handleRouteError } from '@/lib/api/handleRouteError'
+import { withRoute } from '@/lib/api/withRoute'
 import { classifyCart, type CartSignals } from '@/lib/cartClassifier'
 import { OpenRouterError } from '@/lib/openrouter'
-import {
-    checkRateLimit,
-    forbiddenOrigin,
-    isOriginAllowed,
-} from '@/lib/rateLimit'
-import { NextRequest, NextResponse } from 'next/server'
+import { NextResponse } from 'next/server'
 
 // Cap payload size to protect the route from noisy senders.
 const MAX_BODY_BYTES = 8 * 1024
@@ -51,43 +48,60 @@ function sanitize(body: unknown): CartSignals | null {
     }
 }
 
-export async function POST(req: NextRequest) {
-    if (!isOriginAllowed(req)) return forbiddenOrigin()
-    const limited = await checkRateLimit(req, 'mutation')
-    if (limited) return limited
+export const POST = withRoute(
+    {
+        method: 'POST',
+        routeName: 'classify-cart',
+        rateLimit: 'mutation',
+        // Paid, LLM-backed, extension-only endpoint (no web-app page calls
+        // it — grep-confirmed). origin: true's isOriginAllowed() lets a
+        // request with NO Origin header through by design (server-to-
+        // server/curl), which left this route reachable origin-less (E2E
+        // report D5). 'extension' requires the Origin to be present AND an
+        // actual browser-extension protocol — real calls are unaffected:
+        // they originate from background.js's service-worker fetch, which
+        // always carries `Origin: chrome-extension://<id>`.
+        origin: 'extension',
+        // Keeps its own sanitize() below (already validated-or-400, not a
+        // swallow) rather than a wrapper zod schema — see PLAN-F-007.md
+        // §Scope.
+        body: null,
+    },
+    async ({ req }) => {
+        const contentLength = Number(req.headers.get('content-length') || 0)
+        if (contentLength > MAX_BODY_BYTES) {
+            return NextResponse.json(
+                { error: 'payload too large' },
+                { status: 413 },
+            )
+        }
 
-    const contentLength = Number(req.headers.get('content-length') || 0)
-    if (contentLength > MAX_BODY_BYTES) {
-        return NextResponse.json(
-            { error: 'payload too large' },
-            { status: 413 },
-        )
-    }
+        const raw = await req.json().catch(() => null)
+        const signals = sanitize(raw)
+        if (!signals) {
+            return NextResponse.json(
+                { error: 'invalid payload' },
+                { status: 400 },
+            )
+        }
 
-    const raw = await req.json().catch(() => null)
-    const signals = sanitize(raw)
-    if (!signals) {
-        return NextResponse.json({ error: 'invalid payload' }, { status: 400 })
-    }
-
-    try {
-        const result = await classifyCart(signals)
-        return NextResponse.json(result, {
-            headers: {
-                'Cache-Control': 'private, no-store',
-            },
-        })
-    } catch (error) {
-        const status = error instanceof OpenRouterError ? 502 : 500
-        console.error('[classify-cart] failed', error)
-        return NextResponse.json(
-            {
-                error:
+        try {
+            const result = await classifyCart(signals)
+            return NextResponse.json(result, {
+                headers: {
+                    'Cache-Control': 'private, no-store',
+                },
+            })
+        } catch (error) {
+            console.error('[classify-cart] failed', error)
+            return handleRouteError(error, {
+                req,
+                message:
                     error instanceof Error
                         ? error.message
                         : 'classification failed',
-            },
-            { status },
-        )
-    }
-}
+                status: error instanceof OpenRouterError ? 502 : 500,
+            })
+        }
+    },
+)

@@ -32,12 +32,12 @@ export default function Page() {
                     viewport={{ once: true }}
                     transition={{ duration: 2 }}
                 >
-                    <div className="via-caramel/40 h-px bg-gradient-to-r from-transparent to-transparent"></div>
+                    <div className="h-px bg-gradient-to-r from-transparent via-caramel/40 to-transparent"></div>
                     <div className="absolute inset-0 h-px bg-gradient-to-r from-transparent via-orange-500/20 to-transparent blur-sm"></div>
                     {[...Array(5)].map((_, i) => (
                         <motion.div
                             key={i}
-                            className="bg-caramel/60 absolute h-1 w-1 rounded-full"
+                            className="absolute h-1 w-1 rounded-full bg-caramel/60"
                             style={{
                                 left: `${20 + i * 15}%`,
                                 top: '50%',
@@ -65,7 +65,7 @@ export default function Page() {
                     transition={{ duration: 2, delay: 0.2 }}
                 >
                     <div className="h-px bg-gradient-to-r from-transparent via-orange-600/40 to-transparent"></div>
-                    <div className="via-caramel/20 absolute inset-0 h-px bg-gradient-to-r from-transparent to-transparent blur-sm"></div>
+                    <div className="absolute inset-0 h-px bg-gradient-to-r from-transparent via-caramel/20 to-transparent blur-sm"></div>
                 </motion.div>
                 <SupportedSection />
                 <motion.div

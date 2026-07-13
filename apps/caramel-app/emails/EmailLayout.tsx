@@ -1,8 +1,9 @@
+import { BASE_URL } from '@/lib/env.client'
 import React from 'react'
 
 // Always use production URL for email assets
 const PROD_URL = 'https://grabcaramel.com'
-const APP_URL = process.env.NEXT_PUBLIC_BASE_URL || PROD_URL
+const APP_URL = BASE_URL
 
 // Caramel brand palette
 export const brand = {

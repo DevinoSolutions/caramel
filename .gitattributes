@@ -1,0 +1,16 @@
+# NF-04: pin line endings so byte-exact gates (generated-file sync test) and
+# prettier are deterministic on every OS regardless of core.autocrlf.
+* text=auto eol=lf
+
+# Binaries — never touch line endings.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.zip binary
+*.pdf binary

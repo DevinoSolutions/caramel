@@ -6,7 +6,7 @@ import { MagnifyingGlassIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import debounce from 'lodash.debounce'
 import { useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { FaFilter } from 'react-icons/fa'
-import Select from 'react-select'
+import Select, { type StylesConfig } from 'react-select'
 import AsyncSelect from 'react-select/async'
 
 interface CouponFiltersProps {
@@ -87,9 +87,9 @@ export default function CouponFilters({
             ? normalizeOptions([filters.type])[0]
             : null
 
-    const selectStyles = useMemo(
+    const selectStyles: StylesConfig<Option, false> = useMemo(
         () => ({
-            control: (base: any, state: any) => ({
+            control: (base, state) => ({
                 ...base,
                 borderColor: state.isFocused
                     ? isDarkMode
@@ -103,12 +103,12 @@ export default function CouponFilters({
                 backgroundColor: isDarkMode ? '#111827' : '#ffffff',
                 width: '100%',
             }),
-            menu: (base: any) => ({
+            menu: base => ({
                 ...base,
                 zIndex: 20,
                 backgroundColor: isDarkMode ? '#111827' : '#ffffff',
             }),
-            option: (base: any, state: any) => ({
+            option: (base, state) => ({
                 ...base,
                 backgroundColor: state.isFocused
                     ? isDarkMode
@@ -120,15 +120,15 @@ export default function CouponFilters({
                 color: isDarkMode ? '#ffffff' : '#111827',
                 cursor: 'pointer',
             }),
-            singleValue: (base: any) => ({
+            singleValue: base => ({
                 ...base,
                 color: isDarkMode ? '#ffffff' : '#111827',
             }),
-            input: (base: any) => ({
+            input: base => ({
                 ...base,
                 color: isDarkMode ? '#ffffff' : '#111827',
             }),
-            placeholder: (base: any) => ({
+            placeholder: base => ({
                 ...base,
                 color: isDarkMode ? '#6b7280' : '#9ca3af',
             }),
@@ -145,13 +145,13 @@ export default function CouponFilters({
                         Search
                     </label>
                     <div className="relative">
-                        <MagnifyingGlassIcon className="text-caramel absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2" />
+                        <MagnifyingGlassIcon className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-caramel" />
                         <input
                             type="text"
                             value={localSearch}
                             onChange={e => handleSearchChange(e.target.value)}
                             placeholder="Search coupons by site, title, or description..."
-                            className="border-caramel/30 focus:border-caramel w-full rounded-md border-2 bg-white px-3 py-[11px] pl-10 text-sm outline-none transition-all dark:bg-gray-900 dark:text-white dark:placeholder-gray-500 dark:focus:border-orange-400"
+                            className="w-full rounded-md border-2 border-caramel/30 bg-white px-3 py-[11px] pl-10 text-sm outline-none transition-all focus:border-caramel dark:bg-gray-900 dark:text-white dark:placeholder-gray-500 dark:focus:border-orange-400"
                         />
                     </div>
                 </div>
@@ -207,7 +207,7 @@ export default function CouponFilters({
                             onChange({ search: '', site: '', type: 'all' })
                             onClearAll?.()
                         }}
-                        className="from-caramel flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-r to-orange-600 text-white shadow-md transition hover:opacity-90"
+                        className="flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-r from-caramel to-orange-600 text-white shadow-md transition hover:opacity-90"
                         title="Clear filters"
                     >
                         <XMarkIcon className="h-5 w-5" />
@@ -218,7 +218,7 @@ export default function CouponFilters({
             {/* Mobile toggle (md and down per custom breakpoints) */}
             <button
                 onClick={() => setShowFilters(!showFilters)}
-                className="text-caramel mt-2 hidden w-full items-center justify-center gap-2 rounded-full bg-white px-6 py-3 shadow-md transition-all hover:shadow-lg md:flex dark:bg-gray-900 dark:text-orange-400"
+                className="mt-2 hidden w-full items-center justify-center gap-2 rounded-full bg-white px-6 py-3 text-caramel shadow-md transition-all hover:shadow-lg dark:bg-gray-900 dark:text-orange-400 md:flex"
             >
                 <FaFilter className="h-4 w-4" />
                 <span className="font-semibold">Filters</span>

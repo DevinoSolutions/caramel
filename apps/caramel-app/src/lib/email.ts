@@ -1,3 +1,4 @@
+import { env } from '@/lib/env'
 import { UseSend } from 'usesend-js'
 
 type EmailPayload = {
@@ -8,7 +9,7 @@ type EmailPayload = {
 }
 
 const getClient = () => {
-    const apiKey = process.env.USESEND_API_KEY
+    const apiKey = env.USESEND_API_KEY
     if (!apiKey) {
         throw new Error(
             'USESEND_API_KEY is not defined in environment variables',
@@ -18,9 +19,8 @@ const getClient = () => {
 }
 
 export const sendEmail = async (data: EmailPayload) => {
-    const fromEmail =
-        process.env.USESEND_FROM_EMAIL || 'no_reply@grabcaramel.com'
-    const fromName = process.env.USESEND_FROM_NAME || 'Caramel'
+    const fromEmail = env.USESEND_FROM_EMAIL
+    const fromName = env.USESEND_FROM_NAME
 
     const client = getClient()
     const result = await client.emails.send({

@@ -1,8 +1,6 @@
 'use client'
 
-import { ThemeContext } from '@/lib/contexts'
 import { motion } from 'framer-motion'
-import { useContext } from 'react'
 import {
     FaBan,
     FaBug,
@@ -96,14 +94,12 @@ const securityFeatures = [
 ]
 
 export default function OpenSourceSection() {
-    const { isDarkMode } = useContext(ThemeContext)
-
     return (
         <section id="opensource" className="relative overflow-hidden py-32">
             {/* Background Elements */}
             <div className="absolute inset-0">
-                <div className="via-caramel/20 absolute left-0 top-0 h-px w-full bg-gradient-to-r from-transparent to-transparent"></div>
-                <div className="via-caramel/20 absolute bottom-0 left-0 h-px w-full bg-gradient-to-r from-transparent to-transparent"></div>
+                <div className="absolute left-0 top-0 h-px w-full bg-gradient-to-r from-transparent via-caramel/20 to-transparent"></div>
+                <div className="absolute bottom-0 left-0 h-px w-full bg-gradient-to-r from-transparent via-caramel/20 to-transparent"></div>
             </div>
 
             <div className="relative z-10 mx-auto max-w-7xl px-6 lg:px-8">
@@ -115,10 +111,10 @@ export default function OpenSourceSection() {
                     transition={{ duration: 0.6, ease: 'easeOut' }}
                     className="mb-20 text-center"
                 >
-                    <h2 className="from-caramel mb-8 bg-gradient-to-r to-orange-600 bg-clip-text text-5xl font-extrabold leading-[80px] tracking-tight text-transparent lg:text-4xl">
+                    <h2 className="mb-8 bg-gradient-to-r from-caramel to-orange-600 bg-clip-text text-5xl font-extrabold leading-[80px] tracking-tight text-transparent lg:text-4xl">
                         Open Source & Community Driven
                     </h2>
-                    <p className="mx-auto max-w-3xl text-xl leading-relaxed text-gray-600 lg:text-lg dark:text-gray-300">
+                    <p className="mx-auto max-w-3xl text-xl leading-relaxed text-gray-600 dark:text-gray-300 lg:text-lg">
                         Transparency is our core. Every line of code is open,
                         auditable, and community-driven. Join thousands of
                         developers building a better alternative to proprietary
@@ -134,10 +130,10 @@ export default function OpenSourceSection() {
                     transition={{ duration: 0.6, delay: 0.2, ease: 'easeOut' }}
                     className="mb-24"
                 >
-                    <h3 className="mb-12 text-center text-3xl font-extrabold tracking-tight text-gray-900 lg:text-2xl dark:text-white">
+                    <h3 className="mb-12 text-center text-3xl font-extrabold tracking-tight text-gray-900 dark:text-white lg:text-2xl">
                         Security Through Transparency
                     </h3>
-                    <div className="grid grid-cols-4 gap-8 sm:grid-cols-1 lg:grid-cols-2">
+                    <div className="grid grid-cols-4 gap-8 lg:grid-cols-2 sm:grid-cols-1">
                         {securityFeatures.map((feature, index) => (
                             <motion.div
                                 key={feature.title}
@@ -161,7 +157,7 @@ export default function OpenSourceSection() {
                                         '0 20px 40px rgba(234,105,37,0.15)',
                                     transition: { duration: 0.2 },
                                 }}
-                                className="from-caramel/5 to-caramel/5 dark:from-caramel/10 dark:to-caramel/10 border-caramel/20 dark:border-caramel/30 group relative overflow-hidden rounded-3xl border bg-gradient-to-br via-orange-50/30 p-8 sm:p-6 dark:via-orange-900/20"
+                                className="group relative overflow-hidden rounded-3xl border border-caramel/20 bg-gradient-to-br from-caramel/5 via-orange-50/30 to-caramel/5 p-8 dark:border-caramel/30 dark:from-caramel/10 dark:via-orange-900/20 dark:to-caramel/10 sm:p-6"
                             >
                                 <div className="absolute inset-0 opacity-5">
                                     <motion.div
@@ -190,7 +186,7 @@ export default function OpenSourceSection() {
                                 </div>
                                 <div className="relative z-10 text-center">
                                     <motion.div
-                                        className="text-caramel mx-auto mb-6 flex items-center justify-center text-6xl transition-transform duration-300"
+                                        className="mx-auto mb-6 flex items-center justify-center text-6xl text-caramel transition-transform duration-300"
                                         animate={{
                                             rotate: [0, 2, -2, 0],
                                             scale: [1, 1.02, 1],
@@ -205,10 +201,10 @@ export default function OpenSourceSection() {
                                     >
                                         {feature.icon}
                                     </motion.div>
-                                    <h4 className="mb-4 text-2xl font-bold text-gray-800 sm:text-xl dark:text-white">
+                                    <h4 className="mb-4 text-2xl font-bold text-gray-800 dark:text-white sm:text-xl">
                                         {feature.title}
                                     </h4>
-                                    <p className="text-base leading-relaxed text-gray-600 sm:text-sm dark:text-gray-400">
+                                    <p className="text-base leading-relaxed text-gray-600 dark:text-gray-400 sm:text-sm">
                                         {feature.desc}
                                     </p>
                                 </div>
@@ -225,10 +221,10 @@ export default function OpenSourceSection() {
                     transition={{ duration: 0.6, delay: 0.4, ease: 'easeOut' }}
                     className="mb-24"
                 >
-                    <h3 className="mb-12 text-center text-3xl font-extrabold tracking-tight text-gray-900 lg:text-2xl dark:text-white">
+                    <h3 className="mb-12 text-center text-3xl font-extrabold tracking-tight text-gray-900 dark:text-white lg:text-2xl">
                         Connect With Our Community
                     </h3>
-                    <div className="grid grid-cols-3 gap-8 sm:grid-cols-1 lg:grid-cols-2">
+                    <div className="grid grid-cols-3 gap-8 lg:grid-cols-2 sm:grid-cols-1">
                         {platforms.map((platform, index) => (
                             <motion.a
                                 key={platform.name}
@@ -255,7 +251,7 @@ export default function OpenSourceSection() {
                                         '0 20px 40px rgba(234,105,37,0.15)',
                                     transition: { duration: 0.2 },
                                 }}
-                                className="from-caramel/5 to-caramel/5 dark:from-caramel/10 dark:to-caramel/10 border-caramel/20 dark:border-caramel/30 group relative overflow-hidden rounded-3xl border bg-gradient-to-br via-orange-50/30 p-8 sm:p-6 dark:via-orange-900/20"
+                                className="group relative overflow-hidden rounded-3xl border border-caramel/20 bg-gradient-to-br from-caramel/5 via-orange-50/30 to-caramel/5 p-8 dark:border-caramel/30 dark:from-caramel/10 dark:via-orange-900/20 dark:to-caramel/10 sm:p-6"
                             >
                                 <div className="absolute inset-0 opacity-5">
                                     <motion.div
@@ -284,7 +280,7 @@ export default function OpenSourceSection() {
                                 </div>
                                 <div className="relative z-10 flex items-start gap-6 sm:flex-col sm:items-center sm:gap-4">
                                     <motion.div
-                                        className="bg-caramel/10 dark:bg-caramel/20 text-caramel flex h-16 w-16 items-center justify-center rounded-2xl text-2xl transition-transform duration-300"
+                                        className="flex h-16 w-16 items-center justify-center rounded-2xl bg-caramel/10 text-2xl text-caramel transition-transform duration-300 dark:bg-caramel/20"
                                         animate={{
                                             rotate: [0, 2, -2, 0],
                                             scale: [1, 1.02, 1],
@@ -300,10 +296,10 @@ export default function OpenSourceSection() {
                                         {platform.icon}
                                     </motion.div>
                                     <div className="flex-1 sm:text-center">
-                                        <h3 className="mb-3 text-2xl font-bold text-gray-800 sm:text-xl dark:text-white">
+                                        <h3 className="mb-3 text-2xl font-bold text-gray-800 dark:text-white sm:text-xl">
                                             {platform.name}
                                         </h3>
-                                        <p className="text-base leading-relaxed text-gray-600 sm:text-sm dark:text-gray-400">
+                                        <p className="text-base leading-relaxed text-gray-600 dark:text-gray-400 sm:text-sm">
                                             {platform.desc}
                                         </p>
                                     </div>
@@ -321,7 +317,7 @@ export default function OpenSourceSection() {
                     transition={{ duration: 0.6, delay: 0.6, ease: 'easeOut' }}
                     className="mb-24"
                 >
-                    <h3 className="mb-12 text-center text-3xl font-extrabold tracking-tight text-gray-900 lg:text-2xl dark:text-white">
+                    <h3 className="mb-12 text-center text-3xl font-extrabold tracking-tight text-gray-900 dark:text-white lg:text-2xl">
                         Contribution Pathways
                     </h3>
                     <div className="grid grid-cols-2 gap-8 sm:grid-cols-1 sm:gap-6">
@@ -348,7 +344,7 @@ export default function OpenSourceSection() {
                                         '0 20px 40px rgba(234,105,37,0.15)',
                                     transition: { duration: 0.2 },
                                 }}
-                                className="from-caramel/5 to-caramel/5 dark:from-caramel/10 dark:to-caramel/10 border-caramel/20 dark:border-caramel/30 group relative overflow-hidden rounded-3xl border bg-gradient-to-br via-orange-50/30 p-8 sm:p-6 dark:via-orange-900/20"
+                                className="group relative overflow-hidden rounded-3xl border border-caramel/20 bg-gradient-to-br from-caramel/5 via-orange-50/30 to-caramel/5 p-8 dark:border-caramel/30 dark:from-caramel/10 dark:via-orange-900/20 dark:to-caramel/10 sm:p-6"
                             >
                                 <div className="absolute inset-0 opacity-5">
                                     <motion.div
@@ -377,7 +373,7 @@ export default function OpenSourceSection() {
                                 </div>
                                 <div className="relative z-10 flex items-start gap-6 sm:flex-col sm:items-center sm:gap-4">
                                     <motion.div
-                                        className="text-caramel text-4xl transition-transform duration-300 sm:text-3xl"
+                                        className="text-4xl text-caramel transition-transform duration-300 sm:text-3xl"
                                         animate={{
                                             rotate: [0, 2, -2, 0],
                                             scale: [1, 1.02, 1],
@@ -393,17 +389,17 @@ export default function OpenSourceSection() {
                                         {contribution.icon}
                                     </motion.div>
                                     <div className="flex-1 sm:text-center">
-                                        <h4 className="mb-3 text-2xl font-bold text-gray-800 sm:text-xl dark:text-white">
+                                        <h4 className="mb-3 text-2xl font-bold text-gray-800 dark:text-white sm:text-xl">
                                             {contribution.title}
                                         </h4>
-                                        <p className="mb-6 text-base leading-relaxed text-gray-600 sm:text-sm dark:text-gray-400">
+                                        <p className="mb-6 text-base leading-relaxed text-gray-600 dark:text-gray-400 sm:text-sm">
                                             {contribution.desc}
                                         </p>
                                         <motion.a
                                             href={contribution.href}
                                             target="_blank"
                                             rel="noopener noreferrer"
-                                            className="from-caramel inline-flex items-center rounded-full bg-gradient-to-r to-orange-600 px-6 py-3 text-sm font-semibold text-white shadow-md transition-all duration-200 hover:shadow-xl"
+                                            className="inline-flex items-center rounded-full bg-gradient-to-r from-caramel to-orange-600 px-6 py-3 text-sm font-semibold text-white shadow-md transition-all duration-200 hover:shadow-xl"
                                             whileHover={{
                                                 scale: 1.05,
                                                 transition: { duration: 0.2 },
@@ -425,7 +421,7 @@ export default function OpenSourceSection() {
                     whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true }}
                     transition={{ duration: 0.6, delay: 0.8, ease: 'easeOut' }}
-                    className="from-caramel rounded-3xl bg-gradient-to-r to-orange-600 p-12 text-center text-white shadow-2xl lg:p-8"
+                    className="rounded-3xl bg-gradient-to-r from-caramel to-orange-600 p-12 text-center text-white shadow-2xl lg:p-8"
                 >
                     <h3 className="mb-6 text-3xl font-semibold tracking-tight lg:text-2xl">
                         Ready to Make a Difference?
@@ -440,7 +436,7 @@ export default function OpenSourceSection() {
                             href="https://github.com/DevinoSolutions/caramel"
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-caramel inline-flex items-center rounded-full bg-white px-8 py-4 font-semibold shadow-md transition-all duration-200 hover:bg-orange-50 hover:shadow-xl"
+                            className="inline-flex items-center rounded-full bg-white px-8 py-4 font-semibold text-caramel shadow-md transition-all duration-200 hover:bg-orange-50 hover:shadow-xl"
                             whileHover={{
                                 scale: 1.05,
                                 transition: { duration: 0.2 },
@@ -453,7 +449,7 @@ export default function OpenSourceSection() {
                             href="https://discord.com/invite/2vVVrQ5CEB"
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="hover:text-caramel inline-flex items-center rounded-full border-2 border-white bg-transparent px-8 py-4 font-semibold text-white transition-all duration-200 hover:bg-white"
+                            className="inline-flex items-center rounded-full border-2 border-white bg-transparent px-8 py-4 font-semibold text-white transition-all duration-200 hover:bg-white hover:text-caramel"
                             whileHover={{
                                 scale: 1.05,
                                 transition: { duration: 0.2 },

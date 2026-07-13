@@ -46,7 +46,17 @@
                 "https://*.ebay.com/*",
                 "https://*.codecademy.com/*"
             ],
-            "js": ["shared-utils.js", "UI-helpers.js", "inject.js", "amazon.js"]
+            "js": [
+                "coupon-constants.generated.js",
+                "caramel-base.js",
+                "dom-utils.js",
+                "store-detect.js",
+                "coupon-apply.js",
+                "coupon-fetch.js",
+                "coupon-runner.js",
+                "UI-helpers.js",
+                "inject.js"
+            ]
         }
     ],
     "background": {

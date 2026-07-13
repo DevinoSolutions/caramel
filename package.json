@@ -3,6 +3,15 @@
     "workspaces": [
         "apps/*"
     ],
+    "pnpm": {
+        "overrides": {
+            "shell-quote": "1.8.4",
+            "web-ext>tmp": "0.2.7",
+            "undici": "7.28.0",
+            "effect": "3.20.0",
+            "vitest>picomatch": "4.0.4"
+        }
+    },
     "scripts": {
         "compose": "docker compose --env-file local-dev/.env.ports -f local-dev/docker-compose.yml up -d",
         "compose:down": "docker compose --env-file local-dev/.env.ports -f local-dev/docker-compose.yml down",
@@ -11,6 +20,7 @@
         "dev:workspace": "pnpm -r --parallel dev",
         "build": "turbo run build",
         "lint": "turbo run lint",
+        "lint:oxlint": "oxlint",
         "test": "turbo run test",
         "prettier-write": "turbo run prettier-write",
         "prettier-check": "turbo run prettier-check",
@@ -18,6 +28,7 @@
     },
     "lint-staged": {
         "*.{ts,tsx,js,jsx,mjs,cjs}": [
+            "oxlint",
             "eslint --fix",
             "prettier --write"
         ],
@@ -26,15 +37,16 @@
         ]
     },
     "devDependencies": {
-        "eslint": "^9.31.0",
+        "eslint": "9.31.0",
         "eslint-config-next": "16.0.3",
-        "eslint-config-prettier": "^10.1.2",
-        "husky": "^9.1.7",
-        "lint-staged": "^16.4.0",
-        "playwright": "^1.59.1",
-        "prettier": "^3.6.2",
-        "prettier-plugin-organize-imports": "^4.1.0",
-        "prettier-plugin-tailwindcss": "^0.6.14",
-        "turbo": "^2.5.4"
+        "eslint-config-prettier": "10.1.5",
+        "husky": "9.1.7",
+        "lint-staged": "16.4.0",
+        "oxlint": "1.73.0",
+        "playwright": "1.59.1",
+        "prettier": "3.6.2",
+        "prettier-plugin-organize-imports": "4.1.0",
+        "prettier-plugin-tailwindcss": "0.6.14",
+        "turbo": "2.5.4"
     }
 }

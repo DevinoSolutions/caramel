@@ -1,3 +1,6 @@
+// Called from native Swift via webView.evaluateJavaScript("show(...)") in
+// ViewController.swift — invisible to a JS-only static analyzer.
+// oxlint-disable-next-line no-unused-vars
 function show(platform, enabled, useSettingsInsteadOfPreferences) {
     document.body.classList.add(`platform-${platform}`)
 

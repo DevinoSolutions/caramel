@@ -90,7 +90,7 @@ export default function LoginPageClient() {
 
             // signIn.social automatically redirects to OAuth provider
             // The callback will handle redirecting back to callbackURL
-        } catch (error) {
+        } catch {
             toast.error('Something went wrong. Please try again later.')
             setOauthLoading(null)
         }
@@ -104,7 +104,7 @@ export default function LoginPageClient() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.5 }}
             >
-                <h2 className="text-caramel mb-6 flex justify-center gap-2 text-center text-2xl font-bold">
+                <h2 className="mb-6 flex justify-center gap-2 text-center text-2xl font-bold text-caramel">
                     <div className="my-auto">Sign in to</div>
                     <Image
                         src="/full-logo.png"
@@ -134,7 +134,7 @@ export default function LoginPageClient() {
                         <button
                             type="button"
                             onClick={() => router.push('/verify')}
-                            className="text-caramel mt-3 w-full rounded-md border border-orange-300 bg-white px-4 py-2 text-sm font-semibold transition hover:bg-orange-50"
+                            className="mt-3 w-full rounded-md border border-orange-300 bg-white px-4 py-2 text-sm font-semibold text-caramel transition hover:bg-orange-50"
                         >
                             {isTokenExpired
                                 ? 'Request New Link'
@@ -148,9 +148,9 @@ export default function LoginPageClient() {
                         type="button"
                         onClick={() => handleSocialSignIn('google')}
                         disabled={!!oauthLoading}
-                        className="hover:bg-caramel/10 hover:border-caramel border-caramel flex w-full items-center justify-center gap-3 rounded-md border bg-white px-4 py-2 font-medium text-gray-700 transition disabled:cursor-not-allowed disabled:opacity-50"
+                        className="flex w-full items-center justify-center gap-3 rounded-md border border-caramel bg-white px-4 py-2 font-medium text-gray-700 transition hover:border-caramel hover:bg-caramel/10 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                        <FaGoogle className="text-caramel h-5 w-5" />
+                        <FaGoogle className="h-5 w-5 text-caramel" />
                         <span>
                             {oauthLoading === 'google'
                                 ? 'Redirecting...'
@@ -161,9 +161,9 @@ export default function LoginPageClient() {
                         type="button"
                         onClick={() => handleSocialSignIn('apple')}
                         disabled={!!oauthLoading}
-                        className="hover:bg-caramel/10 hover:border-caramel border-caramel flex w-full items-center justify-center gap-3 rounded-md border bg-white px-4 py-2 font-medium text-gray-700 transition disabled:cursor-not-allowed disabled:opacity-50"
+                        className="flex w-full items-center justify-center gap-3 rounded-md border border-caramel bg-white px-4 py-2 font-medium text-gray-700 transition hover:border-caramel hover:bg-caramel/10 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                        <FaApple className="text-caramel h-5 w-5" />
+                        <FaApple className="h-5 w-5 text-caramel" />
                         <span>
                             {oauthLoading === 'apple'
                                 ? 'Redirecting...'
@@ -192,7 +192,7 @@ export default function LoginPageClient() {
                             placeholder="Enter your email"
                             value={email}
                             onChange={event => setEmail(event.target.value)}
-                            className="focus:ring-caramel w-full rounded-md border px-4 py-2 focus:outline-none focus:ring-2"
+                            className="w-full rounded-md border px-4 py-2 focus:outline-none focus:ring-2 focus:ring-caramel"
                         />
                     </div>
                     <div>
@@ -205,20 +205,20 @@ export default function LoginPageClient() {
                             placeholder="Enter your password"
                             value={password}
                             onChange={event => setPassword(event.target.value)}
-                            className="focus:ring-caramel w-full rounded-md border px-4 py-2 focus:outline-none focus:ring-2"
+                            className="w-full rounded-md border px-4 py-2 focus:outline-none focus:ring-2 focus:ring-caramel"
                         />
                     </div>
                     <button
                         type="submit"
                         disabled={loading}
-                        className="bg-caramel w-full rounded-md py-2 font-semibold text-white transition hover:scale-105"
+                        className="w-full rounded-md bg-caramel py-2 font-semibold text-white transition hover:scale-105"
                     >
                         {loading ? 'Logging in...' : 'Login'}
                     </button>
                 </form>
                 <p className="mt-4 text-center text-sm text-gray-600">
                     Don&apos;t have an account?{' '}
-                    <Link className="text-caramel font-semibold" href="/signup">
+                    <Link className="font-semibold text-caramel" href="/signup">
                         Sign Up
                     </Link>
                 </p>

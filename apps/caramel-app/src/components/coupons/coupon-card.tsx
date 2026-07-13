@@ -1,6 +1,8 @@
 'use client'
 
-import type { Coupon, CouponStatus } from '@/types/coupon'
+import type { CouponStatusTier } from '@/lib/coupons'
+import { STATUS_META } from '@/lib/coupons'
+import type { Coupon } from '@/types/coupon'
 import { motion } from 'framer-motion'
 import { useState } from 'react'
 import { toast } from 'sonner'
@@ -11,26 +13,16 @@ interface CouponCardProps {
 }
 
 // Verification badge: green = machine-verified, amber = verified-but-restricted,
-// grey = not yet verified (grace), red = known not valid.
-const AMBER =
-    'bg-amber-100 text-amber-700 ring-amber-200 dark:bg-amber-900/30 dark:text-amber-300 dark:ring-amber-900/50'
-const GREY =
-    'bg-gray-100 text-gray-600 ring-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:ring-gray-700'
-const RED =
-    'bg-red-100 text-red-700 ring-red-200 dark:bg-red-900/30 dark:text-red-300 dark:ring-red-900/50'
-const STATUS_BADGE: Record<CouponStatus, { label: string; cls: string }> = {
-    valid: {
-        label: '✓ Verified',
-        cls: 'bg-green-100 text-green-700 ring-green-200 dark:bg-green-900/30 dark:text-green-300 dark:ring-green-900/50',
-    },
-    valid_with_warning: { label: 'Verified · may vary', cls: AMBER },
-    product_restriction: { label: 'Restrictions apply', cls: AMBER },
-    category_restricted: { label: 'Category-limited', cls: AMBER },
-    seller_specific: { label: 'Seller-specific', cls: AMBER },
-    pending: { label: 'Unverified', cls: GREY },
-    retry: { label: 'Checking…', cls: GREY },
-    invalid: { label: 'Not valid', cls: RED },
-    expired: { label: 'Expired', cls: RED },
+// grey = not yet verified (grace), red = known not valid. Labels + which
+// status maps to which tier live in lib/coupons.ts's STATUS_META (F-006) —
+// this Tailwind palette is the app-local half (the extension's popup badge
+// keeps its own hex equivalent; the 4-tier axis can't drift the way the
+// 9-status axis did).
+const TIER_CLS: Record<CouponStatusTier, string> = {
+    green: 'bg-green-100 text-green-700 ring-green-200 dark:bg-green-900/30 dark:text-green-300 dark:ring-green-900/50',
+    amber: 'bg-amber-100 text-amber-700 ring-amber-200 dark:bg-amber-900/30 dark:text-amber-300 dark:ring-amber-900/50',
+    grey: 'bg-gray-100 text-gray-600 ring-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:ring-gray-700',
+    red: 'bg-red-100 text-red-700 ring-red-200 dark:bg-red-900/30 dark:text-red-300 dark:ring-red-900/50',
 }
 
 export default function CouponCard({ coupon, index }: CouponCardProps) {
@@ -61,7 +53,7 @@ export default function CouponCard({ coupon, index }: CouponCardProps) {
         >
             <div className="flex items-center gap-5 md:flex-col md:items-start">
                 {/* Left: Discount Badge */}
-                <div className="from-caramel flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br to-orange-600 text-white shadow-md ring-1 ring-orange-200 dark:ring-orange-900/50">
+                <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-caramel to-orange-600 text-white shadow-md ring-1 ring-orange-200 dark:ring-orange-900/50">
                     <div className="text-center leading-tight">
                         <span className="block text-xl font-black md:text-lg">
                             {discount}
@@ -87,12 +79,12 @@ export default function CouponCard({ coupon, index }: CouponCardProps) {
                             {coupon.timesUsed} used today
                         </p>
                     )}
-                    {coupon.status && STATUS_BADGE[coupon.status] && (
+                    {coupon.status && STATUS_META[coupon.status] && (
                         <span
                             title={coupon.verificationMessage ?? undefined}
-                            className={`mt-2 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ${STATUS_BADGE[coupon.status].cls}`}
+                            className={`mt-2 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ${TIER_CLS[STATUS_META[coupon.status].tier]}`}
                         >
-                            {STATUS_BADGE[coupon.status].label}
+                            {STATUS_META[coupon.status].label}
                         </span>
                     )}
                 </div>
@@ -101,7 +93,7 @@ export default function CouponCard({ coupon, index }: CouponCardProps) {
                 <div className="shrink-0 md:w-full">
                     <button
                         onClick={handleCopyCode}
-                        className="from-caramel whitespace-nowrap rounded-2xl bg-gradient-to-r to-orange-600 px-6 py-3 font-semibold text-white shadow-md transition-all hover:scale-105 hover:shadow-lg md:w-full"
+                        className="whitespace-nowrap rounded-2xl bg-gradient-to-r from-caramel to-orange-600 px-6 py-3 font-semibold text-white shadow-md transition-all hover:scale-105 hover:shadow-lg md:w-full"
                     >
                         Get Coupon Code
                     </button>
@@ -117,7 +109,7 @@ export default function CouponCard({ coupon, index }: CouponCardProps) {
                 >
                     <div className="text-center">
                         <p className="mb-2 text-sm text-gray-300">Your Code:</p>
-                        <p className="from-caramel mb-3 bg-gradient-to-r to-orange-600 bg-clip-text text-3xl font-black text-transparent">
+                        <p className="mb-3 bg-gradient-to-r from-caramel to-orange-600 bg-clip-text text-3xl font-black text-transparent">
                             {coupon.code}
                         </p>
                         <p className="text-xs text-gray-400">

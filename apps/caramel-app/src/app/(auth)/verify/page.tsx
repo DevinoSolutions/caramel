@@ -1,3 +1,4 @@
+import { BASE_URL } from '@/lib/env.client'
 import type { Metadata } from 'next'
 import { Suspense } from 'react'
 import VerifyPageClient from './VerifyPageClient'
@@ -6,7 +7,7 @@ const title = 'Caramel | Verify Email'
 const description =
     'Verify your email address to activate your Caramel account and start saving with our coupon extension.'
 const canonicalUrl = 'https://grabcaramel.com/verify'
-const base = process.env.NEXT_PUBLIC_BASE_URL || 'https://grabcaramel.com'
+const base = BASE_URL
 const banner = `${base}/caramel_banner.png`
 
 export const metadata: Metadata = {

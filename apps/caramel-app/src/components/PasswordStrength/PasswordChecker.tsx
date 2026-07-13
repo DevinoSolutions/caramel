@@ -44,7 +44,7 @@ const PasswordChecker = ({
 
     return (
         <div className="flex w-full justify-start">
-            <ul className="mt-5 grid w-full grid-cols-1 gap-2 sm:grid-cols-1 lg:grid-cols-2 xl:grid-cols-2">
+            <ul className="mt-5 grid w-full grid-cols-1 gap-2 xl:grid-cols-2 lg:grid-cols-2 sm:grid-cols-1">
                 {checkList.map(itemChecker => (
                     <li
                         className="flex items-center py-1 pl-3"

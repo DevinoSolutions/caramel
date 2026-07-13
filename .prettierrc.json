@@ -8,5 +8,5 @@
         "prettier-plugin-organize-imports",
         "prettier-plugin-tailwindcss"
     ],
-    "tailwindConfigPath": "./apps/caramel-app/tailwind.config.ts"
+    "tailwindConfig": "./apps/caramel-app/tailwind.config.ts"
 }

@@ -32,10 +32,11 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
-          cache-dependency-path: ${{ env.WORKING_DIRECTORY }}/pnpm-lock.yaml
+          cache-dependency-path: ${{ github.workspace }}/pnpm-lock.yaml
 
       - name: Install dependencies
-        run: pnpm install
+        working-directory: ${{ github.workspace }}
+        run: pnpm install --frozen-lockfile
 
       - name: Build extension
         run: pnpm run build

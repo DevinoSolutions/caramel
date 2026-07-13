@@ -54,7 +54,6 @@ const sentryConfig =
               widenClientFileUpload: true,
               tunnelRoute: '/monitoring',
               disableLogger: true,
-              automaticVercelMonitors: true,
           })
         : nextConfig
 

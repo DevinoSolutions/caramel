@@ -1,0 +1,258 @@
+{
+    "run_id": "caramel-audit-2026-07-10",
+    "started": "2026-07-10",
+    "rules_version": "v5 2026-07-10",
+    "baseline": {
+        "branch": "dev",
+        "sha": "537547b3081aa3a0ec817cdc5f6dac4f0d328dbb",
+        "tree_clean": true
+    },
+    "branches": {
+        "target": "audit/dev-2026-07-10",
+        "target_pushed": true,
+        "fixes": "audit/fixes-2026-07-10 (to be created in Stage 3)"
+    },
+    "gate_mode": {
+        "mode": "pre-authorized: gates collapse into PR review",
+        "rationale": "User args directed: branch off dev as the PR target and 'work do pr to that branch basically just follow the audit'. Self-triage + self-approved plans recorded here; PRs to audit/dev-2026-07-10 are the human review surface. No merges by agents, ever.",
+        "decisions": [
+            {
+                "at": "2026-07-11",
+                "by": "human",
+                "decision": "Accepted all Fable recommendations verbatim ('ill take ur recommendations'): all 16 findings FIX in wave order; F-016 one-root-compose parked as a SEPARATE initiative (not in the fix-branch train); Stages 2-3 run in a fresh Opus lead session. This is the go-signal for Stage 2."
+            },
+            {
+                "at": "2026-07-11",
+                "by": "opus-lead",
+                "id": "JC-1",
+                "decision": "PR structure: ONE branch audit/fixes-2026-07-10, ONE cumulative PR into audit/dev-2026-07-10 opened after Wave 1 lands, pushed per-fix, body organized by wave with per-finding commit links. Rationale: fixes are serially dependent (F-007 needs F-009's deletions, etc.) so per-wave/per-finding PRs would show overlapping diffs unless the human merges mid-run, and merge timing/style is unknowable; triage explicitly blesses either granularity — the F-ID-per-commit trace is the requirement and is preserved. If the human merges the PR mid-run, a fresh PR continues the remainder."
+            },
+            {
+                "at": "2026-07-11",
+                "by": "opus-lead",
+                "id": "JC-2",
+                "decision": "F-009 branch protection: agents will NOT mutate GitHub repo settings on real main/dev (spirit of 'never touch dev/main'; also disruptive to the human's push workflow if misconfigured). Deliverable instead: exact gh api commands + recommended required-checks config in the PR body and RUNBOOK as a human-handoff step."
+            },
+            {
+                "at": "2026-07-11",
+                "by": "opus-lead",
+                "id": "JC-3",
+                "decision": "Execution order fixed: W1 F-004,F-005,F-009 | W2 F-003,F-002,F-001,F-011 (small-independent first; error helper before its consumers; runbook documents what W2 created) | W3 F-006,F-007,F-008 | W4 F-013,F-015,F-014,F-012,F-010 (rename before lockfile-consolidation so F-014's regen captures it; docs dead-last). F-016 excluded (separate initiative, /one-root-compose)."
+            },
+            {
+                "at": "2026-07-11",
+                "by": "opus-lead",
+                "id": "JC-4",
+                "decision": "Empirical re-runs batched where one test covers several fixes: 3am re-run after Wave 2 (covers F-001/F-002/F-011), change-trace after F-006/F-007, name-only navigation after F-008, onboarding partial after F-005 and full after F-010; per-fix targeted checks otherwise. Upstream says per-fix; batching avoids redundant Haiku passes over unchanged dimensions."
+            },
+            {
+                "at": "2026-07-11",
+                "by": "opus-lead",
+                "id": "JC-5",
+                "decision": "Stage-2 planning parallelized across 14 Opus subagents (read-only + one plan file each; no repo mutations), common brief at audit/plans/PLANNER-BRIEF.md; F-013+F-015 batched into one planner (both mechanical Wave-4). Cross-review and sequencing remain the lead's own pass."
+            }
+        ]
+    },
+    "stage": "4 COMPLETE — audit cycle 1 closed; PR #111 awaits human review/merge",
+    "stage4": {
+        "status": "complete (2026-07-12, CTO session with full decision authority per user)",
+        "end_review": "independent adversarial Opus review of all 21 fix commits: SHIP — 11 PASS / 5 PASS-WITH-NOTES / 0 REDO; amendments ruled legitimate; both follow-up notes already parked (NF-04, NF-07). audit/end-review.md",
+        "docs_commit": "ce30875 on the fix branch: CLAUDE.md (shared rules v5 embedded verbatim + commands/architecture/conventions-to-checks map/gotchas/boundaries, 146 lines) + DESIGN.md (module boundaries, 10 standoffs, known debt NF-01..13 reconciled to canonical numbering, change guide, testing map) + evals/README codify-block relocation",
+        "doc_validation": "cold zero-context agent, docs-only: 18/18 quiz items correct (commands, where-would-X-live incl. the former navigation misses, gotchas, boundaries), 13/13 factual claims verified, ZERO doc defects. audit/stage4-doc-validation.md",
+        "corrections_this_stage": "commit count 19->21+1 (end-review catch); DESIGN draft reconciled (NF numbering collision with canonical resolved, NF-13 net-new added, gtag/cryptoHelpers mislabeled-dead corrected to proven-live, route count 15/17->16/18, majors list completed to F-014's 13)",
+        "followup_ask_to_human": "mark each of NF-01..NF-13 agree/disagree/unsure for the next cycle; the disputed ones get re-audited with objections injected"
+    },
+    "stage3": {
+        "status": "complete",
+        "fix_branch_head": "145fb10",
+        "pr": "https://github.com/DevinoSolutions/caramel/pull/111 (final body published; never merged by agents)",
+        "findings_fixed": 16,
+        "commits": 19,
+        "commit_map": "audit/findings-post-fix.json (per-finding commits, corrections, statuses)",
+        "new_finding_fixed_in_train": "F-017 (eval-caught maxTokens starvation; micro-plan PLAN-F-017.md; self-approved under gate collapse — rationale logged in stage3-results)",
+        "amendments": {
+            "by_lead": [
+                "19b91ef (F-005 template ?schema=)",
+                "0a806fd (F-005 credentials)",
+                "12d675f (F-008 e2e inventory)",
+                "145fb10 (F-010 LOCAL-DEV consistency)"
+            ],
+            "by_resumed_executor": [
+                "e947a1d (F-006 generator prettier fixed-point)"
+            ]
+        },
+        "suite": "0 -> 305 unit tests green + 40-case eval suite (97.5%) + Playwright e2e 88/1-pre-existing",
+        "empirical_after": {
+            "3am": "11/14 closed, 3 partial, 0 open (audit/empirical-3am-after.md, lead-corrected AM-11)",
+            "onboarding": "PASS - 0 tribal, 12/12 checked gaps covered (audit/empirical-onboarding-after.md, lead-corrected 4 rows)",
+            "navigation": "behaviors 2/5 -> 3/5, functions 10/10 (audit/empirical-navigation-after.md)",
+            "change_trace": "9/3/1 -> 9/4/3 (audit/empirical-change-trace-after.md)"
+        },
+        "e2e_validation": "7/7 PASS (audit/e2e-validation.md) — pages, honest-failure UX, 8 API behaviors, extension in real Chromium, prod read-only disambiguation (coupons DB fine; OPENROUTER_API_KEY genuinely missing in prod)",
+        "ci": "all quality legs green; only reds = pre-existing extension-smoke drift (NF-03) + by-design ai-evals missing-secret leg",
+        "human_handoffs": "PR #111 body §Human handoffs (secrets x3, branch protection, extension release, CORS pre-ship gate, RUNBOOK TODOs, TEMP trigger revert)",
+        "haiku_corrections_by_lead": [
+            "3am AM-11 (restated before-state)",
+            "onboarding OB-3/OB-5/OB-11/OB-14 (line-evidence corrections inline)"
+        ]
+    },
+    "stage2": {
+        "planners": 14,
+        "plans_written": 15,
+        "plans_approved": "ALL 15 (self-approved under gate collapse; PR review is the human surface)",
+        "approval_rulings": [
+            "F-001 APPROVED: extend existing health route (monitor flips red with zero ops change); 8 zod row schemas; drift script dispatch-only.",
+            "F-002 APPROVED incl. premise correction (decryptJsonData sole caller is client-side sources/page.tsx; handled at the client seam).",
+            "F-003 APPROVED: expire->server-only COUPONS_ADMIN_SECRET bearer (zero callers verified); exemption keys off bearer; supported-stores keyless public read = the graceful old-client path. Satisfies the store-lag caveat with no hard cutover.",
+            "F-004 APPROVED: vitest 4, per-package configs, tests/unit/** convention, zero-tests-fails proven, pins scoped to what later fixes flip.",
+            "F-005 APPROVED: 3-var minimal required set; ci-env.ts co-change mandatory (CI has NO next build job — verified); zod enters pinned.",
+            "F-006 APPROVED incl. the ONE deliberate behavior change (filters dropdown broadens to visible set — flagged breaking, 1-line rollback) and stats ruled deliberate (verifiedCensusSql).",
+            "F-007 APPROVED incl. premise correction (mint lives in extension/oauth/route.ts) and STOP-DESIGN ruling: centralize raw-Prisma mint into extensionOAuthSession.ts (better-auth 1.5.3 has no public external-code-exchange API — context7-verified); internalAdapter adoption only behind char-test equivalence trigger; better-auth routing parked as new finding.",
+            "F-008 APPROVED: 6-file banner-boundary split, cat-diff byte-identity invariant, no renames of cart-signals/inject (honest already), modal-UI premise corrected (lives in UI-helpers.js).",
+            "F-009 APPROVED: fossil set +errorMiddleware.ts (in-glob), +jsonwebtoken orphan removal (truthful-green requires it), oxlint 1.73/size-limit 12.1 (npm-verified), summed-group size budgets, TEMP audit-branch CI trigger, branch protection = human handoff per JC-2.",
+            "F-010 APPROVED: docs written from OBSERVED landed tree (step-0 verification table), README/LOCAL-DEV split rule, cold-Haiku validation gate.",
+            "F-011 APPROVED incl. premise corrections (porsager postgres client not pg Pool; Sentry prod-only -> optional-chained span writes).",
+            "F-012 APPROVED: evals import production classifyCart, deterministic scorers, gate >=0.85 primary-match, separate vitest.eval.config, OPENROUTER_API_KEY secret verified ABSENT -> CI leg red-by-design with loud named error (flag in PR body).",
+            "F-013 APPROVED incl. premise correction (apiResponseNext anys are data/error not metadata/viewport); unknown-widening; eslint no-explicit-any=error via existing next plugin (no new dep).",
+            "F-014 APPROVED: react-awesome-button fully dead -> delete not replace; TWO nested fossil lockfiles deleted; CI cache repoint mandatory; majors OUT (named known debt); resolution-neutral pin proof via packages-block byte-identity.",
+            "F-015 APPROVED: amazon.js entry removed (history shows deliberate deletion); nul gitignore-only (untracked — finding sub-claim corrected); rename ref set re-grepped at exec (CR-6); prettier tailwindConfig activation churn accepted (Argos guard); integrity check RED-then-GREEN proof."
+        ],
+        "cross_review_overrides": "CR-1..CR-9 in audit/plans/EXECUTOR-BRIEF.md + stage2_cross_review_notes",
+        "execution_order": [
+            "F-004",
+            "F-005",
+            "F-009",
+            "F-003",
+            "F-002",
+            "F-001",
+            "F-011",
+            "F-006",
+            "F-007",
+            "F-008",
+            "F-013",
+            "F-015",
+            "F-014",
+            "F-012",
+            "F-010"
+        ]
+    },
+    "stage0": {
+        "test_suite": "NONE — turbo run test matches zero package scripts; app has Playwright test:e2e, extension has scripts/test-extension.mjs",
+        "test_runs": [
+            "delegated to tooling agent (x2), see audit/tooling-report.md"
+        ],
+        "tooling_inventory": "in-flight (sonnet)",
+        "exclusions_file": "audit/exclusions.md"
+    },
+    "stage1": {
+        "hotspots": {
+            "a": "21 nominations (audit/hotspots-a.json)",
+            "b": "20 nominations (audit/hotspots-b.json)",
+            "intersection_ruling": [
+                "BOTH→dive: classify-cart LLM surface (DD-1); extension fire-and-forget/silent-failure cluster (DD-2); API req.json swallow convention + validation drift (DD-3); any-typed lib surfaces (DD-4); nested lockfile + missing env validation = direct finding candidates (mechanical, verification gate confirms)",
+                "ONE-FOUND Crit/High→dive: hardcoded EXTENSION_API_KEY in background.js:23 → server-side gating question folded into DD-3 item 4; decryptJsonData plaintext-fallback → DD-4 item 4",
+                "KILLED: hotspot-A '.env with secrets' — git ls-files proves .env untracked + gitignored (only local-dev/.env.ports deliberately tracked via !.env.ports); local machine state, not repo defect",
+                "KILLED: hotspot-A 'no ESLint config' — eslint.config.mjs exists at root and both apps; contradicted by direct observation",
+                "A-only Medium/Low (oauth-redirect logging, coupons GET catch, sentry ctx, recordTiming ignore) → covered by DD-2/DD-3 scopes, else Unverified appendix",
+                "A-only Medium duplication (extension vs app coupon/store logic) → DD-2 item 2 + change-trace corroboration"
+            ]
+        },
+        "stage1_complete": [
+            "tooling",
+            "change-trace",
+            "3am",
+            "onboarding",
+            "navigation",
+            "premortem",
+            "DD-1",
+            "DD-2",
+            "DD-3",
+            "DD-4"
+        ],
+        "candidate_total": 82,
+        "synthesis": {
+            "collapsed_to": 15,
+            "findings_json": "audit/findings.json",
+            "criticals": [
+                "F-001 external coupons DB / blind health check",
+                "F-002 swallowed errors (2 facets)",
+                "F-003 public EXTENSION_API_KEY gates mutation+exempts throttle"
+            ],
+            "cap_compliant": true,
+            "killed_at_intersection": [
+                ".env-with-secrets (untracked+gitignored)",
+                "no-eslint-config (exists)"
+            ]
+        },
+        "verification": {
+            "absent": 0,
+            "deletion_counter": 0,
+            "sub_0.9": [
+                "F-007 0.88",
+                "F-009 0.88",
+                "F-011 0.85",
+                "F-013 0.80",
+                "F-014 0.75 (all tool-sourced/absence sub-claims, not hallucinations — text marked tool-sourced)"
+            ]
+        },
+        "adversarial": {
+            "attacked": 8,
+            "killed": 0,
+            "strengthened": ["F-006", "F-008"],
+            "corrected": ["F-009 apiResponseNext struck (live)"],
+            "narrowed": ["F-002 telemetry facet — onRequestError IS wired"]
+        },
+        "rules_checklist": {
+            "pass": 4,
+            "violation": 29,
+            "na": 5,
+            "gap_rows": 10,
+            "gaps_folded": "STR-2->F-016, CIB-1/2/3+PIECE-1/7/8->F-009, ERR-2->F-011, AIH-1/2->appendix"
+        },
+        "final_findings": 16,
+        "cap_deviation": "16 not 15 — F-016 (one-root-compose) promoted from GAP row; v5 §Structure forbids punch-listing it. Documented in AUDIT.md + findings.json.cap_note.",
+        "artifacts_written": [
+            "AUDIT.md",
+            "findings.json",
+            "triage.md",
+            "rules-checklist.md",
+            "STAGE2-ONLOAD-PROMPT.md",
+            "tooling-report.md",
+            "4 deep-dives",
+            "4 empiricals",
+            "2 hotspots",
+            "3 verify",
+            "adversarial",
+            "premortem"
+        ]
+    },
+    "stage1_done": true,
+    "triage_mode": "self-triaged under gate collapse; recommendations in audit/triage.md; all 16 FIX (none defer/reject); PRs to audit/dev-2026-07-10 are the human review surface",
+    "next": "Human launches a fresh Opus lead session with audit/STAGE2-ONLOAD-PROMPT.md for Stages 2-3. Fable returns for end-review + Stage-4 CLAUDE.md.",
+    "tooling_headline": {
+        "tests": "NONE — pnpm test false-green x2 (turbo 0 tasks)",
+        "typecheck": "PASS 0 errors",
+        "lint": "0 err / 191 warn (all extension: CRLF+no-console)",
+        "knip": "1 unused type — green by ignore-list blindness",
+        "prettier": "13 unformatted + invalid tailwindConfigPath key (dead)",
+        "audit": "83 vulns (2 crit / 45 high / 30 mod / 6 low)",
+        "outdated": "50/51; react-awesome-button DEPRECATED",
+        "branch_protection": "NONE on main or dev — CI advisory only",
+        "ci_secrets": "16 refs, 0 phantom, 2 orphaned",
+        "env_validation": "NO; 19 documented vs 38 read",
+        "ai_surface": "1 (OpenRouter cart classifier), 0 evals",
+        "duplication": "jscpd 65 clones 5.55%; real signal in .tsx marketing/auth components",
+        "top_churn_and_loc": "shared-utils.js is #1 in BOTH (4529 churn / 1536 loc)"
+    },
+    "deletion_counter": 0,
+    "stage2_cross_review_notes": [
+        "CR-1: All app unit tests live in apps/caramel-app/tests/unit/** per F-004's landed vitest include glob — F-002/F-005/F-011/F-014/F-006 plans that mention co-located test paths are overridden on location only.",
+        "CR-2: size-limit stays on F-009's summed-group budget scheme (92KB content-scripts). F-008 step 9's per-file ~18KB budgets are overridden — F-008 only updates the path array (drop shared-utils.js, add the 6 split files).",
+        "CR-3: F-005 introduces zod (pinned exact) — first pinned dep; F-001's schemas and F-007's body validation consume it.",
+        "CR-4: F-009 adds a TEMPORARY checks-app.yml trigger for audit/dev-2026-07-10 PRs (app CI otherwise only fires on PRs to main/dev); revert-when-merged comment required.",
+        "CR-5: Premise corrections accepted from planners (to fold into updated findings.json at stage end): F-002 decryptJsonData sole caller is a client component; F-007 session-mint lives in extension/oauth/route.ts (NOT oauth/redirect), better-auth 1.5.3 lacks a public external-code-exchange API (STOP-DESIGN: centralize mint into one module, park better-auth adoption as new finding); F-008 modal UI lives in UI-helpers.js not shared-utils.js, no renames of cart-signals/inject needed; F-014 react-awesome-button is fully dead (delete not replace), THREE lockfiles not two; F-011 coupons client is porsager postgres not pg Pool, Sentry initialized production-only; F-015 nul file is untracked (working-tree artifact only).",
+        "CR-6: New-finding candidates parked for next cycle (from planning): firefox manifest missing cart-signals.js (Firefox parity); background.js duplicate _isDevInstall/CARAMEL_BASE_URL; oauth mint /api/auth/session path bug + missing emailVerified gate (pinned as-is); StoreButtons.tsx + capitalizeFirst.ts likely dead; possibly-dead UI deps (react-fast-marquee, react-lottie-player); popup script-list minimization; lint-ban of empty-success pattern once oxlint infra matures.",
+        "CR-7: E2E-phase constraint: dev.grabcaramel.com runs the deployed OLD code — E2E validation of fixes runs against the LOCAL boot (HTTP-level route checks + extension harness); full extension-in-browser flows against local require a clearly-temporary base-URL override (removed after), since 537547b pointed dev installs at dev.grabcaramel.com."
+    ],
+    "notes": []
+}

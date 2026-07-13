@@ -1,60 +1,56 @@
-import { couponsSql } from '@/lib/couponsDb'
-import { checkRateLimit } from '@/lib/rateLimit'
-import { NextRequest, NextResponse } from 'next/server'
+import { handleRouteError } from '@/lib/api/handleRouteError'
+import { withRoute } from '@/lib/api/withRoute'
+import { listFilterDiscountTypes, listFilterSites } from '@/lib/couponsRepo'
+import { NextResponse } from 'next/server'
 
-export async function GET(req: NextRequest) {
-    const limited = await checkRateLimit(req, 'read')
-    if (limited) return limited
+export const GET = withRoute(
+    { method: 'GET', routeName: 'coupons/filters', rateLimit: 'read' },
+    async ({ req }) => {
+        const url = new URL(req.url)
+        const includeSitesParam = url.searchParams.get('includeSites')
+        const includeSites = includeSitesParam !== 'false'
+        const rawLimit = parseInt(
+            url.searchParams.get('sitesLimit') || '20',
+            10,
+        )
+        const sitesLimit = Math.min(Math.max(rawLimit, 0), 100)
 
-    const url = new URL(req.url)
-    const includeSitesParam = url.searchParams.get('includeSites')
-    const includeSites = includeSitesParam !== 'false'
-    const rawLimit = parseInt(url.searchParams.get('sitesLimit') || '20', 10)
-    const sitesLimit = Math.min(Math.max(rawLimit, 0), 100)
-
-    try {
-        const sitesPromise: Promise<Array<{ site: string }>> =
-            includeSites && sitesLimit > 0
-                ? couponsSql<Array<{ site: string }>>`
-                      SELECT DISTINCT site FROM coupons
-                      WHERE status = 'valid' AND expired = FALSE AND site IS NOT NULL
-                      ORDER BY site ASC
-                      LIMIT ${sitesLimit}
-                  `
+        try {
+            const sitesPromise = includeSites
+                ? listFilterSites(sitesLimit)
                 : Promise.resolve([])
+            const typesPromise = listFilterDiscountTypes()
 
-        const typesPromise = couponsSql<Array<{ discount_type: string }>>`
-            SELECT DISTINCT discount_type FROM coupons
-            WHERE status = 'valid' AND expired = FALSE AND discount_type IS NOT NULL
-        `
+            const [sitesRaw, discountTypesRaw] = await Promise.all([
+                sitesPromise,
+                typesPromise,
+            ])
 
-        const [sitesRaw, discountTypesRaw] = await Promise.all([
-            sitesPromise,
-            typesPromise,
-        ])
+            const sites = sitesRaw
+                .map(s => s.site)
+                .filter((site): site is string => Boolean(site))
+                .sort((a, b) => a.localeCompare(b))
+            const discountTypes = Array.from(
+                new Set(
+                    discountTypesRaw.map(d => d.discount_type).filter(Boolean),
+                ),
+            )
 
-        const sites = sitesRaw
-            .map(s => s.site)
-            .filter(Boolean)
-            .sort((a, b) => a.localeCompare(b))
-        const discountTypes = Array.from(
-            new Set(discountTypesRaw.map(d => d.discount_type).filter(Boolean)),
-        )
-
-        return NextResponse.json(
-            { sites, discountTypes },
-            {
-                headers: {
-                    'Cache-Control':
-                        'public, s-maxage=300, stale-while-revalidate=300',
+            return NextResponse.json(
+                { sites, discountTypes },
+                {
+                    headers: {
+                        'Cache-Control':
+                            'public, s-maxage=300, stale-while-revalidate=300',
+                    },
                 },
-            },
-        )
-    } catch (error) {
-        console.error('Failed to load coupon filter metadata:', error)
-        return NextResponse.json(
-            { error: 'Failed to load coupon filter metadata' },
-            { status: 500 },
-        )
-    }
-}
+            )
+        } catch (error) {
+            console.error('Failed to load coupon filter metadata:', error)
+            return handleRouteError(error, {
+                req,
+                message: 'Failed to load coupon filter metadata',
+            })
+        }
+    },
+)

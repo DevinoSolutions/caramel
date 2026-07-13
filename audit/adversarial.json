@@ -1,0 +1,50 @@
+[
+    {
+        "id": "F-001",
+        "ruling": "survives",
+        "new_severity": "Critical",
+        "rebuttal": "Attack failed on every vector. (1) Second health check: none exists — Glob on api/health/** and Grep for health|monitor|uptime return only health/db/route.ts, which does prisma.$queryRaw`SELECT 1` (route.ts:10) and never touches couponsSql. External Uptime-Kuma monitoring IS wired (health.ts:32 reads UPKUMA_HEALTH_SECRET) but is pointed only at the Prisma DB, which reinforces the finding. (2) 'Untyped' does not mean 'unsafe' — the postgres.js tagged templates ARE parameterized (couponsDb.ts is fine re: injection), but the finding's claim is about the missing TYPE CONTRACT, and that is worse than stated: the hand-written CouponRow type (couponsDb.ts:32-47) is not applied at any query boundary AND is already out of sync — coupons/route.ts:96 selects status and verification_message, neither of which exists on CouponRow. That is live drift, not hypothetical. Un-contracted confirmed."
+    },
+    {
+        "id": "F-002",
+        "ruling": "survives",
+        "new_severity": "Critical",
+        "rebuttal": "Core intact but two over-broad claims must be narrowed. Empty-success shaping is real (background.js:193 `if (!r.ok) return { coupons: [] }` with no error field, unlike the .catch at :202) and the decrypt swallow is real (decryptJsonData.ts:20-22 `catch { return resData }`). COUNTER TO ATTACH: the finding's 'never reach telemetry' is overstated — instrumentation.ts:12 exports `onRequestError = Sentry.captureRequestError`, so UNCAUGHT errors DO reach Sentry; only the deliberate try/catch-return-500 paths bypass it, so the claim should read 'caught-and-returned route errors bypass Sentry' (no captureConsoleIntegration exists to save them — grep empty). Also the .catch(()=>({})) body-parse sites are validated downstream (expire/route.ts:27 rejects non-arrays -> count:0; sources/route.ts:82 rejects empty website), so that sub-claim is largely defanged. The empty-success + honesty-product framing survives at Critical; the telemetry wording needs tightening."
+    },
+    {
+        "id": "F-003",
+        "ruling": "survives",
+        "new_severity": "Critical",
+        "rebuttal": "Unkillable. The key is in tracked source (background.js:23) and sent on live calls (background.js:208, plus test-extension.mjs:32/114/143); expire/route.ts:16 gates on the same process.env.EXTENSION_API_KEY; rateLimit.ts:61,91 exempts the same key. The 'public-by-design identifier' defense is explicitly refuted by the code's own comment at expire/route.ts:9-11 which calls it 'Privileged' and says it 'permanently flips expired=TRUE'. The prod env value MUST equal the shipped 'WXq...' string or the extension's own supported-stores/rate-exempt calls would 401, so the shipped key necessarily unlocks the mutation. isOriginAllowed returns true for a missing Origin header (rateLimit.ts:165), so curl with the extracted key + no Origin passes all gates unthrottled."
+    },
+    {
+        "id": "F-004",
+        "ruling": "survives",
+        "new_severity": "High",
+        "rebuttal": "Airtight. Grep for \"test\" scripts across every package.json returns only the root `\"test\": \"turbo run test\"`; no workspace package defines a `test` script (app has only test:e2e/test:e2e:ui playwright, extension has only test:e2e node script). turbo.json:15 declares an empty `\"test\": {}` task with no implementers, so `turbo run test` executes zero tasks and exits 0 — the false-green is confirmed exactly as described. Nothing to attack."
+    },
+    {
+        "id": "F-006",
+        "ruling": "survives",
+        "new_severity": "High",
+        "rebuttal": "Duplication is REAL and the finding UNDERSTATES it: the full 7-status predicate appears verbatim in coupons/route.ts:48, sites/top-sites/route.ts:13, sites/search-supported/route.ts:24, coupons/stores/route.ts:18 AND :25, and (marketing)/coupons/[store]/page.tsx:47 (a local const literally named VISIBLE_STATUSES that nobody shares) — 6 copies across 5 files, not the 'copy-pasted 5x' claimed. HOWEVER the specific DRIFT examples are wrong and must be rewritten: stats/route.ts:15 omits `expired = FALSE` because it is COUNTING expired-vs-active (stats/route.ts:13 `COUNT(*) FILTER (WHERE expired = TRUE)`) — adding the filter would zero the count; filters/route.ts:20 uses `status='valid'` to build filter-option lists, a different question. Those two are semantically-required differences, not drift. Core survives; the 'three competing definitions / disagreeing about itself' narrative should be replaced with the genuine 6-copy verbatim duplication."
+    },
+    {
+        "id": "F-007",
+        "ruling": "survives",
+        "new_severity": "High",
+        "rebuttal": "No live wrapper centralizes the cross-cutting concerns. middleware.ts is absent (Glob empty). The withAuth/withRoles/cors wrappers that could centralize this are DEAD (Grep shows zero live importers; they are Pages-Router NextApiRequest handlers), so they don't count. The CORS triplication is verified in a single file: the identical 3-line Access-Control block is hand-inlined at oauth/authorize/route.ts:42-44 (OPTIONS), :62-64 (getCorsHeaders), and :205-207 (catch) — the catch and OPTIONS don't even call the local helper. Coverage gap is real: oauth/authorize/route.ts never imports or calls checkRateLimit despite doing crypto + reading secrets. The shared helpers (checkRateLimit, isOriginAllowed) exist but are opt-in per-handler, which is exactly the invisible-gap problem the finding describes."
+    },
+    {
+        "id": "F-008",
+        "ruling": "survives",
+        "new_severity": "High",
+        "rebuttal": "Not cohesive by any reading. A function census of shared-utils.js shows at least eight unrelated responsibilities in the 1536-line file: DOM visibility/wait helpers (:91-190), price parsing (:203 getPrice), CSS/XPath query utils (:238-257), store-cache + domain detection (:281-382), checkout detection (:395-462), the coupon error-detection + apply loop (:637-692, :994, :1149 startApplyingCoupons), cart-JSON probing (:947 probeCartJson), tried-codes persistence (:969-994), and coupon fetch + LLM cart classification (:1011-1092). The 'all one domain' defense fails — price parsing, telemetry timing, modal UX and the apply loop are independently testable concerns fused with no boundary. LOC=1536 verified against the file length."
+    },
+    {
+        "id": "F-009",
+        "ruling": "survives",
+        "new_severity": "High",
+        "rebuttal": "Thesis holds but the finding contains a verifiable factual error that must be corrected. TRUE core: genuine dead Pages-Router fossils are knip-whitelisted (knip.json:18-21 ignores cors.ts, initMiddleware.ts, middlewares/**, securityHelpers/apiResponse.ts) and those files import NextApiRequest/NextApiResponse with no live callers (Grep for their imports returns only self/docs). ERROR TO FIX: apiResponseNext.ts is NOT dead — it is imported and used throughout a live App-Router route (sources/route.ts:1 and calls at :65,:68,:83,:110,:117 via nextApiResponse), it does NOT import Pages-Router types, and it is NOT in knip's ignore list. Strike apiResponseNext.ts from the dead-fossil set. Secondary: cryptoHelpers.decryptJsonClient is also live via decryptJsonData.ts:1, so 'zero live callers' is imprecise for that file too. The whitelisted-fossil + advisory-CI thesis survives on the remaining ~5 files; the file list needs tightening."
+    }
+]

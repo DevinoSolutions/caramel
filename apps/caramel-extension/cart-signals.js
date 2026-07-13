@@ -6,11 +6,6 @@
         return (el.textContent || '').replace(/\s+/g, ' ').trim()
     }
 
-    function attr(sel, name) {
-        const el = document.querySelector(sel)
-        return el ? (el.getAttribute(name) || '').trim() : ''
-    }
-
     function metaContent(name) {
         const byName = document.querySelector(`meta[name="${name}" i]`)
         if (byName) return (byName.getAttribute('content') || '').trim()
@@ -90,7 +85,7 @@
             let data
             try {
                 data = JSON.parse(s.textContent || '')
-            } catch (_) {
+            } catch {
                 continue
             }
             const queue = Array.isArray(data) ? [...data] : [data]
@@ -130,7 +125,7 @@
                     String(i.product_title || i.title || '').slice(0, 140),
                 )
                 .filter(Boolean)
-        } catch (_) {
+        } catch {
             return null
         }
     }

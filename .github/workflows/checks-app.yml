@@ -2,9 +2,11 @@ name: CI Checks – App
 
 on:
   push:
-    branches: [main, dev]
+    # audit/dev-2026-07-10 is TEMPORARY — remove when the audit branch merges
+    branches: [main, dev, audit/dev-2026-07-10]
   pull_request:
-    branches: [main, dev]
+    # audit/dev-2026-07-10 is TEMPORARY — remove when the audit branch merges
+    branches: [main, dev, audit/dev-2026-07-10]
 
 permissions:
   contents: read
@@ -24,7 +26,7 @@ jobs:
     name: ${{ matrix.task }}
     strategy:
       matrix:
-        task: ["lint", "prettier", "typecheck", "knip"]
+        task: ["lint", "prettier", "typecheck", "knip", "unit", "oxlint"]
     runs-on: ubuntu-latest
 
     steps:
@@ -48,9 +50,17 @@ jobs:
       # Prisma client only for typecheck
       - if: matrix.task == 'typecheck'
         name: Generate Prisma Client
-        run: pnpm --filter caramel-landing exec prisma generate
+        run: pnpm --filter caramel-app exec prisma generate
 
-      - name: Run ${{ matrix.task }}
+      # oxlint runs from the repo root (both apps), not per-app like the rest
+      # of this matrix — kept in the same matrix so it reports as its own
+      # "oxlint" status check, sibling to lint/prettier/typecheck/knip.
+      - if: matrix.task == 'oxlint'
+        name: Run oxlint
+        run: pnpm lint:oxlint
+
+      - if: matrix.task != 'oxlint'
+        name: Run ${{ matrix.task }}
         working-directory: ./apps/caramel-app
         run: |
           case ${{ matrix.task }} in
@@ -58,7 +68,33 @@ jobs:
             prettier)  pnpm prettier-check ;;
             typecheck) pnpm tsc --noEmit ;;
             knip)      pnpm knip ;;
+            unit)      pnpm test ;;
           esac
+
+  # ─────────────────────────────────────────────────────────────
+  # Dependency Vulnerability Audit (prod deps, high + critical)
+  # ─────────────────────────────────────────────────────────────
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Audit production dependencies (high + critical)
+        run: pnpm audit --prod --audit-level=high
 
   # ─────────────────────────────────────────────────────────────
   # Schema Drift Check (only when prisma files change)
@@ -182,13 +218,13 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Install Playwright
-        run: pnpm --filter caramel-landing exec playwright install --with-deps chromium
+        run: pnpm --filter caramel-app exec playwright install --with-deps chromium
 
       - name: Write minimal CI env
-        run: pnpm --filter caramel-landing run setup:ci-env
+        run: pnpm --filter caramel-app run setup:ci-env
 
       - name: Generate Prisma Client
-        run: pnpm --filter caramel-landing exec prisma generate
+        run: pnpm --filter caramel-app exec prisma generate
 
       - name: Apply Prisma migrations
         working-directory: ./apps/caramel-app
@@ -240,7 +276,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Install Playwright
-        run: pnpm --filter caramel-landing exec playwright install --with-deps chromium
+        run: pnpm --filter caramel-app exec playwright install --with-deps chromium
 
       - name: Run E2E tests
         working-directory: ./apps/caramel-app

@@ -12,6 +12,7 @@ PORT=58000
 PG_PORT=58005
 REDIS_PORT=58006
 DATABASE_URL="postgresql://postgres:postgres@localhost:58005/caramel?schema=public"
+COUPONS_DATABASE_URL="postgresql://postgres:postgres@localhost:58005/caramel_coupons"
 BETTER_AUTH_URL="http://localhost:58000"
 BETTER_AUTH_SECRET=ci_better_auth_secret
 JWT_SECRET=ci_jwt_secret

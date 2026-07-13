@@ -9,8 +9,12 @@
  *   4. Supported store sample has valid selectors
  *   5. Coupons endpoint reachable
  *   6. Popup UI: fills the login form and verifies logged-in state
- *   7. Injection logic: loads shared-utils.js against a fake store DOM and
- *      verifies applyCoupon() finds the input, fills the code, and clicks apply.
+ *   7. Injection logic: loads the F-008 split content-script files (formerly
+ *      one shared-utils.js — coupon-constants.generated.js, caramel-base.js,
+ *      dom-utils.js, store-detect.js, coupon-apply.js, coupon-fetch.js,
+ *      coupon-runner.js, in real manifest.json load order) against a fake
+ *      store DOM and verifies applyCoupon() finds the input, fills the
+ *      code, and clicks apply.
  *
  * Prereqs:
  *   - caramel-app dev server running on localhost:58000 (pnpm dev)
@@ -29,7 +33,6 @@ const EXT_PATH = path.resolve(__dirname, '..')
 const API_BASE = 'http://localhost:58000'
 const TEST_EMAIL = 'test@caramel.dev'
 const TEST_PASSWORD = 'test1234'
-const EXTENSION_API_KEY = 'WXqEpm2uOV5jjJXPpnQFyZiNdaPVUrtd2LIrf4kc1JA'
 
 const results = []
 function log(step, ok, detail = '') {
@@ -109,19 +112,13 @@ async function main() {
         )
 
         // 4. Supported stores
-        const storesRes = await sw.evaluate(
-            async ({ url, key }) => {
-                const r = await fetch(url, { headers: { 'x-api-key': key } })
-                return {
-                    status: r.status,
-                    body: await r.json().catch(() => null),
-                }
-            },
-            {
-                url: `${API_BASE}/api/extension/supported-stores`,
-                key: EXTENSION_API_KEY,
-            },
-        )
+        const storesRes = await sw.evaluate(async url => {
+            const r = await fetch(url)
+            return {
+                status: r.status,
+                body: await r.json().catch(() => null),
+            }
+        }, `${API_BASE}/api/extension/supported-stores`)
         const storeCount = storesRes.body?.supported?.length ?? 0
         log(
             'supported-stores endpoint',
@@ -139,17 +136,14 @@ async function main() {
 
         // 6. Coupons endpoint
         const couponsRes = await sw.evaluate(
-            async ({ url, key }) => {
-                const r = await fetch(url, { headers: { 'x-api-key': key } })
+            async url => {
+                const r = await fetch(url)
                 return {
                     status: r.status,
                     body: await r.json().catch(() => null),
                 }
             },
-            {
-                url: `${API_BASE}/api/coupons?site=${encodeURIComponent(sample?.domain || 'allbirds.com')}`,
-                key: EXTENSION_API_KEY,
-            },
+            `${API_BASE}/api/coupons?site=${encodeURIComponent(sample?.domain || 'allbirds.com')}`,
         )
         log(
             'coupons endpoint',
@@ -208,9 +202,21 @@ async function main() {
 
         // 8. DOM INJECTION — real applyCoupon() against a synthetic supported-store DOM
         {
-            const sharedUtilsSrc = readFileSync(
-                path.join(EXT_PATH, 'shared-utils.js'),
-                'utf8',
+            // F-008 split shared-utils.js into 6 files; coupon-fetch.js also
+            // needs coupon-constants.generated.js loaded first (F-006's
+            // RESTRICTED_STATUSES rebind reads window.CaramelCoupons at
+            // module-eval time). Real manifest.json/index.html load order.
+            const contentScriptFiles = [
+                'coupon-constants.generated.js',
+                'caramel-base.js',
+                'dom-utils.js',
+                'store-detect.js',
+                'coupon-apply.js',
+                'coupon-fetch.js',
+                'coupon-runner.js',
+            ]
+            const contentScriptSources = contentScriptFiles.map(f =>
+                readFileSync(path.join(EXT_PATH, f), 'utf8'),
             )
 
             const page = await context.newPage()
@@ -222,8 +228,12 @@ async function main() {
                 <button id="apply-btn">Apply</button>
             </body></html>`)
 
-            // Wire click handler and load shared-utils.js via evaluate (bypasses CSP)
-            await page.evaluate(utilsSrc => {
+            // Wire click handler and load the split content-script files, IN
+            // ORDER, via evaluate (bypasses CSP) — each its own eval, like
+            // separate <script> tags, so load-order semantics match the
+            // real content-script realm (see caramel-base.js's relocated
+            // _isDevInstall for why that distinction matters).
+            await page.evaluate(sources => {
                 window.__clickLog = []
                 document
                     .getElementById('apply-btn')
@@ -233,7 +243,7 @@ async function main() {
                         })
                         document.getElementById('total').textContent = '$90.00'
                     })
-                // Stub chrome APIs that shared-utils.js touches at module scope
+                // Stub chrome APIs the content-script files touch at module scope
                 // Force-overwrite: Chromium provides `chrome` on about:blank but without .runtime
                 window.chrome = {
                     runtime: {
@@ -246,8 +256,10 @@ async function main() {
                     },
                     storage: { sync: { get: (_, cb) => cb && cb({}) } },
                 }
-                ;(0, eval)(utilsSrc)
-            }, sharedUtilsSrc)
+                for (const src of sources) {
+                    ;(0, eval)(src)
+                }
+            }, contentScriptSources)
 
             const rec = {
                 domain: 'test-store.local',

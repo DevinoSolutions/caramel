@@ -1,0 +1,32 @@
+[
+    {
+        "id": "F-001",
+        "verdict": "verbatim",
+        "confidence": 1.0,
+        "note": "Quote 1 (Read-only connection...Python verification service) found verbatim in couponsDb.ts:1-7. Quote 2 (SELECT 1 health check) found verbatim in health/db/route.ts:9-11. The separate postgres connection to caramel_coupons DB owned externally is confirmed by code at couponsDb.ts:9-12."
+    },
+    {
+        "id": "F-002",
+        "verdict": "verbatim",
+        "confidence": 1.0,
+        "note": "Quote 1 (if !r.ok return coupons:[]) found verbatim in background.js:193. Quote 2 (Error fetching coupons) found verbatim in api/coupons/route.ts:121-125. Quote 3 (catch err return resData) found verbatim in decryptJsonData.ts:22. No Sentry calls present in coupons route. Behavior claim confirmed: errors are caught, logged to console only, returned as success-shaped responses."
+    },
+    {
+        "id": "F-003",
+        "verdict": "verbatim",
+        "confidence": 0.95,
+        "note": "Key check found verbatim in expire/route.ts:17-19. Static key 'WXqEpm2uOV5jjJXPpnQFyZiNdaPVUrtd2LIrf4kc1JA' found verbatim in background.js:23. isExtensionClient rate-limit bypass found verbatim in rateLimit.ts:91 (if isExtensionClient return null). Minor: comment in rateLimit.ts says accepts 'x-api-key' OR 'x-extension-api-key' for backwards-compat, but both check same env var. Core finding: static string shipped in public client gates destructive mutations + exempts from rate limit."
+    },
+    {
+        "id": "F-004",
+        "verdict": "verbatim",
+        "confidence": 1.0,
+        "note": "Root package.json:15 contains 'test': 'turbo run test' (verbatim). turbo.json:test is empty {} (verbatim). App package.json has only test:e2e (lines 21-22), extension has only test:e2e (line 13). No workspace implements plain 'test' script. Behavior: turbo run test exits 0 with no tasks executed."
+    },
+    {
+        "id": "F-005",
+        "verdict": "verbatim",
+        "confidence": 1.0,
+        "note": "Code check found verbatim in couponsDb.ts:9-12 (throw error if COUPONS_DATABASE_URL missing). .env.example confirmed: contains DATABASE_URL, JWT_SECRET, etc. (28 lines) but DOES NOT contain COUPONS_DATABASE_URL. Behavior claim confirmed: boot requires COUPONS_DATABASE_URL but .env.example omits it. No zod-validated env module found."
+    }
+]

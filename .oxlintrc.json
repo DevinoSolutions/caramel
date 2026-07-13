@@ -1,0 +1,18 @@
+{
+    "$schema": "./node_modules/oxlint/configuration_schema.json",
+    "plugins": ["typescript", "unicorn", "oxc"],
+    "categories": {
+        "correctness": "error",
+        "suspicious": "warn"
+    },
+    "rules": {},
+    "env": {
+        "builtin": true
+    },
+    "ignorePatterns": [
+        "**/dist/**",
+        "**/.next/**",
+        "**/node_modules/**",
+        "apps/caramel-app/public/**"
+    ]
+}

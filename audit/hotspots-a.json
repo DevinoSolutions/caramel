@@ -1,0 +1,128 @@
+[
+    {
+        "path": "apps/caramel-app/.env",
+        "reason": ".env file exists with real API secrets (gitignored but untracked can be accidentally committed)",
+        "candidate_severity": "Critical",
+        "lenses": ["unvalidated-env", "missing-basics"]
+    },
+    {
+        "path": "apps/caramel-app/pnpm-lock.yaml",
+        "reason": "Nested pnpm-lock.yaml in monorepo (violates one-root-compose; version drift risk between root and app)",
+        "candidate_severity": "High",
+        "lenses": ["version-drift", "stray-artifacts"]
+    },
+    {
+        "path": "apps/caramel-app/src/app/api/classify-cart/route.ts:32+",
+        "reason": "Cart classification uses OpenRouter GPT-5 mini but no AI quality evals in CI; model output never validated post-call",
+        "candidate_severity": "High",
+        "lenses": ["llm-surfaces-without-evals"]
+    },
+    {
+        "path": "apps/caramel-app/src/app/api/classify-cart/route.ts:67",
+        "reason": "req.json().catch(() => null) swallows malformed JSON silently; endpoint then operates on null (producer/consumer contract failure)",
+        "candidate_severity": "High",
+        "lenses": ["silent-failure", "producer-consumer-drift"]
+    },
+    {
+        "path": "apps/caramel-app/src/app/api/coupons/increment/route.ts:20",
+        "reason": "req.json().catch(() => ({})) — malformed body becomes empty object, id?: unknown is silently undefined",
+        "candidate_severity": "High",
+        "lenses": ["silent-failure", "producer-consumer-drift"]
+    },
+    {
+        "path": "apps/caramel-app/src/app/api/extension/login/route.ts:5",
+        "reason": "req.json().catch(() => ({})) — silent email/password loss causes auth errors with no parse-failure context",
+        "candidate_severity": "High",
+        "lenses": ["silent-failure", "producer-consumer-drift"]
+    },
+    {
+        "path": "apps/caramel-extension/background.js",
+        "reason": "Service worker with onMessage listeners and async operations but no global error boundary (failed bg tasks unobserved)",
+        "candidate_severity": "High",
+        "lenses": ["fire-and-forget-async", "silent-failure"]
+    },
+    {
+        "path": "apps/caramel-extension/popup.js",
+        "reason": "760-line popup with 30+ async patterns but only 9 catch blocks (unhandled rejections will fail silently)",
+        "candidate_severity": "High",
+        "lenses": ["fire-and-forget-async", "silent-failure"]
+    },
+    {
+        "path": "apps/caramel-extension/shared-utils.js",
+        "reason": "1537-line core utility with 28 catch blocks but 2+ fetch calls and cross-frame messaging (trace/error flow unclear)",
+        "candidate_severity": "High",
+        "lenses": ["fire-and-forget-async", "trace-propagation"]
+    },
+    {
+        "path": ".eslintrc.json",
+        "reason": "No ESLint config (missing code quality guardrails for unused imports, naming conventions, complexity)",
+        "candidate_severity": "Medium",
+        "lenses": ["missing-basics"]
+    },
+    {
+        "path": "apps/caramel-app/src/app/api/classify-cart/route.ts",
+        "reason": "Large route (100+ lines) with 15+ type casts (as Record, as [string, boolean][], etc.) — trial-and-error bloat pattern",
+        "candidate_severity": "Medium",
+        "lenses": ["trial-and-error-bloat", "missing-basics"]
+    },
+    {
+        "path": "apps/caramel-app/src/app/api/extension/oauth/authorize/route.ts:52",
+        "reason": "searchParams.get('provider') cast as 'google'|'apple'|null without validation (trusts client-supplied enum)",
+        "candidate_severity": "Medium",
+        "lenses": ["producer-consumer-drift", "missing-basics"]
+    },
+    {
+        "path": "apps/caramel-app/src/app/api/extension/oauth/redirect/route.ts",
+        "reason": "OAuth redirect handler has no error logging (exceptions in state validation, token exchange swallowed)",
+        "candidate_severity": "Medium",
+        "lenses": ["silent-failure", "operability"]
+    },
+    {
+        "path": "apps/caramel-app/src/components/coupons/coupon-filters.tsx:92-131",
+        "reason": "React Select styling uses 6x 'any' type casts (base: any, state: any) bypassing type safety",
+        "candidate_severity": "Medium",
+        "lenses": ["missing-basics"]
+    },
+    {
+        "path": "apps/caramel-app/src/lib",
+        "reason": "No env.ts or environment validation (process.env accessed unsafely throughout)",
+        "candidate_severity": "Medium",
+        "lenses": ["missing-basics", "unvalidated-env"]
+    },
+    {
+        "path": "apps/caramel-extension/background.js + apps/caramel-app/src/app/api/extension/",
+        "reason": "Extension→API requests lack trace/request ID propagation; errors in extension cannot be correlated to API logs",
+        "candidate_severity": "Medium",
+        "lenses": ["trace-propagation", "operability"]
+    },
+    {
+        "path": "apps/caramel-extension/shared-utils.js + apps/caramel-app/src/components/coupons/",
+        "reason": "Coupon filtering, store detection, and discount calculation duplicated across extension (JS) and app (TS) (single-source-of-truth violation)",
+        "candidate_severity": "Medium",
+        "lenses": ["duplication", "maintainability"]
+    },
+    {
+        "path": "local-dev/.env",
+        "reason": ".env file with local database credentials and API keys (dev-only but requires care in commit discipline)",
+        "candidate_severity": "Medium",
+        "lenses": ["unvalidated-env"]
+    },
+    {
+        "path": "apps/caramel-app/sentry.server.config.ts",
+        "reason": "Sentry configured but request context (user ID, session, trace ID) propagation to extension calls unclear",
+        "candidate_severity": "Low",
+        "lenses": ["trace-propagation", "operability"]
+    },
+    {
+        "path": "apps/caramel-app/src/app/api/coupons/route.ts:120",
+        "reason": "Coupon GET endpoint catches errors generically without logging which specific coupon query failed",
+        "candidate_severity": "Low",
+        "lenses": ["silent-failure", "operability"]
+    },
+    {
+        "path": "apps/caramel-extension/shared-utils.js:67-69",
+        "reason": "catch (e) { // ignore storage errors } in recordTiming — storage failures mask underlying issues silently",
+        "candidate_severity": "Low",
+        "lenses": ["silent-failure"]
+    }
+]

@@ -1,0 +1,222 @@
+{
+    "audit": "caramel",
+    "baseline_sha": "537547b3081aa3a0ec817cdc5f6dac4f0d328dbb",
+    "fix_branch": "audit/fixes-2026-07-10",
+    "fix_train_head": "ce30875 (21 fix commits: 16 findings + 5 amendments; +1 stage-4 docs commit)",
+    "pr": "https://github.com/DevinoSolutions/caramel/pull/111",
+    "generated_stage": "3-final (post-fix state; companion to the audit-time findings.json — diff future audits against BOTH)",
+    "findings": [
+        {
+            "id": "F-001",
+            "status": "FIXED",
+            "commits": ["0359cb4", "19b91ef"],
+            "notes": "Dual-DB health probe (live-proven 503 on coupons-down); 8 zod row schemas parse 9 read sites; dispatch-only drift workflow (secret COUPONS_DATABASE_URL still to be added by human). Known-debt remainder: producer-side (Python repo) shared contract."
+        },
+        {
+            "id": "F-002",
+            "status": "FIXED",
+            "commits": ["014a55f"],
+            "premise_corrections": [
+                "decryptJsonData's sole caller is the CLIENT component sources/page.tsx — decrypt failures surface client-side, not via the server helper"
+            ],
+            "notes": "handleRouteError → Sentry on all 14 catch sites; DecryptError; extension {error} shaping driving the existing renderLoadError UI. Helper gained headers passthrough (CORS-on-error)."
+        },
+        {
+            "id": "F-003",
+            "status": "FIXED",
+            "commits": ["8231e1d"],
+            "notes": "Key retired from ALL privileged roles; expire = server-only COUPONS_ADMIN_SECRET bearer (zero callers existed); exemption via exported isTrustedServer; supported-stores keyless public read = graceful old-client path. Ops handoff: set COUPONS_ADMIN_SECRET in Dokploy, delete EXTENSION_API_KEY."
+        },
+        {
+            "id": "F-004",
+            "status": "FIXED",
+            "commits": ["517a1b1"],
+            "notes": "Vitest 4 baseline both packages; pnpm test really runs and fails on zero tests; characterization pins on every later-flipped surface; CI unit legs. Suite grew 0 → 305 tests (290 app + 15 ext) by train end."
+        },
+        {
+            "id": "F-005",
+            "status": "FIXED",
+            "commits": ["e52dbee", "19b91ef", "0a806fd"],
+            "notes": "zod env module + boot fail-fast (live-proven); .env.example 19→30 vars AND tracked for the first time (.env* gitignore had swallowed it — fresh clones had no env vocabulary). Two train-regressions in the regenerated example were caught downstream and amended: prisma-style ?schema= on the raw-driver URL (19b91ef) and postgres:postgres credentials vs the compose-created caramel role (0a806fd)."
+        },
+        {
+            "id": "F-006",
+            "status": "FIXED",
+            "commits": ["5777695", "e947a1d"],
+            "notes": "src/lib/coupons.ts domain module + SQL fragment factories; 6 verbatim + 2 ranking sites unified; filters = the ONE deliberate behavior change (broadens to visible set); stats ruled deliberate (verifiedCensusSql); committed generated extension constants + sync gate + raw-token ban gate (both proven red→green). Amendment: generator emits prettier fixed-point output (root lint-staged had reformatted the committed file)."
+        },
+        {
+            "id": "F-007",
+            "status": "FIXED",
+            "commits": ["125827b"],
+            "premise_corrections": [
+                "Session mint lives in extension/oauth/route.ts (Google+Apple branches), NOT oauth/redirect (which is Prisma-free)",
+                "better-auth 1.5.3 exposes no public server API for external code-exchange — STOP-DESIGN exercised: mint centralized into extensionOAuthSession.ts (wire-identity pinned); better-auth adoption parked as new finding"
+            ],
+            "notes": "Declarative withRoute on all 16 routes; 4 unthrottled sensitive routes gained limits; oauth-exchange CORS tightened to exact env allowlist (pre-ship gate: verify prod extension-origin envs). Route table posture derived from tree per CR-8."
+        },
+        {
+            "id": "F-008",
+            "status": "FIXED",
+            "commits": ["2d9b962", "12d675f"],
+            "premise_corrections": [
+                "Modal UI lives in UI-helpers.js, not shared-utils.js — no modal carve-out",
+                "cart-signals.js/inject.js are honestly named — no renames",
+                "One plan assumption false: NOT all cross-file calls were deferred — _isDevInstall is called at module-eval time (caught by fresh-realm prefix loading; relocated verbatim)"
+            ],
+            "notes": "6-file split, cat-diff byte-identity proven, applyCoupon green in real Chromium. Amendment: app e2e file-inventory updated. size-limit headroom now ~0.9KB (watch)."
+        },
+        {
+            "id": "F-009",
+            "status": "FIXED",
+            "commits": ["4e681b9"],
+            "notes": "6 fossils + 4 orphan deps deleted (incl. jsonwebtoken beyond plan — truthful-green required); knip 0 issues 0 unjustified ignores; oxlint (45 real error hits triaged individually); size-limit raw-byte group budgets (plan's gzip:false bug fixed against package source — brotli:false); husky += knip + prisma validate; TEMP audit-branch CI trigger (REVERT AT MERGE); branch protection = human handoff commands (in PR body + RUNBOOK)."
+        },
+        {
+            "id": "F-010",
+            "status": "FIXED",
+            "commits": ["989fb6d", "145fb10"],
+            "notes": "All 4 onboarding docs rewritten from OBSERVED landed reality; migration command proven on an empty DB; secrets-provenance table; degraded-mode documented with live-verified error text. Validation: cold-Haiku docs-only trace PASS — boot→200, real tests, gates, 0 tribal findings, 12/12 checked baseline gaps covered (lead corrected 4 mis-scored rows)."
+        },
+        {
+            "id": "F-011",
+            "status": "FIXED",
+            "commits": ["ef85860"],
+            "premise_corrections": [
+                "couponsDb uses porsager postgres client, not pg Pool (application_name goes in connection options)",
+                "Sentry initializes production-only — span writes optional-chained"
+            ],
+            "notes": "RUNBOOK.md (unknowns as explicit TODO(human)); error.tsx + global-error.tsx with Sentry capture; automaticVercelMonitors removed; OpenRouter generation-id + X-Request-Id on the auto span; pnpm smoke (live-proven honest FAIL on coupons-down). 3am re-run: 11/14 blind spots closed, 0 fully open."
+        },
+        {
+            "id": "F-012",
+            "status": "FIXED",
+            "commits": ["e6700f9"],
+            "notes": "40-case eval suite importing production classifyCart; 5 deterministic scorers; separate eval config + pnpm eval (dependency-free env loading); zod classificationSchema (byte-exact neutrality proven); ai-evals.yml (PR path-filter, nightly+auto-issue, dispatch, loud missing-secret error). Baseline came back RED at 5% — the gate caught F-017 on day one. Secret OPENROUTER_API_KEY still to be added (CI leg red by design); prod Dokploy lacks the key entirely (classify-cart dead in prod — ops handoff)."
+        },
+        {
+            "id": "F-013",
+            "status": "FIXED",
+            "commits": ["48f5142"],
+            "premise_corrections": [
+                "apiResponseNext anys are data/error params, not metadata/viewport (which never existed)"
+            ],
+            "notes": "16 live any tokens → 0; exported surfaces to unknown (TS2698 spread rewrite property-tested); StylesConfig for react-select; @typescript-eslint/no-explicit-any at ERROR, proven firing. Zero suppressions repo-wide maintained."
+        },
+        {
+            "id": "F-014",
+            "status": "FIXED",
+            "commits": ["93cde28"],
+            "notes": "Vulns 89 (2 crit/47 high) → 5 moderates ONLY; 71 ranges pinned (resolution-neutrality proven structurally); nested lockfiles deleted + CI cache repointed; audit gate at high (exit-0 proven); deps-pinned guard test red-proven; @better-auth/prisma-adapter discovered fully dead and deleted; packageManager ruling evidence-backed (CI really runs pnpm 9). Majors = 13-item known-debt list for next cycle."
+        },
+        {
+            "id": "F-015",
+            "status": "FIXED",
+            "commits": ["f34ceab"],
+            "premise_corrections": [
+                "nul file was never tracked (working-tree artifact) — gitignored only",
+                "amazon.js was deliberately deleted in history — stale Firefox entry removed, file not restored"
+            ],
+            "notes": "Package renamed caramel-app (16 refs / 8 files — CR-6 re-grep beat the plan's 5); tailwind class-sorting genuinely activated (proven 0→30 flagged files); repo-integrity gate (root allowlist + manifest existence) proven RED on amazon.js then green; stray file deleted; husky no-op proven by tree-hash equality."
+        },
+        {
+            "id": "F-016",
+            "status": "NOT IN THIS TRAIN — SEPARATE INITIATIVE",
+            "commits": [],
+            "notes": "one-root-compose via the /one-root-compose skill (large, breaking, prod-cutover). Explicitly excluded per triage + human go-signal. caramel is NOT on the PROD-GATE exception list — standard full flow when scheduled, still no prod moves without explicit human go."
+        },
+        {
+            "id": "F-017",
+            "status": "FIXED (NEW — discovered in-train by F-012's eval gate)",
+            "commits": ["09d8dbb"],
+            "notes": "cartClassifier maxTokens:120 starved gpt-5-mini (reasoning model) → ~95% of live calls failed as empty (invisible pre-F-002). Empirically sized: 600 shipped (97.5% primary-match, 0 truncations, p95 5965ms vs 7000ms wall, cost unchanged), green ×2, red→green preserved in evals/SCOREBOARD.md. In-train fix self-approved under gate collapse (rationale: red-at-birth gate + ~dead shipped feature + harness already existed)."
+        }
+    ],
+    "new_findings_next_cycle": [
+        {
+            "id": "NF-01",
+            "sev": "High",
+            "title": "Firefox extension parity: manifest-firefox.json missing cart-signals.js AND the css key chrome ships; matches-list drift",
+            "source": "F-008/F-006/F-015 executors, triple-confirmed"
+        },
+        {
+            "id": "NF-02",
+            "sev": "High",
+            "title": "PROD ops: OPENROUTER_API_KEY absent from the live Dokploy app (classify-cart dead in prod) — provision alongside the CI secret. (The companion COUPONS_DATABASE_URL concern was RETIRED by the E2E phase: prod /api/coupons returns real data — env-layering misread.)",
+            "source": "F-012 executor + E2E validation item 6"
+        },
+        {
+            "id": "NF-03",
+            "sev": "Medium",
+            "title": "extension-smoke e2e: manifest content-script matches vs supported-sites list drift (the ONE standing red CI test — deterministic, pre-existing)",
+            "source": "F-009 executor + CI, reproduced 3x"
+        },
+        {
+            "id": "NF-04",
+            "sev": "Medium",
+            "title": "No .gitattributes — fresh Windows clone with autocrlf=true breaks the byte-exact generated-file test (workaround documented in LOCAL-DEV); repo-wide EOL normalization deserves its own pass",
+            "source": "F-010 pre-flight"
+        },
+        {
+            "id": "NF-05",
+            "sev": "Medium",
+            "title": "suggestion-form.tsx has NO input element and setUrl is never called (form can only submit initialValue) — looks like a real product bug",
+            "source": "F-009 oxlint triage"
+        },
+        {
+            "id": "NF-06",
+            "sev": "Medium",
+            "title": "coupons-section.tsx setStoreOptions never called — store filter permanently empty; sibling setDiscountOptions IS wired",
+            "source": "F-009 oxlint triage"
+        },
+        {
+            "id": "NF-07",
+            "sev": "Medium",
+            "title": "oauth mint hardening: /api/auth/session path bug + missing emailVerified gate (pinned as-is); route through better-auth once it exposes a public external-code-exchange API; authorize/login inner catches bypass handleRouteError (no Sentry/x-request-id)",
+            "source": "F-007 planning + execution"
+        },
+        {
+            "id": "NF-08",
+            "sev": "Low",
+            "title": "apple-extension/Caramel.xcodeproj is stale dead weight (references deleted files; release pipeline regenerates its own project) — recommend deletion",
+            "source": "F-008/F-013/F-015 executors"
+        },
+        {
+            "id": "NF-09",
+            "sev": "Low",
+            "title": "WhyNot.tsx: two content arrays (problemsWithHoney/caramelSolutions) never rendered — dead copy or missing section (product call)",
+            "source": "F-009 oxlint triage"
+        },
+        {
+            "id": "NF-10",
+            "sev": "Low",
+            "title": "Dependency hygiene follow-ups: 5 residual moderate vulns (postcss trivial); no nightly re-audit schedule on the new audit gate; encryptJsonServer has zero callers (fossil); root tailwind.config.js empty stray; no CI check covers root-level loose-file formatting",
+            "source": "F-013/F-014/F-015 executors"
+        },
+        {
+            "id": "NF-11",
+            "sev": "Low",
+            "title": "Eval-suite maintenance: junk-fixture confidence calibration (model says 'other' correctly at 0.8-0.95 vs fixture cap 0.6 — 3 residual eval failures); cross-file oxlint no-unused-vars disable pattern (13 instances) deserves a config-level solution; size-limit content-scripts headroom ~0.9KB",
+            "source": "F-017/F-008 executors"
+        },
+        {
+            "id": "NF-12",
+            "sev": "Low",
+            "title": "mintExtensionSession returning-user response omits freshly-updated name/image (pre-existing, preserved byte-identical)",
+            "source": "F-007 executor"
+        },
+        {
+            "id": "NF-13",
+            "sev": "Low",
+            "title": "Redis provisioned in local-dev compose but never wired into app code — rate limiting is in-memory/per-process (resets on every deploy/instance)",
+            "source": "DESIGN.md verification pass (Stage 4)"
+        }
+    ],
+    "next_audit_focus": [
+        "F-016 one-root-compose migration (own initiative, /one-root-compose skill) — the largest structural item deliberately left standing",
+        "Major-version train (13 pinned majors incl. Prisma 7, TS 7, Tailwind 4) with its own pinning strategy",
+        "Firefox/Safari parity sweep (NF-01, NF-08) coordinated with an extension release",
+        "Product-bug pair NF-05/NF-06 (small, user-visible)",
+        "Re-run the full empirical battery post-merge on dev to confirm the deltas hold outside this branch"
+    ]
+}

@@ -1,3 +1,4 @@
+import { withRoute } from '@/lib/api/withRoute'
 import { NextRequest, NextResponse } from 'next/server'
 
 /**
@@ -104,10 +105,19 @@ async function handleRedirect(req: NextRequest) {
     return NextResponse.redirect(redirectUrl.toString())
 }
 
-export async function GET(req: NextRequest) {
-    return handleRedirect(req)
-}
+// No cors/rateLimit/origin/apiKey/body concerns — this is a server-to-
+// server OAuth-provider callback (Google/Apple POST or redirect here, not
+// a browser CORS context), and throttling Google/Apple is wrong (see
+// PLAN-F-007.md's route table). Wrapped ONLY for the F-002 error boundary
+// withRoute provides for free: previously `handleRedirect` had no
+// try/catch at all, so e.g. a malformed POST body threw an unhandled
+// rejection instead of a clean {error} response.
+export const GET = withRoute(
+    { method: 'GET', routeName: 'extension/oauth/redirect' },
+    async ({ req }) => handleRedirect(req),
+)
 
-export async function POST(req: NextRequest) {
-    return handleRedirect(req)
-}
+export const POST = withRoute(
+    { method: 'POST', routeName: 'extension/oauth/redirect' },
+    async ({ req }) => handleRedirect(req),
+)

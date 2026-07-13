@@ -1,5 +1,8 @@
+import { env } from '@/lib/env'
+import * as Sentry from '@sentry/nextjs'
+
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
-const DEFAULT_MODEL = process.env.OPENROUTER_MODEL || 'openai/gpt-5-mini'
+const DEFAULT_MODEL = env.OPENROUTER_MODEL
 
 export interface ChatMessage {
     role: 'system' | 'user' | 'assistant'
@@ -27,8 +30,18 @@ export async function chat(
     messages: ChatMessage[],
     opts: ChatOptions = {},
 ): Promise<string> {
-    const key = process.env.OPENROUTER_API_KEY
+    const key = env.OPENROUTER_API_KEY
     if (!key) throw new OpenRouterError('OPENROUTER_API_KEY not set')
+
+    // F-011 — coarse cross-hop trace correlation. Sentry already spans this
+    // fetch and propagates sentry-trace/baggage (nativeNodeFetchIntegration,
+    // on by default — see PLAN-F-011.md), but OpenRouter neither reads nor
+    // returns those headers, so that propagation is a dead end. The useful
+    // correlation is manual: a request id we control (sent as a header,
+    // ignored by OpenRouter, but usable if we ever log outgoing requests)
+    // plus OpenRouter's own response `id` (the generation id visible in
+    // their dashboard) — both stashed on the active span below.
+    const requestId = crypto.randomUUID()
 
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), opts.timeoutMs ?? 8000)
@@ -51,6 +64,7 @@ export async function chat(
                 Authorization: `Bearer ${key}`,
                 'HTTP-Referer': 'https://caramel.app',
                 'X-Title': 'Caramel Extension',
+                'X-Request-Id': requestId,
             },
             body: JSON.stringify(body),
         })
@@ -62,8 +76,20 @@ export async function chat(
             )
         }
         const json = (await res.json()) as {
+            id?: string
             choices?: { message?: { content?: string } }[]
         }
+
+        // No-op outside prod: Sentry.init only runs there (see
+        // sentry.common.config.ts), so getActiveSpan() is always undefined
+        // in dev/test.
+        Sentry.getActiveSpan()?.setAttributes({
+            'openrouter.request_id': requestId,
+            ...(typeof json?.id === 'string'
+                ? { 'openrouter.generation_id': json.id }
+                : {}),
+        })
+
         const content = json?.choices?.[0]?.message?.content
         if (typeof content !== 'string')
             throw new OpenRouterError('empty response')
