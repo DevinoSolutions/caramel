@@ -1,9 +1,17 @@
 import { withSentryConfig } from '@sentry/nextjs'
+import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const packageRoot = fileURLToPath(new URL('.', import.meta.url))
 const workspaceRoot = path.resolve(packageRoot, '..', '..')
+
+// Honest build stamp: the app package.json version, exposed to both server and
+// browser as NEXT_PUBLIC_APP_VERSION (env.client.ts reads it, falling back to
+// '0.0.0-dev'). Read here so it needs no build ARG / hand-set env var.
+const appVersion = JSON.parse(
+    readFileSync(new URL('./package.json', import.meta.url), 'utf8'),
+).version
 
 // Universally-safe security headers. CSP is deliberately NOT included
 // here — it's easy to break third-party scripts (Sentry, GA, RevenueCat)
@@ -31,6 +39,9 @@ const nextConfig = {
     // workspace deps correctly.
     output: 'standalone',
     outputFileTracingRoot: workspaceRoot,
+    env: {
+        NEXT_PUBLIC_APP_VERSION: appVersion,
+    },
     turbopack: {
         root: workspaceRoot,
     },

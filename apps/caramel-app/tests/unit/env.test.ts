@@ -66,6 +66,48 @@ describe('parseServerEnv', () => {
         expect(parsed.USESEND_FROM_NAME).toBe('Caramel')
         expect(parsed.GOOGLE_CLIENT_ID).toBeUndefined()
     })
+
+    it('(g) POSTHOG_DATASET defaults to disabled and accepts the enum', () => {
+        expect(parseServerEnv(validServerFixture).POSTHOG_DATASET).toBe(
+            'disabled',
+        )
+        expect(
+            parseServerEnv({
+                ...validServerFixture,
+                POSTHOG_DATASET: 'production',
+            }).POSTHOG_DATASET,
+        ).toBe('production')
+    })
+
+    it('(g) server + client dataset disagreement (both set) throws', () => {
+        expect(() =>
+            parseServerEnv({
+                ...validServerFixture,
+                POSTHOG_DATASET: 'production',
+                NEXT_PUBLIC_POSTHOG_DATASET: 'e2e',
+            }),
+        ).toThrow(/disagree/)
+    })
+
+    it('(g) matching server + client datasets parse fine', () => {
+        expect(() =>
+            parseServerEnv({
+                ...validServerFixture,
+                POSTHOG_DATASET: 'e2e',
+                NEXT_PUBLIC_POSTHOG_DATASET: 'e2e',
+            }),
+        ).not.toThrow()
+    })
+
+    it('(g) the Playwright/CI-only read key present in app env throws (key hygiene)', () => {
+        expect(() =>
+            parseServerEnv({
+                ...validServerFixture,
+                POSTHOG_E2E_TEST_PROJECT_QUERY_READ_ONLY_PERSONAL_API_KEY:
+                    'phx_should_not_be_here',
+            }),
+        ).toThrow(/POSTHOG_E2E_TEST_PROJECT_QUERY_READ_ONLY_PERSONAL_API_KEY/)
+    })
 })
 
 describe('parseClientEnv', () => {
@@ -87,6 +129,32 @@ describe('parseClientEnv', () => {
 
     it('(f) the BASE_URL singleton falls back to the prod URL (NEXT_PUBLIC_BASE_URL unset in test.env)', () => {
         expect(BASE_URL).toBe('https://grabcaramel.com')
+    })
+
+    it('(g) empty input defaults NEXT_PUBLIC_POSTHOG_DATASET to disabled', () => {
+        expect(parseClientEnv({}).NEXT_PUBLIC_POSTHOG_DATASET).toBe('disabled')
+    })
+
+    it('(g) production dataset WITHOUT its capture pair throws (strict parse)', () => {
+        expect(() =>
+            parseClientEnv({ NEXT_PUBLIC_POSTHOG_DATASET: 'production' }),
+        ).toThrow(/NEXT_PUBLIC_POSTHOG_KEY/)
+    })
+
+    it('(g) e2e dataset WITHOUT its capture pair throws (strict parse)', () => {
+        expect(() =>
+            parseClientEnv({ NEXT_PUBLIC_POSTHOG_DATASET: 'e2e' }),
+        ).toThrow(/NEXT_PUBLIC_POSTHOG_E2E_TEST_PROJECT_CAPTURE_TOKEN/)
+    })
+
+    it('(g) production dataset WITH its capture pair parses', () => {
+        expect(() =>
+            parseClientEnv({
+                NEXT_PUBLIC_POSTHOG_DATASET: 'production',
+                NEXT_PUBLIC_POSTHOG_HOST: 'https://posthog.devino.ca',
+                NEXT_PUBLIC_POSTHOG_KEY: 'phc_prod',
+            }),
+        ).not.toThrow()
     })
 })
 

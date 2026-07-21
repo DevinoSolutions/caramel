@@ -1,6 +1,6 @@
 'use client'
 
-import * as Sentry from '@sentry/nextjs'
+import { reportUserVisibleFailure } from '@/lib/feedback/reportUserVisibleFailure'
 import Link from 'next/link'
 import { useEffect } from 'react'
 
@@ -20,7 +20,13 @@ export default function Error({
     reset: () => void
 }) {
     useEffect(() => {
-        Sentry.captureException(error)
+        // Reports to Sentry AND (first occurrence per session) PostHog, with
+        // the two correlated by the Sentry event id.
+        reportUserVisibleFailure({
+            error,
+            operation: 'app_route_render',
+            errorCode: error.digest,
+        })
     }, [error])
 
     return (

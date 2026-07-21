@@ -1,4 +1,5 @@
 'use client'
+import PostHogClientProvider from '@/lib/analytics/PostHogClientProvider'
 import { ThemeContext } from '@/lib/contexts'
 import * as gtag from '@/lib/gtag'
 import Hotjar from '@hotjar/browser'
@@ -58,7 +59,7 @@ export default function Providers({ children }: { children: ReactNode }) {
     )
 
     return (
-        <>
+        <PostHogClientProvider>
             <ThemeContext.Provider value={{ isDarkMode, switchTheme }}>
                 {content}
             </ThemeContext.Provider>
@@ -85,6 +86,6 @@ export default function Providers({ children }: { children: ReactNode }) {
           gtag('config', '${gtag.GA_TRACKING_ID}');
         `}
             </Script>
-        </>
+        </PostHogClientProvider>
     )
 }

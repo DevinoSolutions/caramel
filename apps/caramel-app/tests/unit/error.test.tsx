@@ -38,11 +38,13 @@ describe('app/error.tsx', () => {
         expect(screen.getByText(/reported/i)).toBeTruthy()
     })
 
-    it('reports the error to Sentry on mount', () => {
+    it('reports the error to Sentry on mount (via reportUserVisibleFailure, tagged with the operation)', () => {
         const error = new Error('render exploded')
         render(<ErrorBoundary error={error} reset={vi.fn()} />)
         expect(captureExceptionMock).toHaveBeenCalledTimes(1)
-        expect(captureExceptionMock).toHaveBeenCalledWith(error)
+        expect(captureExceptionMock).toHaveBeenCalledWith(error, {
+            tags: { operation: 'app_route_render' },
+        })
     })
 
     it('re-reports when a new error instance is passed (effect dep on `error`)', () => {
@@ -55,7 +57,9 @@ describe('app/error.tsx', () => {
         const second = new Error('second')
         rerender(<ErrorBoundary error={second} reset={vi.fn()} />)
         expect(captureExceptionMock).toHaveBeenCalledTimes(2)
-        expect(captureExceptionMock).toHaveBeenLastCalledWith(second)
+        expect(captureExceptionMock).toHaveBeenLastCalledWith(second, {
+            tags: { operation: 'app_route_render' },
+        })
     })
 
     it('calls reset() when "Try again" is clicked', () => {

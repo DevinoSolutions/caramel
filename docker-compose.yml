@@ -48,6 +48,15 @@ services:
         NEXT_PUBLIC_SENTRY_DSN: ${NEXT_PUBLIC_SENTRY_DSN:-}
         NEXT_PUBLIC_GOOGLE_ANALYTICS_ID: ${NEXT_PUBLIC_GOOGLE_ANALYTICS_ID:-}
         NEXT_PUBLIC_API_ENCRYPTION_ENABLED: ${NEXT_PUBLIC_API_ENCRYPTION_ENABLED:-}
+        # PostHog capture (feedback+observability). DATASET defaults to
+        # 'disabled' — the safe local default, mirroring NEXT_PUBLIC_BASE_URL's
+        # local default above; platforms override via their env tab. The pairs
+        # are empty strings locally (harmless — capture stays disabled).
+        NEXT_PUBLIC_POSTHOG_DATASET: ${NEXT_PUBLIC_POSTHOG_DATASET:-disabled}
+        NEXT_PUBLIC_POSTHOG_HOST: ${NEXT_PUBLIC_POSTHOG_HOST:-}
+        NEXT_PUBLIC_POSTHOG_KEY: ${NEXT_PUBLIC_POSTHOG_KEY:-}
+        NEXT_PUBLIC_POSTHOG_E2E_TEST_PROJECT_HOST: ${NEXT_PUBLIC_POSTHOG_E2E_TEST_PROJECT_HOST:-}
+        NEXT_PUBLIC_POSTHOG_E2E_TEST_PROJECT_CAPTURE_TOKEN: ${NEXT_PUBLIC_POSTHOG_E2E_TEST_PROJECT_CAPTURE_TOKEN:-}
     # Restart policy (both services) complements the fail-hard entrypoint — a
     # failure still crashes loudly (visible exit + restart count climbing =
     # crash-loop is diagnosable, never silent), but the stack self-recovers
@@ -80,6 +89,12 @@ services:
       # (both retired in W4-D3). It is now an OPTIONAL bridge-sync-only input;
       # when a deploy runs the out-of-repo bridge it reaches the container via
       # the env_file above, never hardcoded here.
+      # Server-side PostHog dataset gate (read at runtime by env.ts). Defaults
+      # to 'disabled' so a local `up` never captures. Platforms set it (and the
+      # matching NEXT_PUBLIC_* capture pair, via their env tab / the env_file
+      # above) to 'production' or 'e2e'. Must AGREE with the baked-in
+      # NEXT_PUBLIC_POSTHOG_DATASET build arg (env.ts fail-fasts on a mismatch).
+      POSTHOG_DATASET: ${POSTHOG_DATASET:-disabled}
     ports:
       - '${BIND_HOST:-127.0.0.1}:${WEB_PORT:-58000}:3000'
     depends_on:

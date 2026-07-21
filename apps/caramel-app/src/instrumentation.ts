@@ -24,6 +24,22 @@ export async function register() {
             '[boot] coupons bridge sync DISABLED — serving the app-owned catalog only (COUPONS_DATABASE_URL unset)',
         )
     }
+
+    // Observability foundation: emit one server-lifecycle event per boot. This
+    // is the first (and, until the feedback flow lands, only) server-side
+    // PostHog capture. Dynamically imported so posthog-node never loads in the
+    // edge runtime (the branch above returns before reaching here). No-ops
+    // silently when POSTHOG_DATASET is 'disabled'; never throws — the helper
+    // reports its own failures to Sentry and returns a boolean we log.
+    const { captureServerEvent } = await import('@/lib/analytics/posthogServer')
+    const captured = await captureServerEvent({
+        event: 'app_server_started',
+        distinctId: 'caramel-server',
+        properties: { node_runtime: process.env.NEXT_RUNTIME ?? 'nodejs' },
+    })
+    if (captured) {
+        console.log('[boot] posthog: app_server_started captured')
+    }
 }
 
 export const onRequestError = Sentry.captureRequestError

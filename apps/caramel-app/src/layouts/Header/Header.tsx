@@ -1,6 +1,7 @@
 import ThemeToggle from '@/components/ThemeToggle'
 import { useScrollDirection } from '@/hooks/useScrollDirection'
 import { useWindowSize } from '@/hooks/useWindowSize'
+import { resetPosthogIdentity } from '@/lib/analytics/identity'
 import { signOut, useSession } from '@/lib/auth/client'
 import { AnimatePresence, motion } from 'framer-motion'
 import Image from 'next/image'
@@ -55,6 +56,9 @@ export default function Header({ scrollRef }: HeaderProps) {
     }, [])
 
     const handleSignOut = async () => {
+        // Clear the PostHog identity BEFORE the session goes away so the reset
+        // isn't attributed to the logged-in person.
+        resetPosthogIdentity()
         await signOut()
         window.location.href = '/'
     }
