@@ -56,6 +56,22 @@ export default defineConfig({
                   url: baseURL,
                   timeout: webServerTimeout,
                   reuseExistingServer: !process.env.CI,
+                  // Playwright launches the app server with { ...process.env,
+                  // ...webServer.env }, so this MERGES over the inherited env.
+                  // In the PostHog real-ingestion e2e mode the Playwright
+                  // process carries POSTHOG_E2E_TEST_PROJECT_QUERY_READ_ONLY_
+                  // PERSONAL_API_KEY (the Query API read key — used ONLY by
+                  // e2e/support/posthog.ts). env.ts fail-fasts at boot if that
+                  // key is present in an app/server env, so we blank it for the
+                  // app process ONLY: '' is falsy, so env.ts's presence guard
+                  // passes, while the Playwright test process keeps the real
+                  // value in its own process.env for the Query API calls. The
+                  // dataset switches (POSTHOG_DATASET / NEXT_PUBLIC_POSTHOG_*)
+                  // are inherited from the parent env unchanged.
+                  env: {
+                      POSTHOG_E2E_TEST_PROJECT_QUERY_READ_ONLY_PERSONAL_API_KEY:
+                          '',
+                  },
               },
           }
         : {}),

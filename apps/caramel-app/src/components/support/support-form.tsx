@@ -95,6 +95,14 @@ export default function SupportForm({
             posthogDistinctId = posthog.get_distinct_id() ?? undefined
         }
 
+        // E2E-ONLY: forward the shared Playwright handshake's test_run_id so the
+        // SERVER-captured support event is tagged with it (a browser super-prop
+        // otherwise never reaches a server event). Present only under Playwright
+        // (window.__CARAMEL_E2E__ is injected via addInitScript); undefined for
+        // every real user, so real submissions carry nothing extra.
+        const e2eHandshake =
+            typeof window !== 'undefined' ? window.__CARAMEL_E2E__ : undefined
+
         const replyEmail = isLoggedIn
             ? (accountEmail ?? undefined)
             : anonymousEmail.trim() || undefined
@@ -122,6 +130,12 @@ export default function SupportForm({
                 (typeof window !== 'undefined'
                     ? window.location.pathname
                     : undefined),
+            ...(e2eHandshake?.test_run_id
+                ? {
+                      test_run_id: e2eHandshake.test_run_id,
+                      test_scenario: e2eHandshake.test_scenario,
+                  }
+                : {}),
             // Honeypot — empty for real users.
             website: honeypot,
         }

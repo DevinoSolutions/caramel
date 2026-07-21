@@ -48,6 +48,16 @@ const SupportBodySchema = z
         sentry_event_id: z.string().max(64).optional(),
         // The page the user was on.
         route: z.string().max(500).optional(),
+        // E2E-ONLY correlation metadata: the shared Playwright handshake's
+        // test_run_id / test_scenario, forwarded by the browser ONLY when
+        // window.__CARAMEL_E2E__ is present (real production submissions never
+        // carry these). test_run_id is a browser super-property, so without
+        // this it would never reach a SERVER-captured event — forwarding it
+        // lets the e2e ingestion-verification helper find THIS run's
+        // support_request_submitted event by test_run_id. Never used for auth
+        // or any behavioural branch.
+        test_run_id: z.string().max(200).optional(),
+        test_scenario: z.string().max(200).optional(),
         // HONEYPOT: a hidden field no real user ever fills. Non-empty ⇒ bot.
         website: z.string().optional(),
     })
@@ -163,6 +173,9 @@ export const POST = withRoute(
                 has_expected_outcome: hasExpectedOutcome,
                 message: body.message,
                 expected_outcome: body.expected_outcome ?? null,
+                // E2E correlation only — null for every real submission.
+                test_run_id: body.test_run_id ?? null,
+                test_scenario: body.test_scenario ?? null,
             }
 
             const distinctId =

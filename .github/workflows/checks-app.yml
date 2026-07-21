@@ -270,7 +270,10 @@ jobs:
     name: E2E & Visual Regression (PR)
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Raised from 15: support-flow.spec.ts verifies REAL PostHog ingestion, and
+    # the shared self-hosted PostHog's ingestion lag can spike to ~340s per
+    # ingestion test (they run serially here — workers=1 in CI).
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:15
@@ -324,6 +327,22 @@ jobs:
           PLAYWRIGHT_WEB_COMMAND: pnpm dev
           PLAYWRIGHT_START_SERVER: 'true'
           PLAYWRIGHT_WEB_TIMEOUT: '300000'
+          # PostHog REAL-INGESTION verification (support-flow.spec.ts). The app
+          # server (next dev, launched by Playwright's webServer) and the
+          # Playwright runner share this step's env. CRITICAL: env.ts fail-fasts
+          # at BOOT if the read-only Query key is present in an app/server env,
+          # so playwright.config.ts blanks POSTHOG_E2E_TEST_PROJECT_QUERY_READ_
+          # ONLY_PERSONAL_API_KEY in its webServer.env for the app process ONLY
+          # (Playwright merges { ...process.env, ...webServer.env }, and '' is
+          # falsy so the guard passes). The Playwright process keeps the real
+          # value — e2e/support/posthog.ts uses it to poll the PostHog Query API.
+          # Dataset=e2e routes captures to the isolated shared test project.
+          POSTHOG_DATASET: e2e
+          NEXT_PUBLIC_POSTHOG_DATASET: e2e
+          NEXT_PUBLIC_POSTHOG_E2E_TEST_PROJECT_HOST: ${{ secrets.NEXT_PUBLIC_POSTHOG_E2E_TEST_PROJECT_HOST }}
+          NEXT_PUBLIC_POSTHOG_E2E_TEST_PROJECT_CAPTURE_TOKEN: ${{ secrets.NEXT_PUBLIC_POSTHOG_E2E_TEST_PROJECT_CAPTURE_TOKEN }}
+          POSTHOG_E2E_TEST_PROJECT_ID: ${{ secrets.POSTHOG_E2E_TEST_PROJECT_ID }}
+          POSTHOG_E2E_TEST_PROJECT_QUERY_READ_ONLY_PERSONAL_API_KEY: ${{ secrets.POSTHOG_E2E_TEST_PROJECT_QUERY_READ_ONLY_PERSONAL_API_KEY }}
         run: pnpm test:e2e
 
       - name: Upload test report
@@ -365,6 +384,13 @@ jobs:
       - name: Install Playwright
         run: pnpm --filter caramel-app exec playwright install --with-deps chromium
 
+      # NOTE: the PostHog real-ingestion env is deliberately NOT set here yet.
+      # The deployed dev site does not have PostHog baked into its bundle until
+      # this branch merges + redeploys, so support-flow.spec.ts's ingestion
+      # tests SKIP themselves against the deployed site (no DATABASE_URL, and the
+      # verification creds are absent). TODO: once dev.grabcaramel.com ships with
+      # NEXT_PUBLIC_POSTHOG_DATASET=e2e, add the same POSTHOG_E2E_* env here to
+      # verify ingestion against the real deployed bundle.
       - name: Run E2E tests
         working-directory: ./apps/caramel-app
         env:
