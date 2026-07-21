@@ -65,6 +65,12 @@ const serverObjectSchema = z.object({
     USESEND_API_KEY: z.string().optional(),
     USESEND_FROM_EMAIL: z.string().default('no_reply@grabcaramel.com'),
     USESEND_FROM_NAME: z.string().default('Caramel'),
+    // Destination inbox for the user support/feedback flow (POST /api/support).
+    // Defaults to the same address the sites/suggest route already mails.
+    // Set-but-EMPTY (`SUPPORT_EMAIL_TO=`) resolves to '' and makes the support
+    // route report email status 'skipped' (analytics still captured) rather
+    // than mailing a blank recipient.
+    SUPPORT_EMAIL_TO: z.string().default('support@unotes.net'),
     OPENROUTER_API_KEY: z.string().optional(),
     OPENROUTER_MODEL: z.string().default('openai/gpt-5-mini'),
     API_ENCRYPTION_ENABLED: z.string().optional(),

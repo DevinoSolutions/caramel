@@ -6,6 +6,10 @@ type EmailPayload = {
     subject: string
     html?: string
     text?: string
+    /** Address the recipient's reply should go to (usesend `replyTo`). NEVER
+     * the sender/`from` — that stays the verified Caramel domain. Used by the
+     * support flow to route a customer reply back to them. */
+    replyTo?: string
 }
 
 const getClient = () => {
@@ -27,7 +31,13 @@ export const sendEmail = async (data: EmailPayload) => {
         from: `${fromName} <${fromEmail}>`,
         to: data.to,
         subject: data.subject,
+        // Keep the pre-existing text→html fold so text-only callers
+        // (sites/suggest) still render, but ALSO send a real text part now.
         html: data.html || data.text || '',
+        text: data.text,
+        // Only set replyTo when provided — usesend treats an absent field
+        // differently from an empty string.
+        ...(data.replyTo ? { replyTo: data.replyTo } : {}),
     })
 
     if (result?.error) {

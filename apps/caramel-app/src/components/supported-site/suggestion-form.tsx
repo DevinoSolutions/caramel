@@ -1,5 +1,6 @@
 'use client'
 
+import { promptSupportOnFailure } from '@/lib/feedback/promptSupportOnFailure'
 import { isValidUrl } from '@/lib/urlHelper'
 import { motion } from 'framer-motion'
 import { useState } from 'react'
@@ -33,6 +34,12 @@ export default function SuggestionForm({
         } catch (err) {
             toast.error('Failed to send suggestion. Please try again later.')
             console.error(err)
+            // A blocked, user-visible action → offer the feedback prompt
+            // (rate-limited to once per session by reportUserVisibleFailure).
+            promptSupportOnFailure({
+                error: err,
+                operation: 'site_suggestion_submit',
+            })
         }
         resetValue()
         setLoading(false)

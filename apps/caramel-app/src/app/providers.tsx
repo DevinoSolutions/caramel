@@ -1,4 +1,5 @@
 'use client'
+import SupportDialog from '@/components/support/SupportDialog'
 import PostHogClientProvider from '@/lib/analytics/PostHogClientProvider'
 import { ThemeContext } from '@/lib/contexts'
 import * as gtag from '@/lib/gtag'
@@ -73,6 +74,9 @@ export default function Providers({ children }: { children: ReactNode }) {
                     },
                 }}
             />
+            {/* App-level support modal — opened via the module-level registry
+                (promptSupportOnFailure) without prop drilling. */}
+            <SupportDialog />
             {/* GA */}
             <Script
                 strategy="afterInteractive"
