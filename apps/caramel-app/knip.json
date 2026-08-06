@@ -12,7 +12,6 @@
         "postcss.config.mjs",
         "postcss.config.ts",
         "tailwind.config.ts",
-        "public/sw.js",
         "src/components/StoreButtons.tsx",
         "src/lib/capitalizeFirst.ts",
         "src/lib/gtag.ts",
