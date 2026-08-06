@@ -14,11 +14,14 @@ export const dynamic = 'force-static'
 const UPLOAD_KEY_SHA256 =
     'A8:AB:BD:05:30:0E:97:DA:53:90:E9:E7:D4:E9:BB:CC:CF:2C:66:E5:68:AA:66:65:5A:45:02:0F:38:B0:AE:BA'
 
-// TODO: append the Play App Signing SHA-256 the moment the Play record exists
-// (Console -> Setup -> App signing). Play RE-SIGNS uploaded bundles, so a file
-// carrying only the upload key verifies for sideloaded builds and silently
-// fails for every user who installed from Play.
-const PLAY_APP_SIGNING_SHA256: string[] = []
+// Play App Signing key (Console -> Setup -> App signing, app id
+// 4973996853903051088). Play RE-SIGNS every uploaded bundle with this key, so
+// installs from Play present THIS fingerprint, not the upload key's. Both must
+// be listed: the upload key covers sideloaded/locally-signed builds, this one
+// covers everyone who installed from the store.
+const PLAY_APP_SIGNING_SHA256 = [
+    '28:20:9D:A2:CC:76:D5:34:17:85:7F:4B:90:51:4C:39:03:DC:E1:DC:1B:63:65:80:74:FD:F4:24:8A:AD:9B:FD',
+]
 
 export function GET() {
     return Response.json([
