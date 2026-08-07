@@ -240,6 +240,13 @@ async function initPopup() {
         url = null
     }
 
+    // Only web pages can have coupons. The service worker hands back whatever
+    // tab is active — on a new tab, a chrome:// page, or this popup itself
+    // that is a URL no store owns, and asking the coupons API about it painted
+    // "Couldn't load coupons — check your connection" over what should be the
+    // introduction view.
+    if (url && !/^https?:\/\//i.test(url)) url = null
+
     // Wrapped in a Promise so initPopup() itself doesn't resolve until the
     // chosen render state has actually been painted (the storage APIs are
     // chrome-callback based, not natively awaitable) — the DOMContentLoaded
