@@ -266,7 +266,35 @@ async function main() {
                 (await popup.locator('#loginToggleBtn').count()) > 0
             if (hasLoginToggle) await popup.locator('#loginToggleBtn').click()
 
-            await popup.waitForSelector('#email', { timeout: 5000 })
+            try {
+                await popup.waitForSelector('#email', { timeout: 5000 })
+            } catch (err) {
+                // Diagnostic dump: what did the popup actually render?
+                const diag = await popup
+                    .evaluate(() => ({
+                        url: location.href,
+                        loaderShown: (() => {
+                            const l =
+                                document.getElementById('loading-container')
+                            return l ? getComputedStyle(l).display : 'absent'
+                        })(),
+                        visibleIds: [...document.querySelectorAll('[id]')]
+                            .filter(el => el.offsetParent !== null)
+                            .map(el => el.id)
+                            .slice(0, 40),
+                        authContainer: (
+                            document.getElementById('auth-container')
+                                ?.innerHTML || '(empty)'
+                        ).slice(0, 1500),
+                        bodyText: (document.body.innerText || '').slice(0, 600),
+                    }))
+                    .catch(e => ({ evalFailed: String(e) }))
+                console.log(
+                    '[diag] popup state at #email timeout:',
+                    JSON.stringify(diag, null, 2),
+                )
+                throw err
+            }
             await popup.fill('#email', TEST_EMAIL)
             await popup.fill('#password', TEST_PASSWORD)
             await popup.locator('#loginForm button[type="submit"]').click()
