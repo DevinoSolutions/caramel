@@ -172,3 +172,5 @@ For deploys, health checks, rollback, and known failure modes, see [RUNBOOK.md](
 ## License
 
 See [LICENSE](LICENSE) file for details.
+
+<!-- ci probe: extension e2e dev baseline, 2026-08-07 -->
