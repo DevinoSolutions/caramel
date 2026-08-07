@@ -324,15 +324,54 @@ describe('what we report is what ended up on the cart', () => {
 })
 
 describe('a discount the shopper arrived with is never left off the cart', () => {
+    // They walked in with MEMBER50 already applied and worth more than anything
+    // we hold. Probing replaces it — so it has to come back.
+    //
+    // The cart below is STATEFUL, which it was not before. The old fixture
+    // answered every read with "MEMBER50 is applied" no matter what had been
+    // sent, so it could not tell a probe that displaced their code from one
+    // that didn't, and the tests underneath had to settle for asserting that a
+    // re-apply REQUEST was made. On harney.com (2026-08-06) that request was
+    // measured destroying the very discount it was meant to protect — the
+    // endpoint appends, and re-sending a code the cart already holds demotes it
+    // and kills it. A fixture that cannot express "their code is still on the
+    // cart" cannot catch that, so this one tracks what is actually applied.
+    let onCart
+
+    const theirs = () =>
+        cart(BASE - 6000, [
+            { code: 'MEMBER50', amount: 6000, applicable: true },
+        ])
+    const displaced = () =>
+        cart(BASE, [{ code: 'MEMBER50', amount: 6000, applicable: false }])
+
     beforeEach(() => {
-        // They walked in with MEMBER50 already applied and worth more than
-        // anything we hold. Probing replaces it — so it has to come back.
+        onCart = 'MEMBER50'
         globalThis.probeCartJson = async () =>
-            cart(BASE - 6000, [{ code: 'MEMBER50', amount: 6000 }])
+            onCart === 'MEMBER50' ? theirs() : displaced()
+        globalThis.applyViaDiscountLink = async code => {
+            linkCalls.push(code)
+            onCart = code
+            return code === 'MEMBER50' ? theirs() : (carts[code] ?? null)
+        }
         globalThis.getCoupons = async () => [
             { code: 'TREAT22', id: 'c1' },
             { code: 'DEADCODE', id: 'c2' },
         ]
+    })
+
+    it('leaves a surviving code alone instead of re-sending it', async () => {
+        // harney.com: all eight probes failed and never displaced their code,
+        // so there was nothing to restore — and the restore is what took the
+        // $10.00 off them.
+        globalThis.applyViaDiscountLink = async code => {
+            linkCalls.push(code)
+            return carts[code] ?? null // these probes displace nothing
+        }
+
+        await startApplyingCoupons(REC)
+
+        expect(linkCalls).not.toContain('MEMBER50')
     })
 
     it('puts their code back when nothing beat it', async () => {

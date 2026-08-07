@@ -691,7 +691,7 @@ async function applyCoupon(code, rec) {
         })
         return { success, newTotal, committed, errorMsg, errorIsNew }
     } catch (err) {
-        console.error('applyCoupon error', err)
+        logError('applyCoupon error', err)
         log('AUTO_INSERT_ATTEMPT_END', code, {
             success: false,
             error: String(err),
@@ -826,6 +826,41 @@ function _unmarkTriedCode(code) {
         /* storage unavailable — the mark was best-effort anyway */
     }
 }
+/* Take every discount code off the cart.
+ *
+ * THE MEASUREMENT THE RESTORE PATH IS BUILT ON (live harney.com cart,
+ * 2026-08-06, reproduced twice). /discount/{code} APPENDS; it does not replace.
+ * Eight probes over the shopper's own HARNEY10 left the cart holding HARNEY10
+ * live plus seven `applicable:false` entries — so probing never endangered it.
+ * Re-sending HARNEY10 into that eight-deep list moved it to the END and killed
+ * it: total_discount 1000 -> 0, no race about it. Clearing first and re-sending
+ * restored the full -$10.00 on the same cart seconds later.
+ *
+ * Two rules follow, and coupon-runner.js applies both: never re-send a code the
+ * cart already honours, and clear before a re-send that IS needed.
+ *
+ * Best-effort — a store that doesn't answer this leaves the cart as it was, and
+ * every caller re-reads the cart rather than trusting either request.
+ */
+// Cross-file content-script call — per-file analysis can't see it.
+// oxlint-disable-next-line no-unused-vars
+async function _caramelClearCartDiscounts() {
+    try {
+        const r = await fetch('/cart/update.js', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ discount: '' }),
+        })
+        return !!r?.ok
+    } catch {
+        // Not this platform, or the store refused. The caller finds out from
+        // the cart itself — there is nothing to report that a cart read won't
+        // say better.
+        return false
+    }
+}
+
 // Called from other split content-script files (cross-file content-script
 // call — oxlint's per-file analysis can't see it).
 // oxlint-disable-next-line no-unused-vars

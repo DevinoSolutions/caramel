@@ -83,7 +83,47 @@ module.exports = [
         // The standing recommendation is unchanged and now overdue: price
         // MINIFIED bytes. Until an owner takes that call, a raise here is the
         // honest move and a silent one still is not.
-        limit: '232 KB',
+        //
+        // 2026-08-06 — 232 → 233 KB. `_caramelUsableTitle` now drops a claim
+        // whose amount fell out of the scrape (100percentpure ships LASHES as
+        // "Get off with code"). The fix plus its comment ran 174 B over after
+        // four rounds of trimming prose elsewhere in the file, which is the
+        // clearest statement yet that this gate is measuring the wrong bytes:
+        // an afternoon can be spent shaving sentences to fit a budget whose
+        // stated purpose is bounding CODE that runs on every store page.
+        // Measured 232.17 kB.
+        //
+        // 2026-08-06 — 233 → 239 KB, two behaviour changes in one evening
+        // pass. Console silence: the dev-gated logError in caramel-base.js,
+        // because three raw console.error calls were printing into STORES'
+        // consoles on shoppers' machines (pinned by
+        // tests/console-silence.test.mjs). Cart-intent signal: store-detect's
+        // gate now opens on the URL SHAPES that drawer-cart stores actually
+        // write — measured live: allbirds 302s /cart to /?openCartDrawer=true
+        // and toms navigates it to /?open_cart=true then rewrites to bare / —
+        // where the old path-only rule saw an ordinary home page and the
+        // shopper got silence on a store we hold codes for. Measured
+        // 238.97 kB.
+        //
+        // 2026-08-06 — 239 → 249 KB. The restore step was destroying the
+        // discount it existed to protect: measured live on harney.com, the
+        // shopper's own HARNEY10 survived all eight probes, the re-apply killed
+        // it (the /discount endpoint appends, and re-sending an attached code
+        // demotes it), and `restored: true` was asserted from the REQUEST
+        // succeeding while the same log line carried the undiscounted total.
+        // The fix is three helpers in coupon-runner.js — ask whether a NAMED
+        // code is still live, clear-then-send when a restore is genuinely
+        // needed, and gate the "already applied and saving you" sentence on the
+        // money being back — plus a third modal branch for the outcome that
+        // previously had no honest wording at all (their code gone, unrecovered).
+        // ~3.5 kB of that is code; the rest is the harney measurement, stated
+        // once in coupon-apply.js and cross-referenced. A first trimming pass
+        // bought 0.7 kB; going further would delete the store-by-store numbers,
+        // which the 232→233 KB note above already ruled the worse trade.
+        // Measured 247.99 kB — the extra kB over that is deliberate headroom,
+        // not slack: 248 left ten bytes, which turns the next comment edit into
+        // a build failure that says nothing true about bundle weight.
+        limit: '249 KB',
         brotli: false,
     },
     {
@@ -95,7 +135,14 @@ module.exports = [
     {
         name: 'background.js (sw)',
         path: 'background.js',
-        limit: '15 KB',
+        // 2026-08-06 — 15 → 17 KB, first raise for this budget: the worker
+        // gained its own storage-recording logError (it cannot share
+        // caramel-base.js — separate context) and the tabs.onUpdated body
+        // became a named, tested function that re-arms detection when an SPA
+        // rewrites the URL. Measured 16.17 kB. Same standing note as above:
+        // the honest fix is pricing minified bytes, and that call is the
+        // owner's.
+        limit: '17 KB',
         brotli: false,
     },
 ]

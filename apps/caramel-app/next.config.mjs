@@ -1,6 +1,7 @@
 import { withSentryConfig } from '@sentry/nextjs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { resolveBuildSha } from './scripts/build-sha.mjs'
 
 const packageRoot = fileURLToPath(new URL('.', import.meta.url))
 const workspaceRoot = path.resolve(packageRoot, '..', '..')
@@ -37,8 +38,15 @@ const IS_PRODUCTION_HOST = PRODUCTION_ORIGINS.includes(
     ),
 )
 
+// Resolved at config-evaluation time, which is BUILD time, and inlined into
+// the bundle by `env` below — so /api/version reports the commit this image
+// was built from and cannot drift from the code it ships. See
+// scripts/build-sha.mjs for where the value comes from in each build context.
+const GIT_COMMIT_SHA = resolveBuildSha()
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+    env: { GIT_COMMIT_SHA },
     // F-016 one-root-compose: emit a self-contained server (.next/standalone)
     // so the Docker runner stage boots `node apps/caramel-app/server.js` with a
     // traced, minimal node_modules instead of the whole install. Pairs with

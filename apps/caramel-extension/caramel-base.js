@@ -110,6 +110,34 @@ if (typeof recordTiming === 'undefined') {
     }
 }
 
+// The error counterpart to `log`, and it exists for the same reason `log` is
+// gated: content scripts run on https://*/*, so anything printed here lands in
+// a STORE's console on a shopper's machine. Three raw console.error calls used
+// to do exactly that — one of them ("applyCoupon error") without even naming
+// Caramel, so a store owner reading their own console had no way to tell whose
+// bug they were looking at.
+//
+// Silencing the console is NOT swallowing the failure: every call still writes
+// a capped storage entry, which is the same place the apply-flow timings are
+// read from on a dev install. Loud where we can read it, quiet on a stranger's
+// page.
+// Called from other split content-script files (cross-file content-script
+// call — oxlint's per-file analysis can't see it).
+// oxlint-disable-next-line no-unused-vars
+if (typeof logError === 'undefined') {
+    var logError = (where, err) => {
+        try {
+            recordTiming('ERROR', {
+                where,
+                message: String(err?.message || err).slice(0, 300),
+            })
+        } catch {
+            // recording is best-effort; never let it mask the original error
+        }
+        if (_isDevInstall()) console.error('Caramel:', where, err)
+    }
+}
+
 // Origins trusted to inject a login token via window.postMessage. The dev
 // origins are ONLY trusted on an unpacked dev install — in the packed Web Store
 // build a tab on dev.grabcaramel.com or a local server must NOT be able to write

@@ -25,6 +25,16 @@ apps/caramel-app/scripts/internal
 
 # VCS / editor / OS
 .git
+# …except the few ref files apps/caramel-app/scripts/build-sha.mjs reads to
+# stamp the build with its commit (/api/version serves it so CI can tell this
+# build apart from the one it replaced). Verified: only HEAD plus whichever of
+# refs/**, packed-refs and commondir exist enter the context — a few hundred
+# bytes, no objects and no config, and the pruner stage resolves them to one
+# line that never reaches the builder or runner layers.
+!.git/HEAD
+!.git/commondir
+!.git/packed-refs
+!.git/refs/**
 .claude
 .idea
 .vscode

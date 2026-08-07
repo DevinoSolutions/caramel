@@ -202,6 +202,20 @@ const stubApi = (sw, config) =>
                         ),
                 )
             }
+            /* Serializing the appends fixed their ORDER, not their arrival.
+             * record() returns immediately, so a scenario could finish, read
+             * the key, and see [] while the write was still in flight — which
+             * is indistinguishable from "the report never fired" and is the
+             * flake that failed this suite for anyone running it more than
+             * once: `fires the "worked" trust-loop report: []` came up in 4 of
+             * 7 runs on 2026-08-06, on unrelated branches, with and without the
+             * change under test — which is how it was finally pinned on the
+             * harness. Nothing was wrong with the product; a guard that cries
+             * wolf about the money path is its own defect, because the next
+             * real failure gets shrugged at.
+             *
+             * The reader awaits this before it looks. */
+            globalThis.__caramelReportsSettled = () => queue
             globalThis.fetch = (input, init) => {
                 const u = String(typeof input === 'string' ? input : input.url)
                 if (u.includes('/api/extension/supported-stores'))
@@ -382,13 +396,21 @@ async function runScenario({
                     ),
                 ),
         )
-        const reports = await sw.evaluate(
-            key =>
-                new Promise(res =>
+        // Drain the recorder before reading, then give a straggler two more
+        // chances: a report fired microseconds after the first drain would
+        // otherwise read as one that never fired. Bounded, so a genuinely
+        // missing report still fails the check rather than hanging it.
+        let reports = []
+        for (let attempt = 0; attempt < 3; attempt++) {
+            reports = await sw.evaluate(async key => {
+                await globalThis.__caramelReportsSettled?.()
+                return new Promise(res =>
                     chrome.storage.local.get([key], r => res(r?.[key] || [])),
-                ),
-            REPORTS_KEY,
-        )
+                )
+            }, REPORTS_KEY)
+            if (reports.length) break
+            await new Promise(r => setTimeout(r, 250))
+        }
 
         console.log(`  [modal] ${modal.slice(0, 200)}`)
         console.log(

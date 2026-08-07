@@ -341,7 +341,13 @@ jobs:
     name: E2E & Visual Regression (push)
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # 20 of these belong to the deploy gate below, which waits out a full
+    # Dokploy Docker build before a single test runs; the rest is the old
+    # budget. 20 rather than 10 is measured: on 2026-08-07 a three-push burst
+    # queued builds back-to-back and 0a57362's deploy was still building when
+    # the 10-minute window closed — the gate refused correctly, but the red
+    # was queue latency, not a defect.
+    timeout-minutes: 35
     env:
       ARGOS_TOKEN: ${{ secrets.ARGOS_TOKEN }}
       ARGOS_API_BASE_URL: ${{ vars.ARGOS_API_BASE_URL }}
@@ -364,6 +370,27 @@ jobs:
 
       - name: Install Playwright
         run: pnpm --filter caramel-app exec playwright install --with-deps chromium
+
+      # The step below tests the LIVE deployment, so this push races Dokploy's
+      # autodeploy of the same commit. Proven 2026-08-06: a625be9's own test
+      # failed at 14:40:44Z, two seconds before the deploy carrying its fix
+      # finished at 14:40:46Z. Wait for the site to report this exact commit.
+      #
+      # dev only: dev.grabcaramel.com is the root docker-compose/Dockerfile
+      # build, whose context carries the git metadata /api/version is stamped
+      # from. Prod is a Dokploy *Nixpacks* app built from apps/caramel-app,
+      # whose context excludes the repo's .git — it answers "unknown" and this
+      # gate could never pass there. Drop the condition when prod moves onto
+      # the root compose (RUNBOOK "Deploys & rollback").
+      - name: Wait for the deployment to carry this commit
+        if: github.ref == 'refs/heads/dev'
+        env:
+          VERSION_URL: https://dev.grabcaramel.com/api/version
+          EXPECTED_SHA: ${{ github.sha }}
+          # One full Docker build is ~10 min; a push burst queues builds
+          # back-to-back, so one queued-behind build fits inside 20.
+          DEPLOY_WAIT_TIMEOUT_SECONDS: '1200'
+        run: bash .github/workflows/scripts/wait-for-deploy.sh
 
       - name: Run E2E tests
         working-directory: ./apps/caramel-app

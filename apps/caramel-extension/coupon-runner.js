@@ -86,6 +86,108 @@ function _caramelDiscountAmountFor(cart, code, applicableCount) {
     return 0
 }
 
+/* What ONE named code is worth on this cart right now, in the cart's own minor
+ * units. Zero = nothing off it: never there, demoted, or attached and worthless.
+ *
+ * Same shape logic as _existingCartDiscount, asked about a code we NAME rather
+ * than whatever the cart leads with — "is there a discount" and "does THEIRS
+ * still exist" are different questions, and the flow answered the first while
+ * reporting on the second. */
+function _caramelLiveDiscountFor(cart, code) {
+    if (!cart) return 0
+    const wanted = String(code).toUpperCase()
+    const codes = Array.isArray(cart.discount_codes) ? cart.discount_codes : []
+    const live = codes.filter(e => e?.code && e.applicable !== false)
+    const entry = live.find(e => String(e.code).toUpperCase() === wanted)
+    if (!entry) return 0
+    const stated = Number(entry.amount)
+    if (stated > 0) return stated
+    return _caramelDiscountAmountFor(cart, entry.code, live.length)
+}
+
+/* Get `code` onto the cart; hand back what the cart says afterwards.
+ *
+ * Not a synonym for applyViaDiscountLink — it asks what is already there first,
+ * because re-sending a code the cart already honours is how you DELETE it, and
+ * a re-send that is needed lands dead unless the stale list is cleared. Both
+ * measured; see _caramelClearCartDiscounts.
+ *
+ * The clear is a LAST resort, not the first move: it empties the cart outright,
+ * and doing it up front left goodr.com reading `discount:0, codes:[]` for 1.2s
+ * (live). Nobody checks out inside a second, but "never worse off than before
+ * we ran" doesn't hold a stopwatch.
+ *
+ * `known` saves a second read for a caller that just read the cart.
+ */
+async function _caramelPutCodeOnCart(code, known) {
+    const current = known === undefined ? await probeCartJson() : known
+    if (_caramelLiveDiscountFor(current, code) > 0) return current
+    const sent = await applyViaDiscountLink(code)
+    if (_caramelLiveDiscountFor(sent, code) > 0) return sent
+    await _caramelClearCartDiscounts()
+    return await applyViaDiscountLink(code)
+}
+
+/* Hand the shopper back the discount they arrived with — and say we did only
+ * when the cart agrees.
+ *
+ * This step used to do neither. Live on harney.com (2026-08-06): their HARNEY10
+ * survived all eight probes untouched, this re-applied it anyway, and THAT
+ * killed it (mechanism: _caramelClearCartDiscounts). It then logged
+ *   AUTO_INSERT_RESTORED_EXISTING {code: HARNEY10, restored: true, total: 11100}
+ * — 11100 being the UNDISCOUNTED total, where the same run had recorded 10100
+ * with the discount on. `restored: true` came from the REQUEST succeeding, so
+ * the number disproving the claim sat in the same log line as the claim. The
+ * shopper then read "HARNEY10 is already applied and saving you $10.00" over a
+ * cart showing nothing off.
+ *
+ * Returns { code, amountText, restored } only when they demonstrably still have
+ * their money off; null means they do not, and the caller must say so plainly
+ * rather than reach for the friendlier sentence.
+ */
+async function _caramelRestoreArrivedDiscount(arrivedWith) {
+    const before = await probeCartJson()
+    const survived = _caramelLiveDiscountFor(before, arrivedWith.code)
+    if (survived > 0) {
+        log('AUTO_INSERT_RESTORE_UNNEEDED', {
+            code: arrivedWith.code,
+            amount: survived,
+            reason: 'their code came through every probe untouched — re-applying a live code is what knocks it off',
+        })
+        return {
+            code: arrivedWith.code,
+            amountText: _caramelCartMoney(before, survived),
+            restored: false,
+        }
+    }
+    const after = await _caramelPutCodeOnCart(arrivedWith.code, before)
+    const back = _caramelLiveDiscountFor(after, arrivedWith.code)
+    log('AUTO_INSERT_RESTORED_EXISTING', {
+        code: arrivedWith.code,
+        restored: back > 0,
+        total: after ? after.total_price : null,
+        amount: back,
+        ...(back > 0
+            ? {}
+            : {
+                  reason: 'the request went through but the cart shows nothing off for their code — reporting it lost, not restored',
+              }),
+    })
+    if (!(back > 0)) return null
+    return {
+        code: arrivedWith.code,
+        amountText: _caramelCartMoney(after, back),
+        restored: true,
+    }
+}
+
+/* The shopper's own code, as a row they can copy. It is whatever they brought,
+ * so it is usually not in our catalogue — without this, the one code we know
+ * worked on this cart is the one code the list can't offer. */
+function _caramelOwnCodeRow(code) {
+    return { code, title: 'Your code — paste it in at checkout' }
+}
+
 function _existingCartDiscount(cart) {
     if (!cart) return null
     const money = minor => _caramelCartMoney(cart, minor)
@@ -249,8 +351,10 @@ async function startApplyingCoupons(rec, options) {
         for (let i = 0; i < linkCodes.length; i++) {
             if (_caramelCancelled) {
                 // Stopping mid-probe leaves whichever code we tried last on the
-                // cart. If the shopper had their own, hand it back before we go.
-                if (arrivedWith) await applyViaDiscountLink(arrivedWith.code)
+                // cart. If the shopper had their own, hand it back before we
+                // go — via the cart-aware put, because if their code is still
+                // live here then a bare re-send is what would remove it.
+                if (arrivedWith) await _caramelPutCodeOnCart(arrivedWith.code)
                 log('AUTO_INSERT_STOP', {
                     result: 'cancelled',
                     restored: arrivedWith ? arrivedWith.code : null,
@@ -292,7 +396,13 @@ async function startApplyingCoupons(rec, options) {
         let lostWinner = null
         let lostWinnerSave = ''
         if (bestCode) {
-            confirmed = await applyViaDiscountLink(bestCode)
+            // Cart-aware put, not a bare re-send: the winner was probed, so it
+            // is already in the discount list, and re-sending an attached code
+            // demotes it — the likeliest reading of REAPPLY_LOST below firing
+            // at all. The confirmation underneath is unchanged and still
+            // decides the verdict, so this can only turn a lost win into a
+            // measured one.
+            confirmed = await _caramelPutCodeOnCart(bestCode)
             if (!confirmed || confirmed.total_price >= _cart0.total_price) {
                 // Nothing is riding on the cart now. Say so rather than claim a
                 // win, and let the no-win branch below hand over the codes.
@@ -396,21 +506,25 @@ async function startApplyingCoupons(rec, options) {
             location.reload()
             return
         }
-        // Nothing we hold beat what the shopper already had. Probing replaced
-        // their code on the cart, so put it back — leaving them worse off than
-        // before we ran is the one outcome this flow must never produce.
-        if (arrivedWith) {
-            const restored = await applyViaDiscountLink(arrivedWith.code)
-            log('AUTO_INSERT_RESTORED_EXISTING', {
-                code: arrivedWith.code,
-                restored: !!restored,
-                total: restored ? restored.total_price : null,
-            })
-        }
+        // Nothing we hold beat what the shopper already had. Probing MAY have
+        // taken their code off — and may equally have left it untouched, which
+        // is the case that used to be destroyed here. Leaving them worse off
+        // than before we ran is the one outcome this flow must never produce,
+        // and asserting we didn't is not the same as checking.
+        const keptExisting = arrivedWith
+            ? await _caramelRestoreArrivedDiscount(arrivedWith)
+            : null
+        // Their discount is gone and would not go back on. Everything below
+        // has to read differently when this is set — most of all the sentence
+        // that would otherwise tell them a dead code is saving them money.
+        const lostTheirs =
+            arrivedWith && !keptExisting ? arrivedWith.code : null
         log('AUTO_INSERT_STOP', {
             result: 'none',
             via: 'discount-link',
             tried: linkCodes.map(c => c.code),
+            kept: keptExisting ? keptExisting.code : null,
+            lostTheirs,
             t: performance.now(),
         })
         // None of the codes BEAT the baseline. That is not the same as "nothing
@@ -440,31 +554,60 @@ async function startApplyingCoupons(rec, options) {
             const rest = coupons.filter(
                 c => String(c.code).toUpperCase() !== lostWinner.toUpperCase(),
             )
-            const theirs = arrivedWith
-                ? ` We've put your ${arrivedWith.code} back on the cart.`
-                : ''
+            const theirs = keptExisting
+                ? keptExisting.restored
+                    ? ` We've put your ${keptExisting.code} back on the cart.`
+                    : ` Your ${keptExisting.code} is still on the cart.`
+                : lostTheirs
+                  ? ` Your own ${lostTheirs} came off while we were testing and the store wouldn't take it back — it's in the list too.`
+                  : ''
             showFinalModal(
                 0,
                 null,
                 `${lostWinner} took ${lostWinnerSave} off when we tested it, but the store wouldn't keep it on your cart.${theirs} It's first in the list below — worth pasting in by hand.`,
                 false,
-                [...first, ...caramelSinkTriedCodes(rest)],
+                [
+                    ...first,
+                    ...(lostTheirs ? [_caramelOwnCodeRow(lostTheirs)] : []),
+                    ...caramelSinkTriedCodes(rest),
+                ],
             )
             return
         }
-        const existing = arrivedWith
-        if (existing) {
-            // Drop the live code from the copy list: offering it is what makes
-            // "paste one of these" a losing move.
+        if (keptExisting) {
+            // Drop the live code from the copy list: re-sending a code the cart
+            // already holds is measurably how you delete it, so offering it
+            // would cost them the exact amount this sentence congratulates
+            // them on.
             const others = coupons.filter(
-                c => String(c.code).toUpperCase() !== existing.code,
+                c => String(c.code).toUpperCase() !== keptExisting.code,
             )
             showFinalModal(
                 0,
                 null,
-                `${existing.code} is already applied and saving you ${existing.amountText} — we checked ${linkCodes.length} other code${linkCodes.length === 1 ? '' : 's'} and none beat it.`,
+                `${keptExisting.code} is already applied and saving you ${keptExisting.amountText} — we checked ${linkCodes.length} other code${linkCodes.length === 1 ? '' : 's'} and none beat it.`,
                 false,
                 others,
+            )
+            return
+        }
+        if (lostTheirs) {
+            /* We took their discount off and could not put it back. No version
+             * of this is good news, and the old code reached for the good-news
+             * sentence anyway. Say what happened and lead with the one code we
+             * know worked on this cart. */
+            const rest = coupons.filter(
+                c => String(c.code).toUpperCase() !== lostTheirs,
+            )
+            showFinalModal(
+                0,
+                null,
+                `We couldn't put your ${lostTheirs} back on the cart — paste it in at checkout to get that discount again. None of the ${linkCodes.length} code${linkCodes.length === 1 ? '' : 's'} we checked beat it.`,
+                false,
+                [
+                    _caramelOwnCodeRow(lostTheirs),
+                    ...caramelSinkTriedCodes(rest),
+                ],
             )
             return
         }
@@ -1061,6 +1204,38 @@ async function caramelAnnounceToWebsite() {
     })
 }
 
+/* URLs detection has already been answered for, seeded with the one the
+ * document loaded at (inject.js runs detection there, and re-running it for the
+ * same URL is pure duplication). A store that rewrites its address bar in a
+ * loop must not cost a run per rewrite.
+ *
+ * Guarded `var`, not `const`: re-injection safety, and the test harness evals
+ * each source file in its own call where only var/function survive
+ * (tests/_load.mjs). */
+if (typeof _caramelEvaluatedUrls === 'undefined') {
+    var _caramelEvaluatedUrls = new Set([location.href])
+}
+
+/* The address bar moved. Re-ask whether we can help here.
+ *
+ * Detection is not idempotent-by-accident — it re-reads the URL, the referrer
+ * and the live cart, which is the whole point: the answer genuinely changes
+ * when a store rewrites /?open_cart=true to /. Its own re-entry guards hold
+ * (insertCaramelPrompt refuses a second pill, the mutation observer refuses a
+ * second install), so a re-run adds a decision, not a duplicate.
+ *
+ * Returns whether it re-ran, so the test can tell a decision from a no-op. */
+function caramelHandleUrlChanged(url) {
+    const seen = String(url || '')
+    if (!seen || _caramelEvaluatedUrls.has(seen)) return false
+    _caramelEvaluatedUrls.add(seen)
+    log('URL_CHANGED_REDETECT', { url: seen })
+    startCheckoutDetection().catch(err =>
+        logError('re-detection after URL change failed', err),
+    )
+    return true
+}
+
 /* --------------------------------------------------  listeners
  * Guard: register once per realm. Without this, SPA re-injections stack
  * duplicate listeners → double-fires, memory leaks. */
@@ -1106,9 +1281,14 @@ if (!window.__caramel_listeners_bound) {
             getDomainRecord(location.hostname)
                 .then(rec => startApplyingCoupons(rec))
                 .catch(err => {
-                    console.error('Caramel: apply flow error', err)
+                    logError('apply flow error', err)
                     hideTestingModal()
                 })
+            send({ success: true })
+            return false
+        }
+        if (req.action === 'caramelUrlChanged') {
+            caramelHandleUrlChanged(req.url)
             send({ success: true })
             return false
         }

@@ -302,6 +302,30 @@ describe('a title that is really just the label again', () => {
         expect(_caramelUsableTitle('Code for 15% off')).toBe('Code for 15% off')
     })
 
+    it('drops a claim whose amount fell out of the scrape', () => {
+        // 100percentpure.com, live catalogue 2026-08-06: LASHES arrives as
+        // "Get off with code". The shopper is promised nothing and shown a
+        // sentence that reads like a bug; the bare code is more honest.
+        expect(_caramelUsableTitle('Get off with code', 'LASHES')).toBe('')
+        expect(_caramelUsableTitle('Save off your order')).toBe('')
+        expect(_caramelUsableTitle('Take off at checkout')).toBe('')
+    })
+
+    it('keeps every offer that still has its number', () => {
+        // The same store's other 19 titles, and the shapes most like the one
+        // above — a rule that also ate these would cost more than it saves.
+        for (const good of [
+            'Take 15% Off Your Order',
+            'Get 50% Off Your Order with Coupon',
+            'Get $10 off your first purchase',
+            'Buy 3 Get 1 Free with Pure Coupon',
+            'Free shipping',
+            'Get Coffee Bean Caffeine Restorative Moisturizer for $25',
+        ]) {
+            expect(_caramelUsableTitle(good)).toBe(good)
+        }
+    })
+
     it('still drops the zero-value claims it always did', () => {
         expect(_caramelUsableTitle('Score 0% off with coupon code')).toBe('')
         expect(_caramelUsableTitle('$0.00 off')).toBe('')

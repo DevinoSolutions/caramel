@@ -78,6 +78,14 @@ export default [
             // env.client.ts's schema + .env.example — only this call site's
             // read is dynamic (see the file's own header comment).
             '**/src/lib/securityHelpers/decryptJsonData.ts',
+            // Documented exception (2026-08-06): buildInfo.ts holds the commit
+            // next.config.mjs's `env` inlines at BUILD time, by rewriting that
+            // exact `process.env.GIT_COMMIT_SHA` expression into a string
+            // literal. env.ts parses `process.env` as an object and so offers
+            // the inliner nothing to rewrite — routing this through the env
+            // door would yield undefined at runtime, since nothing sets the
+            // var in the running container (see the file's own header).
+            '**/src/lib/buildInfo.ts',
         ],
         rules: {
             'no-restricted-syntax': [

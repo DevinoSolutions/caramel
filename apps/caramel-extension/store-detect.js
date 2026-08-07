@@ -163,9 +163,95 @@ function _hostMatchesDomain(host, domain) {
  * the path, never a store-specific rule. Used only to decide whether a live
  * cart probe is worth making, so a miss costs nothing but a missed probe.
  * `bag` is deliberately absent: /collections/bag is a product category on a
- * great many stores, and the prompt has no business appearing there. */
+ * great many stores, and the prompt has no business appearing there.
+ *
+ * The word must END its path segment. It may begin mid-segment (/shopping-cart
+ * is a cart), but a segment that CONTINUES past it is a slug that merely starts
+ * with the word — /products/cart-organizer is a product, and it used to be read
+ * as a checkout, prompt and cart probe and all. Trading /cart-page away is the
+ * price, and it is the cheap side of that trade: a missed probe costs nothing,
+ * a prompt on the wrong page is the defect this whole file guards against. */
 const CARAMEL_CART_PATH_RE =
-    /(?:^|[/\-_])(cart|carts|basket|checkout|checkouts)(?:[/\-_?#]|$)/i
+    /(?:^|[/\-_])(cart|carts|basket|checkout|checkouts)(?:[/?#]|$)/i
+
+/* A query key that means "the cart drawer is open".
+ *
+ * Stores that answer /cart with a redirect say so in the query instead:
+ * ?openCartDrawer=true, ?open_cart=1, ?cart-drawer=1. This matches the SHAPE of
+ * such a key — an optional verb, the cart noun, an optional panel noun, in any
+ * of the casings and separators the web writes them in — and never one store's
+ * literal parameter. That distinction is what the ban above is about: a rule
+ * naming a store (or a store's own parameter, which is the same thing wearing a
+ * different hat) is still out of bounds; a rule about URL shape holds for every
+ * store that writes its URL that way.
+ *
+ * `view` earns its place the same way the rest did: chomps.com and
+ * drsquatch.com both answer /cart with a redirect to `/?viewcart=true`
+ * (measured 2026-08-06). The alternation had been written from the two stores
+ * in front of us at the time and stopped there, so the plainest verb of the set
+ * was the one missing — chomps carries 15 catalogue codes and the extension was
+ * silent on its own cart page.
+ *
+ * Anchored at both ends so `?discart=1` or `?cartoon=1` cannot ride in. */
+const CARAMEL_CART_INTENT_PARAM_RE =
+    /^(?:(?:open|show|toggle|view)[-_]?)?(?:cart|basket|minicart)(?:[-_]?(?:drawer|panel|modal|flyout))?$/i
+
+/* Values that mean the flag is OFF. The key alone is not the signal — a store
+ * that writes ?cart=false is telling us the drawer is closed. */
+const CARAMEL_FALSY_FLAG_VALUES = new Set(['', '0', 'false'])
+
+/* A path that is the site's front door: bare root, or a locale root. */
+const CARAMEL_SITE_ROOT_RE = /^\/(?:[a-z]{2}(?:-[a-z]{2})?\/?)?$/i
+
+/* Did the shopper arrive here FROM this store's own cart URL, landing on its
+ * front door? That is the signature of a cart route that redirects: the address
+ * bar no longer says cart, and the referrer is the only thing left that does.
+ *
+ * Both halves are load-bearing. Same-origin, because another site's /cart says
+ * nothing about this one. Landing on a ROOT, because leaving the cart to go
+ * look at a product is the most ordinary move on any store — treating that as
+ * cart intent would follow the shopper around the whole site. */
+function _caramelReferrerCartBounce() {
+    if (!document.referrer) return false
+    let from
+    try {
+        from = new URL(document.referrer)
+    } catch {
+        return false
+    }
+    if (from.origin !== location.origin) return false
+    if (!CARAMEL_CART_PATH_RE.test(from.pathname)) return false
+    return CARAMEL_SITE_ROOT_RE.test(location.pathname)
+}
+
+/* Is the shopper in their cart, whatever the path happens to say?
+ *
+ * Measured live on 2026-08-06: allbirds.com answers /cart with a 302 to
+ * /?openCartDrawer=true, and toms.com navigates /cart to /?open_cart=true and
+ * then rewrites the address bar to a bare /. On both, the shopper is looking at
+ * a full cart drawer and the path-only rule below saw an ordinary home page, so
+ * the extension stayed silent for the entire visit.
+ *
+ * Returns the name of the signal that answered, or null — the caller logs it,
+ * because "the gate opened" is not a useful thing to read in a dev console
+ * without knowing which of four rules opened it.
+ */
+function _caramelCartIntentSignal() {
+    if (CARAMEL_CART_PATH_RE.test(location.pathname + location.search))
+        return 'path'
+    for (const [key, value] of new URLSearchParams(location.search)) {
+        if (!CARAMEL_CART_INTENT_PARAM_RE.test(key)) continue
+        if (CARAMEL_FALSY_FLAG_VALUES.has(String(value).trim().toLowerCase()))
+            continue
+        return 'param'
+    }
+    // Leading '#' stripped so the fragment is matched as the path it stands in
+    // for: '#cart' and '#/cart' are the same claim.
+    if (CARAMEL_CART_PATH_RE.test(location.hash.replace(/^#/, '')))
+        return 'hash'
+    if (_caramelReferrerCartBounce()) return 'referrer'
+    return null
+}
 
 /* Can we act here even though no promo box matched?
  *
@@ -185,13 +271,14 @@ const CARAMEL_CART_PATH_RE =
  * ordinary product page never pays for the request.
  */
 async function _platformCartUsable() {
-    if (!CARAMEL_CART_PATH_RE.test(location.pathname + location.search))
-        return false
+    const signal = _caramelCartIntentSignal()
+    if (!signal) return false
     try {
         const cart = await probeCartJson()
         if (cart && cart.item_count > 0) {
             log('CHECKOUT_VIA_CART_PAYLOAD', {
                 items: cart.item_count,
+                signal,
                 reason: 'no promo box matched, but the platform cart is readable and non-empty',
             })
             return true

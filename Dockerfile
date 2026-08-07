@@ -21,6 +21,14 @@ RUN corepack enable && corepack prepare pnpm@9.0.0 --activate
 FROM base AS pruner
 WORKDIR /app
 COPY . .
+# Read the commit BEFORE the prune, which does not carry .git forward. Not a
+# build ARG: the platform builds this compose from a git checkout and has no
+# way to compute the commit into an arg (compose interpolates args from a
+# static .env), whereas the checkout itself always knows. Falls back to
+# "unknown" on stderr in a context with no git metadata (e.g. a source
+# tarball) and never fails the build — the cost is a deployment that cannot
+# confirm itself to CI's deploy gate, not a broken image.
+RUN node apps/caramel-app/scripts/build-sha.mjs > /git-sha.txt
 # Pinned turbo (never floating) — deterministic prune.
 RUN pnpm dlx turbo@2.5.4 prune caramel-app --docker
 
@@ -33,6 +41,9 @@ COPY --from=pruner /app/out/pnpm-lock.yaml ./pnpm-lock.yaml
 RUN pnpm install --frozen-lockfile
 # Full pruned source.
 COPY --from=pruner /app/out/full/ ./
+# The commit the pruner read, carried across the stage boundary the prune
+# breaks; next.config.mjs inlines it into the bundle for /api/version.
+COPY --from=pruner /git-sha.txt /git-sha.txt
 
 # Build-time NEXT_PUBLIC_* — every var env.client.ts reads. Defaults are
 # LOCAL-SAFE or EMPTY only; NEVER a production identifier (public repo). Deploy
@@ -71,7 +82,7 @@ ENV BETTER_AUTH_SECRET=build-placeholder-not-a-secret
 # this pruned single-app image the build is one task with no cache anyway
 # (caramel-app has no workspace deps, so `dependsOn: ^build` is empty in
 # practice).
-RUN pnpm --filter caramel-app run build
+RUN GIT_COMMIT_SHA="$(cat /git-sha.txt)" pnpm --filter caramel-app run build
 
 # Self-contained Prisma CLI for the runner's boot-time `migrate deploy`.
 # npm (not pnpm) gives a flat node_modules with every transitive dep real —

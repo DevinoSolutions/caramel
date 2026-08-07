@@ -221,7 +221,13 @@ export default function SignupPageClient() {
                     <input
                         id="signup-password"
                         onBlur={handleBlur}
-                        onClick={() => setShowPasswordChecker(true)}
+                        /* onFocus, not onClick: a shopper who reaches this
+                         * field with Tab, or whose password manager fills it,
+                         * never clicks it — and on `onClick` alone they got
+                         * their password rejected with the requirements list
+                         * still hidden, which is the one thing that would have
+                         * told them why. Focus covers clicking too. */
+                        onFocus={() => setShowPasswordChecker(true)}
                         type="password"
                         name={'password'}
                         required
@@ -241,7 +247,7 @@ export default function SignupPageClient() {
                     <input
                         id="signup-confirm-password"
                         onBlur={handleBlur}
-                        onClick={() => setShowPasswordChecker(true)}
+                        onFocus={() => setShowPasswordChecker(true)}
                         type="password"
                         name={'confirmPassword'}
                         required

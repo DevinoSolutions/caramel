@@ -8,7 +8,7 @@
 // manifests) fetched ONCE, tokens rewritten ':root' → ':host, :root', one
 // <style> per shadow root, awaited before append (no unstyled flash).
 // Embedding the CSS as a JS string was rejected: the summed content-script
-// size budget (.size-limit.json, 102 KB) counts JS bytes, not fetched CSS.
+// size budget (.size-limit.js) counts JS bytes, not fetched CSS.
 
 // Inline SVG close glyph (stroke follows the button's currentColor).
 const CARAMEL_X_ICON =
@@ -170,17 +170,16 @@ function _caramelBarQualifies(style, rect, vw, isBanner) {
 /* The one element allowed to count as an UNPINNED top bar.
  *
  * "Any visible <header> near the top" is too generous, and tog24 is why: its
- * cart carries FIVE, one per component (a mini-cart's at 84→160, a form's at
- * 68→108), and honouring the lowest pushed the pill 57px below a header it had
- * already cleared. The spec's own rule for when <header> means role="banner"
- * — not inside article/aside/main/nav/section — discards three of the five and
- * 100percentpure's featured-column header, but not the mini-cart, which sits in
- * a <mini-cart> custom element matching no sectioning selector.
+ * cart carries FIVE, one per component (a mini-cart's at 84→160), and honouring
+ * the lowest pushed the pill 57px below a header it had already cleared. The
+ * spec's rule for when <header> means role="banner" — not inside
+ * article/aside/main/nav/section — discards three of the five, but not the
+ * mini-cart, which sits in a custom element matching no sectioning selector.
  *
  * Document order separates them: on both stores the page's header is FIRST and
  * every component header follows. So take one candidate and apply the spec rule
- * to it. A store that hides a decorative <header> above its real one yields
- * nothing here and falls back to the pinned sweep — the conservative direction.
+ * to it; a store hiding a decorative <header> above its real one yields nothing
+ * and falls back to the pinned sweep, which is the conservative direction.
  */
 function _caramelPageBanner() {
     const el = document.querySelector('header, [role="banner"]')
@@ -431,7 +430,7 @@ async function insertCaramelPrompt(domainRecord) {
         }
         startApplyingCoupons(domainRecord).catch(err => {
             // A throw mid-flow must never leave the overlay trapping the page.
-            console.error('Caramel: apply flow error', err)
+            logError('apply flow error', err)
             hideTestingModal()
         })
         _dismiss()
@@ -625,6 +624,12 @@ function _caramelUsableTitle(title, code) {
         .trim()
     if (/^(COUPON|PROMO|DISCOUNT|VOUCHER)? ?(CODE|CODES)$/.test(bare)) return ''
     if (code && bare === String(code).toUpperCase().trim()) return ''
+    /* A claim whose amount fell out of the scrape: 100percentpure ships
+     * `LASHES — "Get off with code"` (live, 2026-08-06). The verb sits directly
+     * against "off", which is the shape a dropped number leaves; a title that
+     * kept its quantity, or never had one, does not match. */
+    if (/\b(get|take|save|receive|enjoy|score|grab|snag)\s+off\b/i.test(t))
+        return ''
     return t
 }
 
