@@ -249,11 +249,14 @@ async function main() {
 
         // 7. POPUP UI LOGIN FLOW
         {
-            // Clear storage.sync so popup starts logged out (popup.js uses storage.sync)
+            // Clear BOTH storage areas so the popup starts logged out —
+            // sessions live in storage.local since the sync->local migration.
             await sw.evaluate(
                 () =>
                     new Promise(res =>
-                        chrome.storage.sync.remove(['token', 'user'], res),
+                        chrome.storage.local.remove(['token', 'user'], () =>
+                            chrome.storage.sync.remove(['token', 'user'], res),
+                        ),
                     ),
             )
 
@@ -307,12 +310,17 @@ async function main() {
                 /* fall through */
             }
 
-            // Give storage.sync a moment to flush
+            // Give storage a moment to flush. Sessions live in storage.LOCAL
+            // since the sync->local migration (credentials must not roam via
+            // Chrome Sync); sync is read as the pre-migration fallback only.
             await popup.waitForTimeout(500)
             const stored = await sw.evaluate(
                 () =>
                     new Promise(res =>
-                        chrome.storage.sync.get(['token', 'user'], res),
+                        chrome.storage.local.get(['token', 'user'], local => {
+                            if (local?.token) return res(local)
+                            chrome.storage.sync.get(['token', 'user'], res)
+                        }),
                     ),
             )
             log(
