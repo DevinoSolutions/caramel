@@ -123,7 +123,7 @@ export default function SignupPageClient() {
                 <div className="my-auto whitespace-nowrap">Create your</div>
                 <Image
                     src="/full-logo.png"
-                    alt="logo"
+                    alt="Caramel"
                     height={90}
                     width={90}
                     className="my-auto mt-2"

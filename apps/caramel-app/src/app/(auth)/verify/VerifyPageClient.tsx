@@ -78,7 +78,7 @@ export default function VerifyPageClient({
                 <div className="my-auto whitespace-nowrap">Verify your</div>
                 <Image
                     src="/full-logo.png"
-                    alt="logo"
+                    alt="Caramel"
                     height={90}
                     width={90}
                     className="my-auto mt-2"

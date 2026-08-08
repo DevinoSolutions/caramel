@@ -130,7 +130,7 @@ export default function LoginPageClient({
                 <div className="my-auto whitespace-nowrap">Sign in to</div>
                 <Image
                     src="/full-logo.png"
-                    alt="logo"
+                    alt="Caramel"
                     height={90}
                     width={90}
                     className="my-auto mt-2"

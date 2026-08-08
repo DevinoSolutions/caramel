@@ -1,6 +1,7 @@
 'use client'
 
 import { useSession } from '@/lib/auth/client'
+import { userInitial } from '@/lib/userInitial'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 
@@ -42,10 +43,7 @@ export default function ProfilePageClient() {
     }
 
     const user = session.user
-    const userInitial =
-        user.name?.charAt(0).toUpperCase() ||
-        user.email?.charAt(0).toUpperCase() ||
-        'U'
+    const avatarLetter = userInitial(user)
 
     return (
         <main className="relative -mt-[6.7rem] w-full">
@@ -58,7 +56,7 @@ export default function ProfilePageClient() {
                     <div className="rounded-2xl border border-gray-100 bg-white p-8 shadow-lg dark:border-gray-800 dark:bg-darkerBg">
                         <div className="mb-6 flex items-center gap-6">
                             <div className="flex h-20 w-20 items-center justify-center rounded-full bg-caramel text-2xl font-semibold text-white ring-4 ring-caramel/15">
-                                {userInitial}
+                                {avatarLetter}
                             </div>
                             <div>
                                 <h2 className="text-2xl font-semibold text-gray-900 dark:text-gray-100">
