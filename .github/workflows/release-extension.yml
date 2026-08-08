@@ -1,14 +1,29 @@
 name: Release – Extension
 
-# TODO: Firefox has NO release path in this workflow.
-# `apps/caramel-extension/manifest-firefox.json` exists and is built + packaged,
-# but nothing signs or publishes it to addons.mozilla.org, so every Firefox
-# release is manual and the AMO listing drifts silently behind the tag.
-# Closing the gap needs two repository secrets that do not exist today —
-# AMO_JWT_ISSUER and AMO_JWT_SECRET — plus an `publish_firefox` job running
-# `web-ext sign`. Deliberately not added here: a job referencing unset secrets
-# resolves them to empty strings and fails deep inside the upload instead of
-# up front.
+# Firefox/AMO IS automated now — `package` builds a Firefox variant of dist/ and
+# `publish_firefox` signs and submits it to addons.mozilla.org — but the job is
+# DORMANT until the owner creates two repository secrets:
+#
+#   AMO_JWT_ISSUER   ("JWT issuer")
+#   AMO_JWT_SECRET   ("JWT secret")
+#
+# both minted at https://addons.mozilla.org/en-US/developers/addon/api/key/
+# (one pair per AMO account; the secret is shown exactly once).
+#
+# Until they exist, publish_firefox's FIRST step notices they are empty, writes
+# a ::warning:: plus a run-summary block saying Firefox was not published and
+# why, and every later step in that job is gated off — the release stays green
+# and Chrome/Safari are untouched. That gate is the whole reason the Firefox leg
+# was missing here: a job referencing unset secrets resolves them to empty
+# strings and fails deep inside the upload instead of up front. The cost of
+# leaving it out was real — the AMO listing (public slug `grabcaramel`) served
+# 1.0.3, reviewed 2025-07-12, to ~829 daily users while Chrome and Safari moved
+# on.
+#
+# Once the secrets exist the job runs for real: it proves the credentials
+# against the AMO API, refuses to ship a version AMO already lists, and fails
+# loudly on any upload or validation error. It never degrades to a silent pass.
+# Still manual afterwards: Mozilla's human review of the submitted version.
 
 on:
   push:
@@ -295,6 +310,36 @@ jobs:
           name: extension-package
           path: ${{ env.WORKING_DIRECTORY }}/extension.zip
 
+      # Firefox ships the SAME built dist/ as Chrome — one manifest is the only
+      # difference (MV3 `background.scripts` instead of a service worker, the
+      # gecko id, and no `identity` permission; see popup.js's Firefox OAuth
+      # note). scripts/build-dist.mjs deliberately keeps manifest-firefox.json
+      # OUT of dist/ (it is in that file's NEVER_SHIP list), so the Firefox
+      # package is dist/ with that manifest copied over manifest.json. The
+      # Chrome build and zip above are not touched.
+      - name: Package extension for Firefox
+        run: |
+          set -euo pipefail
+          rm -rf dist-firefox
+          cp -r dist dist-firefox
+          cp manifest-firefox.json dist-firefox/manifest.json
+          # Assert the swap actually landed rather than trusting cp: a Firefox
+          # package carrying Chrome's manifest would be rejected by AMO only
+          # after the upload, and one still carrying manifest-firefox.json
+          # alongside would ship a file the allowlist says never ships.
+          jq -er '.browser_specific_settings.gecko.id' dist-firefox/manifest.json
+          test ! -e dist-firefox/manifest-firefox.json
+
+      # A directory, not a zip: `web-ext sign` takes --source-dir and builds the
+      # xpi itself (it hashes that build to decide whether to re-upload), so
+      # handing it a zip would only mean unzipping it again in publish_firefox.
+      - name: Upload Firefox build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: extension-firefox
+          path: ${{ env.WORKING_DIRECTORY }}/dist-firefox
+          if-no-files-found: error
+
   publish_chrome:
     name: '🚀 Publish to Chrome Web Store'
     needs: [guard, package]
@@ -325,6 +370,285 @@ jobs:
             echo "Version \`${{ needs.guard.outputs.version }}\` was uploaded as a **draft** (\`publish: false\`)."
             echo "**Manual publish required** — open the Chrome Web Store developer dashboard and submit it for review."
             echo "Until that happens the store keeps serving the previous version, and the next release's freeze-guard will still compare against the old one."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  publish_firefox:
+    name: '🚀 Publish to Firefox Add-ons (AMO)'
+    needs: [guard, package]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    outputs:
+      # 'true' only when the run actually submitted to AMO. The GitHub Release
+      # body reads this so it never claims a Firefox release that did not happen.
+      submitted: ${{ steps.credentials.outputs.configured }}
+    steps:
+      # THE GATE. `secrets` is not available in a job-level `if:` (only github,
+      # needs, vars and inputs are), so the skip is a first step that publishes
+      # a boolean every later step keys off. The job still ends GREEN when the
+      # secrets are absent — that is the point: an unconfigured Firefox leg must
+      # never redden a Chrome/Safari release — but it is impossible to miss,
+      # because it writes both an annotation and a run-summary block.
+      #
+      # What it deliberately does NOT do: guess, retry, or continue with empty
+      # credentials. Every publishing step below is gated on configured=true.
+      - name: Detect AMO credentials
+        id: credentials
+        env:
+          AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
+          AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+          RELEASE_VERSION: ${{ needs.guard.outputs.version }}
+        run: |
+          set -euo pipefail
+          missing=""
+          for name in AMO_JWT_ISSUER AMO_JWT_SECRET; do
+            # `${!name:-}`, not `${!name}`: indirect expansion of a genuinely
+            # unset variable aborts under `set -u`, which would fail this job —
+            # the exact outcome this step exists to prevent. GitHub does define
+            # a declared env var as an empty string when its secret is missing,
+            # but the whole point here is not to bet the skip path on that.
+            if [ -z "${!name:-}" ]; then
+              missing="${missing:+${missing}, }${name}"
+            fi
+          done
+
+          if [ -z "$missing" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            echo "AMO credentials present — the Firefox submission will run."
+            exit 0
+          fi
+
+          echo "configured=false" >> "$GITHUB_OUTPUT"
+          echo "::warning::Firefox was NOT published to addons.mozilla.org: repository secret(s) ${missing} are unset, so this run cannot authenticate to AMO. Chrome and Safari were unaffected."
+          {
+            echo "### Firefox Add-ons (AMO) — NOT PUBLISHED"
+            echo ""
+            echo "Version \`${RELEASE_VERSION}\` was **not** submitted to addons.mozilla.org."
+            echo ""
+            echo "Why: repository secret(s) **${missing}** are unset, so nothing could authenticate to the AMO API."
+            echo "Firefox users stay on whatever version the listing already serves; Chrome and Safari were unaffected by this."
+            echo ""
+            echo "To activate this job, create both secrets from an AMO API key pair"
+            echo "(<https://addons.mozilla.org/en-US/developers/addon/api/key/>) and re-run the release:"
+            echo ""
+            echo "- \`AMO_JWT_ISSUER\` — the key pair's *JWT issuer*"
+            echo "- \`AMO_JWT_SECRET\` — the key pair's *JWT secret* (shown only once at creation)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Same doctrine as "Assert Chrome Web Store credentials are live": prove
+      # the credentials work BEFORE uploading anything, so a revoked or mistyped
+      # key surfaces here instead of somewhere inside web-ext's upload.
+      #
+      # An AMO API key is a JWT issuer/secret pair, not a bearer token — the API
+      # wants a short-lived HS256 token signed with the secret (AMO caps its
+      # lifetime at 5 minutes; 60s is plenty). accounts/profile is the cheapest
+      # authenticated read there is: it answers 401 both unauthenticated and
+      # with a bad token, so a 200 is real proof the pair is live.
+      - name: Assert AMO credentials are live
+        if: steps.credentials.outputs.configured == 'true'
+        env:
+          AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
+          AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+        run: |
+          set -euo pipefail
+          token=$(python3 - <<'PY'
+          import base64
+          import hashlib
+          import hmac
+          import json
+          import os
+          import secrets
+          import time
+
+
+          def b64(raw):
+              return base64.urlsafe_b64encode(raw).rstrip(b"=")
+
+
+          now = int(time.time())
+          header = b64(json.dumps({"alg": "HS256", "typ": "JWT"}, separators=(",", ":")).encode())
+          payload = b64(
+              json.dumps(
+                  {
+                      "iss": os.environ["AMO_JWT_ISSUER"],
+                      "jti": secrets.token_hex(16),
+                      "iat": now,
+                      "exp": now + 60,
+                  },
+                  separators=(",", ":"),
+              ).encode()
+          )
+          signing_input = header + b"." + payload
+          signature = b64(hmac.new(os.environ["AMO_JWT_SECRET"].encode(), signing_input, hashlib.sha256).digest())
+          print((signing_input + b"." + signature).decode())
+          PY
+          )
+          # The token is derived from a secret, so it is not masked automatically.
+          echo "::add-mask::${token}"
+
+          http=$(curl -sS -o /tmp/amo-profile.json -w '%{http_code}' \
+            -H "Authorization: JWT ${token}" \
+            "https://addons.mozilla.org/api/v5/accounts/profile/")
+          if [ "$http" != "200" ]; then
+            echo "::error::addons.mozilla.org accounts/profile returned HTTP $http — the AMO API key pair is wrong, revoked or expired."
+            cat /tmp/amo-profile.json
+            exit 1
+          fi
+          echo "AMO credentials verified as $(jq -er '.username' /tmp/amo-profile.json)."
+
+      # FREEZE-GUARD — refuse to ship a version AMO already lists.
+      #
+      # The add-on slug `grabcaramel` is PUBLIC (it is literally the store URL,
+      # https://addons.mozilla.org/en-US/firefox/addon/grabcaramel/), not a
+      # secret, so this read needs no authentication and no extra repository
+      # variable. `current_version.version` is the version AMO currently serves
+      # to installed users; the job fails unless the manifest version is
+      # strictly greater.
+      #
+      # It lives HERE, not in the guard job, on purpose: an AMO-side freeze must
+      # not be able to fail a Chrome/Safari release, and it is meaningless on a
+      # run that is skipping Firefox anyway.
+      #
+      # NOT guaranteed by this guard:
+      #   * A version already submitted and awaiting Mozilla review is invisible
+      #     — the listing keeps reporting the approved one, so two tags pushed
+      #     back to back can both pass (the Chrome guard has the same blind
+      #     spot, for the same reason).
+      #   * Unlisted/self-distributed versions are not represented here at all.
+      #   * A delisted or disabled add-on makes the endpoint 404, which fails
+      #     the job rather than passing an unverifiable release.
+      # Any transport error, unparseable body, missing field or non-numeric
+      # version is a hard failure: this guard never degrades to a pass.
+      - name: AMO publish freeze-guard
+        if: steps.credentials.outputs.configured == 'true'
+        env:
+          MANIFEST_VERSION: ${{ needs.guard.outputs.version }}
+        run: |
+          set -euo pipefail
+          curl -sS --fail-with-body -o /tmp/amo-addon.json \
+            -H 'Accept: application/json' \
+            "https://addons.mozilla.org/api/v5/addons/addon/grabcaramel/"
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+
+          def fail(message):
+              print(f"::error::{message}")
+              sys.exit(1)
+
+
+          def parse(version, label):
+              parts = version.split(".")
+              if not all(part.isdigit() for part in parts):
+                  fail(f"{label} version {version!r} is not numeric-dotted; cannot compare.")
+              return [int(part) for part in parts]
+
+
+          try:
+              with open("/tmp/amo-addon.json", encoding="utf-8") as handle:
+                  addon = json.load(handle)
+          except (OSError, ValueError) as exc:
+              fail(f"addons.mozilla.org returned an unreadable add-on detail response: {exc}")
+
+          listed = (addon.get("current_version") or {}).get("version")
+          if not listed:
+              fail(
+                  "addons.mozilla.org add-on detail carried no current_version.version. "
+                  "Either the slug is wrong or the listing has no approved version, so "
+                  "the published version cannot be verified."
+              )
+
+          manifest = os.environ["MANIFEST_VERSION"]
+          listed_parts = parse(listed, "listed")
+          manifest_parts = parse(manifest, "manifest")
+          width = max(len(listed_parts), len(manifest_parts))
+          listed_parts += [0] * (width - len(listed_parts))
+          manifest_parts += [0] * (width - len(manifest_parts))
+
+          print(f"AMO currently lists {listed}; manifest is {manifest}")
+          if manifest_parts <= listed_parts:
+              fail(
+                  f"Manifest version {manifest} is not greater than the version "
+                  f"addons.mozilla.org already lists ({listed}). Bump "
+                  "apps/caramel-extension manifest.json (and the matching version "
+                  "fields) before tagging."
+              )
+
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write(f"\nAMO listed version: `{listed}` → submitting `{manifest}`\n")
+          PY
+
+      # Checkout before download-artifact, never after: actions/checkout cleans
+      # the workspace and would delete a downloaded artifact. Nothing is rebuilt
+      # here — the checkout exists so the web-ext version comes from the repo's
+      # own pin instead of a second copy of the number living in this file.
+      - name: Checkout code
+        uses: actions/checkout@v4
+        if: steps.credentials.outputs.configured == 'true'
+
+      - name: Resolve the pinned web-ext version
+        id: webext
+        if: steps.credentials.outputs.configured == 'true'
+        run: |
+          set -euo pipefail
+          version=$(jq -er '.devDependencies["web-ext"]' "${WORKING_DIRECTORY}/package.json")
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::web-ext is pinned as '$version' in ${WORKING_DIRECTORY}/package.json — an exact X.Y.Z pin is required (no ranges, no @latest)."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Signing with web-ext@$version (pinned by the extension package)."
+
+      - name: Download Firefox build artifact
+        if: steps.credentials.outputs.configured == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: extension-firefox
+          path: firefox-src
+
+      - name: Setup Node.js
+        if: steps.credentials.outputs.configured == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # `--channel=listed` submits the version to the public AMO listing, which
+      # is what the 829 daily users on that listing actually receive.
+      #
+      # `--approval-timeout=0` is load-bearing, not a shortcut: by default
+      # web-ext waits for the version to be APPROVED and then downloads the
+      # signed xpi. Listed submissions go to human review at Mozilla, which
+      # takes hours to days, so the default would time out and paint a
+      # perfectly successful submission red. What is NOT skipped is AMO's
+      # automated validation — web-ext still waits for it and throws (non-zero
+      # exit) when it fails, so a broken package is still a red job.
+      #
+      # Credentials go through WEB_EXT_API_KEY/WEB_EXT_API_SECRET (web-ext maps
+      # WEB_EXT_* env vars onto the current command's options) rather than CLI
+      # flags, so they never appear in a process command line.
+      - name: Sign and submit to addons.mozilla.org
+        if: steps.credentials.outputs.configured == 'true'
+        env:
+          WEB_EXT_API_KEY: ${{ secrets.AMO_JWT_ISSUER }}
+          WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+          WEB_EXT_VERSION: ${{ steps.webext.outputs.version }}
+        run: |
+          set -euo pipefail
+          npx --yes "web-ext@${WEB_EXT_VERSION}" sign \
+            --source-dir=firefox-src \
+            --artifacts-dir=firefox-artifacts \
+            --channel=listed \
+            --approval-timeout=0
+
+      - name: Note that the version is queued for Mozilla review
+        if: steps.credentials.outputs.configured == 'true'
+        run: |
+          {
+            echo "### Firefox Add-ons (AMO)"
+            echo ""
+            echo "Version \`${{ needs.guard.outputs.version }}\` was **submitted** to the \`listed\` channel of <https://addons.mozilla.org/en-US/firefox/addon/grabcaramel/>."
+            echo "No manual upload is needed — but **Mozilla review still gates it**: until the version is approved the listing keeps serving the previous one, and the next release's freeze-guard will still compare against that older version."
           } >> "$GITHUB_STEP_SUMMARY"
 
   publish_safari:
@@ -617,7 +941,7 @@ jobs:
 
   github_release:
     name: '🏷️ Publish GitHub Release'
-    needs: [guard, package, publish_chrome, publish_safari]
+    needs: [guard, package, publish_chrome, publish_firefox, publish_safari]
     if: ${{ !inputs.dry_run && github.ref_type == 'tag' }}
     runs-on: ubuntu-latest
     permissions:
@@ -643,4 +967,4 @@ jobs:
 
             - **Chrome Web Store** — uploaded as a draft, manual publish required.
             - **Apple App Store** — uploaded to TestFlight, manual submit required.
-            - **Firefox / AMO** — not automated (see the TODO at the top of `.github/workflows/release-extension.yml`).
+            - **Firefox / AMO** — ${{ needs.publish_firefox.outputs.submitted == 'true' && 'submitted to the listed channel, awaiting Mozilla review.' || 'NOT published — the AMO_JWT_ISSUER / AMO_JWT_SECRET repository secrets are unset (see the run summary and the header of `.github/workflows/release-extension.yml`).' }}

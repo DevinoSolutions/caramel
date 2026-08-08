@@ -5,6 +5,10 @@
 .turbo/*
 node_modules
 dist
+# The Firefox store package: dist/ with manifest-firefox.json swapped in for
+# manifest.json. Release CI builds it; a local reproduction of that step must
+# not leave an untracked build output sitting in the tree.
+dist-firefox
 build
 coverage
 .vscode

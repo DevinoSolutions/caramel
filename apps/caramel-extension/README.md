@@ -20,6 +20,8 @@ Commands (from `apps/caramel-extension`, or prefix with `pnpm --filter caramel-e
 
 `pnpm build` copies an explicit **allowlist** (`scripts/build-dist.mjs`), not "everything minus a few excludes". The old rsync blacklist put `package.json`, the lint/knip/size configs, `tests/`, `scripts/` and ~400 KB of unreferenced brand art into the store package. `tests/package-contents.test.mjs` derives the requirement from the manifests and `index.html`, so adding a file to the extension and forgetting the allowlist is a red test rather than a broken release.
 
+Firefox ships that **same** `dist/`: release CI copies it to `dist-firefox/` and swaps `manifest-firefox.json` in as `manifest.json`. The allowlist deliberately keeps the Firefox manifest out of `dist/` (it is in `NEVER_SHIP`), so the two manifests can never ship in one package. `release-extension.yml`'s `publish_firefox` job then signs that directory with `web-ext sign --channel=listed` and submits it to addons.mozilla.org — the version is queued for Mozilla review, which is the one manual step left. That job stays dormant, loudly and green, until the `AMO_JWT_ISSUER` / `AMO_JWT_SECRET` repository secrets exist.
+
 To check the packaged output rather than the source tree:
 
 ```sh
