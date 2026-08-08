@@ -1,13 +1,21 @@
 'use client'
 
-import { signIn, signUp } from '@/lib/auth/client'
+import AuthCard, { AuthDivider } from '@/components/auth/AuthCard'
+import {
+    fieldErrorClasses,
+    inputClasses,
+    labelClasses,
+    linkClasses,
+    primaryButtonClasses,
+} from '@/components/auth/authStyles'
+import PasswordField from '@/components/auth/PasswordField'
+import SocialSignIn from '@/components/auth/SocialSignIn'
+import { signUp } from '@/lib/auth/client'
+import { firstPasswordFailure } from '@/lib/passwordRules'
 import { useFormik } from 'formik'
-import { motion } from 'framer-motion'
 import dynamic from 'next/dynamic'
-import Image from 'next/image'
 import Link from 'next/link'
 import { useState } from 'react'
-import { FaApple, FaGoogle } from 'react-icons/fa'
 import { toast } from 'sonner'
 import { object, ref, string } from 'yup'
 
@@ -16,35 +24,39 @@ const PasswordChecker = dynamic(
     { ssr: false },
 )
 
+/* The password branch is built from `@/lib/passwordRules`, the same source the
+ * on-screen checklist renders, so the two cannot disagree about what a valid
+ * password is.
+ *
+ * Every rule also carries an explicit message. Without one, yup falls back to
+ * printing the constraint itself, so a shopper who typed a lowercase-only
+ * password was previously shown the literal regex
+ * ("password must match the following: /[A-Z]/"). */
 const validationSchema = object().shape({
-    username: string().min(4).required('Please enter your username'),
-    email: string().email().required('Please enter your email'),
+    username: string()
+        .min(4, 'Nicknames need at least 4 characters')
+        .required('Please choose a nickname'),
+    email: string()
+        .email('That does not look like an email address')
+        .required('Please enter your email'),
     password: string()
-        .min(5)
-        .matches(/[A-Z]/)
-        .matches(/[0-9]/)
-        .matches(/[!@#$%^&*+-]/)
-        .required(
-            'Password must contain at least 5 characters, 1 uppercase, 1 number and 1 special character',
+        .required('Please create a password')
+        .test(
+            'password-policy',
+            'Password does not meet the requirements',
+            function (value) {
+                const failure = firstPasswordFailure(value ?? '')
+                return failure ? this.createError({ message: failure }) : true
+            },
         ),
     confirmPassword: string()
-        .oneOf([ref('password')])
-        .required("Password doesn't match"),
+        .oneOf([ref('password')], 'Both passwords need to match')
+        .required('Please re-type your password'),
 })
-
-const inputClasses =
-    'w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-gray-900 shadow-sm placeholder:text-gray-400 transition duration-200 hover:border-gray-400 focus:border-caramel focus:outline-none focus:ring-2 focus:ring-caramel/30 dark:border-gray-600 dark:bg-darkBg dark:text-gray-100 dark:shadow-none dark:placeholder:text-gray-500 dark:hover:border-gray-500 dark:focus:border-caramel'
-const labelClasses =
-    'mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300'
-const socialButtonClasses =
-    'flex w-full items-center justify-center gap-3 rounded-lg border border-caramel/40 bg-white px-4 py-2.5 font-medium text-gray-700 shadow-sm transition duration-200 hover:border-caramel hover:bg-caramel/5 active:bg-caramel/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/50 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:border-caramel/50 dark:bg-darkBg dark:text-gray-200 dark:shadow-none dark:hover:bg-caramel/10 dark:active:bg-caramel/15 dark:focus-visible:ring-offset-darkerBg'
-const linkClasses =
-    'rounded-sm font-semibold text-caramel underline-offset-2 transition hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/50'
 
 export default function SignupPageClient() {
     const [showPasswordChecker, setShowPasswordChecker] = useState(false)
     const [loading, setLoading] = useState(false)
-    const [oauthLoading, setOauthLoading] = useState<string | null>(null)
     const [error, setError] = useState('')
 
     const formik = useFormik({
@@ -70,7 +82,9 @@ export default function SignupPageClient() {
                     toast.error(
                         'Unable to create your account. Please try again or use a different email.',
                     )
-                    setError('Unable to create account')
+                    setError(
+                        'We could not create that account. Try a different email, or sign in if you already have one.',
+                    )
                     return
                 }
 
@@ -78,223 +92,142 @@ export default function SignupPageClient() {
                 window.location.href = '/verify?signup=success'
             } catch {
                 toast.error('Something went wrong. Please try again later.')
-                setError('Something went wrong')
+                setError('Something went wrong. Please try again later.')
             } finally {
                 setLoading(false)
             }
         },
     })
 
-    const handleSocialSignIn = async (provider: 'google' | 'apple') => {
-        setOauthLoading(provider)
-        try {
-            const result = await signIn.social({
-                provider,
-                callbackURL: '/',
-            })
-
-            if (result?.error) {
-                toast.error(
-                    `Unable to sign up with ${provider === 'google' ? 'Google' : 'Apple'}. Please try again.`,
-                )
-                setOauthLoading(null)
-                return
-            }
-
-            // signIn.social automatically redirects to OAuth provider
-            // The callback will handle redirecting back to callbackURL
-        } catch {
-            toast.error('Something went wrong. Please try again later.')
-            setOauthLoading(null)
-        }
-    }
-
     const { handleSubmit, errors, touched, handleChange, handleBlur, values } =
         formik
 
+    const fieldError = (name: keyof typeof values) =>
+        touched[name] && errors[name] ? errors[name] : undefined
+
     return (
-        <motion.div
-            className="w-full min-w-0 max-w-md rounded-2xl border border-gray-200/70 bg-white p-8 shadow-xl shadow-gray-300/40 dark:border-gray-800 dark:bg-darkerBg dark:shadow-black/40 sm:p-6 xs:p-5"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5 }}
+        <AuthCard
+            title="Create your account"
+            subtitle="Free forever. Caramel finds and applies coupon codes for you at checkout."
+            footer={
+                <p className="text-center text-sm text-gray-600 dark:text-gray-400">
+                    Already have an account?{' '}
+                    <Link href="/login" className={linkClasses}>
+                        Sign in
+                    </Link>
+                </p>
+            }
         >
-            <h2 className="mb-6 flex flex-wrap items-center justify-center gap-2 text-center text-2xl font-bold text-caramel">
-                <div className="my-auto whitespace-nowrap">Create your</div>
-                <Image
-                    src="/full-logo.png"
-                    alt="Caramel"
-                    height={90}
-                    width={90}
-                    className="my-auto mt-2"
-                />
-                <div className="my-auto whitespace-nowrap">account</div>
-            </h2>
-            <div className="mb-4 space-y-3">
-                <button
-                    type="button"
-                    onClick={() => handleSocialSignIn('google')}
-                    disabled={!!oauthLoading}
-                    className={socialButtonClasses}
-                >
-                    <FaGoogle className="h-5 w-5 text-caramel" />
-                    <span>
-                        {oauthLoading === 'google'
-                            ? 'Redirecting...'
-                            : 'Sign up with Google'}
-                    </span>
-                </button>
-                <button
-                    type="button"
-                    onClick={() => handleSocialSignIn('apple')}
-                    disabled={!!oauthLoading}
-                    className={socialButtonClasses}
-                >
-                    <FaApple className="h-5 w-5 text-caramel" />
-                    <span>
-                        {oauthLoading === 'apple'
-                            ? 'Redirecting...'
-                            : 'Sign up with Apple'}
-                    </span>
-                </button>
-            </div>
+            <SocialSignIn verb="Sign up" />
+            <AuthDivider />
 
-            <div className="relative my-6">
-                <div className="absolute inset-0 flex items-center">
-                    <div className="w-full border-t border-gray-200 dark:border-gray-700"></div>
-                </div>
-                <div className="relative flex justify-center text-sm">
-                    <span className="bg-white px-3 text-gray-500 dark:bg-darkerBg dark:text-gray-400">
-                        or
-                    </span>
-                </div>
-            </div>
-
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form onSubmit={handleSubmit} className="space-y-5" noValidate>
                 <div>
                     <label htmlFor="signup-username" className={labelClasses}>
-                        Choose a nickname
+                        Nickname
                     </label>
                     <input
                         id="signup-username"
                         type="text"
-                        onBlur={handleBlur}
+                        name="username"
                         required
-                        name={'username'}
-                        onChange={handleChange}
+                        autoComplete="nickname"
                         placeholder="@nickname"
+                        value={values.username}
+                        onBlur={handleBlur}
+                        onChange={handleChange}
+                        aria-invalid={fieldError('username') ? true : undefined}
                         className={inputClasses}
                     />
-                    <div className="ml-1 mt-1 min-h-[1.25rem]">
-                        {errors.username && touched.username && (
-                            <div
-                                role="alert"
-                                className="text-sm text-red-500 dark:text-red-400"
-                            >
-                                {errors.username}
-                            </div>
-                        )}
-                    </div>
+                    {fieldError('username') ? (
+                        <p role="alert" className={fieldErrorClasses}>
+                            {errors.username}
+                        </p>
+                    ) : null}
                 </div>
+
                 <div>
                     <label htmlFor="signup-email" className={labelClasses}>
                         Email
                     </label>
                     <input
                         id="signup-email"
-                        onBlur={handleBlur}
                         type="email"
-                        name={'email'}
+                        name="email"
                         required
                         autoComplete="email"
+                        placeholder="you@example.com"
+                        value={values.email}
+                        onBlur={handleBlur}
                         onChange={handleChange}
-                        placeholder="Enter your email"
+                        aria-invalid={fieldError('email') ? true : undefined}
                         className={inputClasses}
                     />
-                    <div className="ml-1 mt-1 min-h-[1.25rem]">
-                        {errors.email && touched.email && (
-                            <div
-                                role="alert"
-                                className="text-sm text-red-500 dark:text-red-400"
-                            >
-                                {errors.email}
-                            </div>
-                        )}
-                    </div>
+                    {fieldError('email') ? (
+                        <p role="alert" className={fieldErrorClasses}>
+                            {errors.email}
+                        </p>
+                    ) : null}
                 </div>
-                <div>
-                    <label htmlFor="signup-password" className={labelClasses}>
-                        Password
-                    </label>
-                    <input
-                        id="signup-password"
-                        onBlur={handleBlur}
-                        /* onFocus, not onClick: a shopper who reaches this
-                         * field with Tab, or whose password manager fills it,
-                         * never clicks it — and on `onClick` alone they got
-                         * their password rejected with the requirements list
-                         * still hidden, which is the one thing that would have
-                         * told them why. Focus covers clicking too. */
-                        onFocus={() => setShowPasswordChecker(true)}
-                        type="password"
-                        name={'password'}
-                        required
-                        autoComplete="new-password"
-                        onChange={handleChange}
-                        placeholder="Create a password"
-                        className={`mb-2 ${inputClasses}`}
-                    />
-                </div>
-                <div>
-                    <label
-                        htmlFor="signup-confirm-password"
-                        className={labelClasses}
-                    >
-                        Re-type Password
-                    </label>
-                    <input
-                        id="signup-confirm-password"
-                        onBlur={handleBlur}
-                        onFocus={() => setShowPasswordChecker(true)}
-                        type="password"
-                        name={'confirmPassword'}
-                        required
-                        autoComplete="new-password"
-                        onChange={handleChange}
-                        placeholder="Re-type Password"
-                        className={inputClasses}
-                    />
-                </div>
-                <div className="col-span-2 flex justify-end">
-                    {showPasswordChecker && (
+
+                <PasswordField
+                    label="Password"
+                    name="password"
+                    autoComplete="new-password"
+                    placeholder="Create a password"
+                    required
+                    value={values.password}
+                    onChange={handleChange}
+                    onBlur={handleBlur}
+                    /* onFocus, not onClick: a shopper who reaches this field
+                     * with Tab, or whose password manager fills it, never
+                     * clicks it — and on `onClick` alone they got their
+                     * password rejected with the requirements list still
+                     * hidden, which is the one thing that would have told them
+                     * why. Focus covers clicking too. */
+                    onFocus={() => setShowPasswordChecker(true)}
+                    error={fieldError('password')}
+                />
+
+                <PasswordField
+                    label="Re-type password"
+                    name="confirmPassword"
+                    autoComplete="new-password"
+                    placeholder="Re-type your password"
+                    required
+                    value={values.confirmPassword}
+                    onChange={handleChange}
+                    onBlur={handleBlur}
+                    onFocus={() => setShowPasswordChecker(true)}
+                    error={fieldError('confirmPassword')}
+                />
+
+                {showPasswordChecker && (
+                    <div className="flex justify-end">
                         <PasswordChecker
                             password={values.password}
                             confirmPassword={values.confirmPassword}
                         />
-                    )}
-                </div>
+                    </div>
+                )}
+
                 <button
-                    disabled={loading || Object.keys(errors).length > 0}
+                    disabled={loading}
                     type="submit"
-                    className="w-full rounded-lg bg-caramel py-2.5 font-semibold text-white shadow-sm transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 enabled:hover:bg-caramel/90 enabled:hover:shadow-caramel-sm enabled:active:bg-caramel disabled:cursor-not-allowed disabled:opacity-60 dark:focus-visible:ring-offset-darkerBg"
+                    className={primaryButtonClasses}
                 >
-                    {loading ? 'Loading...' : 'Sign Up'}
+                    {loading ? 'Creating your account…' : 'Create account'}
                 </button>
+
+                {error ? (
+                    <p
+                        role="alert"
+                        className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300"
+                    >
+                        {error}
+                    </p>
+                ) : null}
             </form>
-            <p className="mt-6 text-center text-sm text-gray-600 dark:text-gray-400">
-                Already have an account?{' '}
-                <Link href="/login" className={linkClasses}>
-                    Login
-                </Link>
-            </p>
-            {error ? (
-                <p
-                    role="alert"
-                    className="mt-4 text-center text-sm text-red-500 dark:text-red-400"
-                >
-                    {error}
-                </p>
-            ) : null}
-        </motion.div>
+        </AuthCard>
     )
 }

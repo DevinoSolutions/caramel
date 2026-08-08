@@ -168,8 +168,16 @@ test.describe('Responsive - Mobile Viewport', () => {
     test('login page is usable on mobile', async ({ page }) => {
         await page.goto('/login')
 
-        await expect(page.getByPlaceholder('Enter your email')).toBeVisible()
+        await expect(page.getByPlaceholder('you@example.com')).toBeVisible()
         await expect(page.getByPlaceholder('Enter your password')).toBeVisible()
-        await expect(page.getByRole('button', { name: /login/i })).toBeVisible()
+        await expect(
+            page.getByRole('button', { name: 'Sign in', exact: true }),
+        ).toBeVisible()
+
+        // The desktop brand panel is removed below 1024px, so the compact
+        // header is what tells a phone visitor whose sign-in page this is.
+        await expect(
+            page.getByRole('link', { name: /back to home/i }),
+        ).toBeVisible()
     })
 })

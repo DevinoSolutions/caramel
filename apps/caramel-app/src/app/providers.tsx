@@ -33,7 +33,26 @@ export default function Providers({ children }: { children: ReactNode }) {
     // is what satisfies every Tailwind `dark:` variant and paints the page
     // background.
     const [isDarkMode, setDarkMode] = useState(false)
-    const pagesLayoutless = useMemo(() => ['/login', '/signup', '/verify'], [])
+    /* Must list EVERY route in the src/app/(auth) group.
+     *
+     * The (auth) group has its own full-screen shell (brand panel, background,
+     * theme toggle), and anything missing from this list gets the marketing
+     * Layout wrapped around that shell as well — two headers, two theme
+     * toggles, a footer under the sign-in form. That is exactly what
+     * /forgot-password and /reset-password shipped as until this line was
+     * updated, because the list is matched by hand rather than derived from the
+     * route group. tests/unit/auth-routes-layoutless.test.ts walks the (auth)
+     * directory and fails when a route is added without being listed here. */
+    const pagesLayoutless = useMemo(
+        () => [
+            '/login',
+            '/signup',
+            '/verify',
+            '/forgot-password',
+            '/reset-password',
+        ],
+        [],
+    )
 
     useEffect(() => {
         setDarkMode(document.documentElement.classList.contains('dark'))

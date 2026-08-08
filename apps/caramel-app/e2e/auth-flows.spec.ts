@@ -34,12 +34,12 @@ test.describe('Auth Flows — Login (real session)', () => {
         page,
     }) => {
         await page.goto('/login')
-        await page.getByPlaceholder('Enter your email').fill(REAL_LOGIN_EMAIL)
+        await page.getByPlaceholder('you@example.com').fill(REAL_LOGIN_EMAIL)
         await page
             .getByPlaceholder('Enter your password')
             .fill(REAL_LOGIN_PASSWORD)
 
-        await page.getByRole('button', { name: /login/i }).click()
+        await page.getByRole('button', { name: 'Sign in', exact: true }).click()
 
         // On success the client sets a real session cookie then does
         // window.location.href = '/', so we land on the homepage.
@@ -61,7 +61,7 @@ test.describe('Auth Flows — Login', () => {
         page,
     }) => {
         await page.goto('/login')
-        await page.getByPlaceholder('Enter your email').fill('bad@example.com')
+        await page.getByPlaceholder('you@example.com').fill('bad@example.com')
         await page.getByPlaceholder('Enter your password').fill('WrongPass1!')
 
         // Intercept the auth API to return an error without hitting real server
@@ -76,7 +76,7 @@ test.describe('Auth Flows — Login', () => {
             }),
         )
 
-        await page.getByRole('button', { name: /login/i }).click()
+        await page.getByRole('button', { name: 'Sign in', exact: true }).click()
 
         // Sonner toast with error message
         await expect(
@@ -91,7 +91,7 @@ test.describe('Auth Flows — Login', () => {
     }) => {
         await page.goto('/login')
         await page
-            .getByPlaceholder('Enter your email')
+            .getByPlaceholder('you@example.com')
             .fill('unverified@example.com')
         await page.getByPlaceholder('Enter your password').fill('Test@12345')
 
@@ -106,7 +106,7 @@ test.describe('Auth Flows — Login', () => {
             }),
         )
 
-        await page.getByRole('button', { name: /login/i }).click()
+        await page.getByRole('button', { name: 'Sign in', exact: true }).click()
         await expect(page).toHaveURL(/\/verify/, { timeout: 10000 })
     })
 
@@ -160,9 +160,9 @@ test.describe('Auth Flows — Signup', () => {
         await page.goto('/signup')
 
         await page.getByPlaceholder('@nickname').fill('testuser')
-        await page.getByPlaceholder('Enter your email').fill('new@example.com')
+        await page.getByPlaceholder('you@example.com').fill('new@example.com')
         await page.getByPlaceholder('Create a password').fill('Test@12345')
-        await page.getByPlaceholder('Re-type Password').fill('Test@12345')
+        await page.getByPlaceholder('Re-type your password').fill('Test@12345')
 
         // Intercept signup API to return success
         await page.route('**/api/auth/sign-up/email', route =>
@@ -176,7 +176,9 @@ test.describe('Auth Flows — Signup', () => {
             }),
         )
 
-        await page.getByRole('button', { name: 'Sign Up', exact: true }).click()
+        await page
+            .getByRole('button', { name: 'Create account', exact: true })
+            .click()
 
         // Uses window.location.href so wait for navigation
         await page.waitForURL('**/verify?signup=success', { timeout: 10000 })
@@ -186,11 +188,9 @@ test.describe('Auth Flows — Signup', () => {
         await page.goto('/signup')
 
         await page.getByPlaceholder('@nickname').fill('testuser')
-        await page
-            .getByPlaceholder('Enter your email')
-            .fill('taken@example.com')
+        await page.getByPlaceholder('you@example.com').fill('taken@example.com')
         await page.getByPlaceholder('Create a password').fill('Test@12345')
-        await page.getByPlaceholder('Re-type Password').fill('Test@12345')
+        await page.getByPlaceholder('Re-type your password').fill('Test@12345')
 
         await page.route('**/api/auth/sign-up/email', route =>
             route.fulfill({
@@ -203,7 +203,9 @@ test.describe('Auth Flows — Signup', () => {
             }),
         )
 
-        await page.getByRole('button', { name: 'Sign Up', exact: true }).click()
+        await page
+            .getByRole('button', { name: 'Create account', exact: true })
+            .click()
 
         await expect(
             page.getByText(/unable to create your account/i),
@@ -217,12 +219,12 @@ test.describe('Auth Flows — Signup', () => {
         await nickname.fill('ab')
         await nickname.blur()
 
-        await page.getByPlaceholder('Enter your email').click()
+        await page.getByPlaceholder('you@example.com').click()
 
         // Formik shows error after blur
-        await expect(
-            page.getByText(/must be at least 4 characters/i),
-        ).toBeVisible({ timeout: 5000 })
+        await expect(page.getByText(/at least 4 characters/i)).toBeVisible({
+            timeout: 5000,
+        })
     })
 })
 
@@ -273,9 +275,9 @@ test.describe('Auth Flows — before any JavaScript runs', () => {
         await page.goto('/verify?signup=success')
 
         await expect(
-            page.getByText(/we've sent a verification email/i),
+            page.getByText(/we've sent a verification link/i),
         ).toBeVisible()
-        await expect(page.getByText(/didn't receive it/i)).toBeVisible()
+        await expect(page.getByText(/didn't get it/i)).toBeVisible()
     })
 
     test('so is the message for someone arriving without params', async ({
@@ -296,9 +298,9 @@ test.describe('Auth Flows — Verify Page', () => {
         await page.goto('/verify?signup=success')
 
         await expect(
-            page.getByText(/we've sent a verification email/i),
+            page.getByText(/we've sent a verification link/i),
         ).toBeVisible()
-        await expect(page.getByText(/didn't receive it/i)).toBeVisible()
+        await expect(page.getByText(/didn't get it/i)).toBeVisible()
     })
 
     test('verify page without params shows default messaging', async ({
@@ -319,7 +321,7 @@ test.describe('Auth Flows — Verify Page', () => {
     test('verify page has email input and send button', async ({ page }) => {
         await page.goto('/verify')
 
-        await expect(page.getByPlaceholder('Enter your email')).toBeVisible()
+        await expect(page.getByPlaceholder('you@example.com')).toBeVisible()
         await expect(
             page.getByRole('button', { name: /send verification email/i }),
         ).toBeVisible()

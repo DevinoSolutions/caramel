@@ -2,9 +2,13 @@ import { BASE_URL } from '@/lib/env.client'
 import type { Metadata } from 'next'
 import LoginPageClient from './LoginPageClient'
 
-const title = 'Caramel | Login'
+/* Brand-first title: the query this page can realistically win is "caramel
+ * login", and Google renders roughly the first 60 characters, so the
+ * distinguishing words go at the front rather than after a "Caramel |" prefix
+ * that every other page also carries. */
+const title = 'Sign in to Caramel | Coupon Extension Login'
 const description =
-    'Log in to your Caramel account to access exclusive features and start saving with our coupon extension.'
+    'Sign in to your Caramel account to sync saved coupons across browsers and manage the free, open-source coupon extension.'
 const canonicalUrl = 'https://grabcaramel.com/login'
 const base = BASE_URL
 const banner = `${base}/caramel_banner.png`

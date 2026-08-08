@@ -3,8 +3,9 @@
 import ThemeToggle from '@/components/ThemeToggle'
 import { ThemeContext } from '@/lib/contexts'
 import Image from 'next/image'
+import Link from 'next/link'
 import { useContext } from 'react'
-import { HiCheckCircle } from 'react-icons/hi'
+import { HiArrowLeft, HiCheckCircle } from 'react-icons/hi'
 
 // Claim-safe brand copy only (claim-integrity sweep 2026-07-28): no store
 // counts we can't prove, no "zero tracking" phrasing — the analytics stack is
@@ -19,7 +20,18 @@ const brandPoints = [
 // Auth routes are deliberately layoutless (no Header/Footer — see
 // providers.tsx `pagesLayoutless`), so this shell owns what Layout.tsx owns
 // everywhere else: the `dark` class scope, the page background, and a theme
-// toggle. Pages render only their card.
+// toggle. Pages render only their form column.
+//
+// LAYOUT NOTE: this repo's Tailwind is DESKTOP-FIRST (tailwind.config.ts uses
+// `max` screens) — unprefixed = desktop, and `lg:` is a MAX-width override
+// applying at ≤1023px. So `lg:hidden` removes the brand panel on tablet/mobile.
+//
+// The previous shell centered two separately-rounded cards side by side inside
+// a mostly empty viewport: they were different heights, visibly misaligned, and
+// the whole composition floated in a large field of background at any desktop
+// height. This is a full-bleed split instead — brand panel owns the left edge,
+// the form owns an honest column of its own — which is both calmer and gives
+// the form room to grow (the reset-password flow adds pages to this group).
 export default function AuthLayout({
     children,
 }: {
@@ -33,69 +45,108 @@ export default function AuthLayout({
         // so this needs no hydration suppression. <html> already carries the
         // real theme pre-paint — see app/layout.tsx.
         <div className={isDarkMode ? 'dark' : 'light'}>
-            <div className="relative flex min-h-screen items-center justify-center gap-10 overflow-hidden bg-gray-50 px-4 py-12 dark:bg-darkBg sm:py-8 xs:px-3">
-                <div
-                    aria-hidden="true"
-                    className="pointer-events-none absolute -top-32 left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-caramel/10 blur-3xl dark:bg-caramel/15"
-                />
-                <div
-                    aria-hidden="true"
-                    className="pointer-events-none absolute -bottom-40 -right-32 h-96 w-96 rounded-full bg-caramel/[0.07] blur-3xl dark:bg-caramel/10"
-                />
-                <ThemeToggle className="absolute right-6 top-6 sm:right-4 sm:top-4" />
-
-                {/* Brand side panel — desktop only (this repo's Tailwind is
-                    desktop-first: unprefixed = desktop, lg: is a MAX-width
-                    override, so lg:hidden removes it ≤1023px). Static markup,
-                    no client-only branching → hydration-safe. The gradient
-                    pair matches the AA-fixed footer slab (#c14e14/#a63f10:
-                    white text ≥4.5:1 at both stops — from-caramel fails). */}
-                <aside className="relative w-full max-w-md overflow-hidden rounded-2xl border border-transparent bg-gradient-to-br from-[#c14e14] to-[#a63f10] p-10 text-white shadow-xl ring-1 ring-inset ring-white/20 dark:border-caramel/30 dark:bg-caramel/[0.12] dark:bg-none dark:ring-0 lg:hidden">
-                    <Image
-                        src="/full-logo.png"
-                        alt="Caramel"
-                        width={140}
-                        height={45}
-                        className="brightness-0 invert"
+            <div className="flex min-h-screen bg-white dark:bg-darkBg">
+                {/* Brand panel — desktop only. Static markup, no client-only
+                    branching → hydration-safe. The gradient pair matches the
+                    AA-fixed footer slab (#c14e14/#a63f10: white text ≥4.5:1 at
+                    both stops — from-caramel fails). */}
+                <aside className="relative flex w-[44%] shrink-0 flex-col justify-between overflow-hidden bg-gradient-to-br from-[#c14e14] to-[#a63f10] p-12 text-white xl:w-[42%] lg:hidden">
+                    <div
+                        aria-hidden="true"
+                        className="pointer-events-none absolute -right-24 -top-24 h-80 w-80 rounded-full bg-white/10 blur-3xl"
                     />
-                    <p className="mt-6 text-2xl font-bold leading-snug">
-                        The open-source, privacy-first way to save at checkout.
-                    </p>
+                    <div
+                        aria-hidden="true"
+                        className="pointer-events-none absolute -bottom-32 -left-20 h-80 w-80 rounded-full bg-black/10 blur-3xl"
+                    />
 
-                    {/* Coupon perforation: dashed tear line + two side punch
-                        holes, same ticket motif as the pricing card. Notches
-                        straddle the panel edge and are filled with the page
-                        background so overflow-hidden clips them into bites. */}
-                    <div aria-hidden="true" className="relative -mx-10 my-8">
-                        <div className="border-t-2 border-dashed border-white/30 dark:border-caramel/30" />
-                        <div className="absolute left-0 top-1/2 h-8 w-8 -translate-x-1/2 -translate-y-1/2 rounded-full bg-gray-50 dark:bg-darkBg" />
-                        <div className="absolute right-0 top-1/2 h-8 w-8 -translate-y-1/2 translate-x-1/2 rounded-full bg-gray-50 dark:bg-darkBg" />
+                    <div className="relative">
+                        <Link
+                            href="/"
+                            className="inline-flex items-center gap-2 rounded-sm text-sm font-medium text-white/80 transition hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+                        >
+                            <HiArrowLeft aria-hidden="true" />
+                            Back to grabcaramel.com
+                        </Link>
                     </div>
 
-                    <ul className="space-y-3">
-                        {brandPoints.map(point => (
-                            <li
-                                key={point}
-                                className="flex items-start gap-3 text-[15px] font-medium"
-                            >
-                                <HiCheckCircle
-                                    aria-hidden="true"
-                                    className="mt-0.5 shrink-0 text-xl text-white/90 dark:text-caramel"
-                                />
-                                {point}
-                            </li>
-                        ))}
-                    </ul>
+                    <div className="relative">
+                        <Image
+                            src="/full-logo.png"
+                            alt="Caramel"
+                            width={150}
+                            height={48}
+                            className="brightness-0 invert"
+                        />
+                        <p className="mt-7 max-w-sm text-[28px] font-bold leading-[1.25] 3xl:text-2xl">
+                            The open-source, privacy-first way to save at
+                            checkout.
+                        </p>
+
+                        {/* Coupon perforation: dashed tear line + two side punch
+                            holes, same ticket motif as the pricing card. The
+                            notches straddle the panel edge; the left one is
+                            clipped by overflow-hidden, the right one bites into
+                            the form column, so it reads as a torn stub. */}
+                        <div
+                            aria-hidden="true"
+                            className="relative -mx-12 my-9"
+                        >
+                            <div className="border-t-2 border-dashed border-white/30" />
+                            <div className="absolute left-0 top-1/2 h-9 w-9 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white dark:bg-darkBg" />
+                            <div className="absolute right-0 top-1/2 h-9 w-9 -translate-y-1/2 translate-x-1/2 rounded-full bg-white dark:bg-darkBg" />
+                        </div>
+
+                        <ul className="space-y-3.5">
+                            {brandPoints.map(point => (
+                                <li
+                                    key={point}
+                                    className="flex items-start gap-3 text-[15px] font-medium"
+                                >
+                                    <HiCheckCircle
+                                        aria-hidden="true"
+                                        className="mt-0.5 shrink-0 text-xl text-white/90"
+                                    />
+                                    {point}
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
 
                     <p
                         aria-hidden="true"
-                        className="mt-8 font-mono text-xs tracking-[0.35em] text-white/70 dark:text-gray-400"
+                        className="relative font-mono text-xs tracking-[0.35em] text-white/60"
                     >
                         CARAMEL-FREE-FOREVER
                     </p>
                 </aside>
 
-                {children}
+                {/* Form column */}
+                <main className="relative flex flex-1 flex-col items-center justify-center px-8 py-14 sm:px-5 sm:py-10 xs:px-4">
+                    <ThemeToggle className="absolute right-6 top-6 sm:right-4 sm:top-4" />
+
+                    {/* Compact brand header, mobile/tablet only — the panel is
+                        gone there, and a form with no logo above it reads as a
+                        stray page rather than as Caramel. */}
+                    <div className="mb-9 hidden w-full max-w-[26rem] lg:block sm:mb-7">
+                        <Link
+                            href="/"
+                            className="inline-flex items-center gap-2 rounded-sm text-sm font-medium text-gray-500 transition hover:text-caramel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/50 dark:text-gray-400"
+                        >
+                            <HiArrowLeft aria-hidden="true" />
+                            Back to home
+                        </Link>
+                        <Image
+                            src="/full-logo.png"
+                            alt="Caramel"
+                            width={132}
+                            height={42}
+                            className="mt-5 dark:brightness-0 dark:invert"
+                        />
+                    </div>
+
+                    {children}
+                </main>
             </div>
         </div>
     )

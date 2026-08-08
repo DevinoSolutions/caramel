@@ -1,3 +1,4 @@
+import ResetPasswordTemplate from '@/emails/ResetPasswordTemplate'
 import VerificationRequestTemplate from '@/emails/VerificationRequestTemplate'
 import { sendEmail } from '@/lib/email'
 import { env } from '@/lib/env'
@@ -37,6 +38,34 @@ export const auth = betterAuth({
     emailAndPassword: {
         enabled: true,
         requireEmailVerification: true,
+        // Until this landed there was NO password recovery at all: no
+        // sendResetPassword here, no /forgot-password route, and no client
+        // call to forgetPassword — so an email+password user who forgot their
+        // password was permanently locked out of their account with no
+        // self-serve way back in and no support flow to hand them.
+        //
+        // The send failure is handled exactly like the verification email
+        // above, and for the same reason: Better Auth swallows what this
+        // callback throws, so a broken mailer would otherwise look like a
+        // successful request to both the shopper and to us.
+        sendResetPassword: async ({ user, url }) => {
+            try {
+                const html = await render(ResetPasswordTemplate({ url }))
+                await sendEmail({
+                    to: user.email,
+                    subject: 'Reset your Caramel password',
+                    html,
+                })
+            } catch (error) {
+                console.error('reset password email send failed:', error)
+                Sentry.captureException(error, {
+                    tags: { surface: 'auth-reset-password-email' },
+                    extra: { userEmail: user.email },
+                })
+                await Sentry.flush(2000)
+                throw error
+            }
+        },
         password: {
             hash: async (password: string) => bcrypt.hash(password, saltRounds),
             verify: async ({

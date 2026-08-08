@@ -1,41 +1,31 @@
 import PasswordItem from '@/components/PasswordStrength/PasswordItem'
+import { passwordRules } from '@/lib/passwordRules'
 
 interface PasswordCheckerProps {
     password: string
     confirmPassword: string
 }
 
+/**
+ * The rules come from `@/lib/passwordRules` — the same source the signup and
+ * reset-password schemas validate against. This list used to hard-code its own
+ * copy of the policy and had already drifted from the schema (it ticked
+ * "minimum length reached" at 5 characters), so a shopper could see every item
+ * green and still have the form reject the password.
+ */
 const PasswordChecker = ({
     password,
     confirmPassword,
 }: PasswordCheckerProps) => {
     const checkList = [
+        ...passwordRules.map(rule => ({
+            id: rule.id,
+            term: rule.test(password),
+            success_message: rule.success,
+            failure_message: rule.failure,
+        })),
         {
-            id: 1,
-            term: password.length >= 5,
-            success_message: 'The minimum length is reached',
-            failure_message: 'At least 5 characters required',
-        },
-        {
-            id: 2,
-            term: /[A-Z]/.test(password),
-            success_message: 'At least one uppercase letter',
-            failure_message: 'At least one uppercase letter required',
-        },
-        {
-            id: 3,
-            term: /[0-9]/.test(password),
-            success_message: 'At least one number',
-            failure_message: 'At least one number required',
-        },
-        {
-            id: 4,
-            term: /[!@#$%^&*+-]/.test(password),
-            success_message: 'At least special character',
-            failure_message: 'At least special character required',
-        },
-        {
-            id: 5,
+            id: 'match',
             term: password === confirmPassword && password.length > 0,
             success_message: 'Passwords match',
             failure_message: 'Passwords must match',

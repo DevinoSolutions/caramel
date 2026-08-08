@@ -2,8 +2,13 @@ import { BASE_URL } from '@/lib/env.client'
 import type { Metadata } from 'next'
 import SignupPageClient from './SignupPageClient'
 
-const title = 'Caramel | Sign Up'
-const description = 'Join Caramel and start enjoying our services. Sign up now!'
+/* "Join Caramel and start enjoying our services" said nothing about what
+ * Caramel is or costs — it was boilerplate that could describe any product, and
+ * it is the snippet a searcher decides on. This one names the product category,
+ * the price, and the differentiator. */
+const title = 'Create a free Caramel account | Coupon Extension Sign Up'
+const description =
+    'Create a free Caramel account to automatically apply coupon codes at checkout. Open source, no ads, and it never hijacks affiliate commissions.'
 const canonicalUrl = 'https://grabcaramel.com/signup'
 const base = BASE_URL
 const banner = `${base}/caramel_banner.png`
