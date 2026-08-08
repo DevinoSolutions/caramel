@@ -1,0 +1,200 @@
+name: Watch – Store versions
+
+# The recurring failure in this repo is not a broken release, it is an
+# UNNOTICED one. The Chrome listing served 1.1.0 to ~3,000 users for months and
+# the AMO listing served 1.0.3 to ~829 users for over a year, both while `main`
+# moved on, because nothing ever compared what the stores actually serve against
+# what we shipped. Releases were green the whole time.
+#
+# This runs daily and asks the three stores what real users are being given:
+#
+#   Chrome  – clients2.google.com update service (what browsers themselves ask)
+#   Firefox – addons.mozilla.org public API (current_version.version)
+#   Apple   – itunes lookup for the Safari/iOS app (public App Store version)
+#
+# It compares each against apps/caramel-extension/manifest.json and files
+# exactly one tracking issue, reusing it rather than opening a new one each day:
+#
+#   * a store CAUGHT UP  -> comment saying so, so the release can be tested on
+#                           the real store build (this is the signal to go test)
+#   * a store BEHIND for more than GRACE_DAYS -> comment naming the gap
+#
+# A store being briefly behind is normal — review queues take days — so nothing
+# is reported inside the grace window. Silence means "stores agree with main".
+
+on:
+  schedule:
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: watch-store-versions
+  cancel-in-progress: false
+
+env:
+  # How long a store may lag the repo before it is worth a comment.
+  GRACE_DAYS: '10'
+  TRACKING_TITLE: 'Store version watch: what the stores actually serve'
+
+jobs:
+  watch:
+    name: '🔭 Compare live store versions with main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Collect live versions
+        id: collect
+        env:
+          CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
+          AMO_SLUG: grabcaramel
+          APPLE_APP_ID: '6741873881'
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          import os
+          import re
+          import sys
+          import urllib.request
+          import xml.etree.ElementTree as ET
+
+          UA = {"User-Agent": "caramel-store-watch"}
+
+
+          def get(url, timeout=30):
+              req = urllib.request.Request(url, headers=UA)
+              with urllib.request.urlopen(req, timeout=timeout) as r:
+                  return r.read()
+
+
+          def chrome():
+              ext = os.environ.get("CHROME_EXTENSION_ID", "")
+              if not ext:
+                  return None, "CHROME_EXTENSION_ID secret is not set"
+              url = (
+                  "https://clients2.google.com/service/update2/crx"
+                  "?response=updatecheck&prodversion=999.0&acceptformat=crx3"
+                  f"&x=id%3D{ext}%26uc"
+              )
+              raw = get(url)
+              if b"<!DOCTYPE" in raw or b"<!ENTITY" in raw:
+                  return None, "update service returned a doctype/entity declaration"
+              ns = "{http://www.google.com/update2/response}"
+              app = ET.fromstring(raw).find(f"{ns}app")
+              if app is None or app.get("status") != "ok":
+                  return None, "update service reported no ok <app>"
+              check = app.find(f"{ns}updatecheck")
+              return (check.get("version") if check is not None else None), None
+
+
+          def firefox():
+              slug = os.environ["AMO_SLUG"]
+              data = json.loads(get(f"https://addons.mozilla.org/api/v5/addons/addon/{slug}/?lang=en-US"))
+              return (data.get("current_version") or {}).get("version"), None
+
+
+          def apple():
+              app_id = os.environ["APPLE_APP_ID"]
+              data = json.loads(get(f"https://itunes.apple.com/lookup?id={app_id}"))
+              results = data.get("results") or []
+              if not results:
+                  return None, "itunes lookup returned no results"
+              return results[0].get("version"), None
+
+
+          manifest = json.load(open("apps/caramel-extension/manifest.json", encoding="utf-8"))
+          repo_version = manifest["version"]
+
+          out = {"repo": repo_version, "stores": {}}
+          for name, fn in (("chrome", chrome), ("firefox", firefox), ("apple", apple)):
+              try:
+                  version, err = fn()
+              except Exception as exc:  # a store being unreachable must not fail the watch
+                  version, err = None, f"{type(exc).__name__}: {exc}"
+              out["stores"][name] = {"version": version, "error": err}
+
+          print(f"payload={json.dumps(out)}")
+          PY
+
+      - name: Report only what changed or has been stale too long
+        uses: actions/github-script@v7
+        env:
+          PAYLOAD: ${{ steps.collect.outputs.payload }}
+        with:
+          script: |
+            const payload = JSON.parse(process.env.PAYLOAD)
+            const graceDays = Number(process.env.GRACE_DAYS)
+            const title = process.env.TRACKING_TITLE
+            const repoVersion = payload.repo
+
+            const rows = Object.entries(payload.stores).map(([store, s]) =>
+              `| ${store} | ${s.version ?? '—'} | ${s.error ? '`' + s.error + '`' : (s.version === repoVersion ? 'up to date' : 'behind')} |`
+            ).join('\n')
+            core.summary
+              .addHeading(`Stores vs main (${repoVersion})`)
+              .addRaw(`\n| store | live version | state |\n| --- | --- | --- |\n${rows}\n`)
+            await core.summary.write()
+
+            // One long-lived tracking issue, reused. Opening a fresh issue per
+            // day would train everyone to ignore it, which is the same failure
+            // mode as never reporting at all.
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: 'open', labels: 'store-watch', per_page: 20,
+            })
+            let issue = existing.data.find(i => i.title === title)
+
+            const caughtUp = Object.entries(payload.stores)
+              .filter(([, s]) => s.version === repoVersion).map(([k]) => k)
+            const behind = Object.entries(payload.stores)
+              .filter(([, s]) => s.version && s.version !== repoVersion).map(([k, s]) => `${k} (${s.version})`)
+
+            // Age of the repo version = when manifest.json last changed.
+            const commits = await github.rest.repos.listCommits({
+              owner: context.repo.owner, repo: context.repo.repo,
+              path: 'apps/caramel-extension/manifest.json', per_page: 1,
+            })
+            const bumpedAt = new Date(commits.data[0]?.commit?.committer?.date ?? Date.now())
+            const ageDays = Math.floor((Date.now() - bumpedAt.getTime()) / 86400000)
+
+            const staleTooLong = behind.length > 0 && ageDays > graceDays
+            const somethingCaughtUp = caughtUp.length > 0
+
+            if (!staleTooLong && !somethingCaughtUp) {
+              core.info(`Nothing to report (behind=${behind.join(', ') || 'none'}, age=${ageDays}d).`)
+              return
+            }
+
+            const body = [
+              `**main is at \`${repoVersion}\`** (manifest bumped ${ageDays} day(s) ago).`,
+              '',
+              `| store | live version | state |`,
+              `| --- | --- | --- |`,
+              rows,
+              '',
+              somethingCaughtUp
+                ? `✅ **${caughtUp.join(', ')} now serves \`${repoVersion}\` — the released build is live and should be tested against the real store artifact.**`
+                : '',
+              staleTooLong
+                ? `⏳ Behind for more than ${graceDays} days: ${behind.join(', ')}. A release that never reaches users is the failure this watch exists to catch.`
+                : '',
+            ].filter(Boolean).join('\n')
+
+            if (issue) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: issue.number, body,
+              })
+              core.info(`Commented on #${issue.number}`)
+            } else {
+              const created = await github.rest.issues.create({
+                owner: context.repo.owner, repo: context.repo.repo,
+                title, body, labels: ['store-watch'],
+              })
+              core.info(`Opened #${created.data.number}`)
+            }
