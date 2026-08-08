@@ -192,9 +192,12 @@ test.describe('Support flow — real PostHog ingestion', () => {
 
         // THE REAL PROOF: poll PostHog until the server-captured event lands.
         // 420s ceiling for the slow ingestion window (see the helper's note).
+        // testScenario scopes the poll to THIS test's events — without it the
+        // poll returns on any sibling test's row (see the helper's doc).
         const rows = await queryEventsByTestRun({
             testRunId: TEST_RUN_ID,
             event: 'support_request_submitted',
+            testScenario: scenario,
             timeoutMs: 420_000,
         })
         expect(
@@ -236,10 +239,16 @@ test.describe('Support flow — real PostHog ingestion', () => {
         await page.goto('/')
 
         // 420s ceiling: a slow window lags the browser path as much as the
-        // server path (see the helper's note).
+        // server path (see the helper's note). testScenario is the fix for the
+        // deterministic CI failure this spec had from birth: the sibling
+        // ingestion test also emits $identify under the same test_run_id, so an
+        // unscoped poll returned ITS minutes-old row instantly while this
+        // test's own $identify was still ingesting — and the distinct_id
+        // assertion then ran against the wrong test's event, every time.
         const rows = await queryEventsByTestRun({
             testRunId: TEST_RUN_ID,
             event: '$identify',
+            testScenario: scenario,
             timeoutMs: 420_000,
         })
         expect(

@@ -65,6 +65,15 @@ interface QueryEventsArgs {
     testRunId: string
     /** The event name to match (e.g. 'support_request_submitted', '$pageview'). */
     event: string
+    /**
+     * Scope to ONE test's events via the test_scenario super prop the
+     * handshake registers. Without this, the poll returns on the FIRST row any
+     * test in the run ingested — a sibling test's minutes-old row satisfies
+     * `rows.length > 0` while the caller's own event is still in the ingestion
+     * pipeline, and every per-row assertion then runs against the wrong event
+     * (the exact deterministic failure the $identify spec hit in CI).
+     */
+    testScenario?: string
     /** Hard ceiling on total polling time before throwing. */
     timeoutMs?: number
     /** Delay between poll attempts. */
@@ -154,6 +163,7 @@ async function runQuery(
 export async function queryEventsByTestRun({
     testRunId,
     event,
+    testScenario,
     // Ingestion lag on the shared self-hosted PostHog is VARIABLE: usually a few
     // seconds, but in a slow window BOTH the browser (posthog-js → /e/) and
     // server (posthog-node → /batch/) paths lag together — measured as high as
@@ -177,9 +187,11 @@ export async function queryEventsByTestRun({
         'SELECT uuid, event, distinct_id, properties ' +
         'FROM events ' +
         'WHERE properties.test_run_id = {tr} AND event = {ev} ' +
+        (testScenario ? 'AND properties.test_scenario = {sc} ' : '') +
         'AND timestamp > now() - INTERVAL 1 DAY ' +
         'ORDER BY timestamp DESC LIMIT 10'
-    const values = { tr: testRunId, ev: event }
+    const values: Record<string, string> = { tr: testRunId, ev: event }
+    if (testScenario) values.sc = testScenario
 
     // Preflight ONE query up front: a bad read key (401/403) throws here and
     // fails FAST + loud, instead of silently polling for the whole timeout.

@@ -54,7 +54,10 @@ const GIT_COMMIT_SHA = resolveBuildSha()
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-    env: { GIT_COMMIT_SHA },
+    env: {
+        GIT_COMMIT_SHA,
+        NEXT_PUBLIC_APP_VERSION: appVersion,
+    },
     // F-016 one-root-compose: emit a self-contained server (.next/standalone)
     // so the Docker runner stage boots `node apps/caramel-app/server.js` with a
     // traced, minimal node_modules instead of the whole install. Pairs with
@@ -62,9 +65,6 @@ const nextConfig = {
     // workspace deps correctly.
     output: 'standalone',
     outputFileTracingRoot: workspaceRoot,
-    env: {
-        NEXT_PUBLIC_APP_VERSION: appVersion,
-    },
     turbopack: {
         root: workspaceRoot,
     },
