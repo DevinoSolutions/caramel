@@ -33,6 +33,7 @@ module.exports = [
     {
         name: 'content-scripts (injected)',
         path: [
+            'caramel-env.js',
             'coupon-constants.generated.js',
             'cart-signals.js',
             'caramel-base.js',
