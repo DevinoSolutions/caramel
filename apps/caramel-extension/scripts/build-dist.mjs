@@ -253,12 +253,17 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
     } else {
         const flag = args.find(arg => arg.startsWith('--env='))
         const environment = flag ? flag.slice('--env='.length) : undefined
+        // --out lets a second, differently-stamped package be built without
+        // clobbering the release one (CI builds dist/ for the store and
+        // dist-guards/ for the guard suite, which needs dev diagnostics).
+        const out = args.find(arg => arg.startsWith('--out='))
+        const outName = out ? out.slice('--out='.length) : 'dist'
         const built = await buildDist({
-            outDir: join(ROOT, 'dist'),
+            outDir: join(ROOT, outName),
             environment,
         })
         console.log(
-            `built dist/ — ${built.entries} entries, ${built.environment} (${ENVIRONMENTS[built.environment].baseUrl})`,
+            `built ${outName}/ — ${built.entries} entries, ${built.environment} (${ENVIRONMENTS[built.environment].baseUrl})`,
         )
     }
 }

@@ -32,8 +32,11 @@ This replaced a runtime guess — "no `update_url` in the manifest means an unpa
 To check the packaged output rather than the source tree:
 
 ```sh
-pnpm build && CARAMEL_EXT_DIR=./dist pnpm test:guards
+node scripts/build-dist.mjs --env=development --out=dist-guards
+CARAMEL_EXT_DIR=./dist-guards pnpm test:guards
 ```
+
+Development-stamped on purpose: several guard checks assert on the extension's own diagnostic markers (`AUTO_INSERT_*`), and a production build prints nothing anywhere. It is the same packaged directory otherwise. Point the suite at a production package and it says so and exits rather than failing three checks for an unexplained reason.
 
 ## How the extension gets tested
 

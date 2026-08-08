@@ -158,7 +158,20 @@ jobs:
       - name: Build the store package
         run: pnpm --filter caramel-extension run build
 
+      # …and a second, DEVELOPMENT-stamped copy of that same package for the
+      # guards to drive. Several guard checks assert on the extension's own
+      # diagnostic markers (AUTO_INSERT_BASELINE_NARROWED, _REFUSED_CONTROL,
+      # _EARLY_EXIT), which a shipped build deliberately does not print —
+      # console-silence.test.mjs exists to keep our internals out of a
+      # shopper's store console. Before the environment became a build-time
+      # stamp this ran verbose by accident, because an unpacked directory has
+      # no manifest update_url and the old heuristic read that as "dev": the
+      # very bug this stamp replaced. Same packaged directory either way; only
+      # the stamp differs, and the production one is still built above.
+      - name: Build the packaged bundle the guards drive (development stamp)
+        run: pnpm --filter caramel-extension exec node scripts/build-dist.mjs --env=development --out=dist-guards
+
       - name: Run extension guard suite (packaged build)
         env:
-          CARAMEL_EXT_DIR: ./dist
+          CARAMEL_EXT_DIR: ./dist-guards
         run: xvfb-run --auto-servernum pnpm --filter caramel-extension test:guards

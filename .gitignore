@@ -9,6 +9,7 @@ dist
 # manifest.json. Release CI builds it; a local reproduction of that step must
 # not leave an untracked build output sitting in the tree.
 dist-firefox
+dist-guards
 build
 coverage
 .vscode

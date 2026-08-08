@@ -22,7 +22,7 @@
  *      CARAMEL_EXT_DIR=./dist pnpm test:guards   (the packaged build)
  */
 
-import { mkdtempSync, readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -33,6 +33,27 @@ const EXT = resolve(process.env.CARAMEL_EXT_DIR || ROOT)
 const STORE = 'naturepedic.com'
 const CART_URL = `https://${STORE}/checkout/cart/`
 const ONLY = process.argv[2] || null
+
+// Several checks below assert on the extension's own diagnostic markers
+// (AUTO_INSERT_BASELINE_NARROWED / _REFUSED_CONTROL / _EARLY_EXIT), which come
+// out of log() — silent in a build stamped for production, by design, so our
+// internals never print into a shopper's store console. Say so up front
+// instead of letting three checks fail for a reason nothing on screen
+// explains. (Before the environment became a build-time stamp, a packaged
+// directory ran verbose by accident: it carries no manifest update_url, and
+// the old heuristic read that as "an unpacked dev install" — the exact bug the
+// stamp replaced.)
+const stampPath = join(EXT, 'caramel-env.js')
+const stamp = existsSync(stampPath) ? readFileSync(stampPath, 'utf8') : ''
+if (stamp.includes('isProduction: true')) {
+    console.error(
+        `\n  This suite needs a development-stamped package: ${EXT} is stamped for production,\n` +
+            `  so log() is a no-op and the diagnostic-marker checks cannot pass.\n\n` +
+            `  Build one:  node scripts/build-dist.mjs --env=development --out=dist-guards\n` +
+            `  Then run:   CARAMEL_EXT_DIR=./dist-guards pnpm test:guards\n`,
+    )
+    process.exit(1)
+}
 
 const STORE_CONFIG = JSON.parse(
     readFileSync(
