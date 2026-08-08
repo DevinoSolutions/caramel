@@ -30,9 +30,23 @@ const contentScripts = m => m.content_scripts?.[0] ?? {}
 
 describe('manifest parity', () => {
     it('injects the same scripts, in the same order', () => {
-        // Order is load-bearing: caramel-base.js defines _isDevInstall() and
-        // every later file's top-level code calls it (see its F-008 note).
+        // Order is load-bearing: caramel-env.js stamps CARAMEL_ENV and
+        // caramel-base.js reads it in its own top-level initializers, which
+        // separate <script>-equivalent files do not hoist backward across.
         expect(contentScripts(FIREFOX).js).toEqual(contentScripts(CHROME).js)
+    })
+
+    it('gives both background contexts the environment stamp', () => {
+        // Chrome/Safari run background.js as an MV3 service worker and it
+        // importScripts the stamp itself; Firefox runs it as a background
+        // script, where importScripts does not exist, so the manifest must
+        // load the stamp first. Miss this and the Firefox worker reads
+        // CARAMEL_BASE_URL as undefined — every API URL becomes "undefined/…".
+        expect(FIREFOX.background.scripts).toEqual([
+            'caramel-env.js',
+            'background.js',
+        ])
+        expect(CHROME.background.service_worker).toBe('background.js')
     })
 
     it('injects the same stylesheets', () => {

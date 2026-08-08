@@ -1,6 +1,7 @@
 {
     "$schema": "https://unpkg.com/knip@5/schema.json",
     "entry": [
+        "caramel-env.js",
         "coupon-constants.generated.js",
         "cart-signals.js",
         "caramel-base.js",

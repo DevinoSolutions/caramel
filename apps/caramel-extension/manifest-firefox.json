@@ -29,6 +29,7 @@
             "matches": ["https://*/*"],
             "css": ["caramel-content.css"],
             "js": [
+                "caramel-env.js",
                 "coupon-constants.generated.js",
                 "cart-signals.js",
                 "caramel-base.js",
@@ -43,7 +44,7 @@
         }
     ],
     "background": {
-        "scripts": ["background.js"]
+        "scripts": ["caramel-env.js", "background.js"]
     },
     "action": {
         "default_popup": "index.html",

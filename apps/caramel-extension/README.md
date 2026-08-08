@@ -10,6 +10,7 @@ Commands (from `apps/caramel-extension`, or prefix with `pnpm --filter caramel-e
 | ------------------ | ------------------------------------------------------------------------- |
 | `pnpm dev`         | Loads the extension into a `web-ext`-managed Chromium, live-reloading     |
 | `pnpm build`       | Copies the allowlist in `scripts/build-dist.mjs` into `dist/` — see below |
+| `pnpm build:dev`   | Same, but stamped for the dev deployment instead of production            |
 | `pnpm package`     | Zips `dist/` into `extension.zip`                                         |
 | `pnpm test`        | Unit tests (vitest)                                                       |
 | `pnpm test:e2e`    | Real Chromium + the local app (`scripts/test-extension.mjs`)              |
@@ -21,6 +22,12 @@ Commands (from `apps/caramel-extension`, or prefix with `pnpm --filter caramel-e
 `pnpm build` copies an explicit **allowlist** (`scripts/build-dist.mjs`), not "everything minus a few excludes". The old rsync blacklist put `package.json`, the lint/knip/size configs, `tests/`, `scripts/` and ~400 KB of unreferenced brand art into the store package. `tests/package-contents.test.mjs` derives the requirement from the manifests and `index.html`, so adding a file to the extension and forgetting the allowlist is a red test rather than a broken release.
 
 Firefox ships that **same** `dist/`: release CI copies it to `dist-firefox/` and swaps `manifest-firefox.json` in as `manifest.json`. The allowlist deliberately keeps the Firefox manifest out of `dist/` (it is in `NEVER_SHIP`), so the two manifests can never ship in one package. `release-extension.yml`'s `publish_firefox` job then signs that directory with `web-ext sign --channel=listed` and submits it to addons.mozilla.org — the version is queued for Mozilla review, which is the one manual step left. That job stays dormant, loudly and green, until the `AMO_JWT_ISSUER` / `AMO_JWT_SECRET` repository secrets exist.
+
+### Which deployment a build talks to
+
+`caramel-env.js` — the first script every context loads — stamps the base URL, the origins trusted to relay a login token, and whether logging is verbose. `pnpm build` writes it fresh, **production by default**; `pnpm build:dev` stamps the dev deployment. The copy committed at the package root is the DEVELOPMENT stamp and is never copied into a package: it is what an unpacked load of this directory (`pnpm dev`, Load unpacked) gets.
+
+This replaced a runtime guess — "no `update_url` in the manifest means an unpacked dev install" — which only Chrome Web Store installs satisfy. Firefox/AMO uploads and the converted Safari build carry no `update_url` either, so both **shipped** pointing real users at dev. `tests/build-environment.test.mjs` asserts on the built directory: a default build is production, contains no dev URL anywhere, and nothing in it branches on `update_url`. `dist-firefox/` is a copy of that same `dist/`, so the Firefox package inherits the production stamp with no extra step.
 
 To check the packaged output rather than the source tree:
 

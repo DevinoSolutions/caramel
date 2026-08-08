@@ -13,9 +13,30 @@
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { renderEnvStamp } from '../scripts/build-dist.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 export const EXT_ROOT = path.resolve(__dirname, '..')
+
+/**
+ * Evaluates the build-time environment stamp (caramel-env.js) into this realm,
+ * exactly as the browser does before any other extension file: it is the first
+ * entry in both manifests' content_scripts, the first <script> in index.html,
+ * and background.js pulls it in with importScripts.
+ *
+ * PRODUCTION by default, which is both the build default and what the suites
+ * written before the stamp existed were implicitly getting (the chrome stub's
+ * permissive proxy answered `getManifest().update_url` with a truthy no-op
+ * function, so the old `_isDevInstall()` returned false). Pass 'development'
+ * to exercise a dev-stamped build.
+ *
+ * Rendered from scripts/build-dist.mjs rather than read off disk, so a test
+ * asserting production behavior cannot accidentally pick up the DEVELOPMENT
+ * stamp committed at the package root.
+ */
+export function installEnvStamp(name = 'production') {
+    ;(0, eval)(renderEnvStamp(name))
+}
 
 function makeChromeStub() {
     const cache = new WeakMap()
@@ -84,6 +105,11 @@ export function backStorageArea(area, data = {}) {
 }
 
 export function installChromeStub() {
+    // The environment stamp is part of the realm every extension file runs in,
+    // not something a file sets up for itself — so it lands here, alongside the
+    // chrome global, and every existing suite gets it without changing.
+    installEnvStamp()
+
     const stub = makeChromeStub()
 
     // storage.*.get/set invoke their callbacks like the real API does

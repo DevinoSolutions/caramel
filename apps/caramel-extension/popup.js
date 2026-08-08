@@ -1,14 +1,11 @@
 /* global currentBrowser, fetchCoupons */
 
-// Dev/prod base URL via the shared _isDevInstall() (defined in
-// caramel-base.js, loaded before this script — formerly shared-utils.js,
-// split by F-008). Packed Web Store builds have a manifest update_url →
-// prod; unpacked dev installs → the DEV deployment. No `management` perm.
-const CARAMEL_BASE_URL =
-    typeof _isDevInstall === 'function' && _isDevInstall()
-        ? 'https://dev.grabcaramel.com'
-        : 'https://grabcaramel.com'
-const caramelUrl = path => new URL(path, `${CARAMEL_BASE_URL}/`).toString()
+// Base URL from the build-time environment stamp (caramel-env.js, the first
+// script index.html loads). This used to call a shared `_isDevInstall()` that
+// read the manifest's `update_url` — a field only the Chrome Web Store injects,
+// so the Firefox and Safari builds of this popup pointed real users at the dev
+// deployment. See the "environment" block in scripts/build-dist.mjs.
+const caramelUrl = path => new URL(path, `${CARAMEL_ENV.baseUrl}/`).toString()
 
 // Escape coupon/API data before interpolating into innerHTML. Codes, titles and
 // messages come from the API; without this a code containing a quote/angle
@@ -603,7 +600,7 @@ async function handleSocialSignIn(provider) {
     }
 
     try {
-        const baseURL = CARAMEL_BASE_URL
+        const baseURL = CARAMEL_ENV.baseUrl
 
         // Check if identity API is available
         const identity =

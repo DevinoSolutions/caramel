@@ -1,19 +1,16 @@
-// owns: bootstrap (currentBrowser + double-load guard), sleep/log/recordTiming fallbacks, CARAMEL_ALLOWED_ORIGINS, _isDevInstall (relocated from store-detect.js — see F-008 note below)
-// load after: (nothing — loads first)
+// owns: bootstrap (currentBrowser + double-load guard), sleep/log/recordTiming fallbacks, CARAMEL_ALLOWED_ORIGINS
+// load after: caramel-env.js (the build-time environment stamp — this file's
+// own top-level log()/CARAMEL_ALLOWED_ORIGINS initializers read CARAMEL_ENV
+// immediately at load time, and separate <script>-equivalent files do NOT
+// hoist backward across each other)
 //
-// F-008 note: _isDevInstall (defined below, right after the bootstrap
-// block) was reassigned here from store-detect.js's "config cache" section
-// during the shared-utils.js split. This file's own top-level
-// log()/CARAMEL_ALLOWED_ORIGINS initializers call it immediately at load
-// time — same-script hoisting made that resolve when everything was one
-// file; splitting into separate <script>-equivalent files does NOT hoist
-// backward across files, so the definition had to move earlier than its
-// original position. store-detect.js's _getCacheTtl() still calls it too,
-// but only from inside a function body (deferred), so it doesn't care
-// which split file actually defines the global — only that some
-// earlier-loading file does. Verified: an isolated-vm prefix-load check
-// (each file eval'd separately, in manifest order, fresh realm) throws
-// ReferenceError at this file without the move, and is clean with it.
+// F-008 note: _isDevInstall used to be defined here, right after the
+// bootstrap block, having been relocated from store-detect.js for exactly
+// the load-order reason above. It is gone: it decided dev-vs-production by
+// the absence of a manifest `update_url`, which only the Chrome Web Store
+// injects, so every Firefox and Safari build answered "dev". That answer is
+// now made at BUILD time and read from CARAMEL_ENV — see the "environment"
+// block in scripts/build-dist.mjs.
 
 /********************************************************************
  * Caramel core logic – 2025-06-29  (speed-tuned)
@@ -54,31 +51,15 @@ if (typeof window !== 'undefined') {
     })()
 }
 
-// Dev-mode detection that works in BOTH popup AND content-script contexts.
-// chrome.management only exists in the service worker, but
-// chrome.runtime.getManifest() works everywhere.
-// Production (Chrome Web Store) installs have an `update_url` field;
-// unpacked dev extensions don't.
-function _isDevInstall() {
-    try {
-        if (typeof chrome === 'undefined' || !chrome.runtime?.getManifest)
-            return false
-        const m = chrome.runtime.getManifest()
-        return !m.update_url
-    } catch {
-        return false
-    }
-}
-
 /* --------------------------------------------------  tiny helpers */
 // Check if already declared to prevent redeclaration errors on script reload
 if (typeof sleep === 'undefined') {
     var sleep = ms => new Promise(r => setTimeout(r, ms))
 }
 if (typeof log === 'undefined') {
-    // Verbose only on unpacked dev installs; silent in the packed Web Store
-    // build so we don't leak coupon/flow internals into every store's console.
-    var log = _isDevInstall()
+    // Verbose only in a build stamped for development; silent in every shipped
+    // build so we don't leak coupon/flow internals into a store's console.
+    var log = CARAMEL_ENV.verbose
         ? (...a) => console.log('Caramel:', ...a)
         : () => {}
 }
@@ -134,7 +115,7 @@ if (typeof logError === 'undefined') {
         } catch {
             // recording is best-effort; never let it mask the original error
         }
-        if (_isDevInstall()) console.error('Caramel:', where, err)
+        if (CARAMEL_ENV.verbose) console.error('Caramel:', where, err)
     }
 }
 
@@ -218,20 +199,21 @@ function caramelSendMessage(message, timeoutMs) {
     })
 }
 
-// Origins trusted to inject a login token via window.postMessage. The dev
-// origins are ONLY trusted on an unpacked dev install — in the packed Web Store
-// build a tab on dev.grabcaramel.com or a local server must NOT be able to write
-// credentials into a real user's extension storage.
+// Origins trusted to inject a login token via window.postMessage — decided by
+// the build, and matching the deployment this build actually talks to.
+//
+// It used to be the two production origins ALWAYS, plus the dev pair when
+// `_isDevInstall()` said so, which was wrong in both directions. A Firefox or
+// Safari build (no manifest update_url, so "dev" by that heuristic) shipped
+// trusting a local server and the dev site to write credentials into a real
+// user's extension storage; and a build pointed at dev still trusted a prod tab
+// to hand it a PRODUCTION session, which is a token crossing an environment
+// boundary the rest of the extension respects.
+//
 // Read from coupon-runner.js's message listener (cross-file content-script
 // reference — oxlint's per-file analysis can't see it).
 // oxlint-disable-next-line no-unused-vars
-const CARAMEL_ALLOWED_ORIGINS = new Set([
-    'https://grabcaramel.com',
-    'https://www.grabcaramel.com',
-    ...(_isDevInstall()
-        ? ['http://localhost:58000', 'https://dev.grabcaramel.com']
-        : []),
-])
+const CARAMEL_ALLOWED_ORIGINS = new Set(CARAMEL_ENV.trustedOrigins)
 
 /* --------------------------------------------------  session storage */
 // The bearer we get from /api/extension/login and the OAuth exchange IS a full

@@ -42,7 +42,8 @@ beforeAll(() => {
         ['startCheckoutDetection', 'getDomainRecord'],
     ))
 
-    // getDomainRecord's prod-TTL path (ttl>0, since _isDevInstall() is false
+    // getDomainRecord's prod-TTL path (ttl>0, since the harness installs the
+    // PRODUCTION environment stamp by default — see _load.mjs installEnvStamp
     // against this stub) reads chrome.storage.local before falling back to
     // the fetchSupportedStores message — stub both legs of that chain. Real
     // response shapes match background.js's contract (background.test.mjs).

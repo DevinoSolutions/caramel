@@ -167,10 +167,10 @@ async function classifyCartCategory() {
 // oxlint-disable-next-line no-unused-vars
 async function getCoupons(rec) {
     // Dev hook: deterministic coupons when using #caramel-test. Gated to
-    // unpacked dev installs so a #caramel-test link can't make the packed
-    // production build fire mock codes against a real store's checkout.
+    // development-stamped builds so a #caramel-test link can't make a shipped
+    // build fire mock codes against a real store's checkout.
     if (
-        _isDevInstall() &&
+        !CARAMEL_ENV.isProduction &&
         location.hash &&
         location.hash.includes('caramel-test')
     ) {

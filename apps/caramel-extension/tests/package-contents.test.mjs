@@ -16,7 +16,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { NEVER_SHIP, SHIPPED } from '../scripts/build-dist.mjs'
+import { GENERATED, NEVER_SHIP, SHIPPED } from '../scripts/build-dist.mjs'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const read = name => readFileSync(join(root, name), 'utf8')
@@ -24,11 +24,15 @@ const readJson = name => JSON.parse(read(name))
 
 const CHROME = readJson('manifest.json')
 const INDEX = read('index.html')
-const shipped = new Set(SHIPPED)
+// Two ways into the package: copied from the allowlist, or written by the
+// build (the environment stamp). Both count as "packaged" — what this suite
+// asserts is that nothing the extension loads is missing from the result.
+const packaged = [...SHIPPED, ...GENERATED]
+const shipped = new Set(packaged)
 
 /** A path ships if it is listed, or lives under a listed directory. */
 const ships = p =>
-    shipped.has(p) || SHIPPED.some(entry => p.startsWith(entry + '/'))
+    shipped.has(p) || packaged.some(entry => p.startsWith(entry + '/'))
 
 describe('packaged extension contents', () => {
     it('ships every file the chrome manifest loads', () => {

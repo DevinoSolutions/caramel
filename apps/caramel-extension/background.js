@@ -1,34 +1,30 @@
+// The build-time environment stamp (globalThis.CARAMEL_ENV / CARAMEL_BASE_URL)
+// has to be in place before the first message is handled, so it is pulled in
+// synchronously, ahead of everything else in this file.
+//
+// Two ways in, because this same file runs in two kinds of background context:
+// Chrome and Safari run it as an MV3 service worker, which loads siblings with
+// importScripts; Firefox runs it as a background script and lists
+// caramel-env.js ahead of it in manifest-firefox.json, where importScripts does
+// not exist. The guard picks whichever applies rather than assuming Chrome —
+// assuming Chrome is precisely the bug this stamp replaces.
+if (typeof importScripts === 'function') importScripts('/caramel-env.js')
+
 const currentBrowser = (() => {
     if (typeof chrome !== 'undefined') return chrome // Chrome and Chromium-based browsers
     if (typeof browser !== 'undefined') return browser // Firefox
     throw new Error('Browser is not supported!')
 })()
 
-// Dev detection WITHOUT the `management` permission: packed Chrome Web Store
-// builds carry an `update_url` in the manifest; unpacked dev installs don't.
-// This is synchronous, so the base URL is correct before the first message is
-// handled (the old chrome.management.getSelf callback raced inbound messages).
-const _isDevInstall = () => {
-    try {
-        return !currentBrowser.runtime.getManifest().update_url
-    } catch {
-        return false
-    }
-}
-// Unpacked/dev installs hit the DEV deployment (dev.grabcaramel.com); the
-// packed Web Store build (has update_url) hits production.
-globalThis.CARAMEL_BASE_URL = _isDevInstall()
-    ? 'https://dev.grabcaramel.com'
-    : 'https://grabcaramel.com'
 const caramelUrl = path =>
     new URL(path, `${globalThis.CARAMEL_BASE_URL}/`).toString()
 
 // Same policy as `logError` in caramel-base.js, which the service worker
 // cannot share (separate context, no content-script files loaded here): a
-// packed install prints nothing anywhere, and the failure is still recorded
-// where a dev install can read it back. These reach only our own worker
+// shipped build prints nothing anywhere, and the failure is still recorded
+// where a development build can read it back. These reach only our own worker
 // console rather than a store's page, so the leak is smaller — but "quiet
-// unless it's my install" is worth being one rule instead of two.
+// unless it's my build" is worth being one rule instead of two.
 const CARAMEL_BG_ERRORS_MAX = 30
 const logError = (where, err) => {
     try {
@@ -46,7 +42,7 @@ const logError = (where, err) => {
     } catch {
         // recording is best-effort; never let it mask the original error
     }
-    if (_isDevInstall()) console.error('Caramel:', where, err)
+    if (globalThis.CARAMEL_ENV.verbose) console.error('Caramel:', where, err)
 }
 
 const FETCH_TIMEOUT_MS = 8000
@@ -304,7 +300,7 @@ currentBrowser.runtime.onMessage.addListener(
             url.searchParams.set('key_words', kw || '')
             url.searchParams.set('limit', '20')
             if (category) url.searchParams.set('category', category)
-            if (_isDevInstall())
+            if (globalThis.CARAMEL_ENV.verbose)
                 console.log('BACKGROUND: fetchCoupons', {
                     site,
                     kw,

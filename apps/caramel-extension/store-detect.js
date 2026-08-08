@@ -1,19 +1,10 @@
-// owns: supported-store cache, checkout detection, init hook (STORE_CACHE_*, _getCacheTtl, getDomainRecord, _hostMatchesDomain, isCheckout, getCachedCodes, tryInitialize, startCheckoutDetection). NOT _isDevInstall — see F-008 note below.
-// load after: caramel-base.js, dom-utils.js
-//
-// F-008 note: _isDevInstall used to live here (this file owns the rest of
-// "dev-install detection" conceptually) but was relocated to
-// caramel-base.js — that file's own top-level code calls it immediately at
-// load time and needs it defined before that runs (same-script hoisting
-// covered this when everything was one file; separate files don't hoist
-// backward across each other). _getCacheTtl() below still calls it, from
-// inside a function body (deferred), so it doesn't care that the
-// definition now lives in an earlier-loading file instead of this one.
+// owns: supported-store cache, checkout detection, init hook (STORE_CACHE_*, _getCacheTtl, getDomainRecord, _hostMatchesDomain, isCheckout, getCachedCodes, tryInitialize, startCheckoutDetection).
+// load after: caramel-env.js, caramel-base.js, dom-utils.js
 
 /* --------------------------------------------------  config cache */
 const STORE_CACHE_KEY = 'caramel_supported_stores'
 const STORE_CACHE_PROD_TTL = 60 * 60 * 1000 // 1 hour
-const STORE_CACHE_DEV_TTL = 0 // bypass cache when loaded as unpacked dev extension
+const STORE_CACHE_DEV_TTL = 0 // bypass cache in a development-stamped build
 // One retry, because the measured failure is a cold connection: the first
 // fetch of the bulk store list is the slow one and the retry lands quickly.
 const STORE_FETCH_ATTEMPTS = 2
@@ -23,7 +14,7 @@ const STORE_FETCH_RETRY_DELAY_MS = 750
 const STORE_FETCH_MESSAGE_TIMEOUT_MS = 35000
 
 function _getCacheTtl() {
-    return _isDevInstall() ? STORE_CACHE_DEV_TTL : STORE_CACHE_PROD_TTL
+    return CARAMEL_ENV.isProduction ? STORE_CACHE_PROD_TTL : STORE_CACHE_DEV_TTL
 }
 
 async function getDomainRecord(domain) {
