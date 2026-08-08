@@ -1088,10 +1088,21 @@ async function startApplyingCoupons(rec, options) {
             const reason = lastStoreReason
                 ? ` The store said: “${String(lastStoreReason).slice(0, 140)}”.`
                 : ''
+            /* "a discount you already have" is a guess in general and a KNOWN
+             * fact when preExistingDiscount is set — this is that same
+             * already-discounted cart, seen from the side where our code was
+             * accepted and moved nothing. So name it, and carry the sentence
+             * the sibling no-win branch below treats as mandatory: on most
+             * checkouts pasting another code REPLACES the live one. The copy
+             * list is still handed over — a shopper may want to swap — but
+             * never without saying what a swap costs. */
+            const tail = preExistingDiscount
+                ? `Your cart already has a discount on it, and the store may not combine another with it — check your order summary before you check out. Pasting another may replace what you've got, so only swap if you want to.`
+                : `It may need a minimum spend, or the store may not combine it with a discount you already have — check your order summary before you check out.`
             showFinalModal(
                 0,
                 null,
-                `We put ${bestCode} into the promo box, but your total didn't change.${reason} It may need a minimum spend, or the store may not combine it with a discount you already have — check your order summary before you check out.`,
+                `We put ${bestCode} into the promo box, but your total didn't change.${reason} ${tail}`,
                 false,
                 caramelSinkTriedCodes(
                     allCoupons.map(c =>
@@ -1118,7 +1129,25 @@ async function startApplyingCoupons(rec, options) {
         // budget, or an untrusted synthetic click — lastFailId stays null and
         // we fire NOTHING: a valid code the store rejected only because our
         // click isn't trusted must never be recorded as a coupon failure.
-        if (lastFailId) reportOutcome(lastFailId, 'failed', lastStoreReason)
+        // A cart that already carried a discount makes the evidence just as
+        // unattributable. "Cannot be combined with the discount already
+        // applied" reaches lastStoreReason via coupon-apply.js's
+        // empty-container-to-text branch, which does NOT require rejection
+        // vocabulary — the code is valid and the rejection describes the cart.
+        // Withheld rather than softened: the endpoint takes {worked, failed}
+        // and nothing else, so there is no neutral verdict to send, and a false
+        // 'failed' down-ranks a working code for every future shopper.
+        if (lastFailId) {
+            if (preExistingDiscount) {
+                log('AUTO_INSERT_VERDICT_WITHHELD', {
+                    id: lastFailId,
+                    storeReason: lastStoreReason,
+                    reason: 'the cart arrived with a discount, so this rejection is not evidence about the code',
+                })
+            } else {
+                reportOutcome(lastFailId, 'failed', lastStoreReason)
+            }
+        }
         // Nothing auto-applied. Hand the tried codes to the modal so the user
         // gets a manual copy/paste fallback (covers valid codes the store's
         // checkout rejected only because our synthetic click isn't trusted).

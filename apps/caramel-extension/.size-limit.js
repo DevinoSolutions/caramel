@@ -135,7 +135,27 @@ module.exports = [
         // empty list — silence on every fresh install. ~2.5 kB is code; the
         // rest is the measurement prose that stops the next edit undoing it.
         // Measured 254.83 kB.
-        limit: '256 KB',
+        //
+        // 2026-08-08 — 256 → 258 KB. Two residuals in the already-applied
+        // discount handling, both in coupon-runner.js. The no-win path reported
+        // 'failed' to the trust loop with no preExistingDiscount gate, so a
+        // store refusing to stack ("cannot be combined with the discount
+        // already applied" — text that reaches lastStoreReason WITHOUT
+        // rejection vocabulary) spent a permanent verdict on a valid code; the
+        // report is now withheld, because the endpoint's vocabulary is exactly
+        // {worked, failed} and has no neutral value to send. And the
+        // zero-effect branch, which had the same snapshot in scope, hedged at
+        // shoppers whose live discount we could see and dropped the
+        // replace-warning its sibling treats as mandatory. ~0.6 kB is code and
+        // message copy; the rest states the constraint, which is the whole
+        // defence against the next edit reinstating a false 'failed'. A first
+        // pass paid back 0.7 kB by cutting prose. Measured 256.71 kB — 258
+        // rather than 257 for the same reason the 249 line gives: ~290 B of
+        // headroom makes the next comment edit a build failure that says
+        // nothing true about bundle weight. The standing recommendation above
+        // (price MINIFIED bytes) is now five raises overdue and still the
+        // owner's call.
+        limit: '258 KB',
         brotli: false,
     },
     {

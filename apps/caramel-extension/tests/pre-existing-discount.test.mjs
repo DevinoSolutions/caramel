@@ -19,6 +19,7 @@ let startApplyingCoupons
 let removeAppliedCoupon
 let finalModalCalls
 let removedRows
+let reportedOutcomes
 
 const REC = {
     domain: 'example.com',
@@ -74,6 +75,7 @@ beforeEach(() => {
     setTotalText('Order Total $80.00')
     removedRows = []
     finalModalCalls = []
+    reportedOutcomes = []
     globalThis._caramelCancelled = false
     // The cleanup path waits ~600ms after each click for the cart to settle,
     // and the loop pauses between codes. Under a full-suite run that real time
@@ -94,7 +96,8 @@ beforeEach(() => {
     globalThis.showTestingModal = async () => {}
     globalThis.updateTestingModal = async () => {}
     globalThis.hideTestingModal = () => {}
-    globalThis.reportOutcome = () => {}
+    globalThis.reportOutcome = (id, outcome, storeReason) =>
+        reportedOutcomes.push({ id, outcome, storeReason })
     globalThis.caramelRecordSaving = () => {}
     globalThis.showFinalModal = (...args) => finalModalCalls.push(args)
     // Every code "commits" a row and then errors — the exact state that
@@ -214,5 +217,99 @@ describe('an already-discounted cart is not reported as a failure', () => {
         expect(finalModalCalls[0][2] ?? '').not.toMatch(
             /already has a discount/i,
         )
+    })
+})
+
+// The modal told this shopper the truth; the BACKEND was told a lie. Same run,
+// same rejection text, two different audiences — and only one of them was
+// fixed. A store that refuses a second code ("cannot be combined with the
+// discount already applied") produces error text with no rejection vocabulary
+// in it, which coupon-apply.js hands back verbatim, and the no-win path spent
+// it as a 'failed' verdict on a coupon that is in perfect health. That verdict
+// outlives the session and follows the code to every future shopper.
+describe('a rejection caused by the shopper’s own discount is not a coupon verdict', () => {
+    it('sends no failure verdict when the cart already carried a discount', async () => {
+        addAppliedRow('SHOPPER50')
+
+        await startApplyingCoupons(REC)
+
+        // The run still ends with no win, and the shopper still sees why.
+        expect(finalModalCalls[0][2]).toMatch(/already has a discount/i)
+        expect(reportedOutcomes).toEqual([])
+    })
+
+    it("withholds it even when the store's words sound like a code problem", async () => {
+        // The exact trap: wording that reads as a verdict on the code, on a
+        // cart where it cannot be one. There is no neutral outcome to send in
+        // its place — the endpoint takes 'worked' or 'failed' and nothing else
+        // — so the honest report is no report.
+        addAppliedRow('SHOPPER50')
+        globalThis.applyCoupon = async () => ({
+            success: false,
+            newTotal: 80,
+            committed: true,
+            errorMsg:
+                'This code cannot be combined with the discount already applied',
+            errorIsNew: true,
+        })
+
+        await startApplyingCoupons(REC)
+
+        expect(reportedOutcomes).toEqual([])
+    })
+
+    it('still reports the failure when the cart arrived clean', async () => {
+        // Guards the guard. The suppression is scoped to the one situation
+        // that makes the evidence unattributable; everywhere else the trust
+        // loop must keep learning, or the fix costs more signal than the bug.
+        await startApplyingCoupons(REC)
+
+        expect(reportedOutcomes).toEqual([
+            {
+                id: 'c2', // the last code to produce real rejection text
+                outcome: 'failed',
+                storeReason: 'Not valid for these items',
+            },
+        ])
+    })
+})
+
+// The other half of the same cart: our code went in, the store took it, and
+// the total never moved — which on an already-discounted cart is what "they
+// won't combine" looks like from the winning side. This branch knew about the
+// live discount (it had the same snapshot) and still hedged at the shopper
+// with "a discount you already have", then sent them off to paste codes
+// without the warning its sibling treats as mandatory.
+describe('a code that changed nothing on a discounted cart says so plainly', () => {
+    beforeEach(() => {
+        // Accepted, committed, total identical → the zero-effect branch.
+        globalThis.applyCoupon = async code => {
+            addAppliedRow(code)
+            return { success: true, newTotal: 80, committed: true }
+        }
+    })
+
+    it('names the live discount and warns what pasting another costs', async () => {
+        addAppliedRow('SHOPPER50')
+
+        await startApplyingCoupons(REC)
+
+        const message = finalModalCalls[0][2] ?? ''
+        expect(message).toMatch(/already has a discount/i)
+        expect(message).toMatch(/may replace/i)
+        // The guess is gone: we can SEE the discount, so we stop offering a
+        // minimum spend as the likely explanation.
+        expect(message).not.toMatch(/minimum spend/i)
+        // The codes are still handed over — a shopper may want to swap.
+        expect(finalModalCalls[0][4]?.length).toBeGreaterThan(0)
+    })
+
+    it('keeps the original hedge when no discount was on the cart', async () => {
+        await startApplyingCoupons(REC)
+
+        const message = finalModalCalls[0][2] ?? ''
+        expect(message).toMatch(/minimum spend/i)
+        expect(message).not.toMatch(/may replace/i)
+        expect(message).not.toMatch(/already has a discount/i)
     })
 })
