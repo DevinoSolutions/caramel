@@ -19,7 +19,7 @@ Plain scripts, one global scope per realm; load order = manifest order, identica
 
 1. `coupon-constants.generated.js` — codegen output of `coupons.ts` (F-006); no hand-written logic.
 2. `cart-signals.js` — page-signal extraction (cart items, JSON-LD, Shopify `/cart.json` probe); pure DOM reading, zero coupon-domain knowledge, self-contained enough to degrade gracefully when absent (NF-05).
-3. `caramel-base.js` — bootstrap globals every later file needs at _load time_ (`currentBrowser`, `log`, `sleep`, `_isDevInstall`); loads first because later files call these at module-eval time, not just inside functions (verified: isolated-vm prefix-load check throws `ReferenceError` without this ordering).
+3. `caramel-base.js` — bootstrap globals every later file needs at _load time_ (`currentBrowser`, `log`, `sleep`); loads early because later files call these at module-eval time, not just inside functions (verified: isolated-vm prefix-load check throws `ReferenceError` without this ordering). It is itself preceded by `caramel-env.js`, the build-time environment stamp (`CARAMEL_ENV`), which `log` and `CARAMEL_ALLOWED_ORIGINS` read in their own top-level initializers.
 4. `dom-utils.js` — generic DOM primitives (visibility, price parsing, XPath); no store/coupon knowledge.
 5. `store-detect.js` — supported-store cache + checkout-detection trigger.
 6. `coupon-apply.js` — one apply attempt's mechanics (fill/click/detect error or success); no looping, no fetching.
@@ -28,7 +28,7 @@ Plain scripts, one global scope per realm; load order = manifest order, identica
 9. `UI-helpers.js` — on-page prompt/modal DOM (`insertCaramelPrompt` et al.), called cross-file (§2g).
 10. `inject.js` — 8-line entry trigger only.
 
-`background.js` is a separate MV3 service-worker realm with no shared JS global to the content-script realm above, so it deliberately re-defines `currentBrowser`/`_isDevInstall`/`CARAMEL_BASE_URL` (NF-06) instead of importing them; it owns the single fetch chokepoint to caramel-app's API (`classifyCart`/`fetchCoupons`/`fetchSupportedStores`) plus popup-window lifecycle messages.
+`background.js` is a separate MV3 service-worker realm with no shared JS global to the content-script realm above, so it deliberately re-defines `currentBrowser` (NF-06) instead of importing it and pulls the shared environment stamp in with `importScripts('/caramel-env.js')` (Firefox lists that file in `background.scripts` instead, having no `importScripts`); it owns the single fetch chokepoint to caramel-app's API (`classifyCart`/`fetchCoupons`/`fetchSupportedStores`) plus popup-window lifecycle messages.
 
 ## 2. Key decisions — including every standoff (do not re-flag these)
 

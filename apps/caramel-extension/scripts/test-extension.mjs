@@ -49,7 +49,11 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
-import { ENV_FILE, renderEnvStamp } from './build-dist.mjs'
+import {
+    contentScriptRealmSources,
+    ENV_FILE,
+    renderEnvStamp,
+} from './build-dist.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const EXT_PATH = path.resolve(__dirname, '..')
@@ -175,11 +179,10 @@ async function main() {
         const extensionId = new URL(sw.url()).host
 
         // 2. Patched base URL in effect. This asserts what THIS SUITE staged
-        // (the temp-copy rewrite to localhost), not shipped behavior — shipped
-        // unpacked installs point at dev.grabcaramel.com since 537547b. It
-        // proves the browser really loaded the patched copy (and the
-        // _isDevInstall() dev branch fired), so every later step talks to the
-        // hermetic local app instead of the remote deployment.
+        // (the temp copy's rewritten environment stamp), not shipped behavior —
+        // a real build's stamp names the dev or the production deployment. It
+        // proves the browser really loaded the patched copy, so every later
+        // step talks to the hermetic local app instead of a remote deployment.
         await new Promise(r => setTimeout(r, 1500))
         const baseUrl = await sw.evaluate(() => globalThis.CARAMEL_BASE_URL)
         log(
@@ -345,8 +348,12 @@ async function main() {
             // RESTRICTED_STATUSES rebind reads window.CaramelCoupons at
             // module-eval time). Real manifest.json/index.html load order.
             // Deliberately read from EXT_PATH (the SHIPPED source, not the
-            // patched copy): none of these content scripts contain the
-            // base-URL seam, so this step exercises exactly what ships.
+            // patched copy): none of these content scripts hard-code a
+            // deployment, so this step exercises exactly what ships. The one
+            // exception is the environment stamp, which is a property of the
+            // BUILD and so comes from this suite's own render (below) rather
+            // than from disk — caramel-base.js reads CARAMEL_ENV in its own
+            // top-level initializers, so a realm without it throws on load.
             const contentScriptFiles = [
                 'coupon-constants.generated.js',
                 'caramel-base.js',
@@ -356,8 +363,9 @@ async function main() {
                 'coupon-fetch.js',
                 'coupon-runner.js',
             ]
-            const contentScriptSources = contentScriptFiles.map(f =>
-                readFileSync(path.join(EXT_PATH, f), 'utf8'),
+            const contentScriptSources = contentScriptRealmSources(
+                contentScriptFiles,
+                { stamp: ENV_STAMP },
             )
 
             const page = await context.newPage()
@@ -372,8 +380,8 @@ async function main() {
             // Wire click handler and load the split content-script files, IN
             // ORDER, via evaluate (bypasses CSP) — each its own eval, like
             // separate <script> tags, so load-order semantics match the
-            // real content-script realm (see caramel-base.js's relocated
-            // _isDevInstall for why that distinction matters).
+            // real content-script realm (see caramel-base.js's load-order note
+            // for why that distinction matters).
             await page.evaluate(sources => {
                 window.__clickLog = []
                 document

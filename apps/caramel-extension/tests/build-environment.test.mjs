@@ -24,6 +24,7 @@ import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
     buildDist,
+    contentScriptRealmSources,
     ENV_FILE,
     ENVIRONMENTS,
     renderEnvStamp,
@@ -207,6 +208,27 @@ describe('the stamp is the only thing that decides the environment', () => {
         const committed = await readFile(join(ROOT, ENV_FILE), 'utf8')
         expect(committed).toBe(renderEnvStamp('development'))
         expect(SHIPPED).not.toContain(ENV_FILE)
+    })
+
+    it('a hand-built content-script realm gets the stamp first, by construction', () => {
+        // Learned in CI, the expensive way: the e2e suite evaluates the split
+        // content-script files into a blank page to drive the real
+        // applyCoupon(), and a realm without the stamp dies at load with
+        // `CARAMEL_ENV is not defined` — the browser supplies it from the
+        // manifest, a hand-built realm must supply it itself. The list a
+        // harness passes therefore does NOT include the stamp; the builder
+        // prepends it, so no caller can omit it.
+        const sources = contentScriptRealmSources(['caramel-base.js'])
+        expect(sources).toHaveLength(2)
+        expect(sources[0]).toBe(renderEnvStamp('production'))
+        expect(sources[1]).toContain('CARAMEL_ENV.verbose')
+
+        // A harness pointing at its own local app overrides the stamp — and
+        // still cannot end up without one.
+        const staged = contentScriptRealmSources(['caramel-base.js'], {
+            stamp: renderEnvStamp('development'),
+        })
+        expect(staged[0]).toBe(renderEnvStamp('development'))
     })
 
     it('every environment names a distinct deployment', () => {

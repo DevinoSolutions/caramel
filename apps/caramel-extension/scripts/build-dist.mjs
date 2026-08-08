@@ -17,6 +17,7 @@
  * not a broken release.
  */
 
+import { readFileSync } from 'node:fs'
 import { cp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -191,6 +192,30 @@ ${origins}    ]),
 // prove which deployment the loaded build resolved to.
 globalThis.CARAMEL_BASE_URL = globalThis.CARAMEL_ENV.baseUrl
 `
+}
+
+/**
+ * The ordered sources of a hand-built content-script realm, stamp FIRST.
+ *
+ * A browser gets the stamp from the manifest; a harness that evaluates these
+ * files itself (scripts/test-extension.mjs injects them into a blank page to
+ * drive the real applyCoupon()) has to supply it, and caramel-base.js reads
+ * CARAMEL_ENV in its own top-level initializers — so a realm without it dies
+ * with `CARAMEL_ENV is not defined` at load. CI caught exactly that once. It
+ * cannot happen again through this function: the stamp is prepended by
+ * construction, not by the caller remembering to list it.
+ *
+ * @param {string[]} files - content-script files, in load order, WITHOUT the
+ *   stamp (relative to the package root).
+ * @param {{ stamp?: string }} [options] - `stamp` overrides the rendered
+ *   default, for a harness pointing the build at its own local app.
+ * @returns {string[]} sources to evaluate in order
+ */
+export function contentScriptRealmSources(files, { stamp } = {}) {
+    return [
+        stamp ?? renderEnvStamp(DEFAULT_ENVIRONMENT),
+        ...files.map(file => readFileSync(join(ROOT, file), 'utf8')),
+    ]
 }
 
 /**
