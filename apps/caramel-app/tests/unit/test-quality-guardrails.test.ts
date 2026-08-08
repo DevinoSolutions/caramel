@@ -89,27 +89,43 @@ function matchSleep(content: string): string | null {
     return SLEEP_MATCHERS.find(m => m.re.test(content))?.name ?? null
 }
 
-describe('test-quality-guardrails (rules become checks)', () => {
-    it('no `.only(` under tests/** or e2e/** in either package', () => {
-        const files = ONLY_SCAN_DIRS.flatMap(walk)
-        expect(files.length).toBeGreaterThan(0) // sanity: the walk found tests
-        const offenders = files
-            .filter(file => hasOnly(fs.readFileSync(file, 'utf8')))
-            .map(relToRepo)
-        expect(offenders).toEqual([])
-    })
+/* These two walk and read every test file in the repo, synchronously, and their
+ * cost grows with the suite they police. Vitest's 5s default is sized for unit
+ * work: on 2026-08-06 the extension suite crossed 400 tests and this gate went
+ * red inside the full run while passing on its own — a guardrail that fails for
+ * reasons unrelated to what it guards is a guardrail people start ignoring. The
+ * work is bounded and IO-only, so the budget is generous on purpose. */
+const SCAN_TIMEOUT_MS = 30000
 
-    it('no wall-clock sleeps (waitForTimeout / setTimeout) in e2e specs', () => {
-        const files = SLEEP_SCAN_DIRS.flatMap(walk)
-        expect(files.length).toBeGreaterThan(0) // sanity: the walk found specs
-        const offenders = files
-            .map(file => ({
-                file: relToRepo(file),
-                kind: matchSleep(fs.readFileSync(file, 'utf8')),
-            }))
-            .filter(o => o.kind !== null)
-        expect(offenders).toEqual([])
-    })
+describe('test-quality-guardrails (rules become checks)', () => {
+    it(
+        'no `.only(` under tests/** or e2e/** in either package',
+        () => {
+            const files = ONLY_SCAN_DIRS.flatMap(walk)
+            expect(files.length).toBeGreaterThan(0) // sanity: the walk found tests
+            const offenders = files
+                .filter(file => hasOnly(fs.readFileSync(file, 'utf8')))
+                .map(relToRepo)
+            expect(offenders).toEqual([])
+        },
+        SCAN_TIMEOUT_MS,
+    )
+
+    it(
+        'no wall-clock sleeps (waitForTimeout / setTimeout) in e2e specs',
+        () => {
+            const files = SLEEP_SCAN_DIRS.flatMap(walk)
+            expect(files.length).toBeGreaterThan(0) // sanity: the walk found specs
+            const offenders = files
+                .map(file => ({
+                    file: relToRepo(file),
+                    kind: matchSleep(fs.readFileSync(file, 'utf8')),
+                }))
+                .filter(o => o.kind !== null)
+            expect(offenders).toEqual([])
+        },
+        SCAN_TIMEOUT_MS,
+    )
 
     it('the detectors catch a focused test and e2e sleeps (red-proof)', () => {
         // Tokens are assembled at runtime (split so the literal banned pattern

@@ -1,7 +1,9 @@
 'use client'
 
+import { useReducedMotion } from '@/lib/reducedMotion'
 import { motion } from 'framer-motion'
 import {
+    FaArrowRight,
     FaBan,
     FaBug,
     FaCode,
@@ -72,8 +74,8 @@ const contributions = [
 
 const securityFeatures = [
     {
-        title: 'Regular Security Audits',
-        desc: 'Professional security reviews of our codebase',
+        title: 'Open Security Reviews',
+        desc: 'Every change is peer-reviewed in public',
         icon: <FaLock />,
     },
     {
@@ -82,18 +84,20 @@ const securityFeatures = [
         icon: <FaEye />,
     },
     {
-        title: 'No Data Collection',
-        desc: "We don't store or transmit personal information",
+        title: 'No Ad Tracking',
+        desc: 'We never sell or share your personal information',
         icon: <FaBan />,
     },
     {
         title: 'Community Oversight',
-        desc: 'Thousands of developers can audit our code',
+        desc: 'Anyone in the world can audit our code',
         icon: <FaUsers />,
     },
 ]
 
 export default function OpenSourceSection() {
+    const reduceMotion = useReducedMotion()
+
     return (
         <section id="opensource" className="relative overflow-hidden py-32">
             {/* Background Elements */}
@@ -111,14 +115,13 @@ export default function OpenSourceSection() {
                     transition={{ duration: 0.6, ease: 'easeOut' }}
                     className="mb-20 text-center"
                 >
-                    <h2 className="mb-8 bg-gradient-to-r from-caramel to-orange-600 bg-clip-text text-5xl font-extrabold leading-[80px] tracking-tight text-transparent lg:text-4xl">
+                    <h2 className="mb-8 bg-gradient-to-r from-caramel to-orange-600 bg-clip-text pb-1 text-5xl font-extrabold leading-tight tracking-tight text-transparent lg:text-4xl">
                         Open Source & Community Driven
                     </h2>
                     <p className="mx-auto max-w-3xl text-xl leading-relaxed text-gray-600 dark:text-gray-300 lg:text-lg">
                         Transparency is our core. Every line of code is open,
-                        auditable, and community-driven. Join thousands of
-                        developers building a better alternative to proprietary
-                        extensions.
+                        auditable, and community-driven. Join the developers
+                        building a better alternative to proprietary extensions.
                     </p>
                 </motion.div>
 
@@ -128,85 +131,66 @@ export default function OpenSourceSection() {
                     whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true }}
                     transition={{ duration: 0.6, delay: 0.2, ease: 'easeOut' }}
-                    className="mb-24"
+                    className="mb-16"
                 >
-                    <h3 className="mb-12 text-center text-3xl font-extrabold tracking-tight text-gray-900 dark:text-white lg:text-2xl">
+                    <h3 className="mb-8 text-center text-3xl font-extrabold tracking-tight text-gray-900 dark:text-white lg:text-2xl">
                         Security Through Transparency
                     </h3>
-                    <div className="grid grid-cols-4 gap-8 lg:grid-cols-2 sm:grid-cols-1">
+                    {/* Deliberately COMPACT: this row supports the two richer
+                        groups below (Community, Contribution Pathways), so its
+                        cards are quiet — small inline icon, tight padding, no
+                        ambient icon/grid animation. Visual hierarchy, not a
+                        third row of hero cards. */}
+                    <div className="grid grid-cols-4 gap-6 lg:grid-cols-2 sm:grid-cols-1">
                         {securityFeatures.map((feature, index) => (
                             <motion.div
                                 key={feature.title}
-                                initial={{
-                                    opacity: 0,
-                                    x: index % 2 === 0 ? -50 : 50,
-                                }}
+                                initial={
+                                    reduceMotion
+                                        ? { opacity: 0 }
+                                        : {
+                                              opacity: 0,
+                                              x: index % 2 === 0 ? -32 : 32,
+                                          }
+                                }
                                 whileInView={{ opacity: 1, x: 0 }}
-                                viewport={{ once: true }}
+                                viewport={{
+                                    once: true,
+                                    margin: '0px 0px -60px 0px',
+                                }}
                                 transition={{
                                     duration: 0.6,
-                                    delay: index * 0.1,
+                                    delay: index * 0.08,
                                     type: 'spring',
                                     stiffness: 100,
                                     damping: 15,
                                 }}
-                                whileHover={{
-                                    scale: 1.02,
-                                    y: -5,
-                                    boxShadow:
-                                        '0 20px 40px rgba(234,105,37,0.15)',
-                                    transition: { duration: 0.2 },
-                                }}
-                                className="group relative overflow-hidden rounded-3xl border border-caramel/20 bg-gradient-to-br from-caramel/5 via-orange-50/30 to-caramel/5 p-8 dark:border-caramel/30 dark:from-caramel/10 dark:via-orange-900/20 dark:to-caramel/10 sm:p-6"
                             >
-                                <div className="absolute inset-0 opacity-5">
-                                    <motion.div
-                                        className="h-full w-full"
-                                        style={{
-                                            backgroundImage: `
-                                                linear-gradient(90deg, #ea6925 1px, transparent 1px),
-                                                linear-gradient(#ea6925 1px, transparent 1px)
-                                            `,
-                                            backgroundSize: '20px 20px',
-                                        }}
-                                        animate={{
-                                            backgroundPosition: [
-                                                '0px 0px',
-                                                '20px 20px',
-                                                '0px 0px',
-                                            ],
-                                        }}
-                                        transition={{
-                                            duration: 8,
-                                            repeat: Infinity,
-                                            ease: 'linear',
-                                            repeatType: 'loop',
-                                        }}
-                                    />
-                                </div>
-                                <div className="relative z-10 text-center">
-                                    <motion.div
-                                        className="mx-auto mb-6 flex items-center justify-center text-6xl text-caramel transition-transform duration-300"
-                                        animate={{
-                                            rotate: [0, 2, -2, 0],
-                                            scale: [1, 1.02, 1],
-                                        }}
-                                        transition={{
-                                            duration: 4,
-                                            repeat: Infinity,
-                                            ease: 'easeInOut',
-                                            repeatType: 'loop',
-                                        }}
-                                        whileHover={{ scale: 1.1 }}
-                                    >
-                                        {feature.icon}
-                                    </motion.div>
-                                    <h4 className="mb-4 text-2xl font-bold text-gray-800 dark:text-white sm:text-xl">
-                                        {feature.title}
-                                    </h4>
-                                    <p className="text-base leading-relaxed text-gray-600 dark:text-gray-400 sm:text-sm">
-                                        {feature.desc}
-                                    </p>
+                                {/* A framer motion element writes its
+                                    transform inline — including `none` at rest
+                                    — so a Tailwind hover:-translate-y-1 placed
+                                    on it never applies. Every card here splits
+                                    the two: the motion element owns only the
+                                    entrance, a plain child owns the chrome and
+                                    the hover. Same reason the icon scale below
+                                    rides on its own inner span. */}
+                                <div className="group relative h-full overflow-hidden rounded-2xl border border-caramel/20 bg-gradient-to-br from-caramel/5 via-orange-50/30 to-caramel/5 p-5 transition-all duration-300 hover:-translate-y-1 hover:border-caramel/60 hover:shadow-[0_12px_32px_-8px_rgba(234,105,37,0.35)] dark:border-caramel/30 dark:from-caramel/10 dark:via-orange-900/20 dark:to-caramel/10">
+                                    <div className="flex items-start gap-3">
+                                        <span
+                                            aria-hidden="true"
+                                            className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-caramel/10 text-lg text-caramel transition-transform duration-300 group-hover:scale-110 dark:bg-caramel/20"
+                                        >
+                                            {feature.icon}
+                                        </span>
+                                        <div>
+                                            <h4 className="mb-1 text-lg font-bold text-gray-800 dark:text-white">
+                                                {feature.title}
+                                            </h4>
+                                            <p className="text-sm leading-relaxed text-gray-600 dark:text-gray-400">
+                                                {feature.desc}
+                                            </p>
+                                        </div>
+                                    </div>
                                 </div>
                             </motion.div>
                         ))}
@@ -218,7 +202,7 @@ export default function OpenSourceSection() {
                     initial={{ opacity: 0, y: 30 }}
                     whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true }}
-                    transition={{ duration: 0.6, delay: 0.4, ease: 'easeOut' }}
+                    transition={{ duration: 0.6, delay: 0.15, ease: 'easeOut' }}
                     className="mb-24"
                 >
                     <h3 className="mb-12 text-center text-3xl font-extrabold tracking-tight text-gray-900 dark:text-white lg:text-2xl">
@@ -231,77 +215,97 @@ export default function OpenSourceSection() {
                                 href={platform.href}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                initial={{
-                                    opacity: 0,
-                                    x: index % 2 === 0 ? -50 : 50,
-                                }}
+                                initial={
+                                    reduceMotion
+                                        ? { opacity: 0 }
+                                        : {
+                                              opacity: 0,
+                                              x: index % 2 === 0 ? -32 : 32,
+                                          }
+                                }
                                 whileInView={{ opacity: 1, x: 0 }}
-                                viewport={{ once: true }}
+                                viewport={{
+                                    once: true,
+                                    margin: '0px 0px -60px 0px',
+                                }}
                                 transition={{
                                     duration: 0.6,
-                                    delay: index * 0.1,
+                                    delay: index * 0.08,
                                     type: 'spring',
                                     stiffness: 100,
                                     damping: 15,
                                 }}
-                                whileHover={{
-                                    scale: 1.02,
-                                    y: -5,
-                                    boxShadow:
-                                        '0 20px 40px rgba(234,105,37,0.15)',
-                                    transition: { duration: 0.2 },
-                                }}
-                                className="group relative overflow-hidden rounded-3xl border border-caramel/20 bg-gradient-to-br from-caramel/5 via-orange-50/30 to-caramel/5 p-8 dark:border-caramel/30 dark:from-caramel/10 dark:via-orange-900/20 dark:to-caramel/10 sm:p-6"
                             >
-                                <div className="absolute inset-0 opacity-5">
-                                    <motion.div
-                                        className="h-full w-full"
-                                        style={{
-                                            backgroundImage: `
+                                <div className="group relative h-full overflow-hidden rounded-3xl border border-caramel/20 bg-gradient-to-br from-caramel/5 via-orange-50/30 to-caramel/5 p-8 transition-all duration-300 hover:-translate-y-1 hover:border-caramel/60 hover:shadow-[0_12px_32px_-8px_rgba(234,105,37,0.35)] dark:border-caramel/30 dark:from-caramel/10 dark:via-orange-900/20 dark:to-caramel/10 sm:p-6">
+                                    <div
+                                        aria-hidden="true"
+                                        className="absolute inset-0 opacity-5"
+                                    >
+                                        <motion.div
+                                            className="h-full w-full"
+                                            style={{
+                                                backgroundImage: `
                                                 linear-gradient(90deg, #ea6925 1px, transparent 1px),
                                                 linear-gradient(#ea6925 1px, transparent 1px)
                                             `,
-                                            backgroundSize: '20px 20px',
-                                        }}
-                                        animate={{
-                                            backgroundPosition: [
-                                                '0px 0px',
-                                                '20px 20px',
-                                                '0px 0px',
-                                            ],
-                                        }}
-                                        transition={{
-                                            duration: 8,
-                                            repeat: Infinity,
-                                            ease: 'linear',
-                                            repeatType: 'loop',
-                                        }}
-                                    />
-                                </div>
-                                <div className="relative z-10 flex items-start gap-6 sm:flex-col sm:items-center sm:gap-4">
-                                    <motion.div
-                                        className="flex h-16 w-16 items-center justify-center rounded-2xl bg-caramel/10 text-2xl text-caramel transition-transform duration-300 dark:bg-caramel/20"
-                                        animate={{
-                                            rotate: [0, 2, -2, 0],
-                                            scale: [1, 1.02, 1],
-                                        }}
-                                        transition={{
-                                            duration: 4,
-                                            repeat: Infinity,
-                                            ease: 'easeInOut',
-                                            repeatType: 'loop',
-                                        }}
-                                        whileHover={{ scale: 1.1 }}
-                                    >
-                                        {platform.icon}
-                                    </motion.div>
-                                    <div className="flex-1 sm:text-center">
-                                        <h3 className="mb-3 text-2xl font-bold text-gray-800 dark:text-white sm:text-xl">
-                                            {platform.name}
-                                        </h3>
-                                        <p className="text-base leading-relaxed text-gray-600 dark:text-gray-400 sm:text-sm">
-                                            {platform.desc}
-                                        </p>
+                                                backgroundSize: '20px 20px',
+                                            }}
+                                            animate={
+                                                reduceMotion
+                                                    ? undefined
+                                                    : {
+                                                          backgroundPosition: [
+                                                              '0px 0px',
+                                                              '20px 20px',
+                                                              '0px 0px',
+                                                          ],
+                                                      }
+                                            }
+                                            transition={{
+                                                duration: 8,
+                                                repeat: Infinity,
+                                                ease: 'linear',
+                                                repeatType: 'loop',
+                                            }}
+                                        />
+                                    </div>
+                                    <div className="relative z-10 flex items-start gap-6 sm:flex-col sm:items-center sm:gap-4">
+                                        <motion.div
+                                            className="flex h-16 w-16 items-center justify-center rounded-2xl bg-caramel/10 text-2xl text-caramel dark:bg-caramel/20"
+                                            animate={
+                                                reduceMotion
+                                                    ? undefined
+                                                    : {
+                                                          rotate: [0, 2, -2, 0],
+                                                          scale: [1, 1.02, 1],
+                                                      }
+                                            }
+                                            transition={{
+                                                duration: 4,
+                                                repeat: Infinity,
+                                                ease: 'easeInOut',
+                                                repeatType: 'loop',
+                                            }}
+                                        >
+                                            <span className="block transition-transform duration-300 group-hover:scale-110">
+                                                {platform.icon}
+                                            </span>
+                                        </motion.div>
+                                        <div className="flex-1 sm:text-center">
+                                            <h3 className="mb-3 text-2xl font-bold text-gray-800 dark:text-white sm:text-xl">
+                                                {platform.name}
+                                            </h3>
+                                            <p className="text-base leading-relaxed text-gray-600 dark:text-gray-400 sm:text-sm">
+                                                {platform.desc}
+                                            </p>
+                                            <span className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-caramel underline-offset-4 group-hover:underline">
+                                                Open {platform.name}
+                                                <FaArrowRight
+                                                    aria-hidden="true"
+                                                    className="transition-transform duration-300 group-hover:translate-x-1"
+                                                />
+                                            </span>
+                                        </div>
                                     </div>
                                 </div>
                             </motion.a>
@@ -314,7 +318,7 @@ export default function OpenSourceSection() {
                     initial={{ opacity: 0, y: 30 }}
                     whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true }}
-                    transition={{ duration: 0.6, delay: 0.6, ease: 'easeOut' }}
+                    transition={{ duration: 0.6, delay: 0.15, ease: 'easeOut' }}
                     className="mb-24"
                 >
                     <h3 className="mb-12 text-center text-3xl font-extrabold tracking-tight text-gray-900 dark:text-white lg:text-2xl">
@@ -324,90 +328,105 @@ export default function OpenSourceSection() {
                         {contributions.map((contribution, index) => (
                             <motion.div
                                 key={contribution.title}
-                                initial={{
-                                    opacity: 0,
-                                    x: index % 2 === 0 ? -50 : 50,
-                                }}
+                                initial={
+                                    reduceMotion
+                                        ? { opacity: 0 }
+                                        : {
+                                              opacity: 0,
+                                              x: index % 2 === 0 ? -32 : 32,
+                                          }
+                                }
                                 whileInView={{ opacity: 1, x: 0 }}
-                                viewport={{ once: true }}
+                                viewport={{
+                                    once: true,
+                                    margin: '0px 0px -60px 0px',
+                                }}
                                 transition={{
                                     duration: 0.6,
-                                    delay: index * 0.1,
+                                    delay: index * 0.08,
                                     type: 'spring',
                                     stiffness: 100,
                                     damping: 15,
                                 }}
-                                whileHover={{
-                                    scale: 1.02,
-                                    y: -5,
-                                    boxShadow:
-                                        '0 20px 40px rgba(234,105,37,0.15)',
-                                    transition: { duration: 0.2 },
-                                }}
-                                className="group relative overflow-hidden rounded-3xl border border-caramel/20 bg-gradient-to-br from-caramel/5 via-orange-50/30 to-caramel/5 p-8 dark:border-caramel/30 dark:from-caramel/10 dark:via-orange-900/20 dark:to-caramel/10 sm:p-6"
                             >
-                                <div className="absolute inset-0 opacity-5">
-                                    <motion.div
-                                        className="h-full w-full"
-                                        style={{
-                                            backgroundImage: `
+                                <div className="group relative h-full overflow-hidden rounded-3xl border border-caramel/20 bg-gradient-to-br from-caramel/5 via-orange-50/30 to-caramel/5 p-8 transition-all duration-300 hover:-translate-y-1 hover:border-caramel/60 hover:shadow-[0_12px_32px_-8px_rgba(234,105,37,0.35)] dark:border-caramel/30 dark:from-caramel/10 dark:via-orange-900/20 dark:to-caramel/10 sm:p-6">
+                                    <div
+                                        aria-hidden="true"
+                                        className="absolute inset-0 opacity-5"
+                                    >
+                                        <motion.div
+                                            className="h-full w-full"
+                                            style={{
+                                                backgroundImage: `
                                                 linear-gradient(90deg, #ea6925 1px, transparent 1px),
                                                 linear-gradient(#ea6925 1px, transparent 1px)
                                             `,
-                                            backgroundSize: '20px 20px',
-                                        }}
-                                        animate={{
-                                            backgroundPosition: [
-                                                '0px 0px',
-                                                '20px 20px',
-                                                '0px 0px',
-                                            ],
-                                        }}
-                                        transition={{
-                                            duration: 8,
-                                            repeat: Infinity,
-                                            ease: 'linear',
-                                            repeatType: 'loop',
-                                        }}
-                                    />
-                                </div>
-                                <div className="relative z-10 flex items-start gap-6 sm:flex-col sm:items-center sm:gap-4">
-                                    <motion.div
-                                        className="text-4xl text-caramel transition-transform duration-300 sm:text-3xl"
-                                        animate={{
-                                            rotate: [0, 2, -2, 0],
-                                            scale: [1, 1.02, 1],
-                                        }}
-                                        transition={{
-                                            duration: 4,
-                                            repeat: Infinity,
-                                            ease: 'easeInOut',
-                                            repeatType: 'loop',
-                                        }}
-                                        whileHover={{ scale: 1.1 }}
-                                    >
-                                        {contribution.icon}
-                                    </motion.div>
-                                    <div className="flex-1 sm:text-center">
-                                        <h4 className="mb-3 text-2xl font-bold text-gray-800 dark:text-white sm:text-xl">
-                                            {contribution.title}
-                                        </h4>
-                                        <p className="mb-6 text-base leading-relaxed text-gray-600 dark:text-gray-400 sm:text-sm">
-                                            {contribution.desc}
-                                        </p>
-                                        <motion.a
-                                            href={contribution.href}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="inline-flex items-center rounded-full bg-gradient-to-r from-caramel to-orange-600 px-6 py-3 text-sm font-semibold text-white shadow-md transition-all duration-200 hover:shadow-xl"
-                                            whileHover={{
-                                                scale: 1.05,
-                                                transition: { duration: 0.2 },
+                                                backgroundSize: '20px 20px',
                                             }}
-                                            whileTap={{ scale: 0.95 }}
+                                            animate={
+                                                reduceMotion
+                                                    ? undefined
+                                                    : {
+                                                          backgroundPosition: [
+                                                              '0px 0px',
+                                                              '20px 20px',
+                                                              '0px 0px',
+                                                          ],
+                                                      }
+                                            }
+                                            transition={{
+                                                duration: 8,
+                                                repeat: Infinity,
+                                                ease: 'linear',
+                                                repeatType: 'loop',
+                                            }}
+                                        />
+                                    </div>
+                                    <div className="relative z-10 flex items-start gap-6 sm:flex-col sm:items-center sm:gap-4">
+                                        <motion.div
+                                            className="text-4xl text-caramel sm:text-3xl"
+                                            animate={
+                                                reduceMotion
+                                                    ? undefined
+                                                    : {
+                                                          rotate: [0, 2, -2, 0],
+                                                          scale: [1, 1.02, 1],
+                                                      }
+                                            }
+                                            transition={{
+                                                duration: 4,
+                                                repeat: Infinity,
+                                                ease: 'easeInOut',
+                                                repeatType: 'loop',
+                                            }}
                                         >
-                                            {contribution.action}
-                                        </motion.a>
+                                            <span className="block transition-transform duration-300 group-hover:scale-110">
+                                                {contribution.icon}
+                                            </span>
+                                        </motion.div>
+                                        <div className="flex-1 sm:text-center">
+                                            <h4 className="mb-3 text-2xl font-bold text-gray-800 dark:text-white sm:text-xl">
+                                                {contribution.title}
+                                            </h4>
+                                            <p className="mb-6 text-base leading-relaxed text-gray-600 dark:text-gray-400 sm:text-sm">
+                                                {contribution.desc}
+                                            </p>
+                                            <motion.a
+                                                href={contribution.href}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="inline-flex items-center rounded-full bg-gradient-to-r from-caramel to-orange-600 px-6 py-3 text-sm font-semibold text-white shadow-md transition-all duration-200 hover:shadow-xl"
+                                                whileHover={{
+                                                    scale: 1.05,
+                                                    transition: {
+                                                        duration: 0.2,
+                                                    },
+                                                }}
+                                                whileTap={{ scale: 0.95 }}
+                                            >
+                                                {contribution.action}
+                                            </motion.a>
+                                        </div>
                                     </div>
                                 </div>
                             </motion.div>
@@ -420,13 +439,13 @@ export default function OpenSourceSection() {
                     initial={{ opacity: 0, y: 30 }}
                     whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true }}
-                    transition={{ duration: 0.6, delay: 0.8, ease: 'easeOut' }}
-                    className="rounded-3xl bg-gradient-to-r from-caramel to-orange-600 p-12 text-center text-white shadow-2xl lg:p-8"
+                    transition={{ duration: 0.6, delay: 0.15, ease: 'easeOut' }}
+                    className="rounded-3xl bg-gradient-to-br from-caramel to-[#c9531a] p-12 text-center text-white shadow-2xl ring-1 ring-inset ring-white/20 dark:border dark:border-caramel/30 dark:bg-caramel/[0.12] dark:bg-none dark:ring-0 lg:p-8 sm:p-6"
                 >
-                    <h3 className="mb-6 text-3xl font-semibold tracking-tight lg:text-2xl">
+                    <h3 className="mb-6 text-3xl font-semibold tracking-tight text-white lg:text-2xl">
                         Ready to Make a Difference?
                     </h3>
-                    <p className="mx-auto mb-8 max-w-2xl text-lg leading-relaxed opacity-90">
+                    <p className="mx-auto mb-8 max-w-2xl text-lg leading-relaxed text-white/90">
                         Join our mission to create ethical, transparent, and
                         user-first shopping tools. Your contribution, no matter
                         how small, helps build a better internet for everyone.

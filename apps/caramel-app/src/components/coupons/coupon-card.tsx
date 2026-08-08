@@ -22,7 +22,7 @@ interface CouponCardProps {
 const TIER_CLS: Record<CouponStatusTier, string> = {
     green: 'bg-green-100 text-green-700 ring-green-200 dark:bg-green-900/30 dark:text-green-300 dark:ring-green-900/50',
     amber: 'bg-amber-100 text-amber-700 ring-amber-200 dark:bg-amber-900/30 dark:text-amber-300 dark:ring-amber-900/50',
-    grey: 'bg-gray-100 text-gray-600 ring-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:ring-gray-700',
+    grey: 'bg-gray-100 text-gray-600 ring-gray-200 dark:bg-white/10 dark:text-gray-300 dark:ring-white/20',
     red: 'bg-red-100 text-red-700 ring-red-200 dark:bg-red-900/30 dark:text-red-300 dark:ring-red-900/50',
 }
 
@@ -38,11 +38,14 @@ export default function CouponCard({ coupon, index }: CouponCardProps) {
         }
     }
 
+    // Honest badge only: when the catalog has no discount amount the badge
+    // says "DEAL" — it must NEVER invent a number (a fabricated "20% off"
+    // is a false public claim on every unquantified coupon).
     const discount = coupon.discount_amount
         ? coupon.discount_type === 'PERCENTAGE'
             ? `${coupon.discount_amount}%`
             : `$${coupon.discount_amount}`
-        : '20%'
+        : null
 
     // App-owned trust signal (W1) — "worked Xh ago" when the extension last
     // reported this coupon working, and only if that was recent (<7 days).
@@ -55,18 +58,26 @@ export default function CouponCard({ coupon, index }: CouponCardProps) {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.9 }}
             transition={{ duration: 0.3, delay: index * 0.05 }}
-            className="group relative overflow-hidden rounded-3xl border border-orange-100 bg-gradient-to-br from-orange-50/50 via-white to-orange-50/40 p-5 shadow-md transition-all hover:shadow-lg dark:border-orange-900/50 dark:from-gray-900 dark:via-gray-900 dark:to-gray-900"
+            className="group relative overflow-hidden rounded-3xl border border-orange-100 bg-gradient-to-br from-orange-50/50 via-white to-orange-50/40 p-5 shadow-md transition-all duration-200 hover:-translate-y-0.5 hover:border-orange-200 hover:shadow-lg dark:border-orange-900/50 dark:from-darkSurface dark:via-darkSurface dark:to-darkSurface dark:hover:border-orange-800/70"
         >
             <div className="flex items-center gap-5 md:flex-col md:items-start">
                 {/* Left: Discount Badge */}
                 <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-caramel to-orange-600 text-white shadow-md ring-1 ring-orange-200 dark:ring-orange-900/50">
                     <div className="text-center leading-tight">
-                        <span className="block text-xl font-black md:text-lg">
-                            {discount}
-                        </span>
-                        <span className="text-[11px] font-semibold text-white/90">
-                            off
-                        </span>
+                        {discount ? (
+                            <>
+                                <span className="block text-xl font-black md:text-lg">
+                                    {discount}
+                                </span>
+                                <span className="text-[11px] font-semibold text-white/90">
+                                    off
+                                </span>
+                            </>
+                        ) : (
+                            <span className="block text-sm font-black tracking-widest">
+                                DEAL
+                            </span>
+                        )}
                     </div>
                 </div>
 
@@ -109,8 +120,9 @@ export default function CouponCard({ coupon, index }: CouponCardProps) {
                 {/* Right: CTA Button */}
                 <div className="shrink-0 md:w-full">
                     <button
+                        type="button"
                         onClick={handleCopyCode}
-                        className="whitespace-nowrap rounded-2xl bg-gradient-to-r from-caramel to-orange-600 px-6 py-3 font-semibold text-white shadow-md transition-all hover:scale-105 hover:shadow-lg md:w-full"
+                        className="whitespace-nowrap rounded-2xl bg-gradient-to-r from-caramel to-orange-600 px-6 py-3 font-semibold text-white shadow-md transition-all hover:scale-105 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 dark:focus-visible:ring-offset-darkSurface md:w-full"
                     >
                         Get Coupon Code
                     </button>
@@ -120,9 +132,10 @@ export default function CouponCard({ coupon, index }: CouponCardProps) {
             {/* Hover Overlay - Show Code */}
             {showCode && coupon.code && (
                 <motion.div
+                    role="status"
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
-                    className="absolute inset-0 flex items-center justify-center bg-black/90 backdrop-blur-sm"
+                    className="absolute inset-0 flex items-center justify-center rounded-3xl bg-black/90 backdrop-blur-sm"
                 >
                     <div className="text-center">
                         <p className="mb-2 text-sm text-gray-300">Your Code:</p>

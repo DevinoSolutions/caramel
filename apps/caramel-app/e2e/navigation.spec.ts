@@ -33,6 +33,10 @@ test.describe('Navigation & Header', () => {
         ).toBeVisible()
     })
 
+    // The URL asserts below use 15s (default 5s): the click lands right after
+    // domcontentloaded on a cold 2-core CI runner, where the app-router commit
+    // races first-hit page-module loading + hydration of the home bundle. The
+    // assert still proves navigation happens; it just tolerates cold latency.
     test('can navigate to coupons page', async ({ page }) => {
         await gotoHomePage(page)
 
@@ -40,7 +44,7 @@ test.describe('Navigation & Header', () => {
             .locator('header')
             .getByRole('link', { name: /coupons/i })
             .click()
-        await expect(page).toHaveURL(/\/coupons/)
+        await expect(page).toHaveURL(/\/coupons/, { timeout: 15000 })
     })
 
     test('can navigate to pricing page', async ({ page }) => {
@@ -50,7 +54,7 @@ test.describe('Navigation & Header', () => {
             .locator('header')
             .getByRole('link', { name: /pricing/i })
             .click()
-        await expect(page).toHaveURL(/\/pricing/)
+        await expect(page).toHaveURL(/\/pricing/, { timeout: 15000 })
     })
 
     test('can navigate to privacy page', async ({ page }) => {
@@ -60,7 +64,7 @@ test.describe('Navigation & Header', () => {
             .locator('header')
             .getByRole('link', { name: /privacy/i })
             .click()
-        await expect(page).toHaveURL(/\/privacy/)
+        await expect(page).toHaveURL(/\/privacy/, { timeout: 15000 })
     })
 
     test('can navigate to supported stores page', async ({ page }) => {
@@ -70,6 +74,6 @@ test.describe('Navigation & Header', () => {
             .locator('header')
             .getByRole('link', { name: /supported stores/i })
             .click()
-        await expect(page).toHaveURL(/\/supported-stores/)
+        await expect(page).toHaveURL(/\/supported-stores/, { timeout: 15000 })
     })
 })

@@ -9,7 +9,7 @@ export default function PrivacyPageClient() {
         <main className="relative -mt-[6.7rem] w-full overflow-x-clip dark:bg-darkBg">
             <Doodles />
             <div className="scroll-smooth">
-                <section className="text-gray-8 00 relative mt-[5rem] flex min-h-[50vh] flex-col justify-center overflow-hidden px-6 py-16 dark:text-white">
+                <section className="relative mt-[5rem] flex min-h-[50vh] flex-col justify-center overflow-hidden px-6 py-16 text-gray-800 dark:text-white">
                     <div className="mx-auto max-w-6xl text-center">
                         <motion.div
                             initial={{ opacity: 0, y: 30 }}
@@ -17,7 +17,7 @@ export default function PrivacyPageClient() {
                             transition={{ duration: 0.6, ease: 'easeOut' }}
                             className="mb-8"
                         >
-                            <h1 className="mb-6 bg-gradient-to-r from-caramel to-orange-600 bg-clip-text text-5xl font-extrabold leading-[90px] tracking-tight text-transparent lg:text-4xl md:text-3xl">
+                            <h1 className="mb-6 bg-gradient-to-r from-caramel to-orange-600 bg-clip-text pb-2 text-5xl font-extrabold leading-[1.15] tracking-tight text-transparent lg:text-4xl md:text-3xl">
                                 Privacy Policy
                             </h1>
                             <p className="mx-auto max-w-3xl text-xl leading-relaxed text-gray-600 dark:text-gray-300 lg:text-lg">

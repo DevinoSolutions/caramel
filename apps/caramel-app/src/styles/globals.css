@@ -8,6 +8,32 @@ html {
     scrollbar-gutter: stable both-edges;
 }
 
+/* The `dark` class lives on an INNER wrapper div (Layout.tsx, (auth)/layout.tsx)
+   AND, since SSR was restored, on <html> itself (stamped pre-hydration by the
+   script in app/layout.tsx). Tailwind's `dark:` variant compiles to a
+   `.dark <el>` DESCENDANT selector, so it can never style html/body; without a
+   background of their own they showed the browser-default white wherever the
+   themed wrapper didn't cover — the strip at the viewport bottom, overscroll,
+   the scrollbar gutter. Mirror the wrappers' exact backgrounds (light:
+   bg-gray-50, dark: bg-darkBg).
+
+   `html.dark` is the one that matters BEFORE hydration (the inner wrapper is
+   still server-rendered `light` at that point, so :has() would miss); the
+   :has() rules keep working for the inner wrapper after hydration and for the
+   theme toggle. `html.dark body` is needed because plain `body` below would
+   otherwise out-specify the inherited page background. */
+html,
+body {
+    @apply bg-gray-50;
+}
+
+html.dark,
+html.dark body,
+html:has(.dark),
+body:has(.dark) {
+    @apply bg-darkBg;
+}
+
 body {
     /* Keep a consistent vertical scrollbar to avoid layout shifts as content loads */
     overflow-y: scroll;
@@ -165,4 +191,53 @@ body {
 .status-active {
     background-color: #55ff00;
     border-radius: 360px;
+}
+
+/* WebKit paints its own background on autofilled inputs and ignores
+   `background-color` / `background-image` outright, so the near-black auth
+   cards flashed a bright lavender-white field the moment Chrome filled them.
+   The only lever that works is a huge inset box-shadow, which sits under the
+   text but over the UA layer. Colors mirror the auth inputs' own dark styling
+   (`dark:bg-darkBg` + `dark:text-gray-100` in the (auth) forms) so a filled
+   field is indistinguishable from a typed one.
+
+   Setting box-shadow also wipes Tailwind's `focus:ring-2 ring-caramel/30`, so
+   the :focus variant re-states that ring after the fill layer.
+
+   Light mode is left alone: Chrome's default fill (#e8f0fe) against the white
+   auth card still renders gray-900 text well above AA. */
+html.dark input:-webkit-autofill,
+html.dark input:-webkit-autofill:hover,
+html.dark input:-webkit-autofill:active,
+html.dark textarea:-webkit-autofill,
+html.dark select:-webkit-autofill {
+    box-shadow: inset 0 0 0 1000px #191a1c;
+    -webkit-text-fill-color: #f3f4f6;
+    caret-color: #f3f4f6;
+}
+
+html.dark input:-webkit-autofill:focus,
+html.dark textarea:-webkit-autofill:focus,
+html.dark select:-webkit-autofill:focus {
+    box-shadow:
+        inset 0 0 0 1000px #191a1c,
+        0 0 0 2px rgb(234 105 37 / 0.3);
+    -webkit-text-fill-color: #f3f4f6;
+    caret-color: #f3f4f6;
+}
+
+/* Landing refinement (additive): crafted keyboard focus ring in brand color.
+   :focus-visible only — mouse/touch interactions are unaffected. */
+@layer base {
+    :where(a, button, [role='button'], summary):focus-visible {
+        outline: 2px solid rgb(234 105 37 / 0.9);
+        outline-offset: 3px;
+    }
+}
+
+/* Landing refinement (additive): honor reduced-motion for smooth scrolling. */
+@media (prefers-reduced-motion: reduce) {
+    html {
+        scroll-behavior: auto;
+    }
 }

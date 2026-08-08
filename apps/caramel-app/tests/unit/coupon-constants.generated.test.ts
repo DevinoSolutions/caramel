@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import { renderCouponConstants } from '../../scripts/generate-coupon-constants'
 
 // F-006 (plan step 6) — the extension has no bundler and cannot `import`
@@ -27,6 +27,18 @@ const GENERATED_PATH = path.resolve(
 )
 
 describe('coupon-constants.generated.js (F-006 app<->extension sync)', () => {
+    // renderCouponConstants() formats through prettier's API, and prettier's
+    // first call in a process resolves config and loads its parser plugins —
+    // measured at ~6s on a cold Windows filesystem, over vitest's 5s default,
+    // while every later call is milliseconds. Left unhoisted, that one-time
+    // cost lands on whichever assertion happens to run first and times it out
+    // (seen 2026-08-05), which reads as an app<->extension drift failure when
+    // nothing has drifted. Paying it here keeps the assertions themselves on
+    // the default budget, so a real timeout in one still means something.
+    beforeAll(async () => {
+        await renderCouponConstants()
+    }, 60_000)
+
     it('the committed file is byte-identical to what renderCouponConstants() emits right now', async () => {
         const committed = fs.readFileSync(GENERATED_PATH, 'utf8')
         expect(committed).toBe(await renderCouponConstants())

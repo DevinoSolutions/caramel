@@ -55,8 +55,60 @@ let onMessageListeners = []
  * exception to "everything is a no-op": they record real listeners so
  * tests can retrieve and invoke them (see getOnMessageListeners()).
  */
+/**
+ * Backs one storage area with a real object, so a test can assert on what the
+ * code actually stored instead of on which API it called.
+ *
+ * Worth having in one place: the session (token + user) moved from
+ * storage.sync to storage.LOCAL so the credential stops roaming via Chrome
+ * Sync, and every suite that had hand-stubbed `sync` went red at once. Suites
+ * that back the area instead of the call keep working across that kind of
+ * move. Pass the SAME object for 'local' and 'sync' when a test wants one
+ * merged view of storage.
+ */
+export function backStorageArea(area, data = {}) {
+    const target = globalThis.currentBrowser ?? globalThis.chrome
+    const store = target.storage[area]
+    store.get = (_keys, cb) => {
+        if (typeof cb === 'function') cb({ ...data })
+    }
+    store.set = (items, cb) => {
+        Object.assign(data, items)
+        if (typeof cb === 'function') cb()
+    }
+    store.remove = (keys, cb) => {
+        for (const key of [].concat(keys)) delete data[key]
+        if (typeof cb === 'function') cb()
+    }
+    return data
+}
+
 export function installChromeStub() {
     const stub = makeChromeStub()
+
+    // storage.*.get/set invoke their callbacks like the real API does
+    // (empty storage). The bare permissive no-op never called them, which
+    // leaves any promise wrapped around chrome.storage (e.g.
+    // caramel-base.js's caramelGetSettings) pending forever. Tests that
+    // need specific stored values still override these per-test.
+    for (const area of ['sync', 'local', 'session']) {
+        stub.storage[area].get = (_keys, cb) => {
+            if (typeof cb === 'function') cb({})
+        }
+        stub.storage[area].set = (_items, cb) => {
+            if (typeof cb === 'function') cb()
+        }
+        stub.storage[area].remove = (_keys, cb) => {
+            if (typeof cb === 'function') cb()
+        }
+    }
+
+    // Real Chrome leaves runtime.lastError UNDEFINED except inside a
+    // callback that failed. The permissive proxy would instead auto-create
+    // a truthy callable on first read, which code that checks lastError
+    // (caramel-base.js caramelSendMessage) would misread as a closed port.
+    stub.runtime.lastError = undefined
+
     const listeners = []
     stub.runtime.onMessage.addListener = fn => listeners.push(fn)
     stub.runtime.onMessage.removeListener = fn => {

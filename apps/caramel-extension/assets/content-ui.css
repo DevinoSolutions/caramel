@@ -146,6 +146,19 @@ button:focus {
     top: -8px;
     right: -8px;
 }
+/* The final card scrolls (max-height + overflow-y), so a × hanging outside it
+ * would be clipped by its own scroll box. Sits inside, level with the logo. */
+#caramel-final-close {
+    top: 12px;
+    right: 12px;
+    background: transparent;
+    box-shadow: none;
+    color: var(--cm-text-secondary);
+}
+#caramel-final-close:hover {
+    background: var(--cm-surface);
+    color: var(--cm-brand);
+}
 
 /* ---- Shared overlay scrim ----
  * The HOST (#caramel-testing-overlay / #caramel-final-overlay) is the
@@ -224,15 +237,31 @@ button:focus {
     transition: width var(--cm-dur-slow) var(--cm-ease);
 }
 
-/* ---- Final modal ---- */
+/* ---- Final modal ----
+ * The outcome is the headline: the amount is the largest thing on the card,
+ * the code sits under it in a ticket, and everything else is support. The
+ * card itself gets a soft brand wash at the top so the panel reads as one
+ * object rather than a stack of centered paragraphs. */
 .caramel-final-modal {
     position: relative;
     box-sizing: border-box;
+    /* Column flex so the copy list can take whatever height the card has left
+     * over and the button stays put underneath it (see .caramel-manual-list).
+     * Children are full-width block-ish items either way; the visible change is
+     * that adjacent margins no longer collapse, which the spacing below already
+     * accounts for. */
+    display: flex;
+    flex-direction: column;
     background-color: var(--cm-surface);
-    padding: 28px;
+    background-image: linear-gradient(
+        180deg,
+        var(--cm-brand-soft) 0%,
+        transparent 190px
+    );
+    padding: 26px 26px 22px;
     border-radius: var(--cm-radius-lg);
     border: 1px solid var(--cm-border);
-    width: min(92vw, 400px);
+    width: min(92vw, 372px);
     max-height: 88vh; /* fallback */
     max-height: min(88dvh, 88vh);
     overflow-y: auto;
@@ -240,91 +269,166 @@ button:focus {
     color: var(--cm-text-primary);
     font-family: var(--cm-font-sans);
     text-align: center;
-    animation: caramelFadeIn 0.3s var(--cm-ease-out) both;
+    animation: caramelModalIn var(--cm-dur-slow) var(--cm-ease-out) both;
+}
+@keyframes caramelModalIn {
+    from {
+        opacity: 0;
+        transform: translateY(8px) scale(0.97);
+    }
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    .caramel-final-modal {
+        animation: caramelFadeIn var(--cm-dur) var(--cm-ease-out) both;
+    }
 }
 .caramel-final-modal:focus {
     outline: none;
 }
+/* Brand mark as a contained badge, not a 60px free-floating image. */
 .caramel-final-logo {
     display: flex;
     justify-content: center;
-    margin-bottom: 10px;
+    margin-bottom: 14px;
 }
 .caramel-final-logo img {
-    width: 60px;
-    height: 60px;
+    width: 44px;
+    height: 44px;
+    border-radius: var(--cm-radius-md);
+    box-shadow:
+        0 0 0 5px var(--cm-brand-soft-2),
+        var(--cm-shadow-card);
 }
+/* Heading is primary text — the ORANGE is spent on the amount, which is
+ * what the user actually came for. Two brand-colored headlines competed. */
 .caramel-final-modal h2 {
-    margin: 0 0 15px 0;
-    color: var(--cm-brand);
-    font-size: 24px;
+    margin: 0 0 6px 0;
+    color: var(--cm-text-primary);
+    font-size: 21px;
     font-weight: 700;
+    letter-spacing: -0.015em;
 }
 .caramel-final-msg {
-    font-size: 13px;
+    font-size: var(--cm-text-base);
+    line-height: 1.45;
     color: var(--cm-text-secondary);
-    margin: 0 0 10px 0;
+    margin: 0 0 18px 0;
+}
+/* One grouped outcome panel: amount + code ticket. */
+.caramel-final-win {
+    background: var(--cm-brand-soft-2);
+    border: 1px solid var(--cm-border-dashed);
+    border-radius: var(--cm-radius-md);
+    padding: 16px 14px 14px;
+    margin: 0 0 4px;
+}
+.caramel-final-eyebrow {
+    font-size: var(--cm-text-xs);
+    font-weight: 700;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--cm-text-muted);
+}
+.caramel-final-eyebrow-sm {
+    margin-bottom: 6px;
+}
+/* The hero number. Tabular figures so 1s and 4s don't shuffle the width. */
+.caramel-final-savings {
+    font-size: 40px;
+    line-height: 1.05;
+    color: var(--cm-brand);
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    font-variant-numeric: tabular-nums;
+    margin: 2px 0 0;
+}
+.caramel-final-codewrap {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px dashed var(--cm-border-dashed);
 }
 .caramel-final-code {
     font-size: 15px;
     color: var(--cm-text-secondary);
-    margin: 12px 0 6px;
+    margin: 0;
 }
-/* The applied/found code as a mono "coupon ticket" chip — dashed border,
- * soft brand fill (matches the popup's code pills). */
+/* The applied/found code as a mono "coupon ticket" chip. */
 .caramel-final-code span {
     display: inline-block;
     max-width: 100%;
     box-sizing: border-box;
-    margin-left: 6px;
-    padding: 4px 12px;
+    padding: 7px 14px;
     color: var(--cm-brand);
-    background: var(--cm-brand-soft-2);
+    background: var(--cm-surface);
     border: 1px dashed var(--cm-border-dashed);
     border-radius: var(--cm-radius-sm);
     font-family: var(--cm-font-mono);
     font-size: var(--cm-text-md);
     font-weight: 700;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.06em;
     overflow-wrap: anywhere;
-}
-.caramel-final-savings {
-    font-size: var(--cm-text-lg);
-    color: var(--cm-brand);
-    font-weight: 700;
-    margin: 4px 0 0;
 }
 .caramel-final-hint {
     font-size: 13px;
     color: var(--cm-text-muted);
-    margin: 4px 0 0;
+    margin: 12px 0 0;
 }
+/* Full-width primary action — one obvious next step. */
 #caramel-final-ok-btn {
-    margin-top: 20px;
+    margin-top: 18px;
+    width: 100%;
     background: var(--cm-brand);
     color: var(--cm-on-brand);
-    padding: 12px 24px;
+    padding: 13px 24px;
     border-radius: var(--cm-radius-sm);
     font-size: var(--cm-text-md);
     font-weight: 700;
+    letter-spacing: -0.01em;
     box-shadow: var(--cm-shadow-card);
     transition:
         background var(--cm-dur) var(--cm-ease),
-        box-shadow var(--cm-dur) var(--cm-ease);
+        box-shadow var(--cm-dur) var(--cm-ease),
+        transform var(--cm-dur-fast) var(--cm-ease);
 }
 #caramel-final-ok-btn:hover {
     background: var(--cm-brand-strong);
     box-shadow: var(--cm-shadow-raised);
+}
+#caramel-final-ok-btn:active {
+    transform: translateY(1px);
 }
 #caramel-final-ok-btn:focus-visible {
     outline: 3px solid var(--cm-brand);
     outline-offset: 2px;
 }
 
-/* ---- Manual copy list ---- */
+/* ---- Manual copy list ----
+ * Takes whatever height the card has spare rather than a fixed 190px.
+ *
+ * 190px is about three and a half rows, so the list ALWAYS ended on a row
+ * sliced through the middle, sitting directly under a solid button — and
+ * because Chrome hides overlay scrollbars until you scroll, there was nothing
+ * on screen saying "there is more below". A half-drawn row with no scrollbar
+ * doesn't read as a scroll hint, it reads as a rendering bug. Meanwhile the
+ * card is allowed 88dvh and was using ~620px of a 900px viewport: on the very
+ * screens with the most room to show codes, six codes were shown as three.
+ *
+ * flex:1 with min-height:0 (without it a flex item refuses to shrink below its
+ * content) hands the list the leftover space, so tall viewports show more codes
+ * and short ones still show at least one — and the button, a sibling rather
+ * than something after the scroll box, stays reachable without scrolling in
+ * both cases. scrollbar-width makes the indicator permanent instead of
+ * on-scroll, which is what tells the shopper the list continues. */
 .caramel-manual-list {
-    max-height: 190px;
+    flex: 1 1 auto;
+    min-height: 0;
     overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--cm-border) transparent;
     margin: 10px 0 2px;
     text-align: left;
 }
@@ -358,6 +462,15 @@ button:focus {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+/* Codes the store turned down in its own words. Still offered (a store's
+ * "invalid" is sometimes just our synthetic input) but visibly demoted, so the
+ * list never leads with what the user just watched fail. */
+.caramel-manual-row-rejected {
+    opacity: 0.6;
+}
+.caramel-manual-row .caramel-manual-rejected {
+    font-style: italic;
 }
 .caramel-manual-copy {
     flex: none;

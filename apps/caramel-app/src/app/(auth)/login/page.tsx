@@ -38,6 +38,19 @@ export const metadata: Metadata = {
     },
 }
 
-export default function Login() {
-    return <LoginPageClient />
+/* Params read on the server, like /verify — see that page for the full note.
+ *
+ * The client used to pull them out of window.location.search inside an effect
+ * with a 100ms timer, so the "Verification link expired" alert and its button
+ * could not exist until after hydration. That is what failed CI as
+ * `Request New Link button navigates to /verify`: the click waited 5s for a
+ * button whose render was gated on JavaScript that had not run yet.
+ */
+export default async function Login({
+    searchParams,
+}: {
+    searchParams: Promise<{ verified?: string; error?: string }>
+}) {
+    const { verified, error } = await searchParams
+    return <LoginPageClient verified={verified} error={error} />
 }

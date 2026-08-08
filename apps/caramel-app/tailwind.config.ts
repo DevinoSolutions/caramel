@@ -32,6 +32,20 @@ const config: Config = {
                 caramelLight: '#da7f52',
                 darkBg: '#191A1C',
                 darkerBg: '#101010',
+                // Warm raised-card surface for dark mode. Tailwind's gray-800/900
+                // (#1f2937/#111827) are blue-hued and clash with the warm brand
+                // near-blacks above; this charcoal keeps R>G>B (warm cast) and
+                // sits visibly above both darkBg and darkerBg.
+                darkSurface: '#1E1916',
+            },
+            boxShadow: {
+                // Warm brand shadows for card/CTA depth (landing refinement)
+                'caramel-sm': '0 6px 18px -8px rgba(234, 105, 37, 0.25)',
+                'caramel-lg': '0 20px 40px -12px rgba(234, 105, 37, 0.3)',
+            },
+            transitionTimingFunction: {
+                // Soft decelerating ease shared by landing hover/reveal transitions
+                caramel: 'cubic-bezier(0.22, 1, 0.36, 1)',
             },
         },
     },

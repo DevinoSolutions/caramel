@@ -1,0 +1,32 @@
+{
+    "ci": {
+        "collect": {
+            "url": [
+                "http://localhost:58000/",
+                "http://localhost:58000/coupons",
+                "http://localhost:58000/coupons/codecademy.com",
+                "http://localhost:58000/supported-stores",
+                "http://localhost:58000/pricing"
+            ],
+            "startServerCommand": "pnpm exec next start -p 58000",
+            "startServerReadyPattern": "Ready",
+            "startServerReadyTimeout": 60000,
+            "numberOfRuns": 1,
+            "settings": {
+                "preset": "desktop"
+            }
+        },
+        "assert": {
+            "assertions": {
+                "categories:seo": ["error", { "minScore": 0.95 }],
+                "categories:accessibility": ["error", { "minScore": 0.9 }],
+                "categories:best-practices": ["warn", { "minScore": 0.9 }],
+                "categories:performance": ["warn", { "minScore": 0.5 }]
+            }
+        },
+        "upload": {
+            "target": "filesystem",
+            "outputDir": "lighthouse-reports"
+        }
+    }
+}

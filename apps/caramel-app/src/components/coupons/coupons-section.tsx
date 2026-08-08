@@ -3,6 +3,7 @@
 import Loader from '@/components/Loader'
 import { promptSupportOnFailure } from '@/lib/feedback/promptSupportOnFailure'
 import type { Coupon, CouponFilters } from '@/types/coupon'
+import { MagnifyingGlassIcon } from '@heroicons/react/24/outline'
 import { AnimatePresence, motion } from 'framer-motion'
 import Image from 'next/image'
 import Link from 'next/link'
@@ -61,6 +62,7 @@ export default function CouponsSection({
     const [discountOptions, setDiscountOptions] = useState<string[]>([])
     const couponsLengthRef = useRef(initialCoupons?.length || 0)
     const initialFetchDone = useRef(disableInitialFetch)
+    const lastFetchedFiltersRef = useRef(JSON.stringify(initialFiltersState))
     const sentinelRef = useRef<HTMLDivElement | null>(null)
 
     const storeDomain = (defaultFilters?.site || filters.site || '').trim()
@@ -189,9 +191,18 @@ export default function CouponsSection({
         [filters],
     )
 
-    // Trigger fetch when filters change
+    // Trigger fetch when filters change. Keyed on the last-FETCHED filter
+    // values, not effect timing: on an SSR page (disableInitialFetch +
+    // initialCoupons) this effect used to refire on hydration mount and wipe
+    // the server-rendered list with a loader + duplicate /api/coupons fetch.
+    // The ref starts at the initial filter state — already satisfied by the
+    // server render (or by the initial-fetch effect below) — so the effect
+    // fetches exactly when the filters differ from what's on screen, and a
+    // StrictMode double-invoke sees the ref already updated and no-ops.
     useEffect(() => {
-        if (!initialFetchDone.current) return
+        const filtersJson = JSON.stringify(filters)
+        if (filtersJson === lastFetchedFiltersRef.current) return
+        lastFetchedFiltersRef.current = filtersJson
         setPage(1)
         setCoupons([])
         setHasMore(true)
@@ -226,11 +237,11 @@ export default function CouponsSection({
         loadMore()
     }, [hasMore, isLoadingMore, loading, loadMore, page])
 
+    // List reset + refetch live in the filter effect above (keyed on the
+    // last-fetched values) — clearing here too would blank the list even when
+    // a re-selected value changes nothing.
     const handleFilterChange = (newFilters: Partial<CouponFilters>) => {
         setFilters(prev => ({ ...prev, ...newFilters }))
-        setPage(1)
-        setCoupons([])
-        setHasMore(true)
     }
 
     // IntersectionObserver fallback to trigger loadMore when the sentinel hits the viewport
@@ -297,9 +308,12 @@ export default function CouponsSection({
                         <motion.div
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
-                            className="flex min-h-[400px] flex-col items-center justify-center rounded-3xl bg-white p-12 shadow-lg dark:bg-gray-900"
+                            className="flex min-h-[400px] flex-col items-center justify-center rounded-3xl border-2 border-dashed border-caramel/25 bg-white p-12 text-center shadow-sm dark:border-caramel/30 dark:bg-darkSurface"
                         >
-                            <p className="mb-4 bg-gradient-to-r from-caramel to-orange-600 bg-clip-text text-4xl font-bold text-transparent">
+                            <div className="mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-caramel/10 text-3xl dark:bg-caramel/20">
+                                <MagnifyingGlassIcon className="h-8 w-8 text-caramel" />
+                            </div>
+                            <p className="mb-2 bg-gradient-to-r from-caramel to-orange-600 bg-clip-text text-3xl font-bold text-transparent sm:text-2xl">
                                 No coupons found
                             </p>
                             <p className="text-gray-600 dark:text-gray-400">
@@ -357,7 +371,7 @@ export default function CouponsSection({
 
                 {/* Sidebar */}
                 <aside className="w-80 space-y-4 md:w-full">
-                    <div className="rounded-2xl bg-white p-6 shadow-lg dark:bg-gray-900">
+                    <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-lg dark:border-white/10 dark:bg-darkSurface">
                         <div className="mb-4 flex items-center justify-center">
                             <Image
                                 src={storeLogo}
@@ -382,7 +396,7 @@ export default function CouponsSection({
                         </p>
                     </div>
 
-                    <div className="rounded-2xl bg-white p-6 shadow-lg dark:bg-gray-900">
+                    <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-lg dark:border-white/10 dark:bg-darkSurface">
                         <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">
                             Available on Your Favorite Browser
                         </p>
@@ -394,7 +408,7 @@ export default function CouponsSection({
                                 {
                                     name: 'Chrome',
                                     icon: <FaChrome />,
-                                    href: 'https://chromewebstore.google.com/detail/caramel/gaimofgglbackoimfjopicmbmnlccfoe',
+                                    href: 'https://chromewebstore.google.com/detail/caramel-trusted-honey-alt/gaimofgglbackoimfjopicmbmnlccfoe',
                                     available: true,
                                 },
                                 {
@@ -421,7 +435,7 @@ export default function CouponsSection({
                                     href={browser.href}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className="inline-flex items-center gap-2 rounded-full bg-gray-50 px-6 py-3 text-center shadow-sm transition hover:bg-gray-100 dark:bg-gray-800 dark:hover:bg-gray-700"
+                                    className="inline-flex items-center gap-2 rounded-full bg-gray-50 px-6 py-3 text-center shadow-sm transition hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 dark:bg-white/5 dark:hover:bg-white/10 dark:focus-visible:ring-offset-darkSurface"
                                 >
                                     {browser.icon}
                                     {browser.name}
@@ -430,9 +444,9 @@ export default function CouponsSection({
                         </div>
                     </div>
 
-                    <div className="rounded-2xl bg-white p-6 shadow-lg dark:bg-gray-900">
+                    <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-lg dark:border-white/10 dark:bg-darkSurface">
                         <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">
-                            5,000+ Supported Stores
+                            3,000+ Supported Stores
                         </p>
                         <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">
                             From major retailers to niche marketplaces, Caramel
@@ -440,7 +454,7 @@ export default function CouponsSection({
                         </p>
                         <Link
                             href="/supported-stores"
-                            className="mt-4 inline-flex items-center justify-center rounded-full bg-gradient-to-r from-caramel to-orange-600 px-4 py-2 text-xs font-semibold text-white shadow-md transition hover:opacity-90"
+                            className="mt-4 inline-flex items-center justify-center rounded-full bg-gradient-to-r from-caramel to-orange-600 px-4 py-2 text-xs font-semibold text-white shadow-md transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 dark:focus-visible:ring-offset-darkSurface"
                         >
                             View All Supported Stores
                         </Link>

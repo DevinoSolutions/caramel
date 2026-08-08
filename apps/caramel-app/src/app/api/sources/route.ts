@@ -2,16 +2,8 @@ import { handleRouteError } from '@/lib/api/handleRouteError'
 import { withRoute } from '@/lib/api/withRoute'
 import { nextApiResponse } from '@/lib/apiResponseNext'
 import { listActiveSources, requestSource } from '@/lib/couponsRepo'
+import { toSourceMetrics } from '@/lib/sourceMetrics'
 import { z } from 'zod'
-
-type SourceMetrics = {
-    id: string
-    source: string
-    websites: string[]
-    numberOfCoupons: number
-    successRate: number
-    status: string
-}
 
 // Strict on presence only (missing/empty `website` -> 422 — the flagged
 // PLAN-F-007.md §Breaking change for this route, table row "POST
@@ -28,23 +20,11 @@ export const GET = withRoute(
     { method: 'GET', routeName: 'sources', rateLimit: 'read' },
     async ({ req }) => {
         try {
-            const rows = await listActiveSources()
-
-            const sourcesWithMetrics: SourceMetrics[] = rows
-                .map(r => {
-                    const denom = r.total_used + r.total_expired
-                    const successRate =
-                        denom === 0 ? 0 : (r.total_used / denom) * 100
-                    return {
-                        id: r.id,
-                        source: r.source,
-                        websites: r.websites,
-                        numberOfCoupons: r.total_coupons,
-                        successRate: parseFloat(successRate.toFixed(2)),
-                        status: r.status,
-                    }
-                })
-                .sort((a, b) => b.successRate - a.successRate)
+            // Same mapper the /sources server component uses — see
+            // lib/sourceMetrics.ts for why the two must never drift.
+            const sourcesWithMetrics = toSourceMetrics(
+                await listActiveSources(),
+            )
 
             return nextApiResponse(req, 200, 'sources', sourcesWithMetrics)
         } catch (error) {

@@ -93,11 +93,30 @@ function stagePatchedExtensionCopy() {
         writeFileSync(filePath, source.replace(DEV_BASE_URL_SEAM, PATCHED_SEAM))
     }
 
+    // The shipped manifest grants ONLY https://*/* — a packed extension has no
+    // business asking users for access to a localhost dev server (it widens
+    // the Web Store install prompt and lets the released build talk to
+    // whatever is listening on that port on the user's machine). The local
+    // origin is a property of THIS SUITE, so the suite grants it to its own
+    // copy, exactly like the base-URL rewrite above.
+    const manifestPath = path.join(dest, 'manifest.json')
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+    if (manifest.host_permissions.includes(`${API_BASE}/*`)) {
+        throw new Error(
+            `[test] ${API_BASE}/* is in the SHIPPED manifest — it must exist only in this test copy; remove it from manifest.json`,
+        )
+    }
+    manifest.host_permissions.push(`${API_BASE}/*`)
+    writeFileSync(manifestPath, JSON.stringify(manifest, null, 4))
+
     console.log(
         `[test] ⚠️ LOADING A PATCHED TEST COPY of the extension (${dest})`,
     )
     console.log(
         `[test]    dev base URL rewritten -> ${API_BASE} in: ${FILES_WITH_BASE_URL_SEAM.join(', ')} (copy only; shipped code untouched)`,
+    )
+    console.log(
+        `[test]    host permission ${API_BASE}/* granted to the copy only`,
     )
     return dest
 }
@@ -230,11 +249,14 @@ async function main() {
 
         // 7. POPUP UI LOGIN FLOW
         {
-            // Clear storage.sync so popup starts logged out (popup.js uses storage.sync)
+            // Clear BOTH storage areas so the popup starts logged out —
+            // sessions live in storage.local since the sync->local migration.
             await sw.evaluate(
                 () =>
                     new Promise(res =>
-                        chrome.storage.sync.remove(['token', 'user'], res),
+                        chrome.storage.local.remove(['token', 'user'], () =>
+                            chrome.storage.sync.remove(['token', 'user'], res),
+                        ),
                     ),
             )
 
@@ -247,7 +269,35 @@ async function main() {
                 (await popup.locator('#loginToggleBtn').count()) > 0
             if (hasLoginToggle) await popup.locator('#loginToggleBtn').click()
 
-            await popup.waitForSelector('#email', { timeout: 5000 })
+            try {
+                await popup.waitForSelector('#email', { timeout: 5000 })
+            } catch (err) {
+                // Diagnostic dump: what did the popup actually render?
+                const diag = await popup
+                    .evaluate(() => ({
+                        url: location.href,
+                        loaderShown: (() => {
+                            const l =
+                                document.getElementById('loading-container')
+                            return l ? getComputedStyle(l).display : 'absent'
+                        })(),
+                        visibleIds: [...document.querySelectorAll('[id]')]
+                            .filter(el => el.offsetParent !== null)
+                            .map(el => el.id)
+                            .slice(0, 40),
+                        authContainer: (
+                            document.getElementById('auth-container')
+                                ?.innerHTML || '(empty)'
+                        ).slice(0, 1500),
+                        bodyText: (document.body.innerText || '').slice(0, 600),
+                    }))
+                    .catch(e => ({ evalFailed: String(e) }))
+                console.log(
+                    '[diag] popup state at #email timeout:',
+                    JSON.stringify(diag, null, 2),
+                )
+                throw err
+            }
             await popup.fill('#email', TEST_EMAIL)
             await popup.fill('#password', TEST_PASSWORD)
             await popup.locator('#loginForm button[type="submit"]').click()
@@ -260,12 +310,17 @@ async function main() {
                 /* fall through */
             }
 
-            // Give storage.sync a moment to flush
+            // Give storage a moment to flush. Sessions live in storage.LOCAL
+            // since the sync->local migration (credentials must not roam via
+            // Chrome Sync); sync is read as the pre-migration fallback only.
             await popup.waitForTimeout(500)
             const stored = await sw.evaluate(
                 () =>
                     new Promise(res =>
-                        chrome.storage.sync.get(['token', 'user'], res),
+                        chrome.storage.local.get(['token', 'user'], local => {
+                            if (local?.token) return res(local)
+                            chrome.storage.sync.get(['token', 'user'], res)
+                        }),
                     ),
             )
             log(

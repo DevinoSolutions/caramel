@@ -48,6 +48,17 @@ export default defineConfig({
         baseURL,
         trace: 'on-first-retry',
         screenshot: 'only-on-failure',
+        // The app has first-class prefers-reduced-motion support: the 3D
+        // hero/vault scenes render their static CSS posters instead of
+        // mounting WebGL, and the store marquee stops translating. Running
+        // e2e with it ON keeps CI deterministic — otherwise SwiftShader
+        // software-renders the R3F canvases on a 2-core runner and the CPU
+        // starvation flakes unrelated tests (nav toHaveURL timeouts), and
+        // the marquee translates lazy images offscreen where they never
+        // load and stall Argos. The WebGL path is verified locally/manually.
+        contextOptions: {
+            reducedMotion: 'reduce',
+        },
     },
     ...(startServer
         ? {

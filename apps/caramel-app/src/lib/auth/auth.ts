@@ -4,6 +4,7 @@ import { env } from '@/lib/env'
 import { BASE_URL, clientEnv } from '@/lib/env.client'
 import prisma from '@/lib/prisma'
 import { render } from '@react-email/render'
+import * as Sentry from '@sentry/nextjs'
 import bcrypt from 'bcryptjs'
 import { betterAuth } from 'better-auth'
 import { prismaAdapter } from 'better-auth/adapters/prisma'
@@ -51,12 +52,29 @@ export const auth = betterAuth({
         sendOnSignUp: true,
         autoSignInAfterVerification: true,
         sendVerificationEmail: async ({ user, url }) => {
-            const html = await render(VerificationRequestTemplate({ url }))
-            await sendEmail({
-                to: user.email,
-                subject: 'Verify your email for Caramel',
-                html,
-            })
+            // Better Auth swallows errors thrown here (signup still returns
+            // 200), which during the 2026-08-08 prod cutover hid a completely
+            // broken verification-email path for hours. The send can stay
+            // non-blocking for the shopper, but the failure itself must be
+            // LOUD: report to Sentry with enough context to act on, then
+            // rethrow so any future Better Auth version that does surface it
+            // still sees the real error.
+            try {
+                const html = await render(VerificationRequestTemplate({ url }))
+                await sendEmail({
+                    to: user.email,
+                    subject: 'Verify your email for Caramel',
+                    html,
+                })
+            } catch (error) {
+                console.error('verification email send failed:', error)
+                Sentry.captureException(error, {
+                    tags: { surface: 'auth-verification-email' },
+                    extra: { userEmail: user.email },
+                })
+                await Sentry.flush(2000)
+                throw error
+            }
         },
         callbackOnError: '/verify?error=token_expired',
     },

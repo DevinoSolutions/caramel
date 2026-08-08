@@ -1,4 +1,6 @@
-import StoreCouponsPage from '@/app/(marketing)/coupons/[store]/page'
+import StoreCouponsPage, {
+    generateMetadata,
+} from '@/app/(marketing)/coupons/[store]/page'
 import { BASE_URL } from '@/lib/env.client'
 import type { ReactElement } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -98,6 +100,20 @@ describe('StoreCouponsPage — CouponListRow + TotalCountRow', () => {
         ])
         expect(couponsSectionEl.props.initialTotal).toBe(1)
 
+        // AEO prose (2026-07-28): the page also server-renders a visible
+        // "How Caramel finds …" section whose count is the SAME `total` the
+        // list uses — assert it exists, states the live count, and renders no
+        // fabricated freshness date (no verification timestamp exists in the
+        // row data, so none may appear).
+        const proseEl = children.find(
+            c => (c as ReactElement)?.type === 'section',
+        )
+        expect(proseEl).toBeTruthy()
+        const proseJson = JSON.stringify(proseEl)
+        expect(proseJson).toContain('How Caramel finds ')
+        expect(proseJson).toContain('1 active coupon code')
+        expect(proseJson).not.toMatch(/last verified|verified on/i)
+
         // oxlint-disable-next-line no-underscore-dangle -- React's own prop name
         const structuredData = JSON.parse(
             scriptEl!.props.dangerouslySetInnerHTML.__html,
@@ -134,5 +150,89 @@ describe('StoreCouponsPage — CouponListRow + TotalCountRow', () => {
 
         expect(couponsSectionEl.props.initialCoupons).toEqual([])
         expect(couponsSectionEl.props.initialTotal).toBe(0)
+    })
+
+    it('renders a BreadcrumbList script alongside the ItemList (second ld+json)', async () => {
+        mockRows(
+            sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
+            [couponFixture],
+        )
+        mockRows(sql => sql.includes('COUNT(*)::int AS total'), [{ total: 1 }])
+
+        const mainEl = (await StoreCouponsPage({
+            params: { store: 'example.com' },
+        })) as ReactElement<{ children: ReactElement[] }>
+
+        const scripts = mainEl.props.children.filter(
+            (
+                c,
+            ): c is ReactElement<{
+                dangerouslySetInnerHTML: { __html: string }
+            }> => (c as ReactElement)?.type === 'script',
+        )
+        expect(scripts).toHaveLength(2)
+        const breadcrumb = JSON.parse(
+            // oxlint-disable-next-line no-underscore-dangle -- React's own prop name
+            scripts[1]!.props.dangerouslySetInnerHTML.__html,
+        )
+        expect(breadcrumb['@type']).toBe('BreadcrumbList')
+        expect(breadcrumb.itemListElement).toHaveLength(3)
+        expect(breadcrumb.itemListElement[1].item).toBe(`${BASE_URL}/coupons`)
+        // The final crumb is the current page: name only, no `item` URL.
+        expect(breadcrumb.itemListElement[2].item).toBeUndefined()
+    })
+
+    it('with zero coupons the prose section says so honestly instead of inventing a count', async () => {
+        mockRows(
+            sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
+            [],
+        )
+        mockRows(sql => sql.includes('COUNT(*)::int AS total'), [{ total: 0 }])
+
+        const mainEl = (await StoreCouponsPage({
+            params: { store: 'example.com' },
+        })) as ReactElement<{ children: ReactElement[] }>
+
+        const proseEl = mainEl.props.children.find(
+            c => (c as ReactElement)?.type === 'section',
+        )
+        const proseJson = JSON.stringify(proseEl)
+        expect(proseJson).toContain('has no active coupon codes')
+        expect(proseJson).not.toContain('currently lists')
+    })
+})
+
+describe('StoreCouponsPage generateMetadata — canonical normalization + thin-page noindex', () => {
+    it('canonicalizes every slug variant to the base-domain URL (www.example.com → example.com)', async () => {
+        mockRows(
+            sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
+            [couponFixture],
+        )
+        mockRows(sql => sql.includes('COUNT(*)::int AS total'), [{ total: 1 }])
+
+        const metadata = await generateMetadata({
+            params: { store: 'www.example.com' },
+        })
+
+        expect(metadata.alternates?.canonical).toBe(
+            `${BASE_URL}/coupons/example.com`,
+        )
+        expect(metadata.openGraph?.url).toBe(`${BASE_URL}/coupons/example.com`)
+        // A store WITH coupons is indexable — no robots override.
+        expect(metadata.robots).toBeUndefined()
+    })
+
+    it('noindexes (but still follows) a store page with zero visible coupons', async () => {
+        mockRows(
+            sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
+            [],
+        )
+        mockRows(sql => sql.includes('COUNT(*)::int AS total'), [{ total: 0 }])
+
+        const metadata = await generateMetadata({
+            params: { store: 'example.com' },
+        })
+
+        expect(metadata.robots).toEqual({ index: false, follow: true })
     })
 })

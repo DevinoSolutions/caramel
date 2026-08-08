@@ -77,6 +77,9 @@ export function initPosthogBrowser(): boolean {
         // PostHog drops headless/synthetic UAs by default. Accept them ONLY in
         // the shared e2e project so Playwright runs actually land.
         opt_out_useragent_filter: isE2E,
+        // Anonymous visitors stay event-only; person profiles are created on
+        // identify (main's deliberate choice in 63787ec, preserved here).
+        person_profiles: 'identified_only',
     })
 
     posthog.register({

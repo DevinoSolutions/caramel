@@ -15,6 +15,11 @@
 
 /* ---- Prompt host ("Try Caramel Coupons") ---- */
 #caramel-small-prompt {
+    /* A shadow host has no light-DOM children, so it matches :empty — and
+       themes that hide empty containers therefore hide US. 1thrive.com ships
+       `div:empty { display:none }` and rendered our prompt 0x0 (measured
+       2026-08-06). See CARAMEL_HOST_CSS in UI-helpers.js. */
+    display: block !important;
     position: fixed;
     top: max(20px, env(safe-area-inset-top));
     right: max(20px, env(safe-area-inset-right));
@@ -30,6 +35,9 @@
 /* ---- Overlay hosts (testing + final modals) ---- */
 #caramel-testing-overlay,
 #caramel-final-overlay {
+    /* Same :empty exposure as the prompt host above — and worse here, because
+       hiding these two means the whole apply flow runs and shows nothing. */
+    display: block !important;
     position: fixed;
     top: 0;
     left: 0;

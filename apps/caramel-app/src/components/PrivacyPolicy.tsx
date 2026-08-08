@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion'
 import {
+    FaChartLine,
     FaCookie,
     FaEdit,
     FaEnvelope,
@@ -66,10 +67,45 @@ const PrivacyPolicy = () => {
             content: (
                 <p className="text-gray-600 dark:text-gray-400">
                     We prioritize your privacy and security. Your personal data
-                    is never shared with third parties without your explicit
-                    consent. Any browsing or shopping information collected is
-                    used solely to improve your experience with Caramel.
+                    is never sold. We share limited data with analytics and
+                    error-monitoring providers to operate and improve Caramel.
+                    Any browsing or shopping information collected is used
+                    solely to improve your experience with Caramel.
                 </p>
+            ),
+        },
+        {
+            id: 'third-party-services',
+            title: 'Analytics & Third-Party Services',
+            icon: <FaChartLine />,
+            content: (
+                <>
+                    <p className="mb-4 text-gray-600 dark:text-gray-400">
+                        We use a small set of third-party services to understand
+                        how Caramel is used and to keep it working reliably:
+                    </p>
+                    <ul className="space-y-2 text-gray-600 dark:text-gray-400">
+                        <li className="flex items-start gap-3">
+                            <span className="mt-2 h-2 w-2 flex-shrink-0 rounded-full bg-caramel"></span>
+                            Google Analytics — usage analytics on our website.
+                        </li>
+                        <li className="flex items-start gap-3">
+                            <span className="mt-2 h-2 w-2 flex-shrink-0 rounded-full bg-caramel"></span>
+                            Hotjar — usage analytics on our website.
+                        </li>
+                        <li className="flex items-start gap-3">
+                            <span className="mt-2 h-2 w-2 flex-shrink-0 rounded-full bg-caramel"></span>
+                            Sentry — error monitoring, which includes session
+                            replay on a sample of sessions.
+                        </li>
+                        <li className="flex items-start gap-3">
+                            <span className="mt-2 h-2 w-2 flex-shrink-0 rounded-full bg-caramel"></span>
+                            OpenRouter — when the extension applies coupons,
+                            anonymous cart text is sent for coupon-category
+                            classification.
+                        </li>
+                    </ul>
+                </>
             ),
         },
         {
@@ -132,7 +168,7 @@ const PrivacyPolicy = () => {
             >
                 <div className="mb-6 inline-flex items-center gap-3 rounded-full bg-caramel/10 px-6 py-3 text-sm font-semibold text-caramel">
                     <FaShieldAlt className="h-4 w-4" />
-                    Effective Date: January 1, 2025
+                    Effective Date: July 28, 2026
                 </div>
                 <p className="mx-auto max-w-4xl text-lg leading-relaxed text-gray-600 dark:text-gray-300">
                     Welcome to{' '}
@@ -145,7 +181,7 @@ const PrivacyPolicy = () => {
             </motion.div>
 
             {/* Privacy Sections */}
-            <div className="space-y-8">
+            <div className="mx-auto max-w-4xl space-y-8">
                 {sections.map((section, index) => (
                     <motion.div
                         key={section.id}
@@ -202,7 +238,7 @@ const PrivacyPolicy = () => {
             </div>
 
             {/* Contact and Updates */}
-            <div className="mt-16 grid grid-cols-1 gap-8 md:grid-cols-2">
+            <div className="mx-auto mt-16 grid max-w-4xl grid-cols-2 gap-8 md:grid-cols-1">
                 <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     whileInView={{ opacity: 1, y: 0 }}
@@ -224,7 +260,7 @@ const PrivacyPolicy = () => {
                             </p>
                             <a
                                 href="mailto:hello@devino.ca"
-                                className="inline-flex items-center gap-2 font-semibold text-caramel transition-colors duration-200 hover:text-orange-600"
+                                className="inline-flex items-center gap-2 rounded-md font-semibold text-caramel transition-colors duration-200 hover:text-orange-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 dark:focus-visible:ring-offset-darkBg"
                             >
                                 <FaEnvelope className="h-4 w-4" />
                                 hello@devino.ca
@@ -254,7 +290,7 @@ const PrivacyPolicy = () => {
                             </p>
                             <a
                                 href="mailto:hello@devino.ca"
-                                className="inline-flex items-center gap-2 font-semibold text-caramel transition-colors duration-200 hover:text-orange-600"
+                                className="inline-flex items-center gap-2 rounded-md font-semibold text-caramel transition-colors duration-200 hover:text-orange-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 dark:focus-visible:ring-offset-darkBg"
                             >
                                 <FaEnvelope className="h-4 w-4" />
                                 hello@devino.ca
@@ -270,7 +306,7 @@ const PrivacyPolicy = () => {
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true }}
                 transition={{ duration: 0.6 }}
-                className="mt-12 rounded-3xl bg-gradient-to-r from-caramel to-orange-600 p-8 text-center text-white"
+                className="mx-auto mt-12 max-w-4xl rounded-3xl bg-gradient-to-r from-caramel to-orange-600 p-8 text-center text-white shadow-lg"
             >
                 <h3 className="mb-4 text-xl font-semibold">
                     Changes to This Privacy Policy

@@ -1,0 +1,11 @@
+{
+    "_comment": "Snapshot of GET /api/extension/supported-stores → naturepedic.com, taken 2026-08-04 from dev.grabcaramel.com. A real, production-served config, frozen so scripts/test-guards.mjs is deterministic and needs no network. Magento-class: the coupon box sits inside a collapsed accordion behind showInput, which is why this store is the one worth pinning. Refresh it by re-reading the endpoint if the catalog's shape changes.",
+    "domain": "naturepedic.com",
+    "couponInput": "#coupon_code",
+    "couponSubmit": "button[data-action=\"apply-coupon\"], #discount-coupon-form button.action.apply",
+    "couponRemove": "button[data-action=\"cancel-coupon\"], #discount-coupon-form button.action.cancel",
+    "priceContainer": ".grand.totals .price, tr.grand.totals .price",
+    "showInput": "#block-discount-heading, .title[data-role=\"title\"]",
+    "successIndicator": "button[data-action=\"cancel-coupon\"], #discount-coupon-form button.action.cancel",
+    "errorIndicator": ".message-error, div.message.error div, [data-ui-id=\"checkout-cart-validationmessages-message-error\"]"
+}

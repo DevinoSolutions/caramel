@@ -181,6 +181,19 @@ export async function mintExtensionSession({
         })
     }
 
+    return createExtensionSessionRow(user)
+}
+
+/** The one place a raw-token extension Session row is written. Both mint
+ * paths (OAuth code exchange above, signed-in-web relay below) end here,
+ * so token shape / lifetime / response shape can never diverge. */
+async function createExtensionSessionRow(user: {
+    id: string
+    username: string | null
+    name: string | null
+    email: string | null
+    image: string | null
+}): Promise<MintedExtensionSession> {
     const sessionToken = randomBytes(32).toString('base64url')
     const expiresAt = new Date()
     expiresAt.setDate(expiresAt.getDate() + 7) // 7 days
@@ -198,4 +211,20 @@ export async function mintExtensionSession({
         username: user.username || user.name || user.email || null,
         image: user.image || null,
     }
+}
+
+/**
+ * Mints an extension session for a user who is ALREADY authenticated on
+ * the website (better-auth cookie session) — the website→extension
+ * sign-in relay. No provider exchange involved; the caller (the
+ * session-gated POST /api/extension/session route) has already proven
+ * the user's identity. Returns null when the user row is gone (deleted
+ * account with a live cookie).
+ */
+export async function mintExtensionSessionForUser(
+    userId: string,
+): Promise<MintedExtensionSession | null> {
+    const user = await prisma.user.findUnique({ where: { id: userId } })
+    if (!user) return null
+    return createExtensionSessionRow(user)
 }

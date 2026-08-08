@@ -9,8 +9,11 @@ const ThemeToggle = ({ className }: ThemeToggleProps) => {
     const { isDarkMode, switchTheme } = useContext(ThemeContext)
 
     return (
+        /* No `id` here: the header renders two toggles (one inside the desktop
+           nav pill, one in the mobile row) and only ever shows one, but both
+           stay in the DOM — a hard-coded id would duplicate. Styling hooks off
+           the `theme-toggle` class instead. */
         <button
-            id="theme-toggle"
             className={`theme-toggle ${className || ''}`}
             title="Toggle light & dark"
             aria-label={isDarkMode ? 'dark' : 'light'}

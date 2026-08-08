@@ -1,6 +1,7 @@
 'use client'
 
 import { reportUserVisibleFailure } from '@/lib/feedback/reportUserVisibleFailure'
+import Image from 'next/image'
 import Link from 'next/link'
 import { useEffect } from 'react'
 
@@ -30,7 +31,15 @@ export default function Error({
     }, [error])
 
     return (
-        <main className="flex min-h-screen flex-col items-center justify-center gap-4 px-6 text-center dark:bg-darkBg">
+        <main className="flex min-h-screen flex-col items-center justify-center gap-4 bg-gray-50 px-6 text-center dark:bg-darkBg">
+            <Image
+                src="/logo-light.png"
+                alt=""
+                aria-hidden="true"
+                width={56}
+                height={56}
+                className="rounded-2xl shadow-sm"
+            />
             <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
                 Something went wrong
             </h2>
@@ -38,16 +47,16 @@ export default function Error({
                 We hit an unexpected error loading this page. It&apos;s been
                 reported — please try again, or head back to the homepage.
             </p>
-            <div className="flex gap-3">
+            <div className="mt-2 flex gap-3">
                 <button
                     onClick={() => reset()}
-                    className="rounded-full bg-caramel px-6 py-2 font-semibold text-white transition-colors hover:bg-caramelLight"
+                    className="rounded-full bg-caramel px-6 py-2 font-semibold text-white shadow-sm transition-colors hover:bg-caramelLight focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 dark:focus-visible:ring-offset-darkBg"
                 >
                     Try again
                 </button>
                 <Link
                     href="/"
-                    className="rounded-full border border-gray-300 px-6 py-2 font-semibold text-gray-700 transition-colors hover:bg-gray-100 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
+                    className="rounded-full border border-gray-300 px-6 py-2 font-semibold text-gray-700 transition-colors hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/60 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
                 >
                     Go home
                 </Link>

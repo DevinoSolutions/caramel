@@ -1,9 +1,35 @@
 name: Release – Extension
 
+# TODO: Firefox has NO release path in this workflow.
+# `apps/caramel-extension/manifest-firefox.json` exists and is built + packaged,
+# but nothing signs or publishes it to addons.mozilla.org, so every Firefox
+# release is manual and the AMO listing drifts silently behind the tag.
+# Closing the gap needs two repository secrets that do not exist today —
+# AMO_JWT_ISSUER and AMO_JWT_SECRET — plus an `publish_firefox` job running
+# `web-ext sign`. Deliberately not added here: a job referencing unset secrets
+# resolves them to empty strings and fails deep inside the upload instead of
+# up front.
+
 on:
-  pull_request:
-    types: [closed]
-    branches: [main]
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Run the guards, build and package, but skip every store upload and the GitHub Release'
+        type: boolean
+        default: false
+
+# Releases are opt-in: they fire on a pushed `v*` tag (or a deliberate manual
+# dispatch), never on merged PRs. The old trigger shipped a store upload on
+# every merge into main unless the PR *title* happened to contain a skip token,
+# which is how the Chrome listing quietly froze at an old version for months.
+concurrency:
+  group: release-extension
+  cancel-in-progress: false
+
+permissions:
+  contents: read
 
 env:
   SAFARI_BUNDLE_ID: ${{ vars.SAFARI_BUNDLE_ID }}
@@ -12,14 +38,233 @@ env:
   MAC_CATEGORY: ${{ vars.MAC_CATEGORY }}
 
 jobs:
+  guard:
+    name: '🛡️ Version + freeze guard'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Announce run mode
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          if [ "${DRY_RUN:-false}" = "true" ]; then
+            echo "DRY RUN: guards, build and packaging only — no store uploads, no GitHub Release." \
+              >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ "${GITHUB_REF_TYPE}" != "tag" ]; then
+            echo "::warning::Running from ${GITHUB_REF_TYPE} '${GITHUB_REF_NAME}', not a tag. Store uploads may still run, but no GitHub Release will be created and the store version will not be traceable to a tag."
+          fi
+
+      # ONE version authority: apps/caramel-extension/manifest.json. Every other
+      # version field in the extension package must agree with it, and the tag
+      # must be `v` + that version. Nothing in this workflow computes, bumps or
+      # infers a version any more — the Safari marketing version is this value
+      # too, and only the numeric TestFlight build number is derived at runtime.
+      - name: Assert one version authority
+        id: version
+        run: |
+          set -euo pipefail
+          dir="${WORKING_DIRECTORY}"
+          if [ -z "$dir" ]; then
+            echo "::error::Repository variable WORKING_DIRECTORY is unset — cannot locate the extension manifest."
+            exit 1
+          fi
+          for f in manifest.json manifest-firefox.json package.json; do
+            if [ ! -f "$dir/$f" ]; then
+              echo "::error::Expected $dir/$f to exist. Check the WORKING_DIRECTORY repository variable."
+              exit 1
+            fi
+          done
+
+          version=$(jq -er '.version' "$dir/manifest.json")
+          firefox_version=$(jq -er '.version' "$dir/manifest-firefox.json")
+          package_version=$(jq -er '.version' "$dir/package.json")
+
+          echo "manifest.json          $version"
+          echo "manifest-firefox.json  $firefox_version"
+          echo "package.json           $package_version"
+
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::manifest.json version '$version' is not a plain X.Y.Z version."
+            exit 1
+          fi
+          if [ "$firefox_version" != "$version" ]; then
+            echo "::error::manifest-firefox.json version '$firefox_version' disagrees with manifest.json '$version'."
+            exit 1
+          fi
+          if [ "$package_version" != "$version" ]; then
+            echo "::error::package.json version '$package_version' disagrees with manifest.json '$version'."
+            exit 1
+          fi
+
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
+              echo "::error::Tag '${GITHUB_REF_NAME}' does not match manifest version — expected 'v${version}'."
+              exit 1
+            fi
+            echo "Tag ${GITHUB_REF_NAME} matches manifest version $version"
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Releasing extension version **$version**" >> "$GITHUB_STEP_SUMMARY"
+
+      # Proves all four Chrome Web Store secrets are live BEFORE we spend ~30
+      # minutes on the macOS build. A wrong or expired refresh token otherwise
+      # only surfaces at the very last step of the run.
+      - name: Assert Chrome Web Store credentials are live
+        env:
+          CHROME_CLIENT_ID: ${{ secrets.CHROME_CLIENT_ID }}
+          CHROME_CLIENT_SECRET: ${{ secrets.CHROME_CLIENT_SECRET }}
+          CHROME_REFRESH_TOKEN: ${{ secrets.CHROME_REFRESH_TOKEN }}
+          CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
+        run: |
+          set -euo pipefail
+          for name in CHROME_CLIENT_ID CHROME_CLIENT_SECRET CHROME_REFRESH_TOKEN CHROME_EXTENSION_ID; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Secret $name is unset or empty."
+              exit 1
+            fi
+          done
+
+          curl -sS --fail-with-body -o /tmp/cws-token.json \
+            -X POST https://oauth2.googleapis.com/token \
+            --data-urlencode "client_id=${CHROME_CLIENT_ID}" \
+            --data-urlencode "client_secret=${CHROME_CLIENT_SECRET}" \
+            --data-urlencode "refresh_token=${CHROME_REFRESH_TOKEN}" \
+            --data-urlencode "grant_type=refresh_token"
+          access_token=$(jq -er '.access_token' /tmp/cws-token.json)
+
+          http=$(curl -sS -o /tmp/cws-item.json -w '%{http_code}' \
+            -H "Authorization: Bearer ${access_token}" \
+            -H "x-goog-api-version: 2" \
+            "https://www.googleapis.com/chromewebstore/v1.1/items/${CHROME_EXTENSION_ID}?projection=DRAFT")
+          if [ "$http" != "200" ]; then
+            echo "::error::Chrome Web Store items.get returned HTTP $http — credentials or extension id are wrong."
+            cat /tmp/cws-item.json
+            exit 1
+          fi
+          jq -er '.id' /tmp/cws-item.json > /dev/null
+          echo "Chrome Web Store credentials verified against items.get."
+
+      # FREEZE-GUARD — refuse to ship a version the store already serves.
+      #
+      # What this checks, precisely: Chrome's own extension update service
+      # (clients2.google.com/service/update2/crx) reports the version currently
+      # PUBLISHED and served to installed users. The job fails unless the
+      # manifest version is strictly greater than that.
+      #
+      # Why not the authenticated items.get endpoint: its `projection` parameter
+      # documents two values but Google's reference states verbatim —
+      #   "Note that only "DRAFT" is supported at this time."
+      # — and the documented v1.1 Item resource carries only id, kind,
+      # publicKey, uploadState and itemError. There is no published-version
+      # field to read. (The newer V2 API does expose
+      # `publishedItemRevisionStatus` via
+      # `chromewebstore.googleapis.com/v2/publishers/PUBLISHER_ID/items/ID:fetchStatus`,
+      # but that needs a publisher id we hold no secret for. Migrating to it is
+      # the clean upgrade path once CHROME_PUBLISHER_ID exists.)
+      #
+      # NOT guaranteed by this guard:
+      #   * A submission already queued for review is invisible here — the
+      #     update service still reports the previous live version until review
+      #     completes, so two tags pushed back to back can both pass.
+      #   * A staged/partial percentage rollout reports the default cohort's
+      #     version, not the highest staged one.
+      #   * An item that has never been published (or a wrong id) returns
+      #     status="error-unknownApplication" with no version — that fails the
+      #     job by design rather than passing an unverifiable release.
+      # Any transport error, unexpected status or missing version attribute is a
+      # hard failure: this guard never degrades to a pass.
+      - name: Chrome Web Store publish freeze-guard
+        env:
+          CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
+          MANIFEST_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          curl -sS --fail-with-body -o /tmp/cws-updatecheck.xml \
+            "https://clients2.google.com/service/update2/crx?response=updatecheck&prodversion=999.0&acceptformat=crx3&x=id%3D${CHROME_EXTENSION_ID}%26uc"
+          python3 - <<'PY'
+          import os
+          import sys
+          import xml.etree.ElementTree as ET
+
+          NS = "{http://www.google.com/update2/response}"
+
+
+          def fail(message):
+              print(f"::error::{message}")
+              sys.exit(1)
+
+
+          def parse(version, label):
+              parts = version.split(".")
+              if not all(part.isdigit() for part in parts):
+                  fail(f"{label} version {version!r} is not numeric-dotted; cannot compare.")
+              return [int(part) for part in parts]
+
+
+          raw = open("/tmp/cws-updatecheck.xml", "rb").read()
+          # The payload is a fixed-shape response from Google's own update
+          # service, but it is still untrusted input to an XML parser. A
+          # doctype or entity declaration has no legitimate place in it, so
+          # reject the document outright rather than hand expat anything that
+          # could expand (billion-laughs) or dereference (XXE).
+          if b"<!DOCTYPE" in raw or b"<!ENTITY" in raw:
+              fail("Chrome update service response contained a doctype/entity declaration; refusing to parse it.")
+
+          try:
+              root = ET.fromstring(raw)
+          except ET.ParseError as exc:
+              fail(f"Chrome update service returned unparseable XML: {exc}")
+
+          app = root.find(f"{NS}app")
+          if app is None:
+              fail("Chrome update service response contained no <app> element.")
+
+          status = app.get("status")
+          if status != "ok":
+              fail(
+                  f"Chrome update service reported status={status!r} for the configured "
+                  "extension id. Either the id is wrong or the item has never been "
+                  "published, so the published version cannot be verified."
+              )
+
+          updatecheck = app.find(f"{NS}updatecheck")
+          published = updatecheck.get("version") if updatecheck is not None else None
+          if not published:
+              fail("Chrome update service response carried no published version attribute.")
+
+          manifest = os.environ["MANIFEST_VERSION"]
+          published_parts = parse(published, "published")
+          manifest_parts = parse(manifest, "manifest")
+          width = max(len(published_parts), len(manifest_parts))
+          published_parts += [0] * (width - len(published_parts))
+          manifest_parts += [0] * (width - len(manifest_parts))
+
+          print(f"Chrome Web Store currently publishes {published}; manifest is {manifest}")
+          if manifest_parts <= published_parts:
+              fail(
+                  f"Manifest version {manifest} is not greater than the published Chrome "
+                  f"Web Store version {published}. Bump apps/caramel-extension "
+                  "manifest.json (and the matching version fields) before tagging."
+              )
+
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write(f"\nChrome Web Store published version: `{published}` → releasing `{manifest}`\n")
+          PY
+
   package:
     name: '📦 Package Extension'
+    needs: guard
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: ${{ env.WORKING_DIRECTORY }}
-    # only run when a PR into main is merged
-    if: github.event.pull_request.merged == true
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -52,8 +297,8 @@ jobs:
 
   publish_chrome:
     name: '🚀 Publish to Chrome Web Store'
-    needs: package
-    if: ${{ !contains(github.event.pull_request.title, 'skip=chrome') }}
+    needs: [guard, package]
+    if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
     steps:
       - name: Download artifact
@@ -72,16 +317,27 @@ jobs:
           refresh-token: ${{ secrets.CHROME_REFRESH_TOKEN }}
           publish: false
 
+      - name: Note that the upload is a draft
+        run: |
+          {
+            echo "### Chrome Web Store"
+            echo ""
+            echo "Version \`${{ needs.guard.outputs.version }}\` was uploaded as a **draft** (\`publish: false\`)."
+            echo "**Manual publish required** — open the Chrome Web Store developer dashboard and submit it for review."
+            echo "Until that happens the store keeps serving the previous version, and the next release's freeze-guard will still compare against the old one."
+          } >> "$GITHUB_STEP_SUMMARY"
+
   publish_safari:
     name: '🚀 Publish to Apple App Store (Safari & iOS)'
-    needs: package
-    if: ${{ !contains(github.event.pull_request.title, 'skip=apple') }}
+    needs: [guard, package]
+    if: ${{ !inputs.dry_run }}
     runs-on: macos-latest
     env:
       ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
       ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
       ASC_API_KEY_BASE64: ${{ secrets.ASC_API_KEY_BASE64 }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      RELEASE_VERSION: ${{ needs.guard.outputs.version }}
     timeout-minutes: 30
     defaults:
       run:
@@ -118,25 +374,49 @@ jobs:
         env:
           ASC_API_KEY_BASE64: ${{ secrets.ASC_API_KEY_BASE64 }}
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      # `brew trust` is required since Homebrew started refusing --HEAD
+      # formulae from third-party taps: on 2026-07-13 this step failed with
+      # "Refusing to load formula ittybittyapps/appstoreconnect-cli/... from
+      # untrusted tap", which took the whole Safari/iOS release down. The trust
+      # call is the remedy Homebrew's own error message prescribes.
+      #
+      # --HEAD cannot be dropped: the tap's only formula
+      # (ittybittyapps/homebrew-appstoreconnect-cli @ appstoreconnect-cli.rb)
+      # declares a `head` block and NO stable `url`/`version`, so there is no
+      # released version to install. What we can pin is the formula itself, so
+      # a future tap edit cannot silently change what gets built — the tap
+      # checkout is reset to a fixed commit before install.
+      # Residual, deliberately accepted gap: the formula's `head` still tracks
+      # the upstream `master` branch, so the compiled source is not pinned.
+      # Both repos have been dormant for years (tap last touched 2020-04-23,
+      # upstream 2022-10-31), which is why this is a documented risk rather
+      # than a blocker. The real fix is vendoring a formula with a pinned
+      # `url`+`revision`, or replacing `asc` with a direct App Store Connect
+      # API call — neither is in scope for this change.
       - name: Install App Store Connect CLI
+        env:
+          # Tip of ittybittyapps/homebrew-appstoreconnect-cli @ 2020-04-23.
+          ASC_TAP_COMMIT: a465653f2156ba7079a79b149a4078dfaea96f8e
         run: |
+          set -euo pipefail
           brew tap ittybittyapps/appstoreconnect-cli
+          tap_repo="$(brew --repo ittybittyapps/appstoreconnect-cli)"
+          git -C "$tap_repo" fetch --depth 1 origin "$ASC_TAP_COMMIT"
+          git -C "$tap_repo" checkout --detach "$ASC_TAP_COMMIT"
+          echo "Pinned tap to $(git -C "$tap_repo" rev-parse HEAD)"
+          brew trust ittybittyapps/appstoreconnect-cli
           brew install --HEAD appstoreconnect-cli
-      - name: Get latest versions for macOS and iOS and bump
+      # The marketing version is NOT derived here any more — it is the manifest
+      # version resolved by the guard job. TestFlight is queried for one thing
+      # only: the highest existing build number, so the new upload gets +1.
+      - name: Get next TestFlight build numbers for macOS and iOS
         id: get_versions
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           ASC_API_KEY_BASE64: ${{ secrets.ASC_API_KEY_BASE64 }}
           SAFARI_BUNDLE_ID: ${{ env.SAFARI_BUNDLE_ID }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
-          bump="patch"
-          title=$(echo "$PR_TITLE" | tr '[:upper:]' '[:lower:]')
-          [[ "$title" == *feature* ]] && bump="minor"
-          [[ "$title" == *major*   ]] && bump="major"
-          [[ "$title" == *fix*     ]] && bump="patch"
-
           mkdir -p private_keys
           echo "$ASC_API_KEY_BASE64" | base64 --decode > private_keys/AuthKey_$ASC_KEY_ID.p8
           export APPSTORE_CONNECT_API_KEY_ID="$ASC_KEY_ID"
@@ -170,36 +450,14 @@ jobs:
             exit 1
           fi
 
-          MACOS_CURRENT_VERSION=$( echo "$mac_entry" | jq -r '.version      // "1.0.0"' )
           MACOS_CURRENT_BUILD=$( echo "$mac_entry" | jq -r '.buildNumber // "1"' )
-          IOS_CURRENT_VERSION=$( echo "$ios_entry" | jq -r '.version      // "1.0.0"' )
           IOS_CURRENT_BUILD=$( echo "$ios_entry" | jq -r '.buildNumber // "1"' )
 
-          echo "macOS current: $MACOS_CURRENT_VERSION ($MACOS_CURRENT_BUILD)"
-          echo "iOS   current: $IOS_CURRENT_VERSION ($IOS_CURRENT_BUILD)"
+          echo "macOS current build: $MACOS_CURRENT_BUILD"
+          echo "iOS   current build: $IOS_CURRENT_BUILD"
 
-          IFS='.' read -r major minor patch <<< "$MACOS_CURRENT_VERSION"
-          case "$bump" in
-            major) major=$((major+1)); minor=0; patch=0;;
-            minor) minor=$((minor+1)); patch=0;;
-            *)     patch=$((patch+1));;
-          esac
-          MACOS_VERSION="$major.$minor.$patch"
-          MACOS_BUILD=$((MACOS_CURRENT_BUILD+1))
-
-          IFS='.' read -r i_major i_minor i_patch <<< "$IOS_CURRENT_VERSION"
-          case "$bump" in
-            major) i_major=$((i_major+1)); i_minor=0; i_patch=0;;
-            minor) i_minor=$((i_minor+1)); i_patch=0;;
-            *)     i_patch=$((i_patch+1));;
-          esac
-          IOS_VERSION="$i_major.$i_minor.$i_patch"
-          IOS_BUILD=$((IOS_CURRENT_BUILD+1))
-
-          echo "IOS_VERSION_NAME=$IOS_VERSION"     >> $GITHUB_ENV
-          echo "IOS_BUILD_NUM=$IOS_BUILD"         >> $GITHUB_ENV
-          echo "MACOS_VERSION_NAME=$MACOS_VERSION">> $GITHUB_ENV
-          echo "MACOS_BUILD_NUM=$MACOS_BUILD"     >> $GITHUB_ENV
+          echo "IOS_BUILD_NUM=$((IOS_CURRENT_BUILD+1))"     >> $GITHUB_ENV
+          echo "MACOS_BUILD_NUM=$((MACOS_CURRENT_BUILD+1))" >> $GITHUB_ENV
 
       - name: Import distribution cert
         uses: apple-actions/import-codesign-certs@v2
@@ -250,7 +508,7 @@ jobs:
             -archivePath SafariExtProject/${{ env.APP_NAME }}-macos.xcarchive \
             CODE_SIGN_STYLE=Automatic \
             DEVELOPMENT_TEAM="${{ secrets.APPLE_TEAM_ID }}" \
-            MARKETING_VERSION="${{ env.MACOS_VERSION_NAME }}" \
+            MARKETING_VERSION="${RELEASE_VERSION}" \
             CURRENT_PROJECT_VERSION="${{ env.MACOS_BUILD_NUM }}" \
             ARCHS="arm64 x86_64" \
             VALID_ARCHS="arm64 x86_64" \
@@ -271,7 +529,7 @@ jobs:
             -archivePath SafariExtProject/${{ env.APP_NAME }}-ios.xcarchive \
             CODE_SIGN_STYLE=Automatic \
             DEVELOPMENT_TEAM="${{ secrets.APPLE_TEAM_ID }}" \
-            MARKETING_VERSION="${{ env.IOS_VERSION_NAME }}" \
+            MARKETING_VERSION="${RELEASE_VERSION}" \
             CURRENT_PROJECT_VERSION="${{ env.IOS_BUILD_NUM }}" \
             ENABLE_HARDENED_RUNTIME=YES \
             -allowProvisioningUpdates \
@@ -346,3 +604,43 @@ jobs:
           xcrun altool --upload-app \
             -f SafariExtProject/Exported-ios/${{ env.APP_NAME }}.ipa \
             -t ios -u "$ALTOOL_USER" -p "$ALTOOL_PASSWORD" --verbose
+
+      - name: Note that the builds land in TestFlight
+        run: |
+          {
+            echo "### Apple App Store (Safari & iOS)"
+            echo ""
+            echo "Marketing version \`${RELEASE_VERSION}\` uploaded — macOS build \`${MACOS_BUILD_NUM}\`, iOS build \`${IOS_BUILD_NUM}\`."
+            echo "These land in **TestFlight** after Apple finishes processing."
+            echo "**Manual submit required** — App Store Connect still needs a version created and submitted for review before customers get it."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  github_release:
+    name: '🏷️ Publish GitHub Release'
+    needs: [guard, package, publish_chrome, publish_safari]
+    if: ${{ !inputs.dry_run && github.ref_type == 'tag' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: extension-package
+          path: .
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Extension ${{ needs.guard.outputs.version }}
+          files: extension.zip
+          fail_on_unmatched_files: true
+          body: |
+            Extension version `${{ needs.guard.outputs.version }}` built from `${{ github.sha }}`.
+
+            Store state at release time:
+
+            - **Chrome Web Store** — uploaded as a draft, manual publish required.
+            - **Apple App Store** — uploaded to TestFlight, manual submit required.
+            - **Firefox / AMO** — not automated (see the TODO at the top of `.github/workflows/release-extension.yml`).

@@ -51,6 +51,14 @@ async function prepareVisualPage(
 ) {
     await page.goto(path, { waitUntil: 'domcontentloaded' })
 
+    // Wait for hydration before touching the page. Public pages server-render
+    // now, and argosScreenshot rewrites img loading/decoding attributes and
+    // stamps data-argos-* nodes; doing that while React is still hydrating
+    // makes React report attribute mismatches ("won't be patched up") into the
+    // dev-server log. data-hydrated is set from the Providers mount effect,
+    // i.e. strictly after the hydrated tree commits — see src/app/providers.tsx.
+    await page.locator('html[data-hydrated="true"]').waitFor()
+
     if (readySelector) {
         await page.locator(readySelector).first().waitFor({ state: 'visible' })
     }

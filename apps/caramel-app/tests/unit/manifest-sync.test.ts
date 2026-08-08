@@ -20,25 +20,34 @@ import { describe, expect, it } from 'vitest'
 // (documented so the next agent doesn't "helpfully" force them together):
 //   * version           — Chrome and Firefox stores carry independent version
 //                          numbers; release-extension.yml bumps them separately.
-//   * permissions        — Chrome uses `identity`; Firefox uses `alarms` +
-//                          `management` (MV3 background/permission model differs).
+//   * permissions        — Chrome additionally holds `identity` (popup OAuth
+//                          via launchWebAuthFlow); the rest is shared.
 //   * host_permissions    — Chrome requests broad `https://*/*`; Firefox review
-//                          policy favours the narrow per-store list.
-//   * content_scripts.matches — broad (Chrome) vs the explicit store list (FF).
-//   * content_scripts.css — `caramel-content.css` is Chrome-only.
+//                          policy favours the narrow per-store + relay-origin list.
 //   * content_security_policy — Chrome-only key.
 //   * background          — `service_worker` (Chrome MV3) vs `scripts` (FF MV3).
-//   * cart-signals.js     — the LLM cart-classifier content script is Chrome-
-//                          only (see CHROME_ONLY_CONTENT_SCRIPTS).
+//
+// NO LONGER DIFFERENT (ba8c48f, 2026-08-04 — "stop the firefox manifest
+// injecting a different bundle than chrome"): host_permissions,
+// content_scripts.matches, content_scripts.css and the injected js list are
+// now identical in both manifests. Firefox had been shipping a narrow
+// hand-listed store set while Chrome matched every https origin, so Firefox
+// users silently got the extension on almost no stores and never got
+// cart-signals.js at all.
+//
+// That commit left THIS file asserting the opposite — that cart-signals.js is
+// Chrome-only — so these two tests failed from the moment the bug was fixed.
+// Content-script parity is now owned, closer to the manifests themselves, by
+// apps/caramel-extension/tests/manifest-parity.test.mjs (same scripts and
+// order, same stylesheets, same matches, same host permissions, cart-signals
+// first). Re-asserting it here would be a second copy free to drift again in
+// the other direction, which is the exact failure mode this file exists to
+// prevent — so the stale duplicates are gone rather than inverted.
 
 const EXTENSION_DIR = path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),
     '../../../caramel-extension',
 )
-
-// The one content script that legitimately ships to Chrome but not Firefox.
-// Every OTHER content script must appear in BOTH manifests, in the same order.
-const CHROME_ONLY_CONTENT_SCRIPTS = ['cart-signals.js'] as const
 
 interface ContentScript {
     js?: string[]
@@ -92,27 +101,9 @@ describe('R-04: extension manifests stay in sync on shared fields', () => {
         expect(firefox.content_scripts).toHaveLength(1)
     })
 
-    it('shared content-script js list matches (order-sensitive), Chrome minus the Chrome-only scripts', () => {
-        const chromeOnly: readonly string[] = CHROME_ONLY_CONTENT_SCRIPTS
-        const chromeShared = (chrome.content_scripts?.[0].js ?? []).filter(
-            f => !chromeOnly.includes(f),
-        )
-        const firefoxJs = firefox.content_scripts?.[0].js ?? []
-        // Guards against the classic bug: a new shared content script added to
-        // one manifest's ordered load list but forgotten in the other.
-        expect(firefoxJs).toEqual(chromeShared)
-    })
-
     it('content-script run_at agrees (both default / undefined, or both equal)', () => {
         expect(firefox.content_scripts?.[0].run_at).toEqual(
             chrome.content_scripts?.[0].run_at,
         )
-    })
-
-    it('Chrome-only content scripts appear ONLY in the Chrome manifest', () => {
-        const firefoxJs = firefox.content_scripts?.[0].js ?? []
-        for (const chromeOnly of CHROME_ONLY_CONTENT_SCRIPTS) {
-            expect(firefoxJs.includes(chromeOnly)).toBe(false)
-        }
     })
 })

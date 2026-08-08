@@ -105,3 +105,53 @@ describe('CouponsSection filter metadata (NF-06)', () => {
         })
     })
 })
+
+describe('CouponsSection SSR hydration (server-rendered coupon pages)', () => {
+    const ssrCoupon = {
+        id: '7',
+        code: 'SSR10',
+        site: 'example.com',
+        title: 'SSR-rendered coupon',
+        description: '10% off',
+        rating: 4,
+        discount_type: 'PERCENTAGE',
+        discount_amount: 10,
+        expiry: null,
+        expired: false,
+        timesUsed: 0,
+        lastWorkedAt: null,
+    }
+
+    it('keeps server-provided coupons on mount and never refetches /api/coupons (the old filter effect wiped SSR content with a duplicate fetch)', async () => {
+        render(
+            <CouponsSection
+                initialCoupons={[ssrCoupon]}
+                initialTotal={1}
+                disableInitialFetch
+            />,
+        )
+
+        // The SSR rows must stay rendered…
+        expect(screen.getByText('SSR-rendered coupon')).toBeTruthy()
+
+        // …and once the (legitimate) filters-metadata fetch has happened, no
+        // /api/coupons listing call may have been made at any point.
+        await waitFor(() => {
+            const calls = (fetch as ReturnType<typeof vi.fn>).mock.calls.map(
+                ([u]) => String(u),
+            )
+            expect(calls.some(u => u.includes('/api/coupons/filters'))).toBe(
+                true,
+            )
+        })
+        const listingCalls = (fetch as ReturnType<typeof vi.fn>).mock.calls
+            .map(([u]) => String(u))
+            .filter(
+                u =>
+                    u.includes('/api/coupons') &&
+                    !u.includes('/api/coupons/filters'),
+            )
+        expect(listingCalls).toEqual([])
+        expect(screen.getByText('SSR-rendered coupon')).toBeTruthy()
+    })
+})

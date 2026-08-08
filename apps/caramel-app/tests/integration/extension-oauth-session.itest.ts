@@ -1,6 +1,7 @@
 import {
     ExtensionOAuthEmailRequiredError,
     mintExtensionSession,
+    mintExtensionSessionForUser,
 } from '@/lib/auth/extensionOAuthSession'
 import prisma from '@/lib/prisma'
 import { afterAll, describe, expect, it } from 'vitest'
@@ -121,6 +122,40 @@ describe('extension OAuth session mint (F-007) — real DB constraints', () => {
             where: { userId: users[0].id },
         })
         expect(sessionsAfterSecond).toHaveLength(2)
+    })
+
+    it('mintExtensionSessionForUser (website→extension relay) issues a fresh session for an existing user and null for a missing one', async () => {
+        // Reuses the user created by the re-auth test above (this suite runs
+        // sequentially — fileParallelism off).
+        const user = await prisma.user.findFirst({ where: { email: EMAIL } })
+        expect(user).not.toBeNull()
+
+        const sessionsBefore = await prisma.session.count({
+            where: { userId: user!.id },
+        })
+        const relayed = await mintExtensionSessionForUser(user!.id)
+        expect(relayed).not.toBeNull()
+        expect(relayed!.token).toBeTruthy()
+        expect(relayed!.username).toBe('Updated Name')
+
+        // Same raw-token contract as the OAuth mint: a real Session row whose
+        // token IS the returned bearer credential, ~7-day expiry.
+        const row = await prisma.session.findFirst({
+            where: { token: relayed!.token },
+        })
+        expect(row).not.toBeNull()
+        expect(row!.userId).toBe(user!.id)
+        expect(row!.expiresAt.getTime()).toBeGreaterThan(
+            Date.now() + 6 * 24 * 60 * 60 * 1000,
+        )
+        expect(
+            await prisma.session.count({ where: { userId: user!.id } }),
+        ).toBe(sessionsBefore + 1)
+
+        // Deleted-account-with-live-cookie edge: no throw, just null.
+        expect(
+            await mintExtensionSessionForUser(`missing-user-${UNIQUE}`),
+        ).toBeNull()
     })
 
     it('throws ExtensionOAuthEmailRequiredError when no user exists and the provider gave no email', async () => {

@@ -8,9 +8,17 @@ body {
     overflow: hidden; /* Keep extension popup from scrolling */
 }
 body {
-    /* Fluid: full popup width up to the classic 420px cap, so narrow
-       viewports (Firefox overflow menu, small windows) never clip. */
-    width: min(420px, 100vw);
+    /* NEVER size the popup with viewport units. A browser-action popup is
+       sized FROM its content, so `vw` is circular: Chrome lays out with a
+       tiny initial viewport, `100vw` resolves to that, the body shrinks to
+       match, and the popup never recovers — it renders as a ~35px column,
+       320-600px tall, filled with --cm-bg. In dark mode that reads as a
+       plain black rectangle (reported 2026-08-04; was `min(420px, 100vw)`).
+       A definite width gives Chrome something to measure; `max-width: 100%`
+       resolves against <html>, not the viewport, so narrow hosts (Firefox's
+       overflow menu) still clamp instead of clipping. */
+    width: 420px;
+    max-width: 100%;
     /* Size the popup to its content (Chrome grows/shrinks the popup to fit the
        body) so short lists don't waste space and long lists get room — the
        coupon list caps its own height and scrolls. min-height keeps empty/error
@@ -314,6 +322,15 @@ body {
     height: 18px;
 }
 
+/* Shown only when popup OAuth is unavailable (Firefox — no identity
+   permission) and the buttons fall back to website sign-in + relay. */
+.oauth-note {
+    margin: 8px 0 0;
+    text-align: center;
+    color: var(--cm-text-muted);
+    font-size: var(--cm-text-xs);
+}
+
 .oauth-divider {
     display: flex;
     align-items: center;
@@ -453,8 +470,17 @@ body {
        (overflow:hidden) and clips the header / list bottom. Adapts to the
        popup viewport; the list scrolls internally for long lists.
        overscroll-behavior:contain stops macOS rubber-band scroll-chaining.
-       Fixed cap (popup is content-sized now): ~3 cards, then scroll. */
-    max-height: 360px;
+       Fixed cap (popup is content-sized now): ~3 cards, then scroll.
+
+       320, not 360: everything stacked above the list inside body's 600px
+       ceiling — header, profile row, SAVINGS BANNER, list heading — measures
+       ~279px once a user has banked a saving, so a 360px list overflowed the
+       card by ~39px. body is overflow:hidden, so that surplus wasn't merely
+       ugly: the last coupon was sliced mid-card and the bottom of the scroll
+       viewport sat below the popup, permanently unreachable. The banner is
+       the newest of those blocks, which is exactly how a cap that once fit
+       stopped fitting. tests/popup-sizing.test.mjs pins the arithmetic. */
+    max-height: 320px;
     overflow-y: auto;
     overflow-x: hidden;
     overscroll-behavior: contain;
@@ -952,4 +978,104 @@ body {
 .popup-container a:focus:not(:focus-visible),
 .popup-container button:focus:not(:focus-visible) {
     outline: none;
+}
+
+/* --- Savings banner (popup views + settings) --- */
+.savings-banner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 10px 0 4px;
+    padding: 9px 12px;
+    background: var(--cm-brand-soft-2);
+    border: 1px dashed var(--cm-border-dashed);
+    border-radius: var(--cm-radius-md);
+    color: var(--cm-text-primary);
+    font-size: var(--cm-text-sm);
+}
+.savings-banner svg {
+    flex: none;
+    color: var(--cm-brand);
+}
+.savings-banner b {
+    color: var(--cm-brand-strong);
+}
+
+/* --- Settings view --- */
+.settings-view {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 4px 2px;
+}
+.settings-title {
+    margin: 2px 0 4px;
+    font-size: var(--cm-text-md);
+    color: var(--cm-text-primary);
+}
+.settings-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+    background: var(--cm-surface);
+    border: 1px solid var(--cm-border);
+    border-radius: var(--cm-radius-md);
+    cursor: pointer;
+}
+.settings-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+.settings-copy span {
+    font-size: var(--cm-text-base);
+    color: var(--cm-text-primary);
+    overflow-wrap: anywhere;
+}
+.settings-copy small {
+    font-size: var(--cm-text-xs);
+    color: var(--cm-text-secondary);
+}
+/* Checkbox drawn as a brand toggle switch. */
+.settings-switch {
+    appearance: none;
+    flex: none;
+    width: 36px;
+    height: 20px;
+    margin: 0;
+    background: var(--cm-border-dim-hover);
+    border-radius: var(--cm-radius-pill);
+    position: relative;
+    cursor: pointer;
+    transition: background var(--cm-dur) var(--cm-ease);
+}
+.settings-switch::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+    background: var(--cm-on-brand);
+    border-radius: 50%;
+    box-shadow: var(--cm-shadow-card);
+    transition: transform var(--cm-dur) var(--cm-ease);
+}
+.settings-switch:checked {
+    background: var(--cm-brand);
+}
+.settings-switch:checked::after {
+    transform: translateX(16px);
+}
+.account-link {
+    align-self: flex-start;
+    font-size: var(--cm-text-sm);
+    color: var(--cm-brand-strong);
+    text-decoration: none;
+}
+.account-link:hover {
+    text-decoration: underline;
 }

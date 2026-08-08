@@ -39,6 +39,11 @@ jobs:
         run: pnpm run test
       - name: Check bundle size
         run: pnpm run size
+      # Proves the allowlist in scripts/build-dist.mjs actually produces a
+      # loadable package — tests/package-contents.test.mjs checks the file list,
+      # this checks the build runs and lands the files it promises.
+      - name: Build the store package
+        run: pnpm run build
 
   # ─────────────────────────────────────────────────────────────
   # Extension E2E (E-02) — real Chromium + unpacked extension + local app
@@ -139,3 +144,21 @@ jobs:
         run: |
           sudo apt-get -yqq install xvfb
           xvfb-run --auto-servernum pnpm --filter caramel-extension test:e2e
+
+      # ─────────────────────────────────────────────────────────────
+      # Guard suite — the bad-config safety proofs
+      # ─────────────────────────────────────────────────────────────
+      # Runs scripts/test-guards.mjs against the PACKAGED build, so it also
+      # proves what actually ships is loadable. Needs no app and no network:
+      # the store origin is route-intercepted and the caramel API is stubbed
+      # inside the service worker, against a frozen production store config.
+      # Covers the two things the unit suite structurally cannot — inventing a
+      # savings figure, and clicking a checkout's order button — because
+      # savings-plausibility.test.mjs stubs applyCoupon out entirely.
+      - name: Build the store package
+        run: pnpm --filter caramel-extension run build
+
+      - name: Run extension guard suite (packaged build)
+        env:
+          CARAMEL_EXT_DIR: ./dist
+        run: xvfb-run --auto-servernum pnpm --filter caramel-extension test:guards

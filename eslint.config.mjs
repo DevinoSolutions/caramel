@@ -78,6 +78,14 @@ export default [
             // env.client.ts's schema + .env.example — only this call site's
             // read is dynamic (see the file's own header comment).
             '**/src/lib/securityHelpers/decryptJsonData.ts',
+            // Documented exception (2026-08-06): buildInfo.ts holds the commit
+            // next.config.mjs's `env` inlines at BUILD time, by rewriting that
+            // exact `process.env.GIT_COMMIT_SHA` expression into a string
+            // literal. env.ts parses `process.env` as an object and so offers
+            // the inliner nothing to rewrite — routing this through the env
+            // door would yield undefined at runtime, since nothing sets the
+            // var in the running container (see the file's own header).
+            '**/src/lib/buildInfo.ts',
         ],
         rules: {
             'no-restricted-syntax': [
@@ -87,6 +95,35 @@ export default [
                         "MemberExpression[object.object.name='process'][object.property.name='env']:not([property.name=/^(NODE_ENV|NEXT_RUNTIME)$/])",
                     message:
                         'Read env only through src/lib/env.ts (server) or src/lib/env.client.ts (client) — the zod-validated env door (DESIGN.md §1). process.env.NODE_ENV / NEXT_RUNTIME (framework flags) are exempt.',
+                },
+            ],
+        },
+    },
+    {
+        // Reduced-motion door — "rules become checks". framer-motion's
+        // useReducedMotion returns null on the server and the REAL preference
+        // on the first client render, so every prop branching on it (framer
+        // serializes initial/animate into the SSR'd style attribute) makes the
+        // hydrating render disagree with the server HTML. React then throws the
+        // whole tree away, which silently drops in-flight interactions — that
+        // is what broke the navigation e2e specs when the public pages started
+        // server-rendering. src/lib/reducedMotion.ts is the hydration-safe
+        // replacement; keep the raw hook out so this cannot come back.
+        // `**/src/**` for the same dual-invocation-base reason as the blocks
+        // above (root husky cwd vs apps/caramel-app cwd).
+        files: ['**/src/**/*.{ts,tsx}'],
+        rules: {
+            'no-restricted-imports': [
+                'error',
+                {
+                    paths: [
+                        {
+                            name: 'framer-motion',
+                            importNames: ['useReducedMotion'],
+                            message:
+                                "Import useReducedMotion from '@/lib/reducedMotion' — framer's version is not hydration-safe (returns null server-side, the real value on the first client render) and its mismatch regenerates the server tree.",
+                        },
+                    ],
                 },
             ],
         },

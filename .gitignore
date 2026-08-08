@@ -20,3 +20,15 @@ apps/caramel-app/scripts/internal/
 # Internal audit archive (cycle artifacts, findings, onload prompts) — kept
 # locally by maintainers, never published (same policy as scripts/internal).
 /audit/
+/.playwright-mcp/
+
+# Throwaway QA repros and exploration scripts. Lives INSIDE the repo (not the
+# system temp dir) purely so a script here still resolves workspace deps like
+# playwright from the root node_modules. Nothing here is ever committed — a
+# fresh session must not be able to mistake a fossil repro for live tasking.
+/.scratch/
+
+# ext-probe run output: full logs, screenshots and the disposable browser
+# profile each run creates and deletes (tools/ext-probe/README.md). Evidence
+# from a specific run, never repo content.
+/.ext-probe/

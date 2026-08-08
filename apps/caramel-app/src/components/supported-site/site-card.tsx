@@ -11,7 +11,11 @@ export default function SiteCard({ site }: { site: string }) {
     const href = `/coupons/${encodeURIComponent(site)}`
 
     return (
-        <Link href={href} prefetch className="block">
+        <Link
+            href={href}
+            prefetch
+            className="block rounded-3xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 dark:focus-visible:ring-offset-darkBg"
+        >
             <motion.div
                 whileHover={{ scale: 1.04 }}
                 className="flex items-center gap-5 rounded-3xl border border-caramel/20 bg-gradient-to-br from-caramel/5 via-orange-50/20 to-caramel/5 p-6 shadow-md transition-shadow hover:shadow-lg dark:border-caramel/30 dark:from-caramel/10 dark:via-orange-900/10 dark:to-caramel/10 sm:gap-4 sm:p-5"

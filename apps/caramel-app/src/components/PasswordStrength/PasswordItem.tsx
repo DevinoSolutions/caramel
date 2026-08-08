@@ -12,14 +12,14 @@ const PasswordItem = ({ itemChecker }: PasswordItemProps) => {
     return (
         <>
             <div
-                className={`rounded-full fill-current p-1 ${
+                className={`rounded-full fill-current p-1 transition-colors ${
                     itemChecker.term
-                        ? 'bg-green-200 text-green-700'
-                        : 'bg-red-200 text-red-700'
+                        ? 'bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-400'
+                        : 'bg-red-100 text-red-600 dark:bg-red-500/20 dark:text-red-400'
                 } `}
             >
                 <svg
-                    className="h-4 w-4"
+                    className="h-3.5 w-3.5"
                     fill="none"
                     viewBox="0 0 24 24"
                     stroke="currentColor"
@@ -41,8 +41,10 @@ const PasswordItem = ({ itemChecker }: PasswordItemProps) => {
                 </svg>
             </div>
             <span
-                className={`ml-3 text-sm font-medium ${
-                    itemChecker.term ? 'text-green-700' : 'text-red-700'
+                className={`ml-2.5 text-sm font-medium transition-colors ${
+                    itemChecker.term
+                        ? 'text-green-700 dark:text-green-400'
+                        : 'text-red-600 dark:text-red-400'
                 } `}
             >
                 {itemChecker.term

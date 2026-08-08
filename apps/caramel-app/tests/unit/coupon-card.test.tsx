@@ -64,3 +64,25 @@ describe('CouponCard — worked-ago trust line (W1)', () => {
         expect(screen.queryByText(/worked \d/)).toBeNull()
     })
 })
+
+describe('CouponCard — discount badge claim integrity', () => {
+    it('shows the real discount when the catalog has one', () => {
+        render(<CouponCard coupon={baseCoupon} index={0} />)
+
+        expect(screen.getByText('10%')).toBeTruthy()
+        expect(screen.getByText('off')).toBeTruthy()
+    })
+
+    it('falls back to a number-free DEAL badge when no discount amount exists (never a fabricated "20%")', () => {
+        render(
+            <CouponCard
+                coupon={{ ...baseCoupon, discount_amount: null }}
+                index={0}
+            />,
+        )
+
+        expect(screen.getByText('DEAL')).toBeTruthy()
+        expect(screen.queryByText('20%')).toBeNull()
+        expect(screen.queryByText('off')).toBeNull()
+    })
+})

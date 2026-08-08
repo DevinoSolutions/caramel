@@ -4,7 +4,12 @@ test.describe('Coupons Page', () => {
     test('coupons page loads with content', async ({ page }) => {
         await page.goto('/coupons')
 
-        await expect(page.getByText(/all coupons/i).first()).toBeVisible()
+        await expect(
+            page.getByRole('heading', {
+                level: 1,
+                name: /verified coupon codes/i,
+            }),
+        ).toBeVisible()
         await expect(page.getByText(/browse.*coupon/i).first()).toBeVisible()
     })
 
@@ -122,6 +127,23 @@ test.describe('Supported Stores Page', () => {
         // The page should have a search or list of stores
         await expect(page.locator('body')).toContainText(/supported|stores/i)
     })
+
+    // Deployment-safe SSR/SEO gate (both e2e contexts — docs/testing.md
+    // two-context rule): fetch the RAW server HTML, no JS execution, exactly
+    // what a crawler gets. Before the SSR change the "Top Supported Websites"
+    // grid only appeared after a client fetch of /api/sites/top-sites, so the
+    // crawler HTML had no store content at all. The catalog is never
+    // legitimately empty in either context (see the coupon-card test above),
+    // so the top-sites heading must be present in the initial HTML.
+    test('server HTML contains the top supported websites (crawler view)', async ({
+        page,
+    }) => {
+        const res = await page.request.get('/supported-stores')
+        expect(res.ok()).toBe(true)
+        const html = await res.text()
+        expect(html).toContain('Is your favourite store supported?')
+        expect(html).toContain('Top Supported Websites')
+    })
 })
 
 test.describe('Sources Page', () => {
@@ -130,5 +152,37 @@ test.describe('Sources Page', () => {
 
         // The page should show coupon source information
         await expect(page.locator('body')).toContainText(/source/i)
+    })
+
+    // Deployment-safe SSR/SEO gate (both e2e contexts): raw server HTML must
+    // carry the sources table already resolved — the pre-SSR page served a
+    // "Loading..." placeholder row and fetched /api/sources client-side, so
+    // crawlers saw no data. "Loading..." only renders while a client refetch
+    // is in flight, never in the server HTML anymore.
+    test('server HTML contains the sources table (crawler view)', async ({
+        page,
+    }) => {
+        const res = await page.request.get('/sources')
+        expect(res.ok()).toBe(true)
+        const html = await res.text()
+        expect(html).toContain('Caramel coupon sources')
+        expect(html).not.toContain('Loading...')
+    })
+
+    // HERMETIC-ONLY (docs/testing.md two-context rule): asserts the SPECIFIC
+    // synthetic seed sources, which only exist in the fresh-seeded e2e-pr/
+    // local DB — the deployed dev site serves real pipeline sources instead.
+    // See prisma/migrations/20260714220157_catalog_seed/migration.sql.
+    test('server HTML renders the synthetic seed sources (hermetic DB only)', async ({
+        page,
+    }) => {
+        test.skip(
+            !process.env.DATABASE_URL,
+            'asserts synthetic catalog_seed sources rows — only present in the hermetic e2e-pr/local DB (docs/testing.md two-context rule)',
+        )
+        const res = await page.request.get('/sources')
+        const html = await res.text()
+        expect(html).toContain('Caramel Sample Feed A')
+        expect(html).toContain('Caramel Sample Feed B')
     })
 })

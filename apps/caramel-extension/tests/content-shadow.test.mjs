@@ -145,6 +145,104 @@ describe('UI-helpers.js — Shadow DOM hosts (Phase 3)', () => {
         expect(document.getElementById('caramel-final-overlay')).toBeNull()
     })
 
+    // --- immunity to bad catalog data -------------------------------------
+    // Configs and scraped coupon rows are refined continuously; the extension
+    // must stay presentable while they are still wrong. These pin the two
+    // user-visible ways bad data used to leak into the UI.
+
+    it('drops a scraped title that advertises a zero discount (never shows "0% off")', async () => {
+        await showFinalModal(0, null, null, false, [
+            { code: 'ZERO1', title: 'Score 0% off with coupon code' },
+            { code: 'ZERO2', title: 'Save $0.00 on your order' },
+            { code: 'REAL1', title: '10% Off Your Purchase' },
+        ])
+        const root = document.getElementById('caramel-final-overlay').shadowRoot
+        // the modal only — the shadow root also holds the <style> element,
+        // whose keyframes legitimately contain "0%"
+        const text = root.querySelector('.caramel-final-modal').textContent
+
+        expect(text).not.toContain('Score 0% off with coupon code')
+        expect(text).not.toContain('Save $0.00 on your order')
+        // the codes themselves are still offered — a worthless-sounding title
+        // must not hide a code that may well work
+        expect(text).toContain('ZERO1')
+        expect(text).toContain('ZERO2')
+        // a genuine title survives untouched, and is the ONLY one rendered
+        const titles = [...root.querySelectorAll('.caramel-manual-title')].map(
+            n => n.textContent,
+        )
+        expect(titles).toEqual(['10% Off Your Purchase'])
+    })
+
+    it('escapes the message — a hostile page cannot inject markup via the handoff', async () => {
+        // `message` arrives from sessionStorage, which the HOST PAGE can write.
+        await showFinalModal(
+            0,
+            null,
+            '<img src=x onerror="globalThis.__caramelPwned=1">hi',
+        )
+        const root = document.getElementById('caramel-final-overlay').shadowRoot
+        const msg = root.querySelector('.caramel-final-msg')
+
+        // scoped to the message — the modal has its own legitimate logo <img>
+        expect(msg.querySelector('img')).toBeNull()
+        expect(globalThis.__caramelPwned).toBeUndefined()
+        // rendered as visible text, not parsed as markup
+        expect(msg.textContent).toContain('<img src=x')
+        expect(msg.children.length).toBe(0)
+    })
+
+    it('reports the saving in the currency the cart was priced in, not a hardcoded $', async () => {
+        const el = document.createElement('div')
+        el.id = 'cm-total'
+        // jsdom leaves innerText undefined; getPrice reads it.
+        Object.defineProperty(el, 'innerText', {
+            value: 'Total £42.00',
+            configurable: true,
+        })
+        document.body.appendChild(el)
+        // Reading the price is what teaches the UI the currency.
+        globalThis.getPrice('#cm-total', { returnLargest: true })
+
+        await showFinalModal(8, 'GBPCODE')
+        const root = document.getElementById('caramel-final-overlay').shadowRoot
+        const savings = root.querySelector('.caramel-final-savings').textContent
+        expect(savings).toBe('£8.00')
+    })
+
+    it('sinks codes the store rejected below the untried ones, and labels them', async () => {
+        // The runner flags a coupon `rejected` only when the store gave a real
+        // rejection message. Leading with codes the user just watched fail
+        // reads as if the extension learned nothing from its own run.
+        await showFinalModal(0, null, null, false, [
+            { code: 'DEAD1', title: '40% off', rejected: true },
+            { code: 'FRESH1', title: '20% off' },
+            { code: 'DEAD2', title: '10% off', rejected: true },
+            { code: 'FRESH2', title: '5% off' },
+        ])
+        const root = document.getElementById('caramel-final-overlay').shadowRoot
+
+        const order = [...root.querySelectorAll('.caramel-manual-code')].map(
+            n => n.textContent,
+        )
+        // untried first, in their original order; rejected last, likewise
+        expect(order).toEqual(['FRESH1', 'FRESH2', 'DEAD1', 'DEAD2'])
+
+        // nothing is hidden — a store's "invalid" is not always the last word
+        expect(root.querySelectorAll('.caramel-manual-row').length).toBe(4)
+
+        // a rejected row says so INSTEAD of advertising its discount
+        const dead = root.querySelectorAll('.caramel-manual-row-rejected')
+        expect(dead.length).toBe(2)
+        expect(dead[0].textContent).toContain('Store rejected this one')
+        expect(dead[0].textContent).not.toContain('40% off')
+        // …while an untried row keeps its title
+        expect(order.indexOf('FRESH1')).toBe(0)
+        expect(root.querySelector('.caramel-manual-row').textContent).toContain(
+            '20% off',
+        )
+    })
+
     it('final-modal focus trap engages on Tab (cycles within the shadow root, never the page)', async () => {
         // Manual-code list → multiple focusables inside the dialog.
         await showFinalModal(0, null, null, false, [

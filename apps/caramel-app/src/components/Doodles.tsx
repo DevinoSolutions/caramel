@@ -1,14 +1,22 @@
+'use client'
+
+import { useReducedMotion } from '@/lib/reducedMotion'
 import { motion } from 'framer-motion'
 
 const Doodles = () => {
+    const reduceMotion = useReducedMotion()
+
     return (
-        <div className="pointer-events-none fixed z-[1] h-full w-full">
+        <div
+            aria-hidden="true"
+            className="pointer-events-none fixed z-[1] h-full w-full"
+        >
             {/* Top Right Circle */}
             <motion.svg
                 className="absolute -right-48 top-0 h-[40vw] max-h-[500px] w-[40vw] max-w-[500px] -translate-y-1/2 lg:-right-16 lg:top-12"
                 viewBox="0 0 200 200"
                 fill="none"
-                initial={{ opacity: 0, scale: 0.7 }}
+                initial={reduceMotion ? false : { opacity: 0, scale: 0.7 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ duration: 1.2, ease: 'easeOut' }}
             >
@@ -19,11 +27,15 @@ const Doodles = () => {
                     strokeLinecap="round"
                     strokeLinejoin="round"
                     strokeOpacity="0.15"
-                    initial={{ pathLength: 0 }}
-                    animate={{
-                        pathLength: [0, 1, 1, 1],
-                        rotate: [0, 0, 360, 360],
-                    }}
+                    initial={reduceMotion ? false : { pathLength: 0 }}
+                    animate={
+                        reduceMotion
+                            ? undefined
+                            : {
+                                  pathLength: [0, 1, 1, 1],
+                                  rotate: [0, 0, 360, 360],
+                              }
+                    }
                     transition={{
                         duration: 14,
                         ease: 'easeInOut',
@@ -36,10 +48,14 @@ const Doodles = () => {
                     r="5"
                     fill="#ea6925"
                     fillOpacity="0.2"
-                    animate={{
-                        scale: [1, 1.6, 1, 1],
-                        opacity: [0.2, 0.5, 0.2, 0.2],
-                    }}
+                    animate={
+                        reduceMotion
+                            ? undefined
+                            : {
+                                  scale: [1, 1.6, 1, 1],
+                                  opacity: [0.2, 0.5, 0.2, 0.2],
+                              }
+                    }
                     transition={{
                         duration: 14,
                         ease: 'easeInOut',
@@ -53,7 +69,7 @@ const Doodles = () => {
                 className="absolute -left-32 top-[75vh] h-[32vw] max-h-[400px] w-[32vw] max-w-[400px] -translate-y-1/2 lg:-left-8"
                 viewBox="0 0 200 200"
                 fill="none"
-                initial={{ opacity: 0, scale: 0.7 }}
+                initial={reduceMotion ? false : { opacity: 0, scale: 0.7 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ duration: 1.2, ease: 'easeOut', delay: 0.6 }}
             >
@@ -64,11 +80,15 @@ const Doodles = () => {
                     strokeLinecap="round"
                     strokeLinejoin="round"
                     strokeOpacity="0.15"
-                    initial={{ pathLength: 0 }}
-                    animate={{
-                        pathLength: [0, 1, 1, 1],
-                        rotate: [0, 0, -360, -360], // Counter-clockwise rotation
-                    }}
+                    initial={reduceMotion ? false : { pathLength: 0 }}
+                    animate={
+                        reduceMotion
+                            ? undefined
+                            : {
+                                  pathLength: [0, 1, 1, 1],
+                                  rotate: [0, 0, -360, -360], // Counter-clockwise rotation
+                              }
+                    }
                     transition={{
                         duration: 14,
                         ease: 'easeInOut',
@@ -82,10 +102,14 @@ const Doodles = () => {
                     r="5"
                     fill="#da7f52"
                     fillOpacity="0.2"
-                    animate={{
-                        scale: [1, 1.6, 1, 1],
-                        opacity: [0.2, 0.5, 0.2, 0.2],
-                    }}
+                    animate={
+                        reduceMotion
+                            ? undefined
+                            : {
+                                  scale: [1, 1.6, 1, 1],
+                                  opacity: [0.2, 0.5, 0.2, 0.2],
+                              }
+                    }
                     transition={{
                         duration: 14,
                         ease: 'easeInOut',
@@ -99,12 +123,16 @@ const Doodles = () => {
             <motion.div
                 className="absolute left-[15vw] top-[15vh] h-6 w-6 border-2 border-[#ea6925]/20"
                 style={{ clipPath: 'polygon(50% 0%, 0% 100%, 100% 100%)' }}
-                animate={{
-                    y: [0, -25, 0, 0],
-                    x: [0, 15, 0, 0],
-                    rotate: [0, 0, 180, 180],
-                    scale: [1, 1.3, 1, 1],
-                }}
+                animate={
+                    reduceMotion
+                        ? undefined
+                        : {
+                              y: [0, -25, 0, 0],
+                              x: [0, 15, 0, 0],
+                              rotate: [0, 0, 180, 180],
+                              scale: [1, 1.3, 1, 1],
+                          }
+                }
                 transition={{
                     duration: 10,
                     repeat: Infinity,
@@ -120,12 +148,16 @@ const Doodles = () => {
                     clipPath:
                         'polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)',
                 }}
-                animate={{
-                    y: [0, 20, 0, 0],
-                    x: [0, -10, 0, 0],
-                    rotate: [0, 0, 360, 360],
-                    scale: [1, 1.2, 1, 1],
-                }}
+                animate={
+                    reduceMotion
+                        ? undefined
+                        : {
+                              y: [0, 20, 0, 0],
+                              x: [0, -10, 0, 0],
+                              rotate: [0, 0, 360, 360],
+                              scale: [1, 1.2, 1, 1],
+                          }
+                }
                 transition={{
                     duration: 14,
                     repeat: Infinity,
@@ -138,11 +170,15 @@ const Doodles = () => {
             {/* Rotating Rectangle */}
             <motion.div
                 className="absolute left-[25vw] top-[35vh] h-10 w-3 rounded-full bg-[#ea6925]/10"
-                animate={{
-                    rotate: [0, 360, 360, 720],
-                    scale: [1, 1.15, 1, 1],
-                    opacity: [0.1, 0.3, 0.1, 0.1],
-                }}
+                animate={
+                    reduceMotion
+                        ? undefined
+                        : {
+                              rotate: [0, 360, 360, 720],
+                              scale: [1, 1.15, 1, 1],
+                              opacity: [0.1, 0.3, 0.1, 0.1],
+                          }
+                }
                 transition={{
                     duration: 20,
                     repeat: Infinity,
@@ -154,12 +190,16 @@ const Doodles = () => {
             {/* Pulsing Ring */}
             <motion.div
                 className="absolute right-[30vw] top-[75vh] h-8 w-8 rounded-full border-2 border-[#da7f52]/25"
-                animate={{
-                    y: [0, -30, 0, 0],
-                    scale: [1, 0.9, 1, 1],
-                    borderWidth: [2, 5, 2, 2],
-                    opacity: [0.25, 0.5, 0.25, 0.25],
-                }}
+                animate={
+                    reduceMotion
+                        ? undefined
+                        : {
+                              y: [0, -30, 0, 0],
+                              scale: [1, 0.9, 1, 1],
+                              borderWidth: [2, 5, 2, 2],
+                              opacity: [0.25, 0.5, 0.25, 0.25],
+                          }
+                }
                 transition={{
                     duration: 8,
                     repeat: Infinity,
@@ -174,10 +214,14 @@ const Doodles = () => {
                 className="absolute right-[35vw] top-[25vh] h-10 w-10 opacity-15"
                 viewBox="0 0 24 24"
                 fill="none"
-                animate={{
-                    rotate: [0, 0, 360, 360, 360],
-                    scale: [1, 1.1, 1, 1, 1],
-                }}
+                animate={
+                    reduceMotion
+                        ? undefined
+                        : {
+                              rotate: [0, 0, 360, 360, 360],
+                              scale: [1, 1.1, 1, 1, 1],
+                          }
+                }
                 transition={{
                     duration: 25,
                     repeat: Infinity,
@@ -199,11 +243,15 @@ const Doodles = () => {
                 className="absolute left-[30vw] top-[65vh] h-9 w-9 opacity-20"
                 viewBox="0 0 24 24"
                 fill="none"
-                animate={{
-                    rotate: [0, 0, 180, 180, 360, 360],
-                    scale: [1, 1.25, 1, 1, 1, 1],
-                    opacity: [0.2, 0.4, 0.2, 0.2, 0.2, 0.2],
-                }}
+                animate={
+                    reduceMotion
+                        ? undefined
+                        : {
+                              rotate: [0, 0, 180, 180, 360, 360],
+                              scale: [1, 1.25, 1, 1, 1, 1],
+                              opacity: [0.2, 0.4, 0.2, 0.2, 0.2, 0.2],
+                          }
+                }
                 transition={{
                     duration: 18,
                     repeat: Infinity,
@@ -222,11 +270,15 @@ const Doodles = () => {
             {/* Floating Dot Cluster */}
             <motion.div
                 className="absolute right-[10vw] top-[45vh] h-4 w-4 rounded-full bg-[#ea6925]/20"
-                animate={{
-                    y: [0, -15, 0, 0],
-                    x: [0, 10, 0, 0],
-                    scale: [1, 1.4, 1, 1],
-                }}
+                animate={
+                    reduceMotion
+                        ? undefined
+                        : {
+                              y: [0, -15, 0, 0],
+                              x: [0, 10, 0, 0],
+                              scale: [1, 1.4, 1, 1],
+                          }
+                }
                 transition={{
                     duration: 8,
                     repeat: Infinity,
@@ -237,11 +289,15 @@ const Doodles = () => {
             />
             <motion.div
                 className="absolute right-[12vw] top-[47vh] h-2 w-2 rounded-full bg-[#da7f52]/20"
-                animate={{
-                    y: [0, -10, 0, 0],
-                    x: [0, 5, 0, 0],
-                    scale: [1, 1.3, 1, 1],
-                }}
+                animate={
+                    reduceMotion
+                        ? undefined
+                        : {
+                              y: [0, -10, 0, 0],
+                              x: [0, 5, 0, 0],
+                              scale: [1, 1.3, 1, 1],
+                          }
+                }
                 transition={{
                     duration: 6,
                     repeat: Infinity,

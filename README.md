@@ -27,17 +27,17 @@ It automatically tests codes at checkout, never sells your data, and never overw
 - Firefox (AMO)
 - Safari for macOS and iOS – converted from the Chromium build and re‑skinned automatically during CI
 
-<a href="https://chromewebstore.google.com/detail/caramel/gaimofgglbackoimfjopicmbmnlccfoe" target="_blank" rel="noopener noreferrer">
-  <img width="150" height="90" alt="Chrome Web Store badge" src="https://github.com/user-attachments/assets/ac7a688a-9bcd-4073-a769-625e00ac6fa9" />
+<a href="https://chromewebstore.google.com/detail/caramel-trusted-honey-alt/gaimofgglbackoimfjopicmbmnlccfoe" target="_blank" rel="noopener noreferrer">
+  <img height="50" alt="Chrome Web Store badge" src="https://github.com/user-attachments/assets/ac7a688a-9bcd-4073-a769-625e00ac6fa9" />
 </a>
 <a href="https://apps.apple.com/ke/app/caramel/id6741873881" target="_blank" rel="noopener noreferrer">
-  <img width="150" height="90" alt="Download on the App Store badge" src="https://github.com/user-attachments/assets/4169c3ea-ebbd-4526-bafc-d4b82f38fbb1" />
+  <img height="50" alt="Download on the App Store badge" src="https://github.com/user-attachments/assets/4169c3ea-ebbd-4526-bafc-d4b82f38fbb1" />
 </a>
 <a href="https://addons.mozilla.org/en-US/firefox/addon/grabcaramel/" target="_blank" rel="noopener noreferrer">
-  <img width="150" height="90" alt="Firefox Add‑ons badge" src="https://github.com/user-attachments/assets/cc3f312c-15ec-4ce4-b821-af067f330dcd" />
+  <img height="50" alt="Firefox Add‑ons badge" src="https://github.com/user-attachments/assets/cc3f312c-15ec-4ce4-b821-af067f330dcd" />
 </a>
 <a href="https://microsoftedge.microsoft.com/addons/detail/caramel/leodahchedhnenmiengkfpmmcdendnof" target="_blank" rel="noopener noreferrer">
-  <img width="150" height="90" alt="Edge Add‑ons badge" src="https://github.com/user-attachments/assets/42934453-4bba-4dd3-9dd3-6e580066c923" />
+  <img height="50" alt="Edge Add‑ons badge" src="https://github.com/user-attachments/assets/42934453-4bba-4dd3-9dd3-6e580066c923" />
 </a>
 
 ## Getting Started

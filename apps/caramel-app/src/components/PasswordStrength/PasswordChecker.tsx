@@ -43,13 +43,13 @@ const PasswordChecker = ({
     ]
 
     return (
-        <div className="flex w-full justify-start">
-            <ul className="mt-5 grid w-full grid-cols-1 gap-2 xl:grid-cols-2 lg:grid-cols-2 sm:grid-cols-1">
+        <div className="w-full rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 dark:border-gray-700 dark:bg-darkBg">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                Password requirements
+            </p>
+            <ul className="grid w-full grid-cols-1 gap-1.5">
                 {checkList.map(itemChecker => (
-                    <li
-                        className="flex items-center py-1 pl-3"
-                        key={itemChecker.id}
-                    >
+                    <li className="flex items-center" key={itemChecker.id}>
                         <PasswordItem itemChecker={itemChecker} />
                     </li>
                 ))}

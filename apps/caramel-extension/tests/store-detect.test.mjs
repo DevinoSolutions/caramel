@@ -178,3 +178,43 @@ describe('store-detect.js startCheckoutDetection — SPA re-detection (D3)', () 
         )
     })
 })
+
+// A config is only safe if it is applied to the RIGHT site. The hostname
+// matcher decides that, so its boundaries are pinned here: every hyphenated
+// checkout host present in the live catalog must still resolve, while a
+// look-alike domain an attacker could register must not inherit a store's
+// selectors and coupons.
+describe('store-detect.js — hostname matching boundaries', () => {
+    const lookup = async (host, domains) => {
+        getDomainRecord.cache = domains.map(d => ({ domain: d }))
+        return getDomainRecord(host)
+    }
+
+    it.each([
+        ['secure-athleta.gap.com', 'athleta.gap.com'],
+        ['secure-oldnavy.gapcanada.ca', 'oldnavy.gapcanada.ca'],
+        [
+            'secure-bananarepublicfactory.gapfactory.com',
+            'bananarepublicfactory.gapfactory.com',
+        ],
+        ['secure-us.braun.com', 'us.braun.com'],
+        ['www.target.com', 'target.com'],
+        ['checkout.shopify-store.com', 'shopify-store.com'],
+        ['target.com', 'target.com'],
+    ])('matches real host %s to %s', async (host, domain) => {
+        expect(await lookup(host, [domain])).toEqual({ domain })
+    })
+
+    it.each([
+        // attacker-registered look-alikes
+        ['evil-target.com', 'target.com'],
+        ['nottarget.com', 'target.com'],
+        ['secure-target.com', 'target.com'],
+        ['target.com.attacker.net', 'target.com'],
+        // unrelated hosts that plain substring matching used to false-match
+        ['walmart.com', 'art.com'],
+        ['notbestbuy.com', 'bestbuy.com'],
+    ])('does NOT apply %s config to %s', async (host, domain) => {
+        expect(await lookup(host, [domain])).toBeUndefined()
+    })
+})

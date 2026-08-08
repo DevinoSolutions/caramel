@@ -2,21 +2,13 @@ import { handleRouteError } from '@/lib/api/handleRouteError'
 import { withRoute } from '@/lib/api/withRoute'
 import { attachSignals } from '@/lib/couponSignals'
 import { listCoupons } from '@/lib/couponsRepo'
+import { resolveStoreDomain } from '@/lib/storeDomain'
 import { NextResponse } from 'next/server'
 
-function getBaseDomain(raw: string): string | null {
-    let hostname = raw
-    try {
-        const u = new URL(raw.startsWith('http') ? raw : `https://${raw}`)
-        hostname = u.hostname
-    } catch {
-        return null
-    }
-    // Hostnames must be ASCII letters, digits, dots, and hyphens only
-    if (!/^[a-z0-9.-]+$/i.test(hostname)) return null
-    const parts = hostname.split('.')
-    return parts.length > 2 ? parts.slice(-2).join('.') : hostname
-}
+// Registrable domain via the Public Suffix List. Replaces a local
+// "last two labels" helper that collapsed mymemory.co.uk to the bare suffix
+// co.uk and then served every UK store's coupons — see resolveStoreDomain.
+const getBaseDomain = resolveStoreDomain
 
 export const GET = withRoute(
     { method: 'GET', routeName: 'coupons', rateLimit: 'read' },

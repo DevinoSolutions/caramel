@@ -5,6 +5,14 @@
  * caramel-content.css (light-DOM host rules only) must stay var-free.
  */
 :root {
+    /* Tells the UA to paint its own widgets — scrollbars above all — to match
+     * the active scheme. Without it the injected modal and its manual-code
+     * list (both overflow-y:auto) get a WHITE scrollbar track down the side of
+     * a dark surface, which is the one visual defect a dark-mode audit found.
+     * Declared here rather than per-component so it reaches every shadow root
+     * via the ':root' → ':host, :root' rewrite, and the popup document too. */
+    color-scheme: light dark;
+
     /* --- Brand --- */
     --cm-brand: #ea6925;
     --cm-brand-strong: #d65d1f;

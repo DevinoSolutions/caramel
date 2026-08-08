@@ -360,7 +360,13 @@ jobs:
     name: E2E & Visual Regression (push)
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # 20 of these belong to the deploy gate below, which waits out a full
+    # Dokploy Docker build before a single test runs; the rest is the old
+    # budget. 20 rather than 10 is measured: on 2026-08-07 a three-push burst
+    # queued builds back-to-back and 0a57362's deploy was still building when
+    # the 10-minute window closed — the gate refused correctly, but the red
+    # was queue latency, not a defect.
+    timeout-minutes: 35
     env:
       ARGOS_TOKEN: ${{ secrets.ARGOS_TOKEN }}
       ARGOS_API_BASE_URL: ${{ vars.ARGOS_API_BASE_URL }}
@@ -391,6 +397,27 @@ jobs:
       # verification creds are absent). TODO: once dev.grabcaramel.com ships with
       # NEXT_PUBLIC_POSTHOG_DATASET=e2e, add the same POSTHOG_E2E_* env here to
       # verify ingestion against the real deployed bundle.
+      # The step below tests the LIVE deployment, so this push races Dokploy's
+      # autodeploy of the same commit. Proven 2026-08-06: a625be9's own test
+      # failed at 14:40:44Z, two seconds before the deploy carrying its fix
+      # finished at 14:40:46Z. Wait for the site to report this exact commit.
+      #
+      # dev only: dev.grabcaramel.com is the root docker-compose/Dockerfile
+      # build, whose context carries the git metadata /api/version is stamped
+      # from. Prod is a Dokploy *Nixpacks* app built from apps/caramel-app,
+      # whose context excludes the repo's .git — it answers "unknown" and this
+      # gate could never pass there. Drop the condition when prod moves onto
+      # the root compose (RUNBOOK "Deploys & rollback").
+      - name: Wait for the deployment to carry this commit
+        if: github.ref == 'refs/heads/dev'
+        env:
+          VERSION_URL: https://dev.grabcaramel.com/api/version
+          EXPECTED_SHA: ${{ github.sha }}
+          # One full Docker build is ~10 min; a push burst queues builds
+          # back-to-back, so one queued-behind build fits inside 20.
+          DEPLOY_WAIT_TIMEOUT_SECONDS: '1200'
+        run: bash .github/workflows/scripts/wait-for-deploy.sh
+
       - name: Run E2E tests
         working-directory: ./apps/caramel-app
         env:
@@ -404,6 +431,82 @@ jobs:
         with:
           name: playwright-report-push
           path: apps/caramel-app/playwright-report/
+          retention-days: 14
+
+  # ─────────────────────────────────────────────────────────────
+  # Lighthouse (PR – prod build, SEO/a11y budgets)
+  # ─────────────────────────────────────────────────────────────
+  # Locks in the coupon-page SEO elevation (2026-07-30): a production build is
+  # served against the hermetic seeded Postgres and lighthouserc.json asserts
+  # category budgets (SEO ≥0.95 + a11y ≥0.9 error; perf/best-practices warn) on
+  # /, /coupons, a seeded store page, /supported-stores and /pricing.
+  lighthouse:
+    name: Lighthouse (SEO & a11y budgets)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        # Same known pin-drift as e2e-pr (postgres:15 vs compose 18.4) —
+        # deliberately mirrored, not fixed here.
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: caramel
+        ports: ['58005:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d caramel"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      # Production origin ON PURPOSE: robots.ts and next.config's X-Robots-Tag
+      # noindex every non-production BASE_URL, which fails Lighthouse's
+      # heavily-weighted is-crawlable audit and caps the SEO score — the very
+      # category this job gates. The server still listens on localhost; only
+      # origin-derived strings (canonicals, robots ruleset) see prod.
+      NEXT_PUBLIC_BASE_URL: https://grabcaramel.com
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Write minimal CI env
+        run: pnpm --filter caramel-app run setup:ci-env
+
+      - name: Generate Prisma Client
+        run: pnpm --filter caramel-app exec prisma generate
+
+      - name: Apply Prisma migrations (seeds the synthetic catalog)
+        working-directory: ./apps/caramel-app
+        run: pnpm exec prisma migrate deploy
+
+      - name: Build production bundle
+        working-directory: ./apps/caramel-app
+        run: pnpm build
+
+      - name: Run Lighthouse CI
+        working-directory: ./apps/caramel-app
+        run: pnpm lighthouse
+
+      - name: Upload Lighthouse reports
+        uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: lighthouse-reports
+          path: apps/caramel-app/lighthouse-reports/
           retention-days: 14
 
   # ─────────────────────────────────────────────────────────────
