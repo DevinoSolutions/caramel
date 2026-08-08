@@ -158,6 +158,14 @@ jobs:
       - name: Build the store package
         run: pnpm --filter caramel-extension run build
 
+      # Loads that PRODUCTION package in a real Chrome and asserts which
+      # deployment it resolved to. Nothing else in CI does: the guards below
+      # need a development stamp, and the e2e suite points its copy at the
+      # local app — so without this, no browser ever sees what actually ships.
+      # This is the check that would have caught the update_url heuristic.
+      - name: Smoke the store package (production stamp, real browser)
+        run: xvfb-run --auto-servernum pnpm --filter caramel-extension exec node scripts/smoke-package.mjs ./dist production
+
       # …and a second, DEVELOPMENT-stamped copy of that same package for the
       # guards to drive. Several guard checks assert on the extension's own
       # diagnostic markers (AUTO_INSERT_BASELINE_NARROWED, _REFUSED_CONTROL,
