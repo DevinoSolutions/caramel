@@ -111,25 +111,73 @@ jobs:
 
       # Chrome's own update service is what real browsers ask, so it is the
       # honest answer to "what do users have today", unlike the dashboard draft.
+      #
+      # Parse the <updatecheck version> attribute specifically. A grep for the
+      # first version="..." in the document reads the <gupdate protocol> header
+      # instead and yields "1.0", which is lower than every real release — the
+      # guard then passes unconditionally and guards nothing. That is exactly
+      # what happened on the first run of this workflow.
       - name: Refuse to publish a version the store already serves
         env:
           CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
           WANT: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          xml=$(curl -sS \
-            "https://clients2.google.com/service/update2/crx?response=updatecheck&prodversion=999.0&acceptformat=crx3&x=id%3D${CHROME_EXTENSION_ID}%26uc")
-          published=$(printf '%s' "$xml" | grep -o 'version="[0-9.]*"' | head -1 | cut -d'"' -f2 || true)
-          if [ -z "$published" ]; then
-            echo "::warning::Chrome update service reported no published version; continuing on the draft check alone."
-            exit 0
-          fi
-          highest=$(printf '%s\n%s\n' "$published" "$WANT" | sort -V | tail -1)
-          if [ "$published" = "$WANT" ] || [ "$highest" != "$WANT" ]; then
-            echo "::error::Store already publishes $published; $WANT is not higher. Nothing was submitted."
-            exit 1
-          fi
-          echo "Store publishes $published → submitting $WANT."
+          curl -sS --fail-with-body -o /tmp/cws-updatecheck.xml \
+            "https://clients2.google.com/service/update2/crx?response=updatecheck&prodversion=999.0&acceptformat=crx3&x=id%3D${CHROME_EXTENSION_ID}%26uc"
+          python3 - <<'PY'
+          import os
+          import sys
+          import xml.etree.ElementTree as ET
+
+          NS = "{http://www.google.com/update2/response}"
+
+
+          def fail(message):
+              print(f"::error::{message}")
+              sys.exit(1)
+
+
+          def parse(version, label):
+              parts = version.split(".")
+              if not all(part.isdigit() for part in parts):
+                  fail(f"{label} version {version!r} is not numeric-dotted; cannot compare.")
+              return [int(part) for part in parts]
+
+
+          raw = open("/tmp/cws-updatecheck.xml", "rb").read()
+          # Untrusted input to an XML parser even though it comes from Google:
+          # a doctype/entity has no place here, so reject rather than expand.
+          if b"<!DOCTYPE" in raw or b"<!ENTITY" in raw:
+              fail("Chrome update service response contained a doctype/entity declaration; refusing to parse it.")
+
+          try:
+              root = ET.fromstring(raw)
+          except ET.ParseError as exc:
+              fail(f"Chrome update service returned unparseable XML: {exc}")
+
+          app = root.find(f"{NS}app")
+          if app is None:
+              fail("Chrome update service response contained no <app> element.")
+          if app.get("status") != "ok":
+              fail(f"Chrome update service reported status={app.get('status')!r}; cannot read the published version.")
+
+          updatecheck = app.find(f"{NS}updatecheck")
+          published = updatecheck.get("version") if updatecheck is not None else None
+          if not published:
+              fail("Chrome update service response carried no published version attribute.")
+
+          want = os.environ["WANT"]
+          published_parts = parse(published, "published")
+          want_parts = parse(want, "requested")
+          width = max(len(published_parts), len(want_parts))
+          published_parts += [0] * (width - len(published_parts))
+          want_parts += [0] * (width - len(want_parts))
+
+          if want_parts <= published_parts:
+              fail(f"Store already publishes {published}; {want} is not higher. Nothing was submitted.")
+          print(f"Store publishes {published} -> submitting {want}.")
+          PY
 
       - name: Publish
         id: publish
@@ -146,7 +194,14 @@ jobs:
             "https://www.googleapis.com/chromewebstore/v1.1/items/${CHROME_EXTENSION_ID}/publish")
           cat "$out"
           if [ "$http" != "200" ]; then
-            echo "::error::Chrome Web Store publish returned HTTP $http."
+            # Seen for real on 2026-08-08: Google refuses EVERY publish, API or
+            # dashboard, until the item's "Privacy practices" tab is filled in.
+            # No API can supply it — it is an owner action in the dashboard.
+            if grep -q 'privacy information' "$out"; then
+              echo "::error::Chrome Web Store is blocking all publishes until the Privacy practices tab is completed at https://chrome.google.com/webstore/devconsole (item → Privacy practices). This cannot be done over the API; an owner must fill it in, then re-run this workflow."
+            else
+              echo "::error::Chrome Web Store publish returned HTTP $http."
+            fi
             exit 1
           fi
           # The endpoint answers 200 even when it refused the item, with the
