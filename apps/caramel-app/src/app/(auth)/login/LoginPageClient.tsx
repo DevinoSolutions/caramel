@@ -10,11 +10,13 @@ import { FaApple, FaGoogle } from 'react-icons/fa'
 import { toast } from 'sonner'
 
 const inputClasses =
-    'w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-gray-900 placeholder:text-gray-400 transition focus:border-caramel focus:outline-none focus:ring-2 focus:ring-caramel/30 dark:border-gray-600 dark:bg-darkBg dark:text-gray-100 dark:placeholder:text-gray-500'
+    'w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-gray-900 shadow-sm placeholder:text-gray-400 transition duration-200 hover:border-gray-400 focus:border-caramel focus:outline-none focus:ring-2 focus:ring-caramel/30 dark:border-gray-600 dark:bg-darkBg dark:text-gray-100 dark:shadow-none dark:placeholder:text-gray-500 dark:hover:border-gray-500 dark:focus:border-caramel'
 const labelClasses =
     'mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300'
 const socialButtonClasses =
-    'flex w-full items-center justify-center gap-3 rounded-lg border border-caramel/40 bg-white px-4 py-2.5 font-medium text-gray-700 transition hover:border-caramel hover:bg-caramel/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-caramel/50 dark:bg-darkBg dark:text-gray-200 dark:hover:bg-caramel/10'
+    'flex w-full items-center justify-center gap-3 rounded-lg border border-caramel/40 bg-white px-4 py-2.5 font-medium text-gray-700 shadow-sm transition duration-200 hover:border-caramel hover:bg-caramel/5 active:bg-caramel/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/50 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:border-caramel/50 dark:bg-darkBg dark:text-gray-200 dark:shadow-none dark:hover:bg-caramel/10 dark:active:bg-caramel/15 dark:focus-visible:ring-offset-darkerBg'
+const linkClasses =
+    'rounded-sm font-semibold text-caramel underline-offset-2 transition hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/50'
 
 export default function LoginPageClient({
     verified,
@@ -119,7 +121,7 @@ export default function LoginPageClient({
 
     return (
         <motion.div
-            className="w-full max-w-md rounded-2xl border border-gray-200/70 bg-white p-8 shadow-xl shadow-gray-300/40 dark:border-gray-800 dark:bg-darkerBg dark:shadow-black/40"
+            className="w-full min-w-0 max-w-md rounded-2xl border border-gray-200/70 bg-white p-8 shadow-xl shadow-gray-300/40 dark:border-gray-800 dark:bg-darkerBg dark:shadow-black/40 sm:p-6 xs:p-5"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5 }}
@@ -136,7 +138,10 @@ export default function LoginPageClient({
             </h2>
 
             {showVerificationAlert && (
-                <div className="mb-4 rounded-lg border border-orange-300 bg-orange-50 p-4 dark:border-caramel/40 dark:bg-caramel/10">
+                <div
+                    role="alert"
+                    className="mb-4 rounded-lg border border-orange-300 bg-orange-50 p-4 dark:border-caramel/40 dark:bg-caramel/10"
+                >
                     <div className="flex items-start">
                         <div className="flex-1">
                             <p className="text-sm font-medium text-orange-800 dark:text-orange-200">
@@ -154,7 +159,7 @@ export default function LoginPageClient({
                     <button
                         type="button"
                         onClick={() => router.push('/verify')}
-                        className="mt-3 w-full rounded-lg border border-orange-300 bg-white px-4 py-2 text-sm font-semibold text-caramel transition hover:bg-orange-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/50 dark:border-caramel/40 dark:bg-darkBg dark:hover:bg-caramel/10"
+                        className="mt-3 w-full rounded-lg border border-orange-300 bg-white px-4 py-2 text-sm font-semibold text-caramel shadow-sm transition duration-200 hover:bg-orange-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/50 focus-visible:ring-offset-2 dark:border-caramel/40 dark:bg-darkBg dark:shadow-none dark:hover:bg-caramel/10 dark:focus-visible:ring-offset-darkerBg"
                     >
                         {isTokenExpired
                             ? 'Request New Link'
@@ -237,17 +242,14 @@ export default function LoginPageClient({
                 <button
                     type="submit"
                     disabled={loading}
-                    className="w-full rounded-lg bg-caramel py-2.5 font-semibold text-white shadow-sm transition hover:bg-caramel/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 dark:focus-visible:ring-offset-darkerBg"
+                    className="w-full rounded-lg bg-caramel py-2.5 font-semibold text-white shadow-sm transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 enabled:hover:bg-caramel/90 enabled:hover:shadow-caramel-sm enabled:active:bg-caramel disabled:cursor-not-allowed disabled:opacity-60 dark:focus-visible:ring-offset-darkerBg"
                 >
                     {loading ? 'Logging in...' : 'Login'}
                 </button>
             </form>
             <p className="mt-6 text-center text-sm text-gray-600 dark:text-gray-400">
                 Don&apos;t have an account?{' '}
-                <Link
-                    className="font-semibold text-caramel hover:underline"
-                    href="/signup"
-                >
+                <Link className={linkClasses} href="/signup">
                     Sign Up
                 </Link>
             </p>

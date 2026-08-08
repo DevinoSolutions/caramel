@@ -33,12 +33,16 @@ export default function AuthLayout({
         // so this needs no hydration suppression. <html> already carries the
         // real theme pre-paint — see app/layout.tsx.
         <div className={isDarkMode ? 'dark' : 'light'}>
-            <div className="relative flex min-h-screen items-center justify-center gap-10 overflow-hidden bg-gray-50 px-4 py-12 dark:bg-darkBg">
+            <div className="relative flex min-h-screen items-center justify-center gap-10 overflow-hidden bg-gray-50 px-4 py-12 dark:bg-darkBg sm:py-8 xs:px-3">
                 <div
                     aria-hidden="true"
                     className="pointer-events-none absolute -top-32 left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-caramel/10 blur-3xl dark:bg-caramel/15"
                 />
-                <ThemeToggle className="absolute right-6 top-6" />
+                <div
+                    aria-hidden="true"
+                    className="pointer-events-none absolute -bottom-40 -right-32 h-96 w-96 rounded-full bg-caramel/[0.07] blur-3xl dark:bg-caramel/10"
+                />
+                <ThemeToggle className="absolute right-6 top-6 sm:right-4 sm:top-4" />
 
                 {/* Brand side panel — desktop only (this repo's Tailwind is
                     desktop-first: unprefixed = desktop, lg: is a MAX-width

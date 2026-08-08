@@ -8,7 +8,7 @@ import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 
 const inputClasses =
-    'w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-gray-900 placeholder:text-gray-400 transition focus:border-caramel focus:outline-none focus:ring-2 focus:ring-caramel/30 dark:border-gray-600 dark:bg-darkBg dark:text-gray-100 dark:placeholder:text-gray-500'
+    'w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-gray-900 shadow-sm placeholder:text-gray-400 transition duration-200 hover:border-gray-400 focus:border-caramel focus:outline-none focus:ring-2 focus:ring-caramel/30 dark:border-gray-600 dark:bg-darkBg dark:text-gray-100 dark:shadow-none dark:placeholder:text-gray-500 dark:hover:border-gray-500 dark:focus:border-caramel'
 
 export default function VerifyPageClient({
     signup,
@@ -69,13 +69,13 @@ export default function VerifyPageClient({
 
     return (
         <motion.div
-            className="w-full max-w-md rounded-2xl border border-gray-200/70 bg-white p-8 shadow-xl shadow-gray-300/40 dark:border-gray-800 dark:bg-darkerBg dark:shadow-black/40"
+            className="w-full min-w-0 max-w-md rounded-2xl border border-gray-200/70 bg-white p-8 shadow-xl shadow-gray-300/40 dark:border-gray-800 dark:bg-darkerBg dark:shadow-black/40 sm:p-6 xs:p-5"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5 }}
         >
-            <h2 className="mb-6 flex justify-center gap-2 text-center text-2xl font-bold text-caramel">
-                <div className="my-auto">Verify your</div>
+            <h2 className="mb-6 flex flex-wrap items-center justify-center gap-2 text-center text-2xl font-bold text-caramel">
+                <div className="my-auto whitespace-nowrap">Verify your</div>
                 <Image
                     src="/full-logo.png"
                     alt="logo"
@@ -83,7 +83,7 @@ export default function VerifyPageClient({
                     width={90}
                     className="my-auto mt-2"
                 />
-                <div className="my-auto">account</div>
+                <div className="my-auto whitespace-nowrap">account</div>
             </h2>
 
             <div className="mb-6 text-center text-gray-600 dark:text-gray-300">
@@ -122,7 +122,7 @@ export default function VerifyPageClient({
                     type="button"
                     onClick={handleResendVerification}
                     disabled={resendingEmail}
-                    className="w-full rounded-lg bg-caramel py-2.5 font-semibold text-white shadow-sm transition hover:bg-caramel/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 dark:focus-visible:ring-offset-darkerBg"
+                    className="w-full rounded-lg bg-caramel py-2.5 font-semibold text-white shadow-sm transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 enabled:hover:bg-caramel/90 enabled:hover:shadow-caramel-sm enabled:active:bg-caramel disabled:cursor-not-allowed disabled:opacity-60 dark:focus-visible:ring-offset-darkerBg"
                 >
                     {resendingEmail ? 'Sending...' : 'Send verification email'}
                 </button>
@@ -131,7 +131,7 @@ export default function VerifyPageClient({
             <p className="mt-6 text-center text-sm text-gray-600 dark:text-gray-400">
                 Already verified?{' '}
                 <Link
-                    className="font-semibold text-caramel hover:underline"
+                    className="rounded-sm font-semibold text-caramel underline-offset-2 transition hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/50"
                     href="/login"
                 >
                     Sign In

@@ -33,11 +33,13 @@ const validationSchema = object().shape({
 })
 
 const inputClasses =
-    'w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-gray-900 placeholder:text-gray-400 transition focus:border-caramel focus:outline-none focus:ring-2 focus:ring-caramel/30 dark:border-gray-600 dark:bg-darkBg dark:text-gray-100 dark:placeholder:text-gray-500'
+    'w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-gray-900 shadow-sm placeholder:text-gray-400 transition duration-200 hover:border-gray-400 focus:border-caramel focus:outline-none focus:ring-2 focus:ring-caramel/30 dark:border-gray-600 dark:bg-darkBg dark:text-gray-100 dark:shadow-none dark:placeholder:text-gray-500 dark:hover:border-gray-500 dark:focus:border-caramel'
 const labelClasses =
     'mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300'
 const socialButtonClasses =
-    'flex w-full items-center justify-center gap-3 rounded-lg border border-caramel/40 bg-white px-4 py-2.5 font-medium text-gray-700 transition hover:border-caramel hover:bg-caramel/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-caramel/50 dark:bg-darkBg dark:text-gray-200 dark:hover:bg-caramel/10'
+    'flex w-full items-center justify-center gap-3 rounded-lg border border-caramel/40 bg-white px-4 py-2.5 font-medium text-gray-700 shadow-sm transition duration-200 hover:border-caramel hover:bg-caramel/5 active:bg-caramel/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/50 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:border-caramel/50 dark:bg-darkBg dark:text-gray-200 dark:shadow-none dark:hover:bg-caramel/10 dark:active:bg-caramel/15 dark:focus-visible:ring-offset-darkerBg'
+const linkClasses =
+    'rounded-sm font-semibold text-caramel underline-offset-2 transition hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/50'
 
 export default function SignupPageClient() {
     const [showPasswordChecker, setShowPasswordChecker] = useState(false)
@@ -112,7 +114,7 @@ export default function SignupPageClient() {
 
     return (
         <motion.div
-            className="w-full max-w-md rounded-2xl border border-gray-200/70 bg-white p-8 shadow-xl shadow-gray-300/40 dark:border-gray-800 dark:bg-darkerBg dark:shadow-black/40"
+            className="w-full min-w-0 max-w-md rounded-2xl border border-gray-200/70 bg-white p-8 shadow-xl shadow-gray-300/40 dark:border-gray-800 dark:bg-darkerBg dark:shadow-black/40 sm:p-6 xs:p-5"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5 }}
@@ -126,7 +128,7 @@ export default function SignupPageClient() {
                     width={90}
                     className="my-auto mt-2"
                 />
-                <div className="my-auto">account</div>
+                <div className="my-auto whitespace-nowrap">account</div>
             </h2>
             <div className="mb-4 space-y-3">
                 <button
@@ -183,9 +185,12 @@ export default function SignupPageClient() {
                         placeholder="@nickname"
                         className={inputClasses}
                     />
-                    <div className="ml-1 h-1 pb-2">
+                    <div className="ml-1 mt-1 min-h-[1.25rem]">
                         {errors.username && touched.username && (
-                            <div className="text-sm text-red-500 dark:text-red-400">
+                            <div
+                                role="alert"
+                                className="text-sm text-red-500 dark:text-red-400"
+                            >
                                 {errors.username}
                             </div>
                         )}
@@ -206,9 +211,12 @@ export default function SignupPageClient() {
                         placeholder="Enter your email"
                         className={inputClasses}
                     />
-                    <div className="ml-1 h-1 pb-2">
+                    <div className="ml-1 mt-1 min-h-[1.25rem]">
                         {errors.email && touched.email && (
-                            <div className="text-sm text-red-500 dark:text-red-400">
+                            <div
+                                role="alert"
+                                className="text-sm text-red-500 dark:text-red-400"
+                            >
                                 {errors.email}
                             </div>
                         )}
@@ -268,22 +276,22 @@ export default function SignupPageClient() {
                 <button
                     disabled={loading || Object.keys(errors).length > 0}
                     type="submit"
-                    className={`w-full ${loading || Object.keys(errors).length > 0 ? 'pointer-events-none opacity-60' : 'hover:bg-caramel/90'} rounded-lg bg-caramel py-2.5 font-semibold text-white shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 dark:focus-visible:ring-offset-darkerBg`}
+                    className="w-full rounded-lg bg-caramel py-2.5 font-semibold text-white shadow-sm transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 enabled:hover:bg-caramel/90 enabled:hover:shadow-caramel-sm enabled:active:bg-caramel disabled:cursor-not-allowed disabled:opacity-60 dark:focus-visible:ring-offset-darkerBg"
                 >
                     {loading ? 'Loading...' : 'Sign Up'}
                 </button>
             </form>
             <p className="mt-6 text-center text-sm text-gray-600 dark:text-gray-400">
                 Already have an account?{' '}
-                <Link
-                    href="/login"
-                    className="font-semibold text-caramel hover:underline"
-                >
+                <Link href="/login" className={linkClasses}>
                     Login
                 </Link>
             </p>
             {error ? (
-                <p className="mt-4 text-center text-sm text-red-500 dark:text-red-400">
+                <p
+                    role="alert"
+                    className="mt-4 text-center text-sm text-red-500 dark:text-red-400"
+                >
                     {error}
                 </p>
             ) : null}
