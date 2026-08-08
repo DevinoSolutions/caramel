@@ -117,8 +117,8 @@ export default function SignupPageClient() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5 }}
         >
-            <h2 className="mb-6 flex justify-center gap-2 text-center text-2xl font-bold text-caramel">
-                <div className="my-auto">Create your</div>
+            <h2 className="mb-6 flex flex-wrap items-center justify-center gap-2 text-center text-2xl font-bold text-caramel">
+                <div className="my-auto whitespace-nowrap">Create your</div>
                 <Image
                     src="/full-logo.png"
                     alt="logo"

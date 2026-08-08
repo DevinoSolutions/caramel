@@ -124,8 +124,8 @@ export default function LoginPageClient({
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5 }}
         >
-            <h2 className="mb-6 flex justify-center gap-2 text-center text-2xl font-bold text-caramel">
-                <div className="my-auto">Sign in to</div>
+            <h2 className="mb-6 flex flex-wrap items-center justify-center gap-2 text-center text-2xl font-bold text-caramel">
+                <div className="my-auto whitespace-nowrap">Sign in to</div>
                 <Image
                     src="/full-logo.png"
                     alt="logo"
