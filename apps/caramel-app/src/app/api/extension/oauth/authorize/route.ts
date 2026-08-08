@@ -2,6 +2,7 @@ import { handleRouteError } from '@/lib/api/handleRouteError'
 import { preflight, withRoute } from '@/lib/api/withRoute'
 import { env } from '@/lib/env'
 import { BASE_URL } from '@/lib/env.client'
+import { isValidNonce } from '@/lib/extension-oauth-nonce'
 import { createHmac } from 'crypto'
 import { NextResponse } from 'next/server'
 
@@ -10,6 +11,24 @@ const OAUTH_STATE_SECRET = env.EXTENSION_OAUTH_STATE_SECRET
 const createSignedState = (payload: {
     provider: 'google' | 'apple'
     redirectUri: string
+    // ====================================================================
+    // COMPATIBILITY SHIM for the shipped Safari/iOS build (store version
+    // published 2026-04-29): remove after a poll-free Safari version ships.
+    // TODO(safari-shim-removal)
+    // ====================================================================
+    // Present ONLY for the shipped Safari flow, which cannot capture an OAuth
+    // redirect and instead polls for the result (see
+    // src/lib/extension-oauth-nonce.ts). Carrying it INSIDE the signed state is
+    // what lets /redirect recognize a Safari callback: the OAuth provider hands
+    // the state back to us untouched, so the nonce survives the round trip
+    // without the provider needing to know about it.
+    //
+    // Chrome/Firefox send no nonce and are byte-identically unaffected:
+    // JSON.stringify drops an `undefined` value, so the signed payload for a
+    // nonce-less call is exactly the string it was before this shim, and the
+    // POST exchange's verifySignedState() re-hashes the decoded payload as-is
+    // (it never re-serializes), so an EXTRA key cannot invalidate a signature.
+    nonce?: string
 }) => {
     if (!OAUTH_STATE_SECRET) {
         throw new Error('EXTENSION_OAUTH_STATE_SECRET is not configured')
@@ -49,6 +68,10 @@ export const GET = withRoute(
             | 'apple'
             | null
         const redirectUri = searchParams.get('redirect_uri')
+        // COMPATIBILITY SHIM (see createSignedState above) —
+        // TODO(safari-shim-removal). Absent for Chrome/Firefox, which keeps
+        // their behavior exactly as it was.
+        const nonceParam = searchParams.get('nonce')
 
         if (!provider) {
             return NextResponse.json(
@@ -71,6 +94,19 @@ export const GET = withRoute(
             )
         }
 
+        // A nonce outside the bounds /poll will look up would produce a state
+        // whose result can never be collected — the popup would poll a dead
+        // nonce for its full 5 minutes and then report a timeout. Refuse it
+        // here instead, so the failure is legible at the call that caused it.
+        // TODO(safari-shim-removal)
+        if (nonceParam !== null && !isValidNonce(nonceParam)) {
+            return NextResponse.json(
+                { error: 'Invalid nonce parameter' },
+                { status: 400 },
+            )
+        }
+        const nonce = nonceParam ?? undefined
+
         try {
             const baseURL = env.BETTER_AUTH_URL || BASE_URL
 
@@ -79,7 +115,7 @@ export const GET = withRoute(
             let oauthUrl: URL
 
             // Generate signed state for CSRF protection that can be validated on exchange
-            const state = createSignedState({ provider, redirectUri })
+            const state = createSignedState({ provider, redirectUri, nonce })
 
             if (provider === 'google') {
                 // Google OAuth 2.0 authorization endpoint
