@@ -22,8 +22,13 @@ export const POST = withRoute(
     async ({ req, body }) => {
         const cleaned = body.url
         try {
+            // aladdin@devino.ca, NOT support@unotes.net: the old recipient was
+            // a copy-paste from another project whose mailbox bounces, so every
+            // visitor suggestion was silently lost (a real one bounced
+            // 2026-08-08 06:33 UTC and had to be recovered from the UseSend
+            // event log).
             await sendEmail({
-                to: 'support@unotes.net',
+                to: 'aladdin@devino.ca',
                 subject: 'Caramel Site Suggestion',
                 text: `A user suggested a new site: ${cleaned}`,
             })
