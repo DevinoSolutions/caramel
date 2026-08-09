@@ -271,6 +271,10 @@ describe('a signed-out shopper behaves exactly as before', () => {
             code: 'GUEST5',
             amount: 5,
         })
+        // The saving must exist locally for the two negatives below to mean
+        // anything — a broken recording path would otherwise leave nothing to
+        // adopt and this test would go green on the wrong reason.
+        expect((await stored()).map(e => e.code)).toEqual(['GUEST5'])
         setSession('ada')
 
         await base.caramelSyncSavings()
