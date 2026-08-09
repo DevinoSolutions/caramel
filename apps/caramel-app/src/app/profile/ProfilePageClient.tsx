@@ -10,8 +10,9 @@ import {
 } from '@/lib/profile/profileStyles'
 import type { FavoriteStoreSummary } from '@/lib/profile/types'
 import { useProfileOverview } from '@/lib/profile/useProfileOverview'
+import { useReducedMotion } from '@/lib/reducedMotion'
 import { useRouter } from 'next/navigation'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import AccountDetailsCard from './sections/AccountDetailsCard'
 import AccountHeaderCard from './sections/AccountHeaderCard'
 import DataPrivacySection from './sections/DataPrivacySection'
@@ -45,6 +46,37 @@ export default function ProfilePageClient() {
     const signedIn = Boolean(mounted && !isPending && session?.user)
     const { overview, status, retry, patchOverview } =
         useProfileOverview(signedIn)
+
+    // Honour a deep link (/profile#savings) ONCE the target section exists.
+    //
+    // The browser resolves the fragment during load, but the data-backed
+    // sections render only after the overview fetch resolves — so on a cold
+    // load the element the fragment names does not exist yet and the native
+    // scroll silently no-ops. The extension popup's "Manage account" link is a
+    // real entry point that deep-links here, so a fragment that quietly does
+    // nothing is a broken contract rather than a cosmetic miss.
+    //
+    // Guarded by a ref so this fires at most once: re-scrolling the page under
+    // someone who has since scrolled away (a favorite removal re-renders this
+    // tree) would be worse than not scrolling at all.
+    const deepLinkHandled = useRef(false)
+    const prefersReducedMotion = useReducedMotion()
+
+    useEffect(() => {
+        if (deepLinkHandled.current || status !== 'ready') return
+        const id = window.location.hash.slice(1)
+        if (!id) return
+        const target = document.getElementById(id)
+        if (!target) return
+        deepLinkHandled.current = true
+        target.scrollIntoView({
+            // globals.css sets `scroll-behavior: smooth`, which the app already
+            // disables under prefers-reduced-motion — match that here rather
+            // than forcing a smooth scroll past the preference.
+            behavior: prefersReducedMotion ? 'auto' : 'smooth',
+            block: 'start',
+        })
+    }, [status, prefersReducedMotion])
 
     if (!mounted || isPending) {
         return (
