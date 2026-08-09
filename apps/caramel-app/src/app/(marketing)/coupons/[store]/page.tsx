@@ -200,7 +200,13 @@ export default async function StoreCouponsPage({
                 // The star renders nothing at all for signed-out visitors, so
                 // this route's server HTML — the thing SEO and the AEO prose
                 // below depend on — is unchanged for crawlers.
-                heroAction={<StoreFavoriteStar store={base} />}
+                //
+                // No star when `base` is empty: this route answers 200 for a
+                // slug that names no registrable store (the noindexed branch in
+                // generateMetadata above), and there is nothing there to follow.
+                heroAction={
+                    base ? <StoreFavoriteStar store={base} /> : undefined
+                }
                 heroTitle={`Best ${base} coupon codes today`}
                 heroSubtitle={`Save at ${base} with Caramel—the privacy-first coupon finder that applies the top deals automatically at checkout.`}
             />
