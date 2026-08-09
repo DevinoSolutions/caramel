@@ -65,6 +65,17 @@ const nextConfig = {
     // workspace deps correctly.
     output: 'standalone',
     outputFileTracingRoot: workspaceRoot,
+    // The visual-regression job screenshots a `next dev` server, and dev mode
+    // paints Next's on-screen dev indicator (a dark "N" badge, position:fixed
+    // bottom-left) INTO every full-page capture. It shows or hides depending on
+    // compile activity at capture time, so it landed in some baselines and not
+    // others — 918 of the 1145 changed pixels in Snapvisor build #254's
+    // home-page diff were that badge alone. That is why builds on branches which
+    // touch no app code at all (PR #160 changed one workflow file) still
+    // reported 8/8 snapshots changed: the visual gate was reporting its own
+    // overlay, not the product. Hidden only under CI so local dev keeps it;
+    // compile/runtime errors are still reported either way.
+    ...(process.env.CI ? { devIndicators: false } : {}),
     turbopack: {
         root: workspaceRoot,
     },
