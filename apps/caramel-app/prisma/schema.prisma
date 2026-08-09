@@ -264,10 +264,6 @@ model CouponReport {
   outcome   String
   createdAt DateTime @default(now()) @map("created_at")
 
-  // SCRATCH: deliberate drift, no migration written for it. Exists only to
-  // prove the repaired Schema Drift gate goes RED. Reverted in the next commit.
-  redProofOnly String? @map("red_proof_only")
-
   @@index([couponId, userId, createdAt])
   @@map("coupon_reports")
 }
