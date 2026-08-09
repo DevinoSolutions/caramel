@@ -180,8 +180,13 @@ test.describe('Auth Flows — Signup', () => {
             .getByRole('button', { name: 'Create account', exact: true })
             .click()
 
-        // Uses window.location.href so wait for navigation
-        await page.waitForURL('**/verify?signup=success', { timeout: 10000 })
+        // Uses window.location.href so wait for navigation. 30s, not 10s:
+        // against the DEPLOYED site this waits for /verify's full `load` event
+        // on a cold first attempt (fonts, analytics), and 10s made this the
+        // suite's one flaky test twice in a row on 2026-08-09 — while a live
+        // measurement put the signup POST itself at 0.8s, so the app is fast
+        // and the old budget was simply tighter than a cold page load.
+        await page.waitForURL('**/verify?signup=success', { timeout: 30000 })
     })
 
     test('signup with existing email shows error toast', async ({ page }) => {
