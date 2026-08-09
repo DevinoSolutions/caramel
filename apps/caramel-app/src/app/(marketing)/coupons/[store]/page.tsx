@@ -1,5 +1,6 @@
 import CouponsSection from '@/components/coupons/coupons-section'
 import PopularStores from '@/components/coupons/popular-stores'
+import StoreFavoriteStar from '@/components/coupons/store-favorite-star'
 import { attachSignals } from '@/lib/couponSignals'
 import { listStoreCoupons } from '@/lib/couponsRepo'
 import { BASE_URL } from '@/lib/env.client'
@@ -191,6 +192,15 @@ export default async function StoreCouponsPage({
                 initialCoupons={coupons}
                 initialTotal={total}
                 disableInitialFetch
+                // `base` — not the raw slug — because that is the normalized
+                // store key favorites are filed under (the same value the
+                // canonical URL uses), so /coupons/www.nike.com and
+                // /coupons/nike.com star ONE row rather than two.
+                //
+                // The star renders nothing at all for signed-out visitors, so
+                // this route's server HTML — the thing SEO and the AEO prose
+                // below depend on — is unchanged for crawlers.
+                heroAction={<StoreFavoriteStar store={base} />}
                 heroTitle={`Best ${base} coupon codes today`}
                 heroSubtitle={`Save at ${base} with Caramel—the privacy-first coupon finder that applies the top deals automatically at checkout.`}
             />

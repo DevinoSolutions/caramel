@@ -340,6 +340,45 @@ currentBrowser.runtime.onMessage.addListener(
             }
             sendResponse({ success: true })
             return true
+        } else if (message.action === 'getFavoriteStores') {
+            // The stores this account follows. fetchCaramelApi so the stored
+            // bearer rides along (the route is session-gated). A 401 is reported
+            // as an ERROR, never an empty list: "you follow nothing" and "we
+            // couldn't ask" are different answers and the star must not paint
+            // the first when it means the second.
+            fetchCaramelApi(caramelUrl('api/account/favorites'))
+                .then(async r => {
+                    if (!r.ok) return { error: `HTTP ${r.status}` }
+                    return r.json()
+                })
+                .then(resp => sendResponse(resp))
+                .catch(err => {
+                    logError('getFavoriteStores', err)
+                    sendResponse({ error: String(err) })
+                })
+
+            return true
+        } else if (message.action === 'setFavoriteStore') {
+            // Follow / unfollow one store. PUT and DELETE are both idempotent
+            // server-side, so a double-tap or retry is safe; the response echoes
+            // the NORMALIZED key the server wrote (the popup sends a tab
+            // hostname like "shop.nike.com"; the account keys on "nike.com").
+            const { site, favorite } = message
+            fetchCaramelApi(
+                caramelUrl(`api/account/favorites/${encodeURIComponent(site)}`),
+                { method: favorite ? 'PUT' : 'DELETE' },
+            )
+                .then(async r => {
+                    if (!r.ok) return { error: `HTTP ${r.status}` }
+                    return r.json()
+                })
+                .then(resp => sendResponse(resp))
+                .catch(err => {
+                    logError('setFavoriteStore', err)
+                    sendResponse({ error: String(err) })
+                })
+
+            return true
         } else if (message.action === 'fetchSupportedStores') {
             const url = caramelUrl('api/extension/supported-stores')
             // The bulk payload gets the larger budget, and one retry: the

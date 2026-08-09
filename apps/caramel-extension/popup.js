@@ -1025,6 +1025,98 @@ function renderProfileCard(user) {
 }
 
 /* ------------------------------------------------------------ */
+/*  Follow this store (favorites)                               */
+/* ------------------------------------------------------------ */
+// Stroke star when not following, filled when following — the popup's icon
+// convention (16px, currentColor), so it inherits .coupons-logout-button's
+// brand colour and its dark value from --cm-* with no colour of its own.
+const FAVORITE_STAR_SVG = following => `
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="${following ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="m12 3 2.9 5.9 6.5.9-4.7 4.6 1.1 6.5-5.8-3-5.8 3 1.1-6.5L2.6 9.8l6.5-.9z"/>
+  </svg>`
+
+/** Repaints the star for `following` — icon fill, aria-pressed, and the label
+ * a screen reader reads. `aria-pressed` (not aria-checked): this is a toggle
+ * BUTTON, not a switch. */
+function paintFavoriteStoreButton(button, domain, following) {
+    button.setAttribute('aria-pressed', following ? 'true' : 'false')
+    const label = following ? `Unfollow ${domain}` : `Follow ${domain}`
+    button.setAttribute('aria-label', label)
+    button.setAttribute('title', label)
+    button.innerHTML = FAVORITE_STAR_SVG(following)
+}
+
+/**
+ * Wires the header star: asks the account what it follows, paints the true
+ * state, then toggles on click. Every call goes through caramelSendMessage →
+ * background.js, never a direct fetch — the bearer lives in the worker's read
+ * path (getStoredToken), the one place any API call attaches it.
+ *
+ * DISABLED until the account answers, and it stays disabled if the answer never
+ * comes (offline, dead session). An enabled star showing a guessed state invites
+ * a click that writes the opposite of what the user is looking at; a brief
+ * disabled beat does not, and following is not why the popup is open.
+ */
+function wireFavoriteStoreButton(domain) {
+    const button = document.getElementById('favoriteStoreBtn')
+    if (!button || !domain) return
+
+    caramelSendMessage({ action: 'getFavoriteStores' })
+        .then(resp => {
+            if (!resp || resp.error || !Array.isArray(resp.favorites)) return
+            // Suffix-tolerant match, the same predicate the settings view uses
+            // for paused sites: the popup knows the tab hostname
+            // ("shop.nike.com") while the account is keyed on the registrable
+            // domain ("nike.com").
+            const following = resp.favorites.some(
+                f =>
+                    f &&
+                    typeof f.store === 'string' &&
+                    (domain === f.store || domain.endsWith('.' + f.store)),
+            )
+            paintFavoriteStoreButton(button, domain, following)
+            button.disabled = false
+        })
+        .catch(err => log('FAVORITES_LOAD_FAILED', err?.message))
+
+    button.addEventListener('click', () => {
+        if (button.disabled) return
+        const next = button.getAttribute('aria-pressed') !== 'true'
+        // Optimistic, then reconciled: both writes are idempotent, so the only
+        // thing a failure has to undo is this local flip.
+        paintFavoriteStoreButton(button, domain, next)
+        button.disabled = true
+        caramelSendMessage({
+            action: 'setFavoriteStore',
+            site: domain,
+            favorite: next,
+        })
+            .then(resp => {
+                if (!resp || resp.error)
+                    throw new Error(resp?.error || 'failed')
+                paintFavoriteStoreButton(
+                    button,
+                    domain,
+                    Boolean(resp.favorited),
+                )
+                showCopyToast(
+                    resp.favorited
+                        ? `Following ${domain}`
+                        : `Unfollowed ${domain}`,
+                )
+            })
+            .catch(err => {
+                paintFavoriteStoreButton(button, domain, !next)
+                showCopyToast("Couldn't save that — please try again")
+                log('FAVORITE_TOGGLE_FAILED', err?.message)
+            })
+            .finally(() => {
+                button.disabled = false
+            })
+    })
+}
+
+/* ------------------------------------------------------------ */
 /*  Coupons view                                                */
 /* ------------------------------------------------------------ */
 function renderCouponsView(coupons, user, domain) {
@@ -1044,8 +1136,21 @@ function renderCouponsView(coupons, user, domain) {
         <span class="coupons-user-label">Guest</span>
       `
 
+    // Follow-this-store star. SIGNED-IN ONLY: a guest tapping a star only to be
+    // bounced into a sign-in form is a bad first touch, and this header already
+    // branches on `user`. It sits INSIDE the existing header row (never its own
+    // row) and reuses .coupons-logout-button, so the row's height is unchanged —
+    // popup-sizing.test.mjs pins .coupon-list's 320px cap against everything
+    // stacked above it, and a taller header is what would break that. Starts
+    // unpressed + disabled; wireFavoriteStoreButton() corrects it.
+    const favoriteButton = user
+        ? `<button id="favoriteStoreBtn" class="coupons-logout-button coupons-icon-button" type="button" aria-pressed="false" aria-label="Follow ${escHtml(domain)}" title="Follow ${escHtml(domain)}" disabled>
+             ${FAVORITE_STAR_SVG(false)}
+           </button>`
+        : ''
+
     const headerRight = user
-        ? '<button id="logoutBtn" class="coupons-logout-button">Log out</button>'
+        ? `<div class="coupons-header-actions">${favoriteButton}<button id="logoutBtn" class="coupons-logout-button">Log out</button></div>`
         : '<button id="loginToggleBtn" class="coupons-logout-button">Log in</button>'
 
     container.innerHTML = `
@@ -1168,6 +1273,10 @@ function renderCouponsView(coupons, user, domain) {
         logoutBtn.addEventListener('click', () => {
             signOutAndRevoke(() => renderSignInPrompt(selfCallback), logoutBtn)
         })
+
+    /* follow-this-store star (signed-in only; the element simply isn't in the
+       markup for a guest, so this is a no-op there) */
+    wireFavoriteStoreButton(domain)
 
     /* login toggle (guest) */
     const loginToggle = document.getElementById('loginToggleBtn')

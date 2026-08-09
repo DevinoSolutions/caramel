@@ -716,6 +716,34 @@ body {
     color: var(--cm-on-brand);
 }
 
+/* Right-hand action cluster in the coupons-view header (follow-star + log out).
+   .coupons-profile-row is space-between with exactly two children; wrapping the
+   two buttons keeps it two, so adding the star doesn't spread the row.
+
+   HEIGHT-NEUTRAL BY CONSTRUCTION, and that is the point: the buttons inside
+   already own the row's height (.coupons-logout-button min-height: 40px) and
+   this rule adds no padding, border or min-height of its own. Everything
+   stacked above the coupon list is pinned arithmetic — tests/popup-sizing.test.mjs
+   holds .coupon-list's 320px cap against a measured ~279px of surrounding
+   chrome, so a header that grew by even one row would slice the last coupon
+   card inside body's overflow:hidden. */
+.coupons-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* Icon-only variant of the header button: the label is the aria-label, so the
+   horizontal padding drops to keep it square-ish, and the 40px min-height it
+   inherits carries the tap target. */
+.coupons-icon-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 40px;
+    padding: 6px 10px;
+}
+
 /* -------------- Toast / Confirmation -------------- */
 .copy-toast-container {
     position: fixed;

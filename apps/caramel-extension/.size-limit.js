@@ -162,7 +162,22 @@ module.exports = [
     {
         name: 'popup.js',
         path: 'popup.js',
-        limit: '54 KB',
+        // 2026-08-09 — 54 → 60 KB, first raise for this budget. The
+        // follow-this-store star in the coupons-view header: the button markup,
+        // the star SVG in both states, and wireFavoriteStoreButton() (asks the
+        // account what it follows, paints the true state, toggles through the
+        // service worker, reverts a rejected write). ~3.5 kB is code and markup;
+        // the rest states the two constraints that would otherwise be re-decided
+        // wrongly — the star is signed-in-only, and it must live INSIDE the
+        // existing header row, because popup-sizing.test.mjs's 320px coupon-list
+        // cap is measured against everything stacked above it and a header that
+        // grew by a row would slice the last coupon card. A trimming pass paid
+        // back 0.35 kB; going further meant deleting those two, which the
+        // 232 → 233 KB note above already ruled the worse trade. Measured
+        // 59.32 kB — 60 rather than 59.5 for the same reason the 249 line gives:
+        // headroom keeps the next comment edit from failing a build for a reason
+        // that says nothing true about bundle weight.
+        limit: '60 KB',
         brotli: false,
     },
     {
@@ -180,7 +195,16 @@ module.exports = [
         // grew a per-call override; 8 s stays the default for small calls)
         // plus one retry — the measured cold fetch is the slow one and the
         // warm retry lands in seconds. Measured 17.55 kB.
-        limit: '18 KB',
+        //
+        // 2026-08-09 — 18 → 20 KB. The two favorites actions the popup star
+        // rides on (getFavoriteStores / setFavoriteStore → the session-gated
+        // /api/account/favorites routes, via fetchCaramelApi so the stored
+        // bearer is attached in the one place that ever attaches it). ~0.9 kB is
+        // code; the rest records why a 401 is answered as an error rather than
+        // an empty list — "you follow nothing" and "we couldn't ask" are
+        // different answers and the star must not paint the first when it means
+        // the second. Measured 19.02 kB; 20 for the usual headroom.
+        limit: '20 KB',
         brotli: false,
     },
 ]
