@@ -92,7 +92,13 @@ function loadRealm() {
 function installFakeServer() {
     fetchCalls = []
     serverRows = []
-    accountSyncEnabled = false
+    // The ACCOUNT-side consent column, and the ingest route enforces it (a
+    // device setting is a cache, not a gate). Defaults to consented because
+    // that is the state every other test in this file is implicitly in: the
+    // real popup switch PATCHes the account before it writes the device
+    // setting, so "device on, account off" is a stale-device anomaly, not the
+    // normal path. The describe that cares flips it deliberately.
+    accountSyncEnabled = true
     serverDown = false
 
     globalThis.fetch = async (url, opts = {}) => {
@@ -115,6 +121,15 @@ function installFakeServer() {
         }
 
         if (href.includes('/api/account/savings')) {
+            // Consent is checked server-side, per request, before a single
+            // event is looked at — same as the real route.
+            if (!accountSyncEnabled) {
+                return {
+                    ok: false,
+                    status: 403,
+                    json: async () => ({ error: 'savings_sync_disabled' }),
+                }
+            }
             const { events } = JSON.parse(opts.body)
             const storedIds = []
             const rejected = []
@@ -622,5 +637,107 @@ describe('the popup switch writes the account flag, not just the device', () => 
             ),
         )
         expect(response).toEqual({ error: 'HTTP 503' })
+    })
+})
+
+// A device can hold syncSavings=true while the ACCOUNT says no: the user turned
+// sync off on another device or in /profile, and this extension never heard.
+// The server refuses those pushes (403 savings_sync_disabled). What matters
+// here is what the sweep does NEXT — because the sweep's rule for every other
+// failure is "leave it queued and try again on the next popup open", and
+// applying that rule to a permanent refusal is an infinite retry loop.
+describe('a refusal from the account is an answer, not a failure to retry', () => {
+    beforeEach(async () => {
+        await base.caramelSetSettings({ syncSavings: true })
+        setSession('ada')
+        accountSyncEnabled = false
+    })
+
+    // Positive control: the same fixture WITH consent stores the event, so the
+    // absence-shaped assertions below mean "the refusal was handled" and not
+    // "this fixture never syncs anything".
+    it('stores the very same event once the account consents', async () => {
+        accountSyncEnabled = true
+        await record({ domain: 'shop.com', code: 'TEN', amount: 10 })
+
+        expect(serverRows).toHaveLength(1)
+        expect((await stored())[0].synced).toBe(true)
+    })
+
+    it('stops sweeping instead of retrying the refusal forever', async () => {
+        await record({ domain: 'shop.com', code: 'TEN', amount: 10 })
+        expect(ingestCalls()).toHaveLength(1)
+
+        // Three more sweeps, as three popup opens would make.
+        await base.caramelSyncSavings()
+        await base.caramelSyncSavings()
+        await base.caramelSyncSavings()
+
+        expect(ingestCalls()).toHaveLength(1)
+    })
+
+    it('marks nothing synced — the server stored nothing', async () => {
+        await record({ domain: 'shop.com', code: 'TEN', amount: 10 })
+
+        const list = await stored()
+        expect(list).toHaveLength(1)
+        expect(list[0].synced).toBeUndefined()
+        expect(serverRows).toHaveLength(0)
+    })
+
+    it('does not mark the event rejected — the event was fine, the permission was missing', async () => {
+        await record({ domain: 'shop.com', code: 'TEN', amount: 10 })
+        expect((await stored())[0].syncRejected).toBeUndefined()
+    })
+
+    it('un-queues the batch so it stays device-local', async () => {
+        await record({ domain: 'shop.com', code: 'TEN', amount: 10 })
+        expect((await stored())[0].syncPending).toBeUndefined()
+    })
+
+    it('reconciles the device setting to the account, so the next sweep short-circuits', async () => {
+        await record({ domain: 'shop.com', code: 'TEN', amount: 10 })
+
+        expect((await base.caramelGetSettings()).syncSavings).toBe(false)
+        expect(await base.caramelSyncSavings()).toEqual({
+            pushed: 0,
+            skipped: 'sync-off',
+        })
+    })
+
+    it('keeps the saving visible in the shopper local history', async () => {
+        await record({ domain: 'shop.com', code: 'TEN', amount: 10 })
+
+        const list = await stored()
+        expect(list[0].domain).toBe('shop.com')
+        expect(list[0].amount).toBe(10)
+    })
+
+    it('does not upload a backlog if the shopper later turns sync back on', async () => {
+        await record({ domain: 'shop.com', code: 'TEN', amount: 10 })
+
+        // Consent granted afterwards. "Sync starts from here" — the refused
+        // event was recorded while the account said no and stays local.
+        accountSyncEnabled = true
+        await base.caramelSetSettings({ syncSavings: true })
+        await base.caramelSyncSavings()
+
+        expect(serverRows).toHaveLength(0)
+
+        // ...and a saving earned AFTER does upload, so the sweep is alive.
+        await record({ domain: 'shop.com', code: 'LATER', amount: 4 })
+        expect(serverRows.map(row => row.code)).toEqual(['LATER'])
+    })
+
+    it('a transport failure is still retried — only the refusal stops the sweep', async () => {
+        accountSyncEnabled = true
+        serverDown = true
+        await record({ domain: 'shop.com', code: 'TEN', amount: 10 })
+        expect(ingestCalls()).toHaveLength(1)
+
+        await base.caramelSyncSavings()
+        expect(ingestCalls()).toHaveLength(2)
+        expect((await stored())[0].syncPending).toBe(true)
+        expect((await base.caramelGetSettings()).syncSavings).toBe(true)
     })
 })

@@ -267,18 +267,23 @@ export default function SavingsSection({
  */
 function SyncOffBody({ savings }: { savings: ProfileOverview['savings'] }) {
     if (savings.eventCount > 0) {
+        // Verb and pronoun agree with the count too, not just the noun — a
+        // half-pluralized sentence ("The 1 event ... are still here ... delete
+        // them") reads as a bug in the page that is telling you your data is
+        // safe, which is the worst place to look careless.
+        const one = savings.eventCount === 1
         return (
             <div className={noticeClasses} role="status">
                 <p className={noticeTitleClasses}>Sync is off.</p>
                 <p className={noticeBodyClasses}>
                     New savings stay on your device. The {savings.eventCount}{' '}
-                    {savings.eventCount === 1 ? 'event' : 'events'} already in
-                    your account are still here —{' '}
+                    {one ? 'event' : 'events'} already in your account{' '}
+                    {one ? 'is' : 'are'} still here —{' '}
                     <Link
                         href="#data"
                         className="font-semibold underline underline-offset-2"
                     >
-                        delete them from Data &amp; privacy
+                        delete {one ? 'it' : 'them'} from Data &amp; privacy
                     </Link>
                     .
                 </p>

@@ -175,7 +175,17 @@ module.exports = [
         // is now six raises overdue; this change did not take it, because the
         // file's own note puts that call with the owner and not with the change
         // that re-baselines the numbers.
-        limit: '268 KB',
+        //
+        // 2026-08-10 — 268 → 270 KB. The consent-refusal branch in
+        // caramel-base.js's sweep: the ingest route now enforces the ACCOUNT's
+        // savings_sync_enabled column (a device setting is a cache, not a
+        // gate — proven live, a user with sync off had an event stored), and
+        // answers 403 savings_sync_disabled. ~0.4 kB is code; the rest records
+        // why that one error string is not retried like every other error,
+        // which is the whole defence against a later edit folding it back into
+        // the generic failure path and shipping an infinite retry loop. A
+        // trimming pass paid back 0.14 kB. Measured 268.33 kB.
+        limit: '270 KB',
         brotli: false,
     },
     {
@@ -247,7 +257,17 @@ module.exports = [
         // response has to leave those entries queued for the next sweep rather
         // than silently losing a shopper's savings. Measured 21.25 kB; 22 for
         // the usual headroom.
-        limit: '22 KB',
+        //
+        // 2026-08-10 — 22 → 23 KB while GREEN, which needs saying out loud.
+        // The syncSavings handler now reads the error BODY on a failed status
+        // instead of collapsing it to `HTTP <status>`, so the sweep can tell
+        // the route's 403 savings_sync_disabled apart from a transient failure.
+        // Measured 21.96 kB — it fits, with 40 bytes to spare, and 40 bytes is
+        // not a budget, it is a tripwire that turns the next comment edit into
+        // a red build saying nothing true about bundle weight. Same headroom
+        // reasoning as the 249 and 258 KB lines above, applied before the fact
+        // rather than after.
+        limit: '23 KB',
         brotli: false,
     },
 ]

@@ -626,6 +626,34 @@ async function _caramelSyncSavingsOnce() {
         logError('syncSavings transport', err)
         return { pushed: 0, error: String(err) }
     }
+    // The ACCOUNT says sync is off and this device's setting was stale. The
+    // server owns consent, so this is an answer, not a failure — retrying it
+    // would ask the same question on every popup open forever, and the answer
+    // can only change through caramelSetSettings, which re-arms the sweep.
+    //
+    // Two writes, neither a sync: reconcile the cached setting (the next sweep
+    // then short-circuits at 'sync-off' before building a batch), and clear
+    // syncPending on everything queued for this account so it stays device-
+    // local. That keeps the "sync starts from here" promise — consenting later
+    // uploads what follows, never a backlog recorded while consent was off.
+    // Nothing is marked `synced` (nothing was stored) and nothing is marked
+    // `syncRejected` (the events are fine; the permission was missing).
+    if (response && response.error === 'savings_sync_disabled') {
+        await caramelSetSettings({ syncSavings: false })
+        const pendingIds = new Set(queue.map(e => e.clientEventId))
+        const current = await caramelGetSavings({ all: true })
+        for (const e of current) {
+            if (e && e.clientEventId && pendingIds.has(e.clientEventId)) {
+                delete e.syncPending
+            }
+        }
+        await _caramelWriteSavings(current)
+        logError(
+            'syncSavings',
+            `account has savings sync off — un-queued ${pendingIds.size} device-local entries`,
+        )
+        return { pushed: 0, skipped: 'sync-disabled-by-account' }
+    }
     if (!response || response.error) {
         logError('syncSavings', response?.error || 'no response')
         return { pushed: 0, error: response?.error || 'no response' }

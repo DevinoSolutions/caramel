@@ -6,13 +6,36 @@ import { z } from 'zod'
 // POST /api/account/savings — the extension's opt-in cloud savings sync.
 //
 // The extension records every measured win to device storage first and pushes
-// here afterwards, in batches, only when BOTH the device's `syncSavings`
-// setting and the account's `savings_sync_enabled` column are on. `auth:
-// 'session'` rather than 'optional': a savings event with no owner is not a
-// degraded record, it is a meaningless one — there is nowhere to put it and
-// nobody to show it to. Rate-limited + origin-gated like every other mutation;
-// no CORS/OPTIONS export for the same reason coupons/[id]/report has none —
-// the MV3 service worker fetches with host_permissions and never preflights.
+// here afterwards, in batches, when its device `syncSavings` setting is on.
+// `auth: 'session'` rather than 'optional': a savings event with no owner is
+// not a degraded record, it is a meaningless one — there is nowhere to put it
+// and nobody to show it to. Rate-limited + origin-gated like every other
+// mutation; no CORS/OPTIONS export for the same reason coupons/[id]/report has
+// none — the MV3 service worker fetches with host_permissions and never
+// preflights.
+//
+// ── CONSENT IS ENFORCED HERE, NOT ASSUMED ────────────────────────────────────
+// The device setting is a CLIENT cache of the account's consent, and a client
+// cache is not a gate. A stale extension build, a device that never saw the
+// user turn sync off elsewhere, or anything else holding a bearer token can
+// POST this route directly. So `users.savings_sync_enabled` is read per
+// request and a false value refuses the whole batch — the account column is
+// the authority, the device setting only decides whether we bother asking.
+//
+// Read via prisma.user.findUnique, never off `session.user`: better-auth
+// projects only the fields it knows onto the session object, so a custom
+// column arrives `undefined` there — indistinguishable from a real `false`,
+// which is exactly how a consent check silently degrades into a coin flip.
+//
+// The refusal is 403 with a MACHINE-READABLE body, `{ error:
+// 'savings_sync_disabled' }`, because the extension has to tell this apart
+// from a transport failure. Its sweep leaves an event queued on any error and
+// retries on the next popup open, so a bare 403 (or any opaque status) would
+// mean a permanent retry loop against a wall. On this code the extension
+// instead reconciles its cached setting to off and un-queues the batch: the
+// events stay on the device, nothing is marked synced, and the sweep stops.
+// Not 401 — the caller IS authenticated; not a silent 200, which would tell
+// the client the events were stored and let it drop them.
 //
 // ── BATCH SEMANTICS (decided, do not re-litigate) ────────────────────────────
 // TWO layers, because they answer two different questions.
@@ -149,6 +172,19 @@ export const POST = withRoute(
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
         const userId = session.user.id
+
+        // Consent gate — see the header note. Fails CLOSED: a user row that
+        // cannot be read at all is not permission to bank someone's data.
+        const account = await prisma.user.findUnique({
+            where: { id: userId },
+            select: { savingsSyncEnabled: true },
+        })
+        if (!account?.savingsSyncEnabled) {
+            return NextResponse.json(
+                { error: 'savings_sync_disabled' },
+                { status: 403 },
+            )
+        }
 
         const candidates: PreparedEvent[] = []
         const rejected: RejectedEvent[] = []

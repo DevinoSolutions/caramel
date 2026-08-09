@@ -387,6 +387,13 @@ currentBrowser.runtime.onMessage.addListener(
             // The response is handed BACK to the caller rather than swallowed:
             // caramel-base.js marks entries synced only from what the server
             // says it stored, so a dropped response has to leave them queued.
+            //
+            // The error BODY is read on a failed status, not just the number:
+            // the route answers 403 { error: 'savings_sync_disabled' } when the
+            // account has sync off, and the sweep has to tell that permanent
+            // "stop asking" apart from a transient failure it should retry.
+            // Collapsing every non-ok response to `HTTP <status>` made the two
+            // identical, which is an infinite retry on every popup open.
             fetchCaramelApi(caramelUrl('api/account/savings'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -395,7 +402,13 @@ currentBrowser.runtime.onMessage.addListener(
                 }),
             })
                 .then(async r => {
-                    if (!r.ok) return { error: `HTTP ${r.status}` }
+                    if (!r.ok) {
+                        const body = await r.json().catch(() => null)
+                        return {
+                            error: body?.error || `HTTP ${r.status}`,
+                            status: r.status,
+                        }
+                    }
                     return r.json()
                 })
                 .then(resp => sendResponse(resp))

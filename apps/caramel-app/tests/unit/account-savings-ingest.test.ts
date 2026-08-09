@@ -27,6 +27,9 @@ const { prismaMock, db, defaults } = vi.hoisted(() => {
         savings: [] as SavingsRow[],
         /** Catalog coupon ids this deployment has ingested. */
         coupons: new Set<string>(),
+        /** users rows, keyed by id. Absent = no such user, which the route
+         * must treat as "no consent" rather than as permission. */
+        users: new Map<string, { savingsSyncEnabled: boolean }>(),
     }
 
     // Held separately so beforeEach can mockReset() and re-arm. A test that
@@ -71,6 +74,9 @@ const { prismaMock, db, defaults } = vi.hoisted(() => {
             args.where.id.in
                 .filter(id => state.coupons.has(id))
                 .map(id => ({ id })),
+
+        findUser: async (args: { where: { id: string } }) =>
+            state.users.get(args.where.id) ?? null,
     }
 
     return {
@@ -82,6 +88,7 @@ const { prismaMock, db, defaults } = vi.hoisted(() => {
                 createMany: vi.fn(impl.createSavings),
             },
             coupon: { findMany: vi.fn(impl.findCoupons) },
+            user: { findUnique: vi.fn(impl.findUser) },
         },
     }
 })
@@ -143,13 +150,19 @@ async function post(body: unknown) {
     return { res, json: (await res.json()) as IngestResponse }
 }
 
+/** Signed in AND consented — the only state in which an ingest can succeed, so
+ * it is the default for every test that is about something else. */
 function signedIn(id = 'user-1') {
     getSessionMock.mockResolvedValue({ user: { id }, session: { id: 'sess' } })
+    db.users.set(id, { savingsSyncEnabled: true })
 }
 
 beforeEach(() => {
     db.savings.length = 0
     db.coupons.clear()
+    db.users.clear()
+    prismaMock.user.findUnique.mockReset()
+    prismaMock.user.findUnique.mockImplementation(defaults.findUser)
     prismaMock.savingsEvent.findMany.mockReset()
     prismaMock.savingsEvent.findMany.mockImplementation(defaults.findSavings)
     prismaMock.savingsEvent.createMany.mockReset()
@@ -505,5 +518,91 @@ describe('an unknown coupon id cannot take the batch down with it', () => {
         signedIn()
         await post({ events: [event()] })
         expect(prismaMock.coupon.findMany).not.toHaveBeenCalled()
+    })
+})
+
+// The device setting is a CACHE of consent, not the gate. Anything holding a
+// bearer token can POST this route — a stale extension build that never saw
+// the user turn sync off, most of all — so the account column decides, per
+// request. Proven live before it was fixed: a user with sync off had an event
+// stored and displayed back to them.
+describe('the account consent flag gates the ingest, not the device setting', () => {
+    // Positive first, deliberately: the negatives below all assert "nothing was
+    // written", which is also what a route broken in any OTHER way produces.
+    // This pins that the exact same batch DOES store when consent is on, so a
+    // green negative means the gate worked rather than that nothing works.
+    it('stores the batch when the account has savings sync ON', async () => {
+        signedIn('user-consents')
+        const { res, json } = await post({
+            events: [event({ clientEventId: 'consented' })],
+        })
+
+        expect(res.status).toBe(200)
+        expect(json.accepted).toBe(1)
+        expect(db.savings.map(row => row.clientEventId)).toEqual(['consented'])
+    })
+
+    it('refuses that same batch with 403 savings_sync_disabled when consent is OFF', async () => {
+        signedIn('user-declines')
+        db.users.set('user-declines', { savingsSyncEnabled: false })
+
+        const res = await POST(request({ events: [event()] }))
+        const body = (await res.json()) as { error?: string }
+
+        expect(res.status).toBe(403)
+        // A machine-readable code, not prose: the extension branches on this
+        // exact string to stop sweeping instead of retrying forever.
+        expect(body.error).toBe('savings_sync_disabled')
+        expect(db.savings).toHaveLength(0)
+        expect(prismaMock.savingsEvent.createMany).not.toHaveBeenCalled()
+    })
+
+    it('refuses before touching the events at all — a valid batch is not half-processed', async () => {
+        signedIn('user-declines')
+        db.users.set('user-declines', { savingsSyncEnabled: false })
+
+        await POST(request({ events: [event()] }))
+
+        expect(prismaMock.savingsEvent.findMany).not.toHaveBeenCalled()
+    })
+
+    it('reads the flag from the users table, never off the session object', async () => {
+        // better-auth projects only the fields it knows onto session.user, so
+        // a custom column arrives there as undefined — indistinguishable from
+        // a real false. A gate reading the session would refuse EVERY user.
+        getSessionMock.mockResolvedValue({
+            user: { id: 'user-1', savingsSyncEnabled: false },
+            session: { id: 'sess' },
+        })
+        db.users.set('user-1', { savingsSyncEnabled: true })
+
+        const { res, json } = await post({ events: [event()] })
+
+        expect(res.status).toBe(200)
+        expect(json.accepted).toBe(1)
+        expect(prismaMock.user.findUnique).toHaveBeenCalledWith({
+            where: { id: 'user-1' },
+            select: { savingsSyncEnabled: true },
+        })
+    })
+
+    it('fails closed when the user row cannot be read', async () => {
+        // The session names user-ghost; the users table has no such row.
+        // Absence of a recorded consent is not consent.
+        getSessionMock.mockResolvedValue({
+            user: { id: 'user-ghost' },
+            session: { id: 'sess' },
+        })
+
+        const res = await POST(request({ events: [event()] }))
+
+        expect(res.status).toBe(403)
+        expect(db.savings).toHaveLength(0)
+    })
+
+    it('still 401s a signed-out caller rather than 403 — the gate did not replace auth', async () => {
+        const res = await POST(request({ events: [event()] }))
+        expect(res.status).toBe(401)
+        expect(prismaMock.user.findUnique).not.toHaveBeenCalled()
     })
 })
