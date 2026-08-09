@@ -212,9 +212,15 @@ test.describe('Auth Flows — Signup', () => {
             .getByRole('button', { name: 'Create account', exact: true })
             .click()
 
+        // 15s, not 5s: the response is mocked (fulfilled 422 above), so this
+        // only measures the client rendering the toast — but on the deployed
+        // site a cold /signup load can still be hydrating when the click
+        // lands, and 5s went flaky on 2026-08-09 (failOnFlakyTests turns one
+        // slow retry into a red gate). Same budget rationale as the
+        // signup-success redirect above.
         await expect(
             page.getByText(/unable to create your account/i),
-        ).toBeVisible({ timeout: 5000 })
+        ).toBeVisible({ timeout: 15000 })
     })
 
     test('username too short shows validation error', async ({ page }) => {
