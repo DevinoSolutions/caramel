@@ -19,7 +19,18 @@
 // (or mutate) the externally-owned catalog. Signals are keyed by the catalog
 // coupon id as a string, matching the app's Coupon.id: string.
 import prisma from '@/lib/prisma'
+import type { Prisma } from '@prisma/client'
 import * as Sentry from '@sentry/nextjs'
+
+/**
+ * The only slice of the Prisma client these writers need. Satisfied by BOTH the
+ * module-level singleton and an interactive-transaction client, so a caller that
+ * must write the signal atomically alongside another row — the report route's
+ * signed-in attribution, which pairs a `coupon_signals` upsert with a
+ * `coupon_reports` insert — passes its `tx` and gets the exact same write rather
+ * than a second, independently-written copy of it.
+ */
+export type CouponSignalWriter = Pick<Prisma.TransactionClient, 'couponSignal'>
 
 /**
  * Extension reported this coupon worked at checkout — stamp the last-worked
@@ -28,8 +39,11 @@ import * as Sentry from '@sentry/nextjs'
  * bumping it here too would double-count every success. This writer owns
  * `lastWorkedAt` only.
  */
-export async function recordWorked(couponId: string): Promise<void> {
-    await prisma.couponSignal.upsert({
+export async function recordWorked(
+    couponId: string,
+    client: CouponSignalWriter = prisma,
+): Promise<void> {
+    await client.couponSignal.upsert({
         where: { couponId },
         create: { couponId, lastWorkedAt: new Date() },
         update: { lastWorkedAt: new Date() },
@@ -58,11 +72,12 @@ export async function recordUsage(couponId: string): Promise<void> {
 export async function recordFailed(
     couponId: string,
     reason?: string | null,
+    client: CouponSignalWriter = prisma,
 ): Promise<void> {
     // `reason` is already length-bounded by the report route's zod body schema
     // (trim().max(200)); passed straight through — no second-guessing a value
     // the boundary already validated.
-    await prisma.couponSignal.upsert({
+    await client.couponSignal.upsert({
         where: { couponId },
         create: {
             couponId,
