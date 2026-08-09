@@ -23,7 +23,10 @@ const { prismaMock, transactionMock } = vi.hoisted(() => {
             savingsEvent: { deleteMany: vi.fn(() => ({ op: 'savings' })) },
             favoriteStore: { deleteMany: vi.fn(() => ({ op: 'favorites' })) },
             couponReport: { deleteMany: vi.fn(() => ({ op: 'reports' })) },
-            user: { update: vi.fn() },
+            // `delete` is mocked even though the route must never call it: a
+            // "not called" assertion against a method the fixture does not
+            // define is a statement about the fixture, not about the route.
+            user: { update: vi.fn(), delete: vi.fn() },
         },
     }
 })
@@ -128,13 +131,25 @@ describe('POST /api/account/data/delete — scope', () => {
     })
 
     it('does NOT delete the account and does NOT touch the sync preference', async () => {
-        await POST(deleteRequest({ confirm: 'DELETE' }))
+        const res = await POST(deleteRequest({ confirm: 'DELETE' }))
 
-        // Toggling sync off and deleting history are deliberately separate
-        // acts — a delete that also changed a setting the user never touched
-        // would make the danger zone do something it did not say it would.
+        // The POSITIVE half first. Without it both negatives below are
+        // trivially true whenever the request never got as far as deleting
+        // anything — a 401, a 422 from a changed body schema, an early return —
+        // so the test would go green on a route that does nothing at all,
+        // which is the opposite of what it claims to verify.
+        expect(res.status).toBe(200)
+        expect(transactionMock).toHaveBeenCalledTimes(1)
+        expect(prismaMock.savingsEvent.deleteMany).toHaveBeenCalledTimes(1)
+        expect(prismaMock.favoriteStore.deleteMany).toHaveBeenCalledTimes(1)
+        expect(prismaMock.couponReport.deleteMany).toHaveBeenCalledTimes(1)
+
+        // Only now is "and nothing else happened" a real statement. Toggling
+        // sync off and deleting history are deliberately separate acts — a
+        // delete that also changed a setting the user never touched would make
+        // the danger zone do something it did not say it would.
         expect(prismaMock.user.update).not.toHaveBeenCalled()
-        expect(prismaMock).not.toHaveProperty('user.delete')
+        expect(prismaMock.user.delete).not.toHaveBeenCalled()
     })
 })
 
