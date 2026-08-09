@@ -49,8 +49,12 @@ test.describe('Auth Flows — Login (real session)', () => {
         // a protected route that bounces unauthenticated visitors to /login, so
         // seeing the profile with the seeded email proves the session is real.
         await page.goto('/profile')
+        // /profile is an account HOME now: its <h1> is the user's own name, not
+        // the word "Profile". "Account details" is the stable landmark to wait
+        // on — it renders straight from the session, so it does not depend on
+        // the overview fetch resolving.
         await expect(
-            page.getByRole('heading', { name: 'Profile' }),
+            page.getByRole('heading', { name: 'Account details' }),
         ).toBeVisible({ timeout: 10000 })
         await expect(page.getByText(REAL_LOGIN_EMAIL).first()).toBeVisible()
     })
@@ -402,9 +406,16 @@ test.describe('Auth Flows — Protected Routes', () => {
 
         await page.goto('/profile')
 
-        await expect(page.getByText('Profile')).toBeVisible({ timeout: 5000 })
+        // The user's own name is the page's <h1> — the standalone "Profile"
+        // heading is gone. Both assertions below render from the session
+        // alone, which is the point: this test stubs only get-session, so
+        // /api/account/overview genuinely fails here and the page must still
+        // show real account content rather than collapsing to an error.
         await expect(
-            page.getByRole('heading', { name: 'carameluser' }),
+            page.getByRole('heading', { name: 'carameluser', level: 1 }),
+        ).toBeVisible({ timeout: 5000 })
+        await expect(
+            page.getByRole('heading', { name: 'Account details' }),
         ).toBeVisible()
         await expect(page.getByText('test@example.com').first()).toBeVisible()
     })
