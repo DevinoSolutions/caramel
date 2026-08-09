@@ -290,6 +290,24 @@ describe('GET /api/account/export', () => {
         }
     })
 
+    it('the preferences block reflects the users table, not the session', async () => {
+        // Same custom-column trap as the overview: a session cannot be trusted
+        // to carry savingsSyncEnabled, so the export reads it from the row.
+        getSessionMock.mockResolvedValue({
+            user: { id: USER_ID, savingsSyncEnabled: false },
+            session: { id: 'sess' },
+        })
+        prismaMock.user.findUnique.mockResolvedValue({
+            ...ACCOUNT_ROW,
+            savingsSyncEnabled: true,
+        })
+
+        const body = (await (
+            await GET(exportRequest())
+        ).json()) as AccountExport
+        expect(body.preferences).toEqual({ savingsSyncEnabled: true })
+    })
+
     it('an anonymous caller gets 401 and nothing is read', async () => {
         getSessionMock.mockResolvedValue(null)
         const res = await GET(exportRequest())

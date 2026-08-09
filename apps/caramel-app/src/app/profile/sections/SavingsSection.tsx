@@ -37,12 +37,11 @@ import { toast } from 'sonner'
 //
 // What it is instead: one warm hero number and a short list of moments.
 //
-// TODO(feat/login-savings): `PATCH /api/account/savings-sync` is owned by the
-// savings-sync PR and does not exist on this branch. The toggle below already
-// speaks its contract ({ enabled } -> { savingsSyncEnabled }); until that route
-// lands a toggle attempt fails loudly through the failure path below — which is
-// the SAME behaviour the spec requires for any failed toggle (switch does not
-// move, error toast, support prompt), so nothing here is a mock.
+// The switch writes `PATCH /api/account/savings-sync` ({ enabled } ->
+// { savingsSyncEnabled }) and renders the PERSISTED value it reads back, never
+// its own optimistic guess — the route is the single authority for consent, and
+// a switch showing "on" while the account says "off" is the exact drift that
+// authority exists to prevent.
 
 const FAVICON_SIZE = 128
 const INITIAL_ROWS = 5

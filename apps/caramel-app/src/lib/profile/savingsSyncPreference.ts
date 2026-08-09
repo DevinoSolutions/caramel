@@ -1,33 +1,27 @@
 // src/lib/profile/savingsSyncPreference.ts
 //
 // The ONE place the account page learns whether a user has opted into cloud
-// savings sync. It is a module rather than an inline read so that wiring it to
-// its real storage is a one-line change in one file.
+// savings sync. It is a module rather than an inline read so that every
+// consumer (the overview payload, the export's `preferences` block) resolves
+// the flag exactly one way.
 //
-// TODO(feat/login-savings): this must read `users.savings_sync_enabled` — the
-// additive `User.savingsSyncEnabled Boolean @default(false)` column owned by
-// the savings-sync PR (feat/login-savings), which also ships
-// `PATCH /api/account/savings-sync`. That column does NOT exist on this branch
-// (feat/profile-revamp is cut from feat/login-foundation), so referencing it
-// here would not compile. When the two PRs meet, replace the body below with:
+// READ IT FROM THE TABLE, NEVER FROM THE SESSION. better-auth projects only
+// the fields it knows about onto `session.user`, so a custom column arrives
+// there as `undefined` — falsy, and therefore indistinguishable from a real
+// "off". Every account would silently render as sync-off while the table said
+// otherwise. `PATCH /api/account/savings-sync` writes this column and reads it
+// back for the same reason: `users.savings_sync_enabled` is the single
+// authority, and chrome.storage.sync is only a cache of it.
 //
-//     const row = await prisma.user.findUnique({
-//         where: { id: userId },
-//         select: { savingsSyncEnabled: true },
-//     })
-//     return row?.savingsSyncEnabled ?? false
-//
-// and delete this comment. Read it from Prisma, NOT from the better-auth
-// session: `auth.api.getSession()` only returns fields better-auth knows
-// about, so a custom column arrives there as `undefined` — falsy, and every
-// user would silently render as sync-off.
-//
-// Returning false today is not a placeholder or a guess, it is the true
-// value: on this branch nothing can set the preference (no column, no PATCH
-// route), so every account genuinely has sync off and the savings section
-// correctly renders its opt-in pitch. The account page therefore behaves
-// correctly standalone and lights up the moment the column lands.
+// A missing user row resolves to false rather than throwing: the caller is
+// already handling a live session whose row it separately verifies (the export
+// route 404s on it), and an absent row genuinely carries no consent.
+import prisma from '@/lib/prisma'
+
 export async function readSavingsSyncEnabled(userId: string): Promise<boolean> {
-    void userId
-    return false
+    const row = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { savingsSyncEnabled: true },
+    })
+    return row?.savingsSyncEnabled ?? false
 }

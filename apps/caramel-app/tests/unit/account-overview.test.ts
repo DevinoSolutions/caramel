@@ -63,7 +63,12 @@ function overviewRequest() {
 
 /** The empty-everything DB: what a brand-new account really looks like. */
 function stubEmptyDatabase() {
-    prismaMock.user.findUnique.mockResolvedValue({ createdAt: MEMBER_SINCE })
+    // One mock serves both reads of the users row: the route's own
+    // createdAt lookup and readSavingsSyncEnabled's flag lookup.
+    prismaMock.user.findUnique.mockResolvedValue({
+        createdAt: MEMBER_SINCE,
+        savingsSyncEnabled: false,
+    })
     prismaMock.savingsEvent.groupBy.mockResolvedValue([])
     prismaMock.savingsEvent.aggregate.mockResolvedValue({
         _min: { occurredAt: null },
@@ -314,13 +319,40 @@ describe('GET /api/account/overview — populated aggregates', () => {
         expect(body.reports.reportCount).toBe(1)
     })
 
-    it('syncEnabled is false while the preference column is unavailable — a true value, not a guess', async () => {
+    it('syncEnabled reflects the users table', async () => {
+        prismaMock.user.findUnique.mockResolvedValue({
+            createdAt: MEMBER_SINCE,
+            savingsSyncEnabled: true,
+        })
         const body = (await (
             await GET(overviewRequest())
         ).json()) as ProfileOverview
-        // On this branch nothing can set the preference (no column, no PATCH
-        // route), so every account genuinely has sync off. See
-        // savingsSyncPreference.ts's TODO for the one-line wiring.
-        expect(body.savings.syncEnabled).toBe(false)
+        expect(body.savings.syncEnabled).toBe(true)
+    })
+
+    it('reads the sync flag from the users table, NEVER off the session object', async () => {
+        // better-auth projects only the fields it knows onto session.user, so
+        // a custom column arrives there as undefined — falsy, and therefore
+        // indistinguishable from a real "off". A session that CLAIMS the flag
+        // must not be believed. Mirrors the protection the savings-sync PR
+        // pinned on GET /api/extension/me.
+        getSessionMock.mockResolvedValue({
+            user: { id: USER_ID, savingsSyncEnabled: false },
+            session: { id: 'sess' },
+        })
+        prismaMock.user.findUnique.mockResolvedValue({
+            createdAt: MEMBER_SINCE,
+            savingsSyncEnabled: true,
+        })
+
+        const body = (await (
+            await GET(overviewRequest())
+        ).json()) as ProfileOverview
+        expect(body.savings.syncEnabled).toBe(true)
+        expect(prismaMock.user.findUnique).toHaveBeenCalledWith(
+            expect.objectContaining({
+                select: expect.objectContaining({ savingsSyncEnabled: true }),
+            }),
+        )
     })
 })
