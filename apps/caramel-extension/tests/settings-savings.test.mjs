@@ -41,10 +41,13 @@ beforeEach(() => {
 })
 
 describe('caramel-base.js settings helpers', () => {
-    it('defaults to auto-apply ON with no disabled sites', async () => {
+    it('defaults to auto-apply ON with no disabled sites, and savings sync OFF', async () => {
+        // syncSavings false is the load-bearing half: it is consent to upload a
+        // shopping record, so an absent key must read as "has not opted in".
         expect(await helpers.caramelGetSettings()).toEqual({
             autoApply: true,
             disabledSites: [],
+            syncSavings: false,
         })
         expect(await helpers.caramelPromptAllowed('shop.example.com')).toBe(
             true,
@@ -77,6 +80,7 @@ describe('caramel-base.js settings helpers', () => {
         expect(await helpers.caramelGetSettings()).toEqual({
             autoApply: false,
             disabledSites: ['a.com'],
+            syncSavings: false,
         })
     })
 })

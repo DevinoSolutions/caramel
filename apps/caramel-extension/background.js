@@ -379,6 +379,53 @@ currentBrowser.runtime.onMessage.addListener(
                 })
 
             return true
+        } else if (message.action === 'syncSavings') {
+            // Opt-in cloud savings sync. Routed through the worker like all
+            // other API traffic so the bearer token never has to reach a
+            // content script running on a store's page.
+            //
+            // The response is handed BACK to the caller rather than swallowed:
+            // caramel-base.js marks entries synced only from what the server
+            // says it stored, so a dropped response has to leave them queued.
+            fetchCaramelApi(caramelUrl('api/account/savings'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    events: Array.isArray(message.events) ? message.events : [],
+                }),
+            })
+                .then(async r => {
+                    if (!r.ok) return { error: `HTTP ${r.status}` }
+                    return r.json()
+                })
+                .then(resp => sendResponse(resp))
+                .catch(err => {
+                    logError('syncSavings', err)
+                    sendResponse({ error: String(err) })
+                })
+
+            return true
+        } else if (message.action === 'setSavingsSync') {
+            // Writes the ACCOUNT-side consent flag. The popup switch also
+            // writes the device setting, but this column is the authority the
+            // website reads, so a toggle that only touched local storage would
+            // leave /profile showing the opposite of the popup.
+            fetchCaramelApi(caramelUrl('api/account/savings-sync'), {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enabled: !!message.enabled }),
+            })
+                .then(async r => {
+                    if (!r.ok) return { error: `HTTP ${r.status}` }
+                    return r.json()
+                })
+                .then(resp => sendResponse(resp))
+                .catch(err => {
+                    logError('setSavingsSync', err)
+                    sendResponse({ error: String(err) })
+                })
+
+            return true
         } else if (message.action === 'fetchSupportedStores') {
             const url = caramelUrl('api/extension/supported-stores')
             // The bulk payload gets the larger budget, and one retry: the

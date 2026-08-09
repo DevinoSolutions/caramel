@@ -301,8 +301,14 @@ function caramelClearSession(done) {
 
 /* --------------------------------------------------  user settings */
 // One storage.sync object so preferences roam with the browser profile.
-// Shape: { autoApply: boolean, disabledSites: string[] } — read through
-// this helper only, so defaults live in exactly one place.
+// Shape: { autoApply: boolean, disabledSites: string[], syncSavings: boolean }
+// — read through this helper only, so defaults live in exactly one place.
+//
+// `syncSavings` DEFAULTS FALSE, and unlike `autoApply` it is written as
+// `=== true` rather than `!== false`: an absent key must read as "has not
+// opted in". This flag is consent to upload a shopping record, so a default
+// that treated silence as yes would be consent nobody gave. The account-side
+// authority is users.savings_sync_enabled; this is the roaming cache of it.
 const CARAMEL_SETTINGS_KEY = 'caramel_settings'
 // Cross-file content-script/popup reads — per-file analysis can't see them.
 // oxlint-disable-next-line no-unused-vars
@@ -316,10 +322,15 @@ function caramelGetSettings() {
                     disabledSites: Array.isArray(s.disabledSites)
                         ? s.disabledSites
                         : [],
+                    syncSavings: s.syncSavings === true,
                 })
             })
         } catch {
-            resolve({ autoApply: true, disabledSites: [] })
+            resolve({
+                autoApply: true,
+                disabledSites: [],
+                syncSavings: false,
+            })
         }
     })
 }
@@ -413,8 +424,88 @@ function caramelGetSavings(options) {
         }
     })
 }
-// entry: { domain, code, amount, currency, t } — amount must be a real
-// measured saving (> 0); applied-but-unmeasured codes are not recorded.
+/* Stable id for one saving, minted once and never regenerated: it is the
+ * idempotency key POST /api/account/savings dedupes on, so a RETRY must carry
+ * the value the first attempt did. Stamped at record time; sync only reads it.
+ *
+ * crypto.randomUUID() is missing in an INSECURE context and a plain http://
+ * checkout is one, so it is feature-detected, falling back to getRandomValues
+ * (which IS available there) and then to Math.random — a weak id still works as
+ * an idempotency key, where a thrown TypeError would lose the saving.
+ */
+function _caramelNewEventId() {
+    try {
+        if (
+            globalThis.crypto &&
+            typeof globalThis.crypto.randomUUID === 'function'
+        ) {
+            return globalThis.crypto.randomUUID()
+        }
+        if (
+            globalThis.crypto &&
+            typeof globalThis.crypto.getRandomValues === 'function'
+        ) {
+            const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16))
+            bytes[6] = (bytes[6] & 0x0f) | 0x40
+            bytes[8] = (bytes[8] & 0x3f) | 0x80
+            const hex = Array.from(bytes, b =>
+                b.toString(16).padStart(2, '0'),
+            ).join('')
+            return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+        }
+    } catch {
+        // fall through to the arithmetic id below
+    }
+    return `caramel-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`
+}
+
+/* Applies CARAMEL_SAVINGS_MAX, evicting SYNCED entries before unsynced ones.
+ *
+ * A blind newest-50 trim can evict an entry that never reached the server,
+ * deleting the only copy that ever existed. A synced entry is safe on the
+ * account and costs nothing to drop locally, so those go first, oldest first.
+ *
+ * When EVERY entry is unsynced (a long outage, or a shopper who never opted in)
+ * the oldest is dropped. That is a real loss, so it goes through logError
+ * rather than passing in silence: it is the one path in the savings history
+ * where data leaves and does not come back.
+ */
+function _caramelTrimSavings(list) {
+    if (list.length <= CARAMEL_SAVINGS_MAX) return list
+    const keep = list.slice()
+    for (
+        let i = keep.length - 1;
+        i >= 0 && keep.length > CARAMEL_SAVINGS_MAX;
+        i--
+    ) {
+        if (keep[i] && (keep[i].synced || keep[i].syncRejected))
+            keep.splice(i, 1)
+    }
+    if (keep.length > CARAMEL_SAVINGS_MAX) {
+        logError(
+            'savings cap evicted unsynced entries',
+            `dropped ${keep.length - CARAMEL_SAVINGS_MAX} saving(s) that never reached the server`,
+        )
+        return keep.slice(0, CARAMEL_SAVINGS_MAX)
+    }
+    return keep
+}
+
+function _caramelWriteSavings(list) {
+    return new Promise(resolve => {
+        try {
+            currentBrowser.storage.local.set(
+                { [CARAMEL_SAVINGS_KEY]: _caramelTrimSavings(list) },
+                resolve,
+            )
+        } catch {
+            resolve()
+        }
+    })
+}
+
+// entry: { domain, code, amount, currency, t, couponId } — amount must be a
+// real measured saving (> 0); applied-but-unmeasured codes are not recorded.
 // oxlint-disable-next-line no-unused-vars
 async function caramelRecordSaving(entry) {
     if (!entry || !(entry.amount > 0)) return
@@ -423,23 +514,150 @@ async function caramelRecordSaving(entry) {
     const list = await caramelGetSavings({ all: true })
     const session = await caramelGetSession().catch(() => null)
     const owner = session?.user?.username || null
+    const settings = await caramelGetSettings()
+
+    /* Eligibility is decided here, once, and frozen onto the entry rather than
+     * re-derived at sweep time from whatever the settings then say. Two
+     * promises depend on it: "sync starts from here" (turning the switch on
+     * must not retroactively upload savings earned while it was off), and a
+     * saving earned SIGNED OUT belongs to the device, not to the next account
+     * that signs in — no owner, no upload.
+     */
+    const syncPending = !!(settings.syncSavings && session?.token && owner)
+
     list.unshift({
         domain: String(entry.domain || ''),
         code: String(entry.code || ''),
         amount: Math.round(entry.amount * 100) / 100,
         currency: String(entry.currency || 'USD'),
         t: entry.t || Date.now(),
+        // Stamped on EVERY entry, syncable or not: it costs one call, and an
+        // entry that acquires an id only when it becomes eligible could not be
+        // retried idempotently the first time.
+        clientEventId: _caramelNewEventId(),
+        // The catalog coupon this win came from. The call sites hold it (they
+        // already pass it to the trust-loop report) and used to drop it, which
+        // left the account-side event unable to name the code's source.
+        ...(entry.couponId ? { couponId: String(entry.couponId) } : {}),
         // Absent for a signed-out saving — see _caramelSavingsVisibleTo.
         ...(owner ? { u: owner } : {}),
+        ...(syncPending ? { syncPending: true } : {}),
     })
-    return new Promise(resolve => {
-        try {
-            currentBrowser.storage.local.set(
-                { [CARAMEL_SAVINGS_KEY]: list.slice(0, CARAMEL_SAVINGS_MAX) },
-                resolve,
-            )
-        } catch {
-            resolve()
+    await _caramelWriteSavings(list)
+
+    // Deliberately not awaited: the saving is already banked locally and the
+    // money path must not wait on a round-trip to show the shopper their
+    // result. The result IS checked — caramelSyncSavings marks what the server
+    // confirmed and leaves the rest queued — just not here.
+    if (syncPending) caramelSyncSavings()
+}
+
+/* --------------------------------------------------  savings cloud sync */
+// Server-side batch cap is 100; 50 matches the local history cap, so a full
+// catch-up sweep is one request.
+const CARAMEL_SYNC_BATCH_MAX = 50
+
+/* One flush at a time. Two callers race by design — the recording moment fires
+ * one, opening the popup fires a catch-up sweep — and both read the history,
+ * push, then write the marks back, so two in flight can lose the other's mark
+ * (last write wins on the whole array). Duplicate EVENTS stay impossible either
+ * way (clientEventId is unique server-side), but a lost mark means re-pushing
+ * an entry forever. Collapsing onto one promise is cheaper than making the
+ * read-modify-write atomic.
+ */
+let _caramelSyncInFlight = null
+
+/* Pushes queued savings to the account. Never throws and never surfaces
+ * anything to the shopper — a failed background sync is not worth interrupting
+ * checkout for; failures stay queued for the next attempt and go to logError.
+ * Resolves to { pushed, rejected, skipped } so callers and tests can see what
+ * happened instead of inferring it from storage.
+ */
+// oxlint-disable-next-line no-unused-vars
+function caramelSyncSavings() {
+    if (_caramelSyncInFlight) return _caramelSyncInFlight
+    _caramelSyncInFlight = _caramelSyncSavingsOnce().finally(() => {
+        _caramelSyncInFlight = null
+    })
+    return _caramelSyncInFlight
+}
+
+async function _caramelSyncSavingsOnce() {
+    const settings = await caramelGetSettings()
+    if (!settings.syncSavings) return { pushed: 0, skipped: 'sync-off' }
+
+    const session = await caramelGetSession().catch(() => null)
+    const owner = session?.user?.username || null
+    if (!session?.token || !owner) return { pushed: 0, skipped: 'signed-out' }
+
+    const list = await caramelGetSavings({ all: true })
+    const queue = list.filter(
+        e =>
+            e &&
+            e.syncPending &&
+            !e.synced &&
+            !e.syncRejected &&
+            e.clientEventId &&
+            // Only this account's entries. A guest entry has no owner and must
+            // not be attributed to whoever happens to be signed in now.
+            e.u === owner,
+    )
+    if (!queue.length) return { pushed: 0, skipped: 'nothing-queued' }
+
+    const batch = queue.slice(0, CARAMEL_SYNC_BATCH_MAX)
+    let response
+    try {
+        response = await caramelSendMessage({
+            action: 'syncSavings',
+            events: batch.map(e => ({
+                clientEventId: e.clientEventId,
+                store: e.domain,
+                code: e.code || '',
+                couponId: e.couponId || null,
+                // Integer minor units on the wire — the stored `amount` is a
+                // 2-decimal float and floats are not what a total gets summed
+                // from.
+                amountCents: Math.round(e.amount * 100),
+                currency: e.currency || 'USD',
+                occurredAt: new Date(e.t).toISOString(),
+            })),
+        })
+    } catch (err) {
+        logError('syncSavings transport', err)
+        return { pushed: 0, error: String(err) }
+    }
+    if (!response || response.error) {
+        logError('syncSavings', response?.error || 'no response')
+        return { pushed: 0, error: response?.error || 'no response' }
+    }
+
+    const stored = new Set(
+        Array.isArray(response.stored) ? response.stored : [],
+    )
+    const rejected = new Map(
+        (Array.isArray(response.rejected) ? response.rejected : [])
+            .filter(r => r && r.clientEventId)
+            .map(r => [r.clientEventId, String(r.reason || 'rejected')]),
+    )
+
+    // Re-read rather than reusing `list`: the money path may have unshifted a
+    // new saving while this request was in flight, and writing the stale array
+    // back would erase it.
+    const fresh = await caramelGetSavings({ all: true })
+    for (const e of fresh) {
+        if (!e || !e.clientEventId) continue
+        if (stored.has(e.clientEventId)) {
+            e.synced = true
+        } else if (rejected.has(e.clientEventId)) {
+            // The server will refuse this payload every time — validation is
+            // deterministic — so retrying it forever would be a poison pill at
+            // the head of the queue. Mark it, keep it (the shopper's local
+            // history is unchanged), and record why.
+            e.syncRejected = rejected.get(e.clientEventId)
+            logError('syncSavings rejected an event', e.syncRejected)
         }
-    })
+    }
+    await _caramelWriteSavings(fresh)
+
+    return { pushed: stored.size, rejected: rejected.size }
 }

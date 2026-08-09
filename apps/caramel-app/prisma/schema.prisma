@@ -71,6 +71,19 @@ model User {
   deletedAt         DateTime?
   role              Role?           @default(USER)
   status            UserStatus      @default(NOT_VERIFIED)
+
+  // Opt-in cloud savings sync. DEFAULT FALSE, and the default is the whole
+  // point: this flag is consent to upload a shopping record (store, code,
+  // amount, time), so a `true` default would be consent nobody gave. The
+  // extension will not push a single event until this is on AND the device's
+  // own `syncSavings` setting is on.
+  //
+  // Lives on User rather than in extension storage because it is the ONE
+  // authority two surfaces have to agree on — the popup switch and the
+  // /profile switch — and a device-local flag cannot be read or changed by
+  // the website. chrome.storage.sync is the cache; this column is the truth.
+  savingsSyncEnabled Boolean        @default(false) @map("savings_sync_enabled")
+
   accounts          Account[]
   sessions          Session[]
   couponReports     CouponReport[]

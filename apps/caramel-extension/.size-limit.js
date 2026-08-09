@@ -156,7 +156,26 @@ module.exports = [
         // nothing true about bundle weight. The standing recommendation above
         // (price MINIFIED bytes) is now five raises overdue and still the
         // owner's call.
-        limit: '258 KB',
+        //
+        // 2026-08-09 — 258 → 268 KB, all of it in caramel-base.js: opt-in cloud
+        // savings sync. A recorded saving now carries a client-generated
+        // idempotency key, the catalog coupon id its two call sites used to
+        // drop, and a sync-eligibility flag; the cap became eviction-aware; and
+        // the batched push itself lives here (one flush at a time, entries
+        // marked synced ONLY from what the server says it stored). ~5.5 kB is
+        // code. The rest records three decisions that would each be re-decided
+        // wrongly by a later edit: eligibility is frozen at RECORD time, so
+        // turning the switch on never retroactively uploads what was earned
+        // while it was off; a saving earned signed OUT is never attributed to
+        // the next account that signs in; and an entry that never reached the
+        // server is never evicted while a synced one — already safe on the
+        // account — could go instead. A trimming pass paid back 0.70 kB.
+        // Measured 266.77 kB — 268 for the same headroom reason as the 249 and
+        // 258 lines above. The standing recommendation (price MINIFIED bytes)
+        // is now six raises overdue; this change did not take it, because the
+        // file's own note puts that call with the owner and not with the change
+        // that re-baselines the numbers.
+        limit: '268 KB',
         brotli: false,
     },
     {
@@ -177,7 +196,19 @@ module.exports = [
         // 59.32 kB — 60 rather than 59.5 for the same reason the 249 line gives:
         // headroom keeps the next comment edit from failing a build for a reason
         // that says nothing true about bundle weight.
-        limit: '60 KB',
+        //
+        // 2026-08-09 — 60 → 64 KB. The "Sync my savings" row in the settings
+        // view (signed-in only, cloning the existing .settings-row markup so it
+        // costs no CSS), its toggle handler, the polite live region, the
+        // /profile#savings deep link, and the popup-open catch-up sweep that
+        // flushes savings queued while the device was offline. ~2.0 kB is code
+        // and markup; the rest states the ordering constraint, which is the
+        // whole defence against a later edit inverting it: the account column
+        // is the authority and the DEVICE flag is what gates every upload, so a
+        // popup that cached "on" before the server confirmed would sync a
+        // shopping record against an account that never agreed. A trimming pass
+        // paid back 0.25 kB. Measured 63.39 kB — 64 for the usual headroom.
+        limit: '64 KB',
         brotli: false,
     },
     {
@@ -204,7 +235,19 @@ module.exports = [
         // an empty list — "you follow nothing" and "we couldn't ask" are
         // different answers and the star must not paint the first when it means
         // the second. Measured 19.02 kB; 20 for the usual headroom.
-        limit: '20 KB',
+        //
+        // 2026-08-09 — 20 → 22 KB. The two actions savings sync rides on:
+        // syncSavings (the batched POST to /api/account/savings) and
+        // setSavingsSync (PATCH /api/account/savings-sync), both through
+        // fetchCaramelApi so the stored bearer is attached in the one place
+        // that ever attaches it. ~0.9 kB is code; the rest records why the
+        // ingest response is handed BACK to the caller instead of being
+        // swallowed the way reportOutcome's is — caramel-base.js marks an entry
+        // synced only from the ids the server says it stored, so a dropped
+        // response has to leave those entries queued for the next sweep rather
+        // than silently losing a shopper's savings. Measured 21.25 kB; 22 for
+        // the usual headroom.
+        limit: '22 KB',
         brotli: false,
     },
 ]

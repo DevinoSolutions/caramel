@@ -543,6 +543,7 @@ async function _resumePendingSubmit() {
             code: pending.code,
             amount: saved,
             currency: caramelCurrencyCode(),
+            couponId: pending.id,
         })
         showFinalModal(saved, pending.code)
         return true
@@ -639,6 +640,7 @@ async function startCheckoutDetection() {
                     code: st.code,
                     amount: st.saved || 0,
                     currency: st.currency || 'USD',
+                    couponId: st.id || null,
                 })
                 let amount = st.saved || 0
                 let msg = null

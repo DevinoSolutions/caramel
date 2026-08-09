@@ -495,6 +495,10 @@ async function startApplyingCoupons(rec, options) {
                     'caramel_applied',
                     JSON.stringify({
                         code: bestCode,
+                        // Carried across the reload so the fresh document can
+                        // record the saving against its catalog coupon — the
+                        // handoff is the only place that id still exists there.
+                        id: bestId,
                         saved,
                         currency: confirmed.currency || bestCurrency,
                         t: Date.now(),
@@ -1059,6 +1063,10 @@ async function startApplyingCoupons(rec, options) {
                 code: bestCode,
                 amount: bestSave,
                 currency: caramelCurrencyCode(),
+                // Same id the trust-loop report just used. The history used to
+                // drop it, which left a synced savings event unable to name the
+                // catalog row the code came from.
+                couponId: bestId,
             })
         }
         /* A code that didn't move a READABLE total is not a code we can call

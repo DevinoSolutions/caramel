@@ -1,4 +1,5 @@
 import { preflight, withRoute } from '@/lib/api/withRoute'
+import prisma from '@/lib/prisma'
 import { NextResponse } from 'next/server'
 
 // Validated-identity probe for the extension popup: it calls this with the
@@ -29,9 +30,23 @@ export const GET = withRoute(
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
         const { username, name, email, image } = session.user
+
+        // The savings-sync consent flag, read from the users table rather than
+        // off `session.user`. better-auth only projects the fields it knows
+        // about onto the session, so a custom column arrives as `undefined`
+        // there — falsy, and therefore silently indistinguishable from a real
+        // "off". The popup switch renders from this value, so a silent false
+        // would show every consenting shopper an off switch and quietly stop
+        // their sync. A dedicated read is the cheap price of not guessing.
+        const preference = await prisma.user.findUnique({
+            where: { id: session.user.id },
+            select: { savingsSyncEnabled: true },
+        })
+
         return NextResponse.json({
             username: username || name || email || null,
             image: image || null,
+            savingsSyncEnabled: preference?.savingsSyncEnabled ?? false,
         })
     },
 )

@@ -128,6 +128,11 @@ async function renderSettingsView(backFn, domain) {
     const container = document.getElementById('auth-container')
     if (!container) return
     const s = await caramelGetSettings()
+    // Savings sync needs an account to sync TO, so the row is signed-in only —
+    // the gate #accountLink already uses. A guest tapping a switch that can only
+    // bounce them into sign-in is a dead end.
+    const session = await caramelGetSession().catch(() => null)
+    const hasAccount = !!session?.token
     // Dot-less "domains" are extension pages (the popup opened as a tab /
     // login window reports its own chrome-extension host) — no site toggle.
     const site =
@@ -162,9 +167,22 @@ async function renderSettingsView(backFn, domain) {
               : ''
       }
 
+      ${
+          hasAccount
+              ? `<label class="settings-row">
+        <span class="settings-copy">
+          <span>Sync my savings</span>
+          <small>Keep your savings on your Caramel account, not just this device</small>
+        </span>
+        <input type="checkbox" id="syncSavingsToggle" class="settings-switch" role="switch" ${s.syncSavings ? 'checked' : ''}/>
+      </label>
+      <span id="syncSavingsStatus" role="status" aria-live="polite" style="position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;"></span>`
+              : ''
+      }
+
       <div id="savingsSummary"></div>
 
-      <a id="accountLink" class="account-link" href="${caramelUrl('profile')}" target="_blank" rel="noopener noreferrer" style="display:none;">Manage account →</a>
+      <a id="accountLink" class="account-link" href="${caramelUrl('profile#savings')}" target="_blank" rel="noopener noreferrer" style="display:none;">Manage account →</a>
 
       <button id="backBtn" class="back-btn" type="button">← Back</button>
     </div>`
@@ -185,6 +203,53 @@ async function renderSettingsView(backFn, domain) {
             caramelSetSettings({
                 disabledSites: e.target.checked ? [...rest, site] : rest,
             })
+        })
+
+    /* Savings sync. The ACCOUNT column is the authority, so: server first,
+     * device cache second — writing the local flag up front and reconciling
+     * later would leave a device claiming consent the account never recorded,
+     * and that flag is what gates every upload. On failure the switch goes back
+     * where it was: this one governs whether a shopping record leaves the
+     * device, so it must never overstate what happened. */
+    const syncSavingsToggle = document.getElementById('syncSavingsToggle')
+    if (syncSavingsToggle)
+        syncSavingsToggle.addEventListener('change', async e => {
+            const requested = e.target.checked
+            const status = document.getElementById('syncSavingsStatus')
+            syncSavingsToggle.disabled = true
+            let resp = null
+            try {
+                resp = await caramelSendMessage({
+                    action: 'setSavingsSync',
+                    enabled: requested,
+                })
+            } catch (err) {
+                resp = { error: String(err) }
+            }
+            syncSavingsToggle.disabled = false
+
+            if (
+                !resp ||
+                resp.error ||
+                typeof resp.savingsSyncEnabled !== 'boolean'
+            ) {
+                e.target.checked = !requested
+                const message =
+                    'Couldn’t change that setting. Please try again.'
+                if (status) status.textContent = message
+                showCopyToast(message)
+                return
+            }
+
+            const enabled = resp.savingsSyncEnabled
+            e.target.checked = enabled
+            await caramelSetSettings({ syncSavings: enabled })
+            if (status)
+                status.textContent = enabled
+                    ? 'Savings sync is on'
+                    : 'Savings sync is off'
+            // Turning it on flushes anything already queued on this device.
+            if (enabled) caramelSyncSavings()
         })
 
     caramelGetSession().then(({ token }) => {
@@ -322,6 +387,25 @@ function validateStoredSession(token, storedUser) {
                 // Profile only — the token is untouched, so write it beside
                 // the session in local rather than back into sync.
                 currentBrowser.storage.local.set({ user: fresh }, () => {})
+            }
+
+            /* Savings-sync consent, straight from the account. storage.sync
+             * caches it, and is not a second source of truth: a shopper who
+             * turned sync on from the website would otherwise open the popup to
+             * a switch saying off, and — worse — this device would keep not
+             * uploading, since the local flag gates the push. Reached only on a
+             * 200, so offline leaves the cache alone rather than reading
+             * silence as "off". caramelSetSettings resolves on storage errors
+             * instead of rejecting, so there is no rejection path here. */
+            if (typeof data.savingsSyncEnabled === 'boolean') {
+                caramelSetSettings({
+                    syncSavings: data.savingsSyncEnabled,
+                }).then(() => {
+                    // Catch-up sweep. Savings recorded while this device was
+                    // offline, or whose push failed, are still queued locally
+                    // and nothing else would ever retry them.
+                    if (data.savingsSyncEnabled) caramelSyncSavings()
+                })
             }
         })
         .catch(() => {
