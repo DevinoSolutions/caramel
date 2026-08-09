@@ -173,11 +173,21 @@ describe('summarizeReports', () => {
         // reportCount, Coupon.timesUsed or CouponSignal.workCount. All three
         // are anonymous aggregates; a number built from them would be a
         // fabricated public claim about other people's behaviour.
-        expect(summarizeReports([report()]).shoppersHelped).toBeNull()
-        expect(
-            summarizeReports(Array.from({ length: 50 }, () => report()))
-                .shoppersHelped,
-        ).toBeNull()
+        //
+        // reportCount is asserted alongside each null so the null is a claim
+        // about a POPULATED summary. summarizeReports has an early return that
+        // yields all-nulls for an empty input, so a bare `.shoppersHelped` is
+        // null on the path this test is not about — and would stay green if
+        // the populated branch broke, or if `report()` drifted out of shape.
+        const one = summarizeReports([report()])
+        expect(one.reportCount).toBe(1)
+        expect(one.shoppersHelped).toBeNull()
+
+        const many = summarizeReports(
+            Array.from({ length: 50 }, () => report()),
+        )
+        expect(many.reportCount).toBe(50)
+        expect(many.shoppersHelped).toBeNull()
     })
 })
 
