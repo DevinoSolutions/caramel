@@ -232,6 +232,47 @@ export async function getCouponStats(): Promise<StatsRow> {
     return rows[0] ?? { total: 0, expired: 0 }
 }
 
+/**
+ * api/account/overview GET — live "12 codes right now" counts for the stores a
+ * user follows, one query for the whole list.
+ *
+ * Lives here rather than in the account route for the same reason every other
+ * catalog read does: it must share `visibleCouponsWhere()` and the
+ * `site = store OR site LIKE '%.' || store` store-matching predicate with
+ * listStoreCoupons, or the count under a favorite would disagree with the
+ * store page that favorite links to. A second hand-written copy of either
+ * predicate is exactly the F-006 drift this module exists to prevent.
+ *
+ * `stores` are already-normalized registrable domains (resolveStoreDomain
+ * output, the same vocabulary favorite_stores.store_name stores). UNNEST turns
+ * the array into rows so a LEFT JOIN can report a genuine 0 for a followed
+ * store with no live codes — the caller distinguishes "0 codes" from "no count
+ * available" and the UI renders neither as a placeholder.
+ */
+export async function countCouponsForStores(
+    stores: string[],
+): Promise<Map<string, number>> {
+    if (stores.length === 0) return new Map()
+    const rawRows = await prisma.$queryRaw(Prisma.sql`
+        SELECT f.store AS site, COUNT(c.id)::int AS coupon_count
+        FROM UNNEST(${stores}::text[]) AS f(store)
+        LEFT JOIN coupons c
+               ON (c.site = f.store OR c.site LIKE '%.' || f.store)
+              AND ${visibleCouponsWhere()}
+        GROUP BY f.store
+    `)
+    const rows = parseCouponRows(
+        SiteCountRowSchema,
+        rawRows,
+        'account.favorite-counts',
+    )
+    const counts = new Map<string, number>()
+    for (const row of rows) {
+        if (row.site) counts.set(row.site, row.coupon_count)
+    }
+    return counts
+}
+
 /** api/coupons/stores/route.ts GET — store-name autocomplete; q-present/absent branch is a genuinely different query (ILIKE vs. no filter), not just an optional param. */
 export async function listStoreOptions(
     q: string,

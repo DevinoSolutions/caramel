@@ -1,9 +1,25 @@
 'use client'
 
+import SectionSkeleton from '@/components/profile/SectionSkeleton'
 import { useSession } from '@/lib/auth/client'
-import { userInitial } from '@/lib/userInitial'
+import {
+    noticeBodyClasses,
+    noticeButtonClasses,
+    noticeClasses,
+    noticeTitleClasses,
+} from '@/lib/profile/profileStyles'
+import type { FavoriteStoreSummary } from '@/lib/profile/types'
+import { useProfileOverview } from '@/lib/profile/useProfileOverview'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
+import AccountDetailsCard from './sections/AccountDetailsCard'
+import AccountHeaderCard from './sections/AccountHeaderCard'
+import DataPrivacySection from './sections/DataPrivacySection'
+import FavoriteStoresSection from './sections/FavoriteStoresSection'
+import GetStartedChecklist from './sections/GetStartedChecklist'
+import ImpactStrip from './sections/ImpactStrip'
+import ReportsImpactSection from './sections/ReportsImpactSection'
+import SavingsSection from './sections/SavingsSection'
 
 export default function ProfilePageClient() {
     const { data: session, isPending } = useSession()
@@ -24,6 +40,12 @@ export default function ProfilePageClient() {
         }
     }, [mounted, session, isPending, router])
 
+    // Only fetch once we know there IS a session — firing an authenticated
+    // request before that turns every signed-out visit into a spurious 401.
+    const signedIn = Boolean(mounted && !isPending && session?.user)
+    const { overview, status, retry, patchOverview } =
+        useProfileOverview(signedIn)
+
     if (!mounted || isPending) {
         return (
             <main className="relative -mt-[6.7rem] w-full">
@@ -43,90 +65,127 @@ export default function ProfilePageClient() {
     }
 
     const user = session.user
-    const avatarLetter = userInitial(user)
+
+    function removeFavorite(domain: string) {
+        patchOverview(current => ({
+            ...current,
+            favorites: current.favorites.filter(f => f.domain !== domain),
+        }))
+    }
+
+    function restoreFavorite(store: FavoriteStoreSummary) {
+        patchOverview(current =>
+            current.favorites.some(f => f.domain === store.domain)
+                ? current
+                : {
+                      ...current,
+                      favorites: [store, ...current.favorites].sort((a, b) =>
+                          b.starredAt.localeCompare(a.starredAt),
+                      ),
+                  },
+        )
+    }
+
+    function applySyncChange(enabled: boolean) {
+        patchOverview(current => ({
+            ...current,
+            savings: { ...current.savings, syncEnabled: enabled },
+        }))
+    }
+
+    /** Back to the zero state, without a refetch: the delete is transactional
+     * and its counts are exactly these three collections. */
+    function applyDataDeleted() {
+        patchOverview(current => ({
+            ...current,
+            savings: {
+                ...current.savings,
+                eventCount: 0,
+                storeCount: 0,
+                totals: [],
+                firstEventAt: null,
+                recentEvents: [],
+            },
+            favorites: [],
+            reports: {
+                reportCount: 0,
+                confirmedCount: null,
+                shoppersHelped: null,
+            },
+        }))
+    }
+
+    // Every stat at zero => the checklist replaces the impact strip. This is
+    // the DEFAULT state for most people arriving here, not an edge case.
+    const isZeroState =
+        overview !== null &&
+        overview.savings.eventCount === 0 &&
+        overview.favorites.length === 0 &&
+        overview.reports.reportCount === 0
 
     return (
         <main className="relative -mt-[6.7rem] w-full">
-            <div className="container mx-auto px-4 py-16">
-                <div className="mx-auto max-w-2xl">
-                    <h1 className="mb-8 text-4xl font-bold text-caramel">
-                        Profile
-                    </h1>
+            <div className="container mx-auto px-4 py-16 md:py-12 xs:px-3 xs:py-8">
+                <div className="mx-auto max-w-3xl space-y-10 md:space-y-8">
+                    {/* Renders immediately from the session — never waits on
+                        the overview, so there is no whole-page spinner. */}
+                    <AccountHeaderCard
+                        user={user}
+                        memberSince={overview?.memberSince ?? null}
+                    />
 
-                    <div className="rounded-2xl border border-gray-100 bg-white p-8 shadow-lg dark:border-gray-800 dark:bg-darkerBg">
-                        <div className="mb-6 flex items-center gap-6">
-                            <div className="flex h-20 w-20 items-center justify-center rounded-full bg-caramel text-2xl font-semibold text-white ring-4 ring-caramel/15">
-                                {avatarLetter}
-                            </div>
-                            <div>
-                                <h2 className="text-2xl font-semibold text-gray-900 dark:text-gray-100">
-                                    {user.firstName && user.lastName
-                                        ? `${user.firstName} ${user.lastName}`
-                                        : user.name}
-                                </h2>
-                                {user.email && (
-                                    <p className="text-gray-600 dark:text-gray-200">
-                                        {user.email}
-                                    </p>
-                                )}
-                            </div>
+                    {status === 'loading' ? (
+                        <SectionSkeleton />
+                    ) : status === 'error' ? (
+                        <div role="alert" className={noticeClasses}>
+                            <p className={noticeTitleClasses}>
+                                We couldn&apos;t load your savings and stores
+                            </p>
+                            <p className={noticeBodyClasses}>
+                                Nothing is lost — this is on our side. Try again
+                                in a moment.
+                            </p>
+                            <button
+                                type="button"
+                                onClick={retry}
+                                className={noticeButtonClasses}
+                            >
+                                Try again
+                            </button>
                         </div>
-
-                        <div className="space-y-4 border-t border-gray-100 pt-6 dark:border-gray-700">
-                            <div>
-                                <label className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                                    Email
-                                </label>
-                                <p className="mt-1 text-gray-900 dark:text-gray-100">
-                                    {user.email || 'Not provided'}
-                                </p>
-                            </div>
-
-                            {user.name && (
-                                <div>
-                                    <label className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                                        Name
-                                    </label>
-                                    <p className="mt-1 text-gray-900 dark:text-gray-100">
-                                        {user.name}
-                                    </p>
-                                </div>
+                    ) : overview ? (
+                        <>
+                            {isZeroState ? (
+                                <GetStartedChecklist overview={overview} />
+                            ) : (
+                                <ImpactStrip overview={overview} />
                             )}
 
-                            {(user.firstName || user.lastName) && (
-                                <div>
-                                    <label className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                                        First Name
-                                    </label>
-                                    <p className="mt-1 text-gray-900 dark:text-gray-100">
-                                        {user.firstName || 'Not provided'}
-                                    </p>
-                                </div>
-                            )}
+                            <SavingsSection
+                                savings={overview.savings}
+                                onSyncChange={applySyncChange}
+                            />
 
-                            {(user.firstName || user.lastName) && (
-                                <div>
-                                    <label className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                                        Last Name
-                                    </label>
-                                    <p className="mt-1 text-gray-900 dark:text-gray-100">
-                                        {user.lastName || 'Not provided'}
-                                    </p>
-                                </div>
-                            )}
+                            <FavoriteStoresSection
+                                favorites={overview.favorites}
+                                hasExtensionActivity={
+                                    overview.hasExtensionActivity
+                                }
+                                onRemove={removeFavorite}
+                                onRestore={restoreFavorite}
+                            />
 
-                            {user.username && (
-                                <div>
-                                    <label className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                                        Username
-                                    </label>
-                                    <p className="mt-1 text-gray-900 dark:text-gray-100">
-                                        {user.username}
-                                    </p>
-                                </div>
-                            )}
-                        </div>
-                    </div>
+                            <ReportsImpactSection reports={overview.reports} />
+                        </>
+                    ) : null}
+
+                    {/* Both render from the session, so they stay real content
+                        even when the overview failed. */}
+                    <AccountDetailsCard user={user} />
+                    <DataPrivacySection
+                        overview={overview}
+                        onDeleted={applyDataDeleted}
+                    />
                 </div>
             </div>
         </main>
