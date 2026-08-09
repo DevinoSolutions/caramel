@@ -14,6 +14,10 @@
 #   EXPECTED_SHA  - the commit CI checked out (github.sha)
 #   DEPLOY_WAIT_TIMEOUT_SECONDS   - optional, default 600
 #   DEPLOY_WAIT_INTERVAL_SECONDS  - optional, default 15
+#   DEPLOY_WAIT_HINT              - optional, printed verbatim on failure. For
+#                                   branches whose deploy is MANUAL, the generic
+#                                   "the deploy failed or is slow" guidance below
+#                                   is wrong; this is where a branch says so.
 #
 # Nothing here passes on a missing or mismatched sha. A 404 counts as "not
 # deployed yet", never as a pass: the deploy that carries this commit is also
@@ -115,5 +119,9 @@ timeout — check the platform's deployment log.
 EOF
     ;;
 esac
+
+if [ -n "${DEPLOY_WAIT_HINT:-}" ]; then
+    printf '\n%s\n' "$DEPLOY_WAIT_HINT"
+fi
 
 exit 1

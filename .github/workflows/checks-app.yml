@@ -402,20 +402,31 @@ jobs:
       # failed at 14:40:44Z, two seconds before the deploy carrying its fix
       # finished at 14:40:46Z. Wait for the site to report this exact commit.
       #
-      # dev only: dev.grabcaramel.com is the root docker-compose/Dockerfile
-      # build, whose context carries the git metadata /api/version is stamped
-      # from. Prod is a Dokploy *Nixpacks* app built from apps/caramel-app,
-      # whose context excludes the repo's .git — it answers "unknown" and this
-      # gate could never pass there. Drop the condition when prod moves onto
-      # the root compose (RUNBOOK "Deploys & rollback").
+      # Both branches now, not dev only. The old condition existed because prod
+      # was a Dokploy *Nixpacks* app whose build context excluded the repo's
+      # .git, so /api/version answered "unknown" and this gate could never pass
+      # — with the standing note to drop it "when prod moves onto the root
+      # compose". That happened on 2026-08-08: grabcaramel.com IS the compose
+      # stack and answers a real sha.
+      #
+      # The two branches need OPPOSITE timeouts, because they deploy in
+      # opposite ways:
+      #   dev  — autodeploy ON. Wait out a real build (a push burst can queue
+      #          one behind another), so 1200s.
+      #   main — autoDeploy is OFF BY DESIGN on the prod compose. No deploy is
+      #          coming, so waiting is pure latency: poll once and fail with the
+      #          exact reason. Before this, a merge that changed any asserted
+      #          copy surfaced as ~13 `locator.fill: Test timeout` errors after
+      #          ~30 minutes (2026-08-09, the auth redesign) — all of which
+      #          meant only "prod is still serving an older commit".
       - name: Wait for the deployment to carry this commit
-        if: github.ref == 'refs/heads/dev'
         env:
-          VERSION_URL: https://dev.grabcaramel.com/api/version
-          EXPECTED_SHA: ${{ github.sha }}
-          # One full Docker build is ~10 min; a push burst queues builds
-          # back-to-back, so one queued-behind build fits inside 20.
-          DEPLOY_WAIT_TIMEOUT_SECONDS: '1200'
+          VERSION_URL: "${{ github.ref == 'refs/heads/dev' && 'https://dev.grabcaramel.com/api/version' || 'https://grabcaramel.com/api/version' }}"
+          EXPECTED_SHA: '${{ github.sha }}'
+          DEPLOY_WAIT_TIMEOUT_SECONDS: "${{ github.ref == 'refs/heads/dev' && '1200' || '0' }}"
+          # Quoted: the prod branch of this expression contains ': ', which YAML
+          # would otherwise read as a nested mapping key.
+          DEPLOY_WAIT_HINT: "${{ github.ref == 'refs/heads/dev' && '' || 'Prod deploys are MANUAL: the Dokploy prod compose has autoDeploy OFF by design, so merging to main never reaches grabcaramel.com. This is not a failed deploy and not a broken build — the E2E suite runs against the LIVE site, so it cannot verify a commit prod is not serving. Deploy the prod compose, then re-run this job.' }}"
         run: bash .github/workflows/scripts/wait-for-deploy.sh
 
       - name: Run E2E tests
