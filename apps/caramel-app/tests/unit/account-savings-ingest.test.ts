@@ -503,7 +503,11 @@ describe('an unknown coupon id cannot take the batch down with it', () => {
 
     it('does not query the catalog when no event names a coupon', async () => {
         signedIn()
-        await post({ events: [event()] })
+        const { json } = await post({ events: [event()] })
+        // The ingest must have actually happened for the negative below to
+        // mean anything — a drifted fixture would otherwise leave nothing
+        // ingested and the "no catalog query" claim would hold vacuously.
+        expect(json.accepted).toBe(1)
         expect(prismaMock.coupon.findMany).not.toHaveBeenCalled()
     })
 })
