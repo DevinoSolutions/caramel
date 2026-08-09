@@ -183,8 +183,14 @@ jobs:
         run: pnpm --filter caramel-app run audit:prod
 
   # ─────────────────────────────────────────────────────────────
-  # Schema Drift Check (only when prisma files change)
+  # Schema Drift Check (every PR — there is no path filter)
   # ─────────────────────────────────────────────────────────────
+  # This job was DECORATIVE until 2026-08-10: every check ended in
+  # `--exit-code || echo "No drift detected"`, so the `||` turned a real failure
+  # into a reassuring log line and the job was green no matter what the checks
+  # found. It was also failing all three checks in a row, invisibly, because the
+  # shadow "database" was a shadow SCHEMA (see the SHADOW_DATABASE_URL note).
+  # Rule: no `|| echo` in this job. A check that cannot go red is not a gate.
   schema-drift:
     name: Schema Drift
     if: github.event_name == 'pull_request'
@@ -192,7 +198,11 @@ jobs:
 
     services:
       postgres:
-        image: postgres:15
+        # Prod-matching: docker-compose.yml pins postgres:18.4, and a *drift*
+        # gate measuring against a different engine version is measuring the
+        # wrong database. (The e2e-pr job's postgres:15 stays a separate
+        # punch-list item.)
+        image: postgres:18.4
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -206,7 +216,17 @@ jobs:
 
     env:
       DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/caramel_ci'
-      SHADOW_DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/caramel_ci?schema=__shadow'
+      # A dedicated shadow DATABASE, never a shadow SCHEMA. Under
+      # `?schema=__shadow` the migration history genuinely cannot replay: the
+      # older migrations create unqualified tables (which land in __shadow)
+      # while the newer, newer-Prisma ones emit `"public"."…"`-qualified DDL, so
+      # the first public-qualified FK to an older table dies with
+      # P3006 / P1014 "the underlying table for model `public.users` does not
+      # exist". The partial replay then leaves objects behind in caramel_ci,
+      # which made the following `migrate deploy` fail P3005 ("database schema
+      # is not empty") and left the last check diffing against an empty public
+      # schema. A separate database replays the identical history clean.
+      SHADOW_DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/caramel_ci_shadow'
 
     steps:
       - uses: actions/checkout@v4
@@ -235,33 +255,45 @@ jobs:
         working-directory: ./apps/caramel-app
         run: npx prisma validate
 
-      - name: Prepare shadow schema
+      # Prisma resets this database itself before each replay, so the two drift
+      # checks below can share it; it only has to exist.
+      - name: Create shadow database
         run: |
+          set -euo pipefail
           sudo apt-get -yqq install postgresql-client
-          psql "postgresql://postgres:postgres@localhost:5432/caramel_ci" \
-            -c "CREATE SCHEMA IF NOT EXISTS __shadow;"
+          psql "postgresql://postgres:postgres@localhost:5432/postgres" \
+            -c "DROP DATABASE IF EXISTS caramel_ci_shadow;"
+          psql "postgresql://postgres:postgres@localhost:5432/postgres" \
+            -c "CREATE DATABASE caramel_ci_shadow;"
 
+      # Replays every migration into the shadow database and diffs the result
+      # against schema.prisma. Exit 2 = a schema.prisma change shipped without
+      # its migration (or a hand-edited migration). It fails the job.
       - name: Drift check (schema ⇄ migrations)
         working-directory: ./apps/caramel-app
         run: |
+          set -euo pipefail
           npx prisma migrate diff \
             --from-migrations prisma/migrations \
             --to-schema-datamodel prisma/schema.prisma \
             --shadow-database-url "$SHADOW_DATABASE_URL" \
-            --exit-code || echo "No drift detected or no migrations yet"
+            --exit-code
 
+      # A migration that does not apply to an empty database is a broken
+      # migration, so this failing must fail the job.
       - name: Apply migrations
         working-directory: ./apps/caramel-app
-        run: npx prisma migrate deploy --preview-feature || echo "No migrations to apply"
+        run: npx prisma migrate deploy
 
       - name: Drift check (migrations ⇄ Postgres)
         working-directory: ./apps/caramel-app
         run: |
+          set -euo pipefail
           npx prisma migrate diff \
             --from-migrations prisma/migrations \
             --to-url "$DATABASE_URL" \
             --shadow-database-url "$SHADOW_DATABASE_URL" \
-            --exit-code || echo "No drift detected"
+            --exit-code
 
   # ─────────────────────────────────────────────────────────────
   # E2E & Visual Regression (PR – local dev server)
