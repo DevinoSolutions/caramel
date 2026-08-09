@@ -54,25 +54,28 @@ model Verification {
 }
 
 model User {
-  id                String     @id @default(uuid())
+  id                String          @id @default(uuid())
   name              String?
   firstName         String?
   lastName          String?
-  username          String?    @unique
-  email             String?    @unique
-  emailVerified     Boolean    @default(false) @map("email_verified")
+  username          String?         @unique
+  email             String?         @unique
+  emailVerified     Boolean         @default(false) @map("email_verified")
   password          String?
-  token             String?    @unique
+  token             String?         @unique
   image             String?
   encodedPictureUrl String?
   tokenExpiry       DateTime?
-  createdAt         DateTime   @default(now())
-  updatedAt         DateTime   @default(now()) @updatedAt
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @default(now()) @updatedAt
   deletedAt         DateTime?
-  role              Role?      @default(USER)
-  status            UserStatus @default(NOT_VERIFIED)
+  role              Role?           @default(USER)
+  status            UserStatus      @default(NOT_VERIFIED)
   accounts          Account[]
   sessions          Session[]
+  couponReports     CouponReport[]
+  favoriteStores    FavoriteStore[]
+  savingsEvents     SavingsEvent[]
 
   @@map("users")
 }
@@ -153,6 +156,12 @@ model Coupon {
   // omits it: seed rows + insert safety), never rewritten on update.
   updatedAt           DateTime  @default(now()) @map("updated_at")
 
+  // Back-relations for the login-features tables below. Relation fields are
+  // Prisma-side only — they add no column to `coupons` and leave the ingest
+  // write path untouched.
+  reports       CouponReport[]
+  savingsEvents SavingsEvent[]
+
   @@index([site])
   @@index([status, expired])
   @@map("coupons")
@@ -195,6 +204,122 @@ model Source {
   updatedAt DateTime @default(now()) @map("updated_at")
 
   @@map("sources")
+}
+
+// -----------------------------------------------------------------------------
+// App-owned SIGNED-IN-USER tables (login-features foundation).
+//
+// All three are USER-FACING app state — what a person reported, starred, and
+// saved — and are owned by this app end to end. None of them models any part of
+// the external pipeline's private machinery (prisma-schema-secrecy.test.ts), and
+// none is written by ingest.
+//
+// This migration is INERT: it creates the tables and nothing reads or writes
+// them yet. The routes, the per-day dedup, and the extension calls land in later
+// PRs. TODO: no feature is complete until those ship — an empty table here is
+// the foundation, not the feature.
+
+/// One user-attributed "did this coupon work?" report, kept ALONGSIDE the
+/// aggregate CouponSignal (which stays the anonymous counter the extension and
+/// card rendering read). This table is the attribution the aggregate cannot
+/// carry: who said it, and when — so a later PR can weight a signed-in report,
+/// show a user their own history, and drop duplicates.
+///
+/// `userId` is NULLABLE: anonymous reports are the DEFAULT case today (the
+/// report route is `origin`-gated, not auth-gated) and must keep working
+/// unchanged. A NULL row is an anonymous report, not a defect.
+///
+/// Dedup: Prisma cannot express a UNIQUE on date_trunc('day', created_at), so
+/// there is deliberately NO unique constraint here — the (couponId, userId,
+/// createdAt) index exists to make the app-side per-day check a cheap lookup.
+/// Until that check ships, this table accepts repeat reports. TODO: enforce
+/// one-report-per-user-per-coupon-per-day in app logic (later PR).
+model CouponReport {
+  id        String   @id @default(cuid())
+  // FK into the app-owned catalog with CASCADE: a report about a coupon row
+  // that no longer exists is meaningless, so it goes with it. (Distinct from
+  // CouponSignal, which holds NO FK because an aggregate must outlive a
+  // tombstoned coupon. Note ingest never DELETEs — it tombstones by status —
+  // so this cascade is a correctness backstop, not a routine path.)
+  couponId  String   @map("coupon_id")
+  coupon    Coupon   @relation(fields: [couponId], references: [id], onDelete: Cascade)
+  userId    String?  @map("user_id")
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Same two-value vocabulary the report route's zod body already accepts
+  // ('worked' | 'failed'), stored as an OPEN string rather than an enum so the
+  // route schema stays the single place that vocabulary is declared.
+  outcome   String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([couponId, userId, createdAt])
+  @@map("coupon_reports")
+}
+
+/// A store a user starred. Composite PK (userId, storeName) IS the dedup — one
+/// row per user per store, no surrogate id needed.
+///
+/// `storeName` is a plain string matching StoreConfig's key rather than an FK:
+/// a user may favorite a store before the pipeline has published a config for
+/// it, and un-publishing a config must not silently delete someone's favorite.
+model FavoriteStore {
+  userId      String   @map("user_id")
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Store key, same vocabulary as StoreConfig.storeName.
+  storeName   String   @map("store_name")
+  // DORMANT: a hook for a future "email me new coupons for this store" opt-in.
+  // Nothing reads it and there is NO email code anywhere in this PR. TODO: a
+  // later PR either wires the notification or this column is dropped.
+  notifyOnNew Boolean  @default(false) @map("notify_on_new")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@id([userId, storeName])
+  @@map("favorite_stores")
+}
+
+/// One recorded "you saved $X" moment, the append-only ledger behind a lifetime
+/// savings total.
+///
+/// `clientEventId` is UNIQUE and supplied by the client: the extension may
+/// retry a submission (offline, SW restart, a flaky network) and the retry must
+/// not double-count the same saving. The uniqueness constraint — not app
+/// logic — is what makes the replay idempotent.
+///
+/// `couponId` is nullable with onDelete: SetNull, NOT Cascade: money the user
+/// actually saved is theirs and must survive the coupon row disappearing. The
+/// denormalized `store`/`code`/`amountCents` are kept precisely so the event
+/// still renders with no coupon to join to.
+model SavingsEvent {
+  id String @id @default(cuid())
+
+  userId String @map("user_id")
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  couponId String? @map("coupon_id")
+  coupon   Coupon? @relation(fields: [couponId], references: [id], onDelete: SetNull)
+
+  // Denormalized at write time — the human-readable record of the saving,
+  // independent of whether the catalog row survives.
+  store       String
+  code        String
+  // Integer minor units, never a float: this is money and it is summed.
+  amountCents Int    @map("amount_cents")
+  // ISO 4217. VarChar(3), NOT Char(3): Postgres silently space-pads a CHAR, so
+  // a bad 2-letter code would be stored as 'US ' and compare equal to 'US' —
+  // a silent data defect. VarChar caps the length and stores what it was given.
+  // Open string (not an enum) so a new currency is data, not a migration; the
+  // write route's zod schema is where the vocabulary gets validated.
+  currency    String @default("USD") @db.VarChar(3)
+
+  // When the saving HAPPENED (client-reported), distinct from createdAt = when
+  // the server recorded it. A replayed/backfilled event has an occurredAt far
+  // older than its createdAt, and totals must be grouped by the former.
+  occurredAt    DateTime @map("occurred_at") @db.Timestamptz(6)
+  // Client-generated idempotency key for the retry above.
+  clientEventId String   @unique @map("client_event_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([userId, occurredAt])
+  @@map("savings_events")
 }
 
 enum UserStatus {

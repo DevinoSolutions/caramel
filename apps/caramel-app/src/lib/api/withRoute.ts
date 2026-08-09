@@ -25,8 +25,9 @@
 // Concern order (each an early return): compute CORS → origin-gate 403
 // (origin: true = isOriginAllowed's permissive allowlist; origin:
 // 'extension' = isExtensionOrigin's strict extension-protocol-only check,
-// no missing-Origin bypass — D5) → apiKey 401 → auth 401 → rateLimit 429 →
-// body safeParse 422 → handler
+// no missing-Origin bypass — D5) → apiKey 401 → auth 401 (never for
+// auth: 'optional', which resolves a session but gates nothing) →
+// rateLimit 429 → body safeParse 422 → handler
 // (try/catch → F-002's handleRouteError). CORS headers are merged onto
 // EVERY exit point (incl. 4xx/429/500) — matches the pre-F-007
 // authorize/oauth-exchange behavior of attaching corsHeaders to their
@@ -108,8 +109,8 @@ function unauthorized(cors: Headers): NextResponse {
 
 // better-auth's session type, resolved purely at the type level (no
 // runtime import of '@/lib/auth/auth' unless a route actually opts into
-// `auth: 'session'` — see the dynamic import below). Not exercised by any
-// current route (F-007 establishes the mechanism; nothing needs it yet).
+// `auth` — see the dynamic import below). Used today by extension/me and
+// extension/session (both `'session'`); `'optional'` has no route yet.
 type Session = Awaited<
     ReturnType<typeof import('@/lib/auth/auth').auth.api.getSession>
 >
@@ -140,8 +141,23 @@ export interface RouteConfig<TBody> {
      * to POST /api/ingest/catalog). Distinct secrets, one checker each; never a
      * second, independently-written comparison. */
     apiKey?: 'trustedServer' | 'ingest'
-    /** better-auth session gate. */
-    auth?: 'session'
+    /** better-auth session resolution.
+     *
+     * `'session'` GATES: no session → 401, handler never runs.
+     *
+     * `'optional'` never gates. It resolves the session the same way and
+     * hands the handler the same value, but an absent or unrecognized
+     * credential simply arrives as `session: null` and the request
+     * proceeds — for endpoints that serve everyone and merely do MORE for
+     * a signed-in caller (attribute a write, read a preference). Without
+     * it a bearer on a non-`'session'` route is dropped unread, so such a
+     * handler cannot tell a signed-in caller from an anonymous one.
+     *
+     * `'optional'` softens the ABSENCE of auth, not the FAILURE of the
+     * auth system: a THROWN session lookup (DB down) propagates to Next's
+     * onRequestError → Sentry exactly as under `'session'`, rather than
+     * being swallowed into a silent downgrade to anonymous. */
+    auth?: 'session' | 'optional'
     /** zod schema the JSON body must satisfy — 422 on mismatch. Omit (or
      * null) for routes that parse their own body (classify-cart's
      * sanitize(), oauth/redirect's formData/query, and the GET routes
@@ -152,6 +168,10 @@ export interface RouteConfig<TBody> {
 export interface RouteContext<TBody> {
     req: NextRequest
     body: TBody
+    /** Resolved better-auth session — null unless the route declares
+     * `auth`. Under `'session'` the wrapper has already 401'd a null, so a
+     * handler there always sees a real session; under `'optional'` null is
+     * the ordinary anonymous case, not an error. */
     session: Session | null
     /** The CORS headers already computed for this request — withRoute
      * merges these onto whatever the handler returns automatically;
@@ -193,14 +213,21 @@ export function withRoute<TBody = undefined>(
         }
 
         let session: Session | null = null
-        if (config.auth === 'session') {
-            // Lazy import — only routes that opt into session-auth pull in
-            // the full better-auth graph (bcrypt, prisma, email templates).
-            // No current route does; this keeps the other 15 routes'
-            // dependency graph exactly what it was pre-F-007.
+        if (config.auth) {
+            // Lazy import — only routes that opt into session resolution
+            // pull in the full better-auth graph (bcrypt, prisma, email
+            // templates); every route that declares no `auth` keeps the
+            // dependency graph it had pre-F-007.
             const { auth } = await import('@/lib/auth/auth')
+            // Identical resolution for both modes — they differ ONLY in
+            // what a null result means. getSession returns null (it does
+            // not throw) for a missing, malformed, revoked, or expired
+            // credential, so 'optional' turns all of those into an
+            // anonymous request rather than a 401.
             session = await auth.api.getSession({ headers: req.headers })
-            if (!session) return unauthorized(cors)
+            if (!session && config.auth === 'session') {
+                return unauthorized(cors)
+            }
         }
 
         if (config.rateLimit) {

@@ -42,8 +42,13 @@ const { captureExceptionMock } = vi.hoisted(() => ({
 }))
 vi.mock('@sentry/nextjs', () => ({ captureException: captureExceptionMock }))
 
+// Typed with better-auth's actual call shape ({ headers }) so the
+// auth: 'optional' tests can assert the wrapper really forwarded the request's
+// credentials, not just that it called something.
 const { getSessionMock } = vi.hoisted(() => ({
-    getSessionMock: vi.fn(async () => null as unknown),
+    getSessionMock: vi.fn(
+        async (_opts: { headers: Headers }) => null as unknown,
+    ),
 }))
 vi.mock('@/lib/auth/auth', () => ({
     auth: { api: { getSession: getSessionMock } },
@@ -318,7 +323,7 @@ describe('withRoute — apiKey', () => {
     })
 })
 
-describe("withRoute — auth: 'session' (implemented + tested; zero current routes use it)", () => {
+describe("withRoute — auth: 'session' (the GATING mode; used by extension/me + extension/session)", () => {
     it('null session -> 401, without ever needing the real better-auth module', async () => {
         getSessionMock.mockImplementation(async () => null)
         const handler = withRoute(
@@ -340,6 +345,156 @@ describe("withRoute — auth: 'session' (implemented + tested; zero current rout
         const res = await handler(makeReq())
         expect(res.status).toBe(200)
         expect(await res.json()).toEqual({ session: fakeSession })
+    })
+
+    // Pins the gate against the 'optional' mode added below: adding a second
+    // auth mode must not soften this one. Every 401 case that held before
+    // still holds, and the wrapper still short-circuits BEFORE the handler.
+    it('unchanged by the introduction of auth: "optional" — a null session never reaches the handler', async () => {
+        getSessionMock.mockImplementation(async () => null)
+        const handlerBody = vi.fn(async () => NextResponse.json({ ok: true }))
+        const handler = withRoute(
+            { method: 'GET', routeName: 'test', auth: 'session' },
+            handlerBody,
+        )
+        const res = await handler(
+            makeReq('http://localhost/api/test', {
+                headers: { authorization: 'Bearer not-a-real-token' },
+            }),
+        )
+        expect(res.status).toBe(401)
+        expect(handlerBody).not.toHaveBeenCalled()
+    })
+})
+
+// The third auth mode: resolve a session when the caller has one, NEVER reject
+// when they don't. Exists because a bearer/cookie on any route that isn't
+// `auth: 'session'` is dropped unread — so a handler serving both anonymous and
+// signed-in callers (report attribution, favorites, saved totals) previously had
+// no way to tell them apart without also locking anonymous users out.
+describe("withRoute — auth: 'optional' (resolve-but-never-gate)", () => {
+    it('a valid session is handed to the handler exactly as under auth: "session"', async () => {
+        const fakeSession = { session: { id: 's1' }, user: { id: 'u1' } }
+        getSessionMock.mockImplementation(async () => fakeSession)
+        const handler = withRoute(
+            { method: 'GET', routeName: 'test', auth: 'optional' },
+            async ({ session }) => NextResponse.json({ session }),
+        )
+        const res = await handler(makeReq())
+        expect(res.status).toBe(200)
+        expect(await res.json()).toEqual({ session: fakeSession })
+    })
+
+    it('no credentials at all -> 200, handler runs with session: null', async () => {
+        getSessionMock.mockImplementation(async () => null)
+        const handler = withRoute(
+            { method: 'GET', routeName: 'test', auth: 'optional' },
+            async ({ session }) => NextResponse.json({ session }),
+        )
+        const res = await handler(makeReq())
+        expect(res.status).toBe(200)
+        expect(await res.json()).toEqual({ session: null })
+    })
+
+    // The specific regression this mode must never develop: better-auth returns
+    // null (it does not throw) for a garbage, revoked, or expired credential, and
+    // 'optional' must treat all of those as "anonymous", not as "reject".
+    it('a garbage/expired bearer -> still 200 with session: null, NOT a 401', async () => {
+        getSessionMock.mockImplementation(async () => null)
+        const handler = withRoute(
+            { method: 'GET', routeName: 'test', auth: 'optional' },
+            async ({ session }) => NextResponse.json({ session }),
+        )
+        const res = await handler(
+            makeReq('http://localhost/api/test', {
+                headers: { authorization: 'Bearer expired.garbage.token' },
+            }),
+        )
+        expect(res.status).toBe(200)
+        expect(await res.json()).toEqual({ session: null })
+    })
+
+    it('still resolves the session — it reads the request headers rather than skipping the lookup', async () => {
+        // Guards the cheap wrong implementation: a mode that never calls
+        // getSession would pass every assertion above about anonymous requests
+        // while silently making the signed-in case impossible.
+        getSessionMock.mockImplementation(async () => null)
+        const handler = withRoute(
+            { method: 'GET', routeName: 'test', auth: 'optional' },
+            ok,
+        )
+        await handler(
+            makeReq('http://localhost/api/test', {
+                headers: { authorization: 'Bearer some-token' },
+            }),
+        )
+        expect(getSessionMock).toHaveBeenCalledTimes(1)
+        const [args] = getSessionMock.mock.calls[0]!
+        expect(args.headers.get('authorization')).toBe('Bearer some-token')
+    })
+
+    it('omitting auth entirely still skips the lookup completely (session: null, better-auth never imported)', async () => {
+        const handler = withRoute(
+            { method: 'GET', routeName: 'test' },
+            async ({ session }) => NextResponse.json({ session }),
+        )
+        const res = await handler(
+            makeReq('http://localhost/api/test', {
+                headers: { authorization: 'Bearer some-token' },
+            }),
+        )
+        expect(res.status).toBe(200)
+        expect(await res.json()).toEqual({ session: null })
+        expect(getSessionMock).not.toHaveBeenCalled()
+    })
+
+    // 'optional' softens the ABSENCE of auth, not the FAILURE of the auth
+    // system. A throwing getSession means the session store is broken (DB
+    // down) — downgrading that to "anonymous" would silently serve every user
+    // the logged-out experience with nothing reported. It propagates instead,
+    // identically under both modes, reaching Sentry via Next's onRequestError.
+    it('a THROWING session lookup propagates rather than silently downgrading to anonymous', async () => {
+        getSessionMock.mockImplementation(async () => {
+            throw new Error('session store unreachable')
+        })
+        const optionalHandler = withRoute(
+            { method: 'GET', routeName: 'test', auth: 'optional' },
+            ok,
+        )
+        await expect(optionalHandler(makeReq())).rejects.toThrow(
+            'session store unreachable',
+        )
+
+        const sessionHandler = withRoute(
+            { method: 'GET', routeName: 'test', auth: 'session' },
+            ok,
+        )
+        await expect(sessionHandler(makeReq())).rejects.toThrow(
+            'session store unreachable',
+        )
+    })
+
+    it('does not exempt a request from the other concerns — the origin gate still 403s an anonymous cross-origin caller', async () => {
+        getSessionMock.mockImplementation(async () => null)
+        const handler = withRoute(
+            {
+                method: 'POST',
+                routeName: 'test',
+                auth: 'optional',
+                origin: true,
+            },
+            ok,
+        )
+        const res = await handler(
+            makeReq('http://localhost/api/test', {
+                method: 'POST',
+                headers: {
+                    origin: 'https://evil.example.com',
+                    host: 'localhost',
+                },
+            }),
+        )
+        expect(res.status).toBe(403)
     })
 })
 
