@@ -262,10 +262,11 @@ async function initPopup() {
             // show an honest error state with a retry, NEVER leave the popup blank.
             try {
                 if (url) {
-                    const domain = url.replace(
-                        /^(?:https?:\/\/)?(?:www\.)?/,
-                        '',
-                    )
+                    // url is the tab's FULL URL (background.js's
+                    // getActiveTabDomainRecord contract) — parse it rather than
+                    // regex-stripping, or the path/query would ride along into
+                    // the coupons API's site parameter.
+                    const domain = new URL(url).hostname.replace(/^www\./, '')
                     let coupons = []
                     try {
                         coupons = await fetchCoupons(domain, '')

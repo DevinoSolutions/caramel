@@ -371,39 +371,22 @@ currentBrowser.runtime.onMessage.addListener(
                         return
                     }
 
-                    const tab = tabs[0]
-                    const tabUrl = tab.url || ''
-
-                    // Don't inject into extension pages (popup, options, etc.)
-                    if (
-                        tabUrl.startsWith('chrome-extension://') ||
-                        tabUrl.startsWith('moz-extension://') ||
-                        tabUrl.startsWith('safari-web-extension://')
-                    ) {
-                        // For extension pages, just return the URL without injecting
-                        try {
-                            const url = new URL(tabUrl)
-                            sendResponse({
-                                domainRecord: null,
-                                url: url.hostname,
-                            })
-                        } catch {
-                            sendResponse({ domainRecord: null, url: null })
-                        }
-                        return
-                    }
-
-                    // Content scripts are injected by manifest. Use tab URL directly
-                    // to avoid reinjection and duplicate declaration errors.
-                    try {
-                        const hostname = tabUrl
-                            ? new URL(tabUrl).hostname
-                            : null
-                        sendResponse({ domainRecord: null, url: hostname })
-                    } catch (err) {
-                        logError('hostname from tab URL', err)
-                        sendResponse({ domainRecord: null, url: null })
-                    }
+                    // CONTRACT: `url` is the tab's FULL URL (scheme included),
+                    // never a bare hostname. The popup's non-web-tab guard
+                    // (popup.js, `/^https?:\/\//`) is the sole consumer and the
+                    // scheme is the only thing that lets it tell a store page
+                    // from chrome://, about:, or this extension's own pages.
+                    // This handler used to answer `new URL(tabUrl).hostname` —
+                    // "www.ebay.com" — which that guard nulled as a non-web
+                    // tab, so the popup skipped its coupon fetch and showed
+                    // the empty "Ready when you are" state on every real store
+                    // (found live on eBay iOS, 2026-08-09). Pinned by
+                    // tests/popup-tab-url-contract.test.mjs, which runs THIS
+                    // handler against the popup's real guard.
+                    sendResponse({
+                        domainRecord: null,
+                        url: tabs[0].url || null,
+                    })
                 },
             )
 
