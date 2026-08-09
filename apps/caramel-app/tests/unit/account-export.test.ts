@@ -252,12 +252,28 @@ describe('GET /api/account/export', () => {
 
     it('the ACTUAL response body carries nothing from the never-include list', async () => {
         const res = await GET(exportRequest())
-        // Assert 200 FIRST. Without this the test passes vacuously when the
-        // route 500s (an error body has no forbidden keys either) — which is
-        // exactly what happens when assertExportIsSafe catches a leak, so the
-        // one test that must go red on a leak would have stayed green.
+
+        // A NEGATIVE assertion is only as good as its proof that it is looking
+        // at the real thing. "No forbidden keys" is trivially satisfied by an
+        // empty body, an error body, a 404, or a typo'd URL — every one of
+        // which is a failure this test exists to catch. So the positive half
+        // comes FIRST and is what gives the negative half meaning: this is not
+        // "no secrets leaked", it is "no secrets leaked, in a response that
+        // definitely contained the data secrets could have leaked from".
         expect(res.status).toBe(200)
         const body = (await res.json()) as AccountExport
+
+        expect(body.account.email).toBe('shopper@example.com')
+        expect(body.account.id).toBe(USER_ID)
+        expect(body.savingsEvents.length).toBeGreaterThan(0)
+        expect(body.favoriteStores.length).toBeGreaterThan(0)
+        expect(body.couponReports.length).toBeGreaterThan(0)
+        // The account row this export is built FROM is the one carrying
+        // password/token, so a populated account block is the specific proof
+        // that the walker below had something dangerous to find.
+        expect(Object.keys(body.account).length).toBeGreaterThan(5)
+
+        // Only now does absence mean anything.
         expect(collectForbiddenKeys(body)).toEqual([])
 
         // Belt and braces against the walker itself being wrong: the three
