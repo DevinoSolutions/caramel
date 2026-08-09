@@ -287,7 +287,16 @@ describe('GET /api/account/export', () => {
     it('selects User columns EXPLICITLY — a bare findUnique would export password + token', async () => {
         await GET(exportRequest())
         const args = prismaMock.user.findUnique.mock.calls[0]![0]
-        expect(args.select).toBeDefined()
+        // Positive first: this must be the ACCOUNT select, populated with the
+        // columns the export is supposed to carry. An `undefined` or empty
+        // select would satisfy every `not.toHaveProperty` below while being
+        // exactly the regression (a bare findUnique returns ALL columns).
+        expect(args.select).toMatchObject({
+            id: true,
+            email: true,
+            createdAt: true,
+            emailVerified: true,
+        })
         expect(args.select).not.toHaveProperty('password')
         expect(args.select).not.toHaveProperty('token')
         expect(args.select).not.toHaveProperty('tokenExpiry')
