@@ -158,6 +158,15 @@ test.describe('Auth Flows — Login', () => {
 })
 
 test.describe('Auth Flows — Signup', () => {
+    // slow() = triple the 30s default. The waitForURL below already carries a
+    // 30s budget of its own, so the DEFAULT test timeout expired first and
+    // silently capped it — the redirect test died at exactly 30000ms on
+    // 2026-08-10 (third signup flake that week; failOnFlakyTests turns one
+    // slow CI boot into a red gate). The app is measured-fast (signup POST
+    // 0.8s live); what's slow is a cold CI runner hydrating /signup and
+    // loading /verify.
+    test.slow()
+
     test('successful signup redirects to /verify?signup=success', async ({
         page,
     }) => {
