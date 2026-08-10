@@ -5,7 +5,6 @@ import { CHROME_WEB_STORE_URL } from '@/lib/brandLinks'
 import {
     bodyTextClasses,
     secondaryButtonClasses,
-    tintedCardClasses,
 } from '@/lib/profile/profileStyles'
 import type { ProfileOverview } from '@/lib/profile/types'
 import Link from 'next/link'
@@ -53,7 +52,10 @@ export default function GetStartedChecklist({
             title="Get started with Caramel"
             description="Three things that make Caramel worth having."
         >
-            <div className={tintedCardClasses}>
+            {/* No inner card: ProfileSection already provides the surface, and
+                a tinted box inside a white card is the nesting that made this
+                page read as a pile of boxes. */}
+            <div>
                 <ol className="space-y-5">
                     {steps.map(step => (
                         <li

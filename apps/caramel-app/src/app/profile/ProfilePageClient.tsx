@@ -1,5 +1,8 @@
 'use client'
 
+import ProfileNav, {
+    type ProfileNavItem,
+} from '@/components/profile/ProfileNav'
 import SectionSkeleton from '@/components/profile/SectionSkeleton'
 import { useSession } from '@/lib/auth/client'
 import {
@@ -7,6 +10,9 @@ import {
     noticeButtonClasses,
     noticeClasses,
     noticeTitleClasses,
+    pageContainerClasses,
+    pageShellClasses,
+    sectionScrollOffsetClasses,
 } from '@/lib/profile/profileStyles'
 import type { FavoriteStoreSummary } from '@/lib/profile/types'
 import { useProfileOverview } from '@/lib/profile/useProfileOverview'
@@ -18,7 +24,6 @@ import AccountHeaderCard from './sections/AccountHeaderCard'
 import DataPrivacySection from './sections/DataPrivacySection'
 import FavoriteStoresSection from './sections/FavoriteStoresSection'
 import GetStartedChecklist from './sections/GetStartedChecklist'
-import ImpactStrip from './sections/ImpactStrip'
 import ReportsImpactSection from './sections/ReportsImpactSection'
 import SavingsSection from './sections/SavingsSection'
 
@@ -80,8 +85,8 @@ export default function ProfilePageClient() {
 
     if (!mounted || isPending) {
         return (
-            <main className="relative -mt-[6.7rem] w-full">
-                <div className="container mx-auto px-4 py-16">
+            <main className={pageShellClasses}>
+                <div className={pageContainerClasses}>
                     <div className="flex items-center justify-center">
                         <div className="text-lg font-medium text-gray-500 dark:text-gray-400">
                             Loading...
@@ -147,77 +152,116 @@ export default function ProfilePageClient() {
         }))
     }
 
-    // Every stat at zero => the checklist replaces the impact strip. This is
-    // the DEFAULT state for most people arriving here, not an edge case.
+    // Every stat at zero => the get-started checklist leads. This is the
+    // DEFAULT state for most people arriving here, not an edge case.
     const isZeroState =
         overview !== null &&
         overview.savings.eventCount === 0 &&
         overview.favorites.length === 0 &&
         overview.reports.reportCount === 0
 
+    function scrollToSavings() {
+        document.getElementById('savings')?.scrollIntoView({
+            behavior: prefersReducedMotion ? 'auto' : 'smooth',
+            block: 'start',
+        })
+    }
+
+    // The menu is built from the sections ACTUALLY rendered, never a fixed
+    // list: "Your reports" only exists once the user has reports, and a menu
+    // entry pointing at an absent anchor is a dead link.
+    const navItems: ProfileNavItem[] = [{ id: 'overview', label: 'Overview' }]
+    if (overview) {
+        if (isZeroState)
+            navItems.push({ id: 'get-started', label: 'Get started' })
+        navItems.push({ id: 'savings', label: 'Savings' })
+        navItems.push({ id: 'favorites', label: 'Stores' })
+        if (overview.reports.reportCount > 0) {
+            navItems.push({ id: 'reports', label: 'Reports' })
+        }
+    }
+    navItems.push({ id: 'account', label: 'Account' })
+    navItems.push({ id: 'data', label: 'Data & privacy' })
+
     return (
-        <main className="relative -mt-[6.7rem] w-full">
-            <div className="container mx-auto px-4 py-16 md:py-12 xs:px-3 xs:py-8">
-                <div className="mx-auto max-w-3xl space-y-10 md:space-y-8">
-                    {/* Renders immediately from the session — never waits on
-                        the overview, so there is no whole-page spinner. */}
-                    <AccountHeaderCard
-                        user={user}
-                        memberSince={overview?.memberSince ?? null}
-                    />
+        <main className={pageShellClasses}>
+            <div className={pageContainerClasses}>
+                <div className="mx-auto grid max-w-5xl grid-cols-[13rem_minmax(0,1fr)] gap-10 lg:grid-cols-1 lg:gap-0">
+                    {/* Column 1: the section menu. Renders the desktop rail and
+                        the small-screen chip row; each hides itself at the
+                        breakpoint the other owns. */}
+                    <ProfileNav items={navItems} />
 
-                    {status === 'loading' ? (
-                        <SectionSkeleton />
-                    ) : status === 'error' ? (
-                        <div role="alert" className={noticeClasses}>
-                            <p className={noticeTitleClasses}>
-                                We couldn&apos;t load your savings and stores
-                            </p>
-                            <p className={noticeBodyClasses}>
-                                Nothing is lost — this is on our side. Try again
-                                in a moment.
-                            </p>
-                            <button
-                                type="button"
-                                onClick={retry}
-                                className={noticeButtonClasses}
-                            >
-                                Try again
-                            </button>
+                    {/* Column 2: the sections. */}
+                    <div className="min-w-0 space-y-8 md:space-y-6">
+                        {/* Renders immediately from the session — never waits
+                            on the overview, so there is no whole-page
+                            spinner. */}
+                        <div
+                            id="overview"
+                            className={sectionScrollOffsetClasses}
+                        >
+                            <AccountHeaderCard
+                                user={user}
+                                overview={overview}
+                                onTurnOnSync={scrollToSavings}
+                            />
                         </div>
-                    ) : overview ? (
-                        <>
-                            {isZeroState ? (
-                                <GetStartedChecklist overview={overview} />
-                            ) : (
-                                <ImpactStrip overview={overview} />
-                            )}
 
-                            <SavingsSection
-                                savings={overview.savings}
-                                onSyncChange={applySyncChange}
-                            />
+                        {status === 'loading' ? (
+                            <SectionSkeleton />
+                        ) : status === 'error' ? (
+                            <div role="alert" className={noticeClasses}>
+                                <p className={noticeTitleClasses}>
+                                    We couldn&apos;t load your savings and
+                                    stores
+                                </p>
+                                <p className={noticeBodyClasses}>
+                                    Nothing is lost — this is on our side. Try
+                                    again in a moment.
+                                </p>
+                                <button
+                                    type="button"
+                                    onClick={retry}
+                                    className={noticeButtonClasses}
+                                >
+                                    Try again
+                                </button>
+                            </div>
+                        ) : overview ? (
+                            <>
+                                {isZeroState ? (
+                                    <GetStartedChecklist overview={overview} />
+                                ) : null}
 
-                            <FavoriteStoresSection
-                                favorites={overview.favorites}
-                                hasExtensionActivity={
-                                    overview.hasExtensionActivity
-                                }
-                                onRemove={removeFavorite}
-                                onRestore={restoreFavorite}
-                            />
+                                <SavingsSection
+                                    savings={overview.savings}
+                                    onSyncChange={applySyncChange}
+                                />
 
-                            <ReportsImpactSection reports={overview.reports} />
-                        </>
-                    ) : null}
+                                <FavoriteStoresSection
+                                    favorites={overview.favorites}
+                                    hasExtensionActivity={
+                                        overview.hasExtensionActivity
+                                    }
+                                    onRemove={removeFavorite}
+                                    onRestore={restoreFavorite}
+                                />
 
-                    {/* Both render from the session, so they stay real content
-                        even when the overview failed. */}
-                    <AccountDetailsCard user={user} />
-                    <DataPrivacySection
-                        overview={overview}
-                        onDeleted={applyDataDeleted}
-                    />
+                                <ReportsImpactSection
+                                    reports={overview.reports}
+                                />
+                            </>
+                        ) : null}
+
+                        {/* Both render from the session, so they stay real
+                            content even when the overview failed. */}
+                        <AccountDetailsCard user={user} />
+                        <DataPrivacySection
+                            overview={overview}
+                            onDeleted={applyDataDeleted}
+                        />
+                    </div>
                 </div>
             </div>
         </main>

@@ -1,16 +1,21 @@
 import ProfileSection from '@/components/profile/ProfileSection'
-import { cardClasses, microLabelClasses } from '@/lib/profile/profileStyles'
+import { microLabelClasses } from '@/lib/profile/profileStyles'
 
 /**
- * The original profile page's field list, kept intact.
+ * The account's own fields.
  *
- * It renders entirely from the session, so it is real content while the
- * overview is still loading — part of why this page no longer shows a
- * whole-page spinner.
+ * Presented as a two-column definition grid rather than the previous stack of
+ * label-over-value pairs in an oversized card: at desktop width a single
+ * column of short values left most of the card empty, which is what made it
+ * read as a bare field dump. The grid collapses to one column on phones, where
+ * a single column IS the right answer.
  *
  * Fields render only when they have a value, EXCEPT email (always shown, the
- * account's identity) — the old page's behaviour, preserved: a column of "Not
- * provided" rows is a form's idea of completeness, not information.
+ * account's identity) — the original page's behaviour, preserved: a column of
+ * "Not provided" rows is a form's idea of completeness, not information.
+ *
+ * The "Account details" heading is an E2E landmark (auth-flows.spec.ts waits
+ * on it to prove an authenticated /profile rendered) — keep the exact string.
  */
 export default function AccountDetailsCard({
     user,
@@ -43,18 +48,16 @@ export default function AccountDetailsCard({
 
     return (
         <ProfileSection id="account" title="Account details">
-            <div className={cardClasses}>
-                <dl className="space-y-4">
-                    {fields.map(field => (
-                        <div key={field.label}>
-                            <dt className={microLabelClasses}>{field.label}</dt>
-                            <dd className="mt-1 break-words text-gray-900 dark:text-gray-100">
-                                {field.value}
-                            </dd>
-                        </div>
-                    ))}
-                </dl>
-            </div>
+            <dl className="grid grid-cols-2 gap-x-8 gap-y-5 md:grid-cols-1 md:gap-y-4">
+                {fields.map(field => (
+                    <div key={field.label} className="min-w-0">
+                        <dt className={microLabelClasses}>{field.label}</dt>
+                        <dd className="mt-1 truncate text-gray-900 dark:text-gray-100">
+                            {field.value}
+                        </dd>
+                    </div>
+                ))}
+            </dl>
         </ProfileSection>
     )
 }

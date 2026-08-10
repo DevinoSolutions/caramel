@@ -1,9 +1,5 @@
 import ProfileSection from '@/components/profile/ProfileSection'
-import {
-    bodyTextClasses,
-    cardClasses,
-    subHeadingClasses,
-} from '@/lib/profile/profileStyles'
+import { bodyTextClasses, subHeadingClasses } from '@/lib/profile/profileStyles'
 import { selectReportTier, type ReportImpact } from '@/lib/profile/reportImpact'
 
 // "Your reports" — impact without invented numbers.
@@ -51,7 +47,7 @@ export default function ReportsImpactSection({
 
     return (
         <ProfileSection id="reports" title="Your reports">
-            <div className={cardClasses}>
+            <div>
                 <h3 className={subHeadingClasses}>
                     {tier === 'C'
                         ? 'Your reports are working'
@@ -67,9 +63,16 @@ export default function ReportsImpactSection({
                     ) : tier === 'B' ? (
                         <>
                             You&apos;ve told us about {codes}, and{' '}
-                            <Count>{reports.confirmedCount}</Count> matched what
-                            we found when we checked. That&apos;s what keeps the
-                            list honest.
+                            <Count>{reports.confirmedCount}</Count>{' '}
+                            {/* The space above is an explicit expression, not a
+                                literal: a literal space sitting between an
+                                element and the text after it is dropped when
+                                the text node is normalized, which is how this
+                                line shipped as "...and 2matched what we
+                                found...". Pinned by
+                                tests/unit/profile-copy-spacing.test.tsx. */}
+                            matched what we found when we checked. That&apos;s
+                            what keeps the list honest.
                         </>
                     ) : (
                         <>

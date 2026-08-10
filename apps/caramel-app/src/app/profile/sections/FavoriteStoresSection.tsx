@@ -5,11 +5,10 @@ import ProfileSection from '@/components/profile/ProfileSection'
 import { CHROME_WEB_STORE_URL } from '@/lib/brandLinks'
 import { promptSupportOnFailure } from '@/lib/feedback/promptSupportOnFailure'
 import {
-    cardClasses,
     linkRowFocusClasses,
     listRowClasses,
     secondaryButtonClasses,
-    tintedCardClasses,
+    tintedPanelClasses,
 } from '@/lib/profile/profileStyles'
 import type { FavoriteStoreSummary } from '@/lib/profile/types'
 import Image from 'next/image'
@@ -102,7 +101,7 @@ export default function FavoriteStoresSection({
             description="Your starred stores, with their best working codes."
         >
             {favorites.length === 0 ? (
-                <div className={tintedCardClasses}>
+                <div className={tintedPanelClasses}>
                     <EmptyState
                         icon="⭐"
                         heading="Follow the stores you shop"
@@ -138,7 +137,11 @@ export default function FavoriteStoresSection({
                     />
                 </div>
             ) : (
-                <div className={cardClasses}>
+                // No inner card — ProfileSection owns the surface. The rows
+                // here and the recent-savings rows share `listRowClasses` so
+                // both lists have the same anatomy: 40px favicon, truncating
+                // two-line identity, trailing control.
+                <div>
                     {favorites.map(store => (
                         <div key={store.domain} className={listRowClasses}>
                             <Link

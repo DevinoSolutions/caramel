@@ -10,7 +10,6 @@ import {
 } from '@/lib/profile/formatCurrency'
 import {
     bodyTextClasses,
-    cardClasses,
     codeChipClasses,
     listRowClasses,
     microLabelClasses,
@@ -19,7 +18,7 @@ import {
     noticeTitleClasses,
     secondaryButtonClasses,
     subHeadingClasses,
-    tintedCardClasses,
+    tintedPanelClasses,
 } from '@/lib/profile/profileStyles'
 import type { ProfileOverview } from '@/lib/profile/types'
 import Image from 'next/image'
@@ -120,13 +119,17 @@ export default function SavingsSection({
                     : 'Kept on this device unless you turn on sync.'
             }
             action={
+                // The switch sits in the card's header row opposite the title.
+                // Its long description moved into the pitch body below: as a
+                // header-row subtitle it forced the control into a second
+                // column of wrapped text and left a dead gap beside the
+                // heading, which is what made the two read as disconnected.
                 <SwitchField
                     id="savings-sync"
                     checked={savings.syncEnabled}
                     onChange={next => void toggleSync(next)}
                     busy={busy}
                     label="Sync my savings"
-                    description="Store your savings on your Caramel account instead of just this device."
                 />
             }
         >
@@ -139,7 +142,7 @@ export default function SavingsSection({
             {!savings.syncEnabled ? (
                 <SyncOffBody savings={savings} />
             ) : !hasEvents ? (
-                <div className={tintedCardClasses}>
+                <div className={tintedPanelClasses}>
                     <h3 className={subHeadingClasses}>Sync is on</h3>
                     <p className={`${bodyTextClasses} mt-2`}>
                         Nothing to show yet. The next time Caramel lands a code
@@ -151,7 +154,8 @@ export default function SavingsSection({
                     </p>
                 </div>
             ) : (
-                <div className={cardClasses}>
+                // No inner card — ProfileSection owns the surface.
+                <div>
                     <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
                         You&apos;ve saved
                     </p>
@@ -283,7 +287,15 @@ function SyncOffBody({ savings }: { savings: ProfileOverview['savings'] }) {
                         href="#data"
                         className="font-semibold underline underline-offset-2"
                     >
-                        delete {one ? 'it' : 'them'} from Data &amp; privacy
+                        {/* Explicit {' '} rather than a literal space: JSX
+                            strips whitespace that sits between an expression
+                            and a NEWLINE, so if prettier ever wraps this line
+                            after the ternary the space silently disappears and
+                            it renders "delete themfrom Data & privacy". An
+                            explicit space expression cannot be reformatted
+                            away. */}
+                        delete {one ? 'it' : 'them'}
+                        {' from Data & privacy'}
                     </Link>
                     .
                 </p>
@@ -292,7 +304,7 @@ function SyncOffBody({ savings }: { savings: ProfileOverview['savings'] }) {
     }
 
     return (
-        <div className={tintedCardClasses}>
+        <div className={tintedPanelClasses}>
             <h3 className={subHeadingClasses}>Turn on savings sync</h3>
             <p className={`${bodyTextClasses} mt-2`}>
                 Right now Caramel keeps your savings on this device only. Turn

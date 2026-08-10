@@ -5,7 +5,6 @@ import ProfileSection from '@/components/profile/ProfileSection'
 import { promptSupportOnFailure } from '@/lib/feedback/promptSupportOnFailure'
 import {
     bodyTextClasses,
-    cardClasses,
     dangerButtonClasses,
     dangerFenceClasses,
     secondaryButtonClasses,
@@ -99,7 +98,10 @@ export default function DataPrivacySection({
             description="Everything Caramel holds for you, and how to get rid of it."
         >
             <div className="space-y-6">
-                <div className={cardClasses}>
+                {/* Export is plain-weight inside the section card; only the
+                    danger zone keeps its own fence, because it should read as
+                    a different and more dangerous surface. */}
+                <div>
                     <h3 className={subHeadingClasses}>Download your data</h3>
                     <p className={`${bodyTextClasses} mt-2`}>
                         A single JSON file with your account details, the stores
