@@ -15,11 +15,12 @@
         "test:e2e": "node scripts/test-extension.mjs",
         "test:guards": "node scripts/test-guards.mjs",
         "test:smoke": "node scripts/smoke-package.mjs ./dist production",
-        "size": "size-limit",
+        "size": "node scripts/measure-size.mjs && size-limit",
         "knip": "knip"
     },
     "devDependencies": {
         "@size-limit/file": "12.1.0",
+        "esbuild": "0.25.12",
         "eslint-config-prettier": "10.1.5",
         "eslint-plugin-html": "8.1.3",
         "eslint-plugin-import": "2.32.0",
