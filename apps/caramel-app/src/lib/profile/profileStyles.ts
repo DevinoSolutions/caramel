@@ -187,9 +187,14 @@ export const navRailItemIdleClasses =
  * with the floating header pill at rest. Bleeding to the screen edges
  * (`-mx-4` against the container's `px-4`) is what makes the overflow read as
  * scrollable instead of clipped.
+ *
+ * The scrollbar is hidden (both engines) because globals.css gives every
+ * scroll container the chunky brand-orange thumb — under a row of chips that
+ * reads as a broken progress bar, not as chrome. Scrollability is untouched;
+ * the half-visible trailing chip is the swipe affordance.
  */
 export const navChipBarClasses =
-    '-mx-4 mb-6 hidden overflow-x-auto px-4 pb-1 lg:block xs:-mx-3 xs:px-3'
+    '-mx-4 mb-6 hidden overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:block xs:-mx-3 xs:px-3'
 
 export const navChipClasses =
     'shrink-0 whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors duration-200'
