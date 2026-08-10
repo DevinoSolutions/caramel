@@ -21,7 +21,8 @@ import { useEffect, useState } from 'react'
 // first card on small screens. Both drive the same scroll-spy state, so the
 // active section is always shown in whichever presentation is visible.
 // (Why fixed and not sticky: see the positioning note in profileStyles.ts —
-// sticky is inert app-wide behind Layout.tsx's overflow-x-hidden.)
+// built while sticky was inert app-wide; kept fixed since it works and is
+// pinned by tests.)
 //
 // Sections are passed in rather than hardcoded because the page's section set
 // is DYNAMIC — "Your reports" renders only when the user has reports. A fixed

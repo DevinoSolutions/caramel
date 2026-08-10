@@ -21,9 +21,16 @@ export default function Layout({ children }: LayoutProps) {
         // needed here. Don't reintroduce a background: it would repaint the
         // whole viewport light until hydration, the flash this all exists to
         // kill.
+        // overflow-x-CLIP, not -hidden: `hidden` creates a scroll container,
+        // which silently becomes the containing block for every
+        // `position: sticky` inside it — the site header (sticky top-4)
+        // scrolled away on every page (measured top:-1184 on /privacy,
+        // 2026-08-10). `clip` cuts horizontal overflow identically but
+        // creates NO scroll container, so sticky works against the viewport
+        // again. Same one-char class swap Tailwind ships for exactly this.
         <div
             ref={ref}
-            className={`flex min-h-screen flex-col overflow-x-hidden scroll-smooth ${
+            className={`flex min-h-screen flex-col overflow-x-clip scroll-smooth ${
                 isDarkMode ? 'dark' : 'light'
             } font-Roboto`}
         >

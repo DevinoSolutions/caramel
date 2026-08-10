@@ -146,15 +146,14 @@ export const linkRowFocusClasses =
 // Section navigation
 //
 // POSITIONING NOTE — why the rail is `fixed` and not `sticky`:
-// `position: sticky` DOES NOT WORK anywhere in this app. Layout.tsx wraps every
-// page in `flex min-h-screen flex-col overflow-x-hidden`, and an ancestor with
-// a non-visible overflow becomes the sticky scroll container; since that
-// wrapper grows with its content and never scrolls internally, nothing inside
-// it can ever stick. Measured, not assumed: on /privacy the app's OWN header
-// (`sticky top-4`) scrolls from top 16 to top -1184 after a 1200px scroll.
-// Fixing that belongs in Layout.tsx (`overflow-x: clip` keeps the same
-// clipping without creating a scroll container) and would change the scrolled
-// appearance of every page, so it is deliberately NOT done here.
+// When this rail was built (2026-08-10), `position: sticky` was inert
+// app-wide — Layout.tsx's `overflow-x-hidden` wrapper was the sticky scroll
+// container, and nothing inside it could stick (measured: the site header at
+// top -1184 on /privacy). Layout.tsx has since moved to `overflow-x-clip`,
+// which clips without creating a scroll container, so sticky works again.
+// The rail stays `fixed` because it is proven, live, and its own tests pin
+// this shape — converting it to sticky is a pure refactor with no user-visible
+// win, not a bug.
 //
 // `position: fixed` is unaffected (there is no transform/filter ancestor), so
 // the rail uses it.
