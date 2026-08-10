@@ -29,8 +29,10 @@ function setReferrer(value) {
     Object.defineProperty(document, 'referrer', { value, configurable: true })
 }
 
+let _caramelCartHostname
+
 beforeAll(() => {
-    ;({ isCheckout } = loadExtensionSources(
+    ;({ isCheckout, _caramelCartHostname } = loadExtensionSources(
         [
             'coupon-constants.generated.js',
             'caramel-base.js',
@@ -40,7 +42,7 @@ beforeAll(() => {
             'coupon-fetch.js',
             'coupon-runner.js',
         ],
-        ['isCheckout'],
+        ['isCheckout', '_caramelCartHostname'],
     ))
 })
 
@@ -286,5 +288,32 @@ describe('isCheckout — cart intent the path does not spell out', () => {
             expect(await isCheckout()).toBe(false)
             expect(probeCalls).toBe(0)
         })
+    })
+})
+
+describe('cart intent named by the HOST, not the path', () => {
+    // eBay's cart is cart.ebay.com/ — path "/", nothing for the path rule to
+    // read. The host rule speaks the same vocabulary, first label only.
+    it('recognises a cart word as the first hostname label', () => {
+        for (const host of [
+            'cart.ebay.com',
+            'checkout.store.example',
+            'basket.shop.co.uk',
+            'Checkouts.example.com',
+        ]) {
+            expect(_caramelCartHostname(host), host).toBe(true)
+        }
+    })
+
+    it('refuses cart words that are buried, partial, or absent', () => {
+        for (const host of [
+            'secure.cart.example.com', // not what THIS page calls itself
+            'www.ebay.com',
+            'cartoon.example.com', // word must end at the label dot
+            'mycart.example.com',
+            'pay.ebay.com', // deliberately out: "pay" is not cart vocabulary
+        ]) {
+            expect(_caramelCartHostname(host), host).toBe(false)
+        }
     })
 })

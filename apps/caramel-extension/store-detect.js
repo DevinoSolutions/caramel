@@ -263,9 +263,20 @@ function _caramelReferrerCartBounce() {
  * because "the gate opened" is not a useful thing to read in a dev console
  * without knowing which of four rules opened it.
  */
+/* Does this HOST name a cart or checkout? Some platforms put the cart word in
+ * the hostname, not the path: eBay's cart lives at cart.ebay.com/ (path "/"),
+ * and checkout.* subdomains are a common SFCC/legacy shape. Same vocabulary as
+ * CARAMEL_CART_PATH_RE, and only the FIRST label — a cart word deeper in the
+ * host (secure.cart.example) is not what this page calls itself. Still a rule
+ * about URL shape, never about one store. */
+function _caramelCartHostname(hostname) {
+    return /^(cart|carts|basket|checkout|checkouts)\./i.test(hostname)
+}
+
 function _caramelCartIntentSignal() {
     if (CARAMEL_CART_PATH_RE.test(location.pathname + location.search))
         return 'path'
+    if (_caramelCartHostname(location.hostname)) return 'host'
     for (const [key, value] of new URLSearchParams(location.search)) {
         if (!CARAMEL_CART_INTENT_PARAM_RE.test(key)) continue
         if (CARAMEL_FALSY_FLAG_VALUES.has(String(value).trim().toLowerCase()))
