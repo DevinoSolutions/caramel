@@ -531,10 +531,10 @@ body {
    - slight background tint
 */
 .coupon-item {
-    cursor:
-        url('data:image/svg+xml;base64,PHN2Zw0KICAgICAgICB3aWR0aD0iNjAiDQogICAgICAgIGhlaWdodD0iMTYiDQogICAgICAgIHZpZXdCb3g9IjAgMCA2MCAxNiINCiAgICAgICAgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIg0KPg0KICAgIDwhLS0gT3ZlcmxhcHBpbmcgc3F1YXJlcyAocmVwcmVzZW50IHRoZSAiY29weSIgaWNvbikgLS0+DQogICAgPHJlY3QNCiAgICAgICAgICAgIHg9IjAiDQogICAgICAgICAgICB5PSIzIg0KICAgICAgICAgICAgd2lkdGg9IjgiDQogICAgICAgICAgICBoZWlnaHQ9IjEwIg0KICAgICAgICAgICAgZmlsbD0ibm9uZSINCiAgICAgICAgICAgIHN0cm9rZT0iI2VhNjkyNSINCiAgICAgICAgICAgIHN0cm9rZS13aWR0aD0iMSINCiAgICAgICAgICAgIHN0cm9rZS1saW5lY2FwPSJyb3VuZCINCiAgICAgICAgICAgIHN0cm9rZS1saW5lam9pbj0icm91bmQiDQogICAgLz4NCiAgICA8cmVjdA0KICAgICAgICAgICAgeD0iMiINCiAgICAgICAgICAgIHk9IjEiDQogICAgICAgICAgICB3aWR0aD0iOCINCiAgICAgICAgICAgIGhlaWdodD0iMTAiDQogICAgICAgICAgICBmaWxsPSJub25lIg0KICAgICAgICAgICAgc3Ryb2tlPSIjZWE2OTI1Ig0KICAgICAgICAgICAgc3Ryb2tlLXdpZHRoPSIxIg0KICAgICAgICAgICAgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIg0KICAgICAgICAgICAgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCINCiAgICAvPg0KDQogICAgPCEtLSBUaGUgd29yZCAiQ29weSIgdG8gdGhlIHJpZ2h0IC0tPg0KICAgIDx0ZXh0DQogICAgICAgICAgICB4PSIxOCINCiAgICAgICAgICAgIHk9IjEyIg0KICAgICAgICAgICAgZmlsbD0iI2VhNjkyNSINCiAgICAgICAgICAgIGZvbnQtc2l6ZT0iMTAiDQogICAgICAgICAgICBmb250LWZhbWlseT0ic2Fucy1zZXJpZiINCiAgICA+DQogICAgICAgIENvcHkNCiAgICA8L3RleHQ+DQo8L3N2Zz4NCg==')
-            8 8,
-        copy;
+    /* Standard pointer, not a custom drawn cursor: the card is clickable
+       (click-to-copy), and a bespoke cursor image reads as clutter, not
+       affordance (owner call 2026-08-10). */
+    cursor: pointer;
     text-align: left;
     border: 1px solid var(--cm-border);
     border-radius: 14px;
