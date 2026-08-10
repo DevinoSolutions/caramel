@@ -112,7 +112,10 @@ describe('STATUS_META — label + tier, verbatim from coupon-card.tsx STATUS_BAD
             category_restricted: { label: 'Category-limited', tier: 'amber' },
             seller_specific: { label: 'Seller-specific', tier: 'amber' },
             pending: { label: 'Unverified', tier: 'grey' },
-            retry: { label: 'Checking…', tier: 'grey' },
+            // retry shares pending's label on purpose: "Checking…" promised
+            // live verification, and with the pipeline paused (2026-08-10)
+            // rows wore it for days. See coupons.ts.
+            retry: { label: 'Unverified', tier: 'grey' },
             invalid: { label: 'Not valid', tier: 'red' },
             expired: { label: 'Expired', tier: 'red' },
         })

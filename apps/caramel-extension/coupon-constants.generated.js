@@ -60,7 +60,7 @@ window.CaramelCoupons = {
             tier: 'grey',
         },
         retry: {
-            label: 'Checking…',
+            label: 'Unverified',
             tier: 'grey',
         },
         invalid: {

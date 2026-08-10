@@ -66,9 +66,14 @@ const STATUS_TABLE = [
     },
     {
         status: 'retry',
-        label: 'Checking…',
+        label: 'Unverified',
         tier: 'grey',
-        // Mid-verification (a prior attempt failed transiently).
+        // Mid-verification in the DB (a prior attempt failed transiently) —
+        // but presented as plain "Unverified", the same badge as `pending`.
+        // The old "Checking…" label promised live activity, and while the
+        // verification pipeline is paused (post-cutover hold, 2026-08-10)
+        // rows sat on that promise for days. "Unverified" is true in both
+        // worlds: pipeline running or not, the code has no proof yet.
         visible: true,
         restricted: false,
     },
