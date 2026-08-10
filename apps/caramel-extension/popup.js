@@ -1306,6 +1306,26 @@ function couponIdentity(c) {
  * page, not to walk a catalog the backend keeps re-serving. */
 const COUPON_PAGE_EMPTY_LIMIT = 3
 
+/* Guests see a teaser, not the catalog. OWNER RULE (2026-08-10): "for guests
+ * dont show all coupons" — the full list, and the infinite scroll that walks
+ * it, are signed-in features. Six rows is about two screens of the 320px
+ * list: enough to prove the codes are real, small enough that signing in
+ * visibly buys something. The gate only exists when it hides something — a
+ * guest on a store with this many codes or fewer sees exactly what a member
+ * sees. */
+const GUEST_COUPON_LIMIT = 6
+
+/* Bottom of a guest's capped list: name what's hidden and the one action that
+ * reveals it. `total` is the CATALOG count — the same number a member's
+ * scroll ends on — so the promise on the button is exactly what signing in
+ * delivers. */
+function couponGuestGateHtml(shown, total) {
+    return `<div id="couponGuestGate" class="coupon-guest-gate">
+        <p class="coupon-list-note">Showing ${shown} of ${total} codes</p>
+        <button type="button" id="couponLoginGateBtn" class="supported-sites-btn">Log in to see all ${total} codes</button>
+    </div>`
+}
+
 /* Wording for the bottom of the list. "N codes" counts what the CATALOG holds
  * for this store, which is the number the shopper is really asking about when
  * they scroll to the end. */
@@ -1464,6 +1484,16 @@ function renderCouponsView(coupons, user, domain, meta) {
         observer: null,
     }
 
+    /* Guest cap (GUEST_COUPON_LIMIT): slice AFTER the paging state is built so
+     * `paging.total` still carries the real catalog size the gate advertises.
+     * hasMore is forced off — the gate replaces the pager, so a guest's list
+     * never grows past the teaser no matter how the shopper scrolls. */
+    const guestGated = !user && paging.total > GUEST_COUPON_LIMIT
+    const visibleCoupons = guestGated
+        ? coupons.slice(0, GUEST_COUPON_LIMIT)
+        : coupons
+    if (guestGated) paging.hasMore = false
+
     const headerLeft = user
         ? `
         <img
@@ -1510,9 +1540,10 @@ function renderCouponsView(coupons, user, domain, meta) {
         ${
             coupons.length === 0
                 ? '<p>No coupons available for this store right now.</p>'
-                : coupons.map(couponItemHtml).join('')
+                : visibleCoupons.map(couponItemHtml).join('')
         }
         ${paging.hasMore ? '<div id="couponListFooter" class="coupon-list-footer"></div>' : ''}
+        ${guestGated ? couponGuestGateHtml(visibleCoupons.length, paging.total) : ''}
       </div>
     </div>
 
@@ -1543,6 +1574,14 @@ function renderCouponsView(coupons, user, domain, meta) {
     const loginToggle = document.getElementById('loginToggleBtn')
     if (loginToggle)
         loginToggle.addEventListener('click', () =>
+            renderSignInPrompt(selfCallback),
+        )
+
+    /* guest gate at the foot of the capped list — same destination as the
+       header Log in button, offered where the capped list actually ends */
+    const gateBtn = document.getElementById('couponLoginGateBtn')
+    if (gateBtn)
+        gateBtn.addEventListener('click', () =>
             renderSignInPrompt(selfCallback),
         )
 

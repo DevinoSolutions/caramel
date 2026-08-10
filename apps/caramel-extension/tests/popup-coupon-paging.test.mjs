@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
+    backStorageArea,
     getOnMessageListeners,
     loadExtensionSource,
     loadExtensionSources,
@@ -62,6 +63,16 @@ function installCatalogFetch(storeSize = CATALOG_SIZE) {
     servedRows = new Map()
     globalThis.fetch = async url => {
         const parsed = new URL(String(url))
+        // The signed-in boots fire validateStoredSession in parallel; answer
+        // its /api/extension/me probe with a real profile shape so it neither
+        // signs the popup out nor writes a garbage user into storage.
+        if (parsed.pathname === '/api/extension/me') {
+            return {
+                ok: true,
+                status: 200,
+                json: async () => ({ username: 'tester', image: '' }),
+            }
+        }
         requestedUrls.push(parsed)
         const page = Number(parsed.searchParams.get('page') || '1')
         const limit = Number(parsed.searchParams.get('limit') || '10')
@@ -139,8 +150,17 @@ function installObserverStub() {
 }
 
 /** Boots the popup against the real background handler and renders page 1.
- * Returns the observer control plus what the popup rendered. */
-async function bootPopup({ withObserver = true, storeSize } = {}) {
+ * Returns the observer control plus what the popup rendered.
+ *
+ * `signedIn` defaults to true because the DEEP list is a member feature since
+ * the guest cap (GUEST_COUPON_LIMIT in popup.js): every paging behavior below
+ * only exists behind a session, and the "guest gate" suite at the bottom is
+ * what pins the logged-out shape. */
+async function bootPopup({
+    withObserver = true,
+    storeSize,
+    signedIn = true,
+} = {}) {
     installCatalogFetch(storeSize)
 
     // Realm A — the REAL service worker. Its handler stays callable after the
@@ -183,6 +203,19 @@ async function bootPopup({ withObserver = true, storeSize } = {}) {
         cb(undefined)
     }
     globalThis.currentBrowser.storage.sync.get = (_keys, cb) => cb({})
+    // Session lives in storage.LOCAL (token + user). ALWAYS back the area —
+    // the stub is shared across boots in this file, so a guest boot that
+    // skipped this would inherit the previous signed-in boot's token and
+    // silently test the wrong user.
+    backStorageArea(
+        'local',
+        signedIn
+            ? {
+                  token: 'tok_paging_suite',
+                  user: { username: 'tester', image: '' },
+              }
+            : {},
+    )
 
     const observer = withObserver ? installObserverStub() : null
     if (!withObserver) delete globalThis.IntersectionObserver
@@ -422,5 +455,64 @@ describe('popup coupon list — without IntersectionObserver', () => {
 
         expect(codesOnScreen()).toHaveLength(PAGE_SIZE * 2)
         expect(requestedUrls[1].searchParams.get('page')).toBe('2')
+    })
+})
+
+describe('popup coupon list — guest gate', () => {
+    // OWNER RULE (2026-08-10): "for guests dont show all coupons". A guest gets
+    // a teaser of GUEST_COUPON_LIMIT rows and a login gate naming the real
+    // catalog size; the infinite scroll above is a member feature.
+    const GUEST_LIMIT = 6
+
+    it('caps a guest at the teaser with a gate naming the full count, and never wires the pager', async () => {
+        const { observer } = await bootPopup({ signedIn: false })
+
+        expect(codesOnScreen()).toHaveLength(GUEST_LIMIT)
+        expect(footer()).toBeNull()
+        // No live observer: scrolling a guest's list must not grow it.
+        expect(observer.instances.filter(o => !o.disconnected)).toHaveLength(0)
+
+        const gate = document.getElementById('couponGuestGate')
+        expect(gate).not.toBeNull()
+        expect(gate.textContent).toContain(
+            `Showing ${GUEST_LIMIT} of ${CATALOG_SIZE} codes`,
+        )
+        const button = document.getElementById('couponLoginGateBtn')
+        expect(button.textContent).toContain(
+            `Log in to see all ${CATALOG_SIZE} codes`,
+        )
+        // One request, page 1 — the cap is presentation, not a smaller fetch,
+        // so logging in can widen the list without a new contract.
+        expect(requestedUrls).toHaveLength(1)
+    })
+
+    it('leaves a small store ungated — the gate only exists when it hides something', async () => {
+        // Positive precondition: the deep-store boot above DOES gate, so an
+        // absent gate here means "nothing hidden", not "gate never renders".
+        await bootPopup({ signedIn: false, storeSize: 3 })
+
+        expect(codesOnScreen()).toEqual(['SAVE01', 'SAVE02', 'SAVE03'])
+        expect(document.getElementById('couponGuestGate')).toBeNull()
+        expect(footer()).toBeNull()
+    })
+
+    it('sends the gate tap to the sign-in view', async () => {
+        await bootPopup({ signedIn: false })
+
+        const button = document.getElementById('couponLoginGateBtn')
+        button.dispatchEvent(new window.Event('click', { bubbles: true }))
+        await settle()
+
+        // The coupon list is gone and the sign-in form is up.
+        expect(document.getElementById('couponList')).toBeNull()
+        expect(document.getElementById('loginForm')).not.toBeNull()
+    })
+
+    it('shows a member the full first page on the same store a guest sees capped', async () => {
+        await bootPopup()
+
+        expect(codesOnScreen()).toHaveLength(PAGE_SIZE)
+        expect(document.getElementById('couponGuestGate')).toBeNull()
+        expect(footer()).not.toBeNull()
     })
 })
