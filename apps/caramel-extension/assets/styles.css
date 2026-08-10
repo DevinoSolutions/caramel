@@ -489,6 +489,21 @@ body {
     scrollbar-width: thin;
     scrollbar-color: var(--cm-scrollbar) transparent;
 }
+/* Bottom of the list: the IntersectionObserver's target while more pages
+   exist, and afterwards the "that's all of them" line. It holds a
+   .skeleton.skeleton-ticket ghost while loading — the same shimmer the popup
+   opens with, so a page arriving looks like the popup already does, and the
+   ghost's real height is what makes the observer's boundary crossing reliable.
+   Only the box needs describing here; the states reuse existing classes. */
+.coupon-list-footer {
+    margin-bottom: 12px; /* matches .coupon-item's rhythm */
+}
+.coupon-list-note {
+    margin: 4px 0 2px;
+    text-align: center;
+    font-size: var(--cm-text-xs);
+    color: var(--cm-text-secondary);
+}
 .coupon-list::-webkit-scrollbar {
     width: 8px;
 }

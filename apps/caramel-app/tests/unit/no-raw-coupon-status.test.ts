@@ -76,6 +76,13 @@ const SKIP_DIR_NAMES = new Set([
     'dist',
     '.git',
     'coverage',
+    // Minified copies of the shipped extension files, written by
+    // `pnpm --filter caramel-extension size` and gitignored. They are the SAME
+    // sources this gate already walks, so scanning them adds nothing — but
+    // minification inlines the generated constants, so every run of the size
+    // gate left this suite red for anyone who then ran the app tests locally.
+    // A gate that fires on its own build output is noise, not a finding.
+    '.size-cache',
 ])
 
 function walk(dir: string, extensions: string[]): string[] {

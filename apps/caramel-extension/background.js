@@ -45,6 +45,13 @@ const logError = (where, err) => {
     if (globalThis.CARAMEL_ENV.verbose) console.error('Caramel:', where, err)
 }
 
+/* How many coupons one fetchCoupons request asks for. The number the popup
+ * paginates in, and the number the apply flow works from on its first (usually
+ * only) page. 20 has always been this value; it lives in a named constant now
+ * because a second caller — the popup's next-page request — has to agree with
+ * it, and the route's own ceiling is 50. */
+const COUPON_PAGE_SIZE = 20
+
 const FETCH_TIMEOUT_MS = 8000
 // One budget does not fit both shapes of call we make. The store list is a
 // bulk payload (~1.14 MB, 2670 stores) and the small JSON calls are a few KB.
@@ -294,12 +301,19 @@ currentBrowser.runtime.onMessage.addListener(
 
             return true
         } else if (message.action === 'fetchCoupons') {
-            const { site, kw, category } = message
+            const { site, kw, category, page } = message
             const url = new URL(caramelUrl('api/coupons'))
             url.searchParams.set('site', site)
             url.searchParams.set('key_words', kw || '')
-            url.searchParams.set('limit', '20')
+            url.searchParams.set('limit', String(COUPON_PAGE_SIZE))
             if (category) url.searchParams.set('category', category)
+            // `page` is omitted entirely for page 1 so a caller that doesn't
+            // paginate produces the exact URL this handler has always produced
+            // (the route defaults to page=1). Bounded to the route's own cap of
+            // 500 rather than forwarded raw.
+            const wanted = Number(page)
+            if (Number.isFinite(wanted) && wanted > 1)
+                url.searchParams.set('page', String(Math.min(wanted, 500)))
             if (globalThis.CARAMEL_ENV.verbose)
                 console.log('BACKGROUND: fetchCoupons', {
                     site,
@@ -311,10 +325,26 @@ currentBrowser.runtime.onMessage.addListener(
                 .then(async r => {
                     if (!r.ok) return { error: `HTTP ${r.status}` }
                     const json = await r.json()
+                    const coupons = Array.isArray(json)
+                        ? json
+                        : json.coupons || []
+                    // The page envelope rides along so the popup can page
+                    // through a catalog deeper than one request (eBay had 96
+                    // codes while the popup only ever showed 20). A bare-array
+                    // response — or any older shape without the envelope —
+                    // degrades to "this is all there is", which is what every
+                    // caller assumed before this existed.
                     return {
-                        coupons: Array.isArray(json)
-                            ? json
-                            : json.coupons || [],
+                        coupons,
+                        page:
+                            typeof json.page === 'number' && json.page > 0
+                                ? json.page
+                                : 1,
+                        total:
+                            typeof json.total === 'number'
+                                ? json.total
+                                : coupons.length,
+                        hasMore: json.hasMore === true,
                     }
                 })
                 .then(resp => sendResponse(resp))

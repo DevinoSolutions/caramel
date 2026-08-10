@@ -1,13 +1,25 @@
-// owns: coupon list fetch + classify (fetchCoupons, RESTRICTED_STATUSES, classifyCartCategory, getCoupons)
+// owns: coupon list fetch + classify (fetchCouponsPage, fetchCoupons, RESTRICTED_STATUSES, classifyCartCategory, getCoupons)
 // load after: caramel-base.js, dom-utils.js, store-detect.js, coupon-apply.js, and coupon-constants.generated.js (window.CaramelCoupons — loaded first in every manifest/index.html)
 
 /* --------------------------------------------------  coupon list */
-// Called from other split content-script files (cross-file content-script
-// call — oxlint's per-file analysis can't see it).
+/* ONE page of the store's codes, envelope included.
+ *
+ * fetchCoupons() below is this function with the envelope thrown away, and is
+ * still what the apply flow calls — it only ever wants the best codes it can
+ * try, and page 1 is ranked. The popup calls THIS one, because a shopper
+ * scrolling the list needs to know whether the list ends where it stops: eBay
+ * had 96 live codes on the day the popup was showing 20, with nothing in the
+ * UI to suggest the other 76 existed.
+ *
+ * Resolves `{ coupons, page, total, hasMore }`. A backend that answers without
+ * the envelope (older deploy, bare array) degrades to hasMore:false — "this is
+ * all there is" — which is exactly the behavior that shipped before paging. */
+// Called from popup.js and from fetchCoupons below (cross-file call — oxlint's
+// per-file analysis can't see the popup one).
 // oxlint-disable-next-line no-unused-vars
-async function fetchCoupons(site, kw, category) {
+async function fetchCouponsPage(site, kw, category, page) {
     // Delegate network fetch to background/service worker to avoid CORS failures
-    const meta = { site, kw, category }
+    const meta = { site, kw, category, page }
     try {
         log(
             'AUTO_INSERT_FETCHCOUPONS_START',
@@ -24,6 +36,7 @@ async function fetchCoupons(site, kw, category) {
             site,
             kw,
             category,
+            page,
         })
         if (resp?.error) {
             log('fetchCoupons background error', resp.error)
@@ -40,7 +53,12 @@ async function fetchCoupons(site, kw, category) {
         })
         recordTiming('AUTO_INSERT_FETCHCOUPONS_END', { count: d.length })
         log('Fetched', d.length, 'coupons')
-        return d
+        return {
+            coupons: d,
+            page: typeof resp?.page === 'number' ? resp.page : 1,
+            total: typeof resp?.total === 'number' ? resp.total : d.length,
+            hasMore: resp?.hasMore === true,
+        }
     } catch (e) {
         log('fetchCoupons error', e)
         recordTiming('AUTO_INSERT_FETCHCOUPONS_END', {
@@ -49,6 +67,18 @@ async function fetchCoupons(site, kw, category) {
         })
         throw e
     }
+}
+
+/* The codes themselves, page 1, nothing else — the shape every caller outside
+ * the popup wants and the shape this name has always had. Kept as a wrapper
+ * rather than a second request path so there is exactly one place that talks to
+ * the service worker about coupons. */
+// Called from other split content-script files (cross-file content-script
+// call — oxlint's per-file analysis can't see it).
+// oxlint-disable-next-line no-unused-vars
+async function fetchCoupons(site, kw, category) {
+    const { coupons } = await fetchCouponsPage(site, kw, category, 1)
+    return coupons
 }
 // Statuses that signal a coupon has restrictions the user might trip over.
 // When ANY returned coupon carries one of these, we classify the cart so the

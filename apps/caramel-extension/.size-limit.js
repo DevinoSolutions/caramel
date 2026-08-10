@@ -45,14 +45,26 @@ module.exports = [
         name: 'popup.js (minified)',
         path: '.size-cache/popup.min.js',
         // 2026-08-10 — measured 28.29 kB minified, from 63.39 kB of source.
-        limit: '30 KB',
+        // 2026-08-10, raised 30 -> 33 kB: the coupon list paginates. A store
+        // can hold far more codes than one request returns (eBay: 96 against a
+        // page of 20) and the popup showed the first page as if it were the
+        // whole store. The 2.7 kB buys an IntersectionObserver sentinel, the
+        // fetch-append-dedupe loop, the four footer states (loading / end /
+        // retry / no-observer button) and delegated copy handlers so appended
+        // rows work — real behaviour, measured 30.97 kB.
+        limit: '33 KB',
         brotli: false,
     },
     {
         name: 'background.js (sw, minified)',
         path: '.size-cache/background.min.js',
         // 2026-08-10 — measured 7.04 kB minified, from 21.96 kB of source.
-        limit: '7.5 KB',
+        // 2026-08-10, raised 7.5 -> 7.8 kB: the fetchCoupons branch forwards a
+        // page number and passes the route's page/total/hasMore envelope back
+        // to the popup (measured 7.3 kB). Raised rather than left at 2.7%
+        // headroom, which is close enough to the ceiling to red the next
+        // honest edit — see the headroom note above.
+        limit: '7.8 KB',
         brotli: false,
     },
 ]

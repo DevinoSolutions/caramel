@@ -73,8 +73,21 @@ import { randomUUID } from 'node:crypto'
 const visibleCouponsWhere = () =>
     Prisma.sql`status IN (${Prisma.join([...VISIBLE_COUPON_STATUSES])}) AND expired = FALSE`
 
-/** Shared ranking order — the list query and the marketing store page both sort by this identical order. */
-const rankingOrderSql = () => Prisma.sql`rating DESC, created_at DESC`
+/**
+ * Shared ranking order — the list query and the marketing store page both sort
+ * by this identical order.
+ *
+ * `id` is a TIEBREAKER, not a ranking signal, and it is load-bearing for
+ * OFFSET pagination. `rating DESC, created_at DESC` alone is not a total order:
+ * a store's coupons routinely share a rating (0 is the default) and can share a
+ * created_at down to the ingest batch, and Postgres is free to return tied rows
+ * in a different physical order per query. Two requests that differ only by
+ * OFFSET are two separate queries, so a tied row could be returned by both
+ * (a duplicate) or by neither (a row the shopper can never reach — the failure
+ * mode a client-side dedupe cannot see). Appending the primary key makes the
+ * sort total, so page N+1 resumes exactly where page N stopped.
+ */
+const rankingOrderSql = () => Prisma.sql`rating DESC, created_at DESC, id DESC`
 
 /**
  * coupons/stats/route.ts's census predicate. Deliberately NOT

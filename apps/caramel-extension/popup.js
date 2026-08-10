@@ -1,4 +1,4 @@
-/* global currentBrowser, fetchCoupons */
+/* global currentBrowser, fetchCouponsPage */
 
 // Base URL from the build-time environment stamp (caramel-env.js, the first
 // script index.html loads). This used to call a shared `_isDevInstall()` that
@@ -332,16 +332,22 @@ async function initPopup() {
                     // regex-stripping, or the path/query would ride along into
                     // the coupons API's site parameter.
                     const domain = new URL(url).hostname.replace(/^www\./, '')
-                    let coupons = []
+                    // The ENVELOPE, not just the codes: a store can hold far
+                    // more coupons than one request returns (eBay: 96 against a
+                    // page of 20), and `total`/`hasMore` are what let the list
+                    // keep going as the shopper scrolls instead of ending
+                    // silently at the first page.
+                    let page = { coupons: [] }
                     try {
-                        coupons = await fetchCoupons(domain, '')
+                        page = await fetchCouponsPage(domain, '', '', 1)
                     } catch {
                         renderLoadError()
                         return
                     }
+                    const coupons = page.coupons
 
                     if (coupons?.length) {
-                        await renderCouponsView(coupons, user, domain)
+                        await renderCouponsView(coupons, user, domain, page)
                     } else {
                         renderUnsupportedSite(user, domain)
                     }
@@ -1203,8 +1209,260 @@ function wireFavoriteStoreButton(domain) {
 /* ------------------------------------------------------------ */
 /*  Coupons view                                                */
 /* ------------------------------------------------------------ */
-function renderCouponsView(coupons, user, domain) {
+
+/* One coupon card. Extracted from renderCouponsView's template so the FIRST
+ * page and every appended page are built by the same code — a second copy of
+ * this markup is how an appended row quietly loses a badge or a warning. */
+function couponItemHtml(c) {
+    // Sourced from window.CaramelCoupons
+    // (coupon-constants.generated.js, loaded before
+    // this file — F-006) instead of a hard-coded
+    // literal, so this can't re-drift from the app's
+    // src/lib/coupons.ts.
+    const restrictedSet = new Set(window.CaramelCoupons.RESTRICTED_STATUSES)
+    const isRestricted = restrictedSet.has(c.status)
+    const isDead = c.status === 'invalid' || c.status === 'expired'
+    let warning = ''
+    if (isRestricted) {
+        const baseMsg =
+            c.status === 'category_restricted'
+                ? 'Limited to specific categories'
+                : c.status === 'seller_specific'
+                  ? 'Only for items from a specific seller'
+                  : c.status === 'valid_with_warning'
+                    ? 'May have restrictions'
+                    : 'Limited to specific items'
+        const cartHint = c.cartCategory
+            ? ` — your cart looks like <b>${escHtml(c.cartCategory)}</b>${c.cartCategorySecondary ? ` / ${escHtml(c.cartCategorySecondary)}` : ''}`
+            : ''
+        const verifierMsg = c.verificationMessage
+            ? `<div class="coupon-restriction-detail">${escHtml(c.verificationMessage)}</div>`
+            : ''
+        warning = `
+              <div class="coupon-restriction" title="${escHtml(c.verificationMessage || baseMsg)}">
+                <span class="coupon-restriction-icon" aria-hidden="true">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                    <path d="M12 9v4"/>
+                    <path d="M12 17h.01"/>
+                  </svg>
+                </span>
+                <span class="coupon-restriction-text">${baseMsg}${cartHint}</span>
+                ${verifierMsg}
+              </div>`
+    }
+    // Verification badge: green=verified, amber=restricted,
+    // grey=not yet verified (grace), red=known not valid.
+    // Labels + which status maps to which tier come from
+    // window.CaramelCoupons.STATUS_META
+    // (coupon-constants.generated.js, F-006); the tier
+    // palette lives in styles.css as
+    // .coupon-badge--<tier> classes on tokens (with dark
+    // values — the app's coupon-card.tsx keeps its own
+    // Tailwind equivalent; the 4-tier axis can't drift
+    // the way the 9-status axis did).
+    const meta = window.CaramelCoupons.STATUS_META[c.status]
+    const badge = meta
+        ? `<span class="coupon-badge coupon-badge--${meta.tier}" title="${escHtml(c.verificationMessage || '')}">${meta.label}</span>`
+        : ''
+    // App-owned trust signal (W1): "worked Xh ago" when
+    // the extension last reported this coupon working
+    // (<7 days). '' (unshown) until W2 wires the report.
+    const workedAgo = formatWorkedAgo(c.lastWorkedAt)
+    return `
+            <div data-code="${escHtml(c.code)}" role="button" tabindex="0" aria-label="${escHtml((c.title || 'Coupon') + ' — copy code ' + c.code)}" class="coupon-item${isRestricted ? ' coupon-item-restricted' : ''}${isDead ? ' coupon-item-dead' : ''}">
+              <div class="coupon-head">
+                <div class="coupon-title">${escHtml(c.title || 'Untitled Coupon')}</div>
+                ${badge}
+                ${workedAgo ? `<span class="coupon-worked-ago">${escHtml(workedAgo)}</span>` : ''}
+              </div>
+              ${c.description ? `<div class="coupon-desc">${escHtml(c.description)}</div>` : ''}
+              ${warning}
+              <div class="coupon-code-row">
+                <span class="coupon-code">${escHtml(c.code)}</span>
+                <span class="coupon-copy">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <rect x="9" y="9" width="11" height="11" rx="2.5" stroke="currentColor" stroke-width="2"/>
+                    <path d="M5 15V5.5A2.5 2.5 0 0 1 7.5 3H15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                  </svg>
+                  Copy
+                </span>
+              </div>
+            </div>`
+}
+
+/* Identity of a coupon ACROSS requests, for the append dedupe.
+ *
+ * Offset paging over a live catalog is not a snapshot: an ingest between page 1
+ * and page 2 can shift a row across the boundary and hand it to us twice. The
+ * catalog id is the real identity; a code is the fallback for the rare row that
+ * arrives without one, and is unique per store in practice. */
+function couponIdentity(c) {
+    return c?.id != null ? `id:${c.id}` : `code:${c?.code}`
+}
+
+/* How many consecutive all-duplicate pages to chase before handing the shopper
+ * a button instead. Small on purpose: the point is to get past one shifted
+ * page, not to walk a catalog the backend keeps re-serving. */
+const COUPON_PAGE_EMPTY_LIMIT = 3
+
+/* Wording for the bottom of the list. "N codes" counts what the CATALOG holds
+ * for this store, which is the number the shopper is really asking about when
+ * they scroll to the end. */
+function couponListEndHtml(total) {
+    return `<p class="coupon-list-note">${
+        total === 1
+            ? "That's the only code we have"
+            : `You've seen all ${total} codes`
+    }</p>`
+}
+
+/* Repaints the footer of the list for one of four states. It is also the
+ * IntersectionObserver's target: giving it real height while more pages exist
+ * (a ghost card, the same shimmer the popup opens with) is what makes crossing
+ * into view a reliable signal, and it doubles as the "more is coming" cue. */
+function paintCouponListFooter(footer, state, paging) {
+    if (!footer) return
+    footer.dataset.state = state
+    if (state === 'loading' || state === 'idle') {
+        footer.innerHTML =
+            '<div class="skeleton skeleton-ticket" aria-hidden="true"></div>'
+        footer.setAttribute('aria-busy', 'true')
+    } else if (state === 'error') {
+        // Quiet, not an error banner: the codes already on screen are still
+        // good, and one tap retries. Spamming a failure over a working list
+        // would be a worse trade than a button that says what it does.
+        footer.removeAttribute('aria-busy')
+        footer.innerHTML =
+            '<button type="button" id="couponLoadMoreBtn" class="supported-sites-btn">Load more codes</button>'
+    } else {
+        footer.removeAttribute('aria-busy')
+        footer.innerHTML = couponListEndHtml(paging.total)
+    }
+}
+
+/* Fetches the next page and appends it. Every exit leaves the footer in a state
+ * the shopper can act on — never a spinner that spins forever. */
+async function loadMoreCoupons(paging) {
+    if (paging.loading || !paging.hasMore) return
+    const list = document.getElementById('couponList')
+    const footer = document.getElementById('couponListFooter')
+    if (!list || !footer) return
+    paging.loading = true
+    paintCouponListFooter(footer, 'loading', paging)
+    try {
+        const next = await fetchCouponsPage(
+            paging.domain,
+            '',
+            '',
+            paging.page + 1,
+        )
+        // Trust the server's own page number when it sends one — an offset it
+        // clamped is the offset the rows actually came from, and resuming from
+        // our optimistic guess instead would silently re-request the same page.
+        paging.page =
+            typeof next.page === 'number' ? next.page : paging.page + 1
+        if (typeof next.total === 'number') paging.total = next.total
+        paging.hasMore = next.hasMore === true
+
+        const fresh = (next.coupons || []).filter(c => {
+            const key = couponIdentity(c)
+            if (paging.seen.has(key)) return false
+            paging.seen.add(key)
+            return true
+        })
+        if (fresh.length) {
+            paging.empty = 0
+            footer.insertAdjacentHTML(
+                'beforebegin',
+                fresh.map(couponItemHtml).join(''),
+            )
+        } else {
+            paging.empty += 1
+        }
+
+        if (!paging.hasMore) {
+            paintCouponListFooter(footer, 'end', paging)
+            stopCouponPaging(paging)
+            return
+        }
+        // A page that was entirely duplicates leaves the footer exactly where
+        // it was, so the observer has no boundary left to cross and would wait
+        // forever. Pull the next page ourselves — but only a few times, so a
+        // backend insisting there is more while returning nothing new ends at a
+        // button the shopper can press rather than in a loop.
+        if (fresh.length) {
+            paintCouponListFooter(footer, 'idle', paging)
+        } else if (paging.empty >= COUPON_PAGE_EMPTY_LIMIT) {
+            paintCouponListFooter(footer, 'error', paging)
+        } else {
+            paintCouponListFooter(footer, 'idle', paging)
+            paging.loading = false
+            await loadMoreCoupons(paging)
+        }
+    } catch (err) {
+        log('COUPON_PAGE_FAILED', err?.message)
+        paintCouponListFooter(footer, 'error', paging)
+    } finally {
+        paging.loading = false
+    }
+}
+
+function stopCouponPaging(paging) {
+    if (paging.observer) {
+        paging.observer.disconnect()
+        paging.observer = null
+    }
+}
+
+/* Wires the footer up. The observer is the intended path — it works in an
+ * extension popup, with the scrolling .coupon-list itself as the root — and the
+ * button is what a realm without IntersectionObserver gets instead. Both end up
+ * calling the same loader, and the button is ALSO what a failed page falls back
+ * to, so the retry affordance is never a second implementation. */
+function wireCouponPaging(paging) {
+    const list = document.getElementById('couponList')
+    const footer = document.getElementById('couponListFooter')
+    if (!list || !footer || !paging.hasMore) return
+
+    // One delegated listener for the footer, so the retry button keeps working
+    // no matter how many times the footer is repainted.
+    footer.addEventListener('click', e => {
+        if (e.target.closest('#couponLoadMoreBtn')) loadMoreCoupons(paging)
+    })
+
+    if (typeof IntersectionObserver !== 'function') {
+        paintCouponListFooter(footer, 'error', paging)
+        return
+    }
+    paging.observer = new IntersectionObserver(
+        entries => {
+            if (entries.some(entry => entry.isIntersecting))
+                loadMoreCoupons(paging)
+        },
+        // rootMargin pulls the trigger a card's height early so the next page
+        // is usually already there when the shopper reaches the bottom.
+        { root: list, rootMargin: '120px' },
+    )
+    paging.observer.observe(footer)
+}
+
+function renderCouponsView(coupons, user, domain, meta) {
     const container = document.getElementById('auth-container')
+
+    /* Paging state for THIS render. `meta` is the envelope initPopup got with
+     * page 1; without it (every caller that just wants a list painted) the view
+     * behaves exactly as it did before paging existed — one page, no footer. */
+    const paging = {
+        domain,
+        page: typeof meta?.page === 'number' ? meta.page : 1,
+        total: typeof meta?.total === 'number' ? meta.total : coupons.length,
+        hasMore: meta?.hasMore === true && coupons.length > 0,
+        loading: false,
+        empty: 0,
+        seen: new Set(coupons.map(couponIdentity)),
+        observer: null,
+    }
 
     const headerLeft = user
         ? `
@@ -1252,90 +1510,9 @@ function renderCouponsView(coupons, user, domain) {
         ${
             coupons.length === 0
                 ? '<p>No coupons available for this store right now.</p>'
-                : coupons
-                      .map(c => {
-                          // Sourced from window.CaramelCoupons
-                          // (coupon-constants.generated.js, loaded before
-                          // this file — F-006) instead of a hard-coded
-                          // literal, so this can't re-drift from the app's
-                          // src/lib/coupons.ts.
-                          const restrictedSet = new Set(
-                              window.CaramelCoupons.RESTRICTED_STATUSES,
-                          )
-                          const isRestricted = restrictedSet.has(c.status)
-                          const isDead =
-                              c.status === 'invalid' || c.status === 'expired'
-                          let warning = ''
-                          if (isRestricted) {
-                              const baseMsg =
-                                  c.status === 'category_restricted'
-                                      ? 'Limited to specific categories'
-                                      : c.status === 'seller_specific'
-                                        ? 'Only for items from a specific seller'
-                                        : c.status === 'valid_with_warning'
-                                          ? 'May have restrictions'
-                                          : 'Limited to specific items'
-                              const cartHint = c.cartCategory
-                                  ? ` — your cart looks like <b>${escHtml(c.cartCategory)}</b>${c.cartCategorySecondary ? ` / ${escHtml(c.cartCategorySecondary)}` : ''}`
-                                  : ''
-                              const verifierMsg = c.verificationMessage
-                                  ? `<div class="coupon-restriction-detail">${escHtml(c.verificationMessage)}</div>`
-                                  : ''
-                              warning = `
-              <div class="coupon-restriction" title="${escHtml(c.verificationMessage || baseMsg)}">
-                <span class="coupon-restriction-icon" aria-hidden="true">
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-                    <path d="M12 9v4"/>
-                    <path d="M12 17h.01"/>
-                  </svg>
-                </span>
-                <span class="coupon-restriction-text">${baseMsg}${cartHint}</span>
-                ${verifierMsg}
-              </div>`
-                          }
-                          // Verification badge: green=verified, amber=restricted,
-                          // grey=not yet verified (grace), red=known not valid.
-                          // Labels + which status maps to which tier come from
-                          // window.CaramelCoupons.STATUS_META
-                          // (coupon-constants.generated.js, F-006); the tier
-                          // palette lives in styles.css as
-                          // .coupon-badge--<tier> classes on tokens (with dark
-                          // values — the app's coupon-card.tsx keeps its own
-                          // Tailwind equivalent; the 4-tier axis can't drift
-                          // the way the 9-status axis did).
-                          const meta =
-                              window.CaramelCoupons.STATUS_META[c.status]
-                          const badge = meta
-                              ? `<span class="coupon-badge coupon-badge--${meta.tier}" title="${escHtml(c.verificationMessage || '')}">${meta.label}</span>`
-                              : ''
-                          // App-owned trust signal (W1): "worked Xh ago" when
-                          // the extension last reported this coupon working
-                          // (<7 days). '' (unshown) until W2 wires the report.
-                          const workedAgo = formatWorkedAgo(c.lastWorkedAt)
-                          return `
-            <div data-code="${escHtml(c.code)}" role="button" tabindex="0" aria-label="${escHtml((c.title || 'Coupon') + ' — copy code ' + c.code)}" class="coupon-item${isRestricted ? ' coupon-item-restricted' : ''}${isDead ? ' coupon-item-dead' : ''}">
-              <div class="coupon-head">
-                <div class="coupon-title">${escHtml(c.title || 'Untitled Coupon')}</div>
-                ${badge}
-                ${workedAgo ? `<span class="coupon-worked-ago">${escHtml(workedAgo)}</span>` : ''}
-              </div>
-              ${c.description ? `<div class="coupon-desc">${escHtml(c.description)}</div>` : ''}
-              ${warning}
-              <div class="coupon-code-row">
-                <span class="coupon-code">${escHtml(c.code)}</span>
-                <span class="coupon-copy">
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <rect x="9" y="9" width="11" height="11" rx="2.5" stroke="currentColor" stroke-width="2"/>
-                    <path d="M5 15V5.5A2.5 2.5 0 0 1 7.5 3H15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                  </svg>
-                  Copy
-                </span>
-              </div>
-            </div>`
-                      })
-                      .join('')
+                : coupons.map(couponItemHtml).join('')
         }
+        ${paging.hasMore ? '<div id="couponListFooter" class="coupon-list-footer"></div>' : ''}
       </div>
     </div>
 
@@ -1343,7 +1520,7 @@ function renderCouponsView(coupons, user, domain) {
   `
 
     /* save callback for login back-button */
-    const selfCallback = () => renderCouponsView(coupons, user, domain)
+    const selfCallback = () => renderCouponsView(coupons, user, domain, meta)
 
     /* Settings gear (header): in-popup settings, guests included. */
     wireSettingsGear(selfCallback, domain)
@@ -1373,7 +1550,12 @@ function renderCouponsView(coupons, user, domain) {
        with an execCommand fallback (shared caramelCopyText from UI-helpers.js).
        The bare navigator.clipboard path silently did nothing when the API was
        blocked — now the user always gets either the code on the clipboard or
-       honest feedback instead of a dead click. */
+       honest feedback instead of a dead click.
+
+       Bound ONCE on the list, not per card: rows arriving from page 2 onward
+       are appended straight into this container and would otherwise be
+       decorative — a coupon you can see, click, and not copy. Delegation means
+       a row is wired the moment it exists, with no re-bind step to forget. */
     const copyFromItem = async item => {
         const code = item.getAttribute('data-code')
         const ok = await caramelCopyText(code)
@@ -1383,17 +1565,26 @@ function renderCouponsView(coupons, user, domain) {
                 : `Couldn't copy — code is ${code}`,
         )
     }
-    container.querySelectorAll('.coupon-item').forEach(item => {
-        item.addEventListener('click', () => copyFromItem(item))
+    const list = document.getElementById('couponList')
+    if (list) {
+        list.addEventListener('click', e => {
+            const item = e.target.closest?.('.coupon-item')
+            if (item) copyFromItem(item)
+        })
         // Keyboard users / screen readers: the card is role="button", so
         // Enter and Space must activate it like a real button.
-        item.addEventListener('keydown', e => {
-            if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
-                e.preventDefault()
-                copyFromItem(item)
-            }
+        list.addEventListener('keydown', e => {
+            if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar')
+                return
+            const item = e.target.closest?.('.coupon-item')
+            if (!item) return
+            e.preventDefault()
+            copyFromItem(item)
         })
-    })
+    }
+
+    /* Depth: keep loading pages as the shopper scrolls (see wireCouponPaging). */
+    wireCouponPaging(paging)
 }
 
 /* ------------------------------------------------------------ */
