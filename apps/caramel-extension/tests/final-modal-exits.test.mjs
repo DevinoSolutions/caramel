@@ -138,10 +138,13 @@ describe('the button only promises what happened', () => {
         expect(label()).toBe('Proceed to Checkout')
     })
 
-    it('says Done when the card is a list of codes to copy', async () => {
+    it('drops the primary button entirely on a list-of-codes card (lighter UI)', async () => {
+        // The card carries its own controls (copy buttons, the report link) and
+        // three ways out (×, scrim, Esc) — a generic "Done" under all that is
+        // just clutter.
         await showFinalModal(0, null, null, false, [{ code: 'SAVE10' }])
 
-        expect(label()).toBe('Done')
+        expect(root().querySelector('#caramel-final-ok-btn')).toBeNull()
     })
 
     it('says Sign In when that is the ask', async () => {

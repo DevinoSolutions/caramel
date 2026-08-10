@@ -494,6 +494,48 @@ button:focus {
     background: var(--cm-tier-green-bg);
     color: var(--cm-tier-green-text);
 }
+/* Guest teaser gate under the manual list — the button alone ("Sign in for all
+ * N codes") carries the nudge; no separate count line. */
+.caramel-manual-gate {
+    flex: none;
+    text-align: center;
+    margin: 4px 0 2px;
+}
+.caramel-manual-gate-btn {
+    width: 100%;
+    background: var(--cm-brand);
+    color: var(--cm-on-brand);
+    padding: 9px 14px;
+    border-radius: var(--cm-radius-sm);
+    font-size: 13px;
+    font-weight: 600;
+    transition: background var(--cm-dur-fast) var(--cm-ease);
+}
+.caramel-manual-gate-btn:hover {
+    background: var(--cm-brand-strong);
+}
+.caramel-manual-gate-btn:focus-visible {
+    outline: 3px solid var(--cm-brand);
+    outline-offset: 2px;
+}
+/* Quiet "report a problem" link → prod support/feedback form. */
+.caramel-manual-feedback {
+    flex: none;
+    display: inline-block;
+    margin: 8px 0 2px;
+    font-size: var(--cm-text-xs);
+    color: var(--cm-text-muted);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+.caramel-manual-feedback:hover {
+    color: var(--cm-text-secondary);
+}
+.caramel-manual-feedback:focus-visible {
+    outline: 2px solid var(--cm-brand);
+    outline-offset: 2px;
+    border-radius: 2px;
+}
 
 @media (prefers-reduced-motion: reduce) {
     .cm-prompt,

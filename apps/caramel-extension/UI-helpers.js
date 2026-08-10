@@ -18,6 +18,12 @@ const CARAMEL_X_ICON =
 // asks the API for, so in practice this shows everything we fetched.
 const CARAMEL_MANUAL_LIST_MAX = 20
 
+// Guests get the SAME teaser cap here as the popup's coupon list
+// (popup.js GUEST_COUPON_LIMIT). Without it the manual fallback quietly hands a
+// signed-out shopper up to 20 codes while the popup shows them 6 — leaking the
+// gated value and skipping the sign-in nudge. Keep in sync with popup.js.
+const CARAMEL_MANUAL_GUEST_LIMIT = 6
+
 // Functional-minimum styles used ONLY when the stylesheet fetch fails.
 const CARAMEL_UI_FALLBACK_CSS =
     '.cm-scrim{width:100%;height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(15,12,10,.5)}' +
@@ -644,6 +650,10 @@ async function showFinalModal(
     couponList = [],
 ) {
     hideTestingModal()
+    // Login state drives the manual-list teaser cap below — same gate as the
+    // popup's coupon list. Signed-out ⇒ 6-code teaser + sign-in nudge.
+    const _session = await caramelGetSession()
+    const loggedIn = !!_session?.token
     const prevFocus = document.activeElement
     const { host, root } = await createCaramelShadowHost(
         'caramel-final-overlay',
@@ -674,7 +684,7 @@ async function showFinalModal(
     // sometimes just our synthetic input not registering, so hiding them could
     // bury a code that works when pasted by hand — but leading with the codes
     // the user just watched fail reads as if we learned nothing.
-    const manualCodes = (
+    const _manualAll = (
         !isSuccess && Array.isArray(couponList) ? couponList : []
     )
         .filter(c => c && c.code)
@@ -684,10 +694,18 @@ async function showFinalModal(
                 (a.c.rejected ? 1 : 0) - (b.c.rejected ? 1 : 0) || a.i - b.i,
         )
         .map(x => x.c)
-        // Matches the API's own per-store fetch limit, so the list shows every
-        // code we have rather than a second, tighter cap on top of the
-        // attempt cap. The list scrolls; hiding codes helps nobody.
-        .slice(0, CARAMEL_MANUAL_LIST_MAX)
+    // The catalog count for this store — the number the sign-in nudge promises,
+    // matching the popup's "of N codes" gate.
+    const manualTotal = _manualAll.length
+    // Members see the full list (API's own per-store fetch limit); guests see
+    // the same teaser the popup shows. The gate only bites when it actually
+    // hides something (a store with ≤ the guest cap looks identical to both).
+    const manualGuestGated =
+        !loggedIn && manualTotal > CARAMEL_MANUAL_GUEST_LIMIT
+    const manualCodes = _manualAll.slice(
+        0,
+        manualGuestGated ? CARAMEL_MANUAL_GUEST_LIMIT : CARAMEL_MANUAL_LIST_MAX,
+    )
     const hasManual = manualCodes.length > 0
 
     const esc = s =>
@@ -769,6 +787,21 @@ ${
               .join('')}</div>`
         : ''
 
+    // Guest teaser gate — same shape as the popup's couponGuestGateHtml: name
+    // what's hidden, offer the one action that reveals it (opens the popup to
+    // sign in, mirroring the isSignIn primary button below).
+    const manualGateHtml = manualGuestGated
+        ? `<div class="caramel-manual-gate">
+<button type="button" id="caramel-manual-login" class="caramel-manual-gate-btn">Sign in for all ${manualTotal} codes</button>
+</div>`
+        : ''
+
+    // Graceful escape hatch when auto-apply didn't land: a quiet link to the
+    // prod support/feedback form so a shopper can report a broken store or code.
+    const feedbackHtml = hasManual
+        ? `<a id="caramel-manual-feedback" class="caramel-manual-feedback" href="${esc(CARAMEL_ENV.baseUrl)}/support" target="_blank" rel="noopener noreferrer">Report a problem</a>`
+        : ''
+
     // Success states group the outcome into ONE panel so the amount reads as
     // the headline and the code sits under it as a ticket. `.caramel-final-code`
     // keeps the code as its FIRST <span> — the label is a sibling, never a span
@@ -799,9 +832,12 @@ ${savedMoney ? '' : `<p class="caramel-final-hint">Discount visible in your cart
         ? 'Sign In'
         : isSuccess
           ? 'Proceed to Checkout'
-          : hasManual
-            ? 'Done'
-            : 'Got it'
+          : 'Got it'
+    // The manual "Grab a code" card carries its own actions (copy buttons, the
+    // unlock nudge, the report link) and three ways out (×, scrim, Esc) — a
+    // generic "Done" button under all that is just clutter, so drop it. Sign-in
+    // and success states still need their promise-button.
+    const showPrimary = isSignIn || isSuccess || !hasManual
 
     modal.innerHTML = `
 <button id="caramel-final-close" class="cm-close-fab" title="Close" aria-label="Close">${CARAMEL_X_ICON}</button>
@@ -809,8 +845,10 @@ ${savedMoney ? '' : `<p class="caramel-final-hint">Discount visible in your cart
 <h2>${heading}</h2>
 <p class="caramel-final-msg">${esc(finalMessage)}</p>
 ${manualBlock}
+${manualGateHtml}
+${feedbackHtml}
 ${winBlock}
-<button id="caramel-final-ok-btn">${primaryLabel}</button>
+${showPrimary ? `<button id="caramel-final-ok-btn">${primaryLabel}</button>` : ''}
 `
 
     scrim.appendChild(modal)
@@ -859,6 +897,15 @@ ${winBlock}
     scrim.addEventListener('click', ev => {
         if (ev.target === scrim) closeFinal()
     })
+
+    // Guest teaser gate: same destination as the isSignIn button — open the
+    // popup so the shopper signs in, then the full list is theirs.
+    const manualLoginBtn = modal.querySelector('#caramel-manual-login')
+    if (manualLoginBtn)
+        manualLoginBtn.addEventListener('click', () => {
+            closeFinal()
+            currentBrowser.runtime.sendMessage({ action: 'openPopup' })
+        })
 
     // Close on the primary button; Esc closes too (keyboard).
     const okBtn = modal.querySelector('#caramel-final-ok-btn')
