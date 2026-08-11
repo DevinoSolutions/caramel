@@ -24,6 +24,17 @@ name: Release – Extension
 # against the AMO API, refuses to ship a version AMO already lists, and fails
 # loudly on any upload or validation error. It never degrades to a silent pass.
 # Still manual afterwards: Mozilla's human review of the submitted version.
+#
+# Microsoft Edge follows the SAME dormant-until-secrets pattern (`publish_edge`),
+# reusing the Chrome extension.zip untouched — Edge is Chromium. It stays skipped
+# and GREEN until three repository secrets exist:
+#
+#   EDGE_PRODUCT_ID  — the add-on Product ID (Partner Center dashboard)
+#   EDGE_CLIENT_ID   — Publish API v1.1 client id (Partner Center → Publish API)
+#   EDGE_API_KEY     — Publish API v1.1 key (shown once at creation)
+#
+# Edge developer registration and publishing are free; registering the item once
+# in Partner Center to obtain the Product ID is the only human step.
 
 on:
   push:
@@ -651,6 +662,120 @@ jobs:
             echo "No manual upload is needed — but **Mozilla review still gates it**: until the version is approved the listing keeps serving the previous one, and the next release's freeze-guard will still compare against that older version."
           } >> "$GITHUB_STEP_SUMMARY"
 
+  publish_edge:
+    name: '🚀 Publish to Microsoft Edge Add-ons'
+    needs: [guard, package]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    outputs:
+      # 'true' only when the run actually submitted to Edge. The GitHub Release
+      # body reads this so it never claims an Edge release that did not happen.
+      submitted: ${{ steps.credentials.outputs.configured }}
+    steps:
+      # THE GATE — identical doctrine to publish_firefox. `secrets` cannot be
+      # read in a job-level `if:`, so the skip is a first step that publishes a
+      # boolean every later step keys off. The job ends GREEN when the secrets
+      # are absent — an unconfigured Edge leg must never redden a
+      # Chrome/Firefox/Safari release — but it writes both an annotation and a
+      # run-summary block so it is impossible to miss. It never guesses, retries,
+      # or continues with empty credentials.
+      #
+      # The three secrets come from Partner Center's "Publish API" page
+      # (Create API credentials → Client ID + API key) plus the add-on's Product
+      # ID from its Edge Add-ons dashboard:
+      #   EDGE_PRODUCT_ID  — the add-on Product ID
+      #   EDGE_CLIENT_ID   — the Publish API v1.1 client id
+      #   EDGE_API_KEY     — the Publish API v1.1 key (shown once at creation)
+      # Registering the item once in Partner Center to obtain the Product ID is
+      # the only human step; Edge developer registration and publishing are free.
+      - name: Detect Edge credentials
+        id: credentials
+        env:
+          EDGE_PRODUCT_ID: ${{ secrets.EDGE_PRODUCT_ID }}
+          EDGE_CLIENT_ID: ${{ secrets.EDGE_CLIENT_ID }}
+          EDGE_API_KEY: ${{ secrets.EDGE_API_KEY }}
+          RELEASE_VERSION: ${{ needs.guard.outputs.version }}
+        run: |
+          set -euo pipefail
+          missing=""
+          for name in EDGE_PRODUCT_ID EDGE_CLIENT_ID EDGE_API_KEY; do
+            # `${!name:-}`, not `${!name}`: indirect expansion of a genuinely
+            # unset variable aborts under `set -u`, which would fail this job —
+            # the exact outcome this gate exists to prevent.
+            if [ -z "${!name:-}" ]; then
+              missing="${missing:+${missing}, }${name}"
+            fi
+          done
+
+          if [ -z "$missing" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            echo "Edge credentials present — the Edge submission will run."
+            exit 0
+          fi
+
+          echo "configured=false" >> "$GITHUB_OUTPUT"
+          echo "::warning::Microsoft Edge Add-ons was NOT published: repository secret(s) ${missing} are unset, so this run cannot authenticate to the Edge Publish API. Chrome, Firefox and Safari were unaffected."
+          {
+            echo "### Microsoft Edge Add-ons — NOT PUBLISHED"
+            echo ""
+            echo "Version \`${RELEASE_VERSION}\` was **not** submitted to Microsoft Edge Add-ons."
+            echo ""
+            echo "Why: repository secret(s) **${missing}** are unset, so nothing could authenticate to the Edge Publish API."
+            echo "Edge users stay on whatever the listing already serves (or install the Chrome Web Store build directly); Chrome, Firefox and Safari were unaffected."
+            echo ""
+            echo "To activate this job, register the add-on once in Partner Center, then create these repository secrets and re-run the release:"
+            echo ""
+            echo "- \`EDGE_PRODUCT_ID\` — the add-on Product ID (Partner Center dashboard)"
+            echo "- \`EDGE_CLIENT_ID\` — the Publish API *Client ID* (Partner Center → Publish API → Create API credentials)"
+            echo "- \`EDGE_API_KEY\` — the Publish API *key* (shown only once at creation)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Edge is Chromium: the SAME extension.zip Chrome uploads (the standard
+      # manifest.json, `identity` permission and all) is exactly what Edge wants
+      # — no Firefox-style manifest swap. So this leg consumes the `package`
+      # job's `extension-package` artifact untouched, and Edge's popup OAuth
+      # works through chrome.identity just like Chrome's.
+      - name: Download artifact
+        if: steps.credentials.outputs.configured == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: extension-package
+          path: .
+
+      # FREEZE-GUARD GAP (deliberate, documented): unlike the Chrome and AMO
+      # legs there is no unauthenticated public read mapping our Product ID to
+      # the version Edge currently serves — the public getproductdetailsbycrxid
+      # endpoint keys off the CRX id, which differs from the submission Product
+      # ID we hold. The Edge Publish API itself rejects re-publishing an
+      # unchanged/older package with a non-zero error, so the action below fails
+      # loudly rather than mis-publishing; a pre-flight "manifest > live" guard
+      # like the other two stores is a TODO once a Product-ID→version read
+      # exists.
+      #
+      # wdzeng/edge-addon is pinned to a full commit SHA (not a moving tag)
+      # because it handles publish credentials. It authenticates with the v1.1
+      # API key + client id, uploads the package, and — upload-only unset —
+      # submits it for Microsoft certification. It exits non-zero on any
+      # auth/upload/publish error, so it never degrades to a silent pass.
+      - name: Publish to Microsoft Edge Add-ons
+        if: steps.credentials.outputs.configured == 'true'
+        uses: wdzeng/edge-addon@9881f57720358040d079eaa06a4596dc9c273eb6 # v2.1.1
+        with:
+          product-id: ${{ secrets.EDGE_PRODUCT_ID }}
+          zip-path: extension.zip
+          client-id: ${{ secrets.EDGE_CLIENT_ID }}
+          api-key: ${{ secrets.EDGE_API_KEY }}
+
+      - name: Note that the version is queued for Microsoft certification
+        if: steps.credentials.outputs.configured == 'true'
+        run: |
+          {
+            echo "### Microsoft Edge Add-ons"
+            echo ""
+            echo "Version \`${{ needs.guard.outputs.version }}\` was **submitted** to Microsoft Edge Add-ons."
+            echo "No manual upload is needed — but **Microsoft certification still gates it**: until it passes, the listing keeps serving the previous version."
+          } >> "$GITHUB_STEP_SUMMARY"
+
   publish_safari:
     name: '🚀 Publish to Apple App Store (Safari & iOS)'
     needs: [guard, package]
@@ -941,7 +1066,7 @@ jobs:
 
   github_release:
     name: '🏷️ Publish GitHub Release'
-    needs: [guard, package, publish_chrome, publish_firefox, publish_safari]
+    needs: [guard, package, publish_chrome, publish_firefox, publish_safari, publish_edge]
     if: ${{ !inputs.dry_run && github.ref_type == 'tag' }}
     runs-on: ubuntu-latest
     permissions:
@@ -968,3 +1093,4 @@ jobs:
             - **Chrome Web Store** — uploaded as a draft, manual publish required.
             - **Apple App Store** — uploaded to TestFlight, manual submit required.
             - **Firefox / AMO** — ${{ needs.publish_firefox.outputs.submitted == 'true' && 'submitted to the listed channel, awaiting Mozilla review.' || 'NOT published — the AMO_JWT_ISSUER / AMO_JWT_SECRET repository secrets are unset (see the run summary and the header of `.github/workflows/release-extension.yml`).' }}
+            - **Microsoft Edge Add-ons** — ${{ needs.publish_edge.outputs.submitted == 'true' && 'submitted to Edge, awaiting Microsoft certification.' || 'NOT published — the EDGE_PRODUCT_ID / EDGE_CLIENT_ID / EDGE_API_KEY repository secrets are unset (see the run summary and the header of `.github/workflows/release-extension.yml`).' }}
