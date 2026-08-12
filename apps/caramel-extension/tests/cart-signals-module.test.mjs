@@ -3,6 +3,7 @@ import {
     collectCartSignals,
     extractCartItems,
     extractJsonLdProductNames,
+    initCartSignals,
 } from '../cart-signals.js'
 
 // WXT-migration P1 pilot (2026-08-12): the FIRST suite that imports an
@@ -14,7 +15,12 @@ import {
 // the e2e probes read at runtime must survive the module conversion.
 
 describe('cart-signals as an ES module (P1 pilot)', () => {
-    it('publishes window.CaramelCartSignals exactly as the script version did', () => {
+    it('importing alone publishes nothing — WXT imports entrypoints in Node at build time (rule 1b)', () => {
+        expect(window.CaramelCartSignals).toBeUndefined()
+    })
+
+    it('initCartSignals() publishes window.CaramelCartSignals exactly as the script version did', () => {
+        initCartSignals()
         expect(window.CaramelCartSignals).toBeDefined()
         expect(window.CaramelCartSignals.collectCartSignals).toBe(
             collectCartSignals,

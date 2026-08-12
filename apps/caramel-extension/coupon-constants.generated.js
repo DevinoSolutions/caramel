@@ -3,11 +3,15 @@
 // Regenerate: pnpm --filter caramel-app generate:coupon-constants
 // (apps/caramel-app/scripts/generate-coupon-constants.ts)
 //
-// Sets window.CaramelCoupons — the coupon status vocabulary shared with the
-// app (F-006), so the extension can never re-drift its own hard-coded copy
-// of it. Classic script (no import/export): loaded before shared-utils.js
-// and popup.js — see manifest.json, manifest-firefox.json, and index.html.
-window.CaramelCoupons = {
+// The coupon status vocabulary shared with the app (F-006), so the extension
+// can never re-drift its own hard-coded copy of it. An ES module since the
+// WXT P1 port (2026-08-12): consumers import { CaramelCoupons } and the
+// module graph guarantees it is initialized before any reader evaluates (the
+// successor to this file loading first in manifest/index.html order). The
+// window publication survives in initCouponConstants() for the harnesses and
+// any not-yet-ported call-time reader; the entrypoints call it first in realm
+// order.
+export const CaramelCoupons = {
     STATUSES: [
         'valid',
         'valid_with_warning',
@@ -72,4 +76,8 @@ window.CaramelCoupons = {
             tier: 'red',
         },
     },
+}
+
+export function initCouponConstants() {
+    window.CaramelCoupons = CaramelCoupons
 }

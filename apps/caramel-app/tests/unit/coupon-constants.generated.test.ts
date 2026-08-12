@@ -44,9 +44,13 @@ describe('coupon-constants.generated.js (F-006 app<->extension sync)', () => {
         expect(committed).toBe(await renderCouponConstants())
     })
 
-    it('sets window.CaramelCoupons with the 4 expected keys (sanity: the generator did not silently emit an empty/malformed payload)', async () => {
+    it('exports CaramelCoupons with the 4 expected keys (sanity: the generator did not silently emit an empty/malformed payload)', async () => {
         const rendered = await renderCouponConstants()
-        expect(rendered).toContain('window.CaramelCoupons = {')
+        // ESM shape since the WXT P1 port: a named export consumers import,
+        // plus the init that keeps the legacy window seam alive.
+        expect(rendered).toContain('export const CaramelCoupons = {')
+        expect(rendered).toContain('export function initCouponConstants()')
+        expect(rendered).toContain('window.CaramelCoupons = CaramelCoupons')
         // Keys are unquoted in the emitted file: prettier's default
         // quoteProps ("as-needed") strips quotes from identifier-safe keys.
         expect(rendered).toContain('STATUSES: [')

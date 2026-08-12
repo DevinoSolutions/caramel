@@ -1,10 +1,11 @@
 // ES module since the WXT P1 port (2026-08-12) — module scope replaces the
 // old IIFE, and the named exports replace the deleted CJS `module.exports`
-// branch. The `window.CaramelCartSignals` publication at the bottom is KEPT:
-// coupon-fetch.js's classifyCartCategory() reads it off `window` at call time
-// (and degrades to null when absent), and the e2e/guard harnesses probe the
-// same window seam — consumers migrate to direct imports deliberately, later,
-// not as a side effect of this port.
+// branch. The `window.CaramelCartSignals` publication is KEPT, inside
+// initCartSignals() at the bottom (recipe rule 1b — the content entrypoint
+// calls it from main()): coupon-fetch.js's classifyCartCategory() reads it
+// off `window` at call time (and degrades to null when absent), and the
+// e2e/guard harnesses probe the same window seam — consumers migrate to
+// direct imports deliberately, later, not as a side effect of this port.
 function text(el) {
     if (!el) return ''
     return (el.textContent || '').replace(/\s+/g, ' ').trim()
@@ -165,7 +166,10 @@ export async function collectCartSignals() {
     return payload
 }
 
-if (typeof window !== 'undefined') {
+// Init-wrap (recipe rule 1b): WXT imports entrypoints in Node at build time,
+// so the publication may not run as a module-eval side effect — the content
+// entrypoint calls this inside main(), first in the old manifest order.
+export function initCartSignals() {
     window.CaramelCartSignals = {
         collectCartSignals,
         extractCartItems,
