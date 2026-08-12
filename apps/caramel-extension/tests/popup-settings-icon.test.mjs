@@ -1,15 +1,62 @@
 import { beforeAll, describe, expect, it } from 'vitest'
-import { loadExtensionSource, loadExtensionSources } from './_load.mjs'
+import { initCaramelBase } from '../caramel-base.js'
+import { initCouponConstants } from '../coupon-constants.generated.js'
+import { initPopup } from '../popup.js'
 
-// Pins the settings-gear visibility contract (index.html: "shown only when
-// user is logged in"): the MAIN signed-in path — a logged-in user on a
-// supported store — goes through renderCouponsView(), which must show
+// Pins the settings-gear visibility contract (entrypoints/popup/index.html:
+// "shown only when user is logged in"): the MAIN signed-in path — a logged-in
+// user on a supported store — goes through renderCouponsView(), which must show
 // #settingsIcon. Before this pin only the no-tab profile card set it, so the
 // gear silently never appeared in the dominant real-world view.
 //
-// Harness mirrors popup.test.mjs: real load order, one shared chrome stub,
+// Harness mirrors popup.test.mjs: real realm order, one shared chrome stub,
 // only the messaging transport + storage stubbed.
-let initPopup
+
+/** Permissive chrome stub — the makeChromeStub/installChromeStub pair the old
+ * tests/_load.mjs harness installed around every eval, inlined here now that
+ * the sources are ES modules: anything not explicitly set answers with a
+ * callable no-op, storage callbacks fire the way the real API does, and
+ * runtime.lastError starts UNDEFINED (a permissive proxy would auto-create a
+ * truthy callable, which caramel-base.js reads as a closed port). */
+function installChromeStub() {
+    const cache = new WeakMap()
+    const wrap = target => {
+        if (cache.has(target)) return cache.get(target)
+        const proxy = new Proxy(target, {
+            get(obj, prop) {
+                if (prop === 'then' || typeof prop === 'symbol')
+                    return undefined
+                if (!(prop in obj)) obj[prop] = wrap(function () {})
+                return obj[prop]
+            },
+            apply: () => undefined,
+        })
+        cache.set(target, proxy)
+        return proxy
+    }
+    const stub = wrap(function chromeStubRoot() {})
+    for (const area of ['sync', 'local', 'session']) {
+        stub.storage[area].get = (_keys, cb) => {
+            if (typeof cb === 'function') cb({})
+        }
+        stub.storage[area].set = (_items, cb) => {
+            if (typeof cb === 'function') cb()
+        }
+        stub.storage[area].remove = (_keys, cb) => {
+            if (typeof cb === 'function') cb()
+        }
+    }
+    stub.runtime.lastError = undefined
+    globalThis.chrome = stub
+    globalThis.browser = undefined
+    window.chrome = stub
+    window.browser = undefined
+    // Installed ONCE per suite file — vitest gives each file its own jsdom
+    // window, so caramel-base.js's first-run bootstrap latch is still unset and
+    // this stub really becomes the realm's currentBrowser.
+    initCaramelBase()
+    return stub
+}
 
 beforeAll(() => {
     document.body.innerHTML =
@@ -17,20 +64,10 @@ beforeAll(() => {
         '<button id="settingsIcon" style="display:none"></button>' +
         '<div id="auth-container"></div>'
 
-    loadExtensionSource('coupon-constants.generated.js', [])
-    loadExtensionSources(
-        [
-            'caramel-base.js',
-            'dom-utils.js',
-            'store-detect.js',
-            'coupon-apply.js',
-            'coupon-fetch.js',
-            'coupon-runner.js',
-        ],
-        [],
-    )
+    initCouponConstants()
+    const chromeStub = installChromeStub()
 
-    globalThis.currentBrowser.runtime.sendMessage = (message, cb) => {
+    chromeStub.runtime.sendMessage = (message, cb) => {
         if (message?.action === 'getActiveTabDomainRecord') {
             cb({ url: 'https://example.com/cart' })
         } else if (message?.action === 'fetchCoupons') {
@@ -47,9 +84,8 @@ beforeAll(() => {
             cb(undefined)
         }
     }
-    globalThis.currentBrowser.storage.sync.get = (_keys, cb) =>
+    chromeStub.storage.sync.get = (_keys, cb) =>
         cb({ token: 'test-token', user: { username: 'tester', image: '' } })
-    ;({ initPopup } = loadExtensionSource('popup.js', ['initPopup']))
 })
 
 describe('popup.js renderCouponsView — settings gear contract', () => {

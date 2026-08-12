@@ -1,35 +1,69 @@
 import { beforeAll, describe, expect, it } from 'vitest'
-import { loadExtensionSource, loadExtensionSources } from './_load.mjs'
+import { initCaramelBase } from '../caramel-base.js'
+import { initCouponConstants } from '../coupon-constants.generated.js'
+import { renderCouponsView } from '../popup.js'
 
 // F-006 — proves popup.js's badge label + restriction-warning rendering
-// derives from window.CaramelCoupons.STATUS_META / RESTRICTED_STATUSES
+// derives from CaramelCoupons.STATUS_META / RESTRICTED_STATUSES
 // (coupon-constants.generated.js) end-to-end through the real
 // renderCouponsView(), for one coupon per tier. A characterization that
 // labels/behavior are UNCHANGED from the pre-F-006 hard-coded local BADGE
 // map (PLAN-F-006.md: "extension: no behavior change").
-let renderCouponsView
+
+/** Permissive chrome stub — the makeChromeStub/installChromeStub pair the old
+ * tests/_load.mjs harness installed around every eval, inlined here now that
+ * the sources are ES modules: anything not explicitly set answers with a
+ * callable no-op, storage callbacks fire the way the real API does, and
+ * runtime.lastError starts UNDEFINED (a permissive proxy would auto-create a
+ * truthy callable, which caramel-base.js reads as a closed port). */
+function installChromeStub() {
+    const cache = new WeakMap()
+    const wrap = target => {
+        if (cache.has(target)) return cache.get(target)
+        const proxy = new Proxy(target, {
+            get(obj, prop) {
+                if (prop === 'then' || typeof prop === 'symbol')
+                    return undefined
+                if (!(prop in obj)) obj[prop] = wrap(function () {})
+                return obj[prop]
+            },
+            apply: () => undefined,
+        })
+        cache.set(target, proxy)
+        return proxy
+    }
+    const stub = wrap(function chromeStubRoot() {})
+    for (const area of ['sync', 'local', 'session']) {
+        stub.storage[area].get = (_keys, cb) => {
+            if (typeof cb === 'function') cb({})
+        }
+        stub.storage[area].set = (_items, cb) => {
+            if (typeof cb === 'function') cb()
+        }
+        stub.storage[area].remove = (_keys, cb) => {
+            if (typeof cb === 'function') cb()
+        }
+    }
+    stub.runtime.lastError = undefined
+    globalThis.chrome = stub
+    globalThis.browser = undefined
+    window.chrome = stub
+    window.browser = undefined
+    // Installed ONCE per suite file — vitest gives each file its own jsdom
+    // window, so caramel-base.js's first-run bootstrap latch is still unset and
+    // this stub really becomes the realm's currentBrowser.
+    initCaramelBase()
+    return stub
+}
 
 beforeAll(() => {
     document.body.innerHTML = '<div id="auth-container"></div>'
-    // Real load order (manifest.json / manifest-firefox.json / index.html):
-    // constants first, then the 6 F-008 split files (formerly
-    // shared-utils.js; coupon-fetch.js's RESTRICTED_STATUSES rebind
-    // consumes them eagerly at module-eval time), then popup.js.
-    loadExtensionSource('coupon-constants.generated.js', [])
-    loadExtensionSources(
-        [
-            'caramel-base.js',
-            'dom-utils.js',
-            'store-detect.js',
-            'coupon-apply.js',
-            'coupon-fetch.js',
-            'coupon-runner.js',
-        ],
-        [],
-    )
-    ;({ renderCouponsView } = loadExtensionSource('popup.js', [
-        'renderCouponsView',
-    ]))
+    // Real realm order (entrypoints/popup/main.ts): constants published first,
+    // then caramel-base's bootstrap binds the realm's chrome handle. The rest
+    // of what the old <script> list guaranteed by hand — coupon-fetch's status
+    // rebind evaluating before popup.js reads it — is now a module-graph edge.
+    initCouponConstants()
+    installChromeStub()
 })
 
 const COUPONS = [

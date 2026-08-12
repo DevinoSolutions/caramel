@@ -1,9 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-    getOnMessageListeners,
-    loadExtensionSource,
-    loadExtensionSources,
-} from './_load.mjs'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { initBackground } from '../background.js'
+import { initCaramelBase } from '../caramel-base.js'
+import { initCouponConstants } from '../coupon-constants.generated.js'
+import { renderCouponsView } from '../popup.js'
 
 // The popup's "follow this store" star (favorites).
 //
@@ -29,23 +28,81 @@ const DOMAIN = 'shop.nike.com'
 const USER = { username: 'shopper', image: '' }
 const COUPONS = [{ code: 'SAVE10', title: '10% off', status: 'valid' }]
 
-/** Loads the real popup stack (index.html's script order) into a fresh realm
- * and returns renderCouponsView. */
+let chromeStub
+/** background.js's own onMessage handler, captured off the realm's stub. */
+let backgroundHandler
+
+/** Permissive chrome stub — the makeChromeStub/installChromeStub pair the old
+ * tests/_load.mjs harness installed around every eval, inlined here now that
+ * the sources are ES modules: anything not explicitly set answers with a
+ * callable no-op, storage callbacks fire the way the real API does,
+ * runtime.lastError starts UNDEFINED (a permissive proxy would auto-create a
+ * truthy callable, which caramel-base.js reads as a closed port), and
+ * onMessage.addListener records real listeners so a test can invoke one. */
+function installChromeStub() {
+    const cache = new WeakMap()
+    const wrap = target => {
+        if (cache.has(target)) return cache.get(target)
+        const proxy = new Proxy(target, {
+            get(obj, prop) {
+                if (prop === 'then' || typeof prop === 'symbol')
+                    return undefined
+                if (!(prop in obj)) obj[prop] = wrap(function () {})
+                return obj[prop]
+            },
+            apply: () => undefined,
+        })
+        cache.set(target, proxy)
+        return proxy
+    }
+    const stub = wrap(function chromeStubRoot() {})
+    for (const area of ['sync', 'local', 'session']) {
+        stub.storage[area].get = (_keys, cb) => {
+            if (typeof cb === 'function') cb({})
+        }
+        stub.storage[area].set = (_items, cb) => {
+            if (typeof cb === 'function') cb()
+        }
+        stub.storage[area].remove = (_keys, cb) => {
+            if (typeof cb === 'function') cb()
+        }
+    }
+    stub.runtime.lastError = undefined
+    const listeners = []
+    stub.runtime.onMessage.addListener = fn => listeners.push(fn)
+    stub.runtime.onMessage.removeListener = fn => {
+        const i = listeners.indexOf(fn)
+        if (i >= 0) listeners.splice(i, 1)
+    }
+    stub.runtime.onMessage.hasListener = fn => listeners.includes(fn)
+    globalThis.chrome = stub
+    globalThis.browser = undefined
+    window.chrome = stub
+    window.browser = undefined
+    // Installed ONCE per suite file — vitest gives each file its own jsdom
+    // window, so caramel-base.js's first-run bootstrap latch is still unset and
+    // this stub really becomes the realm's currentBrowser.
+    initCaramelBase()
+    return { stub, listeners }
+}
+
+beforeAll(() => {
+    const installed = installChromeStub()
+    chromeStub = installed.stub
+    initCouponConstants()
+    // The REAL service worker. Its handler stays callable for the whole file:
+    // it closed over the realm's chrome handle and its own caramelUrl, and
+    // reaches the network through whatever `fetch` a test installs. (The old
+    // harness re-eval'd background.js per call to get a fresh realm; a module
+    // evaluates once, so it is initialized once and the handler captured here.)
+    initBackground()
+    ;[backgroundHandler] = installed.listeners
+})
+
+/** Resets the popup's DOM. (Was: re-eval the whole index.html script order
+ * into a fresh realm to get renderCouponsView back — an import now.) */
 function loadPopup() {
     document.body.innerHTML = '<div id="auth-container"></div>'
-    loadExtensionSource('coupon-constants.generated.js', [])
-    loadExtensionSources(
-        [
-            'caramel-base.js',
-            'dom-utils.js',
-            'store-detect.js',
-            'coupon-apply.js',
-            'coupon-fetch.js',
-            'coupon-runner.js',
-        ],
-        [],
-    )
-    return loadExtensionSource('popup.js', ['renderCouponsView'])
 }
 
 /** Answers every runtime message from `replies`, recording what was sent.
@@ -53,7 +110,7 @@ function loadPopup() {
  * get an explicit empty object rather than nothing. */
 function stubMessaging(replies) {
     const sent = []
-    globalThis.currentBrowser.runtime.sendMessage = (message, cb) => {
+    chromeStub.runtime.sendMessage = (message, cb) => {
         sent.push(message)
         const reply = replies[message?.action]
         cb(typeof reply === 'function' ? reply(message) : (reply ?? {}))
@@ -74,7 +131,7 @@ beforeEach(() => {
 
 describe('popup header star — signed in', () => {
     it('renders in the header, starts unpressed and disabled, then reflects the account', async () => {
-        const { renderCouponsView } = loadPopup()
+        loadPopup()
         stubMessaging({
             getFavoriteStores: { favorites: [{ store: 'nike.com' }] },
         })
@@ -101,7 +158,7 @@ describe('popup header star — signed in', () => {
     })
 
     it('stays unpressed for a store the account does not follow', async () => {
-        const { renderCouponsView } = loadPopup()
+        loadPopup()
         stubMessaging({
             getFavoriteStores: { favorites: [{ store: 'ebay.com' }] },
         })
@@ -114,7 +171,7 @@ describe('popup header star — signed in', () => {
     })
 
     it('stays disabled — never lying about the state — when the account cannot be reached', async () => {
-        const { renderCouponsView } = loadPopup()
+        loadPopup()
         stubMessaging({ getFavoriteStores: { error: 'HTTP 401' } })
 
         renderCouponsView(COUPONS, USER, DOMAIN)
@@ -128,7 +185,7 @@ describe('popup header star — signed in', () => {
         // The height contract popup-sizing.test.mjs's arithmetic depends on:
         // .coupons-profile-row keeps exactly its two children (info + actions),
         // and the star is a descendant of that row rather than a sibling block.
-        const { renderCouponsView } = loadPopup()
+        loadPopup()
         stubMessaging({ getFavoriteStores: { favorites: [] } })
 
         renderCouponsView(COUPONS, USER, DOMAIN)
@@ -148,7 +205,7 @@ describe('popup header star — signed in', () => {
 
 describe('popup header star — logged out', () => {
     it('is absent, and the guest header is exactly what it was before favorites existed', async () => {
-        const { renderCouponsView } = loadPopup()
+        loadPopup()
         const sent = stubMessaging({})
 
         renderCouponsView(COUPONS, null, DOMAIN)
@@ -167,11 +224,9 @@ describe('popup header star — logged out', () => {
 })
 
 describe('star toggle — round trip through the real service worker', () => {
-    /** Replays `message` against the REAL background.js onMessage handler in a
-     * fresh realm, with fetch stubbed, and reports what it did. */
+    /** Replays `message` against the REAL background.js onMessage handler,
+     * with fetch stubbed, and reports what it did. */
     async function replayThroughBackground(message, response) {
-        loadExtensionSource('background.js', [])
-        const [handler] = getOnMessageListeners()
         const fetchMock = vi.fn(async () => ({
             ok: true,
             status: 200,
@@ -179,13 +234,13 @@ describe('star toggle — round trip through the real service worker', () => {
         }))
         globalThis.fetch = fetchMock
         const reply = await new Promise(resolve =>
-            handler(message, {}, resolve),
+            backgroundHandler(message, {}, resolve),
         )
         return { fetchMock, reply }
     }
 
     it('a click on an unfollowed store sends setFavoriteStore, which the worker turns into a PUT', async () => {
-        const { renderCouponsView } = loadPopup()
+        loadPopup()
         const sent = stubMessaging({
             getFavoriteStores: { favorites: [] },
             setFavoriteStore: { ok: true, store: 'nike.com', favorited: true },
@@ -222,7 +277,7 @@ describe('star toggle — round trip through the real service worker', () => {
     })
 
     it('a click on a followed store sends favorite:false, which the worker turns into a DELETE', async () => {
-        const { renderCouponsView } = loadPopup()
+        loadPopup()
         const sent = stubMessaging({
             getFavoriteStores: { favorites: [{ store: 'nike.com' }] },
             setFavoriteStore: { ok: true, store: 'nike.com', favorited: false },
@@ -247,7 +302,7 @@ describe('star toggle — round trip through the real service worker', () => {
     })
 
     it('a rejected write puts the star back where it was', async () => {
-        const { renderCouponsView } = loadPopup()
+        loadPopup()
         stubMessaging({
             getFavoriteStores: { favorites: [] },
             setFavoriteStore: { error: 'HTTP 500' },

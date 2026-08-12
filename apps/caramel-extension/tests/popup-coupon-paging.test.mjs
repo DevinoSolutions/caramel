@@ -1,10 +1,8 @@
-import { beforeEach, describe, expect, it } from 'vitest'
-import {
-    backStorageArea,
-    getOnMessageListeners,
-    loadExtensionSource,
-    loadExtensionSources,
-} from './_load.mjs'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { initBackground } from '../background.js'
+import { initCaramelBase } from '../caramel-base.js'
+import { initCouponConstants } from '../coupon-constants.generated.js'
+import { initPopup } from '../popup.js'
 
 // Depth of the popup's coupon list (2026-08-10). The popup asked for 20 codes
 // and rendered whatever came back, with nothing on screen to say a store held
@@ -28,6 +26,19 @@ import {
 const SITE = 'ebay.com'
 const CATALOG_SIZE = 46
 const PAGE_SIZE = 20
+
+// The clipboard helper popup.js imports. It was a free global the old harness
+// could overwrite on globalThis; under ESM the collaborator is replaced at its
+// own module boundary instead, which is the only thing this substitutes —
+// every other UI-helpers export stays the real one.
+const { copiedText } = vi.hoisted(() => ({ copiedText: [] }))
+vi.mock('../UI-helpers.js', async importOriginal => ({
+    ...(await importOriginal()),
+    caramelCopyText: async text => {
+        copiedText.push(text)
+        return true
+    },
+}))
 
 /** A coupon shaped like the /api/coupons rows the popup actually renders. */
 function catalogRow(n) {
@@ -116,6 +127,83 @@ function installCatalogFetch(storeSize = CATALOG_SIZE) {
 /*  Realms                                                             */
 /* ------------------------------------------------------------------ */
 
+let chromeStub
+/** background.js's own onMessage handler, captured off the realm's stub. */
+let backgroundHandler
+
+/** Permissive chrome stub — the makeChromeStub/installChromeStub pair the old
+ * tests/_load.mjs harness installed around every eval, inlined here now that
+ * the sources are ES modules: anything not explicitly set answers with a
+ * callable no-op, storage callbacks fire the way the real API does,
+ * runtime.lastError starts UNDEFINED (a permissive proxy would auto-create a
+ * truthy callable, which caramel-base.js reads as a closed port), and
+ * onMessage.addListener records real listeners so a test can invoke one. */
+function installChromeStub() {
+    const cache = new WeakMap()
+    const wrap = target => {
+        if (cache.has(target)) return cache.get(target)
+        const proxy = new Proxy(target, {
+            get(obj, prop) {
+                if (prop === 'then' || typeof prop === 'symbol')
+                    return undefined
+                if (!(prop in obj)) obj[prop] = wrap(function () {})
+                return obj[prop]
+            },
+            apply: () => undefined,
+        })
+        cache.set(target, proxy)
+        return proxy
+    }
+    const stub = wrap(function chromeStubRoot() {})
+    for (const area of ['sync', 'local', 'session']) {
+        stub.storage[area].get = (_keys, cb) => {
+            if (typeof cb === 'function') cb({})
+        }
+        stub.storage[area].set = (_items, cb) => {
+            if (typeof cb === 'function') cb()
+        }
+        stub.storage[area].remove = (_keys, cb) => {
+            if (typeof cb === 'function') cb()
+        }
+    }
+    stub.runtime.lastError = undefined
+    const listeners = []
+    stub.runtime.onMessage.addListener = fn => listeners.push(fn)
+    stub.runtime.onMessage.removeListener = fn => {
+        const i = listeners.indexOf(fn)
+        if (i >= 0) listeners.splice(i, 1)
+    }
+    stub.runtime.onMessage.hasListener = fn => listeners.includes(fn)
+    globalThis.chrome = stub
+    globalThis.browser = undefined
+    window.chrome = stub
+    window.browser = undefined
+    // Installed ONCE per suite file — vitest gives each file its own jsdom
+    // window, so caramel-base.js's first-run bootstrap latch is still unset and
+    // this stub really becomes the realm's currentBrowser.
+    initCaramelBase()
+    return { stub, listeners }
+}
+
+/** Backs one storage area with a real object (tests/_load.mjs's
+ * backStorageArea, inlined), so a test asserts on what the code actually
+ * stored instead of on which API it called. */
+function backStorageArea(area, data = {}) {
+    const store = chromeStub.storage[area]
+    store.get = (_keys, cb) => {
+        if (typeof cb === 'function') cb({ ...data })
+    }
+    store.set = (items, cb) => {
+        Object.assign(data, items)
+        if (typeof cb === 'function') cb()
+    }
+    store.remove = (keys, cb) => {
+        for (const key of [].concat(keys)) delete data[key]
+        if (typeof cb === 'function') cb()
+    }
+    return data
+}
+
 /** Stub IntersectionObserver: records observed targets and exposes a way to
  * say "the target scrolled into view". */
 function installObserverStub() {
@@ -149,6 +237,19 @@ function installObserverStub() {
     }
 }
 
+beforeAll(() => {
+    const installed = installChromeStub()
+    chromeStub = installed.stub
+    initCouponConstants()
+    // Realm A — the REAL service worker. Its handler stays callable for the
+    // whole file: it closed over the realm's chrome handle and its own
+    // caramelUrl, and reaches the network through the per-boot fetch stub.
+    // (The old harness re-eval'd background.js per boot to get a fresh realm;
+    // a module evaluates once, so it is initialized once here.)
+    initBackground()
+    ;[backgroundHandler] = installed.listeners
+})
+
 /** Boots the popup against the real background handler and renders page 1.
  * Returns the observer control plus what the popup rendered.
  *
@@ -163,32 +264,15 @@ async function bootPopup({
 } = {}) {
     installCatalogFetch(storeSize)
 
-    // Realm A — the REAL service worker. Its handler stays callable after the
-    // popup realm is built: it closed over its own chrome stub and its own
-    // caramelUrl, and reaches the network through the fetch stub above.
-    loadExtensionSource('background.js', [])
-    const [backgroundHandler] = getOnMessageListeners()
-
-    // Realm B — the REAL popup, same file order as index.html.
+    // Realm B — the REAL popup. The old harness re-eval'd index.html's whole
+    // script list here; the module graph is that list now, so all that is left
+    // is the page's own DOM and the transport stubs.
     document.body.innerHTML =
         '<div id="loading-container"></div><div id="auth-container"></div>'
-    loadExtensionSource('coupon-constants.generated.js', [])
-    loadExtensionSources(
-        [
-            'caramel-base.js',
-            'dom-utils.js',
-            'store-detect.js',
-            'coupon-apply.js',
-            'coupon-fetch.js',
-            'coupon-runner.js',
-            'UI-helpers.js',
-        ],
-        [],
-    )
 
     /** Every fetchCoupons message the popup sent to the worker. */
     const sentMessages = []
-    globalThis.currentBrowser.runtime.sendMessage = (message, cb) => {
+    chromeStub.runtime.sendMessage = (message, cb) => {
         if (message?.action === 'getActiveTabDomainRecord') {
             cb({ url: `https://www.${SITE}/cart` })
             return
@@ -202,7 +286,7 @@ async function bootPopup({
         }
         cb(undefined)
     }
-    globalThis.currentBrowser.storage.sync.get = (_keys, cb) => cb({})
+    chromeStub.storage.sync.get = (_keys, cb) => cb({})
     // Session lives in storage.LOCAL (token + user). ALWAYS back the area —
     // the stub is shared across boots in this file, so a guest boot that
     // skipped this would inherit the previous signed-in boot's token and
@@ -220,25 +304,14 @@ async function bootPopup({
     const observer = withObserver ? installObserverStub() : null
     if (!withObserver) delete globalThis.IntersectionObserver
 
-    const copied = []
-    globalThis.caramelCopyText = async text => {
-        copied.push(text)
-        return true
-    }
+    copiedText.length = 0
 
-    const { initPopup } = loadExtensionSource('popup.js', ['initPopup'])
-    const painted = new Promise(resolve => {
-        const original = globalThis.renderCouponsView
-        globalThis.renderCouponsView = (...args) => {
-            const result = original(...args)
-            resolve()
-            return result
-        }
-    })
+    // initPopup() awaits the render before it resolves, so this IS the painted
+    // signal. (The old suite wrapped the global renderCouponsView to get one, a
+    // seam ESM does not have: initPopup calls it through its module binding.)
     await initPopup()
-    await painted
 
-    return { observer, sentMessages, copied }
+    return { observer, sentMessages, copied: copiedText }
 }
 
 const codesOnScreen = () =>

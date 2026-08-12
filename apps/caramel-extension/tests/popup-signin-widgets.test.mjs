@@ -1,5 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { loadExtensionSource, loadExtensionSources } from './_load.mjs'
+import { initCaramelBase } from '../caramel-base.js'
+import { initCouponConstants } from '../coupon-constants.generated.js'
+import { renderSignInPrompt } from '../popup.js'
 
 // WXT-migration P0 characterization pins (2026-08-12)
 //
@@ -7,22 +9,66 @@ import { loadExtensionSource, loadExtensionSources } from './_load.mjs'
 // OAuth suites that share this view. Each is the kind of detail a rewrite
 // drops silently because nothing looks broken in a screenshot:
 //
-//   1. The password show/hide toggle (popup.js:986-1004). It flips the input
-//      type AND keeps aria-pressed/aria-label/the two icons in sync — a
-//      rewrite that only swaps the type leaves a screen reader announcing
-//      "Show password" on a field that is already showing it.
-//   2. The Back button (popup.js:880, :972-976, :983-984). It exists ONLY when
-//      renderSignInPrompt was handed a function, because `returnView` is what
-//      the template branches on; a Back button with nothing behind it would be
-//      a dead control, and no Back button at all strands a user who reached
-//      sign-in from another view.
-//   3. The settings gear is hidden here (popup.js:980-981). It is a shared
-//      header element other views turn ON (wireSettingsGear sets display
-//      block), so this view must actively turn it back off — index.html's
-//      contract is "shown only when the user is logged in".
+//   1. The password show/hide toggle. It flips the input type AND keeps
+//      aria-pressed/aria-label/the two icons in sync — a rewrite that only
+//      swaps the type leaves a screen reader announcing "Show password" on a
+//      field that is already showing it.
+//   2. The Back button. It exists ONLY when renderSignInPrompt was handed a
+//      function, because `returnView` is what the template branches on; a Back
+//      button with nothing behind it would be a dead control, and no Back
+//      button at all strands a user who reached sign-in from another view.
+//   3. The settings gear is hidden here. It is a shared header element other
+//      views turn ON (wireSettingsGear sets display block), so this view must
+//      actively turn it back off — the popup page's contract is "shown only
+//      when the user is logged in".
 //
 // Harness mirrors popup-oauth-cancel.test.mjs.
-let renderSignInPrompt
+
+/** Permissive chrome stub — the makeChromeStub/installChromeStub pair the old
+ * tests/_load.mjs harness installed around every eval, inlined here now that
+ * the sources are ES modules: anything not explicitly set answers with a
+ * callable no-op, storage callbacks fire the way the real API does, and
+ * runtime.lastError starts UNDEFINED (a permissive proxy would auto-create a
+ * truthy callable, which caramel-base.js reads as a closed port). */
+function installChromeStub() {
+    const cache = new WeakMap()
+    const wrap = target => {
+        if (cache.has(target)) return cache.get(target)
+        const proxy = new Proxy(target, {
+            get(obj, prop) {
+                if (prop === 'then' || typeof prop === 'symbol')
+                    return undefined
+                if (!(prop in obj)) obj[prop] = wrap(function () {})
+                return obj[prop]
+            },
+            apply: () => undefined,
+        })
+        cache.set(target, proxy)
+        return proxy
+    }
+    const stub = wrap(function chromeStubRoot() {})
+    for (const area of ['sync', 'local', 'session']) {
+        stub.storage[area].get = (_keys, cb) => {
+            if (typeof cb === 'function') cb({})
+        }
+        stub.storage[area].set = (_items, cb) => {
+            if (typeof cb === 'function') cb()
+        }
+        stub.storage[area].remove = (_keys, cb) => {
+            if (typeof cb === 'function') cb()
+        }
+    }
+    stub.runtime.lastError = undefined
+    globalThis.chrome = stub
+    globalThis.browser = undefined
+    window.chrome = stub
+    window.browser = undefined
+    // Installed ONCE per suite file — vitest gives each file its own jsdom
+    // window, so caramel-base.js's first-run bootstrap latch is still unset and
+    // this stub really becomes the realm's currentBrowser.
+    initCaramelBase()
+    return stub
+}
 
 beforeAll(() => {
     document.body.innerHTML =
@@ -30,23 +76,10 @@ beforeAll(() => {
         '<button id="settingsIcon" style="display:none"></button>' +
         '<div id="auth-container"></div>'
 
-    loadExtensionSource('coupon-constants.generated.js', [])
-    loadExtensionSources(
-        [
-            'caramel-base.js',
-            'dom-utils.js',
-            'store-detect.js',
-            'coupon-apply.js',
-            'coupon-fetch.js',
-            'coupon-runner.js',
-        ],
-        [],
-    )
-    globalThis.currentBrowser.tabs.create = () => {}
+    initCouponConstants()
+    const chromeStub = installChromeStub()
+    chromeStub.tabs.create = () => {}
     window.close = vi.fn()
-    ;({ renderSignInPrompt } = loadExtensionSource('popup.js', [
-        'renderSignInPrompt',
-    ]))
 })
 
 beforeEach(() => {
@@ -116,8 +149,8 @@ describe('popup sign-in prompt — the Back button', () => {
 
     it('is absent entirely when there is nowhere to go back to', async () => {
         // Both shapes of "no return view": called with nothing (the popup's own
-        // top-level sign-in) and called with a non-function, which :880 folds
-        // to null rather than wiring a listener that would throw on click.
+        // top-level sign-in) and called with a non-function, which the view
+        // folds to null rather than wiring a listener that would throw on click.
         for (const backFn of [undefined, null, 'renderCouponsView']) {
             await renderSignInPrompt(backFn)
             expect(
@@ -139,8 +172,8 @@ describe('popup sign-in prompt — the Back button', () => {
 
 describe('popup sign-in prompt — the settings gear', () => {
     it('is hidden, even when a previous view turned it on', async () => {
-        // wireSettingsGear (popup.js:270) is what leaves it visible; signing
-        // out must not strand a gear over a signed-out popup.
+        // wireSettingsGear is what leaves it visible; signing out must not
+        // strand a gear over a signed-out popup.
         document.getElementById('settingsIcon').style.display = 'block'
 
         await renderSignInPrompt()

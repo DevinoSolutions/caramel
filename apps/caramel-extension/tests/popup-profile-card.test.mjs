@@ -1,28 +1,90 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-    backStorageArea,
-    loadExtensionSource,
-    loadExtensionSources,
-} from './_load.mjs'
+import { initCaramelBase } from '../caramel-base.js'
+import { initCouponConstants } from '../coupon-constants.generated.js'
+import { initPopup, renderProfileCard } from '../popup.js'
 
 // WXT-migration P0 characterization pins (2026-08-12)
 //
-// renderProfileCard (popup.js:1085-1115) had ZERO coverage. It is the view a
-// SIGNED-IN user gets whenever the popup cannot read a web tab URL — opened on
-// a new tab, on a chrome:// page, or as its own window — so it is the only
-// place some users ever see their account in the extension, and the only
-// signed-in surface with no coupon list to prove it rendered at all.
+// renderProfileCard had ZERO coverage. It is the view a SIGNED-IN user gets
+// whenever the popup cannot read a web tab URL — opened on a new tab, on a
+// chrome:// page, or as its own window — so it is the only place some users
+// ever see their account in the extension, and the only signed-in surface with
+// no coupon list to prove it rendered at all.
 //
 // Three things are frozen: what it paints (username + avatar, with the bundled
 // default when the account has no image), that the `token && !url` branch in
-// initPopup (popup.js:358) really routes here, and that its Log out button is
-// wired to the shared revoke path. The logout MECHANICS (revoke before clear,
-// offline still signs out) are already pinned in popup-logout-revoke.test.mjs
-// — this suite only proves this view's button reaches them, so the rewrite
-// cannot ship a profile card whose logout quietly does nothing.
-let renderProfileCard
-let initPopup
+// initPopup really routes here, and that its Log out button is wired to the
+// shared revoke path. The logout MECHANICS (revoke before clear, offline still
+// signs out) are already pinned in popup-logout-revoke.test.mjs — this suite
+// only proves this view's button reaches them, so the rewrite cannot ship a
+// profile card whose logout quietly does nothing.
+let chromeStub
 let tabUrlAnswer
+
+/** Permissive chrome stub — the makeChromeStub/installChromeStub pair the old
+ * tests/_load.mjs harness installed around every eval, inlined here now that
+ * the sources are ES modules: anything not explicitly set answers with a
+ * callable no-op, storage callbacks fire the way the real API does, and
+ * runtime.lastError starts UNDEFINED (a permissive proxy would auto-create a
+ * truthy callable, which caramel-base.js reads as a closed port). */
+function installChromeStub() {
+    const cache = new WeakMap()
+    const wrap = target => {
+        if (cache.has(target)) return cache.get(target)
+        const proxy = new Proxy(target, {
+            get(obj, prop) {
+                if (prop === 'then' || typeof prop === 'symbol')
+                    return undefined
+                if (!(prop in obj)) obj[prop] = wrap(function () {})
+                return obj[prop]
+            },
+            apply: () => undefined,
+        })
+        cache.set(target, proxy)
+        return proxy
+    }
+    const stub = wrap(function chromeStubRoot() {})
+    for (const area of ['sync', 'local', 'session']) {
+        stub.storage[area].get = (_keys, cb) => {
+            if (typeof cb === 'function') cb({})
+        }
+        stub.storage[area].set = (_items, cb) => {
+            if (typeof cb === 'function') cb()
+        }
+        stub.storage[area].remove = (_keys, cb) => {
+            if (typeof cb === 'function') cb()
+        }
+    }
+    stub.runtime.lastError = undefined
+    globalThis.chrome = stub
+    globalThis.browser = undefined
+    window.chrome = stub
+    window.browser = undefined
+    // Installed ONCE per suite file — vitest gives each file its own jsdom
+    // window, so caramel-base.js's first-run bootstrap latch is still unset and
+    // this stub really becomes the realm's currentBrowser.
+    initCaramelBase()
+    return stub
+}
+
+/** Backs one storage area with a real object (tests/_load.mjs's
+ * backStorageArea, inlined), so a test asserts on what the code actually
+ * stored instead of on which API it called. */
+function backStorageArea(area, data = {}) {
+    const store = chromeStub.storage[area]
+    store.get = (_keys, cb) => {
+        if (typeof cb === 'function') cb({ ...data })
+    }
+    store.set = (items, cb) => {
+        Object.assign(data, items)
+        if (typeof cb === 'function') cb()
+    }
+    store.remove = (keys, cb) => {
+        for (const key of [].concat(keys)) delete data[key]
+        if (typeof cb === 'function') cb()
+    }
+    return data
+}
 
 beforeAll(() => {
     document.body.innerHTML =
@@ -30,39 +92,25 @@ beforeAll(() => {
         '<button id="settingsIcon" style="display:none"></button>' +
         '<div id="auth-container"></div>'
 
-    loadExtensionSource('coupon-constants.generated.js', [])
-    loadExtensionSources(
-        [
-            'caramel-base.js',
-            'dom-utils.js',
-            'store-detect.js',
-            'coupon-apply.js',
-            'coupon-fetch.js',
-            'coupon-runner.js',
-        ],
-        [],
-    )
-    globalThis.currentBrowser.tabs.create = () => {}
+    initCouponConstants()
+    chromeStub = installChromeStub()
+    chromeStub.tabs.create = () => {}
     window.close = vi.fn()
 
-    globalThis.currentBrowser.runtime.sendMessage = (message, cb) => {
+    chromeStub.runtime.sendMessage = (message, cb) => {
         if (message?.action === 'getActiveTabDomainRecord') {
             cb(tabUrlAnswer)
         } else {
             cb(undefined)
         }
     }
-    ;({ renderProfileCard, initPopup } = loadExtensionSource('popup.js', [
-        'renderProfileCard',
-        'initPopup',
-    ]))
 })
 
 beforeEach(() => {
     document.getElementById('auth-container').innerHTML = ''
     // A chrome:// tab is a real signed-in-user-with-no-store situation and the
-    // exact input popup.js:310 nulls out, which is what sends initPopup down
-    // the profile-card branch.
+    // exact input initPopup nulls out, which is what sends it down the
+    // profile-card branch.
     tabUrlAnswer = { url: 'chrome://newtab/' }
     // ALWAYS two separate objects: the session lives in local, and a shared
     // object would let caramelGetSession's pre-migration sync adoption path
@@ -118,21 +166,24 @@ describe('popup profile card — what a signed-in user with no store tab sees', 
     })
 
     it('is the view initPopup routes to when there is a session but no readable tab URL', async () => {
-        const seen = []
-        const real = globalThis.renderProfileCard
-        globalThis.renderProfileCard = user => {
-            seen.push(user)
-            return real(user)
-        }
-        try {
-            await initPopup()
-        } finally {
-            globalThis.renderProfileCard = real
-        }
+        await initPopup()
 
-        expect(seen).toHaveLength(1)
-        expect(seen[0]).toEqual({ username: 'shopper', image: '' })
+        // The old suite wrapped globalThis.renderProfileCard and asserted it
+        // was called once with {username:'shopper', image:''}. ESM has no such
+        // seam — initPopup reaches it through its own module binding — so the
+        // same three facts are read off what actually landed on screen: THIS
+        // view (the signed-in note belongs to no other), exactly one card, and
+        // the STORED user, whose empty image is why the avatar is the default.
+        expect(document.querySelectorAll('.coupons-profile-card')).toHaveLength(
+            1,
+        )
+        expect(document.querySelector('.profile-signed-in-note')).not.toBeNull()
         expect(cardHtml()).toContain('@shopper')
+        expect(
+            document
+                .querySelector('.coupons-profile-image')
+                .getAttribute('src'),
+        ).toBe('assets/default-profile.png')
     })
 
     it('shows the settings gear, which is hidden until a view asks for it', () => {
@@ -145,7 +196,7 @@ describe('popup profile card — what a signed-in user with no store tab sees', 
         expect(typeof gear.onclick).toBe('function')
     })
 
-    it('wires Log out to the shared revoke path rather than clearing storage itself', () => {
+    it('wires Log out to the shared revoke path rather than clearing storage itself', async () => {
         renderProfileCard({ username: 'shopper', image: '' })
 
         const logoutBtn = document.getElementById('logoutBtn')
@@ -154,18 +205,29 @@ describe('popup profile card — what a signed-in user with no store tab sees', 
             'the profile card renders a logout button',
         ).toBeTruthy()
 
-        const real = globalThis.signOutAndRevoke
-        const spy = vi.fn()
-        globalThis.signOutAndRevoke = spy
-        try {
-            logoutBtn.click()
-        } finally {
-            globalThis.signOutAndRevoke = real
+        const calls = []
+        globalThis.fetch = async (url, opts) => {
+            calls.push({ url: String(url), method: opts?.method })
+            return { ok: true, status: 200, json: async () => ({}) }
         }
 
-        expect(spy).toHaveBeenCalledTimes(1)
-        // Second argument is the pressed control — signOutAndRevoke disables
-        // it while the revoke is in flight, so passing it is load-bearing.
-        expect(spy.mock.calls[0][1]).toBe(logoutBtn)
+        logoutBtn.click()
+
+        // The old suite swapped globalThis.signOutAndRevoke for a spy and
+        // asserted (a) it ran once and (b) calls[0][1] was the pressed
+        // control. Both are read off the button itself now: these three
+        // mutations are the FIRST thing signOutAndRevoke does, and only to a
+        // `button` argument it was actually handed.
+        expect(logoutBtn.disabled).toBe(true)
+        expect(logoutBtn.dataset.caramelBusy).toBe('1')
+        expect(logoutBtn.textContent).toBe('Signing out…')
+
+        await new Promise(resolve => setTimeout(resolve, 0))
+
+        // …and it reached the SHARED revoke rather than clearing storage on
+        // its own: the session is killed server-side first.
+        expect(calls).toHaveLength(1)
+        expect(calls[0].method).toBe('DELETE')
+        expect(calls[0].url).toContain('api/extension/session')
     })
 })

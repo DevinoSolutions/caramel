@@ -1,5 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { loadExtensionSource, loadExtensionSources } from './_load.mjs'
+import { initCaramelBase } from '../caramel-base.js'
+import { initCouponConstants } from '../coupon-constants.generated.js'
+import { renderSettingsView } from '../popup.js'
 
 // The "Sync my savings" row in the popup settings view.
 //
@@ -7,17 +9,62 @@ import { loadExtensionSource, loadExtensionSources } from './_load.mjs'
 // must NOT do: appear for someone with no account to sync to, arrive already
 // switched on, or claim a change the account never accepted.
 //
-// Harness mirrors popup-settings-view.test.mjs — real load order, one shared
+// Harness mirrors popup-settings-view.test.mjs — real realm order, one shared
 // chrome stub, only the worker transport and storage stubbed. The service
 // worker's own handler is covered separately in savings-sync.test.mjs; here it
 // is stubbed so a failing PATCH can be produced on demand.
 
-let renderSettingsView
 let syncData
 let localData
 let sentMessages
 /** What the stubbed worker answers `setSavingsSync` with. */
 let patchResponse
+
+/** Permissive chrome stub — the makeChromeStub/installChromeStub pair the old
+ * tests/_load.mjs harness installed around every eval, inlined here now that
+ * the sources are ES modules: anything not explicitly set answers with a
+ * callable no-op, storage callbacks fire the way the real API does, and
+ * runtime.lastError starts UNDEFINED (a permissive proxy would auto-create a
+ * truthy callable, which caramel-base.js reads as a closed port). */
+function installChromeStub() {
+    const cache = new WeakMap()
+    const wrap = target => {
+        if (cache.has(target)) return cache.get(target)
+        const proxy = new Proxy(target, {
+            get(obj, prop) {
+                if (prop === 'then' || typeof prop === 'symbol')
+                    return undefined
+                if (!(prop in obj)) obj[prop] = wrap(function () {})
+                return obj[prop]
+            },
+            apply: () => undefined,
+        })
+        cache.set(target, proxy)
+        return proxy
+    }
+    const stub = wrap(function chromeStubRoot() {})
+    for (const area of ['sync', 'local', 'session']) {
+        stub.storage[area].get = (_keys, cb) => {
+            if (typeof cb === 'function') cb({})
+        }
+        stub.storage[area].set = (_items, cb) => {
+            if (typeof cb === 'function') cb()
+        }
+        stub.storage[area].remove = (_keys, cb) => {
+            if (typeof cb === 'function') cb()
+        }
+    }
+    stub.runtime.lastError = undefined
+    globalThis.chrome = stub
+    globalThis.browser = undefined
+    window.chrome = stub
+    window.browser = undefined
+    // Installed ONCE per suite file — vitest gives each file its own jsdom
+    // window, so caramel-base.js's first-run bootstrap latch is still unset and
+    // this stub really becomes the realm's currentBrowser.
+    initCaramelBase()
+    return stub
+}
 
 beforeAll(() => {
     document.body.innerHTML =
@@ -26,20 +73,10 @@ beforeAll(() => {
         '<div id="auth-container"></div>' +
         '<div id="toastContainer"></div>'
 
-    loadExtensionSource('coupon-constants.generated.js', [])
-    loadExtensionSources(
-        [
-            'caramel-base.js',
-            'dom-utils.js',
-            'store-detect.js',
-            'coupon-apply.js',
-            'coupon-fetch.js',
-            'coupon-runner.js',
-        ],
-        [],
-    )
+    initCouponConstants()
+    const chromeStub = installChromeStub()
 
-    globalThis.currentBrowser.runtime.sendMessage = (message, cb) => {
+    chromeStub.runtime.sendMessage = (message, cb) => {
         sentMessages.push(message)
         if (message?.action === 'getActiveTabDomainRecord') {
             cb({ url: 'https://www.example.com/cart' })
@@ -51,21 +88,16 @@ beforeAll(() => {
             cb(undefined)
         }
     }
-    globalThis.currentBrowser.storage.sync.get = (_keys, cb) =>
-        cb({ ...syncData })
-    globalThis.currentBrowser.storage.sync.set = (items, cb) => {
+    chromeStub.storage.sync.get = (_keys, cb) => cb({ ...syncData })
+    chromeStub.storage.sync.set = (items, cb) => {
         Object.assign(syncData, items)
         if (cb) cb()
     }
-    globalThis.currentBrowser.storage.local.get = (_keys, cb) =>
-        cb({ ...localData })
-    globalThis.currentBrowser.storage.local.set = (items, cb) => {
+    chromeStub.storage.local.get = (_keys, cb) => cb({ ...localData })
+    chromeStub.storage.local.set = (items, cb) => {
         Object.assign(localData, items)
         if (cb) cb()
     }
-    ;({ renderSettingsView } = loadExtensionSource('popup.js', [
-        'renderSettingsView',
-    ]))
 })
 
 beforeEach(() => {

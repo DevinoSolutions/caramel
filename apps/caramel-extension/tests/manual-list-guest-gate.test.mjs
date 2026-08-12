@@ -1,12 +1,10 @@
 import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import path, { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import {
-    EXT_ROOT,
-    backStorageArea,
-    loadExtensionSource,
-    loadExtensionSources,
-} from './_load.mjs'
+import { initCaramelBase } from '../caramel-base.js'
+import { initCouponConstants } from '../coupon-constants.generated.js'
+import { showFinalModal } from '../UI-helpers.js'
 
 // The manual "Grab a code" fallback must not hand a signed-out shopper more
 // codes than the popup does. The popup caps a guest at GUEST_COUPON_LIMIT (6)
@@ -16,7 +14,13 @@ import {
 // and skipping the growth nudge. Members still get the full list. This pins the
 // consistency so the two surfaces can't drift apart again.
 
-let showFinalModal
+/** Extension root — tests/_load.mjs's EXT_ROOT, inlined with the harness. */
+const EXT_ROOT = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    '..',
+)
+
+let chromeStub
 
 const root = () =>
     document.getElementById('caramel-final-overlay')?.shadowRoot ?? null
@@ -37,6 +41,71 @@ const codes = n =>
         title: `${i + 1}% off`,
     }))
 
+/** Permissive chrome stub — the makeChromeStub/installChromeStub pair the old
+ * tests/_load.mjs harness installed around every eval, inlined here now that
+ * the sources are ES modules: anything not explicitly set answers with a
+ * callable no-op, storage callbacks fire the way the real API does, and
+ * runtime.lastError starts UNDEFINED (a permissive proxy would auto-create a
+ * truthy callable, which caramel-base.js reads as a closed port). */
+function installChromeStub() {
+    const cache = new WeakMap()
+    const wrap = target => {
+        if (cache.has(target)) return cache.get(target)
+        const proxy = new Proxy(target, {
+            get(obj, prop) {
+                if (prop === 'then' || typeof prop === 'symbol')
+                    return undefined
+                if (!(prop in obj)) obj[prop] = wrap(function () {})
+                return obj[prop]
+            },
+            apply: () => undefined,
+        })
+        cache.set(target, proxy)
+        return proxy
+    }
+    const stub = wrap(function chromeStubRoot() {})
+    for (const area of ['sync', 'local', 'session']) {
+        stub.storage[area].get = (_keys, cb) => {
+            if (typeof cb === 'function') cb({})
+        }
+        stub.storage[area].set = (_items, cb) => {
+            if (typeof cb === 'function') cb()
+        }
+        stub.storage[area].remove = (_keys, cb) => {
+            if (typeof cb === 'function') cb()
+        }
+    }
+    stub.runtime.lastError = undefined
+    globalThis.chrome = stub
+    globalThis.browser = undefined
+    window.chrome = stub
+    window.browser = undefined
+    // Installed ONCE per suite file — vitest gives each file its own jsdom
+    // window, so caramel-base.js's first-run bootstrap latch is still unset and
+    // this stub really becomes the realm's currentBrowser.
+    initCaramelBase()
+    return stub
+}
+
+/** Backs one storage area with a real object (tests/_load.mjs's
+ * backStorageArea, inlined), so a test asserts on what the code actually
+ * stored instead of on which API it called. */
+function backStorageArea(area, data = {}) {
+    const store = chromeStub.storage[area]
+    store.get = (_keys, cb) => {
+        if (typeof cb === 'function') cb({ ...data })
+    }
+    store.set = (items, cb) => {
+        Object.assign(data, items)
+        if (typeof cb === 'function') cb()
+    }
+    store.remove = (keys, cb) => {
+        for (const key of [].concat(keys)) delete data[key]
+        if (typeof cb === 'function') cb()
+    }
+    return data
+}
+
 const asGuest = () => {
     backStorageArea('local', {})
     backStorageArea('sync', {})
@@ -47,20 +116,9 @@ const asMember = () => {
 }
 
 beforeAll(() => {
-    loadExtensionSource('coupon-constants.generated.js', [])
-    ;({ showFinalModal } = loadExtensionSources(
-        [
-            'caramel-base.js',
-            'dom-utils.js',
-            'store-detect.js',
-            'coupon-apply.js',
-            'coupon-fetch.js',
-            'coupon-runner.js',
-            'UI-helpers.js',
-        ],
-        ['showFinalModal'],
-    ))
-    globalThis.currentBrowser.runtime.getURL = p => p
+    initCouponConstants()
+    chromeStub = installChromeStub()
+    chromeStub.runtime.getURL = p => p
     globalThis.fetch = async relPath => ({
         ok: true,
         text: async () => readFileSync(join(EXT_ROOT, relPath), 'utf8'),
@@ -109,7 +167,7 @@ describe('the fallback code list matches the popup guest cap', () => {
     it('the sign-in nudge opens the popup and closes the card', async () => {
         asGuest()
         const sent = []
-        globalThis.currentBrowser.runtime.sendMessage = msg => sent.push(msg)
+        chromeStub.runtime.sendMessage = msg => sent.push(msg)
         await showFinalModal(0, null, null, false, codes(10))
 
         click(loginBtn())

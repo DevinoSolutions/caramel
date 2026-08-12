@@ -1,5 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { loadExtensionSources } from './_load.mjs'
+import { initCaramelBase } from '../caramel-base.js'
+import { caramelDomainIsSupported } from '../popup.js'
 
 // "We have no codes for this store right now" and "we don't cover this store"
 // are different facts. The popup used to branch on coupons.length alone, so a
@@ -12,27 +13,68 @@ import { loadExtensionSources } from './_load.mjs'
 // zero coupons. Sampling 100 supported domains put roughly 1 in 8 in the same
 // state. These pin the lookup that tells the two apart.
 
-let caramelDomainIsSupported
+let chromeStub
 let sendMessage
 
+/** Permissive chrome stub — the makeChromeStub/installChromeStub pair the old
+ * tests/_load.mjs harness installed around every eval, inlined here now that
+ * the sources are ES modules: anything not explicitly set answers with a
+ * callable no-op, storage callbacks fire the way the real API does, and
+ * runtime.lastError starts UNDEFINED (a permissive proxy would auto-create a
+ * truthy callable, which caramel-base.js reads as a closed port). */
+function installChromeStub() {
+    const cache = new WeakMap()
+    const wrap = target => {
+        if (cache.has(target)) return cache.get(target)
+        const proxy = new Proxy(target, {
+            get(obj, prop) {
+                if (prop === 'then' || typeof prop === 'symbol')
+                    return undefined
+                if (!(prop in obj)) obj[prop] = wrap(function () {})
+                return obj[prop]
+            },
+            apply: () => undefined,
+        })
+        cache.set(target, proxy)
+        return proxy
+    }
+    const stub = wrap(function chromeStubRoot() {})
+    for (const area of ['sync', 'local', 'session']) {
+        stub.storage[area].get = (_keys, cb) => {
+            if (typeof cb === 'function') cb({})
+        }
+        stub.storage[area].set = (_items, cb) => {
+            if (typeof cb === 'function') cb()
+        }
+        stub.storage[area].remove = (_keys, cb) => {
+            if (typeof cb === 'function') cb()
+        }
+    }
+    stub.runtime.lastError = undefined
+    globalThis.chrome = stub
+    globalThis.browser = undefined
+    window.chrome = stub
+    window.browser = undefined
+    // Installed ONCE per suite file — vitest gives each file its own jsdom
+    // window, so caramel-base.js's first-run bootstrap latch is still unset and
+    // this stub really becomes the realm's currentBrowser.
+    initCaramelBase()
+    return stub
+}
+
 beforeAll(() => {
-    ;({ caramelDomainIsSupported } = loadExtensionSources(
-        ['caramel-base.js', 'popup.js'],
-        ['caramelDomainIsSupported'],
-    ))
+    chromeStub = installChromeStub()
 })
 
 /** Make runtime.sendMessage answer fetchSupportedStores with `resp`. */
 function withSupportedStores(resp, { lastError = null } = {}) {
-    const target = globalThis.currentBrowser ?? globalThis.chrome
-    target.runtime.lastError = lastError
+    chromeStub.runtime.lastError = lastError
     sendMessage = vi.fn((_msg, cb) => cb(resp))
-    target.runtime.sendMessage = sendMessage
+    chromeStub.runtime.sendMessage = sendMessage
 }
 
 beforeEach(() => {
-    const target = globalThis.currentBrowser ?? globalThis.chrome
-    target.runtime.lastError = null
+    chromeStub.runtime.lastError = null
 })
 
 describe('caramelDomainIsSupported', () => {

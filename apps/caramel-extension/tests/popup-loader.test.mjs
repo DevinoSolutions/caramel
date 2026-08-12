@@ -1,9 +1,11 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { loadExtensionSource, loadExtensionSources } from './_load.mjs'
+import { initCaramelBase } from '../caramel-base.js'
+import { initCouponConstants } from '../coupon-constants.generated.js'
+import { initPopupEntry } from '../popup.js'
 
 // D4 pin (audit/ext-e2e-report.md #5, ext-config-trace.md §5.4) — the popup
 // loader used to hide on a fixed 400ms setTimeout, completely detached from
-// the actual fetchCoupons() request (which can take up to background.js's
+// the actual coupon request (which can take up to background.js's
 // FETCH_TIMEOUT_MS, 8s). E2E reproduced the resulting blank `auth-container`
 // gap on a slow/degraded connection. The fix ties loader visibility to the
 // real popup.js DOMContentLoaded listener (not initPopup() directly — this
@@ -11,33 +13,77 @@ import { loadExtensionSource, loadExtensionSources } from './_load.mjs'
 // synthetic DOMContentLoaded dispatch, matching this suite's "go through the
 // real listener chain, stub only the messaging transport" convention
 // (popup.test.mjs).
+
+let chromeStub
+
+/** Permissive chrome stub — the makeChromeStub/installChromeStub pair the old
+ * tests/_load.mjs harness installed around every eval, inlined here now that
+ * the sources are ES modules: anything not explicitly set answers with a
+ * callable no-op, storage callbacks fire the way the real API does, and
+ * runtime.lastError starts UNDEFINED (a permissive proxy would auto-create a
+ * truthy callable, which caramel-base.js reads as a closed port). */
+function installChromeStub() {
+    const cache = new WeakMap()
+    const wrap = target => {
+        if (cache.has(target)) return cache.get(target)
+        const proxy = new Proxy(target, {
+            get(obj, prop) {
+                if (prop === 'then' || typeof prop === 'symbol')
+                    return undefined
+                if (!(prop in obj)) obj[prop] = wrap(function () {})
+                return obj[prop]
+            },
+            apply: () => undefined,
+        })
+        cache.set(target, proxy)
+        return proxy
+    }
+    const stub = wrap(function chromeStubRoot() {})
+    for (const area of ['sync', 'local', 'session']) {
+        stub.storage[area].get = (_keys, cb) => {
+            if (typeof cb === 'function') cb({})
+        }
+        stub.storage[area].set = (_items, cb) => {
+            if (typeof cb === 'function') cb()
+        }
+        stub.storage[area].remove = (_keys, cb) => {
+            if (typeof cb === 'function') cb()
+        }
+    }
+    stub.runtime.lastError = undefined
+    globalThis.chrome = stub
+    globalThis.browser = undefined
+    window.chrome = stub
+    window.browser = undefined
+    // Installed ONCE per suite file — vitest gives each file its own jsdom
+    // window, so caramel-base.js's first-run bootstrap latch is still unset and
+    // this stub really becomes the realm's currentBrowser.
+    initCaramelBase()
+    return stub
+}
+
 beforeAll(() => {
-    loadExtensionSource('coupon-constants.generated.js', [])
-    loadExtensionSources(
-        [
-            'caramel-base.js',
-            'dom-utils.js',
-            'store-detect.js',
-            'coupon-apply.js',
-            'coupon-fetch.js',
-            'coupon-runner.js',
-        ],
-        [],
-    )
-    loadExtensionSource('popup.js', [])
+    initCouponConstants()
+    chromeStub = installChromeStub()
+    // The DOMContentLoaded registration used to be a top-level statement in
+    // popup.js and arrived just by loading the file; it lives in
+    // initPopupEntry() now, which entrypoints/popup/main.ts calls last in realm
+    // order. Same listener, same document — the dispatches below still drive
+    // the production wiring rather than initPopup() directly.
+    initPopupEntry()
 })
 
 beforeEach(() => {
     document.body.innerHTML =
         '<div id="loading-container"></div><div id="auth-container"></div>'
-    globalThis.currentBrowser.storage.sync.get = (_keys, cb) => cb({})
+    chromeStub.storage.sync.get = (_keys, cb) => cb({})
     vi.useFakeTimers()
 })
 
 describe('popup.js DOMContentLoaded — loader tracks the real fetch lifecycle (D4)', () => {
     it('slow-resolving transport: spinner stays visible at +1s, content renders once it resolves', async () => {
         let deliverCoupons
-        globalThis.currentBrowser.runtime.sendMessage = (message, cb) => {
+        chromeStub.runtime.sendMessage = (message, cb) => {
             if (message?.action === 'getActiveTabDomainRecord') {
                 cb({ url: 'https://example.com/cart' })
             } else if (message?.action === 'fetchCoupons') {
@@ -52,8 +98,9 @@ describe('popup.js DOMContentLoaded — loader tracks the real fetch lifecycle (
 
         document.dispatchEvent(new Event('DOMContentLoaded'))
         // Flush the synchronous-callback prefix (getActiveTabDomainRecord,
-        // the storage.sync.get dispatch) so fetchCoupons's own sendMessage
-        // call has actually happened and deliverCoupons is assigned.
+        // the storage.sync.get dispatch) so the coupon request's own
+        // sendMessage call has actually happened and deliverCoupons is
+        // assigned.
         await vi.advanceTimersByTimeAsync(50)
         expect(typeof deliverCoupons).toBe('function')
 
@@ -74,7 +121,7 @@ describe('popup.js DOMContentLoaded — loader tracks the real fetch lifecycle (
     })
 
     it('rejecting transport: shows the load-error state (not a blank window) and hides the spinner', async () => {
-        globalThis.currentBrowser.runtime.sendMessage = (message, cb) => {
+        chromeStub.runtime.sendMessage = (message, cb) => {
             if (message?.action === 'getActiveTabDomainRecord') {
                 cb({ url: 'https://example.com/cart' })
             } else if (message?.action === 'fetchCoupons') {
