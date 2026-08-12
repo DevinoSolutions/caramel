@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { initBackground } from '../background.js'
 import { initCaramelBase } from '../caramel-base.js'
 import { initCouponConstants } from '../coupon-constants.generated.js'
@@ -27,18 +27,33 @@ const SITE = 'ebay.com'
 const CATALOG_SIZE = 46
 const PAGE_SIZE = 20
 
-// The clipboard helper popup.js imports. It was a free global the old harness
-// could overwrite on globalThis; under ESM the collaborator is replaced at its
-// own module boundary instead, which is the only thing this substitutes —
-// every other UI-helpers export stays the real one.
-const { copiedText } = vi.hoisted(() => ({ copiedText: [] }))
-vi.mock('../UI-helpers.js', async importOriginal => ({
-    ...(await importOriginal()),
-    caramelCopyText: async text => {
-        copiedText.push(text)
-        return true
-    },
-}))
+/** Every code the popup put on the clipboard, in order. */
+const copiedText = []
+
+/* The old harness overwrote the free global `caramelCopyText`. Its ESM
+ * successor is NOT vi.mock('../UI-helpers.js'): UI-helpers ⇄ coupon-runner is a
+ * real import cycle (documented at UI-helpers.js's import block), and mocking a
+ * module inside a cycle is bypassed for whichever consumer binds while the
+ * factory is still awaiting importOriginal() — a race whose winner depends on
+ * evaluation order. Spreading importOriginal() would ALSO freeze that module's
+ * one reassigned export (`export let _caramelShadowCssPromise`) at its
+ * module-init null.
+ *
+ * So the boundary is stubbed instead of the module: navigator.clipboard is the
+ * browser API the REAL caramelCopyText reaches for first, and jsdom ships no
+ * clipboard at all. That runs more production code than the old global swap
+ * did, and it cannot be raced. */
+function installClipboardStub() {
+    copiedText.length = 0
+    Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: {
+            writeText: async text => {
+                copiedText.push(text)
+            },
+        },
+    })
+}
 
 /** A coupon shaped like the /api/coupons rows the popup actually renders. */
 function catalogRow(n) {
@@ -304,7 +319,7 @@ async function bootPopup({
     const observer = withObserver ? installObserverStub() : null
     if (!withObserver) delete globalThis.IntersectionObserver
 
-    copiedText.length = 0
+    installClipboardStub()
 
     // initPopup() awaits the render before it resolves, so this IS the painted
     // signal. (The old suite wrapped the global renderCouponsView to get one, a

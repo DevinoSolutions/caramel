@@ -189,9 +189,9 @@ describe('getActiveTabDomainRecord producer/consumer contract', () => {
     let nonWebPayload
 
     beforeAll(async () => {
-        // Capture both payloads from the REAL producer up front — each
-        // captureProducerPayload call installs a fresh chrome stub, so the
-        // producer runs are done before any popup realm is built.
+        // Capture both payloads from the REAL producer up front, before any
+        // popup realm is built — the worker realm and the popup realm share one
+        // chrome stub, so the two are kept strictly sequential.
         storePayload = await captureProducerPayload(STORE_TAB_URL)
         nonWebPayload = await captureProducerPayload(NON_WEB_TAB_URL)
     })

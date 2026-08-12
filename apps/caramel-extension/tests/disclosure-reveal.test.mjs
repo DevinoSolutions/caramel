@@ -29,14 +29,30 @@ const REC = { domain: location.hostname, couponInput: '#promo' }
 // Replaced where isCheckout reads them: module imports now, not globals.
 // probeCartJson isolates these cases from the cart gate; waitForElement is the
 // no-op the suite always wanted (the box under test is present, just hidden).
-vi.mock('../coupon-apply.js', async importOriginal => ({
-    ...(await importOriginal()),
-    probeCartJson: async () => null,
-}))
-vi.mock('../dom-utils.js', async importOriginal => ({
-    ...(await importOriginal()),
-    waitForElement: async () => {},
-}))
+vi.mock('../coupon-apply.js', async importOriginal =>
+    passThrough(await importOriginal(), { probeCartJson: async () => null }),
+)
+// Spreading a module namespace SNAPSHOTS it, so any export the module
+// REASSIGNS freezes at its initial value for everyone importing through the
+// mock — measured here: the price set dom-utils republishes on each read
+// stayed [] instead of [9,150]. Forward every untouched export as a getter
+// so live bindings stay live, whichever ones those turn out to be.
+function passThrough(actual, overrides) {
+    const forwarded = Object.keys(actual)
+        .filter(name => !(name in overrides))
+        .map(name => [
+            name,
+            { get: () => actual[name], enumerable: true, configurable: true },
+        ])
+    return Object.defineProperties(
+        { ...overrides },
+        Object.fromEntries(forwarded),
+    )
+}
+
+vi.mock('../dom-utils.js', async importOriginal =>
+    passThrough(await importOriginal(), { waitForElement: async () => {} }),
+)
 
 /** jsdom has no layout, so checkVisibility() must be taught display:none. */
 function stubVisibility() {
