@@ -1,5 +1,10 @@
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { loadExtensionSources } from './_load.mjs'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { initCaramelBase } from '../caramel-base.js'
+import {
+    _caramelCouponAreaText,
+    caramelQuoteIsAttributable,
+} from '../coupon-apply.js'
+import { startApplyingCoupons } from '../coupon-runner.js'
 
 // "The store said: …" has to be something the store actually said to US.
 //
@@ -20,9 +25,47 @@ import { loadExtensionSources } from './_load.mjs'
 // the 'failed' verdict we teach the trust loop. A misfiring selector now costs
 // us a quote instead of costing the shopper a working coupon.
 
-let caramelQuoteIsAttributable
-let _caramelCouponAreaText
-let startApplyingCoupons
+// Collaborators the old suite replaced by assigning over a global are replaced
+// through module mocks now; a factory forwards to a per-test slot so a
+// beforeEach still reads as one assignment.
+const stubs = vi.hoisted(() => ({
+    applyCoupon: null,
+    getCoupons: null,
+    finalModalCalls: [],
+}))
+
+vi.mock('../caramel-base.js', async importOriginal => {
+    const actual = await importOriginal()
+    return {
+        ...actual,
+        // Assigned by initCaramelBase(); a spread would freeze it at undefined.
+        get currentBrowser() {
+            return actual.currentBrowser
+        },
+        sleep: async () => {},
+        caramelRecordSaving: () => {},
+    }
+})
+vi.mock('../coupon-apply.js', async importOriginal => ({
+    ...(await importOriginal()),
+    applyCoupon: (...args) => stubs.applyCoupon(...args),
+    probeCartJson: async () => null,
+    _getTriedCodes: () => ({}),
+    _markTriedCode: () => {},
+    _unmarkTriedCode: () => {},
+}))
+vi.mock('../coupon-fetch.js', async importOriginal => ({
+    ...(await importOriginal()),
+    getCoupons: (...args) => stubs.getCoupons(...args),
+}))
+vi.mock('../UI-helpers.js', async importOriginal => ({
+    ...(await importOriginal()),
+    showTestingModal: async () => {},
+    updateTestingModal: async () => {},
+    hideTestingModal: () => {},
+    showFinalModal: (...args) => stubs.finalModalCalls.push(args),
+}))
+
 let finalModalCalls
 let outcomeCalls
 
@@ -39,44 +82,43 @@ function setTotalText(text) {
     Object.defineProperty(el, 'innerText', { value: text, configurable: true })
 }
 
+/** jsdom implements no layout, so nothing reports itself visible. */
+function alwaysVisible() {
+    return true
+}
+
 beforeAll(() => {
-    ;({ caramelQuoteIsAttributable, _caramelCouponAreaText } =
-        loadExtensionSources(
-            [
-                'coupon-constants.generated.js',
-                'caramel-base.js',
-                'dom-utils.js',
-                'store-detect.js',
-                'coupon-apply.js',
-                'coupon-fetch.js',
-                'coupon-runner.js',
-            ],
-            ['caramelQuoteIsAttributable', '_caramelCouponAreaText'],
-        ))
-    startApplyingCoupons = globalThis.startApplyingCoupons
+    // reportOutcome() lives in coupon-runner.js and is called from inside
+    // coupon-runner.js, so no module mock can stand in front of it. What it
+    // DOES is send one runtime message — so the message is what gets recorded,
+    // and "teaches the trust loop nothing" is pinned as "nothing was sent".
+    globalThis.chrome = {
+        runtime: {
+            sendMessage: msg => {
+                if (msg?.action !== 'reportOutcome') return
+                outcomeCalls.push(
+                    msg.storeReason === undefined
+                        ? [msg.id, msg.outcome]
+                        : [msg.id, msg.outcome, msg.storeReason],
+                )
+            },
+        },
+    }
+    initCaramelBase()
+    // jsdom performs no layout, so the real _isVisible fails closed on every
+    // element; the old suite said "everything here is visible" by replacing it.
+    const { Element } = globalThis.window ?? globalThis
+    Element.prototype.checkVisibility = alwaysVisible
 })
 
 beforeEach(() => {
     document.body.innerHTML =
         '<input id="promo" /><button id="apply">Apply</button><div id="total"></div>'
     setTotalText('Total $80.00')
-    finalModalCalls = []
+    finalModalCalls = stubs.finalModalCalls = []
     outcomeCalls = []
     globalThis._caramelCancelled = false
-    globalThis.sleep = async () => {}
-    globalThis._getTriedCodes = () => ({})
-    globalThis._markTriedCode = () => {}
-    globalThis._unmarkTriedCode = () => {}
-    globalThis.probeCartJson = async () => null
-    globalThis._isVisible = el => !!el
-    globalThis.waitUntilReady = async () => {}
-    globalThis.showTestingModal = async () => {}
-    globalThis.updateTestingModal = async () => {}
-    globalThis.hideTestingModal = () => {}
-    globalThis.reportOutcome = (...args) => outcomeCalls.push(args)
-    globalThis.caramelRecordSaving = () => {}
-    globalThis.showFinalModal = (...args) => finalModalCalls.push(args)
-    globalThis.getCoupons = async () => [{ code: 'PROMO10', id: 'c1' }]
+    stubs.getCoupons = async () => [{ code: 'PROMO10', id: 'c1' }]
 })
 
 describe('what counts as the store answering us', () => {
@@ -180,7 +222,7 @@ describe('a quote we cannot attribute is not put in the store’s mouth', () => 
     beforeEach(() => {
         // The shape mango produced: nothing applies, and the only "error" text
         // is furniture that was always on the page.
-        globalThis.applyCoupon = async () => ({
+        stubs.applyCoupon = async () => ({
             success: false,
             newTotal: NaN,
             committed: false,
@@ -221,7 +263,7 @@ describe('a quote we cannot attribute is not put in the store’s mouth', () => 
 
 describe('a real rejection is still repeated, word for word', () => {
     beforeEach(() => {
-        globalThis.applyCoupon = async () => ({
+        stubs.applyCoupon = async () => ({
             success: false,
             newTotal: NaN,
             committed: false,
@@ -250,7 +292,7 @@ describe('our own exception text is never a store quote', () => {
         // applyCoupon's catch returns String(err) as errorMsg. Showing a
         // shopper “The store said: TypeError: … is not a function” is our bug
         // wearing the merchant's name.
-        globalThis.applyCoupon = async () => ({
+        stubs.applyCoupon = async () => ({
             success: false,
             committed: false,
             errorMsg: 'TypeError: qOne(...) is not a function',

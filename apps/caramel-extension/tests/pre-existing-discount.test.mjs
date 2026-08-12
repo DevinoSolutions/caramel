@@ -1,5 +1,7 @@
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { loadExtensionSources } from './_load.mjs'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { initCaramelBase } from '../caramel-base.js'
+import { removeAppliedCoupon } from '../coupon-apply.js'
+import { startApplyingCoupons } from '../coupon-runner.js'
 
 // A cart that ALREADY has a discount on it is the most expensive thing this
 // flow can get wrong, and the DOM path got it wrong twice over.
@@ -15,8 +17,50 @@ import { loadExtensionSources } from './_load.mjs'
 //    real carts (goodr -$8.00, 1thrive -$20.00); this is the same honesty for
 //    the path that drives the form.
 
-let startApplyingCoupons
-let removeAppliedCoupon
+// Collaborators the old suite replaced by assigning over a global are replaced
+// through module mocks now; a factory forwards to a per-test slot so a
+// beforeEach still reads as one assignment. removeAppliedCoupon is deliberately
+// NOT among them — the cleanup path it drives is what this file pins.
+const stubs = vi.hoisted(() => ({
+    applyCoupon: null,
+    getCoupons: null,
+    finalModalCalls: [],
+}))
+
+vi.mock('../caramel-base.js', async importOriginal => {
+    const actual = await importOriginal()
+    return {
+        ...actual,
+        // Assigned by initCaramelBase(); a spread would freeze it at undefined.
+        get currentBrowser() {
+            return actual.currentBrowser
+        },
+        // The cleanup path waits ~600ms after each click for the cart to settle,
+        // and the loop pauses between codes — see the note in beforeEach.
+        sleep: async () => {},
+        caramelRecordSaving: () => {},
+    }
+})
+vi.mock('../coupon-apply.js', async importOriginal => ({
+    ...(await importOriginal()),
+    applyCoupon: (...args) => stubs.applyCoupon(...args),
+    probeCartJson: async () => null, // non-Shopify: DOM path
+    _getTriedCodes: () => ({}),
+    _markTriedCode: () => {},
+    _unmarkTriedCode: () => {},
+}))
+vi.mock('../coupon-fetch.js', async importOriginal => ({
+    ...(await importOriginal()),
+    getCoupons: (...args) => stubs.getCoupons(...args),
+}))
+vi.mock('../UI-helpers.js', async importOriginal => ({
+    ...(await importOriginal()),
+    showTestingModal: async () => {},
+    updateTestingModal: async () => {},
+    hideTestingModal: () => {},
+    showFinalModal: (...args) => stubs.finalModalCalls.push(args),
+}))
+
 let finalModalCalls
 let removedRows
 let reportedOutcomes
@@ -52,21 +96,32 @@ function addAppliedRow(code) {
     return row
 }
 
+/** jsdom implements no layout, so nothing reports itself visible. */
+function alwaysVisible() {
+    return true
+}
+
 beforeAll(() => {
-    loadExtensionSources(
-        [
-            'coupon-constants.generated.js',
-            'caramel-base.js',
-            'dom-utils.js',
-            'store-detect.js',
-            'coupon-apply.js',
-            'coupon-fetch.js',
-            'coupon-runner.js',
-        ],
-        ['startApplyingCoupons'],
-    )
-    startApplyingCoupons = globalThis.startApplyingCoupons
-    removeAppliedCoupon = globalThis.removeAppliedCoupon
+    // reportOutcome() lives in coupon-runner.js and is called from inside
+    // coupon-runner.js, so no module mock can stand in front of it. What it
+    // DOES is send one runtime message — so the message is what gets recorded,
+    // and "no verdict was sent" is pinned as "no message was sent".
+    globalThis.chrome = {
+        runtime: {
+            sendMessage: msg => {
+                if (msg?.action !== 'reportOutcome') return
+                reportedOutcomes.push({
+                    id: msg.id,
+                    outcome: msg.outcome,
+                    storeReason: msg.storeReason,
+                })
+            },
+        },
+    }
+    initCaramelBase()
+    // jsdom has no layout, so the real _isVisible fails closed on every element.
+    const { Element } = globalThis.window ?? globalThis
+    Element.prototype.checkVisibility = alwaysVisible
 })
 
 beforeEach(() => {
@@ -74,35 +129,17 @@ beforeEach(() => {
         '<input id="promo" /><button id="apply">Apply</button><div id="total"></div>'
     setTotalText('Order Total $80.00')
     removedRows = []
-    finalModalCalls = []
+    finalModalCalls = stubs.finalModalCalls = []
     reportedOutcomes = []
     globalThis._caramelCancelled = false
-    // The cleanup path waits ~600ms after each click for the cart to settle,
-    // and the loop pauses between codes. Under a full-suite run that real time
-    // is enough to trip the default per-test timeout, and none of it is what
-    // these tests are about — which button gets clicked is.
-    globalThis.sleep = async () => {}
 
-    globalThis.getCoupons = async () => [
+    stubs.getCoupons = async () => [
         { code: 'TRYME', id: 'c1' },
         { code: 'ORME', id: 'c2' },
     ]
-    globalThis._getTriedCodes = () => ({})
-    globalThis._markTriedCode = () => {}
-    globalThis._unmarkTriedCode = () => {}
-    globalThis.probeCartJson = async () => null // non-Shopify: DOM path
-    globalThis._isVisible = el => !!el // jsdom has no layout
-    globalThis.waitUntilReady = async () => {}
-    globalThis.showTestingModal = async () => {}
-    globalThis.updateTestingModal = async () => {}
-    globalThis.hideTestingModal = () => {}
-    globalThis.reportOutcome = (id, outcome, storeReason) =>
-        reportedOutcomes.push({ id, outcome, storeReason })
-    globalThis.caramelRecordSaving = () => {}
-    globalThis.showFinalModal = (...args) => finalModalCalls.push(args)
     // Every code "commits" a row and then errors — the exact state that
     // triggers cleanup.
-    globalThis.applyCoupon = async code => {
+    stubs.applyCoupon = async code => {
         addAppliedRow(code)
         return {
             success: false,
@@ -131,7 +168,7 @@ describe('cleanup never removes a discount we did not add', () => {
         // the code (some checkouts render a generic "Discount" line). Removing
         // the only identifiable row would take theirs.
         addAppliedRow('SHOPPER50')
-        globalThis.applyCoupon = async () => ({
+        stubs.applyCoupon = async () => ({
             success: false,
             newTotal: 80,
             committed: true,
@@ -205,7 +242,7 @@ describe('an already-discounted cart is not reported as a failure', () => {
     })
 
     it('says nothing about a pre-existing discount on a clean cart', async () => {
-        globalThis.applyCoupon = async () => ({
+        stubs.applyCoupon = async () => ({
             success: false,
             newTotal: 80,
             committed: false,
@@ -244,7 +281,7 @@ describe('a rejection caused by the shopper’s own discount is not a coupon ver
         // its place — the endpoint takes 'worked' or 'failed' and nothing else
         // — so the honest report is no report.
         addAppliedRow('SHOPPER50')
-        globalThis.applyCoupon = async () => ({
+        stubs.applyCoupon = async () => ({
             success: false,
             newTotal: 80,
             committed: true,
@@ -283,7 +320,7 @@ describe('a rejection caused by the shopper’s own discount is not a coupon ver
 describe('a code that changed nothing on a discounted cart says so plainly', () => {
     beforeEach(() => {
         // Accepted, committed, total identical → the zero-effect branch.
-        globalThis.applyCoupon = async code => {
+        stubs.applyCoupon = async code => {
             addAppliedRow(code)
             return { success: true, newTotal: 80, committed: true }
         }

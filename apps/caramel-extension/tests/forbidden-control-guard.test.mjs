@@ -1,5 +1,9 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { loadExtensionSources } from './_load.mjs'
+import {
+    caramelCouponAnchors,
+    caramelFormSubmitIsUnsafe,
+    caramelIsForbiddenControl,
+} from '../dom-utils.js'
 
 // The guard that stands between a drifted store config and the user's money.
 //
@@ -26,24 +30,6 @@ import { loadExtensionSources } from './_load.mjs'
 // discount, allowing wrongly costs them an order they never placed.
 
 let doc
-let caramelIsForbiddenControl
-let caramelFormSubmitIsUnsafe
-let caramelCouponAnchors
-
-beforeAll(() => {
-    ;({
-        caramelIsForbiddenControl,
-        caramelFormSubmitIsUnsafe,
-        caramelCouponAnchors,
-    } = loadExtensionSources(
-        ['caramel-base.js', 'dom-utils.js'],
-        [
-            'caramelIsForbiddenControl',
-            'caramelFormSubmitIsUnsafe',
-            'caramelCouponAnchors',
-        ],
-    ))
-})
 
 beforeEach(() => {
     document.body.innerHTML = ''

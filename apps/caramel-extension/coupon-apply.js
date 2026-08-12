@@ -98,9 +98,8 @@ export function caramelRowReadsRejected(el) {
 }
 /* Applied-coupon rows that don't declare themselves rejected. Used for BOTH
  * the before and after counts, so the comparison stays like-for-like. */
-// Cross-file content-script call — per-file analysis can't see it.
-// oxlint-disable-next-line no-unused-vars
-function caramelAcceptedRowCount(sel) {
+// Also read directly by tests/false-success.test.mjs.
+export function caramelAcceptedRowCount(sel) {
     return qAll(sel).filter(el => !caramelRowReadsRejected(el)).length
 }
 function findRemoveSelector(rec) {
@@ -247,7 +246,8 @@ function snapshotErrorState(rec) {
  * Both regions the detector reads are captured: every errorIndicator match, and
  * the ancestor chain around the input that the generic branch walks.
  */
-function _caramelCouponAreaText(rec) {
+// Also read directly by tests/store-said-attribution.test.mjs.
+export function _caramelCouponAreaText(rec) {
     // innerText to match what the detector reads, textContent when there is no
     // innerText to read: `[class*="error"]` can land on an SVG or another
     // non-HTML node, where innerText is undefined and the snapshot would
@@ -279,10 +279,9 @@ function _caramelNormalizeQuote(text) {
 }
 
 /* Is this quote the store's answer to US, or something it was already saying? */
-// Called from other split content-script files (cross-file content-script
-// call — oxlint's per-file analysis can't see it).
-// oxlint-disable-next-line no-unused-vars
-function caramelQuoteIsAttributable(quote, priorText) {
+// Called from other split content-script files, and read directly by
+// tests/store-said-attribution.test.mjs.
+export function caramelQuoteIsAttributable(quote, priorText) {
     const q = _caramelNormalizeQuote(quote)
     if (!q) return false
     return !_caramelNormalizeQuote(priorText).includes(q)

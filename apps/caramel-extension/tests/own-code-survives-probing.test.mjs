@@ -1,5 +1,9 @@
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { loadExtensionSources } from './_load.mjs'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+    _caramelLiveDiscountFor,
+    startApplyingCoupons,
+} from '../coupon-runner.js'
+import { _caramelResetCachedCodes } from '../store-detect.js'
 
 // The restore step destroyed a discount that had never been in danger, and then
 // reported that it had saved it.
@@ -32,8 +36,48 @@ import { loadExtensionSources } from './_load.mjs'
 // already holds demotes it to the end of the list and kills it. Clearing first
 // is what makes a restore that IS needed actually work.
 
-let startApplyingCoupons
-let _caramelLiveDiscountFor
+// Collaborators the old suite replaced by assigning over a global are replaced
+// through module mocks now; a factory forwards to a per-test slot so useCart()
+// and the wrapper below still read as plain assignments. `fetch` is NOT one of
+// them — the clear is a raw endpoint call and stays stubbed at the endpoint.
+const stubs = vi.hoisted(() => ({
+    applyViaDiscountLink: null,
+    probeCartJson: null,
+    coupons: [],
+    finalModals: [],
+}))
+
+vi.mock('../caramel-base.js', async importOriginal => {
+    const actual = await importOriginal()
+    return {
+        ...actual,
+        // Assigned by initCaramelBase(); a spread would freeze it at undefined.
+        get currentBrowser() {
+            return actual.currentBrowser
+        },
+        caramelRecordSaving: () => {},
+    }
+})
+vi.mock('../coupon-apply.js', async importOriginal => ({
+    ...(await importOriginal()),
+    probeCartJson: (...args) => stubs.probeCartJson(...args),
+    applyViaDiscountLink: (...args) => stubs.applyViaDiscountLink(...args),
+}))
+vi.mock('../coupon-fetch.js', async importOriginal => ({
+    ...(await importOriginal()),
+    fetchCoupons: async () => stubs.coupons,
+}))
+vi.mock('../store-detect.js', async importOriginal => ({
+    ...(await importOriginal()),
+    getCachedCodes: async () => stubs.coupons,
+}))
+vi.mock('../UI-helpers.js', async importOriginal => ({
+    ...(await importOriginal()),
+    showTestingModal: async () => {},
+    updateTestingModal: async () => {},
+    hideTestingModal: () => {},
+    showFinalModal: (...args) => stubs.finalModals.push(args),
+}))
 
 let finalModals
 let sent
@@ -97,28 +141,12 @@ function makeCart({ subtotal, worth }) {
     }
 }
 
-beforeAll(() => {
-    ;({ startApplyingCoupons, _caramelLiveDiscountFor } = loadExtensionSources(
-        [
-            'coupon-constants.generated.js',
-            'caramel-base.js',
-            'dom-utils.js',
-            'store-detect.js',
-            'coupon-apply.js',
-            'coupon-fetch.js',
-            'coupon-runner.js',
-        ],
-        ['startApplyingCoupons', '_caramelLiveDiscountFor'],
-    ))
-})
-
 /** Wires the runner onto `cart`, so every read is the cart's real state. */
 function useCart(c, coupons) {
     cart = c
-    globalThis.getCachedCodes = async () => coupons
-    globalThis.fetchCoupons = async () => coupons
-    globalThis.probeCartJson = async () => cart.read()
-    globalThis.applyViaDiscountLink = async code => {
+    stubs.coupons = coupons
+    stubs.probeCartJson = async () => cart.read()
+    stubs.applyViaDiscountLink = async code => {
         sent.push(code)
         cart.apply(code)
         return cart.read()
@@ -138,16 +166,10 @@ function useCart(c, coupons) {
 beforeEach(() => {
     sessionStorage.clear()
     document.body.innerHTML = ''
-    finalModals = []
+    finalModals = stubs.finalModals = []
     sent = []
     cleared = []
-    globalThis._caramelCodes = null
-    globalThis.showFinalModal = (...a) => finalModals.push(a)
-    globalThis.showTestingModal = async () => {}
-    globalThis.updateTestingModal = async () => {}
-    globalThis.hideTestingModal = () => {}
-    globalThis.reportOutcome = () => {}
-    globalThis.caramelRecordSaving = () => {}
+    _caramelResetCachedCodes()
 })
 
 const message = () => finalModals[0]?.[2] || ''
@@ -245,8 +267,8 @@ describe('the shopper arrived with a code and none of ours beat it', () => {
             })
             c.apply('THEIRS')
             useCart(c, CATALOGUE)
-            const realApply = globalThis.applyViaDiscountLink
-            globalThis.applyViaDiscountLink = async code => {
+            const realApply = stubs.applyViaDiscountLink
+            stubs.applyViaDiscountLink = async code => {
                 if (code === 'THEIRS') {
                     sent.push(code)
                     return cart.read() // request "succeeded", nothing applied

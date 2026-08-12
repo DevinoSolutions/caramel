@@ -1,5 +1,5 @@
-import { beforeAll, describe, expect, it } from 'vitest'
-import { loadExtensionSources } from './_load.mjs'
+import { describe, expect, it } from 'vitest'
+import { _existingCartDiscount } from '../coupon-runner.js'
 
 // "None of our codes BEAT the cart" is not "nothing worked" — and reporting
 // the second when the first is true is the most expensive lie this flow can
@@ -16,20 +16,6 @@ import { loadExtensionSources } from './_load.mjs'
 // The extension never dropped the discount itself — it just told the user to.
 //
 // probeCartJson() already returned this data; nothing consulted it.
-
-let _existingCartDiscount
-
-beforeAll(() => {
-    ;({ _existingCartDiscount } = loadExtensionSources(
-        [
-            'caramel-base.js',
-            'dom-utils.js',
-            'coupon-apply.js',
-            'coupon-runner.js',
-        ],
-        ['_existingCartDiscount'],
-    ))
-})
 
 describe('_existingCartDiscount', () => {
     it('names the code and amount already saving the user money', () => {

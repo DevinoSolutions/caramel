@@ -1,5 +1,5 @@
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { loadExtensionSources } from './_load.mjs'
+import { beforeEach, describe, expect, it } from 'vitest'
+import { caramelSinkTriedCodes } from '../coupon-apply.js'
 
 // The manual list exists to answer "what can I try myself?" — and it was
 // answering with the codes the shopper had just watched fail.
@@ -14,21 +14,6 @@ import { loadExtensionSources } from './_load.mjs'
 // Only the order changes. Nothing is hidden — a code the store refused from our
 // synthetic input can still work pasted by hand — and nothing is labelled
 // "rejected" without the store's own words for it.
-
-let caramelSinkTriedCodes
-
-beforeAll(() => {
-    ;({ caramelSinkTriedCodes } = loadExtensionSources(
-        [
-            'coupon-constants.generated.js',
-            'caramel-base.js',
-            'dom-utils.js',
-            'store-detect.js',
-            'coupon-apply.js',
-        ],
-        ['caramelSinkTriedCodes'],
-    ))
-})
 
 beforeEach(() => {
     sessionStorage.clear()

@@ -1,5 +1,9 @@
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { loadExtensionSources } from './_load.mjs'
+import { beforeEach, describe, expect, it } from 'vitest'
+import {
+    _getTriedCodes,
+    _markTriedCode,
+    _unmarkTriedCode,
+} from '../coupon-apply.js'
 
 // Codes are marked "tried" at attempt START so a full-page-POST apply that
 // destroys the content script mid-flow doesn't make the next run re-grind the
@@ -20,18 +24,6 @@ import { loadExtensionSources } from './_load.mjs'
 //
 // The same mechanism burns codes attempted against an EMPTY cart, where no
 // total can move by definition.
-
-let _getTriedCodes
-let _markTriedCode
-let _unmarkTriedCode
-
-beforeAll(() => {
-    ;({ _getTriedCodes, _markTriedCode, _unmarkTriedCode } =
-        loadExtensionSources(
-            ['caramel-base.js', 'dom-utils.js', 'coupon-apply.js'],
-            ['_getTriedCodes', '_markTriedCode', '_unmarkTriedCode'],
-        ))
-})
 
 beforeEach(() => {
     sessionStorage.clear()

@@ -1,5 +1,7 @@
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { loadExtensionSources } from './_load.mjs'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { initCaramelBase } from '../caramel-base.js'
+import { startApplyingCoupons } from '../coupon-runner.js'
+import { _caramelResetCachedCodes } from '../store-detect.js'
 
 // The card names a code. That name has to be the one doing the work.
 //
@@ -23,9 +25,48 @@ import { loadExtensionSources } from './_load.mjs'
 // Only the NAME is ever corrected here. The amount stays measured off the
 // cart, so this can never turn into a bigger number than the store agrees to.
 
-let startApplyingCoupons
+// Collaborators the old suite replaced by assigning over a global are replaced
+// through module mocks now; a factory forwards to a per-test slot so a
+// beforeEach still reads as one assignment.
+const stubs = vi.hoisted(() => ({
+    applyViaDiscountLink: null,
+    probeCartJson: null,
+    coupons: [],
+    finalModals: [],
+}))
 
-let finalModals
+vi.mock('../caramel-base.js', async importOriginal => {
+    const actual = await importOriginal()
+    return {
+        ...actual,
+        // Assigned by initCaramelBase(); a spread would freeze it at undefined.
+        get currentBrowser() {
+            return actual.currentBrowser
+        },
+        caramelRecordSaving: () => {},
+    }
+})
+vi.mock('../coupon-apply.js', async importOriginal => ({
+    ...(await importOriginal()),
+    probeCartJson: (...args) => stubs.probeCartJson(...args),
+    applyViaDiscountLink: (...args) => stubs.applyViaDiscountLink(...args),
+}))
+vi.mock('../coupon-fetch.js', async importOriginal => ({
+    ...(await importOriginal()),
+    fetchCoupons: async () => stubs.coupons,
+}))
+vi.mock('../store-detect.js', async importOriginal => ({
+    ...(await importOriginal()),
+    getCachedCodes: async () => stubs.coupons,
+}))
+vi.mock('../UI-helpers.js', async importOriginal => ({
+    ...(await importOriginal()),
+    showTestingModal: async () => {},
+    updateTestingModal: async () => {},
+    hideTestingModal: () => {},
+    showFinalModal: (...args) => stubs.finalModals.push(args),
+}))
+
 let applied
 let cartByCode
 let reported
@@ -58,37 +99,30 @@ const cart = (total, codes, apps) => ({
 })
 
 beforeAll(() => {
-    ;({ startApplyingCoupons } = loadExtensionSources(
-        [
-            'coupon-constants.generated.js',
-            'caramel-base.js',
-            'dom-utils.js',
-            'store-detect.js',
-            'coupon-apply.js',
-            'coupon-fetch.js',
-            'coupon-runner.js',
-        ],
-        ['startApplyingCoupons'],
-    ))
+    // reportOutcome() lives in coupon-runner.js and is called from inside
+    // coupon-runner.js, so no module mock can stand in front of it. What it
+    // DOES is send one runtime message — so the message is what gets recorded.
+    globalThis.chrome = {
+        runtime: {
+            sendMessage: msg => {
+                if (msg?.action !== 'reportOutcome') return
+                reported.push([msg.id, msg.outcome])
+            },
+        },
+    }
+    initCaramelBase()
 })
 
 beforeEach(() => {
     sessionStorage.clear()
     document.body.innerHTML = ''
-    finalModals = []
+    stubs.finalModals = []
     applied = []
     reported = []
-    globalThis._caramelCodes = null
-    globalThis.showFinalModal = (...a) => finalModals.push(a)
-    globalThis.showTestingModal = async () => {}
-    globalThis.updateTestingModal = async () => {}
-    globalThis.hideTestingModal = () => {}
-    globalThis.reportOutcome = (id, outcome) => reported.push([id, outcome])
-    globalThis.caramelRecordSaving = () => {}
-    globalThis.getCachedCodes = async () => COUPONS
-    globalThis.fetchCoupons = async () => COUPONS
-    globalThis.probeCartJson = async () => cart(10000, [])
-    globalThis.applyViaDiscountLink = async code => {
+    _caramelResetCachedCodes()
+    stubs.coupons = COUPONS
+    stubs.probeCartJson = async () => cart(10000, [])
+    stubs.applyViaDiscountLink = async code => {
         applied.push(code)
         return cartByCode(code)
     }

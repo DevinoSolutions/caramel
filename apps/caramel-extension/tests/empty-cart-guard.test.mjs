@@ -1,5 +1,5 @@
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { loadExtensionSources } from './_load.mjs'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { startApplyingCoupons } from '../coupon-runner.js'
 
 // A cart with nothing in it has nothing to discount, and running the apply loop
 // against one is wrong in three directions at once.
@@ -16,7 +16,36 @@ import { loadExtensionSources } from './_load.mjs'
 // cricut.com and clarks.com already stay quiet on an empty cart, so some path
 // knew better; this brings the rest of the fleet in line.
 
-let startApplyingCoupons
+// Collaborators the old suite replaced by assigning over a global are replaced
+// through module mocks now; a factory forwards to a per-test slot so a
+// beforeEach still reads as one assignment.
+const stubs = vi.hoisted(() => ({
+    applyCoupon: null,
+    getCoupons: null,
+    probeCartJson: null,
+    finalModalCalls: [],
+}))
+
+vi.mock('../coupon-apply.js', async importOriginal => ({
+    ...(await importOriginal()),
+    applyCoupon: (...args) => stubs.applyCoupon(...args),
+    probeCartJson: (...args) => stubs.probeCartJson(...args),
+    _getTriedCodes: () => ({}),
+    _markTriedCode: () => {},
+    _unmarkTriedCode: () => {},
+}))
+vi.mock('../coupon-fetch.js', async importOriginal => ({
+    ...(await importOriginal()),
+    getCoupons: (...args) => stubs.getCoupons(...args),
+}))
+vi.mock('../UI-helpers.js', async importOriginal => ({
+    ...(await importOriginal()),
+    showTestingModal: async () => {},
+    updateTestingModal: async () => {},
+    hideTestingModal: () => {},
+    showFinalModal: (...args) => stubs.finalModalCalls.push(args),
+}))
+
 let finalModalCalls
 let appliedCodes
 
@@ -38,20 +67,16 @@ function setTotalText(text) {
     Object.defineProperty(el, 'innerText', { value: text, configurable: true })
 }
 
+/** jsdom implements no layout, so nothing reports itself visible. */
+function alwaysVisible() {
+    return true
+}
+
+// jsdom performs no layout, so the real _isVisible fails closed on every
+// element; the old suite said "jsdom has no layout" and replaced it.
 beforeAll(() => {
-    loadExtensionSources(
-        [
-            'coupon-constants.generated.js',
-            'caramel-base.js',
-            'dom-utils.js',
-            'store-detect.js',
-            'coupon-apply.js',
-            'coupon-fetch.js',
-            'coupon-runner.js',
-        ],
-        ['startApplyingCoupons'],
-    )
-    startApplyingCoupons = globalThis.startApplyingCoupons
+    const { Element } = globalThis.window ?? globalThis
+    Element.prototype.checkVisibility = alwaysVisible
 })
 
 beforeEach(() => {
@@ -61,26 +86,15 @@ beforeEach(() => {
     // below keys off the URL.
     window.history.replaceState({}, '', '/cart')
     globalThis._caramelCancelled = false
-    finalModalCalls = []
+    finalModalCalls = stubs.finalModalCalls = []
     appliedCodes = []
 
-    globalThis.getCoupons = async () => [
+    stubs.getCoupons = async () => [
         { code: 'FIFTEENOFF', id: 'c1' },
         { code: 'TENOFF', id: 'c2' },
     ]
-    globalThis._getTriedCodes = () => ({})
-    globalThis._markTriedCode = () => {}
-    globalThis._unmarkTriedCode = () => {}
-    globalThis.probeCartJson = async () => null // non-Shopify: DOM path
-    globalThis._isVisible = () => true // jsdom has no layout
-    globalThis.waitUntilReady = async () => {}
-    globalThis.showTestingModal = async () => {}
-    globalThis.updateTestingModal = async () => {}
-    globalThis.hideTestingModal = () => {}
-    globalThis.reportOutcome = () => {}
-    globalThis.caramelRecordSaving = () => {}
-    globalThis.showFinalModal = (...args) => finalModalCalls.push(args)
-    globalThis.applyCoupon = async code => {
+    stubs.probeCartJson = async () => null // non-Shopify: DOM path
+    stubs.applyCoupon = async code => {
         appliedCodes.push(code)
         return { success: false, newTotal: 0, committed: false, errorMsg: null }
     }
@@ -120,7 +134,7 @@ describe('coupon-runner.js — an empty cart is named, not ground through', () =
     it('recognises an empty cart from the platform payload too', async () => {
         // Shopify-class stores answer probeCartJson, and there the item count
         // is authoritative even when no price element is configured.
-        globalThis.probeCartJson = async () => ({
+        stubs.probeCartJson = async () => ({
             item_count: 0,
             total_price: 0,
             currency: 'USD',
@@ -145,7 +159,7 @@ describe('coupon-runner.js — an empty cart is named, not ground through', () =
         // let a test move hosts; the live page matches both
         // (shop.bombas.com/checkouts/c/…) and either alone is enough.
         window.history.replaceState({}, '', '/checkouts/c/abc123')
-        globalThis.probeCartJson = async () => ({
+        stubs.probeCartJson = async () => ({
             item_count: 0,
             total_price: 0,
             currency: 'USD',
@@ -163,7 +177,7 @@ describe('coupon-runner.js — an empty cart is named, not ground through', () =
     it('lets a readable total overrule a payload that says empty', async () => {
         // Same disagreement, the other way round: whatever the payload thinks,
         // a total the shopper can read is money in the cart.
-        globalThis.probeCartJson = async () => ({
+        stubs.probeCartJson = async () => ({
             item_count: 0,
             total_price: 0,
             currency: 'USD',

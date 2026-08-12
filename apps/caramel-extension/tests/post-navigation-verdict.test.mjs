@@ -1,5 +1,11 @@
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { loadExtensionSources } from './_load.mjs'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { caramelPostNavigationVerdict } from '../coupon-apply.js'
+import { caramelMarkPendingSubmit } from '../dom-utils.js'
+import {
+    _caramelResetCachedCodes,
+    getDomainRecord,
+    startCheckoutDetection,
+} from '../store-detect.js'
 
 // When the store already answered, stop asking the shopper to go and find out.
 //
@@ -17,9 +23,35 @@ import { loadExtensionSources } from './_load.mjs'
 // of a rejection. Everything else stays unquoted, exactly as in
 // tests/store-said-attribution.test.mjs.
 
-let caramelPostNavigationVerdict
-let caramelMarkPendingSubmit
-let startCheckoutDetection
+// Collaborators the old suite replaced by assigning over a global are replaced
+// through module mocks now. `getDomainRecord` and `getCachedCodes` are the
+// exception: both live in store-detect.js and are called from inside
+// store-detect.js, so no mock can stand in front of them — they are driven
+// through their own seams instead (the store-list cache the source itself
+// maintains, and the coupon fetch getCachedCodes delegates to).
+const stubs = vi.hoisted(() => ({
+    coupons: [],
+    finalModalCalls: [],
+}))
+
+vi.mock('../caramel-base.js', async importOriginal => ({
+    ...(await importOriginal()),
+    sleep: async () => {},
+    caramelRecordSaving: () => {},
+}))
+vi.mock('../coupon-fetch.js', async importOriginal => ({
+    ...(await importOriginal()),
+    fetchCoupons: async () => stubs.coupons,
+}))
+vi.mock('../UI-helpers.js', async importOriginal => ({
+    ...(await importOriginal()),
+    insertCaramelPrompt: () => {},
+    showTestingModal: async () => {},
+    updateTestingModal: async () => {},
+    hideTestingModal: () => {},
+    showFinalModal: (...args) => stubs.finalModalCalls.push(args),
+}))
+
 let finalModalCalls
 
 const REC = {
@@ -48,38 +80,31 @@ function showAlert(text) {
     return el
 }
 
+/** jsdom implements no layout, so nothing reports itself visible. */
+function alwaysVisible() {
+    return true
+}
+
+// jsdom performs no layout, so the real _isVisible fails closed on every
+// element; the old suite said "everything here is visible" by replacing it.
 beforeAll(() => {
-    ;({ caramelPostNavigationVerdict, caramelMarkPendingSubmit } =
-        loadExtensionSources(
-            [
-                'coupon-constants.generated.js',
-                'caramel-base.js',
-                'dom-utils.js',
-                'store-detect.js',
-                'coupon-apply.js',
-                'coupon-fetch.js',
-                'coupon-runner.js',
-            ],
-            ['caramelPostNavigationVerdict', 'caramelMarkPendingSubmit'],
-        ))
-    startCheckoutDetection = globalThis.startCheckoutDetection
+    const { Element } = globalThis.window ?? globalThis
+    Element.prototype.checkVisibility = alwaysVisible
 })
 
 beforeEach(() => {
     sessionStorage.clear()
     document.body.innerHTML = '<input id="promo" />'
-    finalModalCalls = []
-    globalThis._isVisible = el => !!el
-    globalThis.getDomainRecord = async () => REC
-    globalThis.getCachedCodes = async () => [
+    finalModalCalls = stubs.finalModalCalls = []
+    // getDomainRecord answers out of the store-list cache the source keeps on
+    // the function itself, so this is REC served for the page under test — the
+    // lookup matches on hostname, which jsdom will not let a test move.
+    getDomainRecord.cache = [{ ...REC, domain: location.hostname }]
+    _caramelResetCachedCodes()
+    stubs.coupons = [
         { code: 'SALE20', id: 'c1' },
         { code: 'SPRING10', id: 'c2' },
     ]
-    globalThis.insertCaramelPrompt = () => {}
-    globalThis.isCheckout = async () => true
-    globalThis.showFinalModal = (...args) => finalModalCalls.push(args)
-    globalThis.caramelRecordSaving = () => {}
-    globalThis.reportOutcome = () => {}
 })
 
 describe('reading the store’s answer off the page it sent us to', () => {

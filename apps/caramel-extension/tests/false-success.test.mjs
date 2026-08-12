@@ -1,5 +1,9 @@
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { loadExtensionSources } from './_load.mjs'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+    caramelAcceptedRowCount,
+    caramelRowReadsRejected,
+} from '../coupon-apply.js'
+import { startApplyingCoupons } from '../coupon-runner.js'
 
 // The worst thing this product can say is "✓ Coupon Applied" when nothing was.
 //
@@ -21,9 +25,51 @@ import { loadExtensionSources } from './_load.mjs'
 //    on the page: the store does not combine promo codes with the sitewide
 //    promo already on the cart.
 
-let caramelAcceptedRowCount
-let caramelRowReadsRejected
-let startApplyingCoupons
+// The old harness let a test replace a collaborator by assigning over the
+// global the source file read (`globalThis.applyCoupon = …`). ES modules bind
+// their imports, so the same seam is a module mock whose factory forwards to a
+// per-test slot — assigning `stubs.applyCoupon` in a beforeEach reads exactly
+// as the global assignment did.
+const stubs = vi.hoisted(() => ({
+    applyCoupon: null,
+    getCoupons: null,
+    probeCartJson: null,
+    finalModalCalls: [],
+}))
+
+vi.mock('../caramel-base.js', async importOriginal => {
+    const actual = await importOriginal()
+    return {
+        ...actual,
+        // `currentBrowser` is assigned by initCaramelBase(); a spread would
+        // freeze it at undefined, so the live binding is passed through.
+        get currentBrowser() {
+            return actual.currentBrowser
+        },
+        sleep: async () => {},
+        caramelRecordSaving: () => {},
+    }
+})
+vi.mock('../coupon-apply.js', async importOriginal => ({
+    ...(await importOriginal()),
+    applyCoupon: (...args) => stubs.applyCoupon(...args),
+    probeCartJson: (...args) => stubs.probeCartJson(...args),
+    _getTriedCodes: () => ({}),
+    _markTriedCode: () => {},
+    _unmarkTriedCode: () => {},
+}))
+vi.mock('../coupon-fetch.js', async importOriginal => ({
+    ...(await importOriginal()),
+    getCoupons: (...args) => stubs.getCoupons(...args),
+}))
+vi.mock('../UI-helpers.js', async importOriginal => ({
+    ...(await importOriginal()),
+    showTestingModal: async () => {},
+    updateTestingModal: async () => {},
+    hideTestingModal: () => {},
+    showFinalModal: (...args) => stubs.finalModalCalls.push(args),
+}))
+
 let finalModalCalls
 
 const REC = {
@@ -47,43 +93,29 @@ function addRow(text) {
     return row
 }
 
+/** jsdom implements no layout, so nothing reports itself visible. */
+function alwaysVisible() {
+    return true
+}
+
+// jsdom performs no layout, so dom-utils' _isVisible fails closed on every
+// element. The old `globalThis._isVisible = el => !!el` said "everything on
+// this page is visible"; implementing the one signal the real function reads
+// says the same thing, and keeps dom-utils unmocked (coupon-runner reads its
+// live `_caramelLastPrices` binding, which a mock factory's spread freezes).
 beforeAll(() => {
-    ;({ caramelAcceptedRowCount, caramelRowReadsRejected } =
-        loadExtensionSources(
-            [
-                'coupon-constants.generated.js',
-                'caramel-base.js',
-                'dom-utils.js',
-                'store-detect.js',
-                'coupon-apply.js',
-                'coupon-fetch.js',
-                'coupon-runner.js',
-            ],
-            ['caramelAcceptedRowCount', 'caramelRowReadsRejected'],
-        ))
-    startApplyingCoupons = globalThis.startApplyingCoupons
+    const { Element } = globalThis.window ?? globalThis
+    Element.prototype.checkVisibility = alwaysVisible
 })
 
 beforeEach(() => {
     document.body.innerHTML =
         '<input id="promo" /><button id="apply">Apply</button><div id="total"></div>'
     setTotalText('Estimated Total $33.23')
-    finalModalCalls = []
+    finalModalCalls = stubs.finalModalCalls = []
     globalThis._caramelCancelled = false
-    globalThis.sleep = async () => {}
-    globalThis.getCoupons = async () => [{ code: 'WELCOME25', id: 'c1' }]
-    globalThis._getTriedCodes = () => ({})
-    globalThis._markTriedCode = () => {}
-    globalThis._unmarkTriedCode = () => {}
-    globalThis.probeCartJson = async () => null
-    globalThis._isVisible = el => !!el
-    globalThis.waitUntilReady = async () => {}
-    globalThis.showTestingModal = async () => {}
-    globalThis.updateTestingModal = async () => {}
-    globalThis.hideTestingModal = () => {}
-    globalThis.reportOutcome = () => {}
-    globalThis.caramelRecordSaving = () => {}
-    globalThis.showFinalModal = (...args) => finalModalCalls.push(args)
+    stubs.getCoupons = async () => [{ code: 'WELCOME25', id: 'c1' }]
+    stubs.probeCartJson = async () => null
 })
 
 describe("a row that says 'Not Applied' is not a success", () => {
@@ -119,7 +151,7 @@ describe('an unchanged total is never headlined as applied', () => {
     beforeEach(() => {
         // The allposters shape: the code "commits" (a row appears), no error
         // text is detectable, and the total does not move.
-        globalThis.applyCoupon = async () => ({
+        stubs.applyCoupon = async () => ({
             success: true,
             newTotal: 33.23,
             committed: true,
@@ -156,7 +188,7 @@ describe('an unchanged total is never headlined as applied', () => {
 
     it('still reports a real, measured win as a win', async () => {
         // Guards the guard: the honest path must not swallow genuine savings.
-        globalThis.applyCoupon = async () => {
+        stubs.applyCoupon = async () => {
             setTotalText('Estimated Total $25.23')
             return {
                 success: true,

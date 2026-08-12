@@ -1,5 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { loadExtensionSources } from './_load.mjs'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 /**
  * applyCoupon() must report the total that MOVED, not the biggest number in the
@@ -59,24 +58,32 @@ function onApply(afterText) {
     })
 }
 
+/** jsdom implements no layout, so nothing reports itself visible. */
+function alwaysVisible() {
+    return true
+}
+
+// jsdom performs no layout, so dom-utils' _isVisible fails closed on every
+// element and applyCoupon would refuse the input it was handed. The old suite
+// replaced the global `_isVisible` with `el => !!el`; the ES-module version
+// gives the REAL one the same answer by implementing the one signal it reads.
+// It cannot be replaced through vi.mock here: coupon-apply.js also imports the
+// live `_caramelLastPrices` binding dom-utils' getPrice writes, and a mock
+// factory's spread would freeze that at its initial [] — silently emptying the
+// multi-price reading this file exists to pin.
 beforeAll(() => {
-    loadExtensionSources(
-        [
-            'coupon-constants.generated.js',
-            'caramel-base.js',
-            'dom-utils.js',
-            'coupon-apply.js',
-        ],
-        ['applyCoupon'],
-    )
-    applyCoupon = globalThis.applyCoupon
+    const { Element } = globalThis.window ?? globalThis
+    Element.prototype.checkVisibility = alwaysVisible
 })
 
-beforeEach(() => {
+beforeEach(async () => {
     document.body.innerHTML =
         '<input id="promo" /><button id="apply">Apply</button><div id="total"></div>'
-    globalThis._isVisible = el => !!el
-    globalThis._caramelLastPrices = []
+    // `_caramelLastPrices` is module state now, and an import binding cannot be
+    // assigned — a fresh module registry per test is what the old
+    // `globalThis._caramelLastPrices = []` was reaching for.
+    vi.resetModules()
+    ;({ applyCoupon } = await import('../coupon-apply.js'))
 })
 
 describe('applyCoupon — the post-apply total on a multi-price container', () => {
