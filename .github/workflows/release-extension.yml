@@ -1066,7 +1066,15 @@ jobs:
 
   github_release:
     name: '🏷️ Publish GitHub Release'
-    needs: [guard, package, publish_chrome, publish_firefox, publish_safari, publish_edge]
+    needs:
+      [
+        guard,
+        package,
+        publish_chrome,
+        publish_firefox,
+        publish_safari,
+        publish_edge,
+      ]
     if: ${{ !inputs.dry_run && github.ref_type == 'tag' }}
     runs-on: ubuntu-latest
     permissions:
