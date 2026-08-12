@@ -1,5 +1,8 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { loadExtensionSource, loadExtensionSources } from './_load.mjs'
+import { initCaramelBase } from '../caramel-base.js'
+import { initCouponConstants } from '../coupon-constants.generated.js'
+import { initCouponRunner } from '../coupon-runner.js'
+import { renderSignInPrompt } from '../popup.js'
 
 // Two OAuth defects found by a live audit (2026-08-05), both in the states a
 // user hits by CLOSING the provider window — the most common OAuth outcome
@@ -18,7 +21,50 @@ import { loadExtensionSource, loadExtensionSources } from './_load.mjs'
 // Harness mirrors popup-oauth-fallback.test.mjs. The chrome stub is a
 // permissive Proxy that auto-creates missing properties, so identity is
 // assigned explicitly.
-let renderSignInPrompt
+
+/* Realm stub, lifted from tests/_load.mjs (installChromeStub), which the ESM
+ * port retires. Permissive Proxy: any unknown property materializes as a
+ * callable no-op, so a source file touching an API this suite doesn't care
+ * about cannot abort it. Two deliberate exceptions, exactly as _load.mjs had
+ * them — storage.*.get/set/remove invoke their callbacks like the real API
+ * (empty storage), and runtime.lastError stays UNDEFINED outside a failing
+ * callback, because the proxy would otherwise auto-create a truthy callable
+ * that caramelSendMessage reads as a closed port. */
+function installChromeStub() {
+    const cache = new WeakMap()
+    const wrap = target => {
+        if (cache.has(target)) return cache.get(target)
+        const proxy = new Proxy(target, {
+            get(obj, prop) {
+                if (prop === 'then' || typeof prop === 'symbol')
+                    return undefined
+                if (!(prop in obj)) obj[prop] = wrap(function () {})
+                return obj[prop]
+            },
+            apply: () => undefined,
+        })
+        cache.set(target, proxy)
+        return proxy
+    }
+    const stub = wrap(function chromeStubRoot() {})
+    for (const area of ['sync', 'local', 'session']) {
+        stub.storage[area].get = (_keys, cb) => {
+            if (typeof cb === 'function') cb({})
+        }
+        stub.storage[area].set = (_items, cb) => {
+            if (typeof cb === 'function') cb()
+        }
+        stub.storage[area].remove = (_keys, cb) => {
+            if (typeof cb === 'function') cb()
+        }
+    }
+    stub.runtime.lastError = undefined
+    globalThis.chrome = stub
+    globalThis.browser = undefined
+    window.chrome = stub
+    window.browser = undefined
+    return stub
+}
 
 beforeAll(() => {
     document.body.innerHTML =
@@ -26,23 +72,15 @@ beforeAll(() => {
         '<button id="settingsIcon" style="display:none"></button>' +
         '<div id="auth-container"></div>'
 
-    loadExtensionSource('coupon-constants.generated.js', [])
-    loadExtensionSources(
-        [
-            'caramel-base.js',
-            'dom-utils.js',
-            'store-detect.js',
-            'coupon-apply.js',
-            'coupon-fetch.js',
-            'coupon-runner.js',
-        ],
-        [],
-    )
+    // The realm's effects, in entrypoints/popup/main.ts order — the successor
+    // to the <script> list this suite used to eval.
+    installChromeStub()
+    initCouponConstants()
+    initCaramelBase()
+    initCouponRunner()
+
     globalThis.currentBrowser.tabs.create = () => {}
     window.close = vi.fn()
-    ;({ renderSignInPrompt } = loadExtensionSource('popup.js', [
-        'renderSignInPrompt',
-    ]))
 })
 
 /** Chrome shape: identity present, launchWebAuthFlow behaviour injected. */

@@ -1,9 +1,4 @@
-import { beforeAll, describe, expect, it } from 'vitest'
-import {
-    getOnMessageListeners,
-    loadExtensionSource,
-    loadExtensionSources,
-} from './_load.mjs'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 
 // Producer/consumer CONTRACT pin for getActiveTabDomainRecord — born from a
 // live bug (eBay, iOS Safari, 2026-08-09): background.js answered with
@@ -22,21 +17,111 @@ import {
 // and feeding it — unedited — to the REAL popup.
 //
 // (jsdom lacks a service-worker realm, so producer and consumer are loaded
-// into separate stub realms and bridged by replaying the captured payload —
-// the payload itself is never hand-authored.)
+// into separate module realms and bridged by replaying the captured payload —
+// the payload itself is never hand-authored. `vi.resetModules()` before each
+// dynamic import is what gives each realm its own module instances, the
+// successor to the old harness's one-fresh-eval-per-load.)
+//
+// ONE chrome stub for the whole file, installed once. initCaramelBase() is NOT
+// idempotent across stubs: it latches on `window.__caramel_shared_utils_loaded`,
+// which outlives vi.resetModules(), so a second installChromeStub() would leave
+// `currentBrowser` bound to the FIRST stub and every per-run handler written to
+// the second one would be read by nobody. Per-run freshness comes from
+// re-pointing this stub's handlers instead of rebuilding it.
 
 const STORE_TAB_URL = 'https://www.ebay.com/itm/1234567890?campid=abc'
 const NON_WEB_TAB_URL = 'chrome://newtab/'
 
+/* Realm stub, lifted from tests/_load.mjs (installChromeStub +
+ * getOnMessageListeners), which the ESM port retires. Permissive Proxy: any
+ * unknown property materializes as a callable no-op, so a source file touching
+ * an API this suite doesn't care about cannot abort it. The deliberate
+ * exceptions, exactly as _load.mjs had them — storage.*.get/set/remove invoke
+ * their callbacks like the real API (empty storage), runtime.lastError stays
+ * UNDEFINED outside a failing callback, and runtime.onMessage.addListener
+ * RECORDS real listeners so this suite can invoke background.js's handler
+ * directly (`stub.onMessageListeners`). */
+function installChromeStub() {
+    const cache = new WeakMap()
+    const wrap = target => {
+        if (cache.has(target)) return cache.get(target)
+        const proxy = new Proxy(target, {
+            get(obj, prop) {
+                if (prop === 'then' || typeof prop === 'symbol')
+                    return undefined
+                if (!(prop in obj)) obj[prop] = wrap(function () {})
+                return obj[prop]
+            },
+            apply: () => undefined,
+        })
+        cache.set(target, proxy)
+        return proxy
+    }
+    const stub = wrap(function chromeStubRoot() {})
+    for (const area of ['sync', 'local', 'session']) {
+        stub.storage[area].get = (_keys, cb) => {
+            if (typeof cb === 'function') cb({})
+        }
+        stub.storage[area].set = (_items, cb) => {
+            if (typeof cb === 'function') cb()
+        }
+        stub.storage[area].remove = (_keys, cb) => {
+            if (typeof cb === 'function') cb()
+        }
+    }
+    stub.runtime.lastError = undefined
+
+    const listeners = []
+    stub.runtime.onMessage.addListener = fn => listeners.push(fn)
+    stub.runtime.onMessage.removeListener = fn => {
+        const i = listeners.indexOf(fn)
+        if (i >= 0) listeners.splice(i, 1)
+    }
+    stub.runtime.onMessage.hasListener = fn => listeners.includes(fn)
+    stub.onMessageListeners = listeners
+
+    globalThis.chrome = stub
+    globalThis.browser = undefined
+    window.chrome = stub
+    window.browser = undefined
+    return stub
+}
+
+// The one stub every realm in this file shares — see the header note on the
+// initCaramelBase latch.
+let realmStub
+
+beforeAll(() => {
+    realmStub = installChromeStub()
+})
+
 /** Runs the real background.js onMessage handler for a tab whose full URL is
  * `tabUrl` and resolves with the getActiveTabDomainRecord payload. */
-function captureProducerPayload(tabUrl) {
-    loadExtensionSource('background.js', [])
-    const [handler] = getOnMessageListeners()
-    globalThis.chrome.tabs.query = (_query, cb) => cb([{ url: tabUrl }])
+async function captureProducerPayload(tabUrl) {
+    vi.resetModules()
+    realmStub.onMessageListeners.length = 0
+    const { initBackground } = await import('../background.js')
+    initBackground()
+    const [handler] = realmStub.onMessageListeners
+    realmStub.tabs.query = (_query, cb) => cb([{ url: tabUrl }])
     return new Promise(resolve =>
         handler({ action: 'getActiveTabDomainRecord' }, {}, resolve),
     )
+}
+
+/* Which of the popup's four terminal views landed in #auth-container. The old
+ * suite wrapped globalThis.renderCouponsView/renderUnsupportedSite/… to get
+ * this signal; under ESM those calls resolve to popup.js's own module-local
+ * bindings, so it is read off the markup each one paints instead — every view
+ * carries an element no other one does. */
+const renderedView = () => {
+    if (document.getElementById('retryBtn')) return 'renderLoadError'
+    if (document.getElementById('noCouponsHeading'))
+        return 'renderUnsupportedSite'
+    if (document.getElementById('couponList')) return 'renderCouponsView'
+    if (document.querySelector('.profile-signed-in-note'))
+        return 'renderProfileCard'
+    return null
 }
 
 /** Loads the real popup stack, replays `payload` as the service worker's
@@ -47,19 +132,19 @@ async function runPopupAgainst(payload) {
     document.body.innerHTML =
         '<div id="loading-container"></div><div id="auth-container"></div>'
 
-    // Same load order as index.html / the manifests (see popup.test.mjs).
-    loadExtensionSource('coupon-constants.generated.js', [])
-    loadExtensionSources(
-        [
-            'caramel-base.js',
-            'dom-utils.js',
-            'store-detect.js',
-            'coupon-apply.js',
-            'coupon-fetch.js',
-            'coupon-runner.js',
-        ],
-        [],
+    // Same realm inits, in the same order, as entrypoints/popup/main.ts — the
+    // successor to index.html's script list (see popup.test.mjs).
+    vi.resetModules()
+    realmStub.onMessageListeners.length = 0
+    const { initCaramelBase } = await import('../caramel-base.js')
+    const { initCouponConstants } = await import(
+        '../coupon-constants.generated.js'
     )
+    const { initCouponRunner } = await import('../coupon-runner.js')
+    const { initPopup } = await import('../popup.js')
+    initCouponConstants()
+    initCaramelBase()
+    initCouponRunner()
 
     const observed = { fetchedSite: null }
     globalThis.currentBrowser.runtime.sendMessage = (message, cb) => {
@@ -83,29 +168,15 @@ async function runPopupAgainst(payload) {
     }
     globalThis.currentBrowser.storage.sync.get = (_keys, cb) => cb({})
 
-    const { initPopup } = loadExtensionSource('popup.js', ['initPopup'])
-
     // initPopup resolves before its async render chain finishes (see
-    // popup.test.mjs's waitForRenderLoadError note) — wrap the three terminal
-    // render functions for a deterministic completion signal.
-    const rendered = new Promise(resolve => {
-        for (const name of [
-            'renderCouponsView',
-            'renderUnsupportedSite',
-            'renderProfileCard',
-            'renderLoadError',
-        ]) {
-            const original = globalThis[name]
-            globalThis[name] = (...args) => {
-                const result = original(...args)
-                resolve(name)
-                return result
-            }
-        }
-    })
-
+    // popup.test.mjs's waitForRenderLoadError note) — wait for one of the
+    // terminal views to actually be in the DOM.
     await initPopup()
-    const view = await rendered
+    const view = await vi.waitFor(() => {
+        const painted = renderedView()
+        expect(painted, 'a terminal view was painted').not.toBeNull()
+        return painted
+    })
     return {
         observed,
         view,
@@ -119,7 +190,7 @@ describe('getActiveTabDomainRecord producer/consumer contract', () => {
 
     beforeAll(async () => {
         // Capture both payloads from the REAL producer up front — each
-        // loadExtensionSource call installs a fresh chrome stub, so the
+        // captureProducerPayload call installs a fresh chrome stub, so the
         // producer runs are done before any popup realm is built.
         storePayload = await captureProducerPayload(STORE_TAB_URL)
         nonWebPayload = await captureProducerPayload(NON_WEB_TAB_URL)

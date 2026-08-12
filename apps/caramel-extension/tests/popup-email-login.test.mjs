@@ -1,5 +1,9 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { loadExtensionSource, loadExtensionSources } from './_load.mjs'
+import { initCaramelBase } from '../caramel-base.js'
+import { CARAMEL_ENV } from '../caramel-env.js'
+import { initCouponConstants } from '../coupon-constants.generated.js'
+import { initCouponRunner } from '../coupon-runner.js'
+import { renderSignInPrompt } from '../popup.js'
 
 // WXT-migration P0 characterization pins (2026-08-12)
 //
@@ -22,11 +26,77 @@ import { loadExtensionSource, loadExtensionSources } from './_load.mjs'
 // the fallback is itself the string 'Login failed' (:1055), which the catch
 // then prefixes, producing "Login failed: Login failed". Pinned as-is.
 //
-// Harness mirrors popup-oauth-cancel.test.mjs (same fixture, same load order,
+// Harness mirrors popup-oauth-cancel.test.mjs (same fixture, same realm inits,
 // window.close stubbed because jsdom's real one tears down the environment).
-let renderSignInPrompt
 let loginRequests
 let loginResponse
+
+/* caramel-base.js's session writer used to be a top-level function
+ * declaration, so the eval harness let a test replace it on globalThis.
+ * Under ESM the seam is vi.mock: the factory delegates to whatever
+ * `stubs.caramelSetSession` currently holds, and falls back to the real
+ * implementation when a test hasn't installed one. Stubbing it keeps a
+ * successful login from continuing into afterLoginSuccess()/initPopup() —
+ * this suite is about the form, not about what the popup renders next. */
+const stubs = vi.hoisted(() => ({ caramelSetSession: null }))
+
+vi.mock('../caramel-base.js', async importOriginal => {
+    const actual = await importOriginal()
+    return {
+        ...actual,
+        // `currentBrowser` is a live binding that initCaramelBase() assigns;
+        // a plain spread would freeze its pre-init `undefined`.
+        get currentBrowser() {
+            return actual.currentBrowser
+        },
+        caramelSetSession: (...args) =>
+            (stubs.caramelSetSession ?? actual.caramelSetSession)(...args),
+    }
+})
+
+/* Realm stub, lifted from tests/_load.mjs (installChromeStub), which the ESM
+ * port retires. Permissive Proxy: any unknown property materializes as a
+ * callable no-op, so a source file touching an API this suite doesn't care
+ * about cannot abort it. Two deliberate exceptions, exactly as _load.mjs had
+ * them — storage.*.get/set/remove invoke their callbacks like the real API
+ * (empty storage), and runtime.lastError stays UNDEFINED outside a failing
+ * callback, because the proxy would otherwise auto-create a truthy callable
+ * that caramelSendMessage reads as a closed port. */
+function installChromeStub() {
+    const cache = new WeakMap()
+    const wrap = target => {
+        if (cache.has(target)) return cache.get(target)
+        const proxy = new Proxy(target, {
+            get(obj, prop) {
+                if (prop === 'then' || typeof prop === 'symbol')
+                    return undefined
+                if (!(prop in obj)) obj[prop] = wrap(function () {})
+                return obj[prop]
+            },
+            apply: () => undefined,
+        })
+        cache.set(target, proxy)
+        return proxy
+    }
+    const stub = wrap(function chromeStubRoot() {})
+    for (const area of ['sync', 'local', 'session']) {
+        stub.storage[area].get = (_keys, cb) => {
+            if (typeof cb === 'function') cb({})
+        }
+        stub.storage[area].set = (_items, cb) => {
+            if (typeof cb === 'function') cb()
+        }
+        stub.storage[area].remove = (_keys, cb) => {
+            if (typeof cb === 'function') cb()
+        }
+    }
+    stub.runtime.lastError = undefined
+    globalThis.chrome = stub
+    globalThis.browser = undefined
+    window.chrome = stub
+    window.browser = undefined
+    return stub
+}
 
 beforeAll(() => {
     document.body.innerHTML =
@@ -34,23 +104,15 @@ beforeAll(() => {
         '<button id="settingsIcon" style="display:none"></button>' +
         '<div id="auth-container"></div>'
 
-    loadExtensionSource('coupon-constants.generated.js', [])
-    loadExtensionSources(
-        [
-            'caramel-base.js',
-            'dom-utils.js',
-            'store-detect.js',
-            'coupon-apply.js',
-            'coupon-fetch.js',
-            'coupon-runner.js',
-        ],
-        [],
-    )
+    // The realm's effects, in entrypoints/popup/main.ts order — the successor
+    // to the <script> list this suite used to eval.
+    installChromeStub()
+    initCouponConstants()
+    initCaramelBase()
+    initCouponRunner()
+
     globalThis.currentBrowser.tabs.create = () => {}
     window.close = vi.fn()
-    ;({ renderSignInPrompt } = loadExtensionSource('popup.js', [
-        'renderSignInPrompt',
-    ]))
 })
 
 beforeEach(async () => {
@@ -61,11 +123,7 @@ beforeEach(async () => {
         if (loginResponse instanceof Error) throw loginResponse
         return loginResponse
     }
-    // caramel-base.js's session writer is a top-level function declaration, so
-    // it is a replaceable global here. Stubbing it keeps a successful login
-    // from continuing into afterLoginSuccess()/initPopup() — this suite is
-    // about the form, not about what the popup renders next.
-    globalThis.caramelSetSession = vi.fn()
+    stubs.caramelSetSession = vi.fn()
     await renderSignInPrompt()
 })
 
@@ -105,15 +163,13 @@ describe('popup email/password login — the happy path', () => {
         await submitLogin('shopper@example.com', 'hunter2')
 
         const [request] = loginRequests
-        expect(request.url).toBe(
-            `${globalThis.CARAMEL_ENV.baseUrl}/api/extension/login`,
-        )
+        expect(request.url).toBe(`${CARAMEL_ENV.baseUrl}/api/extension/login`)
         expect(request.init.method).toBe('POST')
         expect(JSON.parse(request.init.body)).toEqual({
             email: 'shopper@example.com',
             password: 'hunter2',
         })
-        expect(globalThis.caramelSetSession).toHaveBeenCalledWith(
+        expect(stubs.caramelSetSession).toHaveBeenCalledWith(
             {
                 token: 'fresh-token',
                 user: {
@@ -184,7 +240,7 @@ describe('popup email/password login — what the user sees when it fails', () =
 
         expect(errorBox().textContent).toBe('Login failed: Failed to fetch')
         expect(errorBox().style.display).toBe('block')
-        expect(globalThis.caramelSetSession).not.toHaveBeenCalled()
+        expect(stubs.caramelSetSession).not.toHaveBeenCalled()
     })
 
     it('falls back to bare copy when the rejection carries no error field — and stutters doing it', async () => {

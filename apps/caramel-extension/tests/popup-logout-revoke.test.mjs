@@ -2,7 +2,10 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { loadExtensionSource, loadExtensionSources } from './_load.mjs'
+import { initCaramelBase } from '../caramel-base.js'
+import { initCouponConstants } from '../coupon-constants.generated.js'
+import { initCouponRunner } from '../coupon-runner.js'
+import { initPopup } from '../popup.js'
 
 // "Log out" used to be `storage.sync.remove(['token','user'])` and nothing
 // else, in all three places it appears. The bearer it forgot locally stayed
@@ -16,7 +19,6 @@ import { loadExtensionSource, loadExtensionSources } from './_load.mjs'
 // has to end up logged out on this device, so the local clear is unconditional
 // — but it must not be reordered ahead of the revoke, or the token needed to
 // authenticate the revoke would already be gone.
-let initPopup
 let syncData
 let requests
 let revokeResponse
@@ -25,24 +27,62 @@ const flush = async () => {
     for (let i = 0; i < 12; i++) await new Promise(r => setTimeout(r, 0))
 }
 
+/* Realm stub, lifted from tests/_load.mjs (installChromeStub), which the ESM
+ * port retires. Permissive Proxy: any unknown property materializes as a
+ * callable no-op, so a source file touching an API this suite doesn't care
+ * about cannot abort it. Two deliberate exceptions, exactly as _load.mjs had
+ * them — storage.*.get/set/remove invoke their callbacks like the real API
+ * (empty storage), and runtime.lastError stays UNDEFINED outside a failing
+ * callback, because the proxy would otherwise auto-create a truthy callable
+ * that caramelSendMessage reads as a closed port. */
+function installChromeStub() {
+    const cache = new WeakMap()
+    const wrap = target => {
+        if (cache.has(target)) return cache.get(target)
+        const proxy = new Proxy(target, {
+            get(obj, prop) {
+                if (prop === 'then' || typeof prop === 'symbol')
+                    return undefined
+                if (!(prop in obj)) obj[prop] = wrap(function () {})
+                return obj[prop]
+            },
+            apply: () => undefined,
+        })
+        cache.set(target, proxy)
+        return proxy
+    }
+    const stub = wrap(function chromeStubRoot() {})
+    for (const area of ['sync', 'local', 'session']) {
+        stub.storage[area].get = (_keys, cb) => {
+            if (typeof cb === 'function') cb({})
+        }
+        stub.storage[area].set = (_items, cb) => {
+            if (typeof cb === 'function') cb()
+        }
+        stub.storage[area].remove = (_keys, cb) => {
+            if (typeof cb === 'function') cb()
+        }
+    }
+    stub.runtime.lastError = undefined
+    globalThis.chrome = stub
+    globalThis.browser = undefined
+    window.chrome = stub
+    window.browser = undefined
+    return stub
+}
+
 beforeAll(() => {
     document.body.innerHTML =
         '<div id="loading-container"></div>' +
         '<button id="settingsIcon" style="display:none"></button>' +
         '<div id="auth-container"></div>'
 
-    loadExtensionSource('coupon-constants.generated.js', [])
-    loadExtensionSources(
-        [
-            'caramel-base.js',
-            'dom-utils.js',
-            'store-detect.js',
-            'coupon-apply.js',
-            'coupon-fetch.js',
-            'coupon-runner.js',
-        ],
-        [],
-    )
+    // The realm's effects, in entrypoints/popup/main.ts order — the successor
+    // to the <script> list this suite used to eval.
+    installChromeStub()
+    initCouponConstants()
+    initCaramelBase()
+    initCouponRunner()
 
     globalThis.currentBrowser.runtime.sendMessage = (message, cb) => {
         if (message?.action === 'getActiveTabDomainRecord') {
@@ -70,7 +110,6 @@ beforeAll(() => {
         for (const key of [].concat(keys)) delete syncData[key]
         if (cb) cb()
     }
-    ;({ initPopup } = loadExtensionSource('popup.js', ['initPopup']))
 })
 
 beforeEach(() => {

@@ -1,9 +1,8 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import {
-    backStorageArea,
-    loadExtensionSource,
-    loadExtensionSources,
-} from './_load.mjs'
+import { initCaramelBase } from '../caramel-base.js'
+import { initCouponConstants } from '../coupon-constants.generated.js'
+import { initCouponRunner } from '../coupon-runner.js'
+import { initPopup } from '../popup.js'
 
 // Pins the popup's session validation: a stored token is no longer trusted
 // forever. initPopup() fires GET /api/extension/me with the bearer IN
@@ -13,10 +12,9 @@ import {
 // changed). Network errors are NOT a logout — offline must never sign the
 // user out.
 //
-// Harness mirrors popup-settings-view.test.mjs: real load order, one
-// shared chrome stub, only the messaging transport + storage + fetch
-// stubbed.
-let initPopup
+// Harness mirrors popup-settings-view.test.mjs: the popup realm's own inits in
+// index.html order, one shared chrome stub, only the messaging transport +
+// storage + fetch stubbed.
 let syncData
 let meResponse
 let meInit
@@ -27,24 +25,81 @@ const flush = async () => {
     }
 }
 
+/* Realm stub, lifted from tests/_load.mjs (installChromeStub), which the ESM
+ * port retires. Permissive Proxy: any unknown property materializes as a
+ * callable no-op, so a source file touching an API this suite doesn't care
+ * about cannot abort it. Two deliberate exceptions, exactly as _load.mjs had
+ * them — storage.*.get/set/remove invoke their callbacks like the real API
+ * (empty storage), and runtime.lastError stays UNDEFINED outside a failing
+ * callback, because the proxy would otherwise auto-create a truthy callable
+ * that caramelSendMessage reads as a closed port. */
+function installChromeStub() {
+    const cache = new WeakMap()
+    const wrap = target => {
+        if (cache.has(target)) return cache.get(target)
+        const proxy = new Proxy(target, {
+            get(obj, prop) {
+                if (prop === 'then' || typeof prop === 'symbol')
+                    return undefined
+                if (!(prop in obj)) obj[prop] = wrap(function () {})
+                return obj[prop]
+            },
+            apply: () => undefined,
+        })
+        cache.set(target, proxy)
+        return proxy
+    }
+    const stub = wrap(function chromeStubRoot() {})
+    for (const area of ['sync', 'local', 'session']) {
+        stub.storage[area].get = (_keys, cb) => {
+            if (typeof cb === 'function') cb({})
+        }
+        stub.storage[area].set = (_items, cb) => {
+            if (typeof cb === 'function') cb()
+        }
+        stub.storage[area].remove = (_keys, cb) => {
+            if (typeof cb === 'function') cb()
+        }
+    }
+    stub.runtime.lastError = undefined
+    globalThis.chrome = stub
+    globalThis.browser = undefined
+    window.chrome = stub
+    window.browser = undefined
+    return stub
+}
+
+/** Backs one storage area with a real object, so a test can assert on what the
+ * code actually stored instead of on which API it called (lifted from
+ * tests/_load.mjs). */
+function backStorageArea(area, data = {}) {
+    const store = (globalThis.currentBrowser ?? globalThis.chrome).storage[area]
+    store.get = (_keys, cb) => {
+        if (typeof cb === 'function') cb({ ...data })
+    }
+    store.set = (items, cb) => {
+        Object.assign(data, items)
+        if (typeof cb === 'function') cb()
+    }
+    store.remove = (keys, cb) => {
+        for (const key of [].concat(keys)) delete data[key]
+        if (typeof cb === 'function') cb()
+    }
+    return data
+}
+
 beforeAll(() => {
     document.body.innerHTML =
         '<div id="loading-container"></div>' +
         '<button id="settingsIcon" style="display:none"></button>' +
         '<div id="auth-container"></div>'
 
-    loadExtensionSource('coupon-constants.generated.js', [])
-    loadExtensionSources(
-        [
-            'caramel-base.js',
-            'dom-utils.js',
-            'store-detect.js',
-            'coupon-apply.js',
-            'coupon-fetch.js',
-            'coupon-runner.js',
-        ],
-        [],
-    )
+    // The realm's effects, in entrypoints/popup/main.ts order — the successor
+    // to the <script> list this suite used to eval.
+    installChromeStub()
+    initCouponConstants()
+    initCaramelBase()
+    initCouponRunner()
 
     globalThis.currentBrowser.runtime.sendMessage = (message, cb) => {
         if (message?.action === 'getActiveTabDomainRecord') {
@@ -57,7 +112,6 @@ beforeAll(() => {
             cb(undefined)
         }
     }
-    ;({ initPopup } = loadExtensionSource('popup.js', ['initPopup']))
 })
 
 beforeEach(() => {

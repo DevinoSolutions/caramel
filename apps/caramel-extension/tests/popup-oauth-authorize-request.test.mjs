@@ -1,9 +1,9 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-    backStorageArea,
-    loadExtensionSource,
-    loadExtensionSources,
-} from './_load.mjs'
+import { initCaramelBase } from '../caramel-base.js'
+import { CARAMEL_ENV } from '../caramel-env.js'
+import { initCouponConstants } from '../coupon-constants.generated.js'
+import { initCouponRunner } from '../coupon-runner.js'
+import { renderSignInPrompt } from '../popup.js'
 
 // WXT-migration P0 characterization pins (2026-08-12): the REQUEST half of the
 // popup OAuth flow. popup-oauth-success/cancel.test.mjs pin the response half
@@ -17,7 +17,106 @@ import {
 //
 // Harness mirrors popup-oauth-cancel.test.mjs.
 
-let renderSignInPrompt
+/* Two collaborators the old eval harness let a test replace on globalThis
+ * (both were top-level function declarations); under ESM the seam is vi.mock.
+ *
+ *  - caramelSetSession: the lastError test swaps it out, so the factory
+ *    delegates to whatever `stubs.caramelSetSession` holds and falls back to
+ *    the real writer — every other test starts real.
+ *  - caramelSendMessage: initPopup's own first act (it awaits
+ *    getActiveTabDomainRecord(), which calls this synchronously), so counting
+ *    the calls carrying that action is how the two "did NOT re-render" pins
+ *    below observe initPopup. Under ESM that call resolves to popup.js's
+ *    module-local binding, so the old `globalThis.initPopup = vi.fn()` swap
+ *    has no seam to replace. Never settles, so the render chain stops there. */
+const stubs = vi.hoisted(() => ({
+    caramelSetSession: null,
+    caramelSendMessage: vi.fn(() => new Promise(() => {})),
+}))
+
+vi.mock('../caramel-base.js', async importOriginal => {
+    const actual = await importOriginal()
+    return {
+        ...actual,
+        // `currentBrowser` is a live binding that initCaramelBase() assigns;
+        // a plain spread would freeze its pre-init `undefined`.
+        get currentBrowser() {
+            return actual.currentBrowser
+        },
+        caramelSetSession: (...args) =>
+            (stubs.caramelSetSession ?? actual.caramelSetSession)(...args),
+        caramelSendMessage: stubs.caramelSendMessage,
+    }
+})
+
+/** How many times initPopup() has started since the last reset. */
+const initPopupRuns = () =>
+    stubs.caramelSendMessage.mock.calls.filter(
+        ([message]) => message?.action === 'getActiveTabDomainRecord',
+    ).length
+
+/* Realm stub, lifted from tests/_load.mjs (installChromeStub), which the ESM
+ * port retires. Permissive Proxy: any unknown property materializes as a
+ * callable no-op, so a source file touching an API this suite doesn't care
+ * about cannot abort it. Two deliberate exceptions, exactly as _load.mjs had
+ * them — storage.*.get/set/remove invoke their callbacks like the real API
+ * (empty storage), and runtime.lastError stays UNDEFINED outside a failing
+ * callback, because the proxy would otherwise auto-create a truthy callable
+ * that caramelSendMessage reads as a closed port. */
+function installChromeStub() {
+    const cache = new WeakMap()
+    const wrap = target => {
+        if (cache.has(target)) return cache.get(target)
+        const proxy = new Proxy(target, {
+            get(obj, prop) {
+                if (prop === 'then' || typeof prop === 'symbol')
+                    return undefined
+                if (!(prop in obj)) obj[prop] = wrap(function () {})
+                return obj[prop]
+            },
+            apply: () => undefined,
+        })
+        cache.set(target, proxy)
+        return proxy
+    }
+    const stub = wrap(function chromeStubRoot() {})
+    for (const area of ['sync', 'local', 'session']) {
+        stub.storage[area].get = (_keys, cb) => {
+            if (typeof cb === 'function') cb({})
+        }
+        stub.storage[area].set = (_items, cb) => {
+            if (typeof cb === 'function') cb()
+        }
+        stub.storage[area].remove = (_keys, cb) => {
+            if (typeof cb === 'function') cb()
+        }
+    }
+    stub.runtime.lastError = undefined
+    globalThis.chrome = stub
+    globalThis.browser = undefined
+    window.chrome = stub
+    window.browser = undefined
+    return stub
+}
+
+/** Backs one storage area with a real object, so a test can assert on what the
+ * code actually stored instead of on which API it called (lifted from
+ * tests/_load.mjs). */
+function backStorageArea(area, data = {}) {
+    const store = (globalThis.currentBrowser ?? globalThis.chrome).storage[area]
+    store.get = (_keys, cb) => {
+        if (typeof cb === 'function') cb({ ...data })
+    }
+    store.set = (items, cb) => {
+        Object.assign(data, items)
+        if (typeof cb === 'function') cb()
+    }
+    store.remove = (keys, cb) => {
+        for (const key of [].concat(keys)) delete data[key]
+        if (typeof cb === 'function') cb()
+    }
+    return data
+}
 
 beforeAll(() => {
     document.body.innerHTML =
@@ -25,28 +124,16 @@ beforeAll(() => {
         '<button id="settingsIcon" style="display:none"></button>' +
         '<div id="auth-container"></div>'
 
-    loadExtensionSource('coupon-constants.generated.js', [])
-    loadExtensionSources(
-        [
-            'caramel-base.js',
-            'dom-utils.js',
-            'store-detect.js',
-            'coupon-apply.js',
-            'coupon-fetch.js',
-            'coupon-runner.js',
-        ],
-        [],
-    )
+    // The realm's effects, in entrypoints/popup/main.ts order — the successor
+    // to the <script> list this suite used to eval.
+    installChromeStub()
+    initCouponConstants()
+    initCaramelBase()
+    initCouponRunner()
+
     globalThis.currentBrowser.tabs.create = () => {}
     window.close = vi.fn()
-    ;({ renderSignInPrompt } = loadExtensionSource('popup.js', [
-        'renderSignInPrompt',
-    ]))
-    realCaramelSetSession = globalThis.caramelSetSession
 })
-
-// The lastError test swaps caramelSetSession out; every test starts real.
-let realCaramelSetSession
 
 const REDIRECT = 'https://ext-id.chromiumapp.org/'
 
@@ -96,7 +183,8 @@ const clickProvider = async id => {
 const errorText = () => document.getElementById('loginErrorMessage').textContent
 
 beforeEach(async () => {
-    globalThis.caramelSetSession = realCaramelSetSession
+    stubs.caramelSetSession = null
+    stubs.caramelSendMessage.mockClear()
     recordFetch()
     await renderSignInPrompt()
 })
@@ -175,11 +263,9 @@ describe('popup OAuth — settle paths the response suites never reach', () => {
 
     it('a session write that fails via chrome.runtime.lastError surfaces the reason and stays signed out', async () => {
         withIdentity(async () => `${REDIRECT}?code=CODE123&state=S1`)
-        globalThis.initPopup = vi.fn()
         // Real chrome semantics: lastError is set only inside the failing
-        // callback. caramelSetSession is a top-level function declaration, so
-        // the eval realm resolves it through globalThis — replaceable here.
-        globalThis.caramelSetSession = (_session, cb) => {
+        // callback.
+        stubs.caramelSetSession = (_session, cb) => {
             globalThis.chrome.runtime.lastError = { message: 'disk full' }
             cb()
             globalThis.chrome.runtime.lastError = undefined
@@ -190,7 +276,7 @@ describe('popup OAuth — settle paths the response suites never reach', () => {
             expect(errorText()).toBe('OAuth sign-in failed: disk full'),
         )
 
-        expect(globalThis.initPopup).not.toHaveBeenCalled()
+        expect(initPopupRuns()).toBe(0)
         expect(document.getElementById('googleSignInBtn').disabled).toBe(false)
     })
 
@@ -198,7 +284,6 @@ describe('popup OAuth — settle paths the response suites never reach', () => {
         withIdentity(async () => `${REDIRECT}?code=CODE123&state=S1`)
         const local = backStorageArea('local', {})
         backStorageArea('sync', {})
-        globalThis.initPopup = vi.fn()
         Object.defineProperty(document, 'visibilityState', {
             configurable: true,
             get: () => 'hidden',
@@ -209,7 +294,7 @@ describe('popup OAuth — settle paths the response suites never reach', () => {
             await vi.waitFor(() => expect(local.token).toBe('tok'))
             // The settle delay (popup.js:815) has already elapsed once the
             // token is visible; the gate (:819) must have skipped the render.
-            expect(globalThis.initPopup).not.toHaveBeenCalled()
+            expect(initPopupRuns()).toBe(0)
         } finally {
             delete document.visibilityState
         }

@@ -1,5 +1,8 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest'
-import { loadExtensionSource, loadExtensionSources } from './_load.mjs'
+import { initCaramelBase } from '../caramel-base.js'
+import { initCouponConstants } from '../coupon-constants.generated.js'
+import { initCouponRunner } from '../coupon-runner.js'
+import { renderSignInPrompt } from '../popup.js'
 
 // Pins the popup OAuth fallback (issue #139): Firefox deliberately ships
 // without the `identity` permission (manifest-sync.test.ts header), so the
@@ -10,13 +13,56 @@ import { loadExtensionSource, loadExtensionSources } from './_load.mjs'
 // identity IS available (Chrome), the in-popup launchWebAuthFlow path must
 // stay untouched.
 //
-// Harness mirrors popup-auth-validate.test.mjs: real load order, one shared
-// chrome stub, only storage + tabs + fetch stubbed. Gotcha the stub forces:
-// _load.mjs's chrome stub is a permissive Proxy that AUTO-CREATES any
-// missing property (currentBrowser.identity would materialize as a truthy
+// Harness mirrors popup-auth-validate.test.mjs: the popup realm's own inits in
+// index.html order, one shared chrome stub, only storage + tabs + fetch
+// stubbed. Gotcha the stub forces: it is a permissive Proxy that AUTO-CREATES
+// any missing property (currentBrowser.identity would materialize as a truthy
 // no-op), so the Firefox shape must be assigned EXPLICITLY as undefined.
-let renderSignInPrompt
 let createdTabs
+
+/* Realm stub, lifted from tests/_load.mjs (installChromeStub), which the ESM
+ * port retires. Permissive Proxy: any unknown property materializes as a
+ * callable no-op, so a source file touching an API this suite doesn't care
+ * about cannot abort it. Two deliberate exceptions, exactly as _load.mjs had
+ * them — storage.*.get/set/remove invoke their callbacks like the real API
+ * (empty storage), and runtime.lastError stays UNDEFINED outside a failing
+ * callback, because the proxy would otherwise auto-create a truthy callable
+ * that caramelSendMessage reads as a closed port. */
+function installChromeStub() {
+    const cache = new WeakMap()
+    const wrap = target => {
+        if (cache.has(target)) return cache.get(target)
+        const proxy = new Proxy(target, {
+            get(obj, prop) {
+                if (prop === 'then' || typeof prop === 'symbol')
+                    return undefined
+                if (!(prop in obj)) obj[prop] = wrap(function () {})
+                return obj[prop]
+            },
+            apply: () => undefined,
+        })
+        cache.set(target, proxy)
+        return proxy
+    }
+    const stub = wrap(function chromeStubRoot() {})
+    for (const area of ['sync', 'local', 'session']) {
+        stub.storage[area].get = (_keys, cb) => {
+            if (typeof cb === 'function') cb({})
+        }
+        stub.storage[area].set = (_items, cb) => {
+            if (typeof cb === 'function') cb()
+        }
+        stub.storage[area].remove = (_keys, cb) => {
+            if (typeof cb === 'function') cb()
+        }
+    }
+    stub.runtime.lastError = undefined
+    globalThis.chrome = stub
+    globalThis.browser = undefined
+    window.chrome = stub
+    window.browser = undefined
+    return stub
+}
 
 beforeAll(() => {
     document.body.innerHTML =
@@ -24,26 +70,17 @@ beforeAll(() => {
         '<button id="settingsIcon" style="display:none"></button>' +
         '<div id="auth-container"></div>'
 
-    loadExtensionSource('coupon-constants.generated.js', [])
-    loadExtensionSources(
-        [
-            'caramel-base.js',
-            'dom-utils.js',
-            'store-detect.js',
-            'coupon-apply.js',
-            'coupon-fetch.js',
-            'coupon-runner.js',
-        ],
-        [],
-    )
+    // The realm's effects, in entrypoints/popup/main.ts order — the successor
+    // to the <script> list this suite used to eval.
+    installChromeStub()
+    initCouponConstants()
+    initCaramelBase()
+    initCouponRunner()
 
     createdTabs = []
     globalThis.currentBrowser.tabs.create = tab => createdTabs.push(tab)
     // jsdom's real window.close() tears the environment down mid-suite.
     window.close = vi.fn()
-    ;({ renderSignInPrompt } = loadExtensionSource('popup.js', [
-        'renderSignInPrompt',
-    ]))
 })
 
 const firefoxShape = () => {
