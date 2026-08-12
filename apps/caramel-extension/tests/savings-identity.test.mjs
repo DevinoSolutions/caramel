@@ -1,5 +1,9 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { backStorageArea, loadExtensionSources } from './_load.mjs'
+import {
+    caramelGetSavings,
+    caramelRecordSaving,
+    initCaramelBase,
+} from '../caramel-base.js'
 
 // The savings history is a shopping record: store names, codes, amounts. It was
 // one device-wide list, so logging out and handing the laptop to someone else
@@ -15,15 +19,62 @@ import { backStorageArea, loadExtensionSources } from './_load.mjs'
 // keeps the history you built as a guest, and signing out only puts your
 // account's entries away.
 
-let caramelGetSavings
-let caramelRecordSaving
 let storage
+let chromeStub
+
+/* Chrome, plus the storage-backing helper both lifted out of tests/_load.mjs,
+ * which the ESM port retires.
+ *
+ * backStorageArea backs one area with a REAL object, so a test can assert on
+ * what the code actually stored instead of on which API it called. Worth
+ * keeping: the session (token + user) moved from storage.sync to storage.LOCAL
+ * so the credential stops roaming via Chrome Sync, and every suite that had
+ * hand-stubbed `sync` went red at once. Pass the SAME object for 'local' and
+ * 'sync' when a test wants one merged view of storage. */
+function installChromeStub() {
+    const cache = new WeakMap()
+    function wrap(target) {
+        if (cache.has(target)) return cache.get(target)
+        const proxy = new Proxy(target, {
+            get(obj, prop) {
+                if (prop === 'then' || typeof prop === 'symbol')
+                    return undefined
+                if (!(prop in obj)) obj[prop] = wrap(function () {})
+                return obj[prop]
+            },
+            apply: () => undefined,
+        })
+        cache.set(target, proxy)
+        return proxy
+    }
+    const stub = wrap(function chromeStubRoot() {})
+    stub.runtime.lastError = undefined
+    globalThis.chrome = stub
+    globalThis.browser = undefined
+    window.chrome = stub
+    window.browser = undefined
+    return stub
+}
+
+function backStorageArea(area, data = {}) {
+    const store = chromeStub.storage[area]
+    store.get = (_keys, cb) => {
+        if (typeof cb === 'function') cb({ ...data })
+    }
+    store.set = (items, cb) => {
+        Object.assign(data, items)
+        if (typeof cb === 'function') cb()
+    }
+    store.remove = (keys, cb) => {
+        for (const key of [].concat(keys)) delete data[key]
+        if (typeof cb === 'function') cb()
+    }
+    return data
+}
 
 beforeAll(() => {
-    ;({ caramelGetSavings, caramelRecordSaving } = loadExtensionSources(
-        ['caramel-base.js'],
-        ['caramelGetSavings', 'caramelRecordSaving'],
-    ))
+    chromeStub = installChromeStub()
+    initCaramelBase()
 })
 
 /** Signs in as `username`, or out when passed null. */

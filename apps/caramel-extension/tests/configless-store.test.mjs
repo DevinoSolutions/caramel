@@ -1,5 +1,12 @@
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { loadExtensionSources } from './_load.mjs'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { initCaramelBase } from '../caramel-base.js'
+import { startApplyingCoupons } from '../coupon-runner.js'
+import {
+    _caramelResetCachedCodes,
+    caramelConfiglessRecord,
+    getDomainRecord,
+    tryInitialize,
+} from '../store-detect.js'
 
 // A store we hold codes for, that nobody has written a config for.
 //
@@ -32,10 +39,6 @@ import { loadExtensionSources } from './_load.mjs'
 // The bar to appear is unchanged in spirit and still high: a cart-shaped URL,
 // a readable cart with something in it, and codes for the domain.
 
-let startApplyingCoupons
-let tryInitialize
-let caramelConfiglessRecord
-
 let finalModals
 let promptedWith
 let appliedCodes
@@ -58,20 +61,110 @@ function setPath(pathname) {
 const messageOf = call => call[2]
 const listOf = call => call[4]
 
+// The collaborators the old harness replaced on globalThis are module imports
+// now, so each is replaced in the module the flow reads it from. The factories
+// delegate to mutable impls because vi.mock is hoisted and several tests swap
+// one for their own case.
+let applyCouponImpl
+let probeCartJsonImpl
+vi.mock('../coupon-apply.js', async importOriginal => {
+    const actual = await importOriginal()
+    return {
+        ...actual,
+        // Unstubbed by default — one test spies on it, and the rest rely on the
+        // real generic search finding no promo box.
+        applyCoupon: (...args) =>
+            (applyCouponImpl ?? actual.applyCoupon)(...args),
+        probeCartJson: (...args) => probeCartJsonImpl(...args),
+        applyViaDiscountLink: async code => {
+            appliedCodes.push(code)
+            return {
+                token: 't',
+                total_price: 9000,
+                item_count: 2,
+                currency: 'USD',
+            }
+        },
+    }
+})
+vi.mock('../UI-helpers.js', async importOriginal => ({
+    ...(await importOriginal()),
+    showFinalModal: (...args) => finalModals.push(args),
+    showTestingModal: async () => {},
+    updateTestingModal: async () => {},
+    hideTestingModal: () => {},
+    insertCaramelPrompt: rec => promptedWith.push(rec),
+}))
+vi.mock('../dom-utils.js', async importOriginal => ({
+    ...(await importOriginal()),
+    waitForElement: async () => {
+        throw new Error('not found')
+    },
+}))
+vi.mock('../caramel-base.js', async importOriginal => {
+    const actual = await importOriginal()
+    return {
+        ...actual,
+        // `currentBrowser` is assigned by initCaramelBase(); a spread would
+        // freeze the pre-init undefined, so the live binding is forwarded.
+        get currentBrowser() {
+            return actual.currentBrowser
+        },
+        caramelRecordSaving: () => {},
+    }
+})
+
+/* The coupon catalogue is NOT mocked at the module boundary: coupon-fetch and
+ * store-detect import each other, and a vi.mock factory that has to evaluate
+ * the real coupon-fetch (importOriginal) is still mid-flight when store-detect
+ * asks for it — so getCachedCodes binds the real fetchCoupons and the stub is
+ * silently bypassed. Stubbing the TRANSPORT instead (the service-worker message
+ * fetchCouponsPage sends) has no such hazard and exercises more of the path. */
+let couponsForSite
+function installChromeStub() {
+    const cache = new WeakMap()
+    function wrap(target) {
+        if (cache.has(target)) return cache.get(target)
+        const proxy = new Proxy(target, {
+            get(obj, prop) {
+                if (prop === 'then' || typeof prop === 'symbol')
+                    return undefined
+                if (!(prop in obj)) obj[prop] = wrap(function () {})
+                return obj[prop]
+            },
+            apply: () => undefined,
+        })
+        cache.set(target, proxy)
+        return proxy
+    }
+    const stub = wrap(function chromeStubRoot() {})
+    for (const area of ['sync', 'local', 'session']) {
+        stub.storage[area].get = (_keys, cb) => {
+            if (typeof cb === 'function') cb({})
+        }
+        stub.storage[area].set = (_items, cb) => {
+            if (typeof cb === 'function') cb()
+        }
+    }
+    stub.runtime.lastError = undefined
+    stub.runtime.sendMessage = (message, cb) => {
+        if (message?.action === 'fetchCoupons') {
+            fetchedSites.push(message.site)
+            cb(couponsForSite())
+        } else {
+            cb({})
+        }
+    }
+    globalThis.chrome = stub
+    globalThis.browser = undefined
+    window.chrome = stub
+    window.browser = undefined
+    return stub
+}
+
 beforeAll(() => {
-    ;({ startApplyingCoupons, caramelConfiglessRecord } = loadExtensionSources(
-        [
-            'coupon-constants.generated.js',
-            'caramel-base.js',
-            'dom-utils.js',
-            'store-detect.js',
-            'coupon-apply.js',
-            'coupon-fetch.js',
-            'coupon-runner.js',
-        ],
-        ['startApplyingCoupons', 'caramelConfiglessRecord'],
-    ))
-    tryInitialize = globalThis.tryInitialize
+    installChromeStub()
+    initCaramelBase()
 })
 
 beforeEach(() => {
@@ -86,32 +179,18 @@ beforeEach(() => {
     // Codes are cached per page by domain, which is right in a real tab and
     // wrong across tests — without this, a later case sees the previous one's
     // catalogue instead of its own.
-    globalThis._caramelCodes = null
-    globalThis.showFinalModal = (...args) => finalModals.push(args)
-    globalThis.showTestingModal = async () => {}
-    globalThis.updateTestingModal = async () => {}
-    globalThis.hideTestingModal = () => {}
-    globalThis.insertCaramelPrompt = rec => promptedWith.push(rec)
-    globalThis.reportOutcome = () => {}
-    globalThis.caramelRecordSaving = () => {}
-    globalThis.waitForElement = async () => {
-        throw new Error('not found')
-    }
-    globalThis.getDomainRecord = async () => null
-    globalThis.fetchCoupons = async site => {
-        fetchedSites.push(site)
-        return COUPONS
-    }
-    globalThis.probeCartJson = async () => ({
+    _caramelResetCachedCodes()
+    // A store list that holds no row for this host: getDomainRecord's own
+    // "no config" answer, rather than a stub standing in front of it.
+    getDomainRecord.cache = []
+    applyCouponImpl = null
+    couponsForSite = () => ({ coupons: COUPONS })
+    probeCartJsonImpl = async () => ({
         token: 't',
         total_price: 10000,
         item_count: 2,
         currency: 'USD',
     })
-    globalThis.applyViaDiscountLink = async code => {
-        appliedCodes.push(code)
-        return { token: 't', total_price: 9000, item_count: 2, currency: 'USD' }
-    }
 })
 
 describe('a checkout on a store with no config row', () => {
@@ -124,7 +203,7 @@ describe('a checkout on a store with no config row', () => {
 
     it('stays silent when we hold no codes for it', async () => {
         // A readable cart is not a reason to interrupt someone we cannot help.
-        globalThis.fetchCoupons = async () => []
+        couponsForSite = () => ({ coupons: [] })
 
         await tryInitialize()
 
@@ -149,7 +228,7 @@ describe('when the cart stops being readable mid-flow', () => {
     beforeEach(() => {
         // The shopper emptied it, or moved into a checkout that no longer
         // answers /cart.js — the one way to reach the DOM path with no config.
-        globalThis.probeCartJson = async () => null
+        probeCartJsonImpl = async () => null
     })
 
     it('does not grind a promo box it has no selectors for', async () => {
@@ -157,7 +236,7 @@ describe('when the cart stops being readable mid-flow', () => {
         // generic search finds no promo box, so nothing is ever typed at the
         // store. This is the property that makes a special case unnecessary.
         const domAttempts = []
-        globalThis.applyCoupon = async (_rec, code) => {
+        applyCouponImpl = async (_rec, code) => {
             domAttempts.push(code)
             return { success: false, committed: false, errorIsNew: false }
         }
@@ -202,7 +281,7 @@ describe('the apply flow with no record at all', () => {
     })
 
     it('still says so plainly when there really are no codes', async () => {
-        globalThis.fetchCoupons = async () => []
+        couponsForSite = () => ({ coupons: [] })
 
         await startApplyingCoupons(null)
 
@@ -213,9 +292,9 @@ describe('the apply flow with no record at all', () => {
     it('does not turn an unreachable API into a claim about the store', async () => {
         // Offline: we know nothing about the catalogue, so the message has to
         // be about us, and there is nothing to hand over.
-        globalThis.fetchCoupons = async () => {
-            throw new Error('offline')
-        }
+        // The worker reports its own failures in-band; fetchCouponsPage turns
+        // an `error` field into the throw the old stub raised directly.
+        couponsForSite = () => ({ error: 'offline' })
 
         await startApplyingCoupons(null)
 

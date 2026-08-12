@@ -217,7 +217,9 @@ function _shopifyShopHostMatches(host, domain) {
     return !!brandLabel && shop === brandLabel
 }
 
-function _hostMatchesDomain(host, domain) {
+// Exported for tests/host-matches-domain.test.mjs, which pins this boundary
+// directly (the rest of the file reaches it through getDomainRecord).
+export function _hostMatchesDomain(host, domain) {
     if (!host || !domain) return false
     host = String(host).toLowerCase()
     domain = String(domain).toLowerCase()
@@ -320,7 +322,8 @@ function _caramelReferrerCartBounce() {
  * CARAMEL_CART_PATH_RE, and only the FIRST label — a cart word deeper in the
  * host (secure.cart.example) is not what this page calls itself. Still a rule
  * about URL shape, never about one store. */
-function _caramelCartHostname(hostname) {
+// Exported for tests/cart-capability-gate.test.mjs (the host-vocabulary pins).
+export function _caramelCartHostname(hostname) {
     return /^(cart|carts|basket|checkout|checkouts)\./i.test(hostname)
 }
 
@@ -387,11 +390,16 @@ async function _platformCartUsable() {
  * a promo box and hands the codes over to copy. So there is nothing to flag and
  * nothing to special-case; a record carrying just the domain is the whole
  * difference between helping here and staying silent. */
-function caramelConfiglessRecord(hostname) {
+// Exported for tests/configless-store.test.mjs, which drives the apply flow
+// with exactly this record.
+export function caramelConfiglessRecord(hostname) {
     return { domain: hostname }
 }
 
-async function isCheckout() {
+// Exported for tests/cart-capability-gate.test.mjs,
+// tests/cart-host-intent.test.mjs and tests/disclosure-reveal.test.mjs, which
+// pin this gate directly.
+export async function isCheckout() {
     const rec = await getDomainRecord(location.hostname)
     /* No config row is not the same as nothing we can do.
      *

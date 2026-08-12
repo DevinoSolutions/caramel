@@ -1,9 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
-import {
-    backStorageArea,
-    getOnMessageListeners,
-    loadExtensionSources,
-} from './_load.mjs'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 // Opt-in cloud savings sync, end to end inside the extension: caramel-base.js
 // records and queues, caramelSendMessage crosses into the REAL background.js
@@ -20,6 +15,8 @@ import {
 //     in next.
 
 let base
+let chromeStub
+let onMessageListeners
 let localData
 let fetchCalls
 /** Stands in for savings_events, unique on client_event_id like the real one. */
@@ -27,59 +24,91 @@ let serverRows
 let accountSyncEnabled
 let serverDown
 
-/* Backs ONE storage area, with ONE data object, on BOTH chrome stubs this
- * realm ends up holding.
+/* ONE chrome for the whole realm, recording the listeners background.js
+ * registers — the stub and the storage-backing helper both lifted out of
+ * tests/_load.mjs, which the ESM port retires.
  *
- * caramel-base.js pins `window.currentBrowser` on its first load and guards the
- * assignment with `window.__caramel_shared_utils_loaded` — a window flag that
- * survives every reload inside a jsdom file. So from the SECOND test onward
- * caramel-base keeps the stub installed for the first test, while background.js
- * (`const currentBrowser = chrome`) binds the freshly installed one. They are
- * two different objects with two different storages.
+ * backStorageArea backs an area with a REAL object, so a test can assert on
+ * what the code actually stored rather than on which API it called.
  *
- * Backing only the one _load.mjs's helper targets left the other reading empty
- * storage, and the symptom was pointed: settings and history worked, while the
- * worker's getStoredToken() found no token and sent every request unauthorized —
- * a signed-in fixture producing signed-out traffic, only when the file ran as a
- * whole. Sharing one data object between both stubs is also what a real browser
- * has: one storage, many references. */
-function backStorageEverywhere(area, data) {
-    const pinned = globalThis.currentBrowser
-    const fresh = globalThis.chrome
-    backStorageArea(area, data)
-    if (fresh && fresh !== pinned) {
-        globalThis.currentBrowser = fresh
-        backStorageArea(area, data)
-        globalThis.currentBrowser = pinned
+ * The old harness needed a second helper here (backStorageEverywhere) because
+ * caramel-base pinned `window.currentBrowser` on its FIRST load behind a window
+ * flag that survived every reload, so from the second test onward caramel-base
+ * and background.js held two different stubs with two different storages — a
+ * signed-in fixture produced signed-out worker traffic. Clearing that flag with
+ * the module registry is what makes one stub, one storage correct again: which
+ * is what a real browser has. */
+function installChromeStub() {
+    const cache = new WeakMap()
+    function wrap(target) {
+        if (cache.has(target)) return cache.get(target)
+        const proxy = new Proxy(target, {
+            get(obj, prop) {
+                if (prop === 'then' || typeof prop === 'symbol')
+                    return undefined
+                if (!(prop in obj)) obj[prop] = wrap(function () {})
+                return obj[prop]
+            },
+            apply: () => undefined,
+        })
+        cache.set(target, proxy)
+        return proxy
+    }
+    const stub = wrap(function chromeStubRoot() {})
+    // Real Chrome leaves this undefined on success; the permissive stub would
+    // auto-create a truthy callable that caramelSendMessage reads as a dead port.
+    stub.runtime.lastError = undefined
+    onMessageListeners = []
+    stub.runtime.onMessage.addListener = fn => onMessageListeners.push(fn)
+    globalThis.chrome = stub
+    globalThis.browser = undefined
+    window.chrome = stub
+    window.browser = undefined
+    // caramel-base publishes its browser handle on the window and reuses
+    // whatever it finds there — window state, which a fresh module registry
+    // does not clear — so without this it would stay bound to the PREVIOUS
+    // test's stub while background.js binds this one: two storages, and a
+    // signed-in fixture producing signed-out worker traffic.
+    window.currentBrowser = undefined
+    return stub
+}
+
+function backStorageArea(area, data = {}) {
+    const store = chromeStub.storage[area]
+    store.get = (_keys, cb) => {
+        if (typeof cb === 'function') cb({ ...data })
+    }
+    store.set = (items, cb) => {
+        Object.assign(data, items)
+        if (typeof cb === 'function') cb()
+    }
+    store.remove = (keys, cb) => {
+        for (const key of [].concat(keys)) delete data[key]
+        if (typeof cb === 'function') cb()
     }
     return data
 }
 
-function loadRealm() {
-    base = loadExtensionSources(
-        ['caramel-base.js', 'background.js'],
-        [
-            'caramelGetSettings',
-            'caramelSetSettings',
-            'caramelGetSavings',
-            'caramelRecordSaving',
-            'caramelSyncSavings',
-        ],
-    )
-    // Real Chrome leaves this undefined on success; the permissive stub would
-    // auto-create a truthy callable that caramelSendMessage reads as a dead port.
-    globalThis.chrome.runtime.lastError = undefined
-    globalThis.currentBrowser.runtime.lastError = undefined
+async function loadRealm() {
+    // A fresh module registry per test: caramel-base and background.js both
+    // hold module state (the settings cache, the sync in-flight promise) that
+    // the old per-test re-eval reset.
+    vi.resetModules()
+    chromeStub = installChromeStub()
+    base = await import('../caramel-base.js')
+    const background = await import('../background.js')
+    base.initCaramelBase()
+    background.initBackground()
 
-    localData = backStorageEverywhere('local', {})
+    localData = backStorageArea('local', {})
     // Settings live here; the tests drive them through caramelSetSettings
     // rather than by poking the object, so the handle is not kept.
-    backStorageEverywhere('sync', {})
+    backStorageArea('sync', {})
 
     // The real transport: content script / popup → service worker.
-    globalThis.currentBrowser.runtime.sendMessage = (message, callback) => {
+    chromeStub.runtime.sendMessage = (message, callback) => {
         let answered = false
-        for (const listener of getOnMessageListeners()) {
+        for (const listener of onMessageListeners) {
             listener(message, {}, response => {
                 if (answered) return
                 answered = true
@@ -209,8 +238,8 @@ async function record(entry) {
     await base.caramelSyncSavings()
 }
 
-beforeEach(() => {
-    loadRealm()
+beforeEach(async () => {
+    await loadRealm()
     installFakeServer()
 })
 
@@ -473,10 +502,7 @@ describe('an event the server permanently refuses is not retried forever', () =>
         const list = await stored()
         list[0].amount = 0
         await new Promise(resolve =>
-            globalThis.currentBrowser.storage.local.set(
-                { caramel_savings: list },
-                resolve,
-            ),
+            chromeStub.storage.local.set({ caramel_savings: list }, resolve),
         )
 
         serverDown = false
@@ -616,7 +642,7 @@ describe('the popup switch writes the account flag, not just the device', () => 
     it('PATCHes the account and reports the persisted value back', async () => {
         setSession('ada')
         const response = await new Promise(resolve =>
-            globalThis.currentBrowser.runtime.sendMessage(
+            chromeStub.runtime.sendMessage(
                 { action: 'setSavingsSync', enabled: true },
                 resolve,
             ),
@@ -635,7 +661,7 @@ describe('the popup switch writes the account flag, not just the device', () => 
         setSession('ada')
         serverDown = true
         const response = await new Promise(resolve =>
-            globalThis.currentBrowser.runtime.sendMessage(
+            chromeStub.runtime.sendMessage(
                 { action: 'setSavingsSync', enabled: true },
                 resolve,
             ),

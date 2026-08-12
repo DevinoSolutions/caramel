@@ -1,5 +1,9 @@
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { loadExtensionSources } from './_load.mjs'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+    _caramelCartHostname,
+    getDomainRecord,
+    isCheckout,
+} from '../store-detect.js'
 
 // Whether to offer help on a page was decided entirely by "does the config's
 // promo selector match something visible here". That asks about our
@@ -15,10 +19,28 @@ import { loadExtensionSources } from './_load.mjs'
 // A store that has coupons must be usable. So the gate now also opens on
 // capability: a live cart, with something in it, that we can read and drive.
 
-let isCheckout
 let probeCalls
+let probeCartJsonImpl
 
-const REC = { domain: 'example.com', couponInput: '#promo' }
+// The store list is now seeded into getDomainRecord's own cache instead of a
+// stub standing in front of it, so the record has to be for the host this realm
+// is actually on — nothing below reads the domain itself.
+const REC = { domain: location.hostname, couponInput: '#promo' }
+
+// Replaced where isCheckout reads them (module imports, not globals). Each mock
+// delegates to a mutable impl so a test can still swap one — vi.mock is hoisted.
+vi.mock('../coupon-apply.js', async importOriginal => ({
+    ...(await importOriginal()),
+    probeCartJson: (...args) => probeCartJsonImpl(...args),
+}))
+// jsdom has no layout, so the visibility test fails closed for every element —
+// which is exactly the state this gate exists for: no promo box.
+vi.mock('../dom-utils.js', async importOriginal => ({
+    ...(await importOriginal()),
+    waitForElement: async () => {
+        throw new Error('not found')
+    },
+}))
 
 function setPath(pathname) {
     window.history.replaceState({}, '', pathname)
@@ -29,35 +51,13 @@ function setReferrer(value) {
     Object.defineProperty(document, 'referrer', { value, configurable: true })
 }
 
-let _caramelCartHostname
-
-beforeAll(() => {
-    ;({ isCheckout, _caramelCartHostname } = loadExtensionSources(
-        [
-            'coupon-constants.generated.js',
-            'caramel-base.js',
-            'dom-utils.js',
-            'store-detect.js',
-            'coupon-apply.js',
-            'coupon-fetch.js',
-            'coupon-runner.js',
-        ],
-        ['isCheckout', '_caramelCartHostname'],
-    ))
-})
-
 beforeEach(() => {
     document.body.innerHTML = ''
     probeCalls = 0
     setPath('/')
     setReferrer('')
-    globalThis.getDomainRecord = async () => REC
-    // jsdom has no layout, so the visibility test fails closed for every
-    // element — which is exactly the state this gate exists for: no promo box.
-    globalThis.waitForElement = async () => {
-        throw new Error('not found')
-    }
-    globalThis.probeCartJson = async () => {
+    getDomainRecord.cache = [REC]
+    probeCartJsonImpl = async () => {
         probeCalls++
         return { token: 't', total_price: 4499, item_count: 2, currency: 'USD' }
     }
@@ -85,7 +85,7 @@ describe('isCheckout — capability, not just configuration', () => {
 
     it('stays quiet on a cart the shopper has not filled', async () => {
         setPath('/cart')
-        globalThis.probeCartJson = async () => ({
+        probeCartJsonImpl = async () => ({
             token: 't',
             total_price: 0,
             item_count: 0,
@@ -99,7 +99,7 @@ describe('isCheckout — capability, not just configuration', () => {
         // Non-Shopify-class store: the probe simply fails, and a page with no
         // promo box and no readable cart is a page we cannot help on.
         setPath('/cart')
-        globalThis.probeCartJson = async () => null
+        probeCartJsonImpl = async () => null
 
         expect(await isCheckout()).toBe(false)
     })
@@ -138,7 +138,7 @@ describe('isCheckout — capability, not just configuration', () => {
     // own cart page, and the checks below keep it off every other page.
     describe('a store with no config row of its own', () => {
         beforeEach(() => {
-            globalThis.getDomainRecord = async () => null
+            getDomainRecord.cache = []
         })
 
         it('is helped anyway when its cart is readable and has something in it', async () => {
@@ -149,14 +149,14 @@ describe('isCheckout — capability, not just configuration', () => {
 
         it('is left alone when the platform has no cart to read', async () => {
             setPath('/cart')
-            globalThis.probeCartJson = async () => null
+            probeCartJsonImpl = async () => null
 
             expect(await isCheckout()).toBe(false)
         })
 
         it('is left alone when the cart is empty', async () => {
             setPath('/cart')
-            globalThis.probeCartJson = async () => ({
+            probeCartJsonImpl = async () => ({
                 token: 't',
                 total_price: 0,
                 item_count: 0,

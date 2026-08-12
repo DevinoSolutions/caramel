@@ -1,9 +1,62 @@
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { initBackground } from '../background.js'
+import { initCaramelBase } from '../caramel-base.js'
 import {
-    getOnMessageListeners,
-    loadExtensionSource,
-    loadExtensionSources,
-} from './_load.mjs'
+    _caramelEvaluatedUrls,
+    caramelHandleUrlChanged,
+    initCouponRunner,
+} from '../coupon-runner.js'
+
+// startCheckoutDetection is what a re-run COSTS, so it is replaced where
+// coupon-runner reads it (module import, not a global).
+let detectionRuns
+vi.mock('../store-detect.js', async importOriginal => ({
+    ...(await importOriginal()),
+    startCheckoutDetection: async () => {
+        detectionRuns.push(location.href)
+    },
+}))
+
+/* One realm's chrome, recording the listeners the source registers — the
+ * getOnMessageListeners() seam the old harness owned. Installed twice in this
+ * file, once per realm: the worker's listeners and the content script's are
+ * different registrations and must not be read off one shared list. */
+function installChromeStub() {
+    const cache = new WeakMap()
+    function wrap(target) {
+        if (cache.has(target)) return cache.get(target)
+        const proxy = new Proxy(target, {
+            get(obj, prop) {
+                if (prop === 'then' || typeof prop === 'symbol')
+                    return undefined
+                if (!(prop in obj)) obj[prop] = wrap(function () {})
+                return obj[prop]
+            },
+            apply: () => undefined,
+        })
+        cache.set(target, proxy)
+        return proxy
+    }
+    const stub = wrap(function chromeStubRoot() {})
+    for (const area of ['sync', 'local', 'session']) {
+        stub.storage[area].get = (_keys, cb) => {
+            if (typeof cb === 'function') cb({})
+        }
+        stub.storage[area].set = (_items, cb) => {
+            if (typeof cb === 'function') cb()
+        }
+    }
+    stub.runtime.lastError = undefined
+    const onMessage = []
+    const onTabUpdated = []
+    stub.runtime.onMessage.addListener = fn => onMessage.push(fn)
+    stub.tabs.onUpdated.addListener = fn => onTabUpdated.push(fn)
+    globalThis.chrome = stub
+    globalThis.browser = undefined
+    window.chrome = stub
+    window.browser = undefined
+    return { stub, onMessage, onTabUpdated }
+}
 
 // Detection ran once, when the document loaded, and never again. On a store
 // that rewrites its own address bar that is one evaluation too few.
@@ -23,10 +76,11 @@ describe('background: telling the page its URL moved', () => {
 
     beforeAll(() => {
         globalThis.fetch = async () => ({ ok: true, json: async () => ({}) })
-        ;({ _caramelOnTabUpdated: onTabUpdated } = loadExtensionSource(
-            'background.js',
-            ['_caramelOnTabUpdated'],
-        ))
+        // _caramelOnTabUpdated is module-private; the worker hands it to
+        // tabs.onUpdated.addListener, which is where this reads it from.
+        const realm = installChromeStub()
+        initBackground()
+        ;[onTabUpdated] = realm.onTabUpdated
     })
 
     beforeEach(() => {
@@ -103,27 +157,21 @@ describe('content: re-answering the question when the URL moves', () => {
     let runs
 
     beforeAll(() => {
-        loadExtensionSources(
-            [
-                'coupon-constants.generated.js',
-                'caramel-base.js',
-                'dom-utils.js',
-                'store-detect.js',
-                'coupon-apply.js',
-                'coupon-fetch.js',
-                'coupon-runner.js',
-            ],
-            ['caramelHandleUrlChanged'],
-        )
-        ;[onMessage] = getOnMessageListeners()
+        // A second realm, with its OWN chrome: the content script's listener is
+        // the one this describe drives, and initCaramelBase pins whichever stub
+        // is installed when it runs.
+        const realm = installChromeStub()
+        initCaramelBase()
+        initCouponRunner()
+        ;[onMessage] = realm.onMessage
     })
 
     beforeEach(() => {
         runs = []
-        globalThis.startCheckoutDetection = async () => {
-            runs.push(location.href)
-        }
-        globalThis._caramelEvaluatedUrls = new Set([location.href])
+        detectionRuns = runs
+        // An exported const Set — cleared and re-seeded, never replaced.
+        _caramelEvaluatedUrls.clear()
+        _caramelEvaluatedUrls.add(location.href)
     })
 
     it('re-runs detection for a URL it has not answered for', () => {

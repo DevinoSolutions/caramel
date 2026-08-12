@@ -1,5 +1,5 @@
-import { beforeAll, describe, expect, it } from 'vitest'
-import { loadExtensionSources } from './_load.mjs'
+import { describe, expect, it } from 'vitest'
+import { _hostMatchesDomain } from '../store-detect.js'
 
 // Which hosts inherit a store's config and coupons. This is a security
 // boundary as much as a feature: matching too loosely lets an attacker-
@@ -9,15 +9,6 @@ import { loadExtensionSources } from './_load.mjs'
 // checkout to 5starnutritionusa.myshopify.com. The extension went completely
 // dark there — no prompt, no coupon fetch at all — at the one moment it
 // matters, because nothing connected the two hosts.
-
-let _hostMatchesDomain
-
-beforeAll(() => {
-    ;({ _hostMatchesDomain } = loadExtensionSources(
-        ['caramel-base.js', 'dom-utils.js', 'store-detect.js'],
-        ['_hostMatchesDomain'],
-    ))
-})
 
 describe('_hostMatchesDomain', () => {
     it('matches the store on its own domain and subdomains', () => {

@@ -1,5 +1,15 @@
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { loadExtensionSources } from './_load.mjs'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { initCaramelBase } from '../caramel-base.js'
+import { startApplyingCoupons } from '../coupon-runner.js'
+import {
+    caramelMarkPendingSubmit,
+    caramelTakePendingSubmit,
+} from '../dom-utils.js'
+import {
+    _caramelResetCachedCodes,
+    getDomainRecord,
+    startCheckoutDetection,
+} from '../store-detect.js'
 
 // Submitting a promo code on a classic checkout is a form POST: the page
 // navigates and takes the content script, the overlay, and everything the run
@@ -16,18 +26,123 @@ import { loadExtensionSources } from './_load.mjs'
 // treats "we submitted and the page reloaded" as success is a tool that claims
 // savings its users never got.
 
-let caramelMarkPendingSubmit
-let caramelTakePendingSubmit
-let startCheckoutDetection
 let finalModalCalls
 let recordedSavings
 let reportedOutcomes
 
+// The store list is seeded into getDomainRecord's own cache now, so the record
+// has to be for the host this realm is on. Nothing below reads the domain.
 const REC = {
-    domain: 'example.com',
+    domain: location.hostname,
     couponInput: '#promo',
     couponSubmit: '#apply',
     priceContainer: '#total',
+}
+
+/* Collaborators the old harness replaced on globalThis are module imports now.
+ * Two are replaced through the TRANSPORT instead of a vi.mock:
+ *   · the code list — coupon-fetch and store-detect import each other, and a
+ *     factory still evaluating the real coupon-fetch is bypassed by
+ *     store-detect's own binding (measured while porting), so the codes come
+ *     back through the service-worker message fetchCouponsPage actually sends;
+ *   · reportOutcome — coupon-runner calls its own copy, so the outcomes are
+ *     read off the message the real one posts to the worker. */
+let couponList
+let probeCartJsonImpl
+let applyCouponImpl
+vi.mock('../coupon-apply.js', async importOriginal => {
+    const actual = await importOriginal()
+    return {
+        ...actual,
+        applyCoupon: (...args) =>
+            (applyCouponImpl ?? actual.applyCoupon)(...args),
+        probeCartJson: (...args) => probeCartJsonImpl(...args),
+    }
+})
+vi.mock('../dom-utils.js', async importOriginal => {
+    const actual = await importOriginal()
+    return {
+        ...actual,
+        // getPrice REASSIGNS this one, so a spread would hand the runner the
+        // empty array it held at mock time — and the prices carried across the
+        // navigation are the whole subject of this file.
+        get _caramelLastPrices() {
+            return actual._caramelLastPrices
+        },
+        // jsdom has no layout, so nothing is ever "visible" and isCheckout
+        // would otherwise sit through its 3s grace on every case.
+        waitForElement: async () => {
+            throw new Error('not found')
+        },
+        waitUntilReady: async () => {},
+    }
+})
+vi.mock('../caramel-base.js', async importOriginal => {
+    const actual = await importOriginal()
+    return {
+        ...actual,
+        // Assigned by initCaramelBase(); a spread would freeze it undefined.
+        get currentBrowser() {
+            return actual.currentBrowser
+        },
+        caramelRecordSaving: s => recordedSavings.push(s),
+    }
+})
+vi.mock('../UI-helpers.js', async importOriginal => ({
+    ...(await importOriginal()),
+    showFinalModal: (...args) => finalModalCalls.push(args),
+    showTestingModal: async () => {},
+    updateTestingModal: async () => {},
+    hideTestingModal: () => {},
+    insertCaramelPrompt: () => {
+        // Standing in for the defect: before the handoff existed, the fresh
+        // page's only response to a completed attempt was to prompt again.
+        const pill = document.createElement('div')
+        pill.id = 'caramel-small-prompt'
+        document.body.appendChild(pill)
+    },
+}))
+
+function installChromeStub() {
+    const cache = new WeakMap()
+    function wrap(target) {
+        if (cache.has(target)) return cache.get(target)
+        const proxy = new Proxy(target, {
+            get(obj, prop) {
+                if (prop === 'then' || typeof prop === 'symbol')
+                    return undefined
+                if (!(prop in obj)) obj[prop] = wrap(function () {})
+                return obj[prop]
+            },
+            apply: () => undefined,
+        })
+        cache.set(target, proxy)
+        return proxy
+    }
+    const stub = wrap(function chromeStubRoot() {})
+    for (const area of ['sync', 'local', 'session']) {
+        stub.storage[area].get = (_keys, cb) => {
+            if (typeof cb === 'function') cb({})
+        }
+        stub.storage[area].set = (_items, cb) => {
+            if (typeof cb === 'function') cb()
+        }
+    }
+    stub.runtime.lastError = undefined
+    stub.runtime.sendMessage = (message, cb) => {
+        if (message?.action === 'fetchCoupons') {
+            if (typeof cb === 'function') cb({ coupons: couponList })
+            return
+        }
+        if (message?.action === 'reportOutcome') {
+            reportedOutcomes.push({ id: message.id, outcome: message.outcome })
+        }
+        if (typeof cb === 'function') cb({})
+    }
+    globalThis.chrome = stub
+    globalThis.browser = undefined
+    window.chrome = stub
+    window.browser = undefined
 }
 
 /** jsdom leaves innerText undefined; getPrice reads it. */
@@ -42,46 +157,34 @@ function setTotalText(text) {
 }
 
 beforeAll(() => {
-    ;({ caramelMarkPendingSubmit, caramelTakePendingSubmit } =
-        loadExtensionSources(
-            [
-                'coupon-constants.generated.js',
-                'caramel-base.js',
-                'dom-utils.js',
-                'store-detect.js',
-                'coupon-apply.js',
-                'coupon-fetch.js',
-                'coupon-runner.js',
-            ],
-            ['caramelMarkPendingSubmit', 'caramelTakePendingSubmit'],
-        ))
-    startCheckoutDetection = globalThis.startCheckoutDetection
+    installChromeStub()
+    initCaramelBase()
 })
 
 beforeEach(() => {
     sessionStorage.clear()
     document.body.innerHTML = ''
+    window.history.replaceState({}, '', '/cart')
     finalModalCalls = []
     recordedSavings = []
     reportedOutcomes = []
 
-    globalThis.getDomainRecord = async () => REC
-    globalThis.getCachedCodes = async () => [
+    getDomainRecord.cache = [REC]
+    _caramelResetCachedCodes()
+    couponList = [
         { code: 'THEO20', id: 'c1' },
         { code: 'SPRING10', id: 'c2' },
     ]
-    globalThis.insertCaramelPrompt = () => {
-        // Standing in for the defect: before the handoff existed, the fresh
-        // page's only response to a completed attempt was to prompt again.
-        const pill = document.createElement('div')
-        pill.id = 'caramel-small-prompt'
-        document.body.appendChild(pill)
-    }
-    globalThis.isCheckout = async () => true
-    globalThis.showFinalModal = (...args) => finalModalCalls.push(args)
-    globalThis.caramelRecordSaving = s => recordedSavings.push(s)
-    globalThis.reportOutcome = (id, outcome) =>
-        reportedOutcomes.push({ id, outcome })
+    applyCouponImpl = null
+    // A cart-shaped URL with a readable cart is what makes isCheckout answer
+    // yes here — the old suite said so by stubbing isCheckout itself, which is
+    // now called inside its own module and cannot be replaced from outside.
+    probeCartJsonImpl = async () => ({
+        token: 't',
+        total_price: 73.9,
+        item_count: 2,
+        currency: 'USD',
+    })
 })
 
 describe('dom-utils.js — the pending-submit record', () => {
@@ -138,22 +241,17 @@ describe('coupon-runner.js — the record is written before the submit', () => {
             '<input id="promo" /><button id="apply">Apply</button>'
         setTotalText('Order Total $73.90')
         globalThis._caramelCancelled = false
-        globalThis.getCoupons = async () => [{ code: 'THEO20', id: 'c1' }]
-        globalThis._getTriedCodes = () => ({})
-        globalThis._markTriedCode = () => {}
-        globalThis._unmarkTriedCode = () => {}
-        globalThis.probeCartJson = async () => null // non-Shopify: DOM path
-        globalThis._isVisible = () => true // jsdom has no layout
-        globalThis.waitUntilReady = async () => {}
-        globalThis.showTestingModal = async () => {}
-        globalThis.updateTestingModal = async () => {}
-        globalThis.hideTestingModal = () => {}
-        globalThis.reportOutcome = () => {}
+        couponList = [{ code: 'THEO20', id: 'c1' }]
+        probeCartJsonImpl = async () => null // non-Shopify: DOM path
+        // jsdom has no layout, so _isVisible falls back to offsetParent and
+        // answers no for everything. Answering through the DOM API it consults
+        // reaches its callers INSIDE dom-utils too, which a module stub cannot.
+        Element.prototype.checkVisibility = () => true
     })
 
     it('has the attempt on record while the code is in flight', async () => {
         let inFlight = null
-        globalThis.applyCoupon = async () => {
+        applyCouponImpl = async () => {
             // Stands in for the form POST: this is the moment the real page
             // navigates and this content script stops existing.
             inFlight = caramelTakePendingSubmit()
@@ -165,7 +263,7 @@ describe('coupon-runner.js — the record is written before the submit', () => {
             }
         }
 
-        await globalThis.startApplyingCoupons(RUNNER_REC)
+        await startApplyingCoupons(RUNNER_REC)
 
         expect(inFlight).not.toBeNull()
         expect(inFlight.code).toBe('THEO20')
@@ -174,14 +272,14 @@ describe('coupon-runner.js — the record is written before the submit', () => {
     })
 
     it('leaves nothing behind when the attempt returns normally', async () => {
-        globalThis.applyCoupon = async () => ({
+        applyCouponImpl = async () => ({
             success: false,
             newTotal: 73.9,
             committed: false,
             errorMsg: null,
         })
 
-        await globalThis.startApplyingCoupons(RUNNER_REC)
+        await startApplyingCoupons(RUNNER_REC)
 
         expect(caramelTakePendingSubmit()).toBeNull()
     })

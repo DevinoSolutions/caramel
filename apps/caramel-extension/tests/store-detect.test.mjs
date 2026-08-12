@@ -7,7 +7,12 @@ import {
     it,
     vi,
 } from 'vitest'
-import { loadExtensionSource, loadExtensionSources } from './_load.mjs'
+import { initCaramelBase } from '../caramel-base.js'
+import {
+    _caramelResetCachedCodes,
+    getDomainRecord,
+    startCheckoutDetection,
+} from '../store-detect.js'
 
 // D3 pin (audit/ext-e2e-report.md #8, ext-config-trace.md §5.5) —
 // startCheckoutDetection()'s SPA re-detection MutationObserver is the sole
@@ -19,37 +24,63 @@ import { loadExtensionSource, loadExtensionSources } from './_load.mjs'
 // observer to also watch class/style/hidden attribute changes, feeding the
 // exact same debounce (`scheduled` + one setTimeout(recheck, 400)) — no new
 // mechanism. These pins drive both signal shapes through the real function.
-let startCheckoutDetection
-let getDomainRecord
 let currentRec = null
 
-beforeAll(() => {
-    // Real load order (manifest.json): constants, then the F-008 split
-    // files (coupon-fetch.js reads window.CaramelCoupons at module-eval
-    // time), then UI-helpers.js — startCheckoutDetection's recheck() calls
-    // insertCaramelPrompt(), which lives there.
-    loadExtensionSource('coupon-constants.generated.js', [])
-    ;({ startCheckoutDetection, getDomainRecord } = loadExtensionSources(
-        [
-            'caramel-base.js',
-            'dom-utils.js',
-            'store-detect.js',
-            'coupon-apply.js',
-            'coupon-fetch.js',
-            'coupon-runner.js',
-            'UI-helpers.js',
-        ],
-        ['startCheckoutDetection', 'getDomainRecord'],
-    ))
+/* The permissive chrome stub the old harness installed, kept here because this
+ * suite runs the REAL insertCaramelPrompt (UI-helpers) and the real coupon
+ * fetch: anything not explicitly known has to be a callable no-op rather than a
+ * TypeError. Lifted from tests/_load.mjs, which the ESM port retires. */
+function installChromeStub() {
+    const cache = new WeakMap()
+    function wrap(target) {
+        if (cache.has(target)) return cache.get(target)
+        const proxy = new Proxy(target, {
+            get(obj, prop) {
+                if (prop === 'then' || typeof prop === 'symbol')
+                    return undefined
+                if (!(prop in obj)) obj[prop] = wrap(function () {})
+                return obj[prop]
+            },
+            apply: () => undefined,
+        })
+        cache.set(target, proxy)
+        return proxy
+    }
+    const stub = wrap(function chromeStubRoot() {})
+    for (const area of ['sync', 'local', 'session']) {
+        stub.storage[area].get = (_keys, cb) => {
+            if (typeof cb === 'function') cb({})
+        }
+        stub.storage[area].set = (_items, cb) => {
+            if (typeof cb === 'function') cb()
+        }
+        stub.storage[area].remove = (_keys, cb) => {
+            if (typeof cb === 'function') cb()
+        }
+    }
+    // Real Chrome leaves lastError undefined except inside a failed callback;
+    // the proxy would otherwise mint a truthy callable caramelSendMessage reads
+    // as a closed port.
+    stub.runtime.lastError = undefined
+    globalThis.chrome = stub
+    globalThis.browser = undefined
+    window.chrome = stub
+    window.browser = undefined
+    return stub
+}
 
-    // getDomainRecord's prod-TTL path (ttl>0, since the harness installs the
-    // PRODUCTION environment stamp by default — see _load.mjs installEnvStamp
-    // against this stub) reads chrome.storage.local before falling back to
-    // the fetchSupportedStores message — stub both legs of that chain. Real
-    // response shapes match background.js's contract (background.test.mjs).
-    globalThis.currentBrowser.storage.local.get = (_keys, cb) => cb({})
-    globalThis.currentBrowser.storage.local.set = () => {}
-    globalThis.currentBrowser.runtime.sendMessage = (message, cb) => {
+beforeAll(() => {
+    const chromeStub = installChromeStub()
+    initCaramelBase()
+
+    // getDomainRecord's prod-TTL path (ttl>0, since vitest.config.mjs defines
+    // the PRODUCTION environment stamp) reads chrome.storage.local before
+    // falling back to the fetchSupportedStores message — stub both legs of that
+    // chain. Real response shapes match background.js's contract
+    // (background.test.mjs).
+    chromeStub.storage.local.get = (_keys, cb) => cb({})
+    chromeStub.storage.local.set = () => {}
+    chromeStub.runtime.sendMessage = (message, cb) => {
         if (message?.action === 'fetchSupportedStores') {
             cb({ supported: currentRec ? [currentRec] : [] })
         } else if (message?.action === 'fetchCoupons') {
@@ -66,7 +97,7 @@ beforeEach(() => {
     // a previous test's observer/cache into the next one.
     window.__caramel_checkout_observer = null
     getDomainRecord.cache = null
-    globalThis._caramelCodes = null
+    _caramelResetCachedCodes()
     currentRec = null
     vi.useFakeTimers()
 })

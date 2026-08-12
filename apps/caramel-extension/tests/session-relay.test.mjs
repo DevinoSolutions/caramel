@@ -1,9 +1,8 @@
 // @vitest-environment jsdom
 // @vitest-environment-options {"url": "https://grabcaramel.com/"}
-import { readFileSync } from 'node:fs'
-import path from 'node:path'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
-import { EXT_ROOT, installChromeStub } from './_load.mjs'
+import { initCaramelBase } from '../caramel-base.js'
+import { initCouponRunner } from '../coupon-runner.js'
 
 // Pins the website→extension sign-in relay (content-script side), which
 // runs only on our own origins (CARAMEL_ALLOWED_ORIGINS):
@@ -15,15 +14,49 @@ import { EXT_ROOT, installChromeStub } from './_load.mjs'
 // The jsdom URL above puts this realm on https://grabcaramel.com, the one
 // production origin in the allowlist.
 //
-// Load note: unlike the other suites, the files are evaluated as ONE
-// concatenated script. The relay reads caramel-base.js's top-level
-// `const CARAMEL_ALLOWED_ORIGINS` from coupon-runner.js — in a real
-// browser all content scripts share one global lexical environment, but
-// _load.mjs's per-file `(0, eval)` calls do not carry top-level consts
-// across files (documented there), which would fail the lookup this test
-// exists to exercise.
+// Load note: the relay reads caramel-base.js's CARAMEL_ALLOWED_ORIGINS from
+// coupon-runner.js. Under the old harness that lookup was the fragile part —
+// per-file `(0, eval)` did not carry a top-level const across files, so the
+// suite had to concatenate the sources into one script. It is an import now,
+// and the listener registration it exercises lives in initCouponRunner().
 let stored
 let posted
+
+/* The realm's chrome. Lifted from tests/_load.mjs, which the ESM port retires:
+ * caramel-base and coupon-runner touch more of the API at session time than a
+ * hand-enumerated stub would cover, so anything unknown is a callable no-op. */
+function installChromeStub() {
+    const cache = new WeakMap()
+    function wrap(target) {
+        if (cache.has(target)) return cache.get(target)
+        const proxy = new Proxy(target, {
+            get(obj, prop) {
+                if (prop === 'then' || typeof prop === 'symbol')
+                    return undefined
+                if (!(prop in obj)) obj[prop] = wrap(function () {})
+                return obj[prop]
+            },
+            apply: () => undefined,
+        })
+        cache.set(target, proxy)
+        return proxy
+    }
+    const stub = wrap(function chromeStubRoot() {})
+    for (const area of ['sync', 'local', 'session']) {
+        stub.storage[area].get = (_keys, cb) => {
+            if (typeof cb === 'function') cb({})
+        }
+        stub.storage[area].set = (_items, cb) => {
+            if (typeof cb === 'function') cb()
+        }
+    }
+    stub.runtime.lastError = undefined
+    globalThis.chrome = stub
+    globalThis.browser = undefined
+    window.chrome = stub
+    window.browser = undefined
+    return stub
+}
 
 beforeAll(() => {
     posted = []
@@ -32,30 +65,20 @@ beforeAll(() => {
         posted.push({ data, target })
     })
 
-    installChromeStub()
+    const chromeStub = installChromeStub()
     // The relayed session is stored in storage.LOCAL (it is a full website
     // session token and must not roam via Chrome Sync). Both areas answer an
     // empty read, so the extension still considers itself session-less and
     // sends the hello that starts the relay.
-    globalThis.chrome.storage.local.get = (_keys, cb) => cb({})
-    globalThis.chrome.storage.sync.get = (_keys, cb) => cb({})
-    globalThis.chrome.storage.local.set = (items, cb) => {
+    chromeStub.storage.local.get = (_keys, cb) => cb({})
+    chromeStub.storage.sync.get = (_keys, cb) => cb({})
+    chromeStub.storage.local.set = (items, cb) => {
         stored = items
         if (cb) cb()
     }
 
-    const src = [
-        'coupon-constants.generated.js',
-        'caramel-base.js',
-        'dom-utils.js',
-        'store-detect.js',
-        'coupon-apply.js',
-        'coupon-fetch.js',
-        'coupon-runner.js',
-    ]
-        .map(f => readFileSync(path.join(EXT_ROOT, f), 'utf8'))
-        .join('\n;\n')
-    ;(0, eval)(src)
+    initCaramelBase()
+    initCouponRunner()
 })
 
 describe('coupon-runner.js website→extension session relay', () => {

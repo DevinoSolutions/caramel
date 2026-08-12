@@ -1,5 +1,5 @@
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { loadExtensionSources } from './_load.mjs'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { caramelAnnounceToWebsite } from '../coupon-runner.js'
 
 // Signing in on grabcaramel.com is supposed to sign you in in the extension too.
 // Whether it did came down to a race nobody could see.
@@ -20,35 +20,27 @@ import { loadExtensionSources } from './_load.mjs'
 // Bounded on purpose. This is a courtesy handshake on our own origin, not
 // something worth spending a page's life retrying.
 
-let caramelAnnounceToWebsite
-
 let posted
 let sleeps
 let sessionToken
+let caramelGetSessionImpl
 
-beforeAll(() => {
-    ;({ caramelAnnounceToWebsite } = loadExtensionSources(
-        [
-            'coupon-constants.generated.js',
-            'caramel-base.js',
-            'dom-utils.js',
-            'store-detect.js',
-            'coupon-apply.js',
-            'coupon-fetch.js',
-            'coupon-runner.js',
-        ],
-        ['caramelAnnounceToWebsite'],
-    ))
-})
+// The two collaborators the handshake reads: replaced in caramel-base, where
+// coupon-runner imports them from (the old globalThis stubs). Both delegate to
+// per-test state because vi.mock is hoisted.
+vi.mock('../caramel-base.js', async importOriginal => ({
+    ...(await importOriginal()),
+    sleep: async ms => {
+        sleeps.push(ms)
+    },
+    caramelGetSession: (...args) => caramelGetSessionImpl(...args),
+}))
 
 beforeEach(() => {
     posted = []
     sleeps = []
     sessionToken = null
-    globalThis.sleep = async ms => {
-        sleeps.push(ms)
-    }
-    globalThis.caramelGetSession = async () => ({ token: sessionToken })
+    caramelGetSessionImpl = async () => ({ token: sessionToken })
     window.postMessage = (msg, origin) => posted.push({ msg, origin })
 })
 
@@ -84,7 +76,7 @@ describe('announcing ourselves to the website', () => {
         // The token landing in storage is the acknowledgement — the message
         // listener writes it as soon as the page replies.
         let calls = 0
-        globalThis.caramelGetSession = async () => {
+        caramelGetSessionImpl = async () => {
             calls++
             return { token: calls > 2 ? 'tok_abc' : null }
         }
@@ -105,7 +97,7 @@ describe('announcing ourselves to the website', () => {
     it('stays quiet when storage cannot tell us either way', async () => {
         // Without a readable session we could never know whether it worked, so
         // retrying would just be noise on the page.
-        globalThis.caramelGetSession = async () => {
+        caramelGetSessionImpl = async () => {
             throw new Error('storage unavailable')
         }
 

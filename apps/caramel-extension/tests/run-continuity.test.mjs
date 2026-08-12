@@ -1,5 +1,18 @@
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { loadExtensionSources } from './_load.mjs'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { initCaramelBase } from '../caramel-base.js'
+import { _markTriedCode } from '../coupon-apply.js'
+import {
+    caramelBeginRun,
+    caramelCancelRun,
+    caramelClaimRunHop,
+    caramelEndRun,
+    caramelMarkPendingSubmit,
+} from '../dom-utils.js'
+import {
+    _caramelResetCachedCodes,
+    getDomainRecord,
+    startCheckoutDetection,
+} from '../store-detect.js'
 
 // One click should test more than one code.
 //
@@ -24,18 +37,15 @@ import { loadExtensionSources } from './_load.mjs'
 // left open would let some unrelated later navigation resume a run that already
 // had its answer.
 
-let caramelBeginRun
-let caramelClaimRunHop
-let caramelEndRun
-let caramelCancelRun
-let caramelMarkPendingSubmit
-let startCheckoutDetection
-
 let applyCalls
 let finalModalCalls
+let hideTestingModalImpl
+let startApplyingCouponsImpl
 
+// The store list is seeded into getDomainRecord's own cache now, so the record
+// has to be for the host this realm is on. Nothing below reads the domain.
 const REC = {
-    domain: 'motoin.de',
+    domain: location.hostname,
     couponInput: '#promo',
     priceContainer: '#total',
 }
@@ -43,32 +53,76 @@ const REC = {
 const runRecord = () =>
     JSON.parse(sessionStorage.getItem('caramel_run') ?? 'null')
 
+/* Collaborators the old harness replaced on globalThis are module imports now,
+ * replaced in the module the resumed run reads them from. The code list is the
+ * exception: coupon-fetch and store-detect import each other, and a vi.mock
+ * factory still evaluating the real coupon-fetch is bypassed by store-detect's
+ * own binding — so the codes arrive through the service-worker message
+ * fetchCouponsPage really sends. */
+let couponList
+vi.mock('../coupon-runner.js', async importOriginal => ({
+    ...(await importOriginal()),
+    startApplyingCoupons: (...args) => startApplyingCouponsImpl(...args),
+}))
+vi.mock('../caramel-base.js', async importOriginal => {
+    const actual = await importOriginal()
+    return {
+        ...actual,
+        // Assigned by initCaramelBase(); a spread would freeze it undefined.
+        get currentBrowser() {
+            return actual.currentBrowser
+        },
+        caramelRecordSaving: () => {},
+    }
+})
+vi.mock('../UI-helpers.js', async importOriginal => ({
+    ...(await importOriginal()),
+    showFinalModal: (...args) => finalModalCalls.push(args),
+    insertCaramelPrompt: () => {},
+    showTestingModal: async () => {},
+    updateTestingModal: async () => {},
+    hideTestingModal: () => hideTestingModalImpl(),
+}))
+
+function installChromeStub() {
+    const cache = new WeakMap()
+    function wrap(target) {
+        if (cache.has(target)) return cache.get(target)
+        const proxy = new Proxy(target, {
+            get(obj, prop) {
+                if (prop === 'then' || typeof prop === 'symbol')
+                    return undefined
+                if (!(prop in obj)) obj[prop] = wrap(function () {})
+                return obj[prop]
+            },
+            apply: () => undefined,
+        })
+        cache.set(target, proxy)
+        return proxy
+    }
+    const stub = wrap(function chromeStubRoot() {})
+    for (const area of ['sync', 'local', 'session']) {
+        stub.storage[area].get = (_keys, cb) => {
+            if (typeof cb === 'function') cb({})
+        }
+        stub.storage[area].set = (_items, cb) => {
+            if (typeof cb === 'function') cb()
+        }
+    }
+    stub.runtime.lastError = undefined
+    stub.runtime.sendMessage = (message, cb) => {
+        if (typeof cb !== 'function') return
+        cb(message?.action === 'fetchCoupons' ? { coupons: couponList } : {})
+    }
+    globalThis.chrome = stub
+    globalThis.browser = undefined
+    window.chrome = stub
+    window.browser = undefined
+}
+
 beforeAll(() => {
-    ;({
-        caramelBeginRun,
-        caramelClaimRunHop,
-        caramelEndRun,
-        caramelCancelRun,
-        caramelMarkPendingSubmit,
-    } = loadExtensionSources(
-        [
-            'coupon-constants.generated.js',
-            'caramel-base.js',
-            'dom-utils.js',
-            'store-detect.js',
-            'coupon-apply.js',
-            'coupon-fetch.js',
-            'coupon-runner.js',
-        ],
-        [
-            'caramelBeginRun',
-            'caramelClaimRunHop',
-            'caramelEndRun',
-            'caramelCancelRun',
-            'caramelMarkPendingSubmit',
-        ],
-    ))
-    startCheckoutDetection = globalThis.startCheckoutDetection
+    installChromeStub()
+    initCaramelBase()
 })
 
 beforeEach(() => {
@@ -76,18 +130,18 @@ beforeEach(() => {
     document.body.innerHTML = '<input id="promo" />'
     applyCalls = []
     finalModalCalls = []
-    globalThis._isVisible = el => !!el
-    globalThis.getDomainRecord = async () => REC
-    globalThis.getCachedCodes = async () => [
+    // jsdom has no layout, so _isVisible falls back to offsetParent and answers
+    // no for every element. Answering through the DOM API it consults first
+    // reaches its callers INSIDE dom-utils too, which a module stub cannot.
+    Element.prototype.checkVisibility = () => true
+    getDomainRecord.cache = [REC]
+    _caramelResetCachedCodes()
+    couponList = [
         { code: 'SALE20', id: 'c1' },
         { code: 'SPRING10', id: 'c2' },
     ]
-    globalThis.insertCaramelPrompt = () => {}
-    globalThis.isCheckout = async () => true
-    globalThis.showFinalModal = (...args) => finalModalCalls.push(args)
-    globalThis.caramelRecordSaving = () => {}
-    globalThis.reportOutcome = () => {}
-    globalThis.startApplyingCoupons = async (...args) => applyCalls.push(args)
+    hideTestingModalImpl = () => {}
+    startApplyingCouponsImpl = async (...args) => applyCalls.push(args)
 })
 
 describe('the run record', () => {
@@ -259,8 +313,8 @@ describe('picking the loop back up after the store navigated', () => {
 
     it('will not spend a reload on codes it has already tried', async () => {
         caramelBeginRun()
-        globalThis._markTriedCode('SALE20')
-        globalThis._markTriedCode('SPRING10')
+        _markTriedCode('SALE20')
+        _markTriedCode('SPRING10')
         caramelMarkPendingSubmit('SALE20', 'c1', [])
 
         await startCheckoutDetection()
@@ -298,10 +352,10 @@ describe('picking the loop back up after the store navigated', () => {
         // Otherwise they are left behind an "Applying…" overlay with nothing
         // coming — the silence this whole handoff exists to end.
         let hidden = false
-        globalThis.hideTestingModal = () => {
+        hideTestingModalImpl = () => {
             hidden = true
         }
-        globalThis.startApplyingCoupons = async () => {
+        startApplyingCouponsImpl = async () => {
             throw new Error('boom')
         }
         caramelBeginRun()
