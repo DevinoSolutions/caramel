@@ -210,7 +210,8 @@ async function _couponCountFor(domain) {
     return count
 }
 
-async function updateBadgeForTab(tabId, tabUrl) {
+// Exported for tests/badge.test.mjs, which drives the badge directly.
+export async function updateBadgeForTab(tabId, tabUrl) {
     if (!tabId || !tabUrl || !/^https?:/.test(tabUrl)) {
         _setBadge(tabId, 0)
         return

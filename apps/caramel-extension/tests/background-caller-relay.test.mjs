@@ -1,5 +1,4 @@
 import { beforeAll, describe, expect, it } from 'vitest'
-import { getOnMessageListeners, loadExtensionSource } from './_load.mjs'
 
 // WXT-migration P0 characterization pins (2026-08-12; URL updated to
 // popup.html in P1 when WXT renamed the popup page): the worker half of the
@@ -17,9 +16,63 @@ import { getOnMessageListeners, loadExtensionSource } from './_load.mjs'
 
 let handler
 
-beforeAll(() => {
-    loadExtensionSource('background.js', [])
-    ;[handler] = getOnMessageListeners()
+// The worker realm background.js expects, lifted from the tests/_load.mjs
+// harness this suite no longer uses. Both halves must be in place BEFORE the
+// module is imported:
+//
+//  1. The permissive chrome Proxy — anything not explicitly set answers as a
+//     callable no-op, so the API surface initBackground() touches on the way
+//     past (alarms, badge styling, tab listeners) never throws. The tests
+//     below overwrite the three members they assert on; because the stub is
+//     one object shared with the `currentBrowser` initBackground() resolved,
+//     those overwrites are what the handler calls.
+//  2. ServiceWorkerGlobalScope — background.js decides AT MODULE EVAL whether
+//     it is an MV3 service worker, and its non-worker fallback keep-alive is a
+//     bare setInterval that holds the runner's event loop open forever. Chrome
+//     and Safari really do run this file as a service worker, so the realm
+//     says so and keepAlive() takes the chrome.alarms branch.
+function installWorkerRealm() {
+    const cache = new WeakMap()
+    const wrap = target => {
+        if (cache.has(target)) return cache.get(target)
+        const proxy = new Proxy(target, {
+            get(obj, prop) {
+                if (prop === 'then' || typeof prop === 'symbol')
+                    return undefined
+                if (!(prop in obj)) obj[prop] = wrap(function () {})
+                return obj[prop]
+            },
+            apply: () => undefined,
+        })
+        cache.set(target, proxy)
+        return proxy
+    }
+    const stub = wrap(function chromeStubRoot() {})
+    // Real Chrome invokes storage callbacks (empty storage) and leaves
+    // runtime.lastError undefined outside a failed callback. The bare proxy
+    // does neither, which leaves getStoredToken's promise pending forever and
+    // its lastError check reading a truthy auto-created no-op.
+    for (const area of ['sync', 'local', 'session']) {
+        stub.storage[area].get = (_keys, cb) => cb?.({})
+        stub.storage[area].set = (_items, cb) => cb?.()
+        stub.storage[area].remove = (_keys, cb) => cb?.()
+    }
+    stub.runtime.lastError = undefined
+    const listeners = []
+    stub.runtime.onMessage.addListener = fn => listeners.push(fn)
+    globalThis.ServiceWorkerGlobalScope = {
+        [Symbol.hasInstance]: () => true,
+    }
+    globalThis.chrome = stub
+    globalThis.browser = undefined
+    return listeners
+}
+
+beforeAll(async () => {
+    const listeners = installWorkerRealm()
+    const { initBackground } = await import('../background.js')
+    initBackground()
+    ;[handler] = listeners
 })
 
 const invoke = (message, sender = {}) =>

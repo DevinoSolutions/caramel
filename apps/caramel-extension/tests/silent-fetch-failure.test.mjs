@@ -1,5 +1,19 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { loadExtensionSources } from './_load.mjs'
+import {
+    afterEach,
+    beforeAll,
+    beforeEach,
+    describe,
+    expect,
+    it,
+    vi,
+} from 'vitest'
+import {
+    caramelSendMessage,
+    initCaramelBase,
+    logError,
+    recordTiming,
+} from '../caramel-base.js'
+import { getDomainRecord } from '../store-detect.js'
 
 // Pins for the fleet-silence root cause (measured live 2026-08-07): the
 // service worker's fetch of the 1.14 MB supported-stores payload lost a race
@@ -11,19 +25,66 @@ import { loadExtensionSources } from './_load.mjs'
 // the fix is pinned in background-bulk-budget.test.mjs (separate realm).
 // Every pin below fails against the pre-fix code.
 
-let caramelSendMessage
-let getDomainRecord
+// store-detect.js reaches recordTiming/logError through imports from
+// caramel-base.js, so the spies are installed as a PARTIAL mock of that
+// module rather than as globals (the pre-ESM seam).
+//
+// The mock preserves live bindings deliberately: `currentBrowser` is an
+// exported `let` that initCaramelBase() assigns below, and store-detect.js
+// imports it — a plain `{...actual}` spread would freeze every importer's view
+// of it at its pre-init value (undefined). Everything except the two spies is
+// therefore re-exported as a getter onto the real module.
+vi.mock('../caramel-base.js', async importOriginal => {
+    const actual = await importOriginal()
+    const mocked = { logError: vi.fn(), recordTiming: vi.fn() }
+    for (const name of Object.keys(actual)) {
+        if (name in mocked) continue
+        Object.defineProperty(mocked, name, {
+            enumerable: true,
+            get: () => actual[name],
+        })
+    }
+    return mocked
+})
+
+// Permissive chrome stub, lifted from the tests/_load.mjs harness this suite
+// no longer uses: anything not explicitly set answers as a callable no-op, so
+// the browser surface these files touch never throws. This is a CONTENT-SCRIPT
+// realm, so initCaramelBase() takes its `window` branch and publishes the same
+// object at window.currentBrowser — which is what the tests below reconfigure.
+function installChromeStub() {
+    const cache = new WeakMap()
+    const wrap = target => {
+        if (cache.has(target)) return cache.get(target)
+        const proxy = new Proxy(target, {
+            get(obj, prop) {
+                if (prop === 'then' || typeof prop === 'symbol')
+                    return undefined
+                if (!(prop in obj)) obj[prop] = wrap(function () {})
+                return obj[prop]
+            },
+            apply: () => undefined,
+        })
+        cache.set(target, proxy)
+        return proxy
+    }
+    const stub = wrap(function chromeStubRoot() {})
+    for (const area of ['sync', 'local', 'session']) {
+        stub.storage[area].get = (_keys, cb) => cb?.({})
+        stub.storage[area].set = (_items, cb) => cb?.()
+        stub.storage[area].remove = (_keys, cb) => cb?.()
+    }
+    // Real Chrome leaves runtime.lastError undefined outside a failed
+    // callback; the bare proxy would auto-create a truthy no-op, which
+    // caramelSendMessage's lastError check would misread as a closed port.
+    stub.runtime.lastError = undefined
+    globalThis.chrome = stub
+    globalThis.browser = undefined
+}
 
 beforeAll(() => {
-    // Spies must exist BEFORE the load: caramel-base.js only installs its own
-    // recordTiming/logError fallbacks when the names are undefined, so these
-    // become the functions the code under test calls.
-    globalThis.recordTiming = vi.fn()
-    globalThis.logError = vi.fn()
-    ;({ caramelSendMessage, getDomainRecord } = loadExtensionSources(
-        ['caramel-base.js', 'dom-utils.js', 'store-detect.js'],
-        ['caramelSendMessage', 'getDomainRecord'],
-    ))
+    installChromeStub()
+    initCaramelBase()
 })
 
 let sendMessageCalls
@@ -31,15 +92,15 @@ let responses
 let storedData
 
 beforeEach(() => {
-    globalThis.recordTiming.mockClear()
-    globalThis.logError.mockClear()
+    recordTiming.mockClear()
+    logError.mockClear()
     getDomainRecord.cache = null
     sendMessageCalls = 0
     responses = []
     storedData = {}
     globalThis.currentBrowser.runtime.lastError = undefined
-    // Prod-TTL path (the stub is not a dev install): storage.local is read
-    // before the API, and written back on a successful load.
+    // Prod-TTL path (the build stamp under vitest is production): storage.local
+    // is read before the API, and written back on a successful load.
     globalThis.currentBrowser.storage.local.get = (_keys, cb) =>
         cb({ ...storedData })
     globalThis.currentBrowser.storage.local.set = items =>
@@ -47,8 +108,7 @@ beforeEach(() => {
     // Each send consumes the next scripted response (last one repeats). A
     // function entry runs instead, to script lastError around the callback.
     globalThis.currentBrowser.runtime.sendMessage = (_msg, cb) => {
-        const next =
-            responses[Math.min(sendMessageCalls, responses.length - 1)]
+        const next = responses[Math.min(sendMessageCalls, responses.length - 1)]
         sendMessageCalls++
         if (typeof next === 'function') next(cb)
         else cb(next)
@@ -119,17 +179,20 @@ describe('caramel-base.js caramelSendMessage — a worker that cannot answer is 
     })
 })
 
+// Module scope rather than inside the describe below (its only caller): under
+// ESM `getDomainRecord` is an import, and oxlint then reads the helper as
+// capturing nothing from the describe — consistent-function-scoping.
+async function callThroughRetry(domain) {
+    vi.useFakeTimers()
+    const p = getDomainRecord(domain)
+    // Covers the retry backoff (750 ms) with margin.
+    await vi.advanceTimersByTimeAsync(5000)
+    vi.useRealTimers()
+    return p
+}
+
 describe('store-detect.js getDomainRecord — "we could not ask" is not "not supported"', () => {
     const REC = { domain: 'example.com', couponInput: '#promo' }
-
-    async function callThroughRetry(domain) {
-        vi.useFakeTimers()
-        const p = getDomainRecord(domain)
-        // Covers the retry backoff (750 ms) with margin.
-        await vi.advanceTimersByTimeAsync(5000)
-        vi.useRealTimers()
-        return p
-    }
 
     it('a worker-reported failure is retried, and the retry answer is used', async () => {
         responses = [
@@ -152,20 +215,20 @@ describe('store-detect.js getDomainRecord — "we could not ask" is not "not sup
         const rec = await callThroughRetry('example.com')
         expect(rec).toEqual(REC) // expired data beats silence
         expect(sendMessageCalls).toBe(2) // both attempts spent
-        expect(globalThis.recordTiming).toHaveBeenCalledWith(
+        expect(recordTiming).toHaveBeenCalledWith(
             'STORE_LIST_FETCH_FAILED',
             expect.objectContaining({
                 error: expect.stringContaining('Abort'),
             }),
         )
-        expect(globalThis.logError).toHaveBeenCalled()
+        expect(logError).toHaveBeenCalled()
     })
 
     it('failure with no cache at all records the failure and leaves the cache unpoisoned', async () => {
         responses = [{ supported: [], error: 'AbortError' }]
         const rec = await callThroughRetry('example.com')
         expect(rec).toBeUndefined()
-        expect(globalThis.recordTiming).toHaveBeenCalledWith(
+        expect(recordTiming).toHaveBeenCalledWith(
             'STORE_LIST_FETCH_FAILED',
             expect.anything(),
         )
@@ -179,7 +242,7 @@ describe('store-detect.js getDomainRecord — "we could not ask" is not "not sup
         const rec = await callThroughRetry('example.com')
         expect(rec).toBeUndefined()
         expect(sendMessageCalls).toBe(1)
-        expect(globalThis.recordTiming).not.toHaveBeenCalledWith(
+        expect(recordTiming).not.toHaveBeenCalledWith(
             'STORE_LIST_FETCH_FAILED',
             expect.anything(),
         )
@@ -202,7 +265,7 @@ describe('store-detect.js getDomainRecord — "we could not ask" is not "not sup
         ]
         const rec = await callThroughRetry('example.com')
         expect(rec).toEqual(REC)
-        expect(globalThis.recordTiming).toHaveBeenCalledWith(
+        expect(recordTiming).toHaveBeenCalledWith(
             'STORE_LIST_FETCH_FAILED',
             expect.objectContaining({
                 error: expect.stringContaining('port closed'),

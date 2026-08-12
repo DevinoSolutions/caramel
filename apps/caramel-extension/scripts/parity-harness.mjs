@@ -291,6 +291,19 @@ for (const [label, dir] of [
         )
     }
     check(!all.includes(DEV.baseUrl), `${label}: no dev baseUrl in shipped js`)
+
+    // Successor to build-environment.test.mjs's "no shipped file branches on
+    // update_url" pin (that suite died with the old build): the runtime
+    // dev-detection heuristic this whole stamp design replaced must never
+    // reappear in a shipped bundle. Comments are stripped first — the history
+    // of WHY the heuristic was wrong is worth keeping in source.
+    const code = all
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/^\s*\/\/.*$/gm, '')
+    check(
+        !/update_url/.test(code) && !/_isDevInstall/.test(code),
+        `${label}: no shipped js branches on update_url/_isDevInstall`,
+    )
 }
 {
     const all = readAll(DEV_OUT, jsFiles(DEV_OUT))
