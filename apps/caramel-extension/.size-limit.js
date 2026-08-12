@@ -23,11 +23,11 @@
  * sitting a few bytes above the measurement turns the next honest edit into a
  * red build, and one sitting far above it stops being a gate at all.
  *
- * NOTE — this does not bound the DOWNLOAD. scripts/build-dist.mjs copies these
- * files verbatim, so the shipped package is unminified and a store download
- * really does carry the comments. That is a once-per-install cost; this gate
+ * NOTE — this does not bound the DOWNLOAD. The WXT build ships these modules
+ * with comments intact, so the shipped package is unminified and a store
+ * download really does carry them. That is a once-per-install cost; this gate
  * exists for the per-page-load one. A ceiling on the shipped artifact would be
- * a separate budget over dist/.
+ * a separate budget over .output/.
  *
  * JS rather than JSON purely so this paragraph can sit next to the numbers it
  * explains; size-limit rejects unknown keys in a JSON config.

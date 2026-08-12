@@ -1,10 +1,11 @@
 /**
- * WXT migration parity harness (P0 deliverable, 2026-08-12).
+ * WXT migration parity harness (P0 deliverable, 2026-08-12; old-build checks
+ * retired with scripts/build-dist.mjs in P1).
  *
  * The migration's standing regression gate: proves the WXT build (`.output/`)
- * converges on the hand-rolled build (`scripts/build-dist.mjs` → dist/) and
- * that neither world can ship the two incident classes this repo already paid
- * for — tooling files in the store package, and a store build stamped dev.
+ * stays convergent with the shipped 1.3.1 extension and cannot ship the two
+ * incident classes this repo already paid for — tooling files in the store
+ * package, and a store build stamped dev.
  *
  * Three assertion families, per browser:
  *
@@ -17,34 +18,47 @@
  *      ALSO fails (stale entry — the allowlist only shrinks, so "parity" can
  *      never quietly mean "whatever it currently emits").
  *
- *   2. FILE INVENTORY — the old dist must contain exactly SHIPPED+GENERATED;
- *      no NEVER_SHIP name may exist in dist OR in any .output build; every
- *      file a generated manifest references must exist in its build.
+ *   2. FILE INVENTORY — no NEVER_SHIP name may exist in any .output build;
+ *      every file a generated manifest references must exist in its build.
  *
- *   3. ENV STAMP — production builds of BOTH worlds must carry the production
- *      baseUrl and ZERO dev origins in any shipped .js; a --mode development
- *      WXT build must carry the dev stamp. This is the Firefox/Safari
- *      shipped-dev-build incident, pinned against the new build system.
+ *   3. ENV STAMP — production builds must carry the production baseUrl and
+ *      ZERO dev origins in any shipped .js; a --mode development WXT build
+ *      must carry the dev stamp. This is the Firefox/Safari shipped-dev-build
+ *      incident, pinned against the new build system.
  *
  * Runs standalone (like test-guards.mjs): `pnpm test:parity`. Builds
- * everything it checks into gitignored directories; never touches dist/.
+ * everything it checks into gitignored directories.
  */
 
 import { execFileSync } from 'node:child_process'
 import { readdirSync, readFileSync } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import {
-    buildDist,
-    ENVIRONMENTS,
-    GENERATED,
-    NEVER_SHIP,
-    SHIPPED,
-} from './build-dist.mjs'
+import { ENVIRONMENTS } from './environments.mjs'
+
+/** Files that must NEVER reach a packaged build, asserted by name rather than
+ *  inferred so the intent survives a refactor. Inherited verbatim from the
+ *  retired scripts/build-dist.mjs (whose allowlist copy-build this harness
+ *  used to cross-check); WXT packages only entrypoint output + public/, but
+ *  the incident this list pins — tooling files in the store zip — predates
+ *  that guarantee, so the list stays as the independent check. */
+const NEVER_SHIP = [
+    'package.json',
+    'eslint.config.cjs',
+    'knip.json',
+    '.size-limit.json',
+    '.gitignore',
+    'README.md',
+    'vitest.config.mjs',
+    'manifest-firefox.json',
+    'tests',
+    'scripts',
+    '.turbo',
+    'node_modules',
+]
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const OUT = join(ROOT, '.output')
-const DIST_PARITY = join(ROOT, 'dist-parity')
 
 const EXPECTED = JSON.parse(
     readFileSync(join(ROOT, 'scripts', 'parity-expected-diffs.json'), 'utf8'),
@@ -63,7 +77,7 @@ const check = (ok, label) => {
 
 /* ------------------------------------------------------------------ builds */
 
-// The four artifacts under test. wxt is invoked through its own bin so the
+// The three artifacts under test. wxt is invoked through its own bin so the
 // harness runs identically on a dev machine and in CI (no npx resolution).
 const WXT_BIN = join(ROOT, 'node_modules', 'wxt', 'bin', 'wxt.mjs')
 const wxt = args =>
@@ -72,8 +86,7 @@ const wxt = args =>
         stdio: ['ignore', 'ignore', 'inherit'],
     })
 
-console.log('building: old dist (production) + WXT chrome/firefox/dev …')
-await buildDist({ outDir: DIST_PARITY })
+console.log('building: WXT chrome/firefox/dev …')
 wxt(['build'])
 wxt(['build', '-b', 'firefox', '--mv3'])
 wxt(['build', '--mode', 'development'])
@@ -169,32 +182,8 @@ const walk = dir =>
             ).replaceAll('\\', '/'),
         )
 
-// Old dist is exactly the allowlist — nothing more, nothing less.
-{
-    const files = walk(DIST_PARITY).toSorted()
-    const allowed = [...SHIPPED, ...GENERATED]
-    const allowedSet = new Set(allowed)
-    const ships = p =>
-        allowedSet.has(p) || allowed.some(entry => p.startsWith(entry + '/'))
-    const extras = files.filter(f => !ships(f))
-    check(
-        extras.length === 0,
-        `old dist contains only SHIPPED+GENERATED (extras: ${extras.join(', ') || 'none'})`,
-    )
-    const missing = allowed.filter(
-        entry =>
-            !files.includes(entry) &&
-            !files.some(f => f.startsWith(entry + '/')),
-    )
-    check(
-        missing.length === 0,
-        `old dist contains every SHIPPED+GENERATED entry (missing: ${missing.join(', ') || 'none'})`,
-    )
-}
-
-// NEVER_SHIP names must not exist in ANY artifact of either build system.
+// NEVER_SHIP names must not exist in ANY packaged artifact.
 for (const [label, dir] of [
-    ['old dist', DIST_PARITY],
     ['wxt chrome', BUILDS.chrome.outDir],
     ['wxt firefox', BUILDS.firefox.outDir],
     ['wxt dev', DEV_OUT],
@@ -275,7 +264,6 @@ const readAll = (dir, list) =>
     list.map(f => readFileSync(join(dir, f), 'utf8')).join('\n')
 
 for (const [label, dir] of [
-    ['old dist (production)', DIST_PARITY],
     ['wxt chrome (production)', BUILDS.chrome.outDir],
     ['wxt firefox (production)', BUILDS.firefox.outDir],
 ]) {

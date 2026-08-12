@@ -1,7 +1,7 @@
 /**
  * The build-time environment stamp inlined by wxt.config.ts (vite `define`),
  * successor to the generated caramel-env.js. Values come from the ENVIRONMENTS
- * table in scripts/build-dist.mjs — the single source of truth.
+ * table in scripts/environments.mjs — the single source of truth.
  */
 interface CaramelEnvStamp {
     readonly name: 'production' | 'development'

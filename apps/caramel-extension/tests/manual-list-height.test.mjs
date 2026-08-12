@@ -29,7 +29,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 // a flex item refuses to shrink below its content, the list never scrolls, and
 // the button gets pushed off the bottom of the screen.
 const HERE = path.dirname(fileURLToPath(import.meta.url))
-const CSS_PATH = path.resolve(HERE, '..', 'assets', 'content-ui.css')
+const CSS_PATH = path.resolve(HERE, '..', 'public', 'assets', 'content-ui.css')
 
 let css
 

@@ -1,5 +1,13 @@
 name: Release – Extension
 
+# TODO(WXT P4, 2026-08-13): BROKEN since the WXT P1 merge — this workflow still
+# builds from the deleted hand-rolled world (manifest.json/manifest-firefox.json
+# at the package root, scripts/build-dist.mjs → dist/, the Firefox
+# manifest-swap). P4 rewires every job onto `wxt build` / `wxt zip` per browser
+# and points the Safari converter at .output/chrome-mv3. Do NOT tag a release
+# until that lands; the version-check step fails loudly on the missing
+# manifest.json either way.
+
 # Firefox/AMO IS automated now — `package` builds a Firefox variant of dist/ and
 # `publish_firefox` signs and submits it to addons.mozilla.org — but the job is
 # DORMANT until the owner creates two repository secrets:

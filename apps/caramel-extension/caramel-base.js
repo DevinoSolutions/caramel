@@ -21,8 +21,8 @@
 // the load-order reason above. It is gone: it decided dev-vs-production by
 // the absence of a manifest `update_url`, which only the Chrome Web Store
 // injects, so every Firefox and Safari build answered "dev". That answer is
-// now made at BUILD time and read from CARAMEL_ENV — see the "environment"
-// block in scripts/build-dist.mjs.
+// now made at BUILD time and read from CARAMEL_ENV — see the environment
+// table in scripts/environments.mjs.
 
 import { CARAMEL_ENV } from './caramel-env.js'
 

@@ -23,13 +23,13 @@
  * decide anything is unused.
  *
  * ── what this does and does not bound ────────────────────────────────────────
- * Honest caveat: the shipped package is NOT minified. scripts/build-dist.mjs
- * copies these files verbatim, so a store download really does carry the
- * comments. This gate deliberately does not measure that, because transfer
- * size is a once-per-install cost while the thing worth bounding is the code
- * that parses and runs on every store page a shopper visits. If the shipped
+ * Honest caveat: the shipped package is NOT minified. The WXT build ships
+ * these modules with comments intact, so a store download really does carry
+ * them. This gate deliberately does not measure that, because transfer size
+ * is a once-per-install cost while the thing worth bounding is the code that
+ * parses and runs on every store page a shopper visits. If the shipped
  * artifact ever needs a byte ceiling too, that is a second budget over
- * dist/ — not a reason to go back to pricing sentences.
+ * .output/ — not a reason to go back to pricing sentences.
  */
 import { transform } from 'esbuild'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'

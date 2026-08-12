@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { entryModuleClosure } from './_entry-modules.mjs'
 
 // A stray control byte in a source file is invisible and expensive.
 //
@@ -105,18 +106,17 @@ describe('the sources this extension ships', () => {
         expect(locate(buffer, hit[0])).toBe('line 1, column 21')
     })
 
-    it('reads every content script the manifest injects', () => {
+    it('reads every module the content entrypoint bundles', () => {
         // The scan is only worth anything if it covers the files that matter;
         // a bad SKIP_DIRS entry or extension list would quietly shrink it.
+        // The injected set is derived from the content entrypoint's import
+        // graph — the same inputs the WXT build bundles into store pages.
         const scanned = new Set(
             sourceFiles().map(f => path.relative(ROOT, f).replace(/\\/g, '/')),
         )
-        const manifest = JSON.parse(
-            fs.readFileSync(path.join(ROOT, 'manifest.json'), 'utf8'),
-        )
-        const injected = manifest.content_scripts.flatMap(cs => cs.js ?? [])
+        const injected = entryModuleClosure('entrypoints/content.ts')
 
-        expect(injected.length).toBeGreaterThan(0)
+        expect(injected.size).toBeGreaterThan(0)
         for (const file of injected) expect(scanned.has(file)).toBe(true)
     })
 })

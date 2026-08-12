@@ -6,8 +6,8 @@
 // they were reading). The gate is `log` / `logError` in caramel-base.js and
 // the service worker's own `logError` in background.js, all of which check the
 // build-time environment stamp (CARAMEL_ENV.verbose, false in every shipped
-// build — see scripts/build-dist.mjs) and record to extension storage instead
-// of printing.
+// build — see scripts/environments.mjs) and record to extension storage
+// instead of printing.
 //
 // This test pins the rule the way check_conventions.py does in the sibling
 // repo: the raw form is banned at the source level, so a new console call is
@@ -15,19 +15,19 @@
 // genuinely dev-only, route it through log()/logError() — that is the whole
 // point of them existing.
 import { readFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { entryModuleClosure, EXT_ROOT } from './_entry-modules.mjs'
 
-const root = join(dirname(fileURLToPath(import.meta.url)), '..')
+const root = EXT_ROOT
 
-// Every file the manifest injects into store pages, plus the service worker.
-// popup.js is deliberately NOT here: its console is our own popup page, no
-// shopper or store owner ever sees it, and its OAuth error objects are
-// genuinely useful when a login report comes in.
+// Every module the content/background entrypoints bundle into store pages,
+// plus the service worker. popup.js is deliberately NOT here: its console is
+// our own popup page, no shopper or store owner ever sees it, and its OAuth
+// error objects are genuinely useful when a login report comes in.
 const SHIPPED_TO_STRANGERS = [
-    // caramel-env.js is generated, contains no console call, and is not read
-    // from disk here — the environment pins own it (build-environment.test.mjs)
+    // caramel-env.js is define-fed, contains no console call, and is not read
+    // from disk here — the environment pins own it (env-stamp.test.mjs)
     'coupon-constants.generated.js',
     'cart-signals.js',
     'caramel-base.js',
@@ -70,20 +70,19 @@ describe('a packed install is silent in every console it can reach', () => {
         })
     }
 
-    it('the manifest list above still matches what actually ships', () => {
-        // If a content script is added to the manifest but not to this test,
-        // the ban silently stops covering it — so the list is derived-checked
-        // rather than trusted.
-        const manifest = JSON.parse(
-            readFileSync(join(root, 'manifest.json'), 'utf8'),
+    it('the module list above still matches what actually ships', () => {
+        // If a module is added to an entrypoint's import graph but not to this
+        // test, the ban silently stops covering it — so the list is
+        // derive-checked against the real build inputs rather than trusted.
+        // Set EQUALITY, both directions: a module dropped from the build makes
+        // a stale row here fail too.
+        const bundled = entryModuleClosure(
+            'entrypoints/content.ts',
+            'entrypoints/background.ts',
         )
-        const injected = manifest.content_scripts.flatMap(cs => cs.js)
-        const sw = manifest.background.service_worker
-        for (const f of [...injected, sw]) {
-            // caramel-env.js does not exist as a checked-in shipped file (the
-            // build writes it), so it is exempt from the read-from-disk scan.
-            if (f === 'caramel-env.js') continue
-            expect(SHIPPED_TO_STRANGERS).toContain(f)
-        }
+        bundled.delete('caramel-env.js')
+        expect([...bundled].toSorted()).toEqual(
+            [...SHIPPED_TO_STRANGERS].toSorted(),
+        )
     })
 })

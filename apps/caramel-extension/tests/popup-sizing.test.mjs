@@ -18,7 +18,10 @@ import { describe, expect, it } from 'vitest'
 // circular sizing that causes the bug. What it CAN do is make the specific
 // mistake unrepeatable.
 const here = dirname(fileURLToPath(import.meta.url))
-const css = readFileSync(join(here, '..', 'assets', 'styles.css'), 'utf8')
+const css = readFileSync(
+    join(here, '..', 'public', 'assets', 'styles.css'),
+    'utf8',
+)
 
 /* The top-level `body { ... }` rule that owns the popup's size.
  *

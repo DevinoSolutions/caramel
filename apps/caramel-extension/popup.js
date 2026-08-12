@@ -26,8 +26,8 @@ import { caramelCopyText } from './UI-helpers.js'
 // module the popup realm evaluates). This used to call a shared
 // `_isDevInstall()` that read the manifest's `update_url` — a field only the
 // Chrome Web Store injects, so the Firefox and Safari builds of this popup
-// pointed real users at the dev deployment. See the "environment" block in
-// scripts/build-dist.mjs.
+// pointed real users at the dev deployment. See the environment table in
+// scripts/environments.mjs.
 const caramelUrl = path => new URL(path, `${CARAMEL_ENV.baseUrl}/`).toString()
 
 // Escape coupon/API data before interpolating into innerHTML. Codes, titles and
