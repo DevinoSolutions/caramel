@@ -469,6 +469,13 @@ async function isCheckout() {
 if (typeof _caramelCodes === 'undefined') {
     var _caramelCodes = null // { domain, list }
 }
+/* Test seam (WXT P1, 2026-08-12): the cache used to be a script global the
+   suites reset with `globalThis._caramelCodes = null`; module scope made it
+   unreachable, and an import binding cannot be assigned from outside. Only
+   tests/store-detect.test.mjs + tests/configless-store.test.mjs call this. */
+export function _caramelResetCachedCodes() {
+    _caramelCodes = null
+}
 export async function getCachedCodes(rec) {
     if (_caramelCodes && _caramelCodes.domain === rec.domain)
         return _caramelCodes.list
