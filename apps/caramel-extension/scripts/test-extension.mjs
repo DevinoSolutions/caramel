@@ -10,37 +10,39 @@
  *   4. Supported store sample has valid selectors
  *   5. Coupons endpoint reachable
  *   6. Popup UI: fills the login form and verifies logged-in state
- *   7. Injection logic: loads the F-008 split content-script files (formerly
- *      one shared-utils.js — coupon-constants.generated.js, caramel-base.js,
- *      dom-utils.js, store-detect.js, coupon-apply.js, coupon-fetch.js,
- *      coupon-runner.js, in real manifest.json load order) against a fake
- *      store DOM and verifies applyCoupon() finds the input, fills the
+ *   7. Injection logic: esbuild-bundles the REAL content-module graph from
+ *      the shipped sources (same __CARAMEL_ENV__ define mechanism as the
+ *      real build, pointed at the local app), evaluates it against a fake
+ *      store DOM, and verifies applyCoupon() finds the input, fills the
  *      code, and clicks apply.
  *
  * Prereqs:
  *   - caramel-app dev server running on localhost:58000 (pnpm dev)
  *   - Test user test@caramel.dev / test1234 exists (email_verified flipped)
  *
- * ⚠️ PATCHED TEST COPY (E-02): the package-root caramel-env.js stamps the
- * REMOTE dev deployment — deliberate behavior for an unpacked load, and a
+ * ⚠️ PATCHED TEST COPY (E-02, reworked for the WXT build in P1): the suite
+ * builds `.output/chrome-mv3-dev` (`wxt build --mode development` — the DEV
+ * stamp, bundled into the js by the __CARAMEL_ENV__ define), stages a TEMP
+ * COPY of that output, and string-replaces the dev deployment URL with
+ * localhost:58000 across the copy's bundles. The dev stamp's trustedOrigins
+ * already include localhost:58000, so only the baseUrl needs rewriting. A
  * remote target this suite must NOT test against (non-hermetic: races the
- * autodeploy, can't seed users). So the suite stages a TEMP COPY and writes
- * its OWN environment stamp over that copy's caramel-env.js, pointing at
- * localhost:58000. Shipped extension code is untouched; the loaded extension
- * is the patched copy (announced at runtime below).
+ * autodeploy, can't seed users); the replacement count is asserted loudly so
+ * an environment-wiring refactor breaks this suite visibly instead of
+ * silently testing against the remote deployment. Shipped output untouched.
  *
- * This used to be a verbatim rewrite of a `_isDevInstall() ? <dev> : <prod>`
- * ternary in background.js and popup.js. That ternary is gone: the
- * environment is now a build-time stamp (scripts/build-dist.mjs), so the
- * suite overrides the stamp instead of editing two source files.
+ * This used to overwrite the copy's caramel-env.js file; there is no such
+ * file in the bundled output — the stamp travels inside the bundles.
  *
  * Run: pnpm -C apps/caramel-extension test:e2e
  */
 
+import { build as esbuild } from 'esbuild'
+import { execSync } from 'node:child_process'
 import {
     cpSync,
-    existsSync,
     mkdtempSync,
+    readdirSync,
     readFileSync,
     rmSync,
     writeFileSync,
@@ -49,59 +51,57 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
-import {
-    contentScriptRealmSources,
-    ENV_FILE,
-    renderEnvStamp,
-} from './build-dist.mjs'
+import { stampFor } from './environments.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const EXT_PATH = path.resolve(__dirname, '..')
+const DEV_OUT = path.join(EXT_PATH, '.output', 'chrome-mv3-dev')
 const API_BASE = 'http://localhost:58000'
+const DEV_URL = stampFor('development').baseUrl
 const TEST_EMAIL = 'test@caramel.dev'
 const TEST_PASSWORD = 'test1234'
 
-// The suite's own environment stamp, replacing the copy's caramel-env.js. It
-// is rendered by the SAME function the real build uses, so a change to the
-// stamp's shape reaches this suite instead of leaving it evaluating a file
-// shape nothing produces any more. Only the URLs differ: this build talks to
-// the local app, and trusts only the local app to relay a session into it.
-const ENV_STAMP = renderEnvStamp('development')
-    .split('https://dev.grabcaramel.com')
-    .join(API_BASE)
-
 /**
- * Stages a temp copy of the extension whose environment stamp points at the
- * local app. Throws loudly if the stamp is missing or did not end up naming
- * the local app, so a future refactor of the environment wiring breaks this
- * suite visibly instead of silently testing against the remote deployment.
+ * Stages a temp copy of the DEV-stamped WXT output whose baseUrl points at
+ * the local app. The stamp is bundled (no caramel-env.js file to overwrite),
+ * so the patch is a string replacement across the copy's js, and the suite
+ * throws loudly when zero replacements happen — a future refactor of the
+ * environment wiring breaks this suite visibly instead of silently testing
+ * against the remote deployment.
  */
 function stagePatchedExtensionCopy() {
-    const dest = mkdtempSync(path.join(tmpdir(), 'caramel-ext-patched-'))
-    cpSync(EXT_PATH, dest, {
-        recursive: true,
-        filter: src => {
-            const rel = path.relative(EXT_PATH, src)
-            const top = rel.split(path.sep)[0]
-            // Skip everything the browser never loads (manifest/index.html
-            // reference only top-level files + icons/assets) — node_modules
-            // alone would make the copy enormous.
-            return !['node_modules', 'dist', 'scripts', 'tests'].includes(top)
-        },
+    console.log('[test] building .output/chrome-mv3-dev (dev stamp)…')
+    execSync('npx wxt build --mode development', {
+        cwd: EXT_PATH,
+        stdio: 'inherit',
+        shell: true,
     })
 
-    const stampPath = path.join(dest, ENV_FILE)
-    if (!existsSync(stampPath)) {
+    const dest = mkdtempSync(path.join(tmpdir(), 'caramel-ext-patched-'))
+    cpSync(DEV_OUT, dest, { recursive: true })
+
+    let replacements = 0
+    const walk = dir => {
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+            const p = path.join(dir, entry.name)
+            if (entry.isDirectory()) walk(p)
+            else if (entry.name.endsWith('.js')) {
+                const src = readFileSync(p, 'utf8')
+                if (src.includes(DEV_URL)) {
+                    replacements += src.split(DEV_URL).length - 1
+                    writeFileSync(p, src.split(DEV_URL).join(API_BASE))
+                }
+            }
+        }
+    }
+    walk(dest)
+    if (replacements === 0) {
         throw new Error(
-            `[test] ${ENV_FILE} is missing from the staged copy — the environment wiring changed; update this patcher deliberately`,
+            `[test] no occurrence of ${DEV_URL} found in the staged dev build — the environment wiring changed; update this patcher deliberately`,
         )
     }
-    if (!ENV_STAMP.includes(`baseUrl: '${API_BASE}'`)) {
-        throw new Error(
-            `[test] the rendered stamp does not point at ${API_BASE} — renderEnvStamp's shape changed; update this patcher deliberately`,
-        )
-    }
-    writeFileSync(stampPath, ENV_STAMP)
+    // The dev stamp already trusts localhost:58000 (scripts/environments.mjs),
+    // so only the baseUrl needed rewriting.
 
     // The shipped manifest grants ONLY https://*/* — a packed extension has no
     // business asking users for access to a localhost dev server (it widens
@@ -123,7 +123,7 @@ function stagePatchedExtensionCopy() {
         `[test] ⚠️ LOADING A PATCHED TEST COPY of the extension (${dest})`,
     )
     console.log(
-        `[test]    ${ENV_FILE} rewritten -> ${API_BASE} (copy only; shipped code untouched)`,
+        `[test]    bundled dev stamp rewritten -> ${API_BASE} (copy only; shipped output untouched)`,
     )
     console.log(
         `[test]    host permission ${API_BASE}/* granted to the copy only`,
@@ -270,7 +270,8 @@ async function main() {
             )
 
             const popup = await context.newPage()
-            await popup.goto(`chrome-extension://${extensionId}/index.html`)
+            // popup.html since the WXT P1 port (was index.html)
+            await popup.goto(`chrome-extension://${extensionId}/popup.html`)
             await popup.waitForLoadState('domcontentloaded')
             await popup.waitForTimeout(800)
 
@@ -343,30 +344,38 @@ async function main() {
 
         // 8. DOM INJECTION — real applyCoupon() against a synthetic supported-store DOM
         {
-            // F-008 split shared-utils.js into 6 files; coupon-fetch.js also
-            // needs coupon-constants.generated.js loaded first (F-006's
-            // RESTRICTED_STATUSES rebind reads window.CaramelCoupons at
-            // module-eval time). Real manifest.json/index.html load order.
-            // Deliberately read from EXT_PATH (the SHIPPED source, not the
-            // patched copy): none of these content scripts hard-code a
-            // deployment, so this step exercises exactly what ships. The one
-            // exception is the environment stamp, which is a property of the
-            // BUILD and so comes from this suite's own render (below) rather
-            // than from disk — caramel-base.js reads CARAMEL_ENV in its own
-            // top-level initializers, so a realm without it throws on load.
-            const contentScriptFiles = [
-                'coupon-constants.generated.js',
-                'caramel-base.js',
-                'dom-utils.js',
-                'store-detect.js',
-                'coupon-apply.js',
-                'coupon-fetch.js',
-                'coupon-runner.js',
-            ]
-            const contentScriptSources = contentScriptRealmSources(
-                contentScriptFiles,
-                { stamp: ENV_STAMP },
-            )
+            // The old harness eval'd the classic-script files one by one; the
+            // sources are ES modules now, so esbuild bundles the REAL module
+            // graph (from the shipped sources on disk) into one classic
+            // script, with the same __CARAMEL_ENV__ define mechanism the real
+            // build uses — pointed at the local app. The driver entry calls
+            // the same inits the content entrypoint calls (minus inject: this
+            // step drives applyCoupon directly, not checkout detection) and
+            // publishes the one handle the page code below needs.
+            const stamp = {
+                ...stampFor('development'),
+                baseUrl: API_BASE,
+            }
+            const driver = await esbuild({
+                stdin: {
+                    contents: `
+                        import { initCaramelBase } from './caramel-base.js'
+                        import { initCouponConstants } from './coupon-constants.generated.js'
+                        import { initCouponRunner } from './coupon-runner.js'
+                        import { applyCoupon } from './coupon-apply.js'
+                        initCouponConstants()
+                        initCaramelBase()
+                        initCouponRunner()
+                        globalThis.applyCoupon = applyCoupon
+                    `,
+                    resolveDir: EXT_PATH,
+                },
+                bundle: true,
+                format: 'iife',
+                write: false,
+                define: { __CARAMEL_ENV__: JSON.stringify(stamp) },
+            })
+            const driverSource = driver.outputFiles[0].text
 
             const page = await context.newPage()
             // about:blank has no CSP so we can freely inject via page.evaluate
@@ -377,12 +386,10 @@ async function main() {
                 <button id="apply-btn">Apply</button>
             </body></html>`)
 
-            // Wire click handler and load the split content-script files, IN
-            // ORDER, via evaluate (bypasses CSP) — each its own eval, like
-            // separate <script> tags, so load-order semantics match the
-            // real content-script realm (see caramel-base.js's load-order note
-            // for why that distinction matters).
-            await page.evaluate(sources => {
+            // Wire the click handler and the chrome stub FIRST — the driver's
+            // inits read chrome/window exactly like the real realm start —
+            // then evaluate the bundled graph.
+            await page.evaluate(driverSource => {
                 window.__clickLog = []
                 document
                     .getElementById('apply-btn')
@@ -392,7 +399,7 @@ async function main() {
                         })
                         document.getElementById('total').textContent = '$90.00'
                     })
-                // Stub chrome APIs the content-script files touch at module scope
+                // Stub chrome APIs the realm touches during init.
                 // Force-overwrite: Chromium provides `chrome` on about:blank but without .runtime
                 window.chrome = {
                     runtime: {
@@ -405,10 +412,8 @@ async function main() {
                     },
                     storage: { sync: { get: (_, cb) => cb && cb({}) } },
                 }
-                for (const src of sources) {
-                    ;(0, eval)(src)
-                }
-            }, contentScriptSources)
+                ;(0, eval)(driverSource)
+            }, driverSource)
 
             const rec = {
                 domain: 'test-store.local',

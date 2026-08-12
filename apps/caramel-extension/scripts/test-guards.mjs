@@ -18,10 +18,16 @@
  * cart is created and no order is placed anywhere. The store config is a frozen
  * snapshot of what production serves (tests/fixtures/naturepedic-store-config.json).
  *
- * Run: pnpm test:guards            (source tree)
- *      CARAMEL_EXT_DIR=./dist pnpm test:guards   (the packaged build)
+ * Run: pnpm test:guards            (default: .output/chrome-mv3-dev — the
+ *                                   dev-stamped WXT build; built if missing)
+ *      CARAMEL_EXT_DIR=<dir> pnpm test:guards    (any unpacked build)
+ *
+ * The source tree itself stopped being loadable in the WXT P1 port: the
+ * classic manifest listed script files that are ES modules now, so only a
+ * BUILT output is a valid extension directory.
  */
 
+import { execSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -29,28 +35,44 @@ import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
-const EXT = resolve(process.env.CARAMEL_EXT_DIR || ROOT)
+const DEFAULT_EXT = join(ROOT, '.output', 'chrome-mv3-dev')
+const EXT = resolve(process.env.CARAMEL_EXT_DIR || DEFAULT_EXT)
 const STORE = 'naturepedic.com'
 const CART_URL = `https://${STORE}/checkout/cart/`
 const ONLY = process.argv[2] || null
+
+// Build the default target if it is not there yet — a missing directory used
+// to mean "run from the source tree", which stopped being a loadable thing in
+// the WXT P1 port.
+if (EXT === DEFAULT_EXT && !existsSync(join(EXT, 'manifest.json'))) {
+    console.log('[guards] building .output/chrome-mv3-dev (dev stamp)…')
+    execSync('npx wxt build --mode development', {
+        cwd: ROOT,
+        stdio: 'inherit',
+        shell: true,
+    })
+}
 
 // Several checks below assert on the extension's own diagnostic markers
 // (AUTO_INSERT_BASELINE_NARROWED / _REFUSED_CONTROL / _EARLY_EXIT), which come
 // out of log() — silent in a build stamped for production, by design, so our
 // internals never print into a shopper's store console. Say so up front
 // instead of letting three checks fail for a reason nothing on screen
-// explains. (Before the environment became a build-time stamp, a packaged
-// directory ran verbose by accident: it carries no manifest update_url, and
-// the old heuristic read that as "an unpacked dev install" — the exact bug the
-// stamp replaced.)
-const stampPath = join(EXT, 'caramel-env.js')
-const stamp = existsSync(stampPath) ? readFileSync(stampPath, 'utf8') : ''
-if (stamp.includes('isProduction: true')) {
+// explains. The stamp is BUNDLED since the WXT port, so the probe greps the
+// built js rather than a caramel-env.js file. (Before the environment became
+// a build-time stamp, a packaged directory ran verbose by accident: it
+// carries no manifest update_url, and the old heuristic read that as "an
+// unpacked dev install" — the exact bug the stamp replaced.)
+const contentBundlePath = join(EXT, 'content-scripts', 'content.js')
+const contentBundle = existsSync(contentBundlePath)
+    ? readFileSync(contentBundlePath, 'utf8')
+    : ''
+if (contentBundle.includes('"isProduction":true')) {
     console.error(
         `\n  This suite needs a development-stamped package: ${EXT} is stamped for production,\n` +
             `  so log() is a no-op and the diagnostic-marker checks cannot pass.\n\n` +
-            `  Build one:  node scripts/build-dist.mjs --env=development --out=dist-guards\n` +
-            `  Then run:   CARAMEL_EXT_DIR=./dist-guards pnpm test:guards\n`,
+            `  Build one:  npx wxt build --mode development\n` +
+            `  Then run:   pnpm test:guards   (default dir is .output/chrome-mv3-dev)\n`,
     )
     process.exit(1)
 }

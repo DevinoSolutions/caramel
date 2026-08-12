@@ -20,7 +20,7 @@
  * PRODUCTION package. This can, in about ten seconds.
  *
  * Run: node scripts/smoke-package.mjs <package-dir> <environment>
- *      node scripts/smoke-package.mjs ./dist production
+ *      node scripts/smoke-package.mjs ./.output/chrome-mv3 production
  */
 
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -28,7 +28,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
-import { ENVIRONMENTS } from './build-dist.mjs'
+import { ENVIRONMENTS } from './environments.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PACKAGE_DIR = path.resolve(__dirname, '..', process.argv[2] || 'dist')
@@ -102,16 +102,21 @@ try {
     const popup = await context.newPage()
     const pageErrors = []
     popup.on('pageerror', err => pageErrors.push(String(err?.message || err)))
+    // popup.html since the WXT P1 port (was index.html). The old probe also
+    // read the bare CARAMEL_ALLOWED_ORIGINS global; that Set lives in module
+    // scope now and is invisible to page scripts, so the origin check reads
+    // the published stamp instead — same source of truth (caramel-base builds
+    // the Set from CARAMEL_ENV.trustedOrigins; the construction itself is
+    // unit-pinned in tests/).
     await popup.goto(
-        `chrome-extension://${new URL(worker.url()).host}/index.html`,
+        `chrome-extension://${new URL(worker.url()).host}/popup.html`,
     )
     const fromPopup = await popup.evaluate(() => ({
         name: globalThis.CARAMEL_ENV?.name,
         baseUrl: globalThis.CARAMEL_ENV?.baseUrl,
-        allowed:
-            typeof CARAMEL_ALLOWED_ORIGINS === 'undefined'
-                ? null
-                : [...CARAMEL_ALLOWED_ORIGINS],
+        trusted: globalThis.CARAMEL_ENV?.trustedOrigins
+            ? [...globalThis.CARAMEL_ENV.trustedOrigins]
+            : null,
     }))
 
     check(
@@ -121,15 +126,10 @@ try {
         `${fromPopup.name} ${fromPopup.baseUrl}`,
     )
     check(
-        'the popup built its postMessage allowlist',
-        Array.isArray(fromPopup.allowed) && fromPopup.allowed.length > 0,
-        JSON.stringify(fromPopup.allowed),
-    )
-    check(
         'it trusts exactly the origins this environment declares',
-        JSON.stringify([...(fromPopup.allowed || [])].sort()) ===
+        JSON.stringify([...(fromPopup.trusted || [])].sort()) ===
             JSON.stringify([...expected.trustedOrigins].sort()),
-        JSON.stringify(fromPopup.allowed),
+        JSON.stringify(fromPopup.trusted),
     )
     check(
         'the popup loaded without a page error',

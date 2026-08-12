@@ -50,9 +50,8 @@ jobs:
       # strict tsc, no any; `wxt prepare` generates .wxt/ types first.
       - name: Type-check WXT surfaces
         run: pnpm run type-check
-      # Proves the allowlist in scripts/build-dist.mjs actually produces a
-      # loadable package — tests/package-contents.test.mjs checks the file list,
-      # this checks the build runs and lands the files it promises.
+      # Proves the WXT build runs and lands the files the manifest promises
+      # (the parity harness above asserts the manifest references resolve).
       - name: Build the store package
         run: pnpm run build
 
@@ -175,22 +174,17 @@ jobs:
       # local app — so without this, no browser ever sees what actually ships.
       # This is the check that would have caught the update_url heuristic.
       - name: Smoke the store package (production stamp, real browser)
-        run: xvfb-run --auto-servernum pnpm --filter caramel-extension exec node scripts/smoke-package.mjs ./dist production
+        run: xvfb-run --auto-servernum pnpm --filter caramel-extension exec node scripts/smoke-package.mjs ./.output/chrome-mv3 production
 
-      # …and a second, DEVELOPMENT-stamped copy of that same package for the
-      # guards to drive. Several guard checks assert on the extension's own
-      # diagnostic markers (AUTO_INSERT_BASELINE_NARROWED, _REFUSED_CONTROL,
-      # _EARLY_EXIT), which a shipped build deliberately does not print —
-      # console-silence.test.mjs exists to keep our internals out of a
-      # shopper's store console. Before the environment became a build-time
-      # stamp this ran verbose by accident, because an unpacked directory has
-      # no manifest update_url and the old heuristic read that as "dev": the
-      # very bug this stamp replaced. Same packaged directory either way; only
-      # the stamp differs, and the production one is still built above.
-      - name: Build the packaged bundle the guards drive (development stamp)
-        run: pnpm --filter caramel-extension exec node scripts/build-dist.mjs --env=development --out=dist-guards
+      # …and a second, DEVELOPMENT-stamped build for the guards to drive.
+      # Several guard checks assert on the extension's own diagnostic markers
+      # (AUTO_INSERT_BASELINE_NARROWED, _REFUSED_CONTROL, _EARLY_EXIT), which
+      # a shipped build deliberately does not print — console-silence.test.mjs
+      # exists to keep our internals out of a shopper's store console. Same
+      # module graph either way; only the __CARAMEL_ENV__ stamp differs, and
+      # the production build is still smoked above.
+      - name: Build the bundle the guards drive (development stamp)
+        run: pnpm --filter caramel-extension run build:dev
 
-      - name: Run extension guard suite (packaged build)
-        env:
-          CARAMEL_EXT_DIR: ./dist-guards
+      - name: Run extension guard suite (dev-stamped build)
         run: xvfb-run --auto-servernum pnpm --filter caramel-extension test:guards
