@@ -1,5 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
-import { loadExtensionSource } from './_load.mjs'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 // Pins the caramel-base.js user-preference + savings-history helpers that
 // the checkout prompt (UI-helpers.js insertCaramelPrompt), the apply flow
@@ -9,35 +8,55 @@ import { loadExtensionSource } from './_load.mjs'
 //     subdomains included).
 //   * caramelRecordSaving/caramelGetSavings — measured-wins-only history,
 //     newest first, capped.
-// Storage is faked with a real in-memory map (the permissive stub's
-// default empty storage isn't enough here — these tests assert persisted
-// shapes).
+// Storage is faked with a real in-memory map (a permissive stub's default
+// empty storage isn't enough here — these tests assert persisted shapes).
+//
+// The old harness re-eval'd caramel-base.js per test; vi.resetModules() + a
+// dynamic import is that same freshness in the ESM world (module state like
+// the settings cache must not leak between tests). The re-init works only
+// because `window.currentBrowser` is cleared first: caramel-base's re-resolve
+// branch keys off it, and a fresh module registry would otherwise bind the
+// PREVIOUS realm's browser handle (the once-latch the port fleet documented).
 let helpers
 let syncData
 let localData
 
-beforeEach(() => {
-    helpers = loadExtensionSource('caramel-base.js', [
-        'caramelGetSettings',
-        'caramelSetSettings',
-        'caramelPromptAllowed',
-        'caramelGetSavings',
-        'caramelRecordSaving',
-    ])
+function installChromeStub() {
+    const area = data => ({
+        get: (_keys, cb) => cb({ ...data() }),
+        set: (items, cb) => {
+            Object.assign(data(), items)
+            if (cb) cb()
+        },
+        remove: (keys, cb) => {
+            for (const key of [].concat(keys)) delete data()[key]
+            if (cb) cb()
+        },
+    })
+    globalThis.chrome = {
+        runtime: {
+            id: 'test-ext-id',
+            lastError: undefined,
+            onMessage: { addListener: () => {} },
+            sendMessage: () => {},
+            getURL: p => p,
+        },
+        storage: {
+            sync: area(() => syncData),
+            local: area(() => localData),
+        },
+    }
+}
+
+beforeEach(async () => {
     syncData = {}
     localData = {}
-    globalThis.currentBrowser.storage.sync.get = (_keys, cb) =>
-        cb({ ...syncData })
-    globalThis.currentBrowser.storage.sync.set = (items, cb) => {
-        Object.assign(syncData, items)
-        if (cb) cb()
-    }
-    globalThis.currentBrowser.storage.local.get = (_keys, cb) =>
-        cb({ ...localData })
-    globalThis.currentBrowser.storage.local.set = (items, cb) => {
-        Object.assign(localData, items)
-        if (cb) cb()
-    }
+    vi.resetModules()
+    installChromeStub()
+    window.currentBrowser = undefined
+    const mod = await import('../caramel-base.js')
+    mod.initCaramelBase()
+    helpers = mod
 })
 
 describe('caramel-base.js settings helpers', () => {

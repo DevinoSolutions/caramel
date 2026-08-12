@@ -34,11 +34,21 @@ const stubs = vi.hoisted(() => ({
     finalModalCalls: [],
 }))
 
-vi.mock('../caramel-base.js', async importOriginal => ({
-    ...(await importOriginal()),
-    sleep: async () => {},
-    caramelRecordSaving: () => {},
-}))
+vi.mock('../caramel-base.js', async importOriginal => {
+    const actual = await importOriginal()
+    return {
+        ...actual,
+        // `currentBrowser` is an export the module REASSIGNS (initCaramelBase);
+        // a bare spread freezes it at undefined for every consumer of this
+        // mock. Nothing in this file's paths reads it today, so the getter is
+        // insurance rather than a fix — but the frozen version fails silently.
+        get currentBrowser() {
+            return actual.currentBrowser
+        },
+        sleep: async () => {},
+        caramelRecordSaving: () => {},
+    }
+})
 vi.mock('../coupon-fetch.js', async importOriginal => ({
     ...(await importOriginal()),
     fetchCoupons: async () => stubs.coupons,
