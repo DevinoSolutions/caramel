@@ -1,6 +1,26 @@
 // owns: coupon-apply engine — generic selectors, input/error detection, applyCoupon, discount-link fallback (GENERIC_* selectors, setInputValue, removeAppliedCoupon, detectCouponError, applyCoupon, probeCartJson, applyViaDiscountLink)
 // load after: caramel-base.js, dom-utils.js, store-detect.js
 
+// ES module since the WXT P1 port (2026-08-12). Same statements in the same
+// order; the only new plumbing is explicit imports for the symbols this file
+// used to read off the shared script realm, and `export` on the ones
+// coupon-runner.js / store-detect.js call. This file publishes nothing on
+// window/globalThis and has no effectful top-level statement, so it exports no
+// init() — there is nothing for the composition entrypoint to call.
+import { log, logError, recordTiming, sleep } from './caramel-base.js'
+import {
+    _caramelLastPrices,
+    _isVisible,
+    caramelFormSubmitIsUnsafe,
+    caramelIsForbiddenControl,
+    getPrice,
+    pickBestMatch,
+    qAll,
+    qOne,
+    waitForTextChange,
+    waitForVisible,
+} from './dom-utils.js'
+
 // Generic selectors used when the per-store config doesn't specify them.
 // These cover the most common Honey-style cart UIs.
 const GENERIC_APPLIED_SELECTORS =
@@ -46,7 +66,7 @@ const GENERIC_ERROR_TEXT_RE =
 // when motoin.de's own expiry banner turned out to be unreadable to us
 // (tests/post-navigation-verdict.test.mjs).
 
-function findAppliedSelector(rec) {
+export function findAppliedSelector(rec) {
     return rec.successIndicator || GENERIC_APPLIED_SELECTORS
 }
 
@@ -68,7 +88,7 @@ const CARAMEL_REJECTED_ROW_RE = new RegExp(
     String.raw`\bnot\s+applied\b|\bnicht\s+angewendet\b|\bnon\s+appliqué`,
     'i',
 )
-function caramelRowReadsRejected(el) {
+export function caramelRowReadsRejected(el) {
     if (!el) return false
     const text = (el.innerText || el.textContent || '').trim().slice(0, 300)
     if (!text) return false
@@ -88,7 +108,7 @@ function findRemoveSelector(rec) {
 }
 
 // Set value on a (possibly React-controlled) input + fire input/change events.
-function setInputValue(input, code) {
+export function setInputValue(input, code) {
     const proto = window.HTMLInputElement.prototype
     const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set
     if (setter) setter.call(input, code)
@@ -126,8 +146,7 @@ function _caramelRemoveRowText(btn) {
  */
 // Called from other split content-script files (cross-file content-script
 // call — oxlint's per-file analysis can't see it).
-// oxlint-disable-next-line no-unused-vars
-async function removeAppliedCoupon(rec, options) {
+export async function removeAppliedCoupon(rec, options) {
     const ourCode = options?.code
         ? String(options.code).trim().toUpperCase()
         : null
@@ -342,8 +361,7 @@ function detectCouponError(rec, baseline, code) {
  */
 // Called from store-detect.js (cross-file content-script call — oxlint's
 // per-file analysis can't see it).
-// oxlint-disable-next-line no-unused-vars
-function caramelPostNavigationVerdict(rec, code) {
+export function caramelPostNavigationVerdict(rec, code) {
     if (!rec) return null
     const el = _firstVisibleErrorEl(rec)
     if (!el || !_isVisible(el)) return null
@@ -369,8 +387,7 @@ function caramelPostNavigationVerdict(rec, code) {
 // Called from other split content-script files (cross-file content-script
 // call — oxlint's per-file analysis can't see it) and from
 // scripts/test-extension.mjs's Playwright harness.
-// oxlint-disable-next-line no-unused-vars
-async function applyCoupon(code, rec) {
+export async function applyCoupon(code, rec) {
     const attemptStart = performance.now()
     log('AUTO_INSERT_ATTEMPT_START', code, { t: attemptStart })
     recordTiming('AUTO_INSERT_ATTEMPT_START', { code })
@@ -723,7 +740,7 @@ async function applyCoupon(code, rec) {
 //   GET /discount/{code}    -> attaches the code to the session server-side
 // Any site that isn't that platform simply fails the /cart.js shape probe and
 // the normal config-selector DOM flow below runs unchanged.
-async function probeCartJson() {
+export async function probeCartJson() {
     try {
         const r = await fetch('/cart.js', { credentials: 'same-origin' })
         if (!r.ok) return null
@@ -747,7 +764,7 @@ async function probeCartJson() {
 // expire on their own after 15 minutes so fresh runs eventually retry.
 const CARAMEL_TRIED_KEY = 'caramel_tried_codes'
 const CARAMEL_TRIED_TTL = 15 * 60 * 1000
-function _getTriedCodes() {
+export function _getTriedCodes() {
     try {
         const m = JSON.parse(sessionStorage.getItem(CARAMEL_TRIED_KEY) || '{}')
         const now = Date.now()
@@ -773,8 +790,7 @@ function _getTriedCodes() {
  * synthetic input can still work when pasted by hand) and nothing is labelled
  * rejected that we don't have the store's own words for. */
 // Cross-file content-script call — per-file analysis can't see it.
-// oxlint-disable-next-line no-unused-vars
-function caramelSinkTriedCodes(list, tried) {
+export function caramelSinkTriedCodes(list, tried) {
     const seen = tried || _getTriedCodes() || {}
     return (Array.isArray(list) ? list : [])
         .map((c, i) => ({ c, i })) // index keeps the sort stable
@@ -786,7 +802,7 @@ function caramelSinkTriedCodes(list, tried) {
         .map(x => x.c)
 }
 
-function _markTriedCode(code) {
+export function _markTriedCode(code) {
     // Marked at attempt START, not at verdict — a full-page-POST apply can
     // destroy this script before the verdict lands.
     try {
@@ -815,8 +831,7 @@ function _markTriedCode(code) {
 // auto-apply queue AND the copy list, leaving 16 unevidenced codes in its
 // place. Same mechanism burns codes tried against an EMPTY cart, where no
 // total can move by definition.
-// oxlint-disable-next-line no-unused-vars
-function _unmarkTriedCode(code) {
+export function _unmarkTriedCode(code) {
     try {
         const m = _getTriedCodes()
         if (!(code in m)) return
@@ -843,8 +858,7 @@ function _unmarkTriedCode(code) {
  * every caller re-reads the cart rather than trusting either request.
  */
 // Cross-file content-script call — per-file analysis can't see it.
-// oxlint-disable-next-line no-unused-vars
-async function _caramelClearCartDiscounts() {
+export async function _caramelClearCartDiscounts() {
     try {
         const r = await fetch('/cart/update.js', {
             method: 'POST',
@@ -863,8 +877,7 @@ async function _caramelClearCartDiscounts() {
 
 // Called from other split content-script files (cross-file content-script
 // call — oxlint's per-file analysis can't see it).
-// oxlint-disable-next-line no-unused-vars
-async function applyViaDiscountLink(code) {
+export async function applyViaDiscountLink(code) {
     // The discount endpoint 302s to the storefront; we only need the session
     // cookie it sets, then re-read the live totals to see if the code took.
     // A later code simply replaces the session's discount, so probing several

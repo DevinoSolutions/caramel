@@ -1,5 +1,27 @@
 // owns: coupon list fetch + classify (fetchCouponsPage, fetchCoupons, RESTRICTED_STATUSES, classifyCartCategory, getCoupons)
-// load after: caramel-base.js, dom-utils.js, store-detect.js, coupon-apply.js, and coupon-constants.generated.js (window.CaramelCoupons — loaded first in every manifest/index.html)
+//
+// ES module since the WXT P1 port (2026-08-12). The old "load after" header
+// listed the script order this file depended on; the imports below ARE that
+// order now. Two seams behave differently and deliberately so:
+//
+//   · RESTRICTED_STATUSES still builds at module-eval time, but off the
+//     imported `CaramelCoupons` rather than `window.CaramelCoupons`.
+//     coupon-constants.generated.js is a leaf (it imports nothing), so ESM
+//     guarantees it has evaluated before this line runs — which is the same
+//     guarantee "loaded first in every manifest/index.html" used to give, now
+//     structural instead of clerical.
+//   · classifyCartCategory() keeps reading `window.CaramelCartSignals` at CALL
+//     time and degrading to null when it is absent. That is not an oversight:
+//     the popup realm never loads cart-signals.js, and the window seam is what
+//     lets the same function serve both realms (see cart-signals.js's header).
+//
+// The file has no top-level side effects — no listeners, no DOM/location
+// reads, no chrome API calls, no window publication — so it exports no init
+// function.
+import { caramelSendMessage, log, recordTiming } from './caramel-base.js'
+import { CARAMEL_ENV } from './caramel-env.js'
+import { CaramelCoupons } from './coupon-constants.generated.js'
+import { getCachedCodes } from './store-detect.js'
 
 /* --------------------------------------------------  coupon list */
 /* ONE page of the store's codes, envelope included.
@@ -14,10 +36,8 @@
  * Resolves `{ coupons, page, total, hasMore }`. A backend that answers without
  * the envelope (older deploy, bare array) degrades to hasMore:false — "this is
  * all there is" — which is exactly the behavior that shipped before paging. */
-// Called from popup.js and from fetchCoupons below (cross-file call — oxlint's
-// per-file analysis can't see the popup one).
-// oxlint-disable-next-line no-unused-vars
-async function fetchCouponsPage(site, kw, category, page) {
+// Called from popup.js and from fetchCoupons below.
+export async function fetchCouponsPage(site, kw, category, page) {
     // Delegate network fetch to background/service worker to avoid CORS failures
     const meta = { site, kw, category, page }
     try {
@@ -73,20 +93,19 @@ async function fetchCouponsPage(site, kw, category, page) {
  * the popup wants and the shape this name has always had. Kept as a wrapper
  * rather than a second request path so there is exactly one place that talks to
  * the service worker about coupons. */
-// Called from other split content-script files (cross-file content-script
-// call — oxlint's per-file analysis can't see it).
-// oxlint-disable-next-line no-unused-vars
-async function fetchCoupons(site, kw, category) {
+export async function fetchCoupons(site, kw, category) {
     const { coupons } = await fetchCouponsPage(site, kw, category, 1)
     return coupons
 }
 // Statuses that signal a coupon has restrictions the user might trip over.
 // When ANY returned coupon carries one of these, we classify the cart so the
 // UI can warn the user "your cart is X, this code is for Y." Sourced from
-// window.CaramelCoupons (coupon-constants.generated.js, loaded before this
-// file — F-006) instead of a hard-coded literal, so this can't re-drift
-// from the app's src/lib/coupons.ts.
-const RESTRICTED_STATUSES = new Set(window.CaramelCoupons.RESTRICTED_STATUSES)
+// coupon-constants.generated.js (F-006) instead of a hard-coded literal, so
+// this can't re-drift from the app's src/lib/coupons.ts.
+// Exported for tests/coupon-constants.test.mjs, which proves this set really
+// is derived from the shared vocabulary rather than a copy of it. No source
+// file imports it: popup.js builds its own set from the same constants.
+export const RESTRICTED_STATUSES = new Set(CaramelCoupons.RESTRICTED_STATUSES)
 
 /* Coupon codes are SCRAPED, so they arrive with whatever the source page had
  * around them — trailing newlines, non-breaking spaces, zero-width characters.
@@ -100,7 +119,7 @@ const RESTRICTED_STATUSES = new Set(window.CaramelCoupons.RESTRICTED_STATUSES)
  * button) sees the same clean value. Internal spaces are LEFT ALONE — a few
  * stores really do issue codes containing them. Codes left empty are dropped;
  * an empty code can only ever waste an attempt. */
-function _caramelCleanCodes(list) {
+export function _caramelCleanCodes(list) {
     if (!Array.isArray(list)) return list
     return list
         .map(c => {
@@ -132,9 +151,9 @@ function _caramelCleanCodes(list) {
  * their own cart. A percentage is capped at 100 and a cash amount at the cart
  * total, because neither can take off more than the cart holds.
  */
-// Cross-file content-script call — per-file analysis can't see it.
-// oxlint-disable-next-line no-unused-vars
-function caramelEstimatedValue(coupon, totalMinor) {
+// Exported for tests/best-value-code.test.mjs; inside the extension only
+// caramelRankByValue below consumes it.
+export function caramelEstimatedValue(coupon, totalMinor) {
     const amount = Number(coupon?.discount_amount)
     if (!Number.isFinite(amount) || amount <= 0) return 0
     const total = Number.isFinite(totalMinor) && totalMinor > 0 ? totalMinor : 0
@@ -151,9 +170,7 @@ function caramelEstimatedValue(coupon, totalMinor) {
 /* Best-first ordering. Stable, so codes we can't value keep their original
  * order — an unvalued coupon is unknown, not worthless, and sinking it below a
  * known-tiny one would be its own way of losing money. */
-// Cross-file content-script call — per-file analysis can't see it.
-// oxlint-disable-next-line no-unused-vars
-function caramelRankByValue(list, totalMinor) {
+export function caramelRankByValue(list, totalMinor) {
     return (Array.isArray(list) ? list : [])
         .map((c, i) => ({ c, i, v: caramelEstimatedValue(c, totalMinor) }))
         .sort((a, b) => b.v - a.v || a.i - b.i)
@@ -192,10 +209,7 @@ async function classifyCartCategory() {
     return null
 }
 
-// Called from other split content-script files (cross-file content-script
-// call — oxlint's per-file analysis can't see it).
-// oxlint-disable-next-line no-unused-vars
-async function getCoupons(rec) {
+export async function getCoupons(rec) {
     // Dev hook: deterministic coupons when using #caramel-test. Gated to
     // development-stamped builds so a #caramel-test link can't make a shipped
     // build fire mock codes against a real store's checkout.

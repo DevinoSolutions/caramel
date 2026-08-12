@@ -1,20 +1,96 @@
 // owns: main apply-loop runner + auth-bridge/message listeners (startApplyingCoupons, _caramelCancelled, window "message" + runtime.onMessage listeners)
-// load after: caramel-base.js, dom-utils.js, store-detect.js, coupon-apply.js, coupon-fetch.js
+//
+// ES module since the WXT P1 port (2026-08-12). The old "load after" header
+// listed the script order this file needed; the imports below ARE that order
+// now. Everything that used to RUN at load time — the URL-seen set, the
+// website→extension `message` relay, the hello handshake, the
+// runtime.onMessage listener — moved verbatim into initCouponRunner(), which
+// the content entrypoint calls in manifest order. Nothing else about the flow
+// changed.
+import {
+    CARAMEL_ALLOWED_ORIGINS,
+    caramelGetSession,
+    caramelRecordSaving,
+    caramelSetSession,
+    currentBrowser,
+    log,
+    logError,
+    sleep,
+} from './caramel-base.js'
+import {
+    _caramelClearCartDiscounts,
+    _getTriedCodes,
+    _markTriedCode,
+    _unmarkTriedCode,
+    applyCoupon,
+    applyViaDiscountLink,
+    caramelRowReadsRejected,
+    caramelSinkTriedCodes,
+    findAppliedSelector,
+    probeCartJson,
+    removeAppliedCoupon,
+    setInputValue,
+} from './coupon-apply.js'
+import {
+    _caramelCleanCodes,
+    caramelRankByValue,
+    fetchCoupons,
+    getCoupons,
+} from './coupon-fetch.js'
+import {
+    _caramelLastPrices,
+    _isVisible,
+    caramelBaselineFor,
+    caramelBeginRun,
+    caramelClearPendingSubmit,
+    caramelCurrencyCode,
+    caramelDisclosureFor,
+    caramelEndRun,
+    caramelIsForbiddenControl,
+    caramelMarkPendingSubmit,
+    getPrice,
+    pickBestMatch,
+    qAll,
+    waitForVisible,
+    waitUntilReady,
+} from './dom-utils.js'
+import {
+    getDomainRecord,
+    startCheckoutDetection,
+    tryInitialize,
+} from './store-detect.js'
+import {
+    hideTestingModal,
+    showFinalModal,
+    showTestingModal,
+    updateTestingModal,
+} from './UI-helpers.js'
 
 /* --------------------------------------------------  main runner */
-// Set true when the user dismisses the testing overlay, so the loop stops
-// instead of trapping them. Shared across content-script files (same realm).
-// Guarded `var` (matches this file's re-injection convention — see sleep/log)
-// so a second content-script injection doesn't throw on redeclaration.
-if (typeof _caramelCancelled === 'undefined') {
-    var _caramelCancelled = false
-}
+/* Set true when the user dismisses the testing overlay, so the loop stops
+ * instead of trapping them.
+ *
+ * Stored as a property of the realm's global object rather than as module
+ * state, which is what the classic scripts gave us when this was a top-level
+ * `var`. The testing-overlay cancel control (UI-helpers.js `_cancel`) WRITES
+ * this flag, and an ES module import is a read-only binding, so module state
+ * would sever that seam silently — the ✕ and Esc would stop stopping the loop.
+ * Keeping the property is what lets UI-helpers assign it directly, and it is
+ * also the same `globalThis._caramelCancelled` the cancel-path test suites
+ * already drive. The apply loop below reads it through `globalThis.` at every
+ * site, so the storage and the reads agree.
+ *
+ * Reviewed and settled 2026-08-12 (WXT P1): a `caramelSetCancelled()` export
+ * was considered for the cross-module write and rejected — no invented API on
+ * the money-adjacent path when the existing seam is behavior-identical to what
+ * ships today. UI-helpers writes `globalThis._caramelCancelled` explicitly. */
+globalThis._caramelCancelled = false
 
 // Fire-and-forget trust-loop report → background (content scripts can't hit
 // the API directly). Best-effort: an asleep/unreachable SW must never break
 // the apply flow, so send errors are swallowed. No-op without a real coupon
 // id (the #caramel-test mock list carries none).
-function reportOutcome(id, outcome, storeReason) {
+export function reportOutcome(id, outcome, storeReason) {
     if (!id) return
     try {
         const p = currentBrowser.runtime.sendMessage({
@@ -93,7 +169,7 @@ function _caramelDiscountAmountFor(cart, code, applicableCount) {
  * than whatever the cart leads with — "is there a discount" and "does THEIRS
  * still exist" are different questions, and the flow answered the first while
  * reporting on the second. */
-function _caramelLiveDiscountFor(cart, code) {
+export function _caramelLiveDiscountFor(cart, code) {
     if (!cart) return 0
     const wanted = String(code).toUpperCase()
     const codes = Array.isArray(cart.discount_codes) ? cart.discount_codes : []
@@ -188,7 +264,9 @@ function _caramelOwnCodeRow(code) {
     return { code, title: 'Your code — paste it in at checkout' }
 }
 
-function _existingCartDiscount(cart) {
+// Exported for tests/existing-cart-discount.test.mjs; inside the extension it
+// is called only from startApplyingCoupons below.
+export function _existingCartDiscount(cart) {
     if (!cart) return null
     const money = minor => _caramelCartMoney(cart, minor)
     const codes = Array.isArray(cart.discount_codes) ? cart.discount_codes : []
@@ -215,7 +293,7 @@ function _existingCartDiscount(cart) {
     return null
 }
 
-async function startApplyingCoupons(rec, options) {
+export async function startApplyingCoupons(rec, options) {
     log('=== Starting coupon flow ===')
     // A resumed run is the SAME click continuing on a new page, so the overlay
     // says so — "Applying Coupons…" appearing on its own after a reload reads
@@ -258,7 +336,7 @@ async function startApplyingCoupons(rec, options) {
         return
     }
     log('AUTO_INSERT_START', { domain: rec.domain, t: performance.now() })
-    _caramelCancelled = false
+    globalThis._caramelCancelled = false
     await showTestingModal(resumed ? 'Still checking codes…' : '')
 
     let coupons
@@ -349,7 +427,7 @@ async function startApplyingCoupons(rec, options) {
         let bestId = null
         let bestCurrency = _cart0.currency
         for (let i = 0; i < linkCodes.length; i++) {
-            if (_caramelCancelled) {
+            if (globalThis._caramelCancelled) {
                 // Stopping mid-probe leaves whichever code we tried last on the
                 // cart. If the shopper had their own, hand it back before we
                 // go — via the cart-aware put, because if their code is still
@@ -843,7 +921,7 @@ async function startApplyingCoupons(rec, options) {
     const loopStart = performance.now()
 
     for (let i = 0; i < coupons.length; i++) {
-        if (_caramelCancelled) break
+        if (globalThis._caramelCancelled) break
         if (!bestCode && performance.now() - loopStart > FLOW_BUDGET_MS) {
             log('AUTO_INSERT_TIME_BUDGET', {
                 tried: i,
@@ -1033,7 +1111,7 @@ async function startApplyingCoupons(rec, options) {
     // later navigation resume a chain that already had its answer.
     caramelEndRun()
 
-    if (_caramelCancelled) {
+    if (globalThis._caramelCancelled) {
         log('AUTO_INSERT_STOP', { result: 'cancelled', t: performance.now() })
         return
     }
@@ -1216,9 +1294,8 @@ async function startApplyingCoupons(rec, options) {
  */
 const CARAMEL_HELLO_TRIES = 5
 const CARAMEL_HELLO_GAP_MS = 600
-// Bound at module-eval time below; exported for the suite.
-// oxlint-disable-next-line no-unused-vars
-async function caramelAnnounceToWebsite() {
+// Called from initCouponRunner() below; exported for the suite.
+export async function caramelAnnounceToWebsite() {
     for (let i = 0; i < CARAMEL_HELLO_TRIES; i++) {
         let token = null
         try {
@@ -1241,17 +1318,16 @@ async function caramelAnnounceToWebsite() {
     })
 }
 
-/* URLs detection has already been answered for, seeded with the one the
- * document loaded at (inject.js runs detection there, and re-running it for the
- * same URL is pure duplication). A store that rewrites its address bar in a
- * loop must not cost a run per rewrite.
+/* URLs detection has already been answered for, seeded by initCouponRunner()
+ * with the one the document loaded at (inject.js runs detection there, and
+ * re-running it for the same URL is pure duplication). A store that rewrites
+ * its address bar in a loop must not cost a run per rewrite.
  *
- * Guarded `var`, not `const`: re-injection safety, and the test harness evals
- * each source file in its own call where only var/function survive
- * (tests/_load.mjs). */
-if (typeof _caramelEvaluatedUrls === 'undefined') {
-    var _caramelEvaluatedUrls = new Set([location.href])
-}
+ * The set itself is module state — nothing outside this file writes it — but
+ * the SEEDING reads `location`, which is a top-level DOM touch, so it lives in
+ * the init function with the rest of them. Exported (as the set, never
+ * reassigned) so the suite can drive it. */
+export const _caramelEvaluatedUrls = new Set()
 
 /* The address bar moved. Re-ask whether we can help here.
  *
@@ -1262,7 +1338,7 @@ if (typeof _caramelEvaluatedUrls === 'undefined') {
  * second install), so a re-run adds a decision, not a duplicate.
  *
  * Returns whether it re-ran, so the test can tell a decision from a no-op. */
-function caramelHandleUrlChanged(url) {
+export function caramelHandleUrlChanged(url) {
     const seen = String(url || '')
     if (!seen || _caramelEvaluatedUrls.has(seen)) return false
     _caramelEvaluatedUrls.add(seen)
@@ -1274,60 +1350,73 @@ function caramelHandleUrlChanged(url) {
 }
 
 /* --------------------------------------------------  listeners
+ *
+ * Everything this file used to DO at load time lives here, in its original
+ * order: seed the URL set, then register the listeners. The content entrypoint
+ * calls this in manifest order (after initCaramelBase, which is what assigns
+ * `currentBrowser`), which is what preserves today's script-order semantics.
+ *
  * Guard: register once per realm. Without this, SPA re-injections stack
  * duplicate listeners → double-fires, memory leaks. */
-if (!window.__caramel_listeners_bound) {
-    window.__caramel_listeners_bound = true
+export function initCouponRunner() {
+    _caramelEvaluatedUrls.add(location.href)
 
-    window.addEventListener('message', ev => {
-        if (!CARAMEL_ALLOWED_ORIGINS.has(ev.origin)) return
-        if (ev.data?.token) {
-            caramelSetSession(
-                {
-                    token: ev.data.token,
-                    user: {
-                        username: ev.data.username || 'CaramelUser',
-                        image: ev.data.image,
+    if (!window.__caramel_listeners_bound) {
+        window.__caramel_listeners_bound = true
+
+        window.addEventListener('message', ev => {
+            if (!CARAMEL_ALLOWED_ORIGINS.has(ev.origin)) return
+            if (ev.data?.token) {
+                caramelSetSession(
+                    {
+                        token: ev.data.token,
+                        user: {
+                            username: ev.data.username || 'CaramelUser',
+                            image: ev.data.image,
+                        },
                     },
-                },
-                tryInitialize,
-            )
+                    tryInitialize,
+                )
+            }
+        })
+        // Website→extension sign-in relay: on our own site, when the extension
+        // has no session yet, announce ourselves — a signed-in page answers
+        // with a token (accepted by the listener above, allowlisted origins
+        // only). The page mints at most once; see caramelAnnounceToWebsite for
+        // why we say it more than once.
+        //
+        // This used to carry a `typeof CARAMEL_ALLOWED_ORIGINS !== 'undefined'`
+        // guard, because it ran at module-eval time and the old vitest harness
+        // evaluated each source file separately, where another file's top-level
+        // const simply did not exist. The import at the top of this file is
+        // that guarantee now, so the guard would be dead weight.
+        if (CARAMEL_ALLOWED_ORIGINS.has(location.origin)) {
+            caramelAnnounceToWebsite()
         }
-    })
-    // Website→extension sign-in relay: on our own site, when the extension has
-    // no session yet, announce ourselves — a signed-in page answers with a token
-    // (accepted by the listener above, allowlisted origins only). The page mints
-    // at most once; see caramelAnnounceToWebsite for why we say it more than
-    // once.
-    // typeof guard: unlike the deferred listener above, this runs at
-    // module-eval time, and the vitest harness evals each file separately
-    // (cross-file top-level consts aren't visible there — see _load.mjs).
-    if (
-        typeof CARAMEL_ALLOWED_ORIGINS !== 'undefined' &&
-        CARAMEL_ALLOWED_ORIGINS.has(location.origin)
-    ) {
-        caramelAnnounceToWebsite()
-    }
 
-    currentBrowser.runtime.onMessage.addListener((req, _s, send) => {
-        if (req.action === 'userLoggedIn') {
-            log('AUTO_INSERT_TRIGGERED_BY_MESSAGE', { t: performance.now() })
-            // Fire-and-forget: an async listener returns a Promise (not `true`),
-            // so Chrome would close the channel before a post-await send(). Reply
-            // immediately and run the long apply flow detached.
-            getDomainRecord(location.hostname)
-                .then(rec => startApplyingCoupons(rec))
-                .catch(err => {
-                    logError('apply flow error', err)
-                    hideTestingModal()
+        currentBrowser.runtime.onMessage.addListener((req, _s, send) => {
+            if (req.action === 'userLoggedIn') {
+                log('AUTO_INSERT_TRIGGERED_BY_MESSAGE', {
+                    t: performance.now(),
                 })
-            send({ success: true })
-            return false
-        }
-        if (req.action === 'caramelUrlChanged') {
-            caramelHandleUrlChanged(req.url)
-            send({ success: true })
-            return false
-        }
-    })
+                // Fire-and-forget: an async listener returns a Promise (not
+                // `true`), so Chrome would close the channel before a
+                // post-await send(). Reply immediately and run the long apply
+                // flow detached.
+                getDomainRecord(location.hostname)
+                    .then(rec => startApplyingCoupons(rec))
+                    .catch(err => {
+                        logError('apply flow error', err)
+                        hideTestingModal()
+                    })
+                send({ success: true })
+                return false
+            }
+            if (req.action === 'caramelUrlChanged') {
+                caramelHandleUrlChanged(req.url)
+                send({ success: true })
+                return false
+            }
+        })
+    }
 }

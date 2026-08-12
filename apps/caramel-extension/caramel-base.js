@@ -1,8 +1,20 @@
-// owns: bootstrap (currentBrowser + double-load guard), sleep/log/recordTiming fallbacks, CARAMEL_ALLOWED_ORIGINS
-// load after: caramel-env.js (the build-time environment stamp — this file's
-// own top-level log()/CARAMEL_ALLOWED_ORIGINS initializers read CARAMEL_ENV
-// immediately at load time, and separate <script>-equivalent files do NOT
-// hoist backward across each other)
+// owns: bootstrap (currentBrowser + double-load guard), sleep/log/recordTiming/
+// logError, CARAMEL_ALLOWED_ORIGINS, session/settings/savings storage
+//
+// ES module since the WXT P1 port (2026-08-12). CARAMEL_ENV now arrives by
+// import rather than by load order: the module graph gives structurally what
+// the old "load after: caramel-env.js" note asked the manifest ordering to
+// guarantee by hand, so this file's top-level log()/CARAMEL_ALLOWED_ORIGINS
+// initializers still read a fully-evaluated stamp.
+//
+// The bootstrap block is this file's ONLY top-level side effect, so it moved
+// into the exported initCaramelBase(): WXT imports entrypoints in Node at build
+// time to read their options, and resolving `chrome`/`browser` — or throwing
+// 'Browser is not supported!' — during module evaluation would run there too.
+// `currentBrowser` is therefore a module-scope binding that init assigns. Every
+// helper below closes over it and reads it at CALL time, and importers share the
+// same live binding, so it may never be read during an importer's OWN top-level
+// initialization — only from inside a function.
 //
 // F-008 note: _isDevInstall used to be defined here, right after the
 // bootstrap block, having been relocated from store-detect.js for exactly
@@ -12,82 +24,92 @@
 // now made at BUILD time and read from CARAMEL_ENV — see the "environment"
 // block in scripts/build-dist.mjs.
 
+import { CARAMEL_ENV } from './caramel-env.js'
+
 /********************************************************************
  * Caramel core logic – 2025-06-29  (speed-tuned)
  ********************************************************************/
 
 /* --------------------------------------------------  bootstrap */
-// Track script loading to prevent redeclaration errors on multiple loads
-if (typeof window !== 'undefined') {
-    if (window.__caramel_shared_utils_loaded) {
-        // Script already loaded - use existing window.currentBrowser
-        // Don't redeclare to avoid errors
-    } else {
-        window.__caramel_shared_utils_loaded = true
+// Assigned by initCaramelBase() — see the header note.
+export let currentBrowser
 
-        // First load - create currentBrowser on window
-        window.currentBrowser = (() => {
+// Track script loading to prevent redeclaration errors on multiple loads
+export function initCaramelBase() {
+    if (typeof window !== 'undefined') {
+        if (window.__caramel_shared_utils_loaded) {
+            // Script already loaded - use existing window.currentBrowser
+            // Don't redeclare to avoid errors
+        } else {
+            window.__caramel_shared_utils_loaded = true
+
+            // First load - create currentBrowser on window
+            window.currentBrowser = (() => {
+                if (typeof chrome !== 'undefined') return chrome
+                if (typeof browser !== 'undefined') return browser
+                throw new Error('Browser is not supported!')
+            })()
+        }
+        // Ensure window.currentBrowser exists
+        if (!window.currentBrowser) {
+            window.currentBrowser = (() => {
+                if (typeof chrome !== 'undefined') return chrome
+                if (typeof browser !== 'undefined') return browser
+                throw new Error('Browser is not supported!')
+            })()
+        }
+        // Local reference — this module's helpers and its importers read it.
+        currentBrowser = window.currentBrowser
+    } else {
+        // Non-window environment (service worker)
+        currentBrowser = (() => {
             if (typeof chrome !== 'undefined') return chrome
             if (typeof browser !== 'undefined') return browser
             throw new Error('Browser is not supported!')
         })()
     }
-    // Ensure window.currentBrowser exists
-    if (!window.currentBrowser) {
-        window.currentBrowser = (() => {
-            if (typeof chrome !== 'undefined') return chrome
-            if (typeof browser !== 'undefined') return browser
-            throw new Error('Browser is not supported!')
-        })()
-    }
-    // Create local reference - var allows redeclaration, so this is safe even on second load
-    var currentBrowser = window.currentBrowser
-} else {
-    // Non-window environment (service worker) - safe to declare normally
-    var currentBrowser = (() => {
-        if (typeof chrome !== 'undefined') return chrome
-        if (typeof browser !== 'undefined') return browser
-        throw new Error('Browser is not supported!')
-    })()
 }
 
 /* --------------------------------------------------  tiny helpers */
-// Check if already declared to prevent redeclaration errors on script reload
-if (typeof sleep === 'undefined') {
-    var sleep = ms => new Promise(r => setTimeout(r, ms))
-}
-if (typeof log === 'undefined') {
-    // Verbose only in a build stamped for development; silent in every shipped
-    // build so we don't leak coupon/flow internals into a store's console.
-    var log = CARAMEL_ENV.verbose
-        ? (...a) => console.log('Caramel:', ...a)
-        : () => {}
-}
-if (typeof recordTiming === 'undefined') {
-    // Apply-flow debug telemetry (coupon-apply.js / coupon-fetch.js call
-    // this). No in-extension reader — inspected manually via storage on dev
-    // installs — so the log is capped to the newest entries at write time
-    // (same policy as CARAMEL_SAVINGS_MAX) instead of growing forever.
-    const CARAMEL_TIMINGS_MAX = 50
-    var recordTiming = (event, meta = {}) => {
-        try {
-            const entry = { event, t: performance.now(), meta }
-            if (
-                currentBrowser &&
-                currentBrowser.storage &&
-                currentBrowser.storage.local
-            ) {
-                currentBrowser.storage.local.get(['caramel_timings'], res => {
-                    const arr = (res && res.caramel_timings) || []
-                    arr.push(entry)
-                    currentBrowser.storage.local.set({
-                        caramel_timings: arr.slice(-CARAMEL_TIMINGS_MAX),
-                    })
+// sleep/log/recordTiming/logError were guarded `var`s
+// (`if (typeof sleep === 'undefined') { var sleep = … }`) so a re-injected
+// content script could not redeclare a global. The guards are gone with the
+// globals: a module evaluates once per realm, and under ESM the `typeof` test
+// resolves against this module's own hoisted binding, so it would answer
+// "undefined" every time — a vacuous guard. Nothing else in either realm
+// declares these names, so the unconditional declaration is exactly what the
+// guard produced on every real load.
+export const sleep = ms => new Promise(r => setTimeout(r, ms))
+
+// Verbose only in a build stamped for development; silent in every shipped
+// build so we don't leak coupon/flow internals into a store's console.
+export const log = CARAMEL_ENV.verbose
+    ? (...a) => console.log('Caramel:', ...a)
+    : () => {}
+
+// Apply-flow debug telemetry (coupon-apply.js / coupon-fetch.js call
+// this). No in-extension reader — inspected manually via storage on dev
+// installs — so the log is capped to the newest entries at write time
+// (same policy as CARAMEL_SAVINGS_MAX) instead of growing forever.
+const CARAMEL_TIMINGS_MAX = 50
+export const recordTiming = (event, meta = {}) => {
+    try {
+        const entry = { event, t: performance.now(), meta }
+        if (
+            currentBrowser &&
+            currentBrowser.storage &&
+            currentBrowser.storage.local
+        ) {
+            currentBrowser.storage.local.get(['caramel_timings'], res => {
+                const arr = (res && res.caramel_timings) || []
+                arr.push(entry)
+                currentBrowser.storage.local.set({
+                    caramel_timings: arr.slice(-CARAMEL_TIMINGS_MAX),
                 })
-            }
-        } catch {
-            // ignore storage errors
+            })
         }
+    } catch {
+        // ignore storage errors
     }
 }
 
@@ -102,21 +124,16 @@ if (typeof recordTiming === 'undefined') {
 // a capped storage entry, which is the same place the apply-flow timings are
 // read from on a dev install. Loud where we can read it, quiet on a stranger's
 // page.
-// Called from other split content-script files (cross-file content-script
-// call — oxlint's per-file analysis can't see it).
-// oxlint-disable-next-line no-unused-vars
-if (typeof logError === 'undefined') {
-    var logError = (where, err) => {
-        try {
-            recordTiming('ERROR', {
-                where,
-                message: String(err?.message || err).slice(0, 300),
-            })
-        } catch {
-            // recording is best-effort; never let it mask the original error
-        }
-        if (CARAMEL_ENV.verbose) console.error('Caramel:', where, err)
+export const logError = (where, err) => {
+    try {
+        recordTiming('ERROR', {
+            where,
+            message: String(err?.message || err).slice(0, 300),
+        })
+    } catch {
+        // recording is best-effort; never let it mask the original error
     }
+    if (CARAMEL_ENV.verbose) console.error('Caramel:', where, err)
 }
 
 /* --------------------------------------------------  worker messaging */
@@ -142,10 +159,7 @@ if (typeof logError === 'undefined') {
 // on a 30s budget there and passes a correspondingly larger value.
 const CARAMEL_MESSAGE_TIMEOUT_MS = 15000
 
-// Called from other split content-script files (cross-file content-script
-// call — oxlint's per-file analysis can't see it).
-// oxlint-disable-next-line no-unused-vars
-function caramelSendMessage(message, timeoutMs) {
+export function caramelSendMessage(message, timeoutMs) {
     const budget = timeoutMs || CARAMEL_MESSAGE_TIMEOUT_MS
     const action = message?.action || 'unknown'
     return new Promise((resolve, reject) => {
@@ -210,10 +224,8 @@ function caramelSendMessage(message, timeoutMs) {
 // to hand it a PRODUCTION session, which is a token crossing an environment
 // boundary the rest of the extension respects.
 //
-// Read from coupon-runner.js's message listener (cross-file content-script
-// reference — oxlint's per-file analysis can't see it).
-// oxlint-disable-next-line no-unused-vars
-const CARAMEL_ALLOWED_ORIGINS = new Set(CARAMEL_ENV.trustedOrigins)
+// Read from coupon-runner.js's message listener.
+export const CARAMEL_ALLOWED_ORIGINS = new Set(CARAMEL_ENV.trustedOrigins)
 
 /* --------------------------------------------------  session storage */
 // The bearer we get from /api/extension/login and the OAuth exchange IS a full
@@ -232,9 +244,7 @@ const CARAMEL_ALLOWED_ORIGINS = new Set(CARAMEL_ENV.trustedOrigins)
 // it is a service worker and cannot load this file.
 const CARAMEL_SESSION_KEYS = ['token', 'user']
 
-// Cross-file content-script/popup reads — per-file analysis can't see them.
-// oxlint-disable-next-line no-unused-vars
-function caramelGetSession() {
+export function caramelGetSession() {
     return new Promise(resolve => {
         try {
             currentBrowser.storage.local.get(CARAMEL_SESSION_KEYS, local => {
@@ -271,8 +281,7 @@ function caramelGetSession() {
     })
 }
 
-// oxlint-disable-next-line no-unused-vars
-function caramelSetSession(session, done) {
+export function caramelSetSession(session, done) {
     const cb = typeof done === 'function' ? done : () => {}
     try {
         currentBrowser.storage.local.set(
@@ -287,8 +296,7 @@ function caramelSetSession(session, done) {
     }
 }
 
-// oxlint-disable-next-line no-unused-vars
-function caramelClearSession(done) {
+export function caramelClearSession(done) {
     const cb = typeof done === 'function' ? done : () => {}
     try {
         currentBrowser.storage.local.remove(CARAMEL_SESSION_KEYS, () =>
@@ -310,9 +318,8 @@ function caramelClearSession(done) {
 // that treated silence as yes would be consent nobody gave. The account-side
 // authority is users.savings_sync_enabled; this is the roaming cache of it.
 const CARAMEL_SETTINGS_KEY = 'caramel_settings'
-// Cross-file content-script/popup reads — per-file analysis can't see them.
-// oxlint-disable-next-line no-unused-vars
-function caramelGetSettings() {
+
+export function caramelGetSettings() {
     return new Promise(resolve => {
         try {
             currentBrowser.storage.sync.get([CARAMEL_SETTINGS_KEY], res => {
@@ -334,8 +341,8 @@ function caramelGetSettings() {
         }
     })
 }
-// oxlint-disable-next-line no-unused-vars
-async function caramelSetSettings(patch) {
+
+export async function caramelSetSettings(patch) {
     const cur = await caramelGetSettings()
     const next = Object.assign({}, cur, patch)
     return new Promise(resolve => {
@@ -352,8 +359,7 @@ async function caramelSetSettings(patch) {
 // Should the passive checkout prompt appear on this host? False when the
 // user turned auto-apply off globally or paused this site. The popup's
 // explicit "apply coupons" action deliberately does NOT go through this.
-// oxlint-disable-next-line no-unused-vars
-async function caramelPromptAllowed(host) {
+export async function caramelPromptAllowed(host) {
     const s = await caramelGetSettings()
     if (!s.autoApply) return false
     const h = String(host || '')
@@ -396,8 +402,7 @@ function _caramelSavingsVisibleTo(list, username) {
 }
 /* Reads the history as the CURRENT identity sees it. Pass `{ all: true }` only
  * where every entry is genuinely wanted (the record itself, never the UI). */
-// oxlint-disable-next-line no-unused-vars
-function caramelGetSavings(options) {
+export function caramelGetSavings(options) {
     const wantAll = !!(options && options.all)
     return new Promise(resolve => {
         try {
@@ -506,8 +511,7 @@ function _caramelWriteSavings(list) {
 
 // entry: { domain, code, amount, currency, t, couponId } — amount must be a
 // real measured saving (> 0); applied-but-unmeasured codes are not recorded.
-// oxlint-disable-next-line no-unused-vars
-async function caramelRecordSaving(entry) {
+export async function caramelRecordSaving(entry) {
     if (!entry || !(entry.amount > 0)) return
     // The WHOLE list, not the visible slice: reading through the identity
     // filter here would drop everyone else's entries on the next write.
@@ -573,8 +577,7 @@ let _caramelSyncInFlight = null
  * Resolves to { pushed, rejected, skipped } so callers and tests can see what
  * happened instead of inferring it from storage.
  */
-// oxlint-disable-next-line no-unused-vars
-function caramelSyncSavings() {
+export function caramelSyncSavings() {
     if (_caramelSyncInFlight) return _caramelSyncInFlight
     _caramelSyncInFlight = _caramelSyncSavingsOnce().finally(() => {
         _caramelSyncInFlight = null

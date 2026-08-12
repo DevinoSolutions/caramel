@@ -1,4 +1,12 @@
-log('Injected script')
+// ES module since the WXT P1 port (2026-08-12). This file's entire body was
+// effectful top-level code, so all of it moved — in its exact original order —
+// into `initInject()`, which the content entrypoint calls last (manifest
+// order). The declarations below stay at module scope: `_caramelDetectionStarted`
+// is the once-guard's state and must outlive any single init call, exactly as
+// the script-global did.
+import { log } from './caramel-base.js'
+import { startCheckoutDetection } from './store-detect.js'
+
 // Detection starts at `load` — but never ONLY at load. Measured live
 // (chomps.com drawer, 2026-08-07): a subresource never resolved, `load`
 // never fired, and on a store we hold codes for the extension was
@@ -13,16 +21,20 @@ function _caramelStartDetectionOnce() {
     startCheckoutDetection()
 }
 var CARAMEL_DCL_GRACE_MS = 5000
-if (document.readyState === 'complete') {
-    // Injection can land after `load` already fired; a listener would never run.
-    _caramelStartDetectionOnce()
-} else {
-    window.addEventListener('load', _caramelStartDetectionOnce)
-    if (document.readyState === 'interactive') {
-        setTimeout(_caramelStartDetectionOnce, CARAMEL_DCL_GRACE_MS)
+
+export function initInject() {
+    log('Injected script')
+    if (document.readyState === 'complete') {
+        // Injection can land after `load` already fired; a listener would never run.
+        _caramelStartDetectionOnce()
     } else {
-        document.addEventListener('DOMContentLoaded', () =>
-            setTimeout(_caramelStartDetectionOnce, CARAMEL_DCL_GRACE_MS),
-        )
+        window.addEventListener('load', _caramelStartDetectionOnce)
+        if (document.readyState === 'interactive') {
+            setTimeout(_caramelStartDetectionOnce, CARAMEL_DCL_GRACE_MS)
+        } else {
+            document.addEventListener('DOMContentLoaded', () =>
+                setTimeout(_caramelStartDetectionOnce, CARAMEL_DCL_GRACE_MS),
+            )
+        }
     }
 }

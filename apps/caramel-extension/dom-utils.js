@@ -1,5 +1,13 @@
 // owns: DOM visibility/wait helpers, price parsing, CSS/XPath query helpers, the mid-attempt navigation handoff (_isVisible, waitForVisible, pickBestMatch, waitForElement, waitForTextChange, waitUntilReady, getPrice, _isXPath, qOne, qAll, caramel{Mark,Clear,Take}PendingSubmit)
 // load after: caramel-base.js
+//
+// ES module since the WXT P1 port (2026-08-12). Module scope replaces the
+// script global scope; the `oxlint-disable-next-line no-unused-vars` pragmas
+// that only existed because oxlint's per-file analysis cannot see a cross-file
+// content-script call are gone, because `export` is now that statement. The
+// file has NO top-level side effects — no listeners, no DOM reads, no chrome
+// API calls, no window publication — so it exports no init function.
+import { log } from './caramel-base.js'
 
 /* ---------- DOM waiters ---------- */
 /* ---------- visibility helpers ---------- */
@@ -8,7 +16,7 @@
 // content-visibility, and (unlike the old offsetParent test) doesn't
 // false-negative inside position:fixed/sticky containers, where order-summary
 // rails and their coupon UIs commonly live.
-function _isVisible(el) {
+export function _isVisible(el) {
     if (!el) return false
     try {
         if (typeof el.checkVisibility === 'function')
@@ -24,8 +32,7 @@ function _isVisible(el) {
 // not just the first: generic selectors often also hit hidden templates.
 // Called from other split content-script files (see store-detect.js's
 // startCheckoutDetection for why per-file analysis misses cross-file calls).
-// oxlint-disable-next-line no-unused-vars
-function waitForVisible(sel, timeout = 3000) {
+export function waitForVisible(sel, timeout = 3000) {
     return new Promise((res, rej) => {
         const t0 = performance.now()
         ;(function poll() {
@@ -106,8 +113,7 @@ function _caramelControlLabelParts(el) {
 
 // Called from other split content-script files (cross-file content-script
 // call — oxlint's per-file analysis can't see it).
-// oxlint-disable-next-line no-unused-vars
-function caramelIsForbiddenControl(el) {
+export function caramelIsForbiddenControl(el) {
     if (!el) return false
     // id/name attributes spell the same words with separators ("pay-now",
     // "submit_order"), so flatten those to spaces before matching.
@@ -136,8 +142,7 @@ const CARAMEL_PAYMENT_FIELD_SEL =
  * we must never submit. A correctly-configured store is unaffected — Magento's
  * #discount-coupon-form and WooCommerce's .checkout_coupon are their own forms
  * and contain neither. */
-// oxlint-disable-next-line no-unused-vars
-function caramelFormSubmitIsUnsafe(el) {
+export function caramelFormSubmitIsUnsafe(el) {
     let form = null
     try {
         form = el?.form || el?.closest?.('form') || null
@@ -186,8 +191,7 @@ const CARAMEL_MAX_COUPON_ANCHORS = 8
  * prompt on a misconfigured store costs a discount; keeping it costs the user a
  * prompt that follows them around the whole site and an apply flow aimed at
  * whatever element happened to sort first. */
-// oxlint-disable-next-line no-unused-vars
-function caramelCouponAnchors(sel) {
+export function caramelCouponAnchors(sel) {
     if (!sel) return []
     const visible = qAll(sel).filter(_isVisible)
     if (visible.length > CARAMEL_MAX_COUPON_ANCHORS) {
@@ -203,8 +207,7 @@ function caramelCouponAnchors(sel) {
 
 // Called from other split content-script files (cross-file content-script
 // call — oxlint's per-file analysis can't see it).
-// oxlint-disable-next-line no-unused-vars
-function pickBestMatch(sel, anchorEl) {
+export function pickBestMatch(sel, anchorEl) {
     const all = qAll(sel)
     if (!all.length) return null
     if (anchorEl) {
@@ -237,8 +240,7 @@ function pickBestMatch(sel, anchorEl) {
 }
 // Called from other split content-script files (cross-file content-script
 // call — oxlint's per-file analysis can't see it).
-// oxlint-disable-next-line no-unused-vars
-function waitForElement(sel, timeout = 4000) {
+export function waitForElement(sel, timeout = 4000) {
     return new Promise((res, rej) => {
         if (qOne(sel)) return res('found-immediately')
         const mo = new MutationObserver(() => {
@@ -256,8 +258,7 @@ function waitForElement(sel, timeout = 4000) {
 }
 // Called from other split content-script files (cross-file content-script
 // call — oxlint's per-file analysis can't see it).
-// oxlint-disable-next-line no-unused-vars
-function waitForTextChange(el, timeout = 3000) {
+export function waitForTextChange(el, timeout = 3000) {
     return new Promise((res, rej) => {
         const start = el.textContent
         const mo = new MutationObserver(() => {
@@ -276,8 +277,7 @@ function waitForTextChange(el, timeout = 3000) {
 /* ---------- UI readiness helper ---------- */
 // Called from other split content-script files (cross-file content-script
 // call — oxlint's per-file analysis can't see it).
-// oxlint-disable-next-line no-unused-vars
-async function waitUntilReady(rec, timeout = 2000) {
+export async function waitUntilReady(rec, timeout = 2000) {
     const btn = qOne(rec.couponSubmit)
     const start = performance.now()
     return new Promise(resolve => {
@@ -343,8 +343,7 @@ const _caramelMoneyRe = new RegExp(
  *   one separator, 1-2 trailing digits → decimal ("89,99", "356.00")
  */
 // Consumed by the matcher below and pinned directly by tests.
-// oxlint-disable-next-line no-unused-vars
-function caramelParseMoneyNumber(raw) {
+export function caramelParseMoneyNumber(raw) {
     if (typeof raw !== 'string') return NaN
     const text = raw.replace(/[   ]/g, '')
     const lastDot = text.lastIndexOf('.')
@@ -367,8 +366,7 @@ function caramelParseMoneyNumber(raw) {
 /* Every money amount in a block of text, newest-first order preserved, as
  * { value, marker }. The marker is whatever currency mark sat with it. */
 // Consumed by getPrice; pinned directly by tests.
-// oxlint-disable-next-line no-unused-vars
-function caramelFindMoney(text) {
+export function caramelFindMoney(text) {
     if (typeof text !== 'string' || !text) return []
     const out = []
     _caramelMoneyRe.lastIndex = 0
@@ -384,8 +382,7 @@ function caramelFindMoney(text) {
 
 // Called from other split content-script files (cross-file content-script
 // call — oxlint's per-file analysis can't see it).
-// oxlint-disable-next-line no-unused-vars
-function getPrice(selector, { returnLargest } = {}) {
+export function getPrice(selector, { returnLargest } = {}) {
     let el = qOne(selector)
     if (!el && typeof selector === 'string' && selector.includes('[id=')) {
         const id = selector.match(/\[id=['"]([^'"]+)['"]\]/)?.[1]
@@ -426,6 +423,12 @@ if (typeof _caramelLastCurrency === 'undefined') {
 if (typeof _caramelLastPrices === 'undefined') {
     var _caramelLastPrices = []
 }
+// Read directly by coupon-apply.js (:469, :638) and coupon-runner.js (:757),
+// which snapshot `.slice()` of it either side of an apply. Only this module
+// ever writes it, so the live binding an importer gets is always the set
+// getPrice last parsed. (global-map.json misses this one: its regex looks for
+// column-0 declarations and this `var` sits inside the re-injection guard.)
+export { _caramelLastPrices }
 
 /* The tightest cart baseline consistent with an observed post-discount total:
  * the SMALLEST price seen in the container that is still >= `newTotal`.
@@ -438,15 +441,13 @@ if (typeof _caramelLastPrices === 'undefined') {
  *
  * Returns NaN when nothing qualifies (e.g. the total went UP) — the caller then
  * claims no figure at all. */
-// oxlint-disable-next-line no-unused-vars
-function caramelBaselineFor(newTotal, prices = _caramelLastPrices) {
+export function caramelBaselineFor(newTotal, prices = _caramelLastPrices) {
     if (typeof newTotal !== 'number' || isNaN(newTotal)) return NaN
     const candidates = (prices || []).filter(p => !isNaN(p) && p >= newTotal)
     return candidates.length ? Math.min(...candidates) : NaN
 }
 // Consumed by UI-helpers.js when rendering a measured saving.
-// oxlint-disable-next-line no-unused-vars
-function caramelCurrencySymbol() {
+export function caramelCurrencySymbol() {
     return _caramelLastCurrency || '$'
 }
 
@@ -459,8 +460,7 @@ function caramelCurrencySymbol() {
  * the safest reading of an unqualified '$'. The discount-link path doesn't use
  * this — /cart.js hands it a real ISO code. */
 // Consumed by coupon-runner.js (cross-file content-script call).
-// oxlint-disable-next-line no-unused-vars
-function caramelCurrencyCode() {
+export function caramelCurrencyCode() {
     const marker = _caramelLastCurrency
     const mapped = { '£': 'GBP', '€': 'EUR', '¥': 'JPY', '₹': 'INR' }[marker]
     if (mapped) return mapped
@@ -476,8 +476,7 @@ function caramelCurrencyCode() {
  * from a price we just parsed — the post-reload handoff (store-detect.js)
  * restores a saving recorded BEFORE the reload, so no price has been read in
  * this page yet and the parsed value would still be the '$' default. */
-// oxlint-disable-next-line no-unused-vars
-function caramelSetCurrencySymbol(sym) {
+export function caramelSetCurrencySymbol(sym) {
     if (typeof sym === 'string' && /^[$£€]$/.test(sym)) {
         _caramelLastCurrency = sym
         return true
@@ -515,8 +514,7 @@ function caramelSetCurrencySymbol(sym) {
  */
 const CARAMEL_MAX_DISCLOSURE_DEPTH = 6
 // Consumed by store-detect.js and coupon-runner.js (cross-file calls).
-// oxlint-disable-next-line no-unused-vars
-function caramelDisclosureFor(el) {
+export function caramelDisclosureFor(el) {
     // Only ever for a box the shopper CAN'T see. A visible box needs no reveal.
     if (!el || _isVisible(el)) return null
     const usable = c =>
@@ -586,8 +584,7 @@ function caramelDisclosureFor(el) {
  */
 const CARAMEL_PENDING_KEY = 'caramel_pending_submit'
 // Consumed by coupon-runner.js (cross-file content-script call).
-// oxlint-disable-next-line no-unused-vars
-function caramelMarkPendingSubmit(code, id, prices) {
+export function caramelMarkPendingSubmit(code, id, prices) {
     try {
         sessionStorage.setItem(
             CARAMEL_PENDING_KEY,
@@ -605,8 +602,7 @@ function caramelMarkPendingSubmit(code, id, prices) {
     }
 }
 // Consumed by coupon-runner.js (cross-file content-script call).
-// oxlint-disable-next-line no-unused-vars
-function caramelClearPendingSubmit() {
+export function caramelClearPendingSubmit() {
     try {
         sessionStorage.removeItem(CARAMEL_PENDING_KEY)
     } catch {
@@ -617,8 +613,7 @@ function caramelClearPendingSubmit() {
  * document that follows it, or not at all. Returns null when there is nothing
  * to resume or the record is stale/unreadable. */
 // Consumed by store-detect.js (cross-file content-script call).
-// oxlint-disable-next-line no-unused-vars
-function caramelTakePendingSubmit(maxAgeMs = 120000) {
+export function caramelTakePendingSubmit(maxAgeMs = 120000) {
     let raw = null
     try {
         raw = sessionStorage.getItem(CARAMEL_PENDING_KEY)
@@ -677,8 +672,7 @@ const CARAMEL_RUN_KEY = 'caramel_run'
 const CARAMEL_RUN_MAX_HOPS = 6
 const CARAMEL_RUN_MAX_AGE_MS = 180000
 // Consumed by coupon-runner.js (cross-file content-script call).
-// oxlint-disable-next-line no-unused-vars
-function caramelBeginRun() {
+export function caramelBeginRun() {
     try {
         const raw = sessionStorage.getItem(CARAMEL_RUN_KEY)
         if (raw) {
@@ -710,8 +704,7 @@ function caramelBeginRun() {
     }
 }
 // Consumed by store-detect.js + UI-helpers.js (cross-file content-script call).
-// oxlint-disable-next-line no-unused-vars
-function caramelEndRun() {
+export function caramelEndRun() {
     try {
         sessionStorage.removeItem(CARAMEL_RUN_KEY)
     } catch {
@@ -722,8 +715,7 @@ function caramelEndRun() {
  * to claim. Writing the increment here (rather than at the call site) is what
  * makes the cap hold even if a caller returns early afterwards. */
 // Consumed by store-detect.js (cross-file content-script call).
-// oxlint-disable-next-line no-unused-vars
-function caramelClaimRunHop() {
+export function caramelClaimRunHop() {
     let raw = null
     try {
         raw = sessionStorage.getItem(CARAMEL_RUN_KEY)
@@ -765,8 +757,7 @@ function caramelClaimRunHop() {
 /* The × and Esc set _caramelCancelled, which dies with the document. A chain
  * spans documents, so "stop" has to be written down. */
 // Consumed by UI-helpers.js (cross-file content-script call).
-// oxlint-disable-next-line no-unused-vars
-function caramelCancelRun() {
+export function caramelCancelRun() {
     try {
         if (!sessionStorage.getItem(CARAMEL_RUN_KEY)) return
         sessionStorage.setItem(
@@ -791,7 +782,7 @@ function _isXPath(sel) {
     const t = sel.trim()
     return t.startsWith('/') || t.startsWith('(/') || t.startsWith('./')
 }
-function qOne(sel, root) {
+export function qOne(sel, root) {
     if (!sel) return null
     root = root || document
     try {
@@ -810,7 +801,7 @@ function qOne(sel, root) {
         return null
     }
 }
-function qAll(sel, root) {
+export function qAll(sel, root) {
     if (!sel) return []
     root = root || document
     try {

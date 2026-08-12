@@ -1,5 +1,12 @@
 //UI HELPERS
 //
+// ES module since the WXT P1 port (2026-08-12). No top-level statement in this
+// file DOES anything — it is all declarations — so there is no `init` export;
+// every surface is built on call. The two `if (typeof X === 'undefined') var X`
+// re-injection guards are gone with the script realm that needed them (a
+// bundled module evaluates once per injection into its own scope, so there is
+// nothing left to redeclare); their state is now plain module-scope `let`.
+//
 // Phase 3: each injected surface is a LIGHT-DOM HOST <div> with the
 // historical id (caramel-small-prompt / caramel-testing-overlay /
 // caramel-final-overlay) on document.body — store-detect.js getElementById
@@ -9,6 +16,20 @@
 // <style> per shadow root, awaited before append (no unstyled flash).
 // Embedding the CSS as a JS string was rejected: the summed content-script
 // size budget (.size-limit.js) counts JS bytes, not fetched CSS.
+
+import {
+    caramelGetSession,
+    caramelPromptAllowed,
+    currentBrowser,
+    log,
+    logError,
+} from './caramel-base.js'
+import { CARAMEL_ENV } from './caramel-env.js'
+// coupon-runner.js imports showTestingModal/updateTestingModal/hideTestingModal/
+// showFinalModal back from here. The cycle is fine: neither side READS the
+// other's binding during module evaluation, only inside functions.
+import { startApplyingCoupons } from './coupon-runner.js'
+import { caramelCancelRun, caramelCurrencySymbol } from './dom-utils.js'
 
 // Inline SVG close glyph (stroke follows the button's currentColor).
 const CARAMEL_X_ICON =
@@ -50,24 +71,22 @@ const CARAMEL_UI_FALLBACK_CSS =
 
 const CARAMEL_OVERLAY_HOST_CSS =
     'display:block !important;position:fixed;top:0;left:0;width:100vw;height:100vh;height:100dvh;z-index:2147483647;direction:ltr;'
-const CARAMEL_HOST_CSS = {
+export const CARAMEL_HOST_CSS = {
     'caramel-small-prompt':
         'display:block !important;position:fixed;top:max(20px,env(safe-area-inset-top));right:max(20px,env(safe-area-inset-right));z-index:2147483646;width:min(88vw,300px);cursor:pointer;outline:none;direction:ltr;',
     'caramel-testing-overlay': CARAMEL_OVERLAY_HOST_CSS,
     'caramel-final-overlay': CARAMEL_OVERLAY_HOST_CSS,
 }
 
-// Cached across all three surfaces. Guarded `var` (re-injection convention).
-if (typeof _caramelShadowCssPromise === 'undefined') {
-    var _caramelShadowCssPromise = null
-}
+// Cached across all three surfaces.
+let _caramelShadowCssPromise = null
 /* Every injected surface AWAITS this before appending itself, so a fetch that
  * never settles isn't a missing stylesheet — it's an extension that silently
  * never appears at all. A rejection already falls back loudly; a hang couldn't
  * reach that path. Bounded, and the cached promise is dropped on timeout so a
  * later surface can still get the real CSS. */
 const CARAMEL_UI_CSS_TIMEOUT_MS = 4000
-function _caramelGetShadowCss() {
+export function _caramelGetShadowCss() {
     if (!_caramelShadowCssPromise) {
         const grab = async file => {
             const res = await fetch(currentBrowser.runtime.getURL(file))
@@ -123,7 +142,7 @@ function _caramelGetShadowCss() {
  */
 const CARAMEL_PROMPT_BASE_TOP = 20
 const CARAMEL_PROMPT_MAX_DODGE = 200
-function caramelPromptTopFor(barBottom) {
+export function caramelPromptTopFor(barBottom) {
     const bottom = Number(barBottom)
     if (!Number.isFinite(bottom) || bottom <= CARAMEL_PROMPT_BASE_TOP)
         return CARAMEL_PROMPT_BASE_TOP
@@ -158,7 +177,7 @@ const CARAMEL_BAR_MIN_WIDTH_RATIO = 0.5
 // Measured with the real stylesheets: 81px at 1440, 390 and 360 alike — the
 // copy is fixed English and does not wrap even on the narrowest phone.
 const CARAMEL_PROMPT_HEIGHT = 81
-function _caramelBarQualifies(style, rect, vw, isBanner) {
+export function _caramelBarQualifies(style, rect, vw, isBanner) {
     if (!style || !rect) return false
     const pinned = style.position === 'fixed' || style.position === 'sticky'
     if (!pinned && !isBanner) return false
@@ -187,7 +206,7 @@ function _caramelBarQualifies(style, rect, vw, isBanner) {
  * to it; a store hiding a decorative <header> above its real one yields nothing
  * and falls back to the pinned sweep, which is the conservative direction.
  */
-function _caramelPageBanner() {
+export function _caramelPageBanner() {
     const el = document.querySelector('header, [role="banner"]')
     if (!el) return null
     if (el.parentElement?.closest('article, aside, main, nav, section'))
@@ -216,7 +235,7 @@ function _caramelPageBanner() {
  */
 const CARAMEL_BAR_SCAN_DEPTH = 4
 const CARAMEL_BAR_SCAN_NODES = 400
-function caramelTopBarBottom() {
+export function caramelTopBarBottom() {
     try {
         if (!document.body) return NaN
         const vw = window.innerWidth || 0
@@ -320,9 +339,7 @@ function _caramelRestoreFocus(host) {
 
 // Concurrency guard: the shadow-host await lets two near-simultaneous
 // inserts both pass the getElementById check before either host appends.
-if (typeof _caramelPromptInFlight === 'undefined') {
-    var _caramelPromptInFlight = false
-}
+let _caramelPromptInFlight = false
 
 /* "Not now" — remembered for this tab and origin.
  *
@@ -343,7 +360,7 @@ if (typeof _caramelPromptInFlight === 'undefined') {
  * prompt reaches the page, so the observer needs no separate check.
  */
 const CARAMEL_DISMISSED_KEY = 'caramel_prompt_dismissed'
-function caramelPromptDismissedHere() {
+export function caramelPromptDismissedHere() {
     try {
         return sessionStorage.getItem(CARAMEL_DISMISSED_KEY) === '1'
     } catch {
@@ -352,7 +369,7 @@ function caramelPromptDismissedHere() {
         return false
     }
 }
-function caramelMarkPromptDismissed() {
+export function caramelMarkPromptDismissed() {
     try {
         sessionStorage.setItem(CARAMEL_DISMISSED_KEY, '1')
     } catch {
@@ -360,10 +377,8 @@ function caramelMarkPromptDismissed() {
     }
 }
 
-// Called from store-detect.js — content_scripts share one global scope
-// (manifest order, no ES modules), so per-file analysis misses the call.
-// oxlint-disable-next-line no-unused-vars
-async function insertCaramelPrompt(domainRecord) {
+// Called from store-detect.js.
+export async function insertCaramelPrompt(domainRecord) {
     if (
         document.getElementById('caramel-small-prompt') ||
         _caramelPromptInFlight
@@ -467,9 +482,8 @@ async function insertCaramelPrompt(domainRecord) {
     document.body.appendChild(host)
 }
 
-// Called from coupon-runner.js (cross-file, see insertCaramelPrompt).
-// oxlint-disable-next-line no-unused-vars
-async function showTestingModal(title = '', noLoading = false) {
+// Called from coupon-runner.js.
+export async function showTestingModal(title = '', noLoading = false) {
     const prevFocus = document.activeElement
     const { host, root } = await createCaramelShadowHost(
         'caramel-testing-overlay',
@@ -510,7 +524,16 @@ ${noLoading ? '' : loadingHTML}`
      * that survives the reload or the shopper's ✕ would be undone by the very
      * navigation they were trying to stop. */
     const _cancel = () => {
-        _caramelCancelled = true
+        // CROSS-MODULE WRITE (reviewed and settled, WXT P1 2026-08-12): an ES
+        // module import binding is read-only, so the old bare
+        // `_caramelCancelled = true` cannot survive the port as an assignment.
+        // coupon-runner.js owns the flag and deliberately stores it ON
+        // globalThis (its docblock records why: the cancel-path suites drive
+        // that exact global, and it must survive realm quirks a module-scope
+        // binding wouldn't). Written explicitly here so the seam is visible at
+        // both ends; a setter export was considered and rejected — no invented
+        // API when the existing seam is behavior-identical to what ships.
+        globalThis._caramelCancelled = true
         caramelCancelRun()
         hideTestingModal()
     }
@@ -533,9 +556,8 @@ ${noLoading ? '' : loadingHTML}`
 }
 
 /* Updates the testing modal's status text + progress bar width. */
-// Called from coupon-runner.js (cross-file, see insertCaramelPrompt).
-// oxlint-disable-next-line no-unused-vars
-async function updateTestingModal(currentIndex, total, code) {
+// Called from coupon-runner.js.
+export async function updateTestingModal(currentIndex, total, code) {
     const host = document.getElementById('caramel-testing-overlay')
     const root = host && host.shadowRoot
     if (!root) return
@@ -551,7 +573,8 @@ async function updateTestingModal(currentIndex, total, code) {
         progressBar.style.width = `${progressPercent}%`
     }
 }
-function hideTestingModal() {
+// Called from coupon-runner.js + store-detect.js.
+export function hideTestingModal() {
     const host = document.getElementById('caramel-testing-overlay')
     if (host) {
         if (host.__caramelOnKey)
@@ -563,7 +586,8 @@ function hideTestingModal() {
 
 /* Copies an exact coupon code: async clipboard API first, hidden
  * textarea + execCommand fallback for pages that block it. */
-async function caramelCopyText(text) {
+// Called from popup.js (same file, the popup realm's own script list).
+export async function caramelCopyText(text) {
     try {
         if (navigator.clipboard && navigator.clipboard.writeText) {
             await navigator.clipboard.writeText(text)
@@ -609,7 +633,7 @@ function caramelSavingsCurrency() {
  * Drop those rather than invent a replacement claim — the code alone is
  * honest. The extension must stay presentable on bad data; fixing the row
  * upstream is a separate, slower job. */
-function _caramelUsableTitle(title, code) {
+export function _caramelUsableTitle(title, code) {
     if (typeof title !== 'string') return ''
     const t = title.trim()
     if (!t) return ''
@@ -639,10 +663,8 @@ function _caramelUsableTitle(title, code) {
     return t
 }
 
-// Called from coupon-runner.js + store-detect.js (cross-file, see
-// insertCaramelPrompt).
-// oxlint-disable-next-line no-unused-vars
-async function showFinalModal(
+// Called from coupon-runner.js + store-detect.js.
+export async function showFinalModal(
     savingsAmount,
     code,
     message,

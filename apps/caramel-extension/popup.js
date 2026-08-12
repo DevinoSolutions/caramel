@@ -1,10 +1,33 @@
-/* global currentBrowser, fetchCouponsPage */
+// ES module since the WXT P1 port (2026-08-12) — the popup realm's last
+// script becomes its last module, so the `/* global currentBrowser,
+// fetchCouponsPage */` header that stood here is replaced by real imports.
+// This file had exactly two effectful top-level statements (the ?callerId=
+// read and the DOMContentLoaded registration); both moved, in their original
+// order, into the exported initPopupEntry() below. Everything else was
+// already a pure declaration and stays at module scope.
+import {
+    caramelClearSession,
+    caramelGetSavings,
+    caramelGetSession,
+    caramelGetSettings,
+    caramelSendMessage,
+    caramelSetSession,
+    caramelSetSettings,
+    caramelSyncSavings,
+    currentBrowser,
+    log,
+} from './caramel-base.js'
+import { CARAMEL_ENV } from './caramel-env.js'
+import { CaramelCoupons } from './coupon-constants.generated.js'
+import { fetchCouponsPage } from './coupon-fetch.js'
+import { caramelCopyText } from './UI-helpers.js'
 
 // Base URL from the build-time environment stamp (caramel-env.js, the first
-// script index.html loads). This used to call a shared `_isDevInstall()` that
-// read the manifest's `update_url` — a field only the Chrome Web Store injects,
-// so the Firefox and Safari builds of this popup pointed real users at the dev
-// deployment. See the "environment" block in scripts/build-dist.mjs.
+// module the popup realm evaluates). This used to call a shared
+// `_isDevInstall()` that read the manifest's `update_url` — a field only the
+// Chrome Web Store injects, so the Firefox and Safari builds of this popup
+// pointed real users at the dev deployment. See the "environment" block in
+// scripts/build-dist.mjs.
 const caramelUrl = path => new URL(path, `${CARAMEL_ENV.baseUrl}/`).toString()
 
 // Escape coupon/API data before interpolating into innerHTML. Codes, titles and
@@ -52,9 +75,15 @@ let returnView = null // callback for the “Back” button, set dynamically
 // Set when this popup was opened as a WINDOW by the checkout modal's
 // "Sign In" button (background openPopup → index.html?callerId=<tabId>).
 // Finishing login must then notify that tab so the apply flow resumes.
-const CARAMEL_CALLER_ID = new URLSearchParams(location.search).get('callerId')
+//
+// Read off location.search at module-eval time before the ESM port; now
+// captured as the FIRST statement of initPopupEntry(), which the popup
+// entrypoint calls before anything can render — so it is still in place
+// before any login can complete. `null` until then, matching what
+// URLSearchParams.get() returns for an absent parameter.
+let CARAMEL_CALLER_ID = null
 
-function afterLoginSuccess() {
+export function afterLoginSuccess() {
     if (CARAMEL_CALLER_ID) {
         try {
             const p = currentBrowser.runtime.sendMessage({
@@ -79,7 +108,7 @@ function afterLoginSuccess() {
 // cart don't sum) and renders "You've saved …" into #savingsSummary when
 // there's anything to show. History comes from caramelGetSavings()
 // (caramel-base.js) — written by the apply flow on measured wins only.
-function formatSavingsTotal(list) {
+export function formatSavingsTotal(list) {
     const totals = new Map()
     for (const e of list || []) {
         if (!e || !(e.amount > 0)) continue
@@ -124,7 +153,7 @@ async function renderSavingsSummary() {
 // pause-this-site toggle (when a site is known). Persisted via
 // caramelSetSettings() (storage.sync — roams with the browser profile);
 // the checkout pill honors them in insertCaramelPrompt().
-async function renderSettingsView(backFn, domain) {
+export async function renderSettingsView(backFn, domain) {
     const container = document.getElementById('auth-container')
     if (!container) return
     const s = await caramelGetSettings()
@@ -274,24 +303,32 @@ function wireSettingsGear(backFn, domain) {
 /* ------------------------------------------------------------ */
 /*  Bootstrap                                                   */
 /* ------------------------------------------------------------ */
-document.addEventListener('DOMContentLoaded', async () => {
-    const loader = document.getElementById('loading-container')
-    // Anti-flicker floor, not a fetch-duration ceiling: a near-instant
-    // response still shows the spinner for a beat, but initPopup() (below)
-    // now actually awaits the fetch+render — so on a slow/degraded
-    // connection the spinner correctly outlives 400ms instead of leaving a
-    // blank auth-container gap while the real request is still in flight.
-    const minDisplay = new Promise(resolve => setTimeout(resolve, 400))
+/* Every top-level side effect this file used to run at script-eval time, in
+   the order it ran them. The popup entrypoint calls this after the rest of
+   the realm's inits (manifest/index.html order), which is what preserves
+   today's script-order semantics. */
+export function initPopupEntry() {
+    CARAMEL_CALLER_ID = new URLSearchParams(location.search).get('callerId')
 
-    await Promise.all([initPopup(), minDisplay])
+    document.addEventListener('DOMContentLoaded', async () => {
+        const loader = document.getElementById('loading-container')
+        // Anti-flicker floor, not a fetch-duration ceiling: a near-instant
+        // response still shows the spinner for a beat, but initPopup() (below)
+        // now actually awaits the fetch+render — so on a slow/degraded
+        // connection the spinner correctly outlives 400ms instead of leaving a
+        // blank auth-container gap while the real request is still in flight.
+        const minDisplay = new Promise(resolve => setTimeout(resolve, 400))
 
-    if (loader) loader.style.display = 'none'
-})
+        await Promise.all([initPopup(), minDisplay])
+
+        if (loader) loader.style.display = 'none'
+    })
+}
 
 /* ------------------------------------------------------------ */
 /*  Init                                                        */
 /* ------------------------------------------------------------ */
-async function initPopup() {
+export async function initPopup() {
     // The service worker can reply undefined on a cold start / error; never let
     // destructuring throw and leave the user staring at a blank popup.
     let url = null
@@ -434,7 +471,7 @@ function validateStoredSession(token, storedUser) {
    dead: nothing changed, so the natural response is to press "Log out" again,
    firing a second revoke of a token the first call is already killing. Say
    what's happening and stop taking further presses. */
-function signOutAndRevoke(after, button) {
+export function signOutAndRevoke(after, button) {
     if (button) {
         if (button.disabled) return // already signing out
         button.disabled = true
@@ -462,7 +499,7 @@ function signOutAndRevoke(after, button) {
 
 /* Network/backend failure state — keeps the popup from rendering blank when the
    coupon API is unreachable. Offers a retry that re-runs the whole init. */
-function renderLoadError() {
+export function renderLoadError() {
     const container = document.getElementById('auth-container')
     if (!container) return
     container.innerHTML = `
@@ -519,7 +556,7 @@ async function getActiveTabDomainRecord() {
  * the honest wording is worth a moment's wait, but not at the cost of leaving
  * the popup blank while a network call completes.
  */
-function caramelDomainIsSupported(domain) {
+export function caramelDomainIsSupported(domain) {
     return new Promise(resolve => {
         if (!domain) return resolve(false)
         const host = String(domain)
@@ -552,7 +589,7 @@ function caramelDomainIsSupported(domain) {
     })
 }
 
-function renderUnsupportedSite(user, domain) {
+export function renderUnsupportedSite(user, domain) {
     const container = document.getElementById('auth-container')
 
     /* Three different facts used to arrive at the same sentence.
@@ -876,7 +913,7 @@ function openWebsiteSignIn() {
 /* ------------------------------------------------------------ */
 /*  Login prompt                                                */
 /* ------------------------------------------------------------ */
-function renderSignInPrompt(backFn) {
+export function renderSignInPrompt(backFn) {
     returnView = typeof backFn === 'function' ? backFn : null
 
     const container = document.getElementById('auth-container')
@@ -1082,7 +1119,7 @@ function renderSignInPrompt(backFn) {
 /* ------------------------------------------------------------ */
 /*  Profile card                                                */
 /* ------------------------------------------------------------ */
-function renderProfileCard(user) {
+export function renderProfileCard(user) {
     const container = document.getElementById('auth-container')
     const avatar = user.image?.length
         ? user.image
@@ -1214,12 +1251,13 @@ function wireFavoriteStoreButton(domain) {
  * page and every appended page are built by the same code — a second copy of
  * this markup is how an appended row quietly loses a badge or a warning. */
 function couponItemHtml(c) {
-    // Sourced from window.CaramelCoupons
-    // (coupon-constants.generated.js, loaded before
-    // this file — F-006) instead of a hard-coded
-    // literal, so this can't re-drift from the app's
-    // src/lib/coupons.ts.
-    const restrictedSet = new Set(window.CaramelCoupons.RESTRICTED_STATUSES)
+    // Sourced from CaramelCoupons
+    // (coupon-constants.generated.js — F-006) instead
+    // of a hard-coded literal, so this can't re-drift
+    // from the app's src/lib/coupons.ts. Read off
+    // `window` until the WXT P1 port; the import now
+    // carries the same guarantee structurally.
+    const restrictedSet = new Set(CaramelCoupons.RESTRICTED_STATUSES)
     const isRestricted = restrictedSet.has(c.status)
     const isDead = c.status === 'invalid' || c.status === 'expired'
     let warning = ''
@@ -1254,14 +1292,14 @@ function couponItemHtml(c) {
     // Verification badge: green=verified, amber=restricted,
     // grey=not yet verified (grace), red=known not valid.
     // Labels + which status maps to which tier come from
-    // window.CaramelCoupons.STATUS_META
+    // CaramelCoupons.STATUS_META
     // (coupon-constants.generated.js, F-006); the tier
     // palette lives in styles.css as
     // .coupon-badge--<tier> classes on tokens (with dark
     // values — the app's coupon-card.tsx keeps its own
     // Tailwind equivalent; the 4-tier axis can't drift
     // the way the 9-status axis did).
-    const meta = window.CaramelCoupons.STATUS_META[c.status]
+    const meta = CaramelCoupons.STATUS_META[c.status]
     const badge = meta
         ? `<span class="coupon-badge coupon-badge--${meta.tier}" title="${escHtml(c.verificationMessage || '')}">${meta.label}</span>`
         : ''
@@ -1467,7 +1505,7 @@ function wireCouponPaging(paging) {
     paging.observer.observe(footer)
 }
 
-function renderCouponsView(coupons, user, domain, meta) {
+export function renderCouponsView(coupons, user, domain, meta) {
     const container = document.getElementById('auth-container')
 
     /* Paging state for THIS render. `meta` is the envelope initPopup got with
