@@ -815,7 +815,7 @@ jobs:
           cp ${{ github.workspace }}/.github/workflows/scripts/update-safari-icons.sh   /tmp/safari-icon-scripts/
           chmod +x /tmp/safari-icon-scripts/*.sh
       - name: Generate Safari icons
-        run: /tmp/safari-icon-scripts/generate-safari-icons.sh icons/original.png
+        run: /tmp/safari-icon-scripts/generate-safari-icons.sh brand/original.png
       - name: Install App Store Connect API key
         run: |
           echo "${ASC_API_KEY_BASE64}" | base64 --decode > "/tmp/AuthKey_${ASC_KEY_ID}.p8"

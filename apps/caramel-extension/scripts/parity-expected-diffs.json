@@ -4,25 +4,13 @@
         "Every entry names the phase that retires it. The harness fails on any diff NOT listed here AND on any entry that no longer occurs — this file only shrinks.",
         "diffs[].path uses the harness's /key/subkey notation; arrays diff as one unit at their own path.",
         "missingReferences[] are manifest-referenced files a stub build does not carry yet.",
-        "Red-proofed 2026-08-12: removing a live entry AND adding a stale one each failed the harness (exit 1)."
+        "Red-proofed 2026-08-12: removing a live entry AND adding a stale one each failed the harness (exit 1).",
+        "P1 retired (2026-08-12, real entrypoints landed): /icons, /action/default_icon (explicit ICONS in wxt.config match the goldens exactly), the assets/* and index.html missingReferences (public/ carries the shipped set; the WAR names popup.html).",
+        "golden-rebaseline entries are structural renames the bundled build cannot avoid; they retire when the goldens are re-frozen from the shipped 1.4.0 manifests."
     ],
     "diffs": [
         {
             "browser": "chrome",
-            "path": "/icons",
-            "reason": "stub build ships no icons yet; P1 moves icons/ into WXT's public dir",
-            "retiredBy": "P1",
-            "added": "2026-08-12"
-        },
-        {
-            "browser": "chrome",
-            "path": "/action/default_icon",
-            "reason": "stub build ships no icons yet; P1 moves icons/ into WXT's public dir",
-            "retiredBy": "P1",
-            "added": "2026-08-12"
-        },
-        {
-            "browser": "chrome",
             "path": "/action/default_title",
             "reason": "WXT derives default_title from the popup <title>; harmless addition, golden adopts it at P2",
             "retiredBy": "P2",
@@ -31,29 +19,22 @@
         {
             "browser": "chrome",
             "path": "/action/default_popup",
-            "reason": "WXT names the popup page popup.html; golden index.html dies with the vanilla popup at P2",
-            "retiredBy": "P2",
+            "reason": "WXT names the popup page popup.html (renamed in P1 — background.js mints the same URL, pinned in tests/background-caller-relay.test.mjs); golden still says index.html until re-frozen",
+            "retiredBy": "golden-rebaseline(1.4.0)",
             "added": "2026-08-12"
         },
         {
             "browser": "chrome",
             "path": "/content_scripts",
-            "reason": "stub content script until the P1 ESM port composes the 11-file chain (js list becomes the bundle, css re-attaches)",
-            "retiredBy": "P1",
+            "reason": "the 11-file classic-script js list became one bundle (content-scripts/content.js) and the css re-attached at its bundled path — entrypoints/content.ts owns the effect order",
+            "retiredBy": "golden-rebaseline(1.4.0)",
             "added": "2026-08-12"
         },
         {
-            "browser": "firefox",
-            "path": "/icons",
-            "reason": "stub build ships no icons yet; P1 moves icons/ into WXT's public dir",
-            "retiredBy": "P1",
-            "added": "2026-08-12"
-        },
-        {
-            "browser": "firefox",
-            "path": "/action/default_icon",
-            "reason": "stub build ships no icons yet; P1 moves icons/ into WXT's public dir",
-            "retiredBy": "P1",
+            "browser": "chrome",
+            "path": "/web_accessible_resources",
+            "reason": "the WAR page renamed index.html → popup.html with the popup entrypoint (P1); assets/* unchanged",
+            "retiredBy": "golden-rebaseline(1.4.0)",
             "added": "2026-08-12"
         },
         {
@@ -66,53 +47,31 @@
         {
             "browser": "firefox",
             "path": "/action/default_popup",
-            "reason": "WXT names the popup page popup.html; golden index.html dies with the vanilla popup at P2",
-            "retiredBy": "P2",
+            "reason": "WXT names the popup page popup.html (renamed in P1 — background.js mints the same URL, pinned in tests/background-caller-relay.test.mjs); golden still says index.html until re-frozen",
+            "retiredBy": "golden-rebaseline(1.4.0)",
             "added": "2026-08-12"
         },
         {
             "browser": "firefox",
             "path": "/content_scripts",
-            "reason": "stub content script until the P1 ESM port composes the 11-file chain (js list becomes the bundle, css re-attaches)",
-            "retiredBy": "P1",
+            "reason": "the 11-file classic-script js list became one bundle (content-scripts/content.js) and the css re-attached at its bundled path — entrypoints/content.ts owns the effect order",
+            "retiredBy": "golden-rebaseline(1.4.0)",
+            "added": "2026-08-12"
+        },
+        {
+            "browser": "firefox",
+            "path": "/web_accessible_resources",
+            "reason": "the WAR page renamed index.html → popup.html with the popup entrypoint (P1); assets/* unchanged",
+            "retiredBy": "golden-rebaseline(1.4.0)",
             "added": "2026-08-12"
         },
         {
             "browser": "firefox",
             "path": "/background/scripts",
             "reason": "the env stamp is BUNDLED into background.js instead of a separate manifest entry — the stamp-first guarantee moves from manifest order into the module graph (P1 pins it there)",
-            "retiredBy": "P1",
+            "retiredBy": "golden-rebaseline(1.4.0)",
             "added": "2026-08-12"
         }
     ],
-    "missingReferences": [
-        {
-            "browser": "chrome",
-            "path": "index.html",
-            "reason": "web_accessible_resources still names the vanilla popup page; resolved when P2 lands the React popup and the WAR list is re-derived",
-            "retiredBy": "P2",
-            "added": "2026-08-12"
-        },
-        {
-            "browser": "firefox",
-            "path": "index.html",
-            "reason": "web_accessible_resources still names the vanilla popup page; resolved when P2 lands the React popup and the WAR list is re-derived",
-            "retiredBy": "P2",
-            "added": "2026-08-12"
-        },
-        {
-            "browser": "chrome",
-            "path": "assets/*",
-            "reason": "stub build ships no assets yet; P1 moves assets/ into WXT's public dir",
-            "retiredBy": "P1",
-            "added": "2026-08-12"
-        },
-        {
-            "browser": "firefox",
-            "path": "assets/*",
-            "reason": "stub build ships no assets yet; P1 moves assets/ into WXT's public dir",
-            "retiredBy": "P1",
-            "added": "2026-08-12"
-        }
-    ]
+    "missingReferences": []
 }

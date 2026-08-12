@@ -201,6 +201,23 @@ export function contentScriptRealmSources(files, { stamp } = {}) {
 }
 
 /**
+ * Resolves an allowlist entry to its SOURCE path. icons/ and assets/ moved
+ * into public/ for the WXT build (P1, 2026-08-12) — WXT copies public/
+ * wholesale into its output — while this legacy build keeps writing them at
+ * their manifest-referenced destinations. TODO(WXT-P1): dies with this whole
+ * file when the old build is deleted.
+ *
+ * @param {string} entry
+ * @returns {string}
+ */
+export function srcFor(entry) {
+    if (entry.startsWith('icons/') || entry.startsWith('assets/')) {
+        return `public/${entry}`
+    }
+    return entry
+}
+
+/**
  * Builds a package directory: the allowlist, copied, plus a freshly written
  * environment stamp.
  *
@@ -215,7 +232,7 @@ export async function buildDist({ outDir, environment = DEFAULT_ENVIRONMENT }) {
     for (const entry of SHIPPED) {
         const dest = join(outDir, entry)
         await mkdir(dirname(dest), { recursive: true })
-        await cp(join(ROOT, entry), dest, { recursive: true })
+        await cp(join(ROOT, srcFor(entry)), dest, { recursive: true })
     }
     await writeFile(join(outDir, ENV_FILE), stamp)
     return { environment, entries: SHIPPED.length + GENERATED.length }

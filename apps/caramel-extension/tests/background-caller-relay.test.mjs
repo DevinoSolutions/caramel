@@ -1,12 +1,13 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { getOnMessageListeners, loadExtensionSource } from './_load.mjs'
 
-// WXT-migration P0 characterization pins (2026-08-12): the worker half of the
+// WXT-migration P0 characterization pins (2026-08-12; URL updated to
+// popup.html in P1 when WXT renamed the popup page): the worker half of the
 // checkout-modal caller relay (popup half: popup-caller-relay.test.mjs).
 //
 // Contract under pin (background.js:267-283):
 //   - openPopup from a store tab opens a POPUP WINDOW whose URL carries
-//     `index.html?isPopup=true&callerId=<sender tab id>` — the query string
+//     `popup.html?isPopup=true&callerId=<sender tab id>` — the query string
 //     popup.js reads at module-eval time.
 //   - `userLoggedInFromPopup_<id>` routes {action:'userLoggedIn'} to tab <id>
 //     AS A NUMBER (the worker parses the id with split('_')[1] + parseInt —
@@ -38,7 +39,7 @@ describe('background.js caller relay', () => {
         expect(resp).toEqual({ success: true })
         expect(created).toHaveLength(1)
         expect(created[0].url).toBe(
-            'chrome-extension://test-ext-id/index.html?isPopup=true&callerId=42',
+            'chrome-extension://test-ext-id/popup.html?isPopup=true&callerId=42',
         )
         expect(created[0].type).toBe('popup')
     })
@@ -52,7 +53,7 @@ describe('background.js caller relay', () => {
         await invoke({ action: 'openPopup' }, {})
 
         expect(created[0].url).toBe(
-            'chrome-extension://test-ext-id/index.html?isPopup=true&callerId=',
+            'chrome-extension://test-ext-id/popup.html?isPopup=true&callerId=',
         )
     })
 

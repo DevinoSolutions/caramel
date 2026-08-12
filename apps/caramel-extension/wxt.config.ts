@@ -23,6 +23,15 @@ import { ENVIRONMENTS, stampFor } from './scripts/environments.mjs'
 
 type EnvironmentName = keyof typeof ENVIRONMENTS
 
+const ICONS = {
+    16: '/icons/16.png',
+    19: '/icons/19.png',
+    32: '/icons/32.png',
+    38: '/icons/38.png',
+    192: '/icons/192.png',
+    512: '/icons/512.png',
+}
+
 function resolveEnvironment(mode: string): EnvironmentName {
     // Vite modes map onto the environment table 1:1. Anything else fails the
     // build loudly — a typo must never fall back to either stamp.
@@ -39,6 +48,15 @@ export default defineConfig({
         name: 'Caramel - Trusted Honey Alternative',
         description:
             'Open‑source coupon extension that auto‑applies deals without selling data or hijacking commissions.',
+        // Explicit, root-absolute icon paths — byte-identical to the shipped
+        // 1.3.1 manifests. WXT's auto-discovery from public/icons/N.png emits
+        // the same files without the leading slash; explicit wins so the
+        // parity goldens need no allowlist row for a cosmetic slash.
+        icons: ICONS,
+        action: {
+            default_popup: 'popup.html',
+            default_icon: ICONS,
+        },
         browser_specific_settings: {
             gecko: { id: 'caramel@devino.ca' },
         },
@@ -52,7 +70,10 @@ export default defineConfig({
         host_permissions: ['https://*/*'],
         web_accessible_resources: [
             {
-                resources: ['index.html', 'assets/*'],
+                // popup.html is WXT's name for the popup page (was
+                // index.html); it stays web-accessible because background.js
+                // openPopup opens it as a TAB with ?isPopup=true&callerId=.
+                resources: ['popup.html', 'assets/*'],
                 matches: ['<all_urls>'],
             },
         ],

@@ -1,15 +1,85 @@
 <!doctype html>
 <html lang="en">
-    <!-- TODO(WXT-P2): SCAFFOLD STUB — not the real popup. The shipping popup is
-         still index.html + popup.js (vanilla). P2 rewrites it here as React
-         components on the shared UI package, behavior-identical against the P0
-         characterization pins. -->
     <head>
-        <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>Caramel</title>
+
+        <!-- Design tokens MUST load before the main stylesheet. Absolute
+             paths = public/ assets, untouched by the bundler — the shadow-DOM
+             UI fetches the same files via chrome.runtime.getURL, so they must
+             stay real files at assets/*. -->
+        <link rel="stylesheet" href="/assets/tokens.css" />
+        <!-- Main stylesheet -->
+        <link rel="stylesheet" href="/assets/styles.css" />
     </head>
+
     <body>
-        <main>Caramel</main>
+        <!-- Loading skeleton: header bar ghost + 3 coupon-ticket ghost rows.
+             popup.js hides it (display:none) once the real fetch resolves —
+             #loading-container's id + show/hide contract are load-bearing
+             (tests/popup-loader.test.mjs). -->
+        <div
+            id="loading-container"
+            class="loading-container"
+            aria-hidden="true"
+        >
+            <div class="skeleton skeleton-header"></div>
+            <div class="skeleton skeleton-ticket"></div>
+            <div class="skeleton skeleton-ticket"></div>
+            <div class="skeleton skeleton-ticket"></div>
+        </div>
+
+        <!-- Popup UI -->
+        <div class="popup-container">
+            <header class="popup-header">
+                <a
+                    href="https://grabcaramel.com"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                >
+                    <img
+                        src="/assets/logo-full.svg"
+                        alt="Caramel Logo"
+                        class="popup-logo"
+                    />
+                </a>
+
+                <!-- Opens the in-popup settings view (popup.js toggles
+                     style.display; hidden by default in styles.css and on
+                     the sign-in prompt) -->
+                <button
+                    type="button"
+                    id="settingsIcon"
+                    class="profile-settings"
+                    aria-label="Open settings"
+                >
+                    <svg
+                        width="20"
+                        height="20"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        aria-hidden="true"
+                    >
+                        <circle cx="12" cy="12" r="3" />
+                        <path
+                            d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
+                        />
+                    </svg>
+                </button>
+            </header>
+
+            <main id="mainContent">
+                <div id="auth-container"></div>
+            </main>
+        </div>
+
+        <!-- The ten classic <script> tags became one module graph; effect
+             order lives in main.ts (WXT P1, 2026-08-12). -->
+        <script type="module" src="./main.ts"></script>
     </body>
 </html>

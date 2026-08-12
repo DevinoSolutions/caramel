@@ -16,10 +16,17 @@ import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { GENERATED, NEVER_SHIP, SHIPPED } from '../scripts/build-dist.mjs'
+import {
+    GENERATED,
+    NEVER_SHIP,
+    SHIPPED,
+    srcFor,
+} from '../scripts/build-dist.mjs'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
-const read = name => readFileSync(join(root, name), 'utf8')
+// srcFor: icons/ and assets/ live under public/ since the WXT P1 move; the
+// allowlist still names their packaged DESTINATIONS. Dies with the old build.
+const read = name => readFileSync(join(root, srcFor(name)), 'utf8')
 const readJson = name => JSON.parse(read(name))
 
 const CHROME = readJson('manifest.json')
@@ -94,9 +101,10 @@ describe('packaged extension contents', () => {
 
     it('every allowlisted path actually exists', () => {
         for (const entry of SHIPPED) {
-            expect(existsSync(join(root, entry)), `${entry} is missing`).toBe(
-                true,
-            )
+            expect(
+                existsSync(join(root, srcFor(entry))),
+                `${entry} is missing`,
+            ).toBe(true)
         }
     })
 

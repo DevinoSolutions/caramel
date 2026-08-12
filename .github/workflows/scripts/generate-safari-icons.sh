@@ -11,7 +11,7 @@ if ! command -v convert &> /dev/null; then
 fi
 
 # Source icon path (should be at least 1024x1024)
-SOURCE_ICON=${1:-"icons/original.png"}
+SOURCE_ICON=${1:-"brand/original.png"}
 
 # Output directory
 OUTPUT_DIR="safari-icons"

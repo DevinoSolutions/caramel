@@ -284,8 +284,13 @@ export function initBackground() {
             if (!message || typeof message.action !== 'string') return
             if (message.action === 'openPopup') {
                 currentBrowser.windows.create({
+                    // popup.html since the WXT P1 port (was index.html) —
+                    // WXT names the page after its entrypoint directory.
+                    // popup.js parses callerId back out of this URL; the
+                    // mint→parse round-trip is pinned in
+                    // tests/background-caller-relay.test.mjs.
                     url: currentBrowser.runtime.getURL(
-                        'index.html?isPopup=true&callerId=' +
+                        'popup.html?isPopup=true&callerId=' +
                             (sender.tab?.id ?? ''),
                     ),
                     type: 'popup',

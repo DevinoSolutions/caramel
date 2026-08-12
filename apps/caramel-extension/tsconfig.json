@@ -4,7 +4,13 @@
         "strict": true,
         "noUncheckedIndexedAccess": true,
         "noImplicitOverride": true,
-        "skipLibCheck": true
+        "skipLibCheck": true,
+        // The ported extension sources are plain-JS ES modules; the .ts
+        // entrypoints import them, so tsc infers their types from the real
+        // code (no hand-written declarations to drift). checkJs stays off —
+        // the .js bodies' own annotation debt is not this gate's business.
+        "allowJs": true,
+        "checkJs": false
     },
     "include": ["entrypoints", "types", "wxt.config.ts", ".wxt/wxt.d.ts"]
 }

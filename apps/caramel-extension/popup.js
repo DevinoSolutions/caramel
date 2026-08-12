@@ -73,7 +73,7 @@ const formatWorkedAgo = iso => {
 let returnView = null // callback for the “Back” button, set dynamically
 
 // Set when this popup was opened as a WINDOW by the checkout modal's
-// "Sign In" button (background openPopup → index.html?callerId=<tabId>).
+// "Sign In" button (background openPopup → popup.html?callerId=<tabId>).
 // Finishing login must then notify that tab so the apply flow resumes.
 //
 // Read off location.search at module-eval time before the ESM port; now
