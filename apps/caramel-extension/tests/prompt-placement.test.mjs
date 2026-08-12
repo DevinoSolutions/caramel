@@ -1,5 +1,11 @@
-import { beforeAll, describe, expect, it } from 'vitest'
-import { loadExtensionSources } from './_load.mjs'
+import { describe, expect, it } from 'vitest'
+import {
+    _caramelBarQualifies,
+    _caramelPageBanner,
+    _caramelUsableTitle,
+    caramelPromptTopFor,
+    caramelTopBarBottom,
+} from '../UI-helpers.js'
 
 // The prompt is fixed 20px from the top-right and up to 300px wide, which on a
 // phone is most of the header. QA's first-time users kept meeting the
@@ -18,40 +24,6 @@ import { loadExtensionSources } from './_load.mjs'
 // The decision is split from the DOM probe because jsdom has no layout, so what
 // is pinned where cannot be measured in a unit test — but what to DO about a
 // measurement can be, and that is the part with a rule in it.
-
-let caramelPromptTopFor
-let _caramelUsableTitle
-let _caramelBarQualifies
-let caramelTopBarBottom
-let _caramelPageBanner
-
-beforeAll(() => {
-    ;({
-        caramelPromptTopFor,
-        _caramelUsableTitle,
-        _caramelBarQualifies,
-        caramelTopBarBottom,
-        _caramelPageBanner,
-    } = loadExtensionSources(
-        [
-            'coupon-constants.generated.js',
-            'caramel-base.js',
-            'dom-utils.js',
-            'store-detect.js',
-            'coupon-apply.js',
-            'coupon-fetch.js',
-            'coupon-runner.js',
-            'UI-helpers.js',
-        ],
-        [
-            'caramelPromptTopFor',
-            '_caramelUsableTitle',
-            '_caramelBarQualifies',
-            'caramelTopBarBottom',
-            '_caramelPageBanner',
-        ],
-    ))
-})
 
 describe('clearing the store’s own top bar', () => {
     it('starts below a typical sticky header', () => {
@@ -240,12 +212,12 @@ describe('what counts as the store’s top bar', () => {
 
 // Which <header> is THE header is a DOM question, not a layout one, so unlike
 // everything above it can be asked of jsdom directly.
-describe('picking the page’s own header out of a page full of headers', () => {
-    const html = markup => {
-        document.body.innerHTML = markup
-        return _caramelPageBanner()
-    }
+const html = markup => {
+    document.body.innerHTML = markup
+    return _caramelPageBanner()
+}
 
+describe('picking the page’s own header out of a page full of headers', () => {
     it('takes the store header even with component headers behind it', () => {
         // tog24.com's cart page carries five <header> elements. The first is
         // the store's; the rest belong to a mini-cart, a form and a modal, and

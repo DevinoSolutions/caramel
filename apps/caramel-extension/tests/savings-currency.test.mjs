@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { loadExtensionSources } from './_load.mjs'
+import {
+    caramelCurrencyCode,
+    caramelSetCurrencySymbol,
+    getPrice,
+} from '../dom-utils.js'
 
 // The DOM apply path used to bank EVERY win as 'USD'. The modal renders the
 // symbol the price parser actually saw (getPrice records £/€/$), so a British
@@ -10,19 +14,13 @@ import { loadExtensionSources } from './_load.mjs'
 //
 // caramelCurrencyCode() is the bridge: symbol seen on the page -> ISO code
 // stored in the history.
-let getPrice
-let caramelCurrencyCode
-
 beforeEach(() => {
-    ;({ getPrice, caramelCurrencyCode } = loadExtensionSources(
-        ['caramel-base.js', 'dom-utils.js'],
-        ['getPrice', 'caramelCurrencyCode'],
-    ))
     document.body.innerHTML = ''
-    // dom-utils declares _caramelLastCurrency with the guarded-`var` pattern,
-    // so re-loading the source deliberately does NOT reset it (re-injection
-    // safety). Clear it here so each case starts like a fresh page.
-    globalThis._caramelLastCurrency = '$'
+    // _caramelLastCurrency is module-private state that outlives any single
+    // test (one module instance per file), exactly as the guarded `var` it
+    // came from outlived a re-injection. Reset it through the source's own
+    // exported seam so each case starts like a fresh page.
+    caramelSetCurrencySymbol('$')
 })
 
 /** jsdom computes no layout, so innerText is undefined; getPrice reads it. */

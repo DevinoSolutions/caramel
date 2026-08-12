@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it } from 'vitest'
-import { loadExtensionSource } from './_load.mjs'
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { initCaramelBase, recordTiming } from '../caramel-base.js'
 
 // Pins the caramel-base.js recordTiming write cap: the apply-flow debug
 // telemetry (coupon-apply.js / coupon-fetch.js call sites) has no in-extension
@@ -8,23 +8,36 @@ import { loadExtensionSource } from './_load.mjs'
 // as the savings-history cap in settings-savings.test.mjs. Storage is faked
 // with a real in-memory map (the permissive stub's default empty storage isn't
 // enough here — these tests assert the persisted shape).
-let helpers
 let localData
 
-beforeEach(() => {
-    helpers = loadExtensionSource('caramel-base.js', ['recordTiming'])
-    localData = {}
-    globalThis.currentBrowser.storage.local.get = (_keys, cb) =>
-        cb({ ...localData })
-    globalThis.currentBrowser.storage.local.set = (items, cb) => {
-        Object.assign(localData, items)
-        if (cb) cb()
+// initCaramelBase() resolves `currentBrowser` from the `chrome` global and
+// publishes it as window.currentBrowser — so the storage seam below is the same
+// one the old harness offered, and it is installed ONCE: the bootstrap's
+// double-load guard makes a second call keep the FIRST browser object, exactly
+// as a re-injected content script would. Per-test freshness comes from
+// re-pointing `localData`, which these closures read at call time.
+beforeAll(() => {
+    globalThis.chrome = {
+        storage: {
+            local: {
+                get: (_keys, cb) => cb({ ...localData }),
+                set: (items, cb) => {
+                    Object.assign(localData, items)
+                    if (cb) cb()
+                },
+            },
+        },
     }
+    initCaramelBase()
+})
+
+beforeEach(() => {
+    localData = {}
 })
 
 describe('caramel-base.js timings telemetry', () => {
     it('appends entries with the {event, t, meta} shape', () => {
-        helpers.recordTiming('AUTO_INSERT_ATTEMPT_START', { code: 'SAVE10' })
+        recordTiming('AUTO_INSERT_ATTEMPT_START', { code: 'SAVE10' })
         expect(localData.caramel_timings).toHaveLength(1)
         expect(localData.caramel_timings[0]).toMatchObject({
             event: 'AUTO_INSERT_ATTEMPT_START',
@@ -35,7 +48,7 @@ describe('caramel-base.js timings telemetry', () => {
 
     it('caps the log at 50 entries, keeping the newest', () => {
         for (let i = 0; i < 55; i++) {
-            helpers.recordTiming(`EVENT_${i}`)
+            recordTiming(`EVENT_${i}`)
         }
         expect(localData.caramel_timings).toHaveLength(50)
         expect(localData.caramel_timings[0].event).toBe('EVENT_5') // oldest kept

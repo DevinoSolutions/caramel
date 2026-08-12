@@ -1,11 +1,16 @@
 import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { initCaramelBase } from '../caramel-base.js'
+import { getPrice } from '../dom-utils.js'
 import {
-    EXT_ROOT,
-    loadExtensionSource,
-    loadExtensionSources,
-} from './_load.mjs'
+    hideTestingModal,
+    insertCaramelPrompt,
+    showFinalModal,
+    showTestingModal,
+    updateTestingModal,
+} from '../UI-helpers.js'
 
 // Phase 3 pins (Shadow DOM migration of the injected UI) — the two contracts
 // that must never drift:
@@ -19,50 +24,34 @@ import {
 // jsdom implements attachShadow/shadowRoot (and composed event bubbling), so
 // these run against the same harness as the other content-script suites.
 
-let insertCaramelPrompt
-let showTestingModal
-let updateTestingModal
-let hideTestingModal
-let showFinalModal
+const EXT_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
+
+// Empty storage keeps the prompt's settings gate open (autoApply reads
+// `!== false`, so an unwritten preference is an allowed one).
+const emptyArea = () => ({
+    get: (_keys, cb) => cb?.({}),
+    set: (_items, cb) => cb?.(),
+    remove: (_keys, cb) => cb?.(),
+})
 
 beforeAll(() => {
-    // Real load order (manifest.json): constants first, then the split files
-    // (UI-helpers.js needs caramel-base.js's currentBrowser/log and
-    // coupon-runner.js's _caramelCancelled realm-global).
-    loadExtensionSource('coupon-constants.generated.js', [])
-    ;({
-        insertCaramelPrompt,
-        showTestingModal,
-        updateTestingModal,
-        hideTestingModal,
-        showFinalModal,
-    } = loadExtensionSources(
-        [
-            'caramel-base.js',
-            'dom-utils.js',
-            'store-detect.js',
-            'coupon-apply.js',
-            'coupon-fetch.js',
-            'coupon-runner.js',
-            'UI-helpers.js',
-        ],
-        [
-            'insertCaramelPrompt',
-            'showTestingModal',
-            'updateTestingModal',
-            'hideTestingModal',
-            'showFinalModal',
-        ],
-    ))
-
-    // The shadow-CSS loader fetches runtime.getURL('assets/…') once. The
-    // permissive chrome stub's getURL returns undefined, so make it identity
-    // and serve the REAL stylesheet files from disk — the tests then pin the
-    // actual :root → :host rewrite against the shipped tokens.css.
-    globalThis.currentBrowser.runtime.getURL = p => p
+    // The load order the manifest used to guarantee by hand is the module
+    // graph's now; what still has to be arranged is the realm — the bootstrap
+    // resolves `currentBrowser` off the chrome global.
+    globalThis.chrome = {
+        // The shadow-CSS loader fetches runtime.getURL('assets/…') once; an
+        // identity getURL plus a disk-backed fetch means the tests pin the
+        // actual :root → :host rewrite against the shipped tokens.css.
+        runtime: { getURL: p => p, lastError: undefined },
+        storage: { local: emptyArea(), sync: emptyArea() },
+    }
+    initCaramelBase()
+    // Packaged assets live under public/ in the repo and at assets/ in the
+    // build, which is the path the source asks getURL for.
     globalThis.fetch = async relPath => ({
         ok: true,
-        text: async () => readFileSync(join(EXT_ROOT, relPath), 'utf8'),
+        text: async () =>
+            readFileSync(join(EXT_ROOT, 'public', relPath), 'utf8'),
     })
 })
 
@@ -202,7 +191,7 @@ describe('UI-helpers.js — Shadow DOM hosts (Phase 3)', () => {
         })
         document.body.appendChild(el)
         // Reading the price is what teaches the UI the currency.
-        globalThis.getPrice('#cm-total', { returnLargest: true })
+        getPrice('#cm-total', { returnLargest: true })
 
         await showFinalModal(8, 'GBPCODE')
         const root = document.getElementById('caramel-final-overlay').shadowRoot

@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { beforeAll, describe, expect, it } from 'vitest'
-import { loadExtensionSources } from './_load.mjs'
+import { describe, expect, it } from 'vitest'
+import { CARAMEL_HOST_CSS } from '../UI-helpers.js'
 
 // Every surface we inject is a shadow HOST: a bare <div> whose children all
 // live in a shadow root. In the light DOM — which is the only DOM the store's
@@ -32,15 +32,6 @@ const HOST_IDS = [
     'caramel-testing-overlay',
     'caramel-final-overlay',
 ]
-
-let CARAMEL_HOST_CSS
-
-beforeAll(() => {
-    ;({ CARAMEL_HOST_CSS } = loadExtensionSources(
-        ['coupon-constants.generated.js', 'caramel-base.js', 'UI-helpers.js'],
-        ['CARAMEL_HOST_CSS'],
-    ))
-})
 
 describe('an injected host a store’s CSS cannot switch off', () => {
     it.each(HOST_IDS)(

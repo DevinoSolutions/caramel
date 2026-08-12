@@ -78,8 +78,10 @@ export const CARAMEL_HOST_CSS = {
     'caramel-final-overlay': CARAMEL_OVERLAY_HOST_CSS,
 }
 
-// Cached across all three surfaces.
-let _caramelShadowCssPromise = null
+// Cached across all three surfaces. Exported because whether this cache is
+// still held after a race is exactly what tests/content-css-timer.test.mjs
+// pins — it read the pre-ESM script global of the same name.
+export let _caramelShadowCssPromise = null
 /* Every injected surface AWAITS this before appending itself, so a fetch that
  * never settles isn't a missing stylesheet — it's an extension that silently
  * never appears at all. A rejection already falls back loudly; a hang couldn't

@@ -1,5 +1,12 @@
-import { beforeEach, describe, expect, it } from 'vitest'
-import { loadExtensionSource, loadExtensionSources } from './_load.mjs'
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import {
+    caramelClearSession,
+    caramelGetSession,
+    caramelGetSettings,
+    caramelSetSession,
+    caramelSetSettings,
+    initCaramelBase,
+} from '../caramel-base.js'
 
 // The extension's bearer is a FULL website session token, not an
 // extension-scoped one. It used to live in chrome.storage.sync, which Chrome
@@ -15,9 +22,6 @@ import { loadExtensionSource, loadExtensionSources } from './_load.mjs'
 // signs out every existing user, or leaves the roaming copy behind while
 // looking fixed. It is lazy and self-healing: the first read adopts whatever
 // sync still holds and deletes it there.
-let caramelGetSession
-let caramelSetSession
-let caramelClearSession
 let local
 let synced
 
@@ -39,13 +43,16 @@ const backAreas = () => {
     }
 }
 
+// initCaramelBase() publishes the resolved browser object as
+// window.currentBrowser, which is the seam backAreas() writes through. It runs
+// once: the bootstrap's double-load guard makes a second call keep the FIRST
+// browser object, so per-test freshness comes from new local/synced maps.
+beforeAll(() => {
+    globalThis.chrome = { storage: { local: {}, sync: {} } }
+    initCaramelBase()
+})
+
 beforeEach(() => {
-    loadExtensionSource('coupon-constants.generated.js', [])
-    ;({ caramelGetSession, caramelSetSession, caramelClearSession } =
-        loadExtensionSources(
-            ['caramel-base.js'],
-            ['caramelGetSession', 'caramelSetSession', 'caramelClearSession'],
-        ))
     local = {}
     synced = {}
     backAreas()
@@ -150,12 +157,6 @@ describe('session storage — local, never Chrome Sync', () => {
     })
 
     it('leaves user SETTINGS roaming in sync, which is the whole point of the split', async () => {
-        const { caramelSetSettings, caramelGetSettings } = loadExtensionSources(
-            ['caramel-base.js'],
-            ['caramelSetSettings', 'caramelGetSettings'],
-        )
-        backAreas()
-
         await caramelSetSettings({ autoApply: false })
 
         expect(

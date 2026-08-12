@@ -1,5 +1,13 @@
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { loadExtensionSources } from './_load.mjs'
+import { initCaramelBase } from '../caramel-base.js'
+import {
+    caramelMarkPromptDismissed,
+    caramelPromptDismissedHere,
+    insertCaramelPrompt,
+} from '../UI-helpers.js'
 
 // Dismissing the prompt used to remove the host and record nothing — which
 // failed the user twice over.
@@ -19,31 +27,35 @@ import { loadExtensionSources } from './_load.mjs'
 // for this visit, not a silent permanent opt-out. The permanent version is
 // already explicit: "Pause on this site" in the popup settings.
 
-let caramelPromptDismissedHere
-let caramelMarkPromptDismissed
-let insertCaramelPrompt
+const EXT_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
+
+// Empty storage, which is what makes the prompt "otherwise allowed": the
+// settings gate reads autoApply as `!== false`, so an unwritten preference is
+// an allowed one. This suite is about the dismissal gate, not that one.
+const emptyArea = () => ({
+    get: (_keys, cb) => cb?.({}),
+    set: (_items, cb) => cb?.(),
+    remove: (_keys, cb) => cb?.(),
+})
 
 beforeAll(() => {
-    ;({
-        caramelPromptDismissedHere,
-        caramelMarkPromptDismissed,
-        insertCaramelPrompt,
-    } = loadExtensionSources(
-        ['caramel-base.js', 'dom-utils.js', 'UI-helpers.js'],
-        [
-            'caramelPromptDismissedHere',
-            'caramelMarkPromptDismissed',
-            'insertCaramelPrompt',
-        ],
-    ))
+    globalThis.chrome = {
+        runtime: { getURL: p => p, lastError: undefined },
+        storage: { local: emptyArea(), sync: emptyArea() },
+    }
+    initCaramelBase()
+    // The shadow-CSS loader fetches the packaged stylesheets; serve them off
+    // disk, where WXT now keeps them (public/assets → assets/ in the build).
+    globalThis.fetch = async relPath => ({
+        ok: true,
+        text: async () =>
+            readFileSync(join(EXT_ROOT, 'public', relPath), 'utf8'),
+    })
 })
 
 beforeEach(() => {
     sessionStorage.clear()
     document.body.innerHTML = ''
-    // The prompt is otherwise allowed: this suite is about the dismissal gate,
-    // not the settings gate.
-    globalThis.caramelPromptAllowed = async () => true
 })
 
 describe('prompt dismissal is remembered', () => {

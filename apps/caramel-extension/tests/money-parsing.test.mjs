@@ -1,5 +1,10 @@
-import { beforeAll, describe, expect, it } from 'vitest'
-import { loadExtensionSources } from './_load.mjs'
+import { describe, expect, it } from 'vitest'
+import {
+    caramelCurrencyCode,
+    caramelFindMoney,
+    caramelParseMoneyNumber,
+    getPrice,
+} from '../dom-utils.js'
 
 // The price reader required $ £ or € IMMEDIATELY BEFORE the digits, then parsed
 // by stripping everything except [0-9.]. That reads the United States and the
@@ -20,28 +25,6 @@ import { loadExtensionSources } from './_load.mjs'
 // so a bare number from "Qty 2" is never money. And letter codes must be
 // uppercase (or one of a few named lowercase ones), which is what stops "Save
 // 10" and "Total 5" parsing as prices.
-
-let caramelFindMoney
-let caramelParseMoneyNumber
-let getPrice
-let caramelCurrencyCode
-
-beforeAll(() => {
-    ;({
-        caramelFindMoney,
-        caramelParseMoneyNumber,
-        getPrice,
-        caramelCurrencyCode,
-    } = loadExtensionSources(
-        ['caramel-base.js', 'dom-utils.js'],
-        [
-            'caramelFindMoney',
-            'caramelParseMoneyNumber',
-            'getPrice',
-            'caramelCurrencyCode',
-        ],
-    ))
-})
 
 /** getPrice reads innerText, which jsdom leaves undefined. */
 function priceFrom(text, options) {

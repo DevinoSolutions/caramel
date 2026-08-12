@@ -777,7 +777,8 @@ export function caramelCancelRun() {
  *   "//input[@id='code']"  → XPath → document.evaluate
  *   "(//div)[2]"           → XPath
  */
-function _isXPath(sel) {
+// Exported for tests/shared-utils.test.mjs, which characterizes it directly.
+export function _isXPath(sel) {
     if (typeof sel !== 'string' || !sel) return false
     const t = sel.trim()
     return t.startsWith('/') || t.startsWith('(/') || t.startsWith('./')

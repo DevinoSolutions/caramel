@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
     afterEach,
     beforeAll,
@@ -9,11 +10,25 @@ import {
     it,
     vi,
 } from 'vitest'
-import {
-    EXT_ROOT,
-    loadExtensionSource,
-    loadExtensionSources,
-} from './_load.mjs'
+
+const EXT_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
+
+// log() used to be a script global the suite could overwrite; it is an import
+// now, so the collaborator is replaced at the module boundary instead. Only
+// `log` changes — `currentBrowser` is a live binding that initCaramelBase()
+// fills in later, so it is re-read through a getter rather than snapshotted by
+// the spread.
+const { logged } = vi.hoisted(() => ({ logged: [] }))
+vi.mock('../caramel-base.js', async importOriginal => {
+    const actual = await importOriginal()
+    return {
+        ...actual,
+        get currentBrowser() {
+            return actual.currentBrowser
+        },
+        log: (...args) => logged.push(String(args[0])),
+    }
+})
 
 // The shadow-CSS loader races the real stylesheet fetch against a 4s budget.
 // The budget timer has to be CANCELLED when the fetch wins, and the whole
@@ -28,32 +43,32 @@ import {
 // noise was masking the signal it was supposed to be. The packaged assets are
 // local (single-digit ms even under Slow 3G), so every one of those logs was
 // false.
+// The UI-helpers namespace of the CURRENT module registry: `getShadowCss` is
+// its _caramelGetShadowCss, and `ui._caramelShadowCssPromise` reads the cache
+// live, which the pre-ESM suite did through a global of the same name.
+let ui
 let getShadowCss
-const logged = []
 
 beforeAll(() => {
-    loadExtensionSource('coupon-constants.generated.js', [])
-    ;({ _caramelGetShadowCss: getShadowCss } = loadExtensionSources(
-        [
-            'caramel-base.js',
-            'dom-utils.js',
-            'store-detect.js',
-            'coupon-apply.js',
-            'coupon-fetch.js',
-            'coupon-runner.js',
-            'UI-helpers.js',
-        ],
-        ['_caramelGetShadowCss'],
-    ))
-    globalThis.currentBrowser.runtime.getURL = p => p
+    globalThis.chrome = {
+        runtime: { getURL: p => p, lastError: undefined },
+        storage: {
+            local: { get: (_keys, cb) => cb?.({}), set: (_i, cb) => cb?.() },
+            sync: { get: (_keys, cb) => cb?.({}), set: (_i, cb) => cb?.() },
+        },
+    }
 })
 
-beforeEach(() => {
+beforeEach(async () => {
     logged.length = 0
-    // log() is looked up on the global at call time, so this records what the
-    // extension would emit regardless of the dev/packed gate.
-    globalThis.log = (...args) => logged.push(String(args[0]))
-    globalThis._caramelShadowCssPromise = null
+    // A fresh registry is how the cached promise gets back to null now that it
+    // is module state; the imports run BEFORE the timers are faked so nothing
+    // in the loader waits on a clock this suite controls.
+    vi.resetModules()
+    const base = await import('../caramel-base.js')
+    base.initCaramelBase()
+    ui = await import('../UI-helpers.js')
+    ;({ _caramelGetShadowCss: getShadowCss } = ui)
     vi.useFakeTimers()
 })
 
@@ -64,7 +79,8 @@ afterEach(() => {
 const serveRealCss = () => {
     globalThis.fetch = async relPath => ({
         ok: true,
-        text: async () => readFileSync(join(EXT_ROOT, relPath), 'utf8'),
+        text: async () =>
+            readFileSync(join(EXT_ROOT, 'public', relPath), 'utf8'),
     })
 }
 
@@ -79,7 +95,7 @@ describe('_caramelGetShadowCss — the 4s budget timer', () => {
         await vi.advanceTimersByTimeAsync(5000)
 
         expect(logged).not.toContain('CONTENT_UI_CSS_TIMEOUT')
-        expect(globalThis._caramelShadowCssPromise).not.toBeNull()
+        expect(ui._caramelShadowCssPromise).not.toBeNull()
     })
 
     it('still falls back exactly once when the fetch never settles', async () => {
@@ -95,7 +111,7 @@ describe('_caramelGetShadowCss — the 4s budget timer', () => {
             1,
         )
         // The cache is dropped on a real timeout so a later surface can retry.
-        expect(globalThis._caramelShadowCssPromise).toBeNull()
+        expect(ui._caramelShadowCssPromise).toBeNull()
     })
 
     it('reports a genuine fetch failure as LOAD_FAILED, not as a timeout', async () => {

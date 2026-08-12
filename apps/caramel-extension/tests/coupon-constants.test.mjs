@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { loadExtensionSource, loadExtensionSources } from './_load.mjs'
+import { describe, expect, it, vi } from 'vitest'
+import { initCouponConstants } from '../coupon-constants.generated.js'
 
 // F-006 — proves the extension's app<->shared coupon-domain wiring works,
 // not just that the generated file has the right JSON shape (that's
@@ -7,7 +7,7 @@ import { loadExtensionSource, loadExtensionSources } from './_load.mjs'
 
 describe('coupon-constants.generated.js -> window.CaramelCoupons', () => {
     it('sets the 4 expected keys with the real vocabulary counts (9 statuses, 7 visible, 4 restricted)', () => {
-        loadExtensionSource('coupon-constants.generated.js', [])
+        initCouponConstants()
 
         expect(window.CaramelCoupons.STATUSES).toHaveLength(9)
         expect(window.CaramelCoupons.VISIBLE_STATUSES).toHaveLength(7)
@@ -21,26 +21,23 @@ describe('coupon-constants.generated.js -> window.CaramelCoupons', () => {
 })
 
 describe("coupon-fetch.js RESTRICTED_STATUSES (formerly shared-utils.js, split by F-008) — genuinely SOURCED FROM window.CaramelCoupons (F-006's 1-line rebind), not a coincidentally-matching hard-coded literal", () => {
-    it('reflects a deliberately different fixture set before coupon-fetch.js loads', () => {
-        loadExtensionSource('coupon-constants.generated.js', [])
-        // Overwrite with an obviously-fake fixture BEFORE the F-008 split
-        // files load. If RESTRICTED_STATUSES were still hard-coded (the
-        // pre-F-006 state), it would ignore this entirely and keep the real
-        // 4-status set — this is what would fail if the rebind ever
-        // regressed back to a literal.
-        window.CaramelCoupons.RESTRICTED_STATUSES = ['totally_fake_status']
+    it('reflects a deliberately different fixture set before coupon-fetch.js loads', async () => {
+        // Serve an obviously-fake fixture from the module coupon-fetch.js
+        // sources the vocabulary FROM. (Pre-ESM this was an assignment to
+        // window.CaramelCoupons before the split files were eval'd; the seam
+        // moved from the window to the module graph, the question did not.)
+        // If RESTRICTED_STATUSES were still hard-coded (the pre-F-006 state),
+        // it would ignore this entirely and keep the real 4-status set — this
+        // is what would fail if the rebind ever regressed back to a literal.
+        // doMock + resetModules rather than a hoisted vi.mock: the describe
+        // above asserts on the REAL vocabulary, in this same file.
+        vi.resetModules()
+        vi.doMock('../coupon-constants.generated.js', () => ({
+            CaramelCoupons: { RESTRICTED_STATUSES: ['totally_fake_status'] },
+            initCouponConstants: () => {},
+        }))
 
-        const { RESTRICTED_STATUSES } = loadExtensionSources(
-            [
-                'caramel-base.js',
-                'dom-utils.js',
-                'store-detect.js',
-                'coupon-apply.js',
-                'coupon-fetch.js',
-                'coupon-runner.js',
-            ],
-            ['RESTRICTED_STATUSES'],
-        )
+        const { RESTRICTED_STATUSES } = await import('../coupon-fetch.js')
 
         expect(RESTRICTED_STATUSES instanceof Set).toBe(true)
         expect(RESTRICTED_STATUSES.has('totally_fake_status')).toBe(true)

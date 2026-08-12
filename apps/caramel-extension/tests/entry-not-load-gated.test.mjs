@@ -7,22 +7,23 @@
 // DOMContentLoaded + grace timer; these tests pin that dispatch logic and
 // that the two paths can never double-start detection.
 //
-// Each test re-evaluates inject.js, so listeners from earlier tests are still
+// Each test re-imports inject.js, so listeners from earlier tests are still
 // attached to the shared jsdom window. That is deliberate cover, not a
 // nuisance: every stale listener funnels through the same once-flag, so the
 // "exactly one start" assertions also prove the dedupe holds across repeated
 // injection — the real-world content-script double-injection case.
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { readFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
-
-const INJECT_SRC = readFileSync(
-    join(dirname(fileURLToPath(import.meta.url)), '..', 'inject.js'),
-    'utf8',
-)
 
 let starts
+
+// The only collaborator inject.js has. The factory is re-run by each
+// resetModules() below, but every copy increments the SAME counter, so a start
+// is counted no matter which injection's listener fired it.
+vi.mock('../store-detect.js', () => ({
+    startCheckoutDetection: () => {
+        starts++
+    },
+}))
 
 function setReadyState(value) {
     Object.defineProperty(document, 'readyState', {
@@ -31,32 +32,31 @@ function setReadyState(value) {
     })
 }
 
-function evalInject() {
-    // Indirect eval, same as tests/_load.mjs: top-level `var`/`function` land
-    // on globalThis, which is exactly how the browser runs a content script.
-    ;(0, eval)(INJECT_SRC)
+async function evalInject() {
+    // A fresh module registry per injection: `_caramelDetectionStarted` is
+    // module state now, and re-importing is what the eval'd re-declaration
+    // used to be. initInject() holds this file's entire former top-level body,
+    // in its original order — which is the thing under test.
+    vi.resetModules()
+    const { initInject } = await import('../inject.js')
+    initInject()
 }
 
 beforeEach(() => {
     vi.useFakeTimers()
     starts = 0
-    globalThis.log = () => {}
-    globalThis.startCheckoutDetection = () => {
-        starts++
-    }
-    globalThis._caramelDetectionStarted = false
 })
 
 describe('detection starts without waiting on a load event that may never come', () => {
-    it('a page already complete starts immediately', () => {
+    it('a page already complete starts immediately', async () => {
         setReadyState('complete')
-        evalInject()
+        await evalInject()
         expect(starts).toBe(1)
     })
 
-    it('load never fires: DOMContentLoaded + grace still starts it', () => {
+    it('load never fires: DOMContentLoaded + grace still starts it', async () => {
         setReadyState('loading')
-        evalInject()
+        await evalInject()
         expect(starts).toBe(0)
 
         document.dispatchEvent(new Event('DOMContentLoaded'))
@@ -73,17 +73,17 @@ describe('detection starts without waiting on a load event that may never come',
         expect(starts).toBe(1)
     })
 
-    it('injected mid-parse after DOMContentLoaded (readyState interactive) arms the grace timer directly', () => {
+    it('injected mid-parse after DOMContentLoaded (readyState interactive) arms the grace timer directly', async () => {
         setReadyState('interactive')
-        evalInject()
+        await evalInject()
         expect(starts).toBe(0)
         vi.advanceTimersByTime(5000)
         expect(starts).toBe(1)
     })
 
-    it('a healthy page keeps the old behavior: load wins the race and the timer is a no-op', () => {
+    it('a healthy page keeps the old behavior: load wins the race and the timer is a no-op', async () => {
         setReadyState('interactive')
-        evalInject()
+        await evalInject()
         window.dispatchEvent(new Event('load'))
         expect(starts).toBe(1)
         vi.advanceTimersByTime(60000)

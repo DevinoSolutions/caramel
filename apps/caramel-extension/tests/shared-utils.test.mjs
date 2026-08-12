@@ -1,5 +1,5 @@
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { loadExtensionSource, loadExtensionSources } from './_load.mjs'
+import { beforeEach, describe, expect, it } from 'vitest'
+import { _isXPath, getPrice } from '../dom-utils.js'
 
 // Characterization pins (F-004) — lock behavior of two pure/near-pure
 // helpers that used to live in shared-utils.js (the repo's former #1-churn,
@@ -9,38 +9,10 @@ import { loadExtensionSource, loadExtensionSources } from './_load.mjs'
 // getPrice/_isXPath now live in dom-utils.js. These pins were written
 // BEFORE the split and passed unchanged AFTER it — that is the proof this
 // characterization was meant to provide.
-// Loaded ONCE for the whole file: the source has top-level guards against
-// double-loading (window.__caramel_shared_utils_loaded, still that literal
-// name post-split — it's a "move only" cut, no renames inside the moved
-// code — now defined in caramel-base.js) so re-evaluating per-test would
-// silently no-op the second time.
-let _isXPath
-let getPrice
-
-beforeAll(() => {
-    // F-006 — coupon-constants.generated.js sets window.CaramelCoupons,
-    // which coupon-fetch.js (post-F-008) reads unconditionally at
-    // module-eval time (RESTRICTED_STATUSES's rebind). Real load order
-    // (manifest.json, manifest-firefox.json, index.html) always puts it
-    // first; mirror that here or the content-script files throw on load.
-    loadExtensionSource('coupon-constants.generated.js', [])
-    // Load the 6 F-008 split files in real manifest load order, sharing ONE
-    // chrome stub across all of them (loadExtensionSources, not 6 separate
-    // loadExtensionSource calls) — matching how a real content-script realm
-    // shares one `chrome` global across every file in the list.
-    ;({ getPrice, _isXPath } = loadExtensionSources(
-        [
-            'caramel-base.js',
-            'dom-utils.js',
-            'store-detect.js',
-            'coupon-apply.js',
-            'coupon-fetch.js',
-            'coupon-runner.js',
-        ],
-        ['getPrice', '_isXPath'],
-    ))
-})
-
+// Both helpers are imported straight from the file F-008 moved them into.
+// The manifest load order the old harness had to replay by hand (constants
+// first, then the six split files) is now the module graph's job — importing
+// dom-utils.js pulls in exactly what it depends on, in dependency order.
 beforeEach(() => {
     document.body.innerHTML = ''
 })

@@ -1,5 +1,6 @@
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { loadExtensionSources } from './_load.mjs'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { caramelDisclosureFor } from '../dom-utils.js'
+import { getDomainRecord, isCheckout } from '../store-detect.js'
 
 // "Is the promo box visible?" conflates two different pages: one where the
 // coupon markup is inert theme debris, and one where the box sits behind a
@@ -20,10 +21,22 @@ import { loadExtensionSources } from './_load.mjs'
 // input the CONFIG names, be visible, not already be expanded, and pass the
 // order-button guard. Anything else returns null and nothing changes.
 
-let caramelDisclosureFor
-let isCheckout
+// Seeded into getDomainRecord's own cache rather than stubbed in front of it,
+// so the record has to name the host this realm is actually on — nothing below
+// reads the domain itself.
+const REC = { domain: location.hostname, couponInput: '#promo' }
 
-const REC = { domain: 'example.com', couponInput: '#promo' }
+// Replaced where isCheckout reads them: module imports now, not globals.
+// probeCartJson isolates these cases from the cart gate; waitForElement is the
+// no-op the suite always wanted (the box under test is present, just hidden).
+vi.mock('../coupon-apply.js', async importOriginal => ({
+    ...(await importOriginal()),
+    probeCartJson: async () => null,
+}))
+vi.mock('../dom-utils.js', async importOriginal => ({
+    ...(await importOriginal()),
+    waitForElement: async () => {},
+}))
 
 /** jsdom has no layout, so checkVisibility() must be taught display:none. */
 function stubVisibility() {
@@ -37,28 +50,11 @@ function stubVisibility() {
     }
 }
 
-beforeAll(() => {
-    ;({ caramelDisclosureFor, isCheckout } = loadExtensionSources(
-        [
-            'coupon-constants.generated.js',
-            'caramel-base.js',
-            'dom-utils.js',
-            'store-detect.js',
-            'coupon-apply.js',
-            'coupon-fetch.js',
-            'coupon-runner.js',
-        ],
-        ['caramelDisclosureFor', 'isCheckout'],
-    ))
-})
-
 beforeEach(() => {
     stubVisibility()
     document.body.innerHTML = ''
     window.history.replaceState({}, '', '/checkout')
-    globalThis.getDomainRecord = async () => REC
-    globalThis.waitForElement = async () => {}
-    globalThis.probeCartJson = async () => null // isolate from the cart gate
+    getDomainRecord.cache = [REC]
 })
 
 /** The Shopify-phone shape: a toggle naming the collapsed section. */
