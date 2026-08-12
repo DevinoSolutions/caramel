@@ -21,6 +21,7 @@ import { readFileSync } from 'node:fs'
 import { cp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { ENVIRONMENTS } from './environments.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -109,30 +110,11 @@ export const ENV_FILE = 'caramel-env.js'
 /** Files the build WRITES into dist rather than copying from the package. */
 export const GENERATED = [ENV_FILE]
 
-export const ENVIRONMENTS = {
-    production: {
-        baseUrl: 'https://grabcaramel.com',
-        // Origins trusted to postMessage a login token into extension
-        // storage. They must match the deployment this build talks to: a
-        // build whose API is dev has no business accepting a PRODUCTION
-        // session relayed from a prod tab, and vice versa.
-        trustedOrigins: [
-            'https://grabcaramel.com',
-            'https://www.grabcaramel.com',
-        ],
-        // Content scripts run on https://*/*, so a console call lands in a
-        // STORE's console on a shopper's machine. Never in a shipped build.
-        verbose: false,
-    },
-    development: {
-        baseUrl: 'https://dev.grabcaramel.com',
-        trustedOrigins: [
-            'https://dev.grabcaramel.com',
-            'http://localhost:58000',
-        ],
-        verbose: true,
-    },
-}
+// The table itself moved to scripts/environments.mjs in the WXT P1 port
+// (2026-08-12) — wxt.config.ts and vitest.config.mjs read it there. Re-
+// exported here so this legacy build and its consumers keep one source of
+// truth until they are deleted with the old build system.
+export { ENVIRONMENTS } from './environments.mjs'
 
 // Not exported: nothing outside should be able to read the default and then
 // "helpfully" pass it back in. A caller either names an environment or gets

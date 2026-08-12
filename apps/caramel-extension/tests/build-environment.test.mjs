@@ -200,13 +200,20 @@ describe('the stamp is the only thing that decides the environment', () => {
         expect(firefox.background.scripts[0]).toBe(ENV_FILE)
     })
 
-    it('the committed package-root stamp is the DEVELOPMENT one, and matches its renderer', async () => {
-        // That copy is what an unpacked load of this directory gets (`pnpm
-        // dev`, the Playwright harness). It is never copied into a package —
-        // buildDist writes a fresh one — but it must not drift from the
-        // renderer, or a developer debugs a stamp nobody generates any more.
-        const committed = await readFile(join(ROOT, ENV_FILE), 'utf8')
-        expect(committed).toBe(renderEnvStamp('development'))
+    it('the package-root caramel-env.js is the ESM stamp module, define-fed and frozen (WXT P1)', async () => {
+        // P1 replaced the GENERATED per-build stamp with a real module fed by
+        // the __CARAMEL_ENV__ define (wxt.config.ts / vitest.config.mjs, both
+        // reading scripts/environments.mjs). Under vitest the define carries
+        // PRODUCTION values — same default the old installEnvStamp had.
+        const stamp = await import('../caramel-env.js')
+        expect(stamp.CARAMEL_ENV.name).toBe('production')
+        expect(stamp.CARAMEL_ENV.isProduction).toBe(true)
+        expect(stamp.CARAMEL_ENV.baseUrl).toBe(PROD_URL)
+        expect(stamp.CARAMEL_BASE_URL).toBe(PROD_URL)
+        expect(Object.isFrozen(stamp.CARAMEL_ENV)).toBe(true)
+        expect(Object.isFrozen(stamp.CARAMEL_ENV.trustedOrigins)).toBe(true)
+        // Still never copied into the OLD build's package — that build writes
+        // its own rendered stamp until it is deleted with the port.
         expect(SHIPPED).not.toContain(ENV_FILE)
     })
 

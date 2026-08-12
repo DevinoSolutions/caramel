@@ -12,20 +12,20 @@
  *   - Which deployment a build talks to is decided AT BUILD TIME, never at
  *     runtime. `wxt build` defaults to production mode; a dev-stamped build
  *     takes an explicit `--mode development`. The environment table itself is
- *     imported from scripts/build-dist.mjs — one source of truth, no drift.
+ *     imported from scripts/environments.mjs — one source of truth, no drift.
  *   - One config generates BOTH browser manifests (`-b firefox`); the
  *     `identity` permission and extension-pages CSP are Chrome-only, exactly
  *     like the committed manifest.json / manifest-firefox.json twins.
  */
 import { defineConfig } from 'wxt'
 
-import { ENVIRONMENTS } from './scripts/build-dist.mjs'
+import { ENVIRONMENTS, stampFor } from './scripts/environments.mjs'
 
 type EnvironmentName = keyof typeof ENVIRONMENTS
 
 function resolveEnvironment(mode: string): EnvironmentName {
-    // Vite modes map onto the build-dist environment table 1:1. Anything else
-    // fails the build loudly — a typo must never fall back to either stamp.
+    // Vite modes map onto the environment table 1:1. Anything else fails the
+    // build loudly — a typo must never fall back to either stamp.
     if (mode !== 'production' && mode !== 'development') {
         throw new Error(
             `unknown mode "${mode}" — expected one of ${Object.keys(ENVIRONMENTS).join(', ')}`,
@@ -65,23 +65,13 @@ export default defineConfig({
                   },
               }),
     }),
-    vite: ({ mode }) => {
-        const environment = resolveEnvironment(mode)
-        const env = ENVIRONMENTS[environment]
-        return {
-            define: {
-                // The build-time environment stamp, successor to the generated
-                // caramel-env.js. Entrypoints assign it to globalThis.CARAMEL_ENV
-                // before any other code runs (stamp-first, like manifest order
-                // guaranteed for caramel-env.js today).
-                __CARAMEL_ENV__: JSON.stringify({
-                    name: environment,
-                    isProduction: environment === 'production',
-                    baseUrl: env.baseUrl,
-                    trustedOrigins: env.trustedOrigins,
-                    verbose: env.verbose,
-                }),
-            },
-        }
-    },
+    vite: ({ mode }) => ({
+        define: {
+            // The build-time environment stamp. caramel-env.js re-exports it
+            // as CARAMEL_ENV; the module graph guarantees it is initialized
+            // before any reader runs (the successor to caramel-env.js loading
+            // first in manifest order).
+            __CARAMEL_ENV__: JSON.stringify(stampFor(resolveEnvironment(mode))),
+        },
+    }),
 })
