@@ -12,9 +12,11 @@
 // without this file being "started" first. The detection work all hangs off
 // startCheckoutDetection(), which inject.js and coupon-runner.js call.
 //
-// The dom-utils ⇄ store-detect and coupon-runner/UI-helpers cycles are the
-// expected ones: every imported binding below is read at CALL time, never
-// during module evaluation, so no TDZ hazard exists.
+// The real cycles through this file are with coupon-fetch and coupon-runner
+// (both import from here and are imported here). dom-utils is NOT one of
+// them — it imports only caramel-base; the old claim of a dom-utils cycle was
+// comment noise in the pre-port sources. Every imported binding below is read
+// at CALL time, never during module evaluation, so no TDZ hazard exists.
 import {
     caramelRecordSaving,
     caramelSendMessage,
