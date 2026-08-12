@@ -8,8 +8,9 @@
  *
  * Three assertion families, per browser:
  *
- *   1. SEMANTIC MANIFEST DIFF — the committed manifests (manifest.json /
- *      manifest-firefox.json) are the golden spec; the WXT-generated manifests
+ *   1. SEMANTIC MANIFEST DIFF — the frozen 1.3.1 golden manifests (scripts/
+ *      parity-golden-*.json, snapshotted when the classic manifests retired)
+ *      are the golden spec; the WXT-generated manifests
  *      are diffed against them path by path. Every difference must be listed
  *      in scripts/parity-expected-diffs.json with a reason and the phase that
  *      retires it. An UNLISTED diff fails; a listed diff that no longer occurs
@@ -79,12 +80,20 @@ wxt(['build', '--mode', 'development'])
 
 const BUILDS = {
     chrome: {
-        golden: JSON.parse(readFileSync(join(ROOT, 'manifest.json'), 'utf8')),
+        golden: JSON.parse(
+            readFileSync(
+                join(ROOT, 'scripts/parity-golden-chrome.json'),
+                'utf8',
+            ),
+        ),
         outDir: join(OUT, 'chrome-mv3'),
     },
     firefox: {
         golden: JSON.parse(
-            readFileSync(join(ROOT, 'manifest-firefox.json'), 'utf8'),
+            readFileSync(
+                join(ROOT, 'scripts/parity-golden-firefox.json'),
+                'utf8',
+            ),
         ),
         outDir: join(OUT, 'firefox-mv3'),
     },
