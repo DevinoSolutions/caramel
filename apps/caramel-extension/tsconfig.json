@@ -1,0 +1,10 @@
+{
+    "extends": "./.wxt/tsconfig.json",
+    "compilerOptions": {
+        "strict": true,
+        "noUncheckedIndexedAccess": true,
+        "noImplicitOverride": true,
+        "skipLibCheck": true
+    },
+    "include": ["entrypoints", "types", "wxt.config.ts", ".wxt/wxt.d.ts"]
+}

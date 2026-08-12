@@ -17,6 +17,14 @@
 # minified copies the size gate weighs — rebuilt by `pnpm size`, never shipped
 /.size-cache
 
+# WXT (migration P0): generated types + build output — never committed, never
+# shipped until the parity harness clears the .output artifacts
+/.wxt
+/.output
+
+# parity-harness build of the old dist — compared, never shipped
+/dist-parity
+
 # misc
 .DS_Store
 *.pem

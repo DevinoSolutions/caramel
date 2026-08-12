@@ -8,7 +8,15 @@ module.exports = [
     {
         // GENERATED — not hand-maintained (F-006). Regenerate via
         // `pnpm --filter caramel-app generate:coupon-constants`.
-        ignores: ['coupon-constants.generated.js'],
+        // Build outputs (old build: dist*/; WXT: .output/, .wxt/) are
+        // artifacts, never sources — the parity harness owns their contents.
+        ignores: [
+            'coupon-constants.generated.js',
+            'dist/**',
+            'dist-*/**',
+            '.output/**',
+            '.wxt/**',
+        ],
     },
     {
         files: ['**/*.{js,html}'],

@@ -39,6 +39,17 @@ jobs:
         run: pnpm run test
       - name: Check bundle size
         run: pnpm run size
+      # WXT migration parity harness (P0, 2026-08-12): builds the old dist AND
+      # the WXT .output per browser, then asserts semantic manifest parity
+      # (scripts/parity-expected-diffs.json is the shrink-only allowlist),
+      # NEVER_SHIP file inventory, and the build-time env stamp in both build
+      # systems. Every migration phase must keep this green.
+      - name: Run WXT parity harness
+        run: pnpm run test:parity
+      # TypeScript gate for the WXT surfaces (wxt.config.ts, entrypoints/) —
+      # strict tsc, no any; `wxt prepare` generates .wxt/ types first.
+      - name: Type-check WXT surfaces
+        run: pnpm run type-check
       # Proves the allowlist in scripts/build-dist.mjs actually produces a
       # loadable package — tests/package-contents.test.mjs checks the file list,
       # this checks the build runs and lands the files it promises.

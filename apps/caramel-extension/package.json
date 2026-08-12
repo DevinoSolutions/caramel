@@ -9,12 +9,17 @@
         "prettier-write": "prettier --write '**/*.{js,html,css,json,md}'",
         "build": "node scripts/build-dist.mjs",
         "build:dev": "node scripts/build-dist.mjs --env=development",
+        "wxt:prepare": "wxt prepare",
+        "wxt:build": "wxt build",
+        "wxt:build:firefox": "wxt build -b firefox --mv3",
+        "type-check": "wxt prepare && tsc --noEmit",
         "package": "zip -r extension.zip ./dist",
         "dev": "web-ext run --target=chromium --source-dir=. --watch-file=./**/*",
         "test": "vitest run",
         "test:e2e": "node scripts/test-extension.mjs",
         "test:guards": "node scripts/test-guards.mjs",
         "test:smoke": "node scripts/smoke-package.mjs ./dist production",
+        "test:parity": "node scripts/parity-harness.mjs",
         "size": "node scripts/measure-size.mjs && size-limit",
         "knip": "knip"
     },
@@ -31,7 +36,9 @@
         "prettier": "3.6.2",
         "prettier-plugin-organize-imports": "4.1.0",
         "size-limit": "12.1.0",
+        "typescript": "5.9.2",
         "vitest": "4.1.10",
-        "web-ext": "8.10.0"
+        "web-ext": "8.10.0",
+        "wxt": "0.21.4"
     }
 }
