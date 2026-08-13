@@ -27,6 +27,10 @@ export function ProfileCard({ user, api }: { user: PopupUser; api: AppApi }) {
                 </div>
                 <button
                     type="button"
+                    // The id is a consumer contract, not styling:
+                    // scripts/test-extension.mjs waits on #logoutBtn after a
+                    // live login, and this card is where a no-tab login lands.
+                    id="logoutBtn"
                     className="coupons-logout-button"
                     onClick={e =>
                         signOutAndRevoke(api.refresh, e.currentTarget)

@@ -91,12 +91,11 @@ export function App() {
 
     return (
         <ToastProvider>
+            {/* The vanilla skeleton carried aria-hidden (decorative ghosts);
+                the Spinner is a real role=status announcement, so the
+                container must stay in the accessibility tree. */}
             {!booted && (
-                <div
-                    id="loading-container"
-                    className="loading-container"
-                    aria-hidden="true"
-                >
+                <div id="loading-container" className="loading-container">
                     <Spinner label="Loading coupons…" size={28} />
                 </div>
             )}

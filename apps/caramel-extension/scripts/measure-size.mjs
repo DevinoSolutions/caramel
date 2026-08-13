@@ -32,12 +32,25 @@
  * .output/ — not a reason to go back to pricing sentences.
  */
 import { transform } from 'esbuild'
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { dirname, extname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 export const CACHE_DIR = '.size-cache'
+
+/** Every .ts/.tsx under `dir`, repo-relative, sorted — so a new popup view is
+ *  weighed the day it is added instead of drifting out of the file list. */
+async function tsSourcesUnder(dir) {
+    const entries = await readdir(join(ROOT, dir), {
+        recursive: true,
+        withFileTypes: true,
+    })
+    return entries
+        .filter(e => e.isFile() && /\.(ts|tsx)$/.test(e.name))
+        .map(e => relative(ROOT, join(e.parentPath, e.name)))
+        .sort()
+}
 
 /* The one place the measured file sets live. .size-limit.js points at this
  * script's OUTPUT, so it cannot drift from this list: a file added to a group
@@ -57,11 +70,18 @@ export const GROUPS = {
         'UI-helpers.js',
         'inject.js',
     ],
-    // popup.js became popup-core.js in P2 (logic only; the React views are
-    // TSX the popup bundle owns). TODO(WXT-P2 gates): give the BUILT React
-    // popup chunk its own budget once the shell lands — this group weighs the
-    // logic module, not the React bundle.
+    // popup.js became popup-core.js in P2: the logic module keeps its own
+    // budget, and the React views/shell get theirs below.
     popup: ['popup-core.js'],
+    // The popup's OWN React code (P2): everything TSX/TS under the popup
+    // entrypoint plus caramel-ui's sources, which ship in the same chunk.
+    // Deliberately NOT the built chunk: react/react-dom are a fixed vendor
+    // cost pinned by the lockfile, and weighing them would let 180 kB of
+    // vendor noise hide real growth in the code this ratchet exists to bound.
+    'popup-react': async () => [
+        ...(await tsSourcesUnder('entrypoints/popup')),
+        ...(await tsSourcesUnder('../../packages/caramel-ui/src')),
+    ],
     background: ['background.js'],
 }
 
@@ -70,10 +90,11 @@ async function buildGroup(name, files) {
     const minified = []
     for (const file of files) {
         const source = await readFile(join(ROOT, file), 'utf8')
+        const ext = extname(file)
         // A syntax error here must stop the build rather than silently
         // measure a smaller file: esbuild throws, and nothing catches it.
         const { code } = await transform(source, {
-            loader: 'js',
+            loader: ext === '.tsx' ? 'tsx' : ext === '.ts' ? 'ts' : 'js',
             minify: true,
             // Match the floor the extension already ships against (MV3 is
             // evergreen Chrome/Firefox/Safari). A lower target would transpile
@@ -92,5 +113,5 @@ const cache = join(ROOT, CACHE_DIR)
 await rm(cache, { recursive: true, force: true })
 await mkdir(cache, { recursive: true })
 for (const [name, files] of Object.entries(GROUPS)) {
-    await buildGroup(name, files)
+    await buildGroup(name, typeof files === 'function' ? await files() : files)
 }

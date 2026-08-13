@@ -8,12 +8,18 @@ import { stampFor } from './scripts/environments.mjs'
 // default (tests/_load.mjs installEnvStamp — deleted with the old build), so
 // a suite asserting production behavior cannot accidentally pick up the dev
 // stamp.
+//
+// React era (WXT P2, 2026-08-13): popup view suites are .test.tsx rendered
+// with @testing-library/react — `jsx: 'automatic'` mirrors the build's
+// react-jsx transform, and the setup file registers the jest-dom matchers.
 export default defineConfig({
+    esbuild: { jsx: 'automatic' },
     define: {
         __CARAMEL_ENV__: JSON.stringify(stampFor('production')),
     },
     test: {
         environment: 'jsdom',
-        include: ['tests/**/*.test.mjs'],
+        include: ['tests/**/*.test.{mjs,tsx}'],
+        setupFiles: ['tests/_vitest-setup.ts'],
     },
 })

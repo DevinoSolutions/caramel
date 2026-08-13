@@ -1,11 +1,6 @@
-// DISABLED during the P2 popup rewrite - the vanilla render functions this
-// suite drove were deleted from popup.js (now popup-core.js). The P2 view
-// slice "B" ports these pins to @testing-library/react against the React
-// popup IN THIS SAME PR. If you are reading this on main, the port was
-// dropped: treat it as a release blocker and restore the coverage.
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { initCaramelBase } from '../caramel-base.js'
-import { caramelDomainIsSupported } from '../popup.js'
+import { caramelDomainIsSupported } from '../popup-core.js'
 
 // "We have no codes for this store right now" and "we don't cover this store"
 // are different facts. The popup used to branch on coupons.length alone, so a

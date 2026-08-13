@@ -14,27 +14,26 @@
         "inject.js",
         "background.js",
         "popup-core.js",
+        "entrypoints/*.ts",
+        "entrypoints/popup/main.tsx",
         "eslint.config.cjs",
-        "vitest.config.mjs",
+        "wxt.config.ts",
+        "vitest.config.ts",
         "scripts/**/*.mjs",
-        "tests/**/*.mjs"
+        "tests/**/*.{mjs,tsx}",
     ],
-    "project": ["**/*.{js,cjs,mjs}"],
+    "project": ["**/*.{js,cjs,mjs,ts,tsx}"],
     "ignoreBinaries": ["eslint"],
     "ignoreDependencies": [
         "prettier-plugin-organize-imports",
-        // TODO(WXT-P2, 2026-08-13): the React stack lands ahead of its first
-        // consumer — the popup rewrite in this same PR removes every ignore
-        // below. If you are reading this on main, that failed: delete the
-        // ignores and let knip say what is really unused.
-        "@testing-library/jest-dom",
-        "@testing-library/react",
-        "@testing-library/user-event",
-        "@types/react",
-        "@types/react-dom",
-        "@wxt-dev/module-react",
+        // knip 5's resolver doesn't credit an import that resolves into
+        // another pnpm workspace package (the imports are real: App.tsx and
+        // views/LoadErrorView.tsx consume caramel-ui; `main`/`types`
+        // fallbacks were tried and don't help). Dated 2026-08-13 — re-test
+        // on the next knip upgrade.
         "caramel-ui",
-        "react",
-        "react-dom"
-    ]
+        // Referenced only as a string in wxt.config.ts `modules`; there is
+        // no import statement for knip to see. Dated 2026-08-13.
+        "@wxt-dev/module-react",
+    ],
 }

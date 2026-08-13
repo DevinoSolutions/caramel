@@ -128,4 +128,18 @@ export default [
             ],
         },
     },
+    {
+        // 2026-08-13 (WXT P2) — the extension's popup suites stub the chrome
+        // API through a permissive Proxy (any missing property materializes
+        // as a callable no-op), a shape TypeScript cannot express without
+        // `any`. Root lint-staged runs THIS config over those files (flat
+        // config resolves from the cwd, so the extension's own
+        // eslint.config.cjs never sees a root-invoked run); scope the
+        // exemption to the test dir — the shipped views in entrypoints/ stay
+        // under the full rule set and are clean.
+        files: ['apps/caramel-extension/tests/**/*.{ts,tsx}'],
+        rules: {
+            '@typescript-eslint/no-explicit-any': 'off',
+        },
+    },
 ]

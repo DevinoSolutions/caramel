@@ -45,17 +45,22 @@ module.exports = [
         name: 'popup-core.js (minified)',
         path: '.size-cache/popup.min.js',
         // 2026-08-10 — measured 28.29 kB minified, from 63.39 kB of source.
-        // 2026-08-10, raised 30 -> 33 kB: the coupon list paginates. A store
-        // can hold far more codes than one request returns (eBay: 96 against a
-        // page of 20) and the popup showed the first page as if it were the
-        // whole store. The 2.7 kB buys an IntersectionObserver sentinel, the
-        // fetch-append-dedupe loop, the four footer states (loading / end /
-        // retry / no-observer button) and delegated copy handlers so appended
-        // rows work — real behaviour, measured 30.97 kB.
-        // 2026-08-13 (P2): popup.js became popup-core.js — renders moved to
-        // React TSX; the budget stays until the gates slice re-measures and
-        // adds the built React chunk's own budget (see measure-size.mjs TODO).
-        limit: '33 KB',
+        // 2026-08-13 (P2), lowered 33 -> 6.5 kB: popup.js became
+        // popup-core.js and every render moved to the React popup (its own
+        // budget below) — what remains is the pinned logic, measured 5.67 kB.
+        // A ratchet locks wins in, not just losses out.
+        limit: '6.5 KB',
+        brotli: false,
+    },
+    {
+        name: 'popup React views (ours, minified)',
+        path: '.size-cache/popup-react.min.js',
+        // 2026-08-13 (P2) — measured 27.04 kB minified: the App shell, the six
+        // views (coupons w/ paging + star + guest gate, sign-in, settings,
+        // profile, unsupported, load-error), toast, banner, and caramel-ui's
+        // sources. Vendor react/react-dom are deliberately NOT weighed — see
+        // measure-size.mjs — so growth here is always OUR code growing.
+        limit: '30 KB',
         brotli: false,
     },
     {
