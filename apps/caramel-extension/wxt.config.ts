@@ -69,7 +69,49 @@ export default defineConfig({
             default_icon: ICONS,
         },
         browser_specific_settings: {
-            gecko: { id: 'caramel@devino.ca' },
+            gecko: {
+                id: 'caramel@devino.ca',
+                // Mozilla's data-collection consent framework (mandatory for
+                // new AMO submissions since 2025-11-03, extending to updates
+                // of existing listings during 2026 — declared now so the
+                // 1.4.0 submission cannot bounce on it). Firefox-only: Chrome
+                // ignores the key and the chrome parity golden stays exact.
+                //
+                // Evidence-based mapping (full outbound audit 2026-08-13; the
+                // ONLY server origin is the build-time baseUrl — no Sentry,
+                // no analytics, nothing third-party):
+                //   required.browsingActivity — the toolbar badge sends every
+                //     visited https domain to /api/coupons on tab switch,
+                //     guests included, no off switch.
+                //   required.websiteContent — /api/classify-cart sends page
+                //     title/meta/product names; coupon outcome reports carry
+                //     the store's own rejection text. Both automatic.
+                //   optional.authenticationInfo + personallyIdentifyingInfo —
+                //     email/password (and OAuth codes on non-Firefox) travel
+                //     only when the user signs in; guests never send them.
+                //   optional.financialAndPaymentInfo — savings sync uploads
+                //     per-win {store, code, amountCents} records, and is
+                //     double-gated: sign-in AND an off-by-default toggle.
+                // Deliberately ABSENT: technicalAndInteraction (timings and
+                // error buffers live in chrome.storage.local with no reader
+                // that transmits them — declaring it would disclose
+                // collection that doesn't happen), websiteActivity (we click
+                // checkout buttons, we never transmit interaction data),
+                // searchTerms (the key_words API param is '' at all call
+                // sites).
+                ...(browser === 'firefox'
+                    ? {
+                          data_collection_permissions: {
+                              required: ['browsingActivity', 'websiteContent'],
+                              optional: [
+                                  'authenticationInfo',
+                                  'personallyIdentifyingInfo',
+                                  'financialAndPaymentInfo',
+                              ],
+                          },
+                      }
+                    : {}),
+            },
         },
         // `identity` (launchWebAuthFlow) exists on Chrome/Edge/Safari builds
         // only; its absence on Firefox is what routes popup sign-in through

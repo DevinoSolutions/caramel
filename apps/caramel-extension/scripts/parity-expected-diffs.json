@@ -67,6 +67,13 @@
         },
         {
             "browser": "firefox",
+            "path": "/browser_specific_settings/gecko/data_collection_permissions",
+            "reason": "Mozilla data-collection consent declaration added 2026-08-13 (mandatory for AMO; audit-backed mapping in wxt.config.ts) — the 1.3.1 golden predates the framework",
+            "retiredBy": "golden-rebaseline(1.4.0)",
+            "added": "2026-08-13"
+        },
+        {
+            "browser": "firefox",
             "path": "/background/scripts",
             "reason": "the env stamp is BUNDLED into background.js instead of a separate manifest entry — the stamp-first guarantee moves from manifest order into the module graph (P1 pins it there)",
             "retiredBy": "golden-rebaseline(1.4.0)",
