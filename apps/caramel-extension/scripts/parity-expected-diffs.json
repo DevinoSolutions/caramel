@@ -12,8 +12,8 @@
         {
             "browser": "chrome",
             "path": "/action/default_title",
-            "reason": "WXT derives default_title from the popup <title>; harmless addition, golden adopts it at P2",
-            "retiredBy": "P2",
+            "reason": "WXT derives default_title from the popup <title>; harmless addition the shipped 1.3.1 manifest does not have. Relabelled 2026-08-13: P2 shipped without adopting it, and back-dating a frozen 1.3.1 snapshot would falsify the golden — it retires when the goldens are re-frozen from 1.4.0",
+            "retiredBy": "golden-rebaseline(1.4.0)",
             "added": "2026-08-12"
         },
         {
@@ -40,8 +40,8 @@
         {
             "browser": "firefox",
             "path": "/action/default_title",
-            "reason": "WXT derives default_title from the popup <title>; harmless addition, golden adopts it at P2",
-            "retiredBy": "P2",
+            "reason": "WXT derives default_title from the popup <title>; harmless addition the shipped 1.3.1 manifest does not have. Relabelled 2026-08-13: P2 shipped without adopting it, and back-dating a frozen 1.3.1 snapshot would falsify the golden — it retires when the goldens are re-frozen from 1.4.0",
+            "retiredBy": "golden-rebaseline(1.4.0)",
             "added": "2026-08-12"
         },
         {

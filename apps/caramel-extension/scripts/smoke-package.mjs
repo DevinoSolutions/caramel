@@ -31,7 +31,14 @@ import { chromium } from 'playwright'
 import { ENVIRONMENTS } from './environments.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const PACKAGE_DIR = path.resolve(__dirname, '..', process.argv[2] || 'dist')
+// Default is the WXT production build. It used to be `dist` — the hand-rolled
+// build's output, deleted in P1 (2026-08-12) — so a bare invocation pointed at
+// a directory that no longer exists and reported that as a package problem.
+const PACKAGE_DIR = path.resolve(
+    __dirname,
+    '..',
+    process.argv[2] || '.output/chrome-mv3',
+)
 const ENVIRONMENT = process.argv[3] || 'production'
 
 const expected = ENVIRONMENTS[ENVIRONMENT]
