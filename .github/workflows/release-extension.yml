@@ -1,14 +1,12 @@
 name: Release – Extension
 
-# TODO(WXT P4, 2026-08-13): BROKEN since the WXT P1 merge — this workflow still
-# builds from the deleted hand-rolled world (manifest.json/manifest-firefox.json
-# at the package root, scripts/build-dist.mjs → dist/, the Firefox
-# manifest-swap). P4 rewires every job onto `wxt build` / `wxt zip` per browser
-# and points the Safari converter at .output/chrome-mv3. Do NOT tag a release
-# until that lands; the version-check step fails loudly on the missing
-# manifest.json either way.
+# Every store package here is built by WXT (P4, 2026-08-13): `wxt zip` per
+# browser, out of apps/caramel-extension into .output/. The manifest is
+# generated, so package.json's "version" is the single version authority and
+# the built manifests are cross-checked against it rather than maintained
+# beside it.
 
-# Firefox/AMO IS automated now — `package` builds a Firefox variant of dist/ and
+# Firefox/AMO IS automated now — `package` builds the Firefox variant and
 # `publish_firefox` signs and submits it to addons.mozilla.org — but the job is
 # DORMANT until the owner creates two repository secrets:
 #
@@ -34,7 +32,7 @@ name: Release – Extension
 # Still manual afterwards: Mozilla's human review of the submitted version.
 #
 # Microsoft Edge follows the SAME dormant-until-secrets pattern (`publish_edge`),
-# reusing the Chrome extension.zip untouched — Edge is Chromium. It stays skipped
+# reusing the Chrome store zip untouched — Edge is Chromium. It stays skipped
 # and GREEN until three repository secrets exist:
 #
 #   EDGE_PRODUCT_ID  — the add-on Product ID (Partner Center dashboard)
@@ -94,54 +92,42 @@ jobs:
             echo "::warning::Running from ${GITHUB_REF_TYPE} '${GITHUB_REF_NAME}', not a tag. Store uploads may still run, but no GitHub Release will be created and the store version will not be traceable to a tag."
           fi
 
-      # ONE version authority: apps/caramel-extension/manifest.json. Every other
-      # version field in the extension package must agree with it, and the tag
-      # must be `v` + that version. Nothing in this workflow computes, bumps or
-      # infers a version any more — the Safari marketing version is this value
-      # too, and only the numeric TestFlight build number is derived at runtime.
+      # ONE version authority: apps/caramel-extension/package.json. WXT
+      # generates each browser's manifest from it, so there is no second
+      # version field to keep in sync here — what used to be a three-file
+      # agreement check is now a build-output check, in the `package` job,
+      # against the manifests WXT actually stamped. The tag must be `v` + this
+      # version. Nothing in this workflow computes, bumps or infers a version —
+      # the Safari marketing version is this value too, and only the numeric
+      # TestFlight build number is derived at runtime.
       - name: Assert one version authority
         id: version
         run: |
           set -euo pipefail
           dir="${WORKING_DIRECTORY}"
           if [ -z "$dir" ]; then
-            echo "::error::Repository variable WORKING_DIRECTORY is unset — cannot locate the extension manifest."
+            echo "::error::Repository variable WORKING_DIRECTORY is unset — cannot locate the extension package."
             exit 1
           fi
-          for f in manifest.json manifest-firefox.json package.json; do
-            if [ ! -f "$dir/$f" ]; then
-              echo "::error::Expected $dir/$f to exist. Check the WORKING_DIRECTORY repository variable."
-              exit 1
-            fi
-          done
+          if [ ! -f "$dir/package.json" ]; then
+            echo "::error::Expected $dir/package.json to exist. Check the WORKING_DIRECTORY repository variable."
+            exit 1
+          fi
 
-          version=$(jq -er '.version' "$dir/manifest.json")
-          firefox_version=$(jq -er '.version' "$dir/manifest-firefox.json")
-          package_version=$(jq -er '.version' "$dir/package.json")
-
-          echo "manifest.json          $version"
-          echo "manifest-firefox.json  $firefox_version"
-          echo "package.json           $package_version"
+          version=$(jq -er '.version' "$dir/package.json")
+          echo "package.json  $version"
 
           if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "::error::manifest.json version '$version' is not a plain X.Y.Z version."
-            exit 1
-          fi
-          if [ "$firefox_version" != "$version" ]; then
-            echo "::error::manifest-firefox.json version '$firefox_version' disagrees with manifest.json '$version'."
-            exit 1
-          fi
-          if [ "$package_version" != "$version" ]; then
-            echo "::error::package.json version '$package_version' disagrees with manifest.json '$version'."
+            echo "::error::package.json version '$version' is not a plain X.Y.Z version."
             exit 1
           fi
 
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
-              echo "::error::Tag '${GITHUB_REF_NAME}' does not match manifest version — expected 'v${version}'."
+              echo "::error::Tag '${GITHUB_REF_NAME}' does not match the package version — expected 'v${version}'."
               exit 1
             fi
-            echo "Tag ${GITHUB_REF_NAME} matches manifest version $version"
+            echo "Tag ${GITHUB_REF_NAME} matches package version $version"
           fi
 
           echo "version=$version" >> "$GITHUB_OUTPUT"
@@ -283,9 +269,9 @@ jobs:
           print(f"Chrome Web Store currently publishes {published}; manifest is {manifest}")
           if manifest_parts <= published_parts:
               fail(
-                  f"Manifest version {manifest} is not greater than the published Chrome "
-                  f"Web Store version {published}. Bump apps/caramel-extension "
-                  "manifest.json (and the matching version fields) before tagging."
+                  f"Version {manifest} is not greater than the published Chrome "
+                  f"Web Store version {published}. Bump the \"version\" field in "
+                  "apps/caramel-extension/package.json before tagging."
               )
 
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
@@ -317,46 +303,92 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: pnpm install --frozen-lockfile
 
-      - name: Build extension
-        run: pnpm run build
+      # The release gate, run BEFORE anything is packaged so a bad build costs
+      # seconds instead of a store upload. The harness builds both browsers and
+      # asserts semantic manifest parity, the NEVER_SHIP file inventory (no
+      # package.json, tests/, scripts/ or configs reaching a store package) and
+      # — the part a release depends on — that both builds carry the PRODUCTION
+      # env stamp. That is why no step in this workflow may pass `--mode`:
+      # production is WXT's default, and a development-stamped package would
+      # point real users' extensions at the dev deployment.
+      - name: Assert both builds are production-stamped and ship-clean
+        run: pnpm run test:parity
 
-      - name: Package extension
+      # `wxt zip` builds and zips in one step. Chrome's zip is what the Chrome
+      # Web Store and Edge (Chromium, same package) receive; the Firefox run
+      # additionally emits a -sources.zip, which AMO requires because the
+      # submitted bundle is generated/minified and its reviewers need readable
+      # source.
+      - name: Package extension for Chrome
         run: pnpm run package
 
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: extension-package
-          path: ${{ env.WORKING_DIRECTORY }}/extension.zip
-
-      # Firefox ships the SAME built dist/ as Chrome — one manifest is the only
-      # difference (MV3 `background.scripts` instead of a service worker, the
-      # gecko id, and no `identity` permission; see popup.js's Firefox OAuth
-      # note). scripts/build-dist.mjs deliberately keeps manifest-firefox.json
-      # OUT of dist/ (it is in that file's NEVER_SHIP list), so the Firefox
-      # package is dist/ with that manifest copied over manifest.json. The
-      # Chrome build and zip above are not touched.
       - name: Package extension for Firefox
+        run: pnpm exec wxt zip -b firefox --mv3
+
+      # The manifests are GENERATED, so this is the check that used to be a
+      # three-file version agreement in the guard job: it proves what WXT
+      # actually stamped into each shipping package matches the version the
+      # guard resolved, tagged and freeze-checked against the stores. A silent
+      # disagreement here would publish a package whose version is not the one
+      # the guards cleared.
+      - name: Assert the built manifests carry the released version
+        env:
+          RELEASE_VERSION: ${{ needs.guard.outputs.version }}
         run: |
           set -euo pipefail
-          rm -rf dist-firefox
-          cp -r dist dist-firefox
-          cp manifest-firefox.json dist-firefox/manifest.json
-          # Assert the swap actually landed rather than trusting cp: a Firefox
-          # package carrying Chrome's manifest would be rejected by AMO only
-          # after the upload, and one still carrying manifest-firefox.json
-          # alongside would ship a file the allowlist says never ships.
-          jq -er '.browser_specific_settings.gecko.id' dist-firefox/manifest.json
-          test ! -e dist-firefox/manifest-firefox.json
+          for build in chrome-mv3 firefox-mv3; do
+            stamped=$(jq -er '.version' ".output/${build}/manifest.json")
+            echo "${build}  ${stamped}"
+            if [ "$stamped" != "${RELEASE_VERSION}" ]; then
+              echo "::error::.output/${build}/manifest.json is version '${stamped}' but this release is '${RELEASE_VERSION}'."
+              exit 1
+            fi
+          done
+          for zip in ".output/caramel-extension-${RELEASE_VERSION}-chrome.zip" \
+                     ".output/caramel-extension-${RELEASE_VERSION}-firefox.zip" \
+                     ".output/caramel-extension-${RELEASE_VERSION}-sources.zip"; do
+            if [ ! -f "$zip" ]; then
+              echo "::error::Expected $zip to exist — wxt zip did not produce the version-named artifact this release expects."
+              exit 1
+            fi
+          done
 
-      # A directory, not a zip: `web-ext sign` takes --source-dir and builds the
-      # xpi itself (it hashes that build to decide whether to re-upload), so
-      # handing it a zip would only mean unzipping it again in publish_firefox.
-      - name: Upload Firefox build artifact
+      - name: Upload Chrome store package
+        uses: actions/upload-artifact@v4
+        with:
+          name: extension-chrome
+          path: ${{ env.WORKING_DIRECTORY }}/.output/caramel-extension-${{ needs.guard.outputs.version }}-chrome.zip
+          if-no-files-found: error
+
+      # An unpacked directory, not the zip: safari-web-extension-converter takes
+      # a directory of extension files, so shipping the zip would only mean
+      # unzipping it again in publish_safari.
+      - name: Upload unpacked Chrome build for the Safari converter
+        uses: actions/upload-artifact@v4
+        with:
+          name: extension-chrome-unpacked
+          path: ${{ env.WORKING_DIRECTORY }}/.output/chrome-mv3
+          if-no-files-found: error
+
+      # Also a directory: `web-ext sign` takes --source-dir and builds the xpi
+      # itself (it hashes that build to decide whether to re-upload), so handing
+      # it a zip would only mean unzipping it again in publish_firefox.
+      - name: Upload unpacked Firefox build
         uses: actions/upload-artifact@v4
         with:
           name: extension-firefox
-          path: ${{ env.WORKING_DIRECTORY }}/dist-firefox
+          path: ${{ env.WORKING_DIRECTORY }}/.output/firefox-mv3
+          if-no-files-found: error
+
+      # The Firefox store zip is what the GitHub Release attaches; the sources
+      # zip is what web-ext hands AMO's reviewers alongside the signed build.
+      - name: Upload Firefox store and sources zips
+        uses: actions/upload-artifact@v4
+        with:
+          name: extension-firefox-zips
+          path: |
+            ${{ env.WORKING_DIRECTORY }}/.output/caramel-extension-${{ needs.guard.outputs.version }}-firefox.zip
+            ${{ env.WORKING_DIRECTORY }}/.output/caramel-extension-${{ needs.guard.outputs.version }}-sources.zip
           if-no-files-found: error
 
   publish_chrome:
@@ -368,13 +400,13 @@ jobs:
       - name: Download artifact
         uses: actions/download-artifact@v4
         with:
-          name: extension-package
+          name: extension-chrome
           path: .
 
       - name: Upload to Chrome Web Store (upload-only)
         uses: mnao305/chrome-extension-upload@v5.0.0
         with:
-          file-path: extension.zip
+          file-path: caramel-extension-${{ needs.guard.outputs.version }}-chrome.zip
           extension-id: ${{ secrets.CHROME_EXTENSION_ID }}
           client-id: ${{ secrets.CHROME_CLIENT_ID }}
           client-secret: ${{ secrets.CHROME_CLIENT_SECRET }}
@@ -588,10 +620,9 @@ jobs:
           print(f"AMO currently lists {listed}; manifest is {manifest}")
           if manifest_parts <= listed_parts:
               fail(
-                  f"Manifest version {manifest} is not greater than the version "
-                  f"addons.mozilla.org already lists ({listed}). Bump "
-                  "apps/caramel-extension manifest.json (and the matching version "
-                  "fields) before tagging."
+                  f"Version {manifest} is not greater than the version "
+                  f"addons.mozilla.org already lists ({listed}). Bump the "
+                  '"version" field in apps/caramel-extension/package.json before tagging.'
               )
 
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
@@ -626,6 +657,13 @@ jobs:
           name: extension-firefox
           path: firefox-src
 
+      - name: Download Firefox sources artifact
+        if: steps.credentials.outputs.configured == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: extension-firefox-zips
+          path: firefox-zips
+
       - name: Setup Node.js
         if: steps.credentials.outputs.configured == 'true'
         uses: actions/setup-node@v4
@@ -643,6 +681,12 @@ jobs:
       # automated validation — web-ext still waits for it and throws (non-zero
       # exit) when it fails, so a broken package is still a red job.
       #
+      # `--upload-source-code` satisfies AMO's source-code requirement: the
+      # submitted bundle is generated and minified by WXT, and Mozilla's policy
+      # requires readable source whenever a reviewer cannot read what was
+      # uploaded. `wxt zip -b firefox` emits that archive next to the store zip
+      # precisely for this.
+      #
       # Credentials go through WEB_EXT_API_KEY/WEB_EXT_API_SECRET (web-ext maps
       # WEB_EXT_* env vars onto the current command's options) rather than CLI
       # flags, so they never appear in a process command line.
@@ -652,11 +696,18 @@ jobs:
           WEB_EXT_API_KEY: ${{ secrets.AMO_JWT_ISSUER }}
           WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
           WEB_EXT_VERSION: ${{ steps.webext.outputs.version }}
+          RELEASE_VERSION: ${{ needs.guard.outputs.version }}
         run: |
           set -euo pipefail
+          sources="firefox-zips/caramel-extension-${RELEASE_VERSION}-sources.zip"
+          if [ ! -f "$sources" ]; then
+            echo "::error::Expected $sources from the package job — refusing to submit a generated bundle to AMO without the source archive its reviewers require."
+            exit 1
+          fi
           npx --yes "web-ext@${WEB_EXT_VERSION}" sign \
             --source-dir=firefox-src \
             --artifacts-dir=firefox-artifacts \
+            --upload-source-code="$sources" \
             --channel=listed \
             --approval-timeout=0
 
@@ -738,16 +789,16 @@ jobs:
             echo "- \`EDGE_API_KEY\` — the Publish API *key* (shown only once at creation)"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # Edge is Chromium: the SAME extension.zip Chrome uploads (the standard
+      # Edge is Chromium: the SAME chrome zip Chrome uploads (the standard
       # manifest.json, `identity` permission and all) is exactly what Edge wants
-      # — no Firefox-style manifest swap. So this leg consumes the `package`
-      # job's `extension-package` artifact untouched, and Edge's popup OAuth
+      # — no separate Firefox-style build. So this leg consumes the `package`
+      # job's `extension-chrome` artifact untouched, and Edge's popup OAuth
       # works through chrome.identity just like Chrome's.
       - name: Download artifact
         if: steps.credentials.outputs.configured == 'true'
         uses: actions/download-artifact@v4
         with:
-          name: extension-package
+          name: extension-chrome
           path: .
 
       # FREEZE-GUARD GAP (deliberate, documented): unlike the Chrome and AMO
@@ -770,7 +821,7 @@ jobs:
         uses: wdzeng/edge-addon@9881f57720358040d079eaa06a4596dc9c273eb6 # v2.1.1
         with:
           product-id: ${{ secrets.EDGE_PRODUCT_ID }}
-          zip-path: extension.zip
+          zip-path: caramel-extension-${{ needs.guard.outputs.version }}-chrome.zip
           client-id: ${{ secrets.EDGE_CLIENT_ID }}
           api-key: ${{ secrets.EDGE_API_KEY }}
 
@@ -805,13 +856,14 @@ jobs:
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: latest-stable
-      - name: Download artifact
+      # The unpacked Chrome build, restored to the path it had in the package
+      # job — safari-web-extension-converter reads a directory of extension
+      # files, so nothing is unzipped here.
+      - name: Download unpacked Chrome build
         uses: actions/download-artifact@v4
         with:
-          name: extension-package
-          path: ${{ env.WORKING_DIRECTORY }}
-      - name: Unzip extension
-        run: unzip -q extension.zip
+          name: extension-chrome-unpacked
+          path: ${{ env.WORKING_DIRECTORY }}/.output/chrome-mv3
       - name: Install ImageMagick and jq
         run: |
           if ! command -v convert >/dev/null 2>&1; then brew install imagemagick; fi
@@ -935,7 +987,7 @@ jobs:
 
       - name: Convert to Safari app (macOS & iOS)
         run: |
-          xcrun safari-web-extension-converter dist \
+          xcrun safari-web-extension-converter .output/chrome-mv3 \
             --project-location SafariExtProject \
             --app-name "${{ env.APP_NAME }}" \
             --bundle-identifier "${SAFARI_BUNDLE_ID}" \
@@ -1088,10 +1140,18 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Download artifact
+      - name: Download Chrome store package
         uses: actions/download-artifact@v4
         with:
-          name: extension-package
+          name: extension-chrome
+          path: .
+
+      # Only the Firefox store zip is attached below; the sources zip in this
+      # artifact is a Mozilla review input, not a release download.
+      - name: Download Firefox store package
+        uses: actions/download-artifact@v4
+        with:
+          name: extension-firefox-zips
           path: .
 
       - name: Create GitHub Release
@@ -1099,7 +1159,9 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           name: Extension ${{ needs.guard.outputs.version }}
-          files: extension.zip
+          files: |
+            caramel-extension-${{ needs.guard.outputs.version }}-chrome.zip
+            caramel-extension-${{ needs.guard.outputs.version }}-firefox.zip
           fail_on_unmatched_files: true
           body: |
             Extension version `${{ needs.guard.outputs.version }}` built from `${{ github.sha }}`.
