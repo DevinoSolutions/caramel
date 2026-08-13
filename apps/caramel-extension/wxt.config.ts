@@ -19,6 +19,9 @@ import { defineConfig } from 'wxt'
 
 import { ENVIRONMENTS, stampFor } from './scripts/environments.mjs'
 
+// React is POPUP-ONLY by doctrine (content scripts stay React-free — the
+// module only affects entrypoints that actually import React).
+
 type EnvironmentName = keyof typeof ENVIRONMENTS
 
 const ICONS = {
@@ -42,6 +45,7 @@ function resolveEnvironment(mode: string): EnvironmentName {
 }
 
 export default defineConfig({
+    modules: ['@wxt-dev/module-react'],
     manifest: ({ browser }) => ({
         name: 'Caramel - Trusted Honey Alternative',
         description:

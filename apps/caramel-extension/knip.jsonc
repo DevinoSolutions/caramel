@@ -1,0 +1,40 @@
+{
+    "$schema": "https://unpkg.com/knip@5/schema.json",
+    "entry": [
+        "caramel-env.js",
+        "coupon-constants.generated.js",
+        "cart-signals.js",
+        "caramel-base.js",
+        "dom-utils.js",
+        "store-detect.js",
+        "coupon-apply.js",
+        "coupon-fetch.js",
+        "coupon-runner.js",
+        "UI-helpers.js",
+        "inject.js",
+        "background.js",
+        "popup.js",
+        "eslint.config.cjs",
+        "vitest.config.mjs",
+        "scripts/**/*.mjs",
+        "tests/**/*.mjs"
+    ],
+    "project": ["**/*.{js,cjs,mjs}"],
+    "ignoreBinaries": ["eslint"],
+    "ignoreDependencies": [
+        "prettier-plugin-organize-imports",
+        // TODO(WXT-P2, 2026-08-13): the React stack lands ahead of its first
+        // consumer — the popup rewrite in this same PR removes every ignore
+        // below. If you are reading this on main, that failed: delete the
+        // ignores and let knip say what is really unused.
+        "@testing-library/jest-dom",
+        "@testing-library/react",
+        "@testing-library/user-event",
+        "@types/react",
+        "@types/react-dom",
+        "@wxt-dev/module-react",
+        "caramel-ui",
+        "react",
+        "react-dom"
+    ]
+}

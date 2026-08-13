@@ -1,0 +1,38 @@
+/* Token-driven button; the HOST loads the --cm-* sheet (see package README). */
+.cm-ui-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    font-family: var(--cm-font-sans);
+    font-size: var(--cm-text-base);
+    font-weight: 600;
+    border-radius: var(--cm-radius-md);
+    padding: 10px 16px;
+    cursor: pointer;
+    transition:
+        background-color var(--cm-dur) var(--cm-ease),
+        border-color var(--cm-dur) var(--cm-ease),
+        color var(--cm-dur) var(--cm-ease);
+}
+.cm-ui-button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+.cm-ui-button--primary {
+    background: var(--cm-brand);
+    color: var(--cm-on-brand);
+    border: 1px solid transparent;
+}
+.cm-ui-button--primary:hover:not(:disabled) {
+    background: var(--cm-brand-strong);
+}
+.cm-ui-button--ghost {
+    background: var(--cm-surface);
+    color: var(--cm-text-primary);
+    border: 1px solid var(--cm-border);
+}
+.cm-ui-button--ghost:hover:not(:disabled) {
+    border-color: var(--cm-border-dashed-hover);
+    background: var(--cm-brand-soft);
+}
