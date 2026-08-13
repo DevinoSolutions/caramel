@@ -319,10 +319,6 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-    env:
-      ARGOS_TOKEN: ${{ secrets.ARGOS_TOKEN }}
-      ARGOS_API_BASE_URL: ${{ vars.ARGOS_API_BASE_URL }}
-
     steps:
       - uses: actions/checkout@v4
 
@@ -400,8 +396,6 @@ jobs:
     # was queue latency, not a defect.
     timeout-minutes: 35
     env:
-      ARGOS_TOKEN: ${{ secrets.ARGOS_TOKEN }}
-      ARGOS_API_BASE_URL: ${{ vars.ARGOS_API_BASE_URL }}
       NEXT_PUBLIC_BASE_URL: ${{ github.ref == 'refs/heads/dev' && 'https://dev.grabcaramel.com' || 'https://grabcaramel.com' }}
 
     steps:

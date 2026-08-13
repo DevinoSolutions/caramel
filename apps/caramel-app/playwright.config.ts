@@ -37,10 +37,14 @@ export default defineConfig({
         [
             '@argos-ci/playwright/reporter',
             createArgosReporterOptions({
-                uploadToArgos: !!process.env.CI,
+                // Upload permanently OFF (2026-08-13, issue #194): the Argos
+                // account is retired and the end-of-run upload threw APIError
+                // AFTER a green 108-test suite, keeping the whole workflow
+                // red on every main push. Snapvisor owns visual diffs now;
+                // the argosScreenshot specs stay as deterministic render
+                // smoke + local screenshot artifacts.
+                uploadToArgos: false,
                 buildName: 'caramel-app',
-                token: process.env.ARGOS_TOKEN,
-                apiBaseUrl: process.env.ARGOS_API_BASE_URL,
             }),
         ],
     ],
