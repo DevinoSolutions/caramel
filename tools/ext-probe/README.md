@@ -22,17 +22,17 @@ the vocabulary.
 node tools/ext-probe/probe.mjs <url> [width] [tag] [flags]
 ```
 
-| Flag / env         | Default                  | Meaning                                                                 |
-| ------------------ | ------------------------ | ----------------------------------------------------------------------- |
-| `EXT_DIR`          | `apps/caramel-extension` | Which build to load. Point it at `dist/` to measure the packaged build. |
-| `PROBE_WAIT_MS`    | `30000`                  | How long a shopper waits before we call it a no-show.                   |
-| `PROBE_ALL_LOGS`   | unset                    | `1` keeps every console line, not just the Caramel-shaped ones.         |
-| `--out <path>`     | stdout                   | Write the JSON report to a file instead of stdout.                      |
-| `--out-dir <path>` | `.ext-probe/`            | Where the full log, screenshot and disposable profile live.             |
-| `--expect-config`  | —                        | JSON file holding the config under test; enables the staleness compare. |
-| `--good-code`      | —                        | A code expected to work — supplies GREEN evidence (6).                  |
-| `--invalid-code`   | —                        | A deliberately invalid code — the negative control, GREEN evidence (7). |
-| `--width`/`--tag`  | `390` / `probe`          | Same as the positional forms.                                           |
+| Flag / env         | Default                  | Meaning                                                                                                     |
+| ------------------ | ------------------------ | ----------------------------------------------------------------------------------------------------------- |
+| `EXT_DIR`          | `apps/caramel-extension` | Which build to load. Point it at `apps/caramel-extension/.output/chrome-mv3` to measure the packaged build. |
+| `PROBE_WAIT_MS`    | `30000`                  | How long a shopper waits before we call it a no-show.                                                       |
+| `PROBE_ALL_LOGS`   | unset                    | `1` keeps every console line, not just the Caramel-shaped ones.                                             |
+| `--out <path>`     | stdout                   | Write the JSON report to a file instead of stdout.                                                          |
+| `--out-dir <path>` | `.ext-probe/`            | Where the full log, screenshot and disposable profile live.                                                 |
+| `--expect-config`  | —                        | JSON file holding the config under test; enables the staleness compare.                                     |
+| `--good-code`      | —                        | A code expected to work — supplies GREEN evidence (6).                                                      |
+| `--invalid-code`   | —                        | A deliberately invalid code — the negative control, GREEN evidence (7).                                     |
+| `--width`/`--tag`  | `390` / `probe`          | Same as the positional forms.                                                                               |
 
 Human prose goes to **stderr**; stdout carries the JSON object and nothing else.
 

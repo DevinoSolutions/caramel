@@ -151,11 +151,11 @@ Full directory purposes: see [Project layout](#project-layout) below. Local infr
 
 ## Project layout
 
-| Path                                | Purpose                                                                                                                                                                   |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apps/caramel-app`                  | Web app + API for grabcaramel.com — Next.js, Prisma (auth DB), Better Auth                                                                                                |
-| `apps/caramel-extension`            | Browser extension source (Chrome/Edge/Firefox/Safari — no in-repo Xcode project; release CI packages Safari from `dist/` via `safari-web-extension-converter`, see below) |
-| `docker-compose.yml` / `Dockerfile` | One-root-compose: `web` + Postgres — the graph `pnpm dev` builds and runs — and the deployment unit production migrates onto                                              |
+| Path                                | Purpose                                                                                                                                                                                                 |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/caramel-app`                  | Web app + API for grabcaramel.com — Next.js, Prisma (auth DB), Better Auth                                                                                                                              |
+| `apps/caramel-extension`            | Browser extension source (Chrome/Edge/Firefox/Safari — no in-repo Xcode project; release CI packages Safari from the WXT build at `.output/chrome-mv3` via `safari-web-extension-converter`, see below) |
+| `docker-compose.yml` / `Dockerfile` | One-root-compose: `web` + Postgres — the graph `pnpm dev` builds and runs — and the deployment unit production migrates onto                                                                            |
 
 ### Safari Extension Icons
 

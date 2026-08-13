@@ -46,6 +46,15 @@ function resolveEnvironment(mode: string): EnvironmentName {
 
 export default defineConfig({
     modules: ['@wxt-dev/module-react'],
+    zip: {
+        // The AMO sources archive (`wxt zip -b firefox` emits it beside the
+        // store zip) does NOT honor .gitignore — measured 2026-08-13: it swept
+        // in dist/ and dist-parity/, gitignored fossils of the retired
+        // hand-rolled build, 58 entries and roughly half the archive. Mozilla
+        // reviewers read this archive; hand them the tree a fresh checkout
+        // has, not whatever stale build output a local machine accumulated.
+        excludeSources: ['dist/**', 'dist-*/**', '.venv/**'],
+    },
     manifest: ({ browser }) => ({
         name: 'Caramel - Trusted Honey Alternative',
         description:
