@@ -12,7 +12,8 @@ name: Watch – Store versions
 #   Firefox – addons.mozilla.org public API (current_version.version)
 #   Apple   – itunes lookup for the Safari/iOS app (public App Store version)
 #
-# It compares each against apps/caramel-extension/manifest.json and files
+# It compares each against apps/caramel-extension/package.json (the single
+# version source WXT stamps into every generated manifest) and files
 # exactly one tracking issue, reusing it rather than opening a new one each day:
 #
 #   * a store CAUGHT UP  -> comment saying so, so the release can be tested on
@@ -107,8 +108,10 @@ jobs:
               return results[0].get("version"), None
 
 
-          manifest = json.load(open("apps/caramel-extension/manifest.json", encoding="utf-8"))
-          repo_version = manifest["version"]
+          # package.json is the ONE version source since the WXT migration —
+          # wxt stamps it into every generated manifest at build time.
+          pkg = json.load(open("apps/caramel-extension/package.json", encoding="utf-8"))
+          repo_version = pkg["version"]
 
           out = {"repo": repo_version, "stores": {}}
           for name, fn in (("chrome", chrome), ("firefox", firefox), ("apple", apple)):
@@ -154,10 +157,11 @@ jobs:
             const behind = Object.entries(payload.stores)
               .filter(([, s]) => s.version && s.version !== repoVersion).map(([k, s]) => `${k} (${s.version})`)
 
-            // Age of the repo version = when manifest.json last changed.
+            // Age of the repo version = when package.json (the single version
+            // source WXT stamps) last changed.
             const commits = await github.rest.repos.listCommits({
               owner: context.repo.owner, repo: context.repo.repo,
-              path: 'apps/caramel-extension/manifest.json', per_page: 1,
+              path: 'apps/caramel-extension/package.json', per_page: 1,
             })
             const bumpedAt = new Date(commits.data[0]?.commit?.committer?.date ?? Date.now())
             const ageDays = Math.floor((Date.now() - bumpedAt.getTime()) / 86400000)
