@@ -1,6 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { initCaramelBase } from '../caramel-base.js'
-import { signOutAndRevoke } from '../popup.js'
+import { signOutAndRevoke } from '../popup-core.js'
 
 // Logging out revokes the session server-side — a real network round-trip. The
 // popup showed nothing while it ran: the button stayed live, the view didn't

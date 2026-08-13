@@ -57,7 +57,11 @@ export const GROUPS = {
         'UI-helpers.js',
         'inject.js',
     ],
-    popup: ['popup.js'],
+    // popup.js became popup-core.js in P2 (logic only; the React views are
+    // TSX the popup bundle owns). TODO(WXT-P2 gates): give the BUILT React
+    // popup chunk its own budget once the shell lands — this group weighs the
+    // logic module, not the React bundle.
+    popup: ['popup-core.js'],
     background: ['background.js'],
 }
 

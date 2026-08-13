@@ -42,7 +42,7 @@ module.exports = [
         brotli: false,
     },
     {
-        name: 'popup.js (minified)',
+        name: 'popup-core.js (minified)',
         path: '.size-cache/popup.min.js',
         // 2026-08-10 — measured 28.29 kB minified, from 63.39 kB of source.
         // 2026-08-10, raised 30 -> 33 kB: the coupon list paginates. A store
@@ -52,6 +52,9 @@ module.exports = [
         // fetch-append-dedupe loop, the four footer states (loading / end /
         // retry / no-observer button) and delegated copy handlers so appended
         // rows work — real behaviour, measured 30.97 kB.
+        // 2026-08-13 (P2): popup.js became popup-core.js — renders moved to
+        // React TSX; the budget stays until the gates slice re-measures and
+        // adds the built React chunk's own budget (see measure-size.mjs TODO).
         limit: '33 KB',
         brotli: false,
     },

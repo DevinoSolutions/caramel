@@ -3,35 +3,25 @@ import { initCaramelBase } from '../caramel-base.js'
 import { CARAMEL_ENV } from '../caramel-env.js'
 import { initCouponConstants } from '../coupon-constants.generated.js'
 import { initCouponRunner } from '../coupon-runner.js'
-import { renderSignInPrompt } from '../popup.js'
+import { runSocialSignIn, setAfterLoginRerender } from '../popup-core.js'
 
-// WXT-migration P0 characterization pins (2026-08-12): the REQUEST half of the
-// popup OAuth flow. popup-oauth-success/cancel.test.mjs pin the response half
-// thoroughly, but nothing asserted what we SEND — the authorize URL's shape,
-// that the redirect_uri is identity.getRedirectURL()'s output (encoded), that
-// the provider window is launched interactive and with the backend's own
-// authorizationUrl — nor the authorize-hop failure branches, the
-// resolve-undefined cancel, the session-write lastError path, or the
-// visibility gate on re-render. Those are exactly what a rewrite rewrites.
-// Mechanics under pin: popup.js handleSocialSignIn (:668-855).
-//
-// Harness mirrors popup-oauth-cancel.test.mjs.
+// WXT-migration P0 characterization pins (2026-08-12; P2-ported 2026-08-13 to
+// runSocialSignIn — the wire flow extracted from the vanilla
+// handleSocialSignIn, DOM replaced by the {onPending,onError} ui callbacks):
+// the REQUEST half of the popup OAuth flow. popup-oauth-success/cancel pin
+// the response half; what THIS suite pins is what we SEND — the authorize
+// URL's shape, that the redirect_uri is identity.getRedirectURL()'s output
+// (encoded), that the provider window is launched interactive and with the
+// backend's own authorizationUrl — plus the authorize-hop failure branches,
+// the resolve-undefined cancel, the session-write lastError path, and the
+// visibility gate on re-render. Button enable/disable states moved to the
+// React SignInView suite (it consumes onPending/onError).
 
-/* Two collaborators the old eval harness let a test replace on globalThis
- * (both were top-level function declarations); under ESM the seam is vi.mock.
- *
- *  - caramelSetSession: the lastError test swaps it out, so the factory
- *    delegates to whatever `stubs.caramelSetSession` holds and falls back to
- *    the real writer — every other test starts real.
- *  - caramelSendMessage: initPopup's own first act (it awaits
- *    getActiveTabDomainRecord(), which calls this synchronously), so counting
- *    the calls carrying that action is how the two "did NOT re-render" pins
- *    below observe initPopup. Under ESM that call resolves to popup.js's
- *    module-local binding, so the old `globalThis.initPopup = vi.fn()` swap
- *    has no seam to replace. Never settles, so the render chain stops there. */
+/* caramelSetSession is the one collaborator a test swaps (the lastError
+ * path); the factory delegates to whatever `stubs.caramelSetSession` holds
+ * and falls back to the real writer — every other test starts real. */
 const stubs = vi.hoisted(() => ({
     caramelSetSession: null,
-    caramelSendMessage: vi.fn(() => new Promise(() => {})),
 }))
 
 vi.mock('../caramel-base.js', async importOriginal => {
@@ -45,15 +35,8 @@ vi.mock('../caramel-base.js', async importOriginal => {
         },
         caramelSetSession: (...args) =>
             (stubs.caramelSetSession ?? actual.caramelSetSession)(...args),
-        caramelSendMessage: stubs.caramelSendMessage,
     }
 })
-
-/** How many times initPopup() has started since the last reset. */
-const initPopupRuns = () =>
-    stubs.caramelSendMessage.mock.calls.filter(
-        ([message]) => message?.action === 'getActiveTabDomainRecord',
-    ).length
 
 /* Realm stub, lifted from tests/_load.mjs (installChromeStub), which the ESM
  * port retires. Permissive Proxy: any unknown property materializes as a
@@ -118,14 +101,10 @@ function backStorageArea(area, data = {}) {
     return data
 }
 
-beforeAll(() => {
-    document.body.innerHTML =
-        '<div id="loading-container"></div>' +
-        '<button id="settingsIcon" style="display:none"></button>' +
-        '<div id="auth-container"></div>'
+/** The React app's registered re-resolve, observed instead of performed. */
+const rerender = vi.fn()
 
-    // The realm's effects, in entrypoints/popup/main.ts order — the successor
-    // to the <script> list this suite used to eval.
+beforeAll(() => {
     installChromeStub()
     initCouponConstants()
     initCaramelBase()
@@ -133,6 +112,7 @@ beforeAll(() => {
 
     globalThis.currentBrowser.tabs.create = () => {}
     window.close = vi.fn()
+    setAfterLoginRerender(rerender)
 })
 
 const REDIRECT = 'https://ext-id.chromiumapp.org/'
@@ -174,19 +154,24 @@ const recordFetch = ({
     return calls
 }
 
-const clickProvider = async id => {
-    document.getElementById(id).click()
-    await new Promise(r => setTimeout(r, 0))
-    await new Promise(r => setTimeout(r, 0))
+/** Recording ui half — what the React SignInView hands runSocialSignIn. */
+const makeUi = () => {
+    const rec = { pending: 0, errors: [] }
+    return {
+        rec,
+        onPending: () => {
+            rec.pending += 1
+        },
+        onError: message => {
+            rec.errors.push(message)
+        },
+    }
 }
 
-const errorText = () => document.getElementById('loginErrorMessage').textContent
-
-beforeEach(async () => {
+beforeEach(() => {
     stubs.caramelSetSession = null
-    stubs.caramelSendMessage.mockClear()
+    rerender.mockClear()
     recordFetch()
-    await renderSignInPrompt()
 })
 
 describe('popup OAuth — the authorize request we send', () => {
@@ -195,9 +180,13 @@ describe('popup OAuth — the authorize request we send', () => {
         // Provider window stays open: the request half is fully observable
         // without ever settling the flow.
         const launches = withIdentity(() => new Promise(() => {}))
+        const ui = makeUi()
 
-        await clickProvider('googleSignInBtn')
+        runSocialSignIn('google', ui)
+        await new Promise(r => setTimeout(r, 0))
+        await new Promise(r => setTimeout(r, 0))
 
+        expect(ui.rec.pending).toBe(1)
         expect(calls).toHaveLength(1)
         expect(calls[0].url).toBe(
             `${CARAMEL_ENV.baseUrl}/api/extension/oauth/authorize?provider=google&redirect_uri=${encodeURIComponent(REDIRECT)}`,
@@ -214,7 +203,9 @@ describe('popup OAuth — the authorize request we send', () => {
         const calls = recordFetch()
         withIdentity(() => new Promise(() => {}))
 
-        await clickProvider('appleSignInBtn')
+        runSocialSignIn('apple', makeUi())
+        await new Promise(r => setTimeout(r, 0))
+        await new Promise(r => setTimeout(r, 0))
 
         expect(calls[0].url).toBe(
             `${CARAMEL_ENV.baseUrl}/api/extension/oauth/authorize?provider=apple&redirect_uri=${encodeURIComponent(REDIRECT)}`,
@@ -230,22 +221,26 @@ describe('popup OAuth — the authorize request we send', () => {
             },
         })
         const launches = withIdentity(() => new Promise(() => {}))
+        const ui = makeUi()
 
-        await clickProvider('googleSignInBtn')
+        await runSocialSignIn('google', ui)
 
-        expect(errorText()).toBe('OAuth sign-in failed: OAuth backend down')
+        expect(ui.rec.errors).toEqual([
+            'OAuth sign-in failed: OAuth backend down',
+        ])
         expect(launches).toEqual([])
-        expect(document.getElementById('googleSignInBtn').disabled).toBe(false)
-        expect(document.getElementById('appleSignInBtn').disabled).toBe(false)
     })
 
     it('treats a 200 with no authorizationUrl as a failure, not a launch of `undefined`', async () => {
         recordFetch({ authorize: { ok: true, json: async () => ({}) } })
         const launches = withIdentity(() => new Promise(() => {}))
+        const ui = makeUi()
 
-        await clickProvider('googleSignInBtn')
+        await runSocialSignIn('google', ui)
 
-        expect(errorText()).toMatch(/Failed to get OAuth authorization URL/)
+        expect(ui.rec.errors[0]).toMatch(
+            /Failed to get OAuth authorization URL/,
+        )
         expect(launches).toEqual([])
     })
 })
@@ -255,10 +250,11 @@ describe('popup OAuth — settle paths the response suites never reach', () => {
         // Chrome rejects instead (pinned in popup-oauth-cancel.test.mjs); the
         // !finalCallbackUrl guard covers engines that resolve undefined.
         withIdentity(async () => undefined)
+        const ui = makeUi()
 
-        await clickProvider('googleSignInBtn')
+        await runSocialSignIn('google', ui)
 
-        expect(errorText()).toBe('Sign-in was cancelled.')
+        expect(ui.rec.errors).toEqual(['Sign-in was cancelled.'])
     })
 
     it('a session write that fails via chrome.runtime.lastError surfaces the reason and stays signed out', async () => {
@@ -270,14 +266,12 @@ describe('popup OAuth — settle paths the response suites never reach', () => {
             cb()
             globalThis.chrome.runtime.lastError = undefined
         }
+        const ui = makeUi()
 
-        await clickProvider('googleSignInBtn')
-        await vi.waitFor(() =>
-            expect(errorText()).toBe('OAuth sign-in failed: disk full'),
-        )
+        await runSocialSignIn('google', ui)
 
-        expect(initPopupRuns()).toBe(0)
-        expect(document.getElementById('googleSignInBtn').disabled).toBe(false)
+        expect(ui.rec.errors).toEqual(['OAuth sign-in failed: disk full'])
+        expect(rerender).not.toHaveBeenCalled()
     })
 
     it('a popup already hidden (no caller) banks the session but does not re-render', async () => {
@@ -290,11 +284,11 @@ describe('popup OAuth — settle paths the response suites never reach', () => {
         })
 
         try {
-            await clickProvider('googleSignInBtn')
+            await runSocialSignIn('google', makeUi())
             await vi.waitFor(() => expect(local.token).toBe('tok'))
-            // The settle delay (popup.js:815) has already elapsed once the
-            // token is visible; the gate (:819) must have skipped the render.
-            expect(initPopupRuns()).toBe(0)
+            // The 100ms settle delay has already elapsed once the token is
+            // visible; the visibility gate must have skipped the re-render.
+            expect(rerender).not.toHaveBeenCalled()
         } finally {
             delete document.visibilityState
         }

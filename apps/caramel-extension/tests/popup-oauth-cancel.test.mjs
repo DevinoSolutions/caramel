@@ -2,34 +2,23 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { initCaramelBase } from '../caramel-base.js'
 import { initCouponConstants } from '../coupon-constants.generated.js'
 import { initCouponRunner } from '../coupon-runner.js'
-import { renderSignInPrompt } from '../popup.js'
+import { runSocialSignIn } from '../popup-core.js'
 
-// Two OAuth defects found by a live audit (2026-08-05), both in the states a
-// user hits by CLOSING the provider window — the most common OAuth outcome
-// after success, and the one nobody screenshots:
+// Pins the cancel-vs-failure mapping of the popup OAuth flow (P2-ported
+// 2026-08-13 to runSocialSignIn): closing the provider window is a CANCEL,
+// not a failure. Chrome REJECTS launchWebAuthFlow with its own third-person
+// wording ("The user did not approve access.") — that must reach the user as
+// 'Sign-in was cancelled.', while a genuine failure keeps its real reason.
 //
-//   1. Chrome REJECTS launchWebAuthFlow when the window is closed (it does not
-//      resolve undefined), so handleSocialSignIn's `!finalCallbackUrl` guard
-//      never ran and its friendly copy was dead code. What shipped was
-//      Chrome's own third-person string — "OAuth sign-in failed: The user did
-//      not approve access." — which reads as a product failure and blames the
-//      user for the click they just made.
-//   2. Only the CLICKED provider was disabled during a flow, so clicking the
-//      other one put BOTH buttons in "Redirecting..." while exactly one
-//      provider window existed.
-//
-// Harness mirrors popup-oauth-fallback.test.mjs. The chrome stub is a
-// permissive Proxy that auto-creates missing properties, so identity is
-// assigned explicitly.
+// The button-state halves of the old suite (both providers disabled in
+// flight, only the clicked one reading 'Redirecting...', both re-enabled
+// after a cancel) are VIEW behavior now — the React SignInView suite pins
+// them through the onPending/onError callbacks this suite drives directly.
 
 /* Realm stub, lifted from tests/_load.mjs (installChromeStub), which the ESM
- * port retires. Permissive Proxy: any unknown property materializes as a
- * callable no-op, so a source file touching an API this suite doesn't care
- * about cannot abort it. Two deliberate exceptions, exactly as _load.mjs had
- * them — storage.*.get/set/remove invoke their callbacks like the real API
- * (empty storage), and runtime.lastError stays UNDEFINED outside a failing
- * callback, because the proxy would otherwise auto-create a truthy callable
- * that caramelSendMessage reads as a closed port. */
+ * port retires — permissive Proxy, storage callbacks invoked, lastError
+ * undefined outside a failing callback (see popup-oauth-success.test.mjs for
+ * the rationale block). */
 function installChromeStub() {
     const cache = new WeakMap()
     const wrap = target => {
@@ -67,23 +56,14 @@ function installChromeStub() {
 }
 
 beforeAll(() => {
-    document.body.innerHTML =
-        '<div id="loading-container"></div>' +
-        '<button id="settingsIcon" style="display:none"></button>' +
-        '<div id="auth-container"></div>'
-
-    // The realm's effects, in entrypoints/popup/main.ts order — the successor
-    // to the <script> list this suite used to eval.
     installChromeStub()
     initCouponConstants()
     initCaramelBase()
     initCouponRunner()
-
     globalThis.currentBrowser.tabs.create = () => {}
     window.close = vi.fn()
 })
 
-/** Chrome shape: identity present, launchWebAuthFlow behaviour injected. */
 const withIdentity = launchWebAuthFlow => {
     globalThis.currentBrowser.identity = {
         launchWebAuthFlow,
@@ -92,7 +72,6 @@ const withIdentity = launchWebAuthFlow => {
     globalThis.currentBrowser.chrome = undefined
 }
 
-/** The backend hop handleSocialSignIn makes before launching the flow. */
 const stubAuthorizeEndpoint = () => {
     globalThis.fetch = async () => ({
         ok: true,
@@ -102,18 +81,22 @@ const stubAuthorizeEndpoint = () => {
     })
 }
 
-const clickProvider = async id => {
-    document.getElementById(id).click()
-    // handleSocialSignIn is async and not awaited by the click handler.
-    await new Promise(r => setTimeout(r, 0))
-    await new Promise(r => setTimeout(r, 0))
+/** Recording ui half — what the React SignInView hands runSocialSignIn. */
+const makeUi = () => {
+    const rec = { pending: 0, errors: [] }
+    return {
+        rec,
+        onPending: () => {
+            rec.pending += 1
+        },
+        onError: message => {
+            rec.errors.push(message)
+        },
+    }
 }
 
-const errorText = () => document.getElementById('loginErrorMessage').textContent
-
-beforeEach(async () => {
+beforeEach(() => {
     stubAuthorizeEndpoint()
-    await renderSignInPrompt()
 })
 
 describe('popup OAuth — closing the provider window', () => {
@@ -121,54 +104,55 @@ describe('popup OAuth — closing the provider window', () => {
         withIdentity(async () => {
             throw new Error('The user did not approve access.')
         })
+        const ui = makeUi()
 
-        await clickProvider('googleSignInBtn')
+        await runSocialSignIn('google', ui)
 
-        expect(errorText()).toBe('Sign-in was cancelled.')
-        expect(errorText()).not.toMatch(/failed/i)
-        expect(errorText()).not.toMatch(/did not approve/i)
+        expect(ui.rec.errors).toEqual(['Sign-in was cancelled.'])
+        expect(ui.rec.errors[0]).not.toMatch(/failed/i)
+        expect(ui.rec.errors[0]).not.toMatch(/did not approve/i)
     })
 
     it('still reports a GENUINE failure as a failure', async () => {
         withIdentity(async () => {
             throw new Error('Network request failed')
         })
+        const ui = makeUi()
 
-        await clickProvider('googleSignInBtn')
+        await runSocialSignIn('google', ui)
 
-        expect(errorText()).toMatch(/OAuth sign-in failed/)
-        expect(errorText()).toMatch(/Network request failed/)
+        expect(ui.rec.errors[0]).toMatch(/OAuth sign-in failed/)
+        expect(ui.rec.errors[0]).toMatch(/Network request failed/)
     })
 
-    it('re-enables BOTH providers after a cancel, so neither is left stuck', async () => {
+    it('a cancel settles the flow through onError — the view re-enables both providers there', async () => {
+        // The DOM half (both buttons re-enabled, labels restored) is pinned in
+        // the React SignInView suite; what the wire owes it is exactly one
+        // onPending at the start and exactly one onError on the cancel — no
+        // path that leaves the flow neither settled nor erred.
         withIdentity(async () => {
-            throw new Error('The user did not approve access.')
+            throw new Error('cancelled')
         })
+        const ui = makeUi()
 
-        await clickProvider('appleSignInBtn')
+        await runSocialSignIn('apple', ui)
 
-        expect(document.getElementById('googleSignInBtn').disabled).toBe(false)
-        expect(document.getElementById('appleSignInBtn').disabled).toBe(false)
-        expect(
-            document.getElementById('appleSignInBtn').querySelector('span')
-                .textContent,
-        ).toBe('Sign in with Apple')
+        expect(ui.rec.pending).toBe(1)
+        expect(ui.rec.errors).toEqual(['Sign-in was cancelled.'])
     })
 
-    it('locks out the other provider while a flow is in flight, instead of showing two "Redirecting..." buttons', async () => {
-        // Never settles: models a provider window sitting open.
+    it('an in-flight flow has fired onPending and nothing else', async () => {
+        // Models a provider window sitting open: the view keeps both buttons
+        // disabled until onError settles it (pinned there); the wire's half is
+        // that onPending fired once and NO error arrived while pending.
         withIdentity(() => new Promise(() => {}))
+        const ui = makeUi()
 
-        await clickProvider('googleSignInBtn')
+        runSocialSignIn('google', ui)
+        await new Promise(r => setTimeout(r, 0))
+        await new Promise(r => setTimeout(r, 0))
 
-        const google = document.getElementById('googleSignInBtn')
-        const apple = document.getElementById('appleSignInBtn')
-        expect(google.disabled).toBe(true)
-        expect(apple.disabled).toBe(true)
-        // Only the clicked provider claims to be redirecting.
-        expect(google.querySelector('span').textContent).toBe('Redirecting...')
-        expect(apple.querySelector('span').textContent).toBe(
-            'Sign in with Apple',
-        )
+        expect(ui.rec.pending).toBe(1)
+        expect(ui.rec.errors).toEqual([])
     })
 })

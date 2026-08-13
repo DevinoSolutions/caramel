@@ -1,3 +1,8 @@
+// DISABLED during the P2 popup rewrite - the vanilla render functions this
+// suite drove were deleted from popup.js (now popup-core.js). The P2 view
+// slice "D" ports these pins to @testing-library/react against the React
+// popup IN THIS SAME PR. If you are reading this on main, the port was
+// dropped: treat it as a release blocker and restore the coverage.
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { initCaramelBase } from '../caramel-base.js'
 import { initCouponConstants } from '../coupon-constants.generated.js'

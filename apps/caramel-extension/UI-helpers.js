@@ -40,9 +40,12 @@ const CARAMEL_X_ICON =
 const CARAMEL_MANUAL_LIST_MAX = 20
 
 // Guests get the SAME teaser cap here as the popup's coupon list
-// (popup.js GUEST_COUPON_LIMIT). Without it the manual fallback quietly hands a
-// signed-out shopper up to 20 codes while the popup shows them 6 — leaking the
-// gated value and skipping the sign-in nudge. Keep in sync with popup.js.
+// (popup-core.js GUEST_COUPON_LIMIT). Without it the manual fallback quietly
+// hands a signed-out shopper up to 20 codes while the popup shows them 6 —
+// leaking the gated value and skipping the sign-in nudge. Kept as a LITERAL
+// twin on purpose: importing popup-core here would pull the popup's logic
+// module into the content bundle (size + console-silence closure both pin
+// that boundary). Keep in sync with popup-core.js.
 const CARAMEL_MANUAL_GUEST_LIMIT = 6
 
 // Functional-minimum styles used ONLY when the stylesheet fetch fails.
@@ -588,7 +591,7 @@ export function hideTestingModal() {
 
 /* Copies an exact coupon code: async clipboard API first, hidden
  * textarea + execCommand fallback for pages that block it. */
-// Called from popup.js (same file, the popup realm's own script list).
+// Also used by the popup realm's coupon list (React CouponsView).
 export async function caramelCopyText(text) {
     try {
         if (navigator.clipboard && navigator.clipboard.writeText) {

@@ -287,7 +287,7 @@ export function initBackground() {
                 currentBrowser.windows.create({
                     // popup.html since the WXT P1 port (was index.html) —
                     // WXT names the page after its entrypoint directory.
-                    // popup.js parses callerId back out of this URL; the
+                    // popup-core.js parses callerId back out of this URL; the
                     // mint→parse round-trip is pinned in
                     // tests/background-caller-relay.test.mjs.
                     url: currentBrowser.runtime.getURL(
@@ -532,7 +532,7 @@ export function initBackground() {
 
                         // CONTRACT: `url` is the tab's FULL URL (scheme included),
                         // never a bare hostname. The popup's non-web-tab guard
-                        // (popup.js, `/^https?:\/\//`) is the sole consumer and the
+                        // (popup-core.js, `/^https?:\/\//`) is the sole consumer and the
                         // scheme is the only thing that lets it tell a store page
                         // from chrome://, about:, or this extension's own pages.
                         // This handler used to answer `new URL(tabUrl).hostname` —

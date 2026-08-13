@@ -109,31 +109,13 @@ async function captureProducerPayload(tabUrl) {
     )
 }
 
-/* Which of the popup's four terminal views landed in #auth-container. The old
- * suite wrapped globalThis.renderCouponsView/renderUnsupportedSite/… to get
- * this signal; under ESM those calls resolve to popup.js's own module-local
- * bindings, so it is read off the markup each one paints instead — every view
- * carries an element no other one does. */
-const renderedView = () => {
-    if (document.getElementById('retryBtn')) return 'renderLoadError'
-    if (document.getElementById('noCouponsHeading'))
-        return 'renderUnsupportedSite'
-    if (document.getElementById('couponList')) return 'renderCouponsView'
-    if (document.querySelector('.profile-signed-in-note'))
-        return 'renderProfileCard'
-    return null
-}
-
-/** Loads the real popup stack, replays `payload` as the service worker's
- * getActiveTabDomainRecord answer, runs initPopup(), and reports what the
- * popup did: which site (if any) it fetched coupons for, and which view
- * landed in the DOM. */
+/** Loads the real popup logic stack, replays `payload` as the service
+ * worker's getActiveTabDomainRecord answer, runs resolvePopupState() (the P2
+ * successor to initPopup — it returns the view instead of painting it; the
+ * paint itself is the React shell suite's pin), and reports what the popup
+ * did: which site (if any) it fetched coupons for, and which view it chose. */
 async function runPopupAgainst(payload) {
-    document.body.innerHTML =
-        '<div id="loading-container"></div><div id="auth-container"></div>'
-
-    // Same realm inits, in the same order, as entrypoints/popup/main.ts — the
-    // successor to index.html's script list (see popup.test.mjs).
+    // Same realm inits, in the same order, as entrypoints/popup/main.tsx.
     vi.resetModules()
     realmStub.onMessageListeners.length = 0
     const { initCaramelBase } = await import('../caramel-base.js')
@@ -141,7 +123,7 @@ async function runPopupAgainst(payload) {
         '../coupon-constants.generated.js'
     )
     const { initCouponRunner } = await import('../coupon-runner.js')
-    const { initPopup } = await import('../popup.js')
+    const { resolvePopupState } = await import('../popup-core.js')
     initCouponConstants()
     initCaramelBase()
     initCouponRunner()
@@ -168,20 +150,8 @@ async function runPopupAgainst(payload) {
     }
     globalThis.currentBrowser.storage.sync.get = (_keys, cb) => cb({})
 
-    // initPopup resolves before its async render chain finishes (see
-    // popup.test.mjs's waitForRenderLoadError note) — wait for one of the
-    // terminal views to actually be in the DOM.
-    await initPopup()
-    const view = await vi.waitFor(() => {
-        const painted = renderedView()
-        expect(painted, 'a terminal view was painted').not.toBeNull()
-        return painted
-    })
-    return {
-        observed,
-        view,
-        html: document.getElementById('auth-container').innerHTML,
-    }
+    const state = await resolvePopupState()
+    return { observed, state }
 }
 
 describe('getActiveTabDomainRecord producer/consumer contract', () => {
@@ -200,18 +170,19 @@ describe('getActiveTabDomainRecord producer/consumer contract', () => {
         expect(storePayload.url).toBe(STORE_TAB_URL)
     })
 
-    it('a store tab renders the coupon list, fetching by hostname without www/path/query', async () => {
-        const { observed, view, html } = await runPopupAgainst(storePayload)
+    it('a store tab resolves to the coupon list, fetching by hostname without www/path/query', async () => {
+        const { observed, state } = await runPopupAgainst(storePayload)
         expect(observed.fetchedSite).toBe('ebay.com')
-        expect(view).toBe('renderCouponsView')
-        expect(html).toContain('CONTRACT10')
-        // The empty state that shipped to eBay users must not be what renders.
-        expect(html).not.toContain('View Supported Stores')
+        // The empty state that shipped to eBay users must NOT be what resolves.
+        expect(state.view).toBe('coupons')
+        expect(state.domain).toBe('ebay.com')
+        expect(state.coupons.map(c => c.code)).toContain('CONTRACT10')
     })
 
     it('a non-web tab still lands on the introduction view without fetching (PR #143 behavior preserved)', async () => {
-        const { observed, view } = await runPopupAgainst(nonWebPayload)
+        const { observed, state } = await runPopupAgainst(nonWebPayload)
         expect(observed.fetchedSite).toBeNull()
-        expect(view).toBe('renderUnsupportedSite')
+        expect(state.view).toBe('unsupported')
+        expect(state.domain).toBeUndefined()
     })
 })

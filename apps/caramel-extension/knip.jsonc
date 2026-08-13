@@ -13,7 +13,7 @@
         "UI-helpers.js",
         "inject.js",
         "background.js",
-        "popup.js",
+        "popup-core.js",
         "eslint.config.cjs",
         "vitest.config.mjs",
         "scripts/**/*.mjs",

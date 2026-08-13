@@ -1,33 +1,27 @@
-import { beforeAll, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { initCaramelBase } from '../caramel-base.js'
 import { initCouponConstants } from '../coupon-constants.generated.js'
 import { initCouponRunner } from '../coupon-runner.js'
-import { renderSignInPrompt } from '../popup.js'
+import {
+    openWebsiteSignIn,
+    popupOAuthSupported,
+    runSocialSignIn,
+} from '../popup-core.js'
 
-// Pins the popup OAuth fallback (issue #139): Firefox deliberately ships
-// without the `identity` permission (manifest-sync.test.ts header), so the
-// popup's Google/Apple buttons cannot run launchWebAuthFlow there. Instead
-// of dying with "OAuth not supported", the buttons must open the website's
-// /login page in a tab — the website→extension session relay
-// (session-relay.test.mjs) then lands the session in storage.sync. When
-// identity IS available (Chrome), the in-popup launchWebAuthFlow path must
-// stay untouched.
-//
-// Harness mirrors popup-auth-validate.test.mjs: the popup realm's own inits in
-// index.html order, one shared chrome stub, only storage + tabs + fetch
-// stubbed. Gotcha the stub forces: it is a permissive Proxy that AUTO-CREATES
-// any missing property (currentBrowser.identity would materialize as a truthy
-// no-op), so the Firefox shape must be assigned EXPLICITLY as undefined.
-let createdTabs
+// Pins the OAuth fallback for browsers without popup OAuth (issue #139;
+// P2-ported 2026-08-13 to the popup-core logic): Firefox ships without
+// identity.launchWebAuthFlow, so popupOAuthSupported() must answer false
+// there — the React SignInView branches on it, routing the provider buttons
+// through openWebsiteSignIn() (the website's /login page in a tab; the
+// website→extension session relay lands the session) and rendering the
+// "Sign-in opens grabcaramel.com" note. The button routing + note markup are
+// pinned in the React SignInView suite; what THIS suite owns is the
+// capability answer and what each branch DOES.
 
 /* Realm stub, lifted from tests/_load.mjs (installChromeStub), which the ESM
- * port retires. Permissive Proxy: any unknown property materializes as a
- * callable no-op, so a source file touching an API this suite doesn't care
- * about cannot abort it. Two deliberate exceptions, exactly as _load.mjs had
- * them — storage.*.get/set/remove invoke their callbacks like the real API
- * (empty storage), and runtime.lastError stays UNDEFINED outside a failing
- * callback, because the proxy would otherwise auto-create a truthy callable
- * that caramelSendMessage reads as a closed port. */
+ * port retires — permissive Proxy, storage callbacks invoked, lastError
+ * undefined outside a failing callback (see popup-oauth-success.test.mjs for
+ * the rationale block). */
 function installChromeStub() {
     const cache = new WeakMap()
     const wrap = target => {
@@ -64,50 +58,61 @@ function installChromeStub() {
     return stub
 }
 
-beforeAll(() => {
-    document.body.innerHTML =
-        '<div id="loading-container"></div>' +
-        '<button id="settingsIcon" style="display:none"></button>' +
-        '<div id="auth-container"></div>'
+let createdTabs = []
 
-    // The realm's effects, in entrypoints/popup/main.ts order — the successor
-    // to the <script> list this suite used to eval.
+beforeAll(() => {
     installChromeStub()
     initCouponConstants()
     initCaramelBase()
     initCouponRunner()
-
-    createdTabs = []
-    globalThis.currentBrowser.tabs.create = tab => createdTabs.push(tab)
-    // jsdom's real window.close() tears the environment down mid-suite.
-    window.close = vi.fn()
 })
 
+/** Firefox: no identity API anywhere; tab creation recorded. */
 const firefoxShape = () => {
-    // No identity permission → the API namespace itself is undefined.
     globalThis.currentBrowser.identity = undefined
     globalThis.currentBrowser.chrome = undefined
+    globalThis.currentBrowser.tabs.create = opts => {
+        createdTabs.push(opts)
+    }
 }
 
+/** Chrome: identity present with an injected launchWebAuthFlow. */
 const chromeShape = launchWebAuthFlow => {
     globalThis.currentBrowser.identity = {
         launchWebAuthFlow,
         getRedirectURL: () => 'https://ext-id.chromiumapp.org/',
     }
+    globalThis.currentBrowser.chrome = undefined
+    globalThis.currentBrowser.tabs.create = opts => {
+        createdTabs.push(opts)
+    }
 }
 
-describe('popup.js renderSignInPrompt — OAuth fallback without the identity API (Firefox)', () => {
-    it('renders the website sign-in note and routes the Google button to the /login page instead of launchWebAuthFlow', async () => {
+beforeEach(() => {
+    createdTabs = []
+    window.close = vi.fn()
+})
+
+describe('popup-core — OAuth fallback without the identity API (Firefox)', () => {
+    it('popupOAuthSupported() answers false with no identity API, true with launchWebAuthFlow present', () => {
         firefoxShape()
-        createdTabs = []
+        expect(popupOAuthSupported()).toBe(false)
+
+        chromeShape(async () => undefined)
+        expect(popupOAuthSupported()).toBe(true)
+
+        // Capability check, not UA sniffing: an identity object WITHOUT
+        // launchWebAuthFlow still means no popup OAuth.
+        globalThis.currentBrowser.identity = {}
+        globalThis.currentBrowser.chrome = undefined
+        expect(popupOAuthSupported()).toBe(false)
+    })
+
+    it('openWebsiteSignIn() opens the website /login page in a tab, closes the popup, and never touches the OAuth endpoints', () => {
+        firefoxShape()
         globalThis.fetch = vi.fn()
 
-        renderSignInPrompt()
-        const html = document.getElementById('auth-container').innerHTML
-        expect(html).toContain('oauth-note')
-
-        document.getElementById('googleSignInBtn').click()
-        await new Promise(resolve => setTimeout(resolve, 0))
+        openWebsiteSignIn()
 
         expect(createdTabs).toHaveLength(1)
         expect(createdTabs[0].url).toContain('grabcaramel.com')
@@ -117,23 +122,10 @@ describe('popup.js renderSignInPrompt — OAuth fallback without the identity AP
         expect(window.close).toHaveBeenCalled()
     })
 
-    it('routes the Apple button through the same website fallback', async () => {
-        firefoxShape()
-        createdTabs = []
-
-        renderSignInPrompt()
-        document.getElementById('appleSignInBtn').click()
-        await new Promise(resolve => setTimeout(resolve, 0))
-
-        expect(createdTabs).toHaveLength(1)
-        expect(new URL(createdTabs[0].url).pathname).toBe('/login')
-    })
-
-    it('keeps the in-popup launchWebAuthFlow path (no note, no tab) when identity IS available', async () => {
+    it('keeps the in-popup launchWebAuthFlow path (no tab) when identity IS available', async () => {
         const launchWebAuthFlow = vi.fn(async () => undefined)
         chromeShape(launchWebAuthFlow)
-        createdTabs = []
-        // handleSocialSignIn's first hop: GET /api/extension/oauth/authorize.
+        // runSocialSignIn's first hop: GET /api/extension/oauth/authorize.
         globalThis.fetch = vi.fn(async () => ({
             ok: true,
             json: async () => ({
@@ -141,15 +133,7 @@ describe('popup.js renderSignInPrompt — OAuth fallback without the identity AP
             }),
         }))
 
-        renderSignInPrompt()
-        const html = document.getElementById('auth-container').innerHTML
-        expect(html).not.toContain('oauth-note')
-
-        document.getElementById('googleSignInBtn').click()
-        // Let the async handleSocialSignIn chain reach launchWebAuthFlow.
-        for (let i = 0; i < 5; i++) {
-            await new Promise(resolve => setTimeout(resolve, 0))
-        }
+        await runSocialSignIn('google', { onPending() {}, onError() {} })
 
         expect(globalThis.fetch).toHaveBeenCalled()
         expect(String(globalThis.fetch.mock.calls[0][0])).toContain(

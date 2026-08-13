@@ -36,7 +36,7 @@ import { getCachedCodes } from './store-detect.js'
  * Resolves `{ coupons, page, total, hasMore }`. A backend that answers without
  * the envelope (older deploy, bare array) degrades to hasMore:false — "this is
  * all there is" — which is exactly the behavior that shipped before paging. */
-// Called from popup.js and from fetchCoupons below.
+// Called from popup-core.js (and the React coupon list) and fetchCoupons below.
 export async function fetchCouponsPage(site, kw, category, page) {
     // Delegate network fetch to background/service worker to avoid CORS failures
     const meta = { site, kw, category, page }
@@ -104,7 +104,7 @@ export async function fetchCoupons(site, kw, category) {
 // this can't re-drift from the app's src/lib/coupons.ts.
 // Exported for tests/coupon-constants.test.mjs, which proves this set really
 // is derived from the shared vocabulary rather than a copy of it. No source
-// file imports it: popup.js builds its own set from the same constants.
+// file imports it: the popup's views build their own from the same constants.
 export const RESTRICTED_STATUSES = new Set(CaramelCoupons.RESTRICTED_STATUSES)
 
 /* Coupon codes are SCRAPED, so they arrive with whatever the source page had
