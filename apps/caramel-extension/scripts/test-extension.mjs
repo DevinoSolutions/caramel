@@ -275,9 +275,17 @@ async function main() {
             await popup.waitForLoadState('domcontentloaded')
             await popup.waitForTimeout(800)
 
-            const hasLoginToggle =
-                (await popup.locator('#loginToggleBtn').count()) > 0
-            if (hasLoginToggle) await popup.locator('#loginToggleBtn').click()
+            // Bounded wait, not a one-shot count: the React popup (WXT P2)
+            // paints this button only after resolvePopupState's fetch lands,
+            // which on a cold CI runner can outrun the 800ms settle above.
+            const loginToggle = popup.locator('#loginToggleBtn')
+            try {
+                await loginToggle.waitFor({ state: 'visible', timeout: 10000 })
+            } catch {
+                // Absent is a legal state (already signed in); the #email
+                // wait below is the real assertion either way.
+            }
+            if ((await loginToggle.count()) > 0) await loginToggle.click()
 
             try {
                 await popup.waitForSelector('#email', { timeout: 5000 })

@@ -110,6 +110,12 @@ export function UnsupportedView({
                 ) : (
                     <button
                         type="button"
+                        // The id is a consumer contract, not styling:
+                        // scripts/test-extension.mjs clicks #loginToggleBtn to
+                        // reach the sign-in form, and this view is where a
+                        // no-tab popup open lands (CI run 31659875787 failed
+                        // on exactly this id going missing, 2026-08-13).
+                        id="loginToggleBtn"
                         className="toggle-login-btn"
                         onClick={api.openSignIn}
                     >
