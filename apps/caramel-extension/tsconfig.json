@@ -10,7 +10,11 @@
         // code (no hand-written declarations to drift). checkJs stays off —
         // the .js bodies' own annotation debt is not this gate's business.
         "allowJs": true,
-        "checkJs": false
+        "checkJs": false,
+        // @wxt-dev/module-react configures Vite's JSX transform but NOT the
+        // generated .wxt/tsconfig.json (WXT 0.21.4) — without this line the
+        // type-check gate dies on every .tsx file while `wxt build` succeeds.
+        "jsx": "react-jsx"
     },
     "include": ["entrypoints", "types", "wxt.config.ts", ".wxt/wxt.d.ts"]
 }
