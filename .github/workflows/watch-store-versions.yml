@@ -6,9 +6,12 @@ name: Watch – Store versions
 # moved on, because nothing ever compared what the stores actually serve against
 # what we shipped. Releases were green the whole time.
 #
-# This runs daily and asks the three stores what real users are being given:
+# This runs daily and asks the four stores what real users are being given:
 #
 #   Chrome  – clients2.google.com update service (what browsers themselves ask)
+#   Edge    – the Add-ons product-details endpoint (added 2026-08-13; Edge went
+#             live 2026-08-12 serving a stale 1.0.1, exactly the unnoticed-release
+#             failure this watch exists for, and it was the only store nobody asked)
 #   Firefox – addons.mozilla.org public API (current_version.version)
 #   Apple   – itunes lookup for the Safari/iOS app (public App Store version)
 #
@@ -52,6 +55,9 @@ jobs:
         id: collect
         env:
           CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
+          # Public listing identifiers (all three appear in README badges) —
+          # literals rather than secrets, like the AMO slug and Apple app id.
+          EDGE_PRODUCT_ID: leodahchedhnenmiengkfpmmcdendnof
           AMO_SLUG: grabcaramel
           APPLE_APP_ID: '6741873881'
         run: |
@@ -93,6 +99,15 @@ jobs:
               return (check.get("version") if check is not None else None), None
 
 
+          def edge():
+              product = os.environ["EDGE_PRODUCT_ID"]
+              data = json.loads(get(
+                  "https://microsoftedge.microsoft.com/addons"
+                  f"/getproductdetailsbycrxid/{product}"
+              ))
+              return data.get("version"), None
+
+
           def firefox():
               slug = os.environ["AMO_SLUG"]
               data = json.loads(get(f"https://addons.mozilla.org/api/v5/addons/addon/{slug}/?lang=en-US"))
@@ -114,7 +129,7 @@ jobs:
           repo_version = pkg["version"]
 
           out = {"repo": repo_version, "stores": {}}
-          for name, fn in (("chrome", chrome), ("firefox", firefox), ("apple", apple)):
+          for name, fn in (("chrome", chrome), ("edge", edge), ("firefox", firefox), ("apple", apple)):
               try:
                   version, err = fn()
               except Exception as exc:  # a store being unreachable must not fail the watch
