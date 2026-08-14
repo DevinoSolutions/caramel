@@ -24,12 +24,19 @@ import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 import {
+    capabilityProbeOrder,
+    CART_API_PROBES,
     countPromoInputsInPage,
     DEFAULT_PRODUCT_LIMIT,
+    describeDocumentInPage,
     detectPlatformInPage,
     MAX_REJECTED_ADDS,
+    normalizePlatformHint,
+    probeCartApiInPage,
     readCartStateInPage,
+    resolvePlatform,
     seedersByPlatform,
+    shouldRelookAtDocument,
 } from './seed.mjs'
 import {
     buildReport,
@@ -259,6 +266,10 @@ async function main() {
         throw new Error('no target url given')
     }
     const { width, height } = resolveViewport(flags, widthArg)
+    // Thrown BEFORE the browser launches: a hint the probe cannot honour is a
+    // caller bug, and swallowing it would leave that caller reading a detection
+    // failure as a fact about the store.
+    const platformHint = normalizePlatformHint(flags['platform-hint'])
     const tag = flags.tag || tagArg || 'probe'
     const extDir = resolve(process.env.EXT_DIR || flags.ext || DEFAULT_EXT_DIR)
     const waitMs = Number(process.env.PROBE_WAIT_MS || flags.wait || 30000)
@@ -359,10 +370,16 @@ async function main() {
 
         // An empty cart is not a checkout, and the extension is right not to show
         // there — so seed one first, the way the platform itself would.
-        await page.goto(target.origin, {
+        // The status is KEPT. A store that answers the probe's first
+        // navigation with a challenge, a consent wall or a 5xx serves a
+        // document carrying no platform marker, and the report used to record
+        // that as "no platform marker found" — indistinguishable from a store
+        // we genuinely do not recognise.
+        const firstNav = await page.goto(target.origin, {
             waitUntil: 'domcontentloaded',
             timeout: 60000,
         })
+        let navigationStatus = firstNav ? firstNav.status() : null
         if (!sw)
             sw = await ctx
                 .waitForEvent('serviceworker', { timeout: 15000 })
@@ -396,13 +413,72 @@ async function main() {
         // platform itself emits — detected ONCE and then passed to both the
         // seeder and the cart reader, so the two can never disagree about what
         // the store is.
-        const detected = await page.evaluate(detectPlatformInPage).catch(e => ({
-            platform: 'unknown',
-            signal: `detection failed: ${e.message}`,
-        }))
-        const platform = detected.platform
+        //
+        // `identify` is the whole ladder, kept in one place so the second look
+        // below is the SAME question asked again rather than a different one.
+        const identify = async () => {
+            const markup = await page
+                .evaluate(detectPlatformInPage)
+                .catch(e => ({
+                    platform: 'unknown',
+                    signal: `detection failed: ${e.message}`,
+                }))
+            // Markup is free and is the store's own bundle talking, so the
+            // endpoints are only asked when it found nothing.
+            let capability = null
+            if (markup.platform === 'unknown')
+                capability = await page
+                    .evaluate(probeCartApiInPage, {
+                        order: capabilityProbeOrder(platformHint),
+                        endpoints: CART_API_PROBES,
+                    })
+                    .catch(e => ({
+                        platform: 'unknown',
+                        signal: `cart API probe failed: ${e.message}`,
+                        attempts: [],
+                    }))
+            return resolvePlatform({ markup, capability, hint: platformHint })
+        }
+
+        let resolved = await identify()
+        if (shouldRelookAtDocument({ navigationStatus, resolved })) {
+            // The document we were shown may not have been the store: three
+            // stores reported `unknown` by a batch run detected `shopify` on
+            // the very next run from the same machine (2026-08-14). One reload,
+            // only on that evidence, and the outcome of both looks is recorded.
+            note(
+                `platform: first look found nothing (${resolved.signal}) — reloading once`,
+            )
+            observation.platform.firstLook = {
+                platform: resolved.platform,
+                signal: resolved.signal,
+                navigationStatus,
+            }
+            const again = await page
+                .reload({ waitUntil: 'domcontentloaded', timeout: 60000 })
+                .catch(e => {
+                    note(`  (reload failed: ${e.message})`)
+                    return null
+                })
+            if (again) navigationStatus = again.status()
+            resolved = await identify()
+        }
+
+        const platform = resolved.platform
         observation.platform.detected = platform
-        note(`platform: ${platform} (${detected.signal})`)
+        observation.platform.signal = resolved.signal
+        observation.platform.source = resolved.source
+        observation.platform.hint = resolved.hint
+        observation.platform.hintAgreed = resolved.hintAgreed
+        observation.platform.blocked = resolved.blocked
+        observation.platform.navigationStatus = navigationStatus
+        if (platform === 'unknown')
+            // What we were actually looking at, so "no marker found" can never
+            // again stand in for "we were on a challenge page".
+            observation.platform.document = await page
+                .evaluate(describeDocumentInPage)
+                .catch(() => null)
+        note(`platform: ${platform} (${resolved.signal})`)
 
         const seeder = seedersByPlatform()[platform]
         // No seeder means no cart, and no cart means no evidence — reported as
@@ -414,7 +490,7 @@ async function main() {
               })
             : {
                   ok: false,
-                  detail: `no seeder speaks for platform "${platform}" (${detected.signal})`,
+                  detail: `no seeder speaks for platform "${platform}" (${resolved.signal})`,
                   rejectedAdds: 0,
                   adds: 0,
                   productFeedOk: false,

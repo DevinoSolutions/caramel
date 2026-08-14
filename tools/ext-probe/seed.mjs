@@ -52,6 +52,254 @@ export function seedersByPlatform() {
 }
 
 /**
+ * The endpoint each platform publishes that answers "are you this platform?"
+ * — the SAME endpoint that platform's seeder is about to call, so a `200` here
+ * is evidence the seed can proceed rather than a second opinion about markup.
+ *
+ * Passed INTO the page function rather than read from module scope: a
+ * serialised page function cannot see this file (see the note at the top), and
+ * one table beats a copy that drifts.
+ *
+ * `expect` names the JSON shape that platform's endpoint returns. The shape
+ * check is not decoration — 5 of the 167 stores measured on 2026-08-14
+ * (publiclands.com, wearpact.com, gamefly.com, secretsales.com,
+ * strawberrynet.com) answer `200` with their SPA's HTML catch-all on at least
+ * one of these paths, and a status-only check would have named every one of
+ * them the wrong platform.
+ */
+export const CART_API_PROBES = Object.freeze({
+    shopify: { path: '/products.json?limit=1', expect: 'products-array' },
+    woocommerce: {
+        path: '/wp-json/wc/store/v1/products?per_page=1',
+        expect: 'array',
+    },
+    bigcommerce: { path: '/api/storefront/carts', expect: 'array' },
+})
+
+/**
+ * Statuses that mean "the store refused to answer", as opposed to "the store
+ * answered, and the answer is no". Collapsing the two is what made a blocked
+ * Shopify store indistinguishable from a store that is not Shopify.
+ */
+const REFUSAL_STATUSES = Object.freeze([401, 403, 407, 429, 451, 503])
+
+/**
+ * Ask each platform's own endpoint, in the given order, whether it is home.
+ *
+ * Runs only when markup detection came back `unknown`, so the common path
+ * still costs zero requests. Every attempt is REPORTED — status included —
+ * because "404, so not Shopify" and "403, so we never found out" are different
+ * facts and the report used to carry neither.
+ *
+ * @param {{order: string[], endpoints: Record<string, {path: string, expect: string}>}} options
+ * @returns {Promise<{platform: string, signal: string, attempts: Array<object>}>}
+ */
+export async function probeCartApiInPage(options) {
+    const order = (options && options.order) || []
+    const endpoints = (options && options.endpoints) || {}
+    const attempts = []
+    for (const platform of order) {
+        const spec = endpoints[platform]
+        if (!spec) continue
+        const attempt = {
+            platform,
+            endpoint: spec.path,
+            status: null,
+            ok: false,
+            shape: null,
+            error: null,
+        }
+        attempts.push(attempt)
+        try {
+            const res = await fetch(spec.path, {
+                headers: { accept: 'application/json' },
+            })
+            attempt.status = res.status
+            if (!res.ok) continue
+            let body = null
+            try {
+                body = await res.json()
+            } catch {
+                // Not a parse bug on our side: a store whose SPA answers every
+                // path with HTML lands here, and "the endpoint served
+                // something that is not this platform's JSON" is the finding.
+                attempt.shape = 'not-json'
+                continue
+            }
+            const matches =
+                spec.expect === 'array'
+                    ? Array.isArray(body)
+                    : !!body &&
+                      typeof body === 'object' &&
+                      Array.isArray(body.products)
+            attempt.shape = matches ? spec.expect : 'unexpected-json'
+            if (!matches) continue
+            attempt.ok = true
+            return {
+                platform,
+                signal: `${platform} answered ${spec.path} with ${spec.expect}`,
+                attempts,
+            }
+        } catch (e) {
+            attempt.error = String(e).slice(0, 80)
+        }
+    }
+    return { platform: 'unknown', signal: 'no cart API answered', attempts }
+}
+
+/**
+ * What document did we actually look at? Recorded whenever the platform comes
+ * back unknown.
+ *
+ * A store that served a challenge page, a consent wall or an error page to the
+ * probe's first navigation carries none of a platform's markers, and the old
+ * report said only "no platform marker found" — the same sentence a genuinely
+ * unrecognised store produces. These four fields separate them: a challenge
+ * page is small, differently titled, and served under a non-2xx status.
+ */
+export function describeDocumentInPage() {
+    return {
+        url: location.href,
+        title: String(document.title || '').slice(0, 120),
+        htmlBytes: document.documentElement
+            ? document.documentElement.outerHTML.length
+            : 0,
+        readyState: document.readyState,
+    }
+}
+
+/**
+ * The order to ask the platforms in. A caller's hint goes first — it is the
+ * store's own config talking, and asking the likely endpoint first costs the
+ * unlikely ones nothing.
+ *
+ * @param {string|null} hint
+ * @returns {string[]}
+ */
+export function capabilityProbeOrder(hint) {
+    const rest = SEEDABLE_PLATFORMS.filter(p => p !== hint)
+    return hint && SEEDABLE_PLATFORMS.includes(hint) ? [hint, ...rest] : rest
+}
+
+/**
+ * A caller-supplied platform hint, or `null`. Anything else THROWS: a hint the
+ * probe silently drops is worse than no hint, because the caller then reads a
+ * detection failure as a property of the store.
+ *
+ * @param {unknown} value
+ * @returns {string|null}
+ */
+export function normalizePlatformHint(value) {
+    if (value === undefined || value === null || value === '') return null
+    const hint = String(value).trim().toLowerCase()
+    if (!SEEDABLE_PLATFORMS.includes(hint))
+        throw new Error(
+            `unknown --platform-hint "${value}" — the seeder speaks ${SEEDABLE_PLATFORMS.join('/')}`,
+        )
+    return hint
+}
+
+/**
+ * Decide the platform from the evidence gathered, and say who decided.
+ *
+ * Node-side and pure: the page functions above collect facts, this turns them
+ * into one answer, and keeping the two apart is what makes the answer testable
+ * without a browser.
+ *
+ * Markup outranks the hint on purpose. A global the platform's own bundle set
+ * is the store speaking; a hint is our config guessing, and a store that
+ * replatformed since discovery would otherwise be seeded the old way.
+ *
+ * @param {{markup: object, capability: object|null, hint: string|null}} evidence
+ * @returns {{platform: string, signal: string, source: string|null, hint: string|null, hintAgreed: boolean|null, blocked: boolean}}
+ */
+export function resolvePlatform(evidence) {
+    const markup = (evidence && evidence.markup) || {
+        platform: 'unknown',
+        signal: 'no markup detection ran',
+    }
+    const capability = (evidence && evidence.capability) || null
+    const hint = (evidence && evidence.hint) || null
+    const attempts = (capability && capability.attempts) || []
+    // Every attempt refused, and there was at least one: we did not learn that
+    // the store is on some other platform, we learned nothing.
+    const blocked =
+        attempts.length > 0 &&
+        attempts.every(
+            a =>
+                a.status === null ||
+                REFUSAL_STATUSES.includes(a.status) ||
+                a.ok === undefined,
+        ) &&
+        !attempts.some(a => a.ok)
+
+    if (SEEDABLE_PLATFORMS.includes(markup.platform))
+        return {
+            platform: markup.platform,
+            signal: markup.signal,
+            source: 'markup',
+            hint,
+            hintAgreed: hint ? hint === markup.platform : null,
+            blocked: false,
+        }
+
+    if (capability && SEEDABLE_PLATFORMS.includes(capability.platform))
+        return {
+            platform: capability.platform,
+            signal: `${markup.signal}; ${capability.signal}`,
+            source: 'capability',
+            hint,
+            hintAgreed: hint ? hint === capability.platform : null,
+            blocked: false,
+        }
+
+    const trail = attempts
+        .map(a => `${a.platform} ${a.error || a.shape || a.status}`)
+        .join(', ')
+    return {
+        platform: 'unknown',
+        signal: [
+            markup.signal,
+            trail && `cart API: ${trail}`,
+            blocked &&
+                'every endpoint refused — this is NOT evidence the store is on another platform',
+        ]
+            .filter(Boolean)
+            .join('; '),
+        source: null,
+        hint,
+        hintAgreed: hint ? false : null,
+        blocked,
+    }
+}
+
+/**
+ * Should the probe look at the document a second time before abandoning?
+ *
+ * Only when the evidence says we may have been looking at the wrong page —
+ * a navigation the store did not answer 2xx, or a set of cart-API probes that
+ * were all refused. Measured (2026-08-14): kizik.com, peterthomasroth.com and
+ * venus.com were each reported `unknown` by a batch run and each detected
+ * `shopify` on the very next run from the same machine, with `Shopify.shop`
+ * present at `domcontentloaded` — the detector was right about the document it
+ * was shown, and wrong about which document that was.
+ *
+ * Deliberately NOT "retry whenever unknown": a store we genuinely cannot seed
+ * would then pay for a second page load on every run forever.
+ *
+ * @param {{navigationStatus: number|null, resolved: object}} state
+ * @returns {boolean}
+ */
+export function shouldRelookAtDocument(state) {
+    const resolved = (state && state.resolved) || {}
+    if (resolved.platform !== 'unknown') return false
+    const status = state ? state.navigationStatus : null
+    if (status === null || status === undefined) return true
+    if (status < 200 || status >= 300) return true
+    return !!resolved.blocked
+}
+
+/**
  * Name the e-commerce platform from markup the platform itself emits — never
  * from the hostname. A per-store list would rot the day a store replatformed,
  * and would be wrong for the 2,700th store the moment it was written.
@@ -103,6 +351,19 @@ export function detectPlatformInPage() {
             () =>
                 has(
                     'script[src*="cdn.shopify.com"], link[href*="cdn.shopify.com"]',
+                ),
+        ],
+        // Shopify serves theme and platform assets from the STORE's own host
+        // now, not only from cdn.shopify.com. Counted on 2026-08-14:
+        // peterthomasroth.com carries 92 first-party `/cdn/shop/` tags against
+        // 4 on cdn.shopify.com, so a store that drops the preconnect is
+        // invisible to the marker above while still being plain Shopify.
+        [
+            'shopify',
+            'first-party /cdn/shop asset',
+            () =>
+                has(
+                    'script[src*="/cdn/shop"], link[href*="/cdn/shop"], script[src*="/cdn/shopifycloud"], link[href*="/cdn/shopifycloud"]',
                 ),
         ],
         [

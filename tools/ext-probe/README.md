@@ -36,6 +36,7 @@ node tools/ext-probe/probe.mjs <url> [width] [tag] [flags]
 | `--viewport WxH`     | `1920x1080`              | The viewport to measure at, in the spelling `agent_discovery` uses. Authoritative when given.                                                                                                                                                        |
 | `--width`/`--height` | `1920` / class default   | Set individually. A width alone picks the conventional height for its class (`--width 390` → 390x844), so a mobile pass is one flag.                                                                                                                 |
 | `--tag`              | `probe`                  | Same as the positional form.                                                                                                                                                                                                                         |
+| `--platform-hint`    | —                        | `shopify`/`woocommerce`/`bigcommerce`. Orders the cart-API probe so the likely endpoint is asked first, and names the platform when markup found none. Never overrides markup. An unrecognised value **throws before Chromium starts**.              |
 
 Human prose goes to **stderr**; stdout carries the JSON object and nothing else. Three artifacts always
 land in `--out-dir`: `ext-probe-<tag>-<width>.log`, `.json` and `.png`. The **report is an artifact,
@@ -120,6 +121,14 @@ the served config, the best available verdict is `AMBER_NO_INDICATORS` — never
             "cartApiOk": null, // the platform's cart endpoint answered
             "productsJsonOk": null, // the Shopify legs, set only on a Shopify run
             "cartJsOk": null,
+            "signal": null, // WHY that answer, incl. every cart-API status tried
+            "source": null, // markup | capability | null — which leg decided
+            "hint": null, // the caller's --platform-hint, echoed back
+            "hintAgreed": null, // whether the evidence agreed with it
+            "blocked": null, // every cart-API probe refused: we learned NOTHING
+            "navigationStatus": null, // HTTP status the detection ran against
+            "document": null, // {url,title,htmlBytes,readyState}, only when unknown
+            "firstLook": null, // set only when a second look was taken
         },
         "cartItemsAtArrival": null, // read BEFORE the wait window
         "config": {
@@ -247,6 +256,35 @@ them without reconstructing the theme's own `attribute_*` field names. On BigCom
 A platform with no seeder reports `INCONCLUSIVE_PLATFORM` and the run stops there. **A cart is never
 faked**: on Shopify the add's own status is the signal, and on both new platforms success is
 confirmed by re-reading the cart, so a `201` whose item never appears is not a seeded cart.
+
+### When markup finds nothing
+
+Markup detection answers the common case for free, and it used to be the ONLY leg — so
+`"no platform marker found"` was the single sentence covering a store we do not support, a store
+behind a challenge page, and a store whose markers were simply not in the document we happened to
+be shown. In the 2026-08-14 batch that sentence buried 11 of 24 stores, and three of them
+(kizik.com, peterthomasroth.com, venus.com) are plain Shopify that detected correctly on the very
+next run. A verdict the caller cannot read is not a verdict.
+
+Three legs now separate those cases:
+
+1. **The cart API is asked directly.** When markup finds nothing, each platform's own endpoint is
+   fetched — the same endpoint that platform's seeder is about to use, so a `200` is a licence to
+   seed rather than a second opinion. The JSON **shape** is checked, not just the status: 5 of the
+   167 stores measured that day answer `200` with their SPA's HTML on at least one of these paths.
+2. **Refusal is recorded as refusal.** Every attempt keeps its status, and `blocked: true` marks the
+   case where all of them were refused (401/403/407/429/451/503 or a network error) — "we learned
+   nothing", never "the store is on some other platform".
+3. **One second look, on evidence.** If the navigation was not `2xx`, or every endpoint refused, the
+   page is reloaded once and the same question asked again; `firstLook` keeps what the first attempt
+   saw. Not "retry whenever unknown" — a store we genuinely cannot seed would then pay for an extra
+   page load forever.
+
+`--platform-hint` lets the caller pass what the store's config implies. It orders the cart-API probe
+so the likely endpoint is asked first and names the platform when markup found none — but it never
+overrides markup, because a global the platform's own bundle set is the store speaking while a hint
+is our config guessing, and a store that replatformed since discovery would otherwise be seeded the
+old way.
 
 ## Store safety
 

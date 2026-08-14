@@ -128,6 +128,28 @@ export function emptyObservation() {
             // Shopify stay comparable field-for-field.
             productsJsonOk: null,
             cartJsOk: null,
+            // WHY the answer above is the answer. `unknown` used to arrive with
+            // one sentence — "no platform marker found" — that a blocked store,
+            // a challenge page and a genuinely unrecognised platform all
+            // produced, which is why 11 of 24 stores in the 2026-08-14 batch
+            // were unreadable. These carry the difference.
+            signal: null,
+            // 'markup' | 'capability' | null — which leg decided.
+            source: null,
+            // The caller's platform hint and whether the evidence agreed with
+            // it. A hint never decides on its own; see resolvePlatform.
+            hint: null,
+            hintAgreed: null,
+            // Every cart-API probe refused (401/403/429/503/network). We did
+            // not learn the store is on another platform; we learned nothing.
+            blocked: null,
+            // The HTTP status of the navigation the detection ran against.
+            navigationStatus: null,
+            // The document we were actually looking at, recorded only when the
+            // platform came back unknown.
+            document: null,
+            // Present only when a second look was taken: what the first one saw.
+            firstLook: null,
         },
         // Read BEFORE the wait window. See probe.mjs for why that ordering is
         // load-bearing rather than incidental.
