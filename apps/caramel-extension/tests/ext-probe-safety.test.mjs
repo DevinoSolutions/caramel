@@ -21,9 +21,12 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
+    detectPlatformInPage,
     MAX_REJECTED_ADDS,
     readCartStateInPage,
+    seedBigCommerceCartInPage,
     seedShopifyCartInPage,
+    seedWooCommerceCartInPage,
 } from '../../../tools/ext-probe/seed.mjs'
 
 const TOOL_DIR = join(
@@ -161,7 +164,7 @@ describe('the seed stops before it can rate-limit a store', () => {
 describe('the cart is read before the wait window', () => {
     it('the cart read appears earlier in probe.mjs than the wait deadline', () => {
         const cartRead = probeSource.indexOf(
-            'page.evaluate(readCartStateInPage)',
+            'page.evaluate(readCartStateInPage, platform)',
         )
         const waitLoop = probeSource.indexOf(
             'const deadline = Date.now() + waitMs',
@@ -201,14 +204,16 @@ describe('the cart is read before the wait window', () => {
             status: 200,
             json: async () => ({ item_count: 3 }),
         })
-        await expect(readCartStateInPage()).resolves.toEqual({
+        await expect(readCartStateInPage('shopify')).resolves.toEqual({
+            cartApiOk: true,
             cartJsOk: true,
             itemCount: 3,
             detail: '',
         })
 
         globalThis.fetch = async () => ({ ok: false, status: 404 })
-        await expect(readCartStateInPage()).resolves.toEqual({
+        await expect(readCartStateInPage('shopify')).resolves.toEqual({
+            cartApiOk: false,
             cartJsOk: false,
             itemCount: null,
             detail: 'cart.js 404',
@@ -217,8 +222,8 @@ describe('the cart is read before the wait window', () => {
         globalThis.fetch = async () => {
             throw new Error('network down')
         }
-        const thrown = await readCartStateInPage()
-        expect(thrown.cartJsOk).toBe(false)
+        const thrown = await readCartStateInPage('shopify')
+        expect(thrown.cartApiOk).toBe(false)
         expect(thrown.itemCount).toBeNull()
     })
 })
@@ -247,19 +252,26 @@ describe('the probe is platform-portable', () => {
 
 describe('the page functions stay serialisable', () => {
     it.each([
+        ['detectPlatformInPage', detectPlatformInPage],
         ['seedShopifyCartInPage', seedShopifyCartInPage],
+        ['seedWooCommerceCartInPage', seedWooCommerceCartInPage],
+        ['seedBigCommerceCartInPage', seedBigCommerceCartInPage],
         ['readCartStateInPage', readCartStateInPage],
     ])('%s closes over nothing from module scope', (name, fn) => {
         // Playwright serialises a function by its source text, so anything
         // captured from this module would arrive `undefined` in the page. The
         // same property is what lets the tests above call them directly.
+        // SEEDABLE_PLATFORMS is the trap the widening added: it is exactly the
+        // kind of shared constant a new seeder wants to reference.
         const src = fn.toString()
         expect(src).not.toContain('MAX_REJECTED_ADDS')
         expect(src).not.toContain('DEFAULT_PRODUCT_LIMIT')
+        expect(src).not.toContain('SEEDABLE_PLATFORMS')
+        expect(src).not.toContain('seedersByPlatform')
         expect(src).not.toMatch(/\bimport\b/)
         // A plain named declaration — not a bound wrapper and not `[native
         // code]`, either of which would serialise into something the page
         // cannot run.
-        expect(src.startsWith(`async function ${name}`)).toBe(true)
+        expect(src).toMatch(new RegExp(`^(async )?function ${name}\\s*\\(`))
     })
 })

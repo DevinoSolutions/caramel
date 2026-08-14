@@ -12,6 +12,7 @@
 // Usage and the full exit-code table: see ./README.md
 import { createHash } from 'node:crypto'
 import {
+    existsSync,
     mkdirSync,
     readdirSync,
     readFileSync,
@@ -25,11 +26,17 @@ import { chromium } from 'playwright'
 import {
     countPromoInputsInPage,
     DEFAULT_PRODUCT_LIMIT,
+    detectPlatformInPage,
     MAX_REJECTED_ADDS,
     readCartStateInPage,
-    seedShopifyCartInPage,
+    seedersByPlatform,
 } from './seed.mjs'
-import { buildReport, diffWitnesses, emptyObservation } from './verdict.mjs'
+import {
+    buildReport,
+    diffWitnesses,
+    emptyObservation,
+    PROBE_NO_EXTENSION,
+} from './verdict.mjs'
 
 // fileURLToPath, not `new URL(...).pathname.slice(1)`: the slice trick strips
 // the leading slash of a Windows drive path and silently produces garbage
@@ -37,6 +44,12 @@ import { buildReport, diffWitnesses, emptyObservation } from './verdict.mjs'
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(HERE, '..', '..')
 const DEFAULT_EXT_DIR = join(REPO_ROOT, 'apps', 'caramel-extension')
+// Where a build actually lands. Only used to make the "you pointed me at a
+// directory with no manifest" message name a real path instead of a shrug.
+const BUILD_OUTPUT_HINTS = [
+    join(REPO_ROOT, 'apps', 'caramel-extension', '.output', 'chrome-mv3'),
+    join(REPO_ROOT, 'apps', 'caramel-extension', '.output', 'chrome-mv3-dev'),
+]
 
 // The extension's own cache key for the supported-domain list (store-detect.js).
 // Cleared before the run so the domain list is always fetched fresh: a verdict
@@ -107,6 +120,64 @@ function listFiles(dir, base = dir, out = []) {
         else out.push(relative(base, full).split(sep).join('/'))
     }
     return out
+}
+
+/**
+ * Carries the PROBE_NO_EXTENSION sentinel out to the one place that emits a
+ * report, so the "no extension" exit code is chosen where the verdict is
+ * built rather than by a second `process.exit` hiding in the middle of main().
+ */
+class NoExtensionError extends Error {
+    constructor(message) {
+        super(message)
+        this.name = 'NoExtensionError'
+        this.probeVerdict = PROBE_NO_EXTENSION
+    }
+}
+
+/**
+ * Refuse to launch without a loadable extension.
+ *
+ * Chromium accepts `--load-extension=<dir>` pointing at a directory with no
+ * manifest, logs nothing a caller can see, and runs a perfectly normal browser
+ * with no extension in it. Every measurement taken that way says the same
+ * thing — the prompt never appeared, no coupons were fetched, nothing was
+ * submitted — which is indistinguishable from a genuinely broken store config.
+ * That is exactly what happened after the WXT migration moved the build to
+ * `.output/chrome-mv3` and left `apps/caramel-extension` (this file's default)
+ * without a manifest: days of ext-QA verdicts were measurements of an empty
+ * browser, and the single tell was `vnull` in the log header.
+ */
+function assertLoadableExtension(extDir) {
+    const manifestPath = join(extDir, 'manifest.json')
+    let problem = null
+    if (!existsSync(manifestPath)) {
+        problem = `no manifest.json in ${extDir}`
+    } else {
+        // A manifest Chromium cannot parse loads exactly as well as no
+        // manifest at all, and produces the same empty browser.
+        try {
+            const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+            if (!manifest.version)
+                problem = `${manifestPath} carries no version — Chromium refuses a manifest without one`
+        } catch (e) {
+            problem = `${manifestPath} is not parseable JSON: ${e.message}`
+        }
+    }
+    if (!problem) return
+    const built = BUILD_OUTPUT_HINTS.filter(dir =>
+        existsSync(join(dir, 'manifest.json')),
+    )
+    throw new NoExtensionError(
+        [
+            `${problem} — Chromium would have launched with NO extension,`,
+            'and every verdict from that run would have been a measurement of an empty browser.',
+            'The WXT build lands in apps/caramel-extension/.output/chrome-mv3; point EXT_DIR (or --ext) at it.',
+            built.length
+                ? `Loadable build(s) found here now: ${built.join(', ')}`
+                : 'No built extension found either — run `pnpm --filter caramel-extension build` first.',
+        ].join(' '),
+    )
 }
 
 /**
@@ -202,6 +273,10 @@ async function main() {
             readFileSync(resolve(flags['expect-config']), 'utf8'),
         )
 
+    // Before anything else that costs time or touches a store: a probe that
+    // cannot load the extension must never produce a verdict.
+    assertLoadableExtension(extDir)
+
     const build = identifyBuild(extDir)
     const target = {
         url,
@@ -287,17 +362,44 @@ async function main() {
                     ),
                 )
 
-        const seeded = await page.evaluate(seedShopifyCartInPage, {
-            maxRejectedAdds: MAX_REJECTED_ADDS,
-            productLimit: DEFAULT_PRODUCT_LIMIT,
-        })
+        // Which cart mechanism this store speaks, named from markup the
+        // platform itself emits — detected ONCE and then passed to both the
+        // seeder and the cart reader, so the two can never disagree about what
+        // the store is.
+        const detected = await page.evaluate(detectPlatformInPage).catch(e => ({
+            platform: 'unknown',
+            signal: `detection failed: ${e.message}`,
+        }))
+        const platform = detected.platform
+        observation.platform.detected = platform
+        note(`platform: ${platform} (${detected.signal})`)
+
+        const seeder = seedersByPlatform()[platform]
+        // No seeder means no cart, and no cart means no evidence — reported as
+        // such rather than attempted with someone else's endpoints.
+        const seeded = seeder
+            ? await page.evaluate(seeder, {
+                  maxRejectedAdds: MAX_REJECTED_ADDS,
+                  productLimit: DEFAULT_PRODUCT_LIMIT,
+              })
+            : {
+                  ok: false,
+                  detail: `no seeder speaks for platform "${platform}" (${detected.signal})`,
+                  rejectedAdds: 0,
+                  adds: 0,
+                  productFeedOk: false,
+              }
         observation.seed = {
             ok: seeded.ok,
             detail: seeded.detail,
             rejectedAdds: seeded.rejectedAdds,
             adds: seeded.adds,
         }
-        observation.platform.productsJsonOk = seeded.productsJsonOk
+        observation.platform.productFeedOk = seeded.productFeedOk
+        // Only a Shopify run has a /products.json to speak about; on every
+        // other platform the field stays null, which is "not observed".
+        if (seeded.productsJsonOk !== undefined)
+            observation.platform.productsJsonOk = seeded.productsJsonOk
         note(`seed: ${seeded.detail}`)
 
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 })
@@ -305,8 +407,9 @@ async function main() {
         // The cart as it stands when the extension is about to look at it — an
         // empty cart here makes silence the CORRECT answer, and reading it only
         // after the wait cannot tell the two apart.
-        const cartState = await page.evaluate(readCartStateInPage)
+        const cartState = await page.evaluate(readCartStateInPage, platform)
         observation.cartItemsAtArrival = cartState.itemCount
+        observation.platform.cartApiOk = cartState.cartApiOk
         observation.platform.cartJsOk = cartState.cartJsOk
         note(`cart at arrival: ${cartState.itemCount ?? cartState.detail}`)
 
@@ -640,10 +743,20 @@ let code
 try {
     code = await main()
 } catch (e) {
-    // A harness crash is never reported as a store verdict.
-    const report = buildReport({ error: e?.stack || String(e) })
+    // A harness crash is never reported as a store verdict. Neither is a
+    // missing extension — that one carries its own sentinel and exit code, so
+    // a caller can tell "I was pointed at the wrong directory" from "the probe
+    // fell over" without reading English.
+    const report = buildReport({
+        error: e?.probeVerdict ? e.message : e?.stack || String(e),
+        errorVerdict: e?.probeVerdict || undefined,
+    })
     process.stdout.write(`${JSON.stringify(report, null, 2)}\n`)
-    note(`ext-probe crashed: ${e?.stack || e}`)
+    note(
+        e?.probeVerdict
+            ? `ext-probe refused to run: ${e.message}`
+            : `ext-probe crashed: ${e?.stack || e}`,
+    )
     code = report.exitCode
 }
 process.exit(code)

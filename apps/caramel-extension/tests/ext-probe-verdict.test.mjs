@@ -12,11 +12,13 @@
 // so the precedence cases at the bottom are as load-bearing as the ten
 // per-verdict cases above them.
 import { describe, expect, it } from 'vitest'
+import { SEEDABLE_PLATFORMS } from '../../../tools/ext-probe/seed.mjs'
 import {
     classify,
     EXIT_CODES,
     exitCodeFor,
     PROBE_ERROR,
+    PROBE_NO_EXTENSION,
     VERDICTS,
 } from '../../../tools/ext-probe/verdict.mjs'
 import { greenObservation } from './_ext-probe-fixtures.mjs'
@@ -44,12 +46,38 @@ describe('every verdict is reachable and carries its own exit code', () => {
         expect(r.reasons.join(' ')).toMatch(/correct behaviour/i)
     })
 
-    it('INCONCLUSIVE_PLATFORM when the store is not Shopify-shaped', () => {
+    it('INCONCLUSIVE_PLATFORM when no seeder speaks for the store platform', () => {
         const r = classify(
-            greenObservation({ platform: { productsJsonOk: false } }),
+            greenObservation({ platform: { detected: 'unknown' } }),
         )
         expect(r.verdict).toBe('INCONCLUSIVE_PLATFORM')
         expect(r.exitCode).toBe(31)
+        // The reason names what the seeder DOES speak, so the reader knows
+        // whether this is a gap to close or a store to leave alone.
+        for (const p of SEEDABLE_PLATFORMS)
+            expect(r.reasons.join(' ')).toContain(p)
+    })
+
+    it.each(SEEDABLE_PLATFORMS)(
+        'a seeded %s store gets past the platform gate',
+        platform => {
+            expect(
+                classify(greenObservation({ platform: { detected: platform } }))
+                    .verdict,
+            ).toBe('GREEN')
+        },
+    )
+
+    it('INCONCLUSIVE_PLATFORM when the platform is known but its endpoints did not answer', () => {
+        for (const patch of [{ productFeedOk: false }, { cartApiOk: false }]) {
+            const r = classify(
+                greenObservation({
+                    platform: { detected: 'woocommerce', ...patch },
+                }),
+            )
+            expect(r.verdict).toBe('INCONCLUSIVE_PLATFORM')
+            expect(r.reasons.join(' ')).toContain('woocommerce')
+        }
     })
 
     it('INCONCLUSIVE_CONFIG_STALE when the API log line never appeared', () => {
@@ -156,6 +184,22 @@ describe('every verdict is reachable and carries its own exit code', () => {
         expect(exitCodeFor(PROBE_ERROR)).toBe(70)
         // An unknown verdict string exits like a crash rather than like a red.
         expect(exitCodeFor('NOT_A_VERDICT')).toBe(EXIT_CODES[PROBE_ERROR])
+    })
+
+    it('"no extension was loaded" is not a verdict about the store either, and has its own code', () => {
+        // A browser with no extension answers every question with "nothing
+        // happened", which reads exactly like a broken config — so this must
+        // never be countable as a red, and must not collapse into the generic
+        // crash code a caller might already tolerate.
+        expect(VERDICTS).not.toContain(PROBE_NO_EXTENSION)
+        expect(exitCodeFor(PROBE_NO_EXTENSION)).toBe(71)
+        expect(exitCodeFor(PROBE_NO_EXTENSION)).not.toBe(
+            exitCodeFor(PROBE_ERROR),
+        )
+        for (const verdict of VERDICTS)
+            expect(exitCodeFor(verdict)).not.toBe(
+                exitCodeFor(PROBE_NO_EXTENSION),
+            )
     })
 })
 
