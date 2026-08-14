@@ -48,6 +48,21 @@ const probeCode = probeSource
     .map(l => l.replace(/(^|[^:])\/\/.*$/, '$1'))
     .join('\n')
 
+describe('the comment-stripped view still contains the code', () => {
+    it('keeps most of the source, so the bans below are not testing an empty string', () => {
+        // The stripper opens a block comment at any `/*`, including one that
+        // occurs INSIDE a line comment — writing the literal match pattern
+        // `https:` + `//*` + `/*` in a prose comment once swallowed 25K of the
+        // 34K file, and every source assertion in this suite silently passed
+        // against the remains. A hollow view is a suite that tests nothing.
+        expect(probeCode.length).toBeGreaterThan(probeSource.length * 0.6)
+        // Spot-check both ends: truncation from a runaway open-comment shows up
+        // as a missing tail long before the ratio does.
+        expect(probeCode).toContain('async function main()')
+        expect(probeCode).toContain('process.exit(code)')
+    })
+})
+
 const originalFetch = globalThis.fetch
 afterEach(() => {
     globalThis.fetch = originalFetch
@@ -240,6 +255,31 @@ describe('the probe is platform-portable', () => {
     it('keeps the three documented env knobs', () => {
         for (const knob of ['EXT_DIR', 'PROBE_WAIT_MS', 'PROBE_ALL_LOGS'])
             expect(probeSource).toContain(knob)
+    })
+
+    it('persists the report beside the log, whatever the caller does with stdout', () => {
+        // `observation.config.served` — the served config, the exact datum a
+        // staleness diagnosis needs — existed only on stdout and was discarded
+        // by every caller that did not ask for it. A diagnosis a week later
+        // cannot ask a pipe what it saw.
+        expect(probeCode).toMatch(
+            /const reportFile = join\(\s*outDir,\s*`ext-probe-\$\{tag\}-\$\{width\}\.json`/,
+        )
+        expect(probeCode).toContain('writeFileSync(reportFile, json,')
+        // Unconditional: not inside the `if (flags.out)` branch that decides
+        // where the caller's copy goes.
+        const persist = probeCode.indexOf('writeFileSync(reportFile, json,')
+        const stdoutBranch = probeCode.indexOf('if (flags.out)')
+        expect(persist).toBeGreaterThan(-1)
+        expect(persist).toBeLessThan(stdoutBranch)
+    })
+
+    it('takes the FRESHEST service worker, as its own comment has always claimed', () => {
+        // `[0]` is the oldest handle. After a worker restart every storage
+        // read went to the dead one the timeout exists to survive, and the
+        // witness came back empty.
+        expect(probeCode).toContain('ctx.serviceWorkers().at(-1)')
+        expect(probeCode).not.toContain('ctx.serviceWorkers()[0]')
     })
 
     it('sends the report to stdout and every word of prose to stderr', () => {

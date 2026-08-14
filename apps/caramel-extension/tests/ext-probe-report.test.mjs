@@ -57,6 +57,9 @@ const TOP_LEVEL_KEYS = [
     'observation',
     'witnesses',
     'logFile',
+    // Where the probe persisted this same object. The report is an artifact,
+    // not just something a caller may or may not have piped somewhere.
+    'reportFile',
     'screenshot',
     'durationMs',
 ]

@@ -25,6 +25,7 @@ export function greenObservation(overrides = {}) {
         cartItemsAtArrival: 1,
         config: {
             servedFromApi: true,
+            cacheClearedBeforeRun: true,
             expected: { couponInput: '#code' },
             served: { couponInput: '#code' },
             matches: true,

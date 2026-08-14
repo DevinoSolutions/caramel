@@ -37,8 +37,10 @@ const PROBE = join(
 
 // A URL that is never reached: the refusal is decided from the filesystem, so
 // a run that somehow got as far as the network would be the failure this suite
-// exists to catch.
-const UNREACHED = 'https://example.invalid/cart'
+// exists to catch. A closed local port rather than an unresolvable host —
+// connection-refused is immediate, where a bogus TLD spends ~50s in the DNS
+// resolver and made the red-proof below race its own timeout.
+const UNREACHED = 'http://127.0.0.1:1/cart'
 
 function runProbe(extDir) {
     const res = spawnSync(
@@ -127,5 +129,11 @@ describe('the probe refuses to run without a loadable extension', () => {
         const res = runProbe(ok)
         expect(res.status).not.toBe(71)
         expect(reportFrom(res).verdict).not.toBe(PROBE_NO_EXTENSION)
+        // The header resolved a real version instead of the `vnull` that was
+        // the only tell for days...
+        expect(res.stderr).toContain('v0.0.1')
+        // ...and the launch really happened at the desktop viewport, which is
+        // the one place that default can be observed end to end.
+        expect(res.stderr).toContain('viewport 1920x1080')
     }, 120000)
 })

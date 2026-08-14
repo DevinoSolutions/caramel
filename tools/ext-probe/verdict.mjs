@@ -133,7 +133,16 @@ export function emptyObservation() {
         // load-bearing rather than incidental.
         cartItemsAtArrival: null,
         config: {
+            // "the domain list under test was fetched from the API during
+            // THIS run". Established from the extension's own storage — the
+            // cache key the probe removed coming back — because the console
+            // line it used to be read from is compiled out of a production
+            // build and its silence therefore proves nothing.
             servedFromApi: null,
+            // Whether that removal actually happened. Without it a repopulated
+            // key could just be yesterday's cache, so the proof above is only
+            // a proof when this is true.
+            cacheClearedBeforeRun: null,
             expected: null,
             served: null,
             matches: null,
@@ -186,6 +195,41 @@ export function normalizeObservation(partial) {
                 : incoming
     }
     return base
+}
+
+/**
+ * Did the extension fetch the domain list from the API during THIS run?
+ *
+ * Two independent witnesses to one fact, and they are not interchangeable.
+ *
+ * The STORAGE witness is load-bearing. The probe removes the extension's
+ * supported-stores cache key before the run, and the extension rewrites that
+ * key only on the branch that just fetched from the API — so a key that comes
+ * back holding data IS the fetch. It works on the production build, which is
+ * the build ext-QA measures.
+ *
+ * The CONSOLE witness can only CONFIRM, never deny. `log` in caramel-base.js
+ * is `CARAMEL_ENV.verbose ? console.log : noop` and the production stamp sets
+ * `verbose: false` on purpose — content scripts run on every https origin, so
+ * a shipped build must never write into a shopper's store console (verified in
+ * the artifacts: `.output/chrome-mv3` carries `verbose:!1`, the dev build
+ * `verbose:!0`, 2026-08-14). Its absence therefore says nothing at all, and
+ * reading that silence as `false` is what pinned every production run at
+ * INCONCLUSIVE_CONFIG_STALE and meant the served-vs-expected comparison never
+ * once ran.
+ *
+ * @returns {boolean|null} `null` when neither witness could speak — not
+ *   observed, which is not the same as "it did not happen".
+ */
+export function deriveServedFromApi({
+    cacheCleared = false,
+    cacheReadOk = false,
+    cacheHasData = false,
+    loggedApiLoad = false,
+} = {}) {
+    if (cacheCleared && cacheReadOk) return cacheHasData
+    if (loggedApiLoad) return true
+    return null
 }
 
 const SELECTOR_FIELDS = ['priceContainer', 'successIndicator', 'errorIndicator']
@@ -283,7 +327,9 @@ export function classify(partialObservation) {
     if (o.config.servedFromApi !== true)
         return done(
             'INCONCLUSIVE_CONFIG_STALE',
-            'the "Loaded supported domains from API" line never appeared — the run may have been served a cached domain list',
+            o.config.cacheClearedBeforeRun === true
+                ? 'the supported-domain cache was cleared before the run and never came back — the extension did not fetch the domain list from the API'
+                : 'the supported-domain cache could not be cleared and no API load was observed — the run may have been served a stale domain list',
         )
     if (o.config.matches === false)
         return done(
@@ -440,6 +486,7 @@ export function buildReport({
     observation = null,
     witnesses = null,
     logFile = null,
+    reportFile = null,
     screenshot = null,
     durationMs = null,
     error = null,
@@ -459,6 +506,7 @@ export function buildReport({
             observation: observation ? normalizeObservation(observation) : null,
             witnesses,
             logFile,
+            reportFile,
             screenshot,
             durationMs,
         }
@@ -475,6 +523,7 @@ export function buildReport({
         observation: normalized,
         witnesses,
         logFile,
+        reportFile,
         screenshot,
         durationMs,
     }

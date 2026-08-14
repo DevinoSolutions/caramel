@@ -33,10 +33,12 @@ import {
 } from './seed.mjs'
 import {
     buildReport,
+    deriveServedFromApi,
     diffWitnesses,
     emptyObservation,
     PROBE_NO_EXTENSION,
 } from './verdict.mjs'
+import { resolveViewport } from './viewport.mjs'
 
 // fileURLToPath, not `new URL(...).pathname.slice(1)`: the slice trick strips
 // the leading slash of a Windows drive path and silently produces garbage
@@ -70,7 +72,11 @@ const note = (...args) => console.error(...args)
 // context knows about and races a hard timeout around the call.
 const SW_EVAL_TIMEOUT_MS = 8000
 async function swEval(ctx, fallbackSw, pageFunction, arg, label) {
-    const sw = ctx.serviceWorkers()[0] || fallbackSw
+    // `.at(-1)`, not `[0]`: the comment above has always said "the freshest
+    // worker the context knows about" while the code took the OLDEST one, so
+    // after a worker restart every storage read went to the dead handle the
+    // timeout exists to survive — and the witness came back empty.
+    const sw = ctx.serviceWorkers().at(-1) || fallbackSw
     if (!sw) return { ok: false, value: null }
     try {
         const value = await Promise.race([
@@ -252,7 +258,7 @@ async function main() {
         // one-object contract holds only on the happy path.
         throw new Error('no target url given')
     }
-    const width = Number(flags.width || widthArg || 390)
+    const { width, height } = resolveViewport(flags, widthArg)
     const tag = flags.tag || tagArg || 'probe'
     const extDir = resolve(process.env.EXT_DIR || flags.ext || DEFAULT_EXT_DIR)
     const waitMs = Number(process.env.PROBE_WAIT_MS || flags.wait || 30000)
@@ -266,6 +272,11 @@ async function main() {
     mkdirSync(outDir, { recursive: true })
     const logFile = join(outDir, `ext-probe-${tag}-${width}.log`)
     const screenshotFile = join(outDir, `ext-probe-${tag}-${width}.png`)
+    // The report is an ARTIFACT, not just something a caller may or may not
+    // have piped somewhere. `observation.config.served` — the served config,
+    // the exact datum a staleness diagnosis needs — used to exist only on
+    // stdout and was discarded by every caller that did not ask for it.
+    const reportFile = join(outDir, `ext-probe-${tag}-${width}.json`)
 
     let expectedConfig = null
     if (flags['expect-config'])
@@ -282,12 +293,14 @@ async function main() {
         url,
         origin: new URL(url).origin,
         viewportWidth: width,
+        viewportHeight: height,
         tag,
     }
     note(
         `ext-probe: ${build.manifestName || 'extension'} v${build.manifestVersion} ${build.contentHash}`,
     )
     note(`ext-probe: ${extDir}`)
+    note(`ext-probe: viewport ${width}x${height}`)
 
     const observation = emptyObservation()
     const consoleTrail = []
@@ -300,7 +313,7 @@ async function main() {
 
     const ctx = await chromium.launchPersistentContext(profile, {
         headless: false,
-        viewport: { width, height: 844 },
+        viewport: { width, height },
         args: [
             `--disable-extensions-except=${extDir}`,
             `--load-extension=${extDir}`,
@@ -319,11 +332,21 @@ async function main() {
                 consoleTrail.push(`[${m.type()}] ${t}`)
         })
         page.on('pageerror', e => consoleTrail.push(`[pageerror] ${String(e)}`))
-        // The background service worker is where the API calls are made and
-        // logged on a dev install, so it says whether the content script ever
-        // asked — and it is the ONLY context that can read the extension's own
-        // chrome.storage.local. Page `evaluate` runs in the store's world and
-        // cannot see it at all.
+        // The background service worker is the ONLY context that can read the
+        // extension's own chrome.storage.local — page `evaluate` runs in the
+        // store's world and cannot see it at all.
+        //
+        // Its CONSOLE, however, says nothing in the build ext-QA actually
+        // measures. `log` in caramel-base.js is `CARAMEL_ENV.verbose ?
+        // console.log : noop`, and the production stamp sets `verbose: false`
+        // deliberately — content scripts run on every https origin, so a
+        // shipped build must never write into a shopper's console. Verified in
+        // the built artifacts: `.output/chrome-mv3` carries `verbose:!1`,
+        // `.output/chrome-mv3-dev` carries `verbose:!0` (2026-08-14). So an
+        // empty console trail is CORRECT for a production build, and anything
+        // this probe concludes from silence is a conclusion about the build
+        // stamp, not about the store. The storage witness below is what
+        // carries the evidence.
         let sw = null
         const attachSW = worker => {
             if (!sw) sw = worker
@@ -344,11 +367,17 @@ async function main() {
             sw = await ctx
                 .waitForEvent('serviceworker', { timeout: 15000 })
                 .catch(() => null)
-        // Force the API path. The extension caches the supported-domain list in
-        // chrome.storage.local, and staleness must be ruled out by evidence
-        // (the API log line below), not by hoping a fixed sleep was long enough.
+        // Force the API path, and make the clear itself the evidence. The
+        // extension writes `{data, ts}` to this key ONLY on the branch that
+        // just fetched the list from the API (store-detect.js), so a key that
+        // was removed here and holds data at the end of the run was fetched
+        // fresh DURING this run. That is the same fact the log line used to
+        // stand for, established from state instead of from a message a
+        // production build never prints — and it is only a proof if the clear
+        // succeeded, which is why the outcome is recorded rather than assumed.
+        let storeCacheCleared = false
         if (sw)
-            await sw
+            storeCacheCleared = await sw
                 .evaluate(
                     key =>
                         new Promise(r =>
@@ -356,11 +385,12 @@ async function main() {
                         ),
                     STORE_CACHE_KEY,
                 )
-                .catch(e =>
-                    note(
-                        `  (could not clear ${STORE_CACHE_KEY}: ${e.message})`,
-                    ),
-                )
+                .then(() => true)
+                .catch(e => {
+                    note(`  (could not clear ${STORE_CACHE_KEY}: ${e.message})`)
+                    return false
+                })
+        observation.config.cacheClearedBeforeRun = storeCacheCleared
 
         // Which cart mechanism this store speaks, named from markup the
         // platform itself emits — detected ONCE and then passed to both the
@@ -528,6 +558,8 @@ async function main() {
         let timings = []
         let timingsReadOk = false
         let servedRecord = null
+        let cacheReadOk = false
+        let cachedList = null
         if (sw || ctx.serviceWorkers().length) {
             const timingsRead = await swEval(
                 ctx,
@@ -551,10 +583,11 @@ async function main() {
                 STORE_CACHE_KEY,
                 STORE_CACHE_KEY,
             )
-            const cached = cachedRead.value
+            cacheReadOk = cachedRead.ok
+            cachedList = cachedRead.value
             const host = new URL(url).hostname
             servedRecord =
-                (cached?.data || []).find(rec =>
+                (cachedList?.data || []).find(rec =>
                     hostMatches(rec.domain, host),
                 ) || null
         } else {
@@ -574,9 +607,26 @@ async function main() {
         }
 
         // ── derive the observation from what the witnesses saw ────────────
-        observation.config.servedFromApi = wholeTrail.some(l =>
-            l.includes(API_LOAD_LINE),
-        )
+        // Two independent witnesses to one fact: "the domain list under test
+        // was fetched from the API during THIS run".
+        //
+        // The storage witness is the load-bearing one. The key was removed
+        // before the run and the extension rewrites it only on the branch that
+        // just fetched from the API, so a repopulated key IS the fetch. It
+        // works on a production build, which is the build ext-QA measures.
+        //
+        // The console witness is kept because it is genuinely independent —
+        // but it can only ever CONFIRM, never deny: `log` is compiled out when
+        // `CARAMEL_ENV.verbose` is false, so its absence in a production build
+        // says nothing at all. Reading that silence as `false` is what pinned
+        // every production run at INCONCLUSIVE_CONFIG_STALE and meant the
+        // served-vs-expected comparison below never once ran.
+        observation.config.servedFromApi = deriveServedFromApi({
+            cacheCleared: storeCacheCleared,
+            cacheReadOk,
+            cacheHasData: !!cachedList?.data?.length,
+            loggedApiLoad: wholeTrail.some(l => l.includes(API_LOAD_LINE)),
+        })
         observation.config.served = servedRecord
         observation.config.expected = expectedConfig
         Object.assign(
@@ -719,11 +769,17 @@ async function main() {
             observation,
             witnesses,
             logFile,
+            reportFile,
             screenshot,
             durationMs: Date.now() - started,
         })
-        // The ONE machine-readable object, alone on stdout.
         const json = JSON.stringify(report, null, 2)
+        // Always persisted beside the log, whatever the caller does with
+        // stdout — the report is the only place `observation.config.served`
+        // survives, and a diagnosis a week later cannot ask a pipe what it saw.
+        writeFileSync(reportFile, json, 'utf8')
+        note(`full report: ${reportFile}`)
+        // The ONE machine-readable object, alone on stdout.
         if (flags.out) writeFileSync(resolve(flags.out), json, 'utf8')
         else process.stdout.write(`${json}\n`)
         note(`verdict: ${report.verdict} (exit ${report.exitCode})`)

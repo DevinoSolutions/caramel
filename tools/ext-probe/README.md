@@ -10,11 +10,12 @@ the vocabulary.
 
 ## Layout
 
-| File          | Role                                                                                                                                                         |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `probe.mjs`   | The driver. Launches Chromium, seeds a cart, watches the run, emits the report. Needs a browser.                                                             |
-| `verdict.mjs` | The judgement. Pure — no browser, no filesystem. This is what the unit tests exercise.                                                                       |
-| `seed.mjs`    | The functions that run **inside** the page — platform detection, the per-platform seeders, the cart reader. Self-contained so Playwright can serialise them. |
+| File           | Role                                                                                                                                                         |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `probe.mjs`    | The driver. Launches Chromium, seeds a cart, watches the run, emits the report. Needs a browser.                                                             |
+| `verdict.mjs`  | The judgement. Pure — no browser, no filesystem. This is what the unit tests exercise.                                                                       |
+| `seed.mjs`     | The functions that run **inside** the page — platform detection, the per-platform seeders, the cart reader. Self-contained so Playwright can serialise them. |
+| `viewport.mjs` | Which viewport to measure at. Its own module because it is a policy, not a detail — see below.                                                               |
 
 ## Usage
 
@@ -22,19 +23,33 @@ the vocabulary.
 node tools/ext-probe/probe.mjs <url> [width] [tag] [flags]
 ```
 
-| Flag / env         | Default                  | Meaning                                                                                                                                                                                                                                              |
-| ------------------ | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `EXT_DIR`          | `apps/caramel-extension` | Which build to load. **Set it** — the WXT build lands in `apps/caramel-extension/.output/chrome-mv3`, and the default path no longer holds a manifest. A directory without a loadable `manifest.json` exits `71` before Chromium starts (see below). |
-| `PROBE_WAIT_MS`    | `30000`                  | How long a shopper waits before we call it a no-show.                                                                                                                                                                                                |
-| `PROBE_ALL_LOGS`   | unset                    | `1` keeps every console line, not just the Caramel-shaped ones.                                                                                                                                                                                      |
-| `--out <path>`     | stdout                   | Write the JSON report to a file instead of stdout.                                                                                                                                                                                                   |
-| `--out-dir <path>` | `.ext-probe/`            | Where the full log, screenshot and disposable profile live.                                                                                                                                                                                          |
-| `--expect-config`  | —                        | JSON file holding the config under test; enables the staleness compare.                                                                                                                                                                              |
-| `--good-code`      | —                        | A code expected to work — supplies GREEN evidence (6).                                                                                                                                                                                               |
-| `--invalid-code`   | —                        | A deliberately invalid code — the negative control, GREEN evidence (7).                                                                                                                                                                              |
-| `--width`/`--tag`  | `390` / `probe`          | Same as the positional forms.                                                                                                                                                                                                                        |
+| Flag / env           | Default                  | Meaning                                                                                                                                                                                                                                              |
+| -------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `EXT_DIR`            | `apps/caramel-extension` | Which build to load. **Set it** — the WXT build lands in `apps/caramel-extension/.output/chrome-mv3`, and the default path no longer holds a manifest. A directory without a loadable `manifest.json` exits `71` before Chromium starts (see below). |
+| `PROBE_WAIT_MS`      | `30000`                  | How long a shopper waits before we call it a no-show.                                                                                                                                                                                                |
+| `PROBE_ALL_LOGS`     | unset                    | `1` keeps every console line, not just the Caramel-shaped ones.                                                                                                                                                                                      |
+| `--out <path>`       | stdout                   | Write the JSON report to a file instead of stdout. The report is persisted to `--out-dir` regardless.                                                                                                                                                |
+| `--out-dir <path>`   | `.ext-probe/`            | Where the full log, the JSON report, the screenshot and the disposable profile live.                                                                                                                                                                 |
+| `--expect-config`    | —                        | JSON file holding the config under test; enables the staleness compare.                                                                                                                                                                              |
+| `--good-code`        | —                        | A code expected to work — supplies GREEN evidence (6).                                                                                                                                                                                               |
+| `--invalid-code`     | —                        | A deliberately invalid code — the negative control, GREEN evidence (7).                                                                                                                                                                              |
+| `--viewport WxH`     | `1920x1080`              | The viewport to measure at, in the spelling `agent_discovery` uses. Authoritative when given.                                                                                                                                                        |
+| `--width`/`--height` | `1920` / class default   | Set individually. A width alone picks the conventional height for its class (`--width 390` → 390x844), so a mobile pass is one flag.                                                                                                                 |
+| `--tag`              | `probe`                  | Same as the positional form.                                                                                                                                                                                                                         |
 
-Human prose goes to **stderr**; stdout carries the JSON object and nothing else.
+Human prose goes to **stderr**; stdout carries the JSON object and nothing else. Three artifacts always
+land in `--out-dir`: `ext-probe-<tag>-<width>.log`, `.json` and `.png`. The **report is an artifact,
+not just something a caller may have piped somewhere** — `observation.config.served` is the exact
+datum a staleness diagnosis needs, and a diagnosis a week later cannot ask a pipe what it saw.
+
+## Viewport
+
+**Default `1920x1080` — the same pair `agent_discovery` passes.** QA must run at the viewport the
+config was DERIVED at. Discovery writes selectors against a desktop DOM; this probe defaulted to
+`390x844`, so every config was proven on a desktop layout and then graded on a phone one. A phone is
+a different DOM and frequently a different checkout, which produced reds that were never about the
+config — every ext-QA run before 2026-08-14 was measured that way. A mobile pass is still available
+and still approximates iOS Safari; it is simply no longer the silent default (`--width 390`).
 
 ## Exit codes
 
@@ -108,7 +123,8 @@ the served config, the best available verdict is `AMBER_NO_INDICATORS` — never
         },
         "cartItemsAtArrival": null, // read BEFORE the wait window
         "config": {
-            "servedFromApi": null,
+            "servedFromApi": null, // from storage, not from a log line — see below
+            "cacheClearedBeforeRun": null, // without which the above is not proof
             "expected": null,
             "served": null,
             "matches": null,
@@ -154,6 +170,7 @@ the served config, the best available verdict is `AMBER_NO_INDICATORS` — never
         },
     },
     "logFile": "", // full, untruncated
+    "reportFile": "", // where this object was persisted
     "screenshot": null,
     "durationMs": 0,
 }
@@ -161,6 +178,32 @@ the served config, the best available verdict is `AMBER_NO_INDICATORS` — never
 
 `null` means **not observed** and is never written as `false`. "We did not see it" and "it did not
 happen" lead to different verdicts, and collapsing them is how a harness starts lying.
+
+## The console cannot deny, only confirm
+
+The build ext-QA measures is **silent by design**. `log` in `caramel-base.js` is
+`CARAMEL_ENV.verbose ? console.log : noop`, and the production stamp sets `verbose: false` on
+purpose — content scripts run on every https origin, so a shipped build must never write into a
+shopper's store console. Verified in the artifacts on 2026-08-14: `.output/chrome-mv3` carries
+`verbose:!1`, `.output/chrome-mv3-dev` carries `verbose:!0`.
+
+So an empty console/service-worker trail is **correct** for a production build, and anything
+concluded from that silence is a conclusion about the build stamp rather than about the store.
+`config.servedFromApi` used to be exactly such a conclusion — `consoleTrail.some(l => l.includes('Loaded
+supported domains from API'))` — which meant classify's first config gate fired on every single
+production run and the served-vs-expected comparison behind it never once executed.
+
+It is now read from the extension's own **storage**, which is stamped in both builds: the probe
+removes the supported-stores cache key before the run, and the extension rewrites that key only on
+the branch that just fetched the list from the API, so a key that comes back holding data **is** the
+fetch. `observation.config.cacheClearedBeforeRun` records whether the removal actually happened,
+because without it a repopulated key could just be yesterday's cache. The console line is kept as a
+genuinely independent witness, but it can only ever say **yes** — never no. If neither witness can
+speak the answer is `null`, never `false`.
+
+Switching ext-QA to the dev build is **not** the fix: `.output/chrome-mv3-dev` is verbose but points
+at `https://dev.grabcaramel.com`, so it would QA the dev configs rather than the ones production
+serves.
 
 ## Two independent witnesses
 
