@@ -846,6 +846,12 @@ jobs:
       ASC_API_KEY_BASE64: ${{ secrets.ASC_API_KEY_BASE64 }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       RELEASE_VERSION: ${{ needs.guard.outputs.version }}
+      # The MV3 floor, in one place: read by both archive steps as a build
+      # setting and by the post-archive assertion. See the comment above
+      # "Build & archive (macOS)" for why these numbers and not the
+      # converter's iOS 15.0 / macOS 10.14 defaults.
+      IOS_DEPLOYMENT_FLOOR: '16.4'
+      MACOS_DEPLOYMENT_FLOOR: '13.0'
     timeout-minutes: 30
     defaults:
       run:
@@ -1008,6 +1014,16 @@ jobs:
             /usr/libexec/PlistBuddy -c "Set :LSApplicationCategoryType ${MAC_CATEGORY}" "$plist"
           done
 
+      # MV3 deployment floor. safari-web-extension-converter stamps its own
+      # defaults (iOS 15.0 / macOS 10.14) onto the generated project, and both
+      # are below what this extension can actually run on: MV3 web extensions
+      # need Safari 15.4, and the service-worker background only became usable
+      # at Safari 16.4 (background ES modules, storage.session, the
+      # importScripts fix). macOS 10.14 Mojave tops out at Safari 14.1 and has
+      # no MV3 at all — that default would ship an app whose extension Safari
+      # can never load. Floors below are the 16.4 era: iOS 16.4, and macOS 13.0
+      # (Ventura, which bundles 16.1 and auto-updates past 16.4).
+      # Asserted after archive by "Assert MV3 deployment floor".
       - name: Build & archive (macOS)
         run: |
           xcodebuild archive \
@@ -1019,6 +1035,7 @@ jobs:
             DEVELOPMENT_TEAM="${{ secrets.APPLE_TEAM_ID }}" \
             MARKETING_VERSION="${RELEASE_VERSION}" \
             CURRENT_PROJECT_VERSION="${{ env.MACOS_BUILD_NUM }}" \
+            MACOSX_DEPLOYMENT_TARGET="${MACOS_DEPLOYMENT_FLOOR}" \
             ARCHS="arm64 x86_64" \
             VALID_ARCHS="arm64 x86_64" \
             ONLY_ACTIVE_ARCH=NO \
@@ -1040,11 +1057,67 @@ jobs:
             DEVELOPMENT_TEAM="${{ secrets.APPLE_TEAM_ID }}" \
             MARKETING_VERSION="${RELEASE_VERSION}" \
             CURRENT_PROJECT_VERSION="${{ env.IOS_BUILD_NUM }}" \
+            IPHONEOS_DEPLOYMENT_TARGET="${IOS_DEPLOYMENT_FLOOR}" \
             ENABLE_HARDENED_RUNTIME=YES \
             -allowProvisioningUpdates \
             -authenticationKeyPath "/tmp/AuthKey_${ASC_KEY_ID}.p8" \
             -authenticationKeyID "${ASC_KEY_ID}" \
             -authenticationKeyIssuerID "${ASC_ISSUER_ID}"
+
+      # The floor is a build SETTING on the two archive commands above, which is
+      # only worth anything if it actually landed in the shipped bundles — and
+      # the one that matters most is the .appex, since the extension is what
+      # Safari refuses to load below 16.4. Command-line settings apply to every
+      # target in the build, so this reads the archives back and proves it,
+      # rather than trusting that they did. A missing key or a path change that
+      # finds nothing is a failure too: a gate that inspects zero files passes
+      # forever and tells you nothing.
+      - name: Assert MV3 deployment floor
+        run: |
+          set -euo pipefail
+
+          # true when A < B, comparing version components numerically.
+          ver_lt() {
+            awk -v a="$1" -v b="$2" 'BEGIN {
+              split(a, x, "."); split(b, y, ".")
+              for (i = 1; i <= 3; i++) {
+                xi = (x[i] == "" ? 0 : x[i] + 0); yi = (y[i] == "" ? 0 : y[i] + 0)
+                if (xi < yi) exit 0
+                if (xi > yi) exit 1
+              }
+              exit 1
+            }'
+          }
+
+          fail=0
+          checked=0
+          check_archive() {
+            archive="$1"; key="$2"; floor="$3"
+            while IFS= read -r -d '' plist; do
+              value=$(/usr/libexec/PlistBuddy -c "Print :${key}" "$plist" 2>/dev/null || true)
+              [ -n "$value" ] || continue
+              checked=$((checked + 1))
+              bundle=${plist#"${archive}/Products/"}
+              if ver_lt "$value" "$floor"; then
+                echo "::error::${bundle} declares ${key} ${value}, below the MV3 floor ${floor}"
+                fail=1
+              else
+                echo "ok: ${bundle} ${key}=${value} (floor ${floor})"
+              fi
+            done < <(find "${archive}/Products" -name Info.plist -print0)
+          }
+
+          check_archive "SafariExtProject/${{ env.APP_NAME }}-ios.xcarchive" \
+            MinimumOSVersion "${IOS_DEPLOYMENT_FLOOR}"
+          check_archive "SafariExtProject/${{ env.APP_NAME }}-macos.xcarchive" \
+            LSMinimumSystemVersion "${MACOS_DEPLOYMENT_FLOOR}"
+
+          if [ "$checked" -eq 0 ]; then
+            echo "::error::No archived Info.plist declared a deployment target — the floor gate inspected nothing."
+            exit 1
+          fi
+          echo "Checked ${checked} bundle(s) against the MV3 deployment floor."
+          exit "$fail"
 
       - name: Write exportOptions (macOS)
         run: |
