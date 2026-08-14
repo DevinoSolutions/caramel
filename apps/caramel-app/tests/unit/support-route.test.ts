@@ -98,6 +98,31 @@ describe('POST /api/support — support/feedback flow', () => {
         expect(sendEmailMock).toHaveBeenCalledTimes(1)
     })
 
+    it('sends BOTH a rendered html part and the plain-text part, carrying the same report', async () => {
+        // The bug this pins: the route used to pass `text` only, and email.ts
+        // dropped that raw text into the html body — so the operator's copy
+        // arrived as one unstyled run-on wall with every newline collapsed.
+        // Deleting the html argument here is the edit that reinstates it.
+        await POST(supportRequest(validBody({ message: 'line one\nline two' })))
+
+        const payload = sendEmailMock.mock.calls[0]![0] as {
+            html?: string
+            text?: string
+        }
+
+        expect(payload.html).toBeTruthy()
+        expect(payload.text).toBeTruthy()
+        expect(payload.html).not.toBe(payload.text)
+        // The html is real markup on the shared Caramel layout...
+        expect(payload.html).toContain('<table')
+        expect(payload.html).toContain('#fdf8f5')
+        expect(payload.html).toContain('<br')
+        // ...and the text part stays the plain triage dump it always was.
+        expect(payload.text).toContain('Feedback ID:')
+        expect(payload.text).toContain('line one\nline two')
+        expect(payload.text).not.toContain('<table')
+    })
+
     it('authenticated submit uses the SESSION user_id + email and IGNORES client-supplied identity', async () => {
         getSessionMock.mockResolvedValue({
             user: { id: 'user-1', email: 'real@user.com' },
