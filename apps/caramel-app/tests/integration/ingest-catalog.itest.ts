@@ -97,6 +97,89 @@ describe('applyCatalogRows — only-if-newer (real pg :58005)', () => {
     })
 })
 
+describe('applyCatalogRows — a partial store_config never deletes a selector', () => {
+    // The producer's served rows are SPARSE (measured 2026-08-14 over 2,132 stores:
+    // dismiss_button_xpath null on 97.8%, show_input_xpath on 74.6%), and the schema
+    // explicitly allows "a producer may push a partial config (only the fields it
+    // re-derived)". The upsert used to write every column verbatim, so those absent
+    // fields DELETED what this table was serving — 8 domains lost a field that day,
+    // and nothing else writes this table, so the value never came back.
+    const store = 'itest-null-preserve.example'
+
+    it('leaves a column alone when the push omits it, and clears it only on an explicit empty string', async () => {
+        // Full config first.
+        const r1 = await applyCatalogRows({
+            coupons: [],
+            sources: [],
+            force: false,
+            storeConfigs: [
+                {
+                    store_name: store,
+                    coupon_input_xpath: 'input#code',
+                    apply_button_xpath: 'button#apply',
+                    show_input_xpath: 'a#reveal',
+                    price_container_xpath: '.total',
+                    updated_at: new Date('2026-07-14T12:00:00.000Z'),
+                },
+            ],
+        })
+        expect(r1.gated).toBe(false)
+
+        // A later, PARTIAL push: it re-derived the two required selectors and has no
+        // opinion on the rest. The omitted columns must survive.
+        const r2 = await applyCatalogRows({
+            coupons: [],
+            sources: [],
+            force: false,
+            storeConfigs: [
+                {
+                    store_name: store,
+                    coupon_input_xpath: 'input#code-v2',
+                    apply_button_xpath: 'button#apply',
+                    updated_at: new Date('2026-07-14T18:00:00.000Z'),
+                },
+            ],
+        })
+        expect(r2.gated).toBe(false)
+
+        const kept = await prisma.storeConfig.findUnique({
+            where: { storeName: store },
+        })
+        expect(kept?.couponInputXpath).toBe('input#code-v2') // re-derived → applied
+        expect(kept?.showInputXpath).toBe('a#reveal') // omitted → PRESERVED
+        expect(kept?.priceContainerXpath).toBe('.total') // omitted → PRESERVED
+
+        // Deleting is still possible, but it has to be SAID: '' is the tombstone.
+        const r3 = await applyCatalogRows({
+            coupons: [],
+            sources: [],
+            force: false,
+            storeConfigs: [
+                {
+                    store_name: store,
+                    coupon_input_xpath: 'input#code-v2',
+                    apply_button_xpath: 'button#apply',
+                    show_input_xpath: '',
+                    updated_at: new Date('2026-07-15T00:00:00.000Z'),
+                },
+            ],
+        })
+        expect(r3.gated).toBe(false)
+
+        const cleared = await prisma.storeConfig.findUnique({
+            where: { storeName: store },
+        })
+        expect(cleared?.showInputXpath).toBeNull() // explicit '' → cleared
+        expect(cleared?.priceContainerXpath).toBe('.total') // still untouched
+    })
+
+    afterEach(async () => {
+        await prisma.storeConfig.deleteMany({
+            where: { storeName: { startsWith: 'itest-' } },
+        })
+    })
+})
+
 describe('applyCatalogRows — >20% tombstone force-gate', () => {
     it('refuses a >20% tombstoning push without force, applies it with force', async () => {
         // M = before + 3 visible test coupons guarantees expiring all of them

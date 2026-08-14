@@ -184,6 +184,51 @@ function pgTextArray(values: readonly string[]): Prisma.Sql {
  * `WHERE excluded.updated_at >= …` guard still prevents a concurrent write from
  * being clobbered by an older one regardless.
  */
+/**
+ * The eight extension-consumed selector columns, in the order the upsert writes them.
+ */
+const SELECTOR_COLUMNS = [
+    'show_input_xpath',
+    'dismiss_button_xpath',
+    'coupon_input_xpath',
+    'apply_button_xpath',
+    'price_container_xpath',
+    'success_indicator_xpath',
+    'error_indicator_xpath',
+    'coupon_remove_xpath',
+] as const
+
+/**
+ * `ON CONFLICT` assignments for the selector columns, where **absent means "no opinion",
+ * not "delete"**.
+ *
+ * These used to be a plain `col = excluded.col`, which made a push authoritative for every
+ * column including the ones the producer knows nothing about. The producer's served rows are
+ * SPARSE — measured 2026-08-14 over 2,132 stores: `dismiss_button_xpath` is null on 97.8% of
+ * them, `show_input_xpath` on 74.6%, `price_container_xpath` on 18.2% — so a routine sync
+ * silently DELETED values this table was serving. Eight domains lost a field that day
+ * (mikasa.com, oralb.com, plae.co, simpli-home.com, thegldshop.com, theoutnet.com,
+ * uspoloassn.com, venus.com); four of them because a freshly discovered config with fewer
+ * populated fields became the producer's served row. Nothing else writes this table, so a
+ * dropped value never came back on its own.
+ *
+ * A NULL is therefore treated as "I have no value for this field" and leaves the stored value
+ * alone. Deleting a selector is still possible, but it must be SAID rather than implied: the
+ * empty string is an explicit tombstone and clears the column. Plain COALESCE was rejected for
+ * exactly that reason — it would have made a wrong selector unremovable by any push.
+ *
+ * Column names come from the const array above, never from input, so `Prisma.raw` is safe here.
+ */
+const SELECTOR_UPSERT_ASSIGNMENTS = Prisma.raw(
+    SELECTOR_COLUMNS.map(
+        col =>
+            `${col} = CASE` +
+            ` WHEN excluded.${col} IS NULL THEN store_configs.${col}` +
+            ` WHEN excluded.${col} = '' THEN NULL` +
+            ` ELSE excluded.${col} END`,
+    ).join(', '),
+)
+
 export async function applyCatalogRows(
     payload: IngestCatalogPayload,
 ): Promise<ApplyResult> {
@@ -337,14 +382,7 @@ export async function applyCatalogRows(
                             INSERT INTO store_configs (store_name, show_input_xpath, dismiss_button_xpath, coupon_input_xpath, apply_button_xpath, price_container_xpath, success_indicator_xpath, error_indicator_xpath, coupon_remove_xpath, created_at, updated_at)
                             VALUES ${Prisma.join(tuples)}
                             ON CONFLICT (store_name) DO UPDATE SET
-                                show_input_xpath = excluded.show_input_xpath,
-                                dismiss_button_xpath = excluded.dismiss_button_xpath,
-                                coupon_input_xpath = excluded.coupon_input_xpath,
-                                apply_button_xpath = excluded.apply_button_xpath,
-                                price_container_xpath = excluded.price_container_xpath,
-                                success_indicator_xpath = excluded.success_indicator_xpath,
-                                error_indicator_xpath = excluded.error_indicator_xpath,
-                                coupon_remove_xpath = excluded.coupon_remove_xpath,
+                                ${SELECTOR_UPSERT_ASSIGNMENTS},
                                 updated_at = excluded.updated_at
                             WHERE excluded.updated_at >= store_configs.updated_at
                         `,
