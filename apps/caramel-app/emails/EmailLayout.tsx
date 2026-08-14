@@ -25,11 +25,18 @@ export const brand = {
 interface EmailLayoutProps {
     children: React.ReactNode
     previewText?: string
+    /** Replaces the default "do not reply" footer line.
+     *
+     * The default is correct for the automated mail this layout was built for,
+     * but the support notification sets `replyTo` to the CUSTOMER — telling the
+     * operator not to reply would be the opposite of what they should do. */
+    footerNote?: string
 }
 
 export default function EmailLayout({
     children,
     previewText,
+    footerNote,
 }: EmailLayoutProps) {
     return (
         <div
@@ -213,14 +220,21 @@ export default function EmailLayout({
                                                                         '18px',
                                                                 }}
                                                             >
-                                                                This is an
-                                                                automated
-                                                                message from{' '}
-                                                                <strong>
-                                                                    no_reply@grabcaramel.com
-                                                                </strong>
-                                                                . Please do not
-                                                                reply.
+                                                                {footerNote ?? (
+                                                                    <>
+                                                                        This is
+                                                                        an
+                                                                        automated
+                                                                        message
+                                                                        from{' '}
+                                                                        <strong>
+                                                                            no_reply@grabcaramel.com
+                                                                        </strong>
+                                                                        . Please
+                                                                        do not
+                                                                        reply.
+                                                                    </>
+                                                                )}
                                                             </p>
                                                             <p
                                                                 style={{

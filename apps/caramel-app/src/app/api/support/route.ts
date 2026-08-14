@@ -13,6 +13,7 @@
 // capture a first-class `support_request_submitted` event instead of survey
 // responses. If a survey is created later, a `POSTHOG_SUPPORT_SURVEY_ID` env
 // var could route submissions to it — do NOT invent an id before one exists.
+import SupportNotificationTemplate from '@/emails/SupportNotificationTemplate'
 import { APP_ID } from '@/lib/analytics/posthogDataset'
 import { captureServerEvent } from '@/lib/analytics/posthogServer'
 import { withRoute } from '@/lib/api/withRoute'
@@ -20,6 +21,7 @@ import { auth } from '@/lib/auth/auth'
 import { sendEmail } from '@/lib/email'
 import { env } from '@/lib/env'
 import { APP_VERSION } from '@/lib/env.client'
+import { render } from '@react-email/render'
 import * as Sentry from '@sentry/nextjs'
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
@@ -77,6 +79,18 @@ const SupportBodySchema = z
 
 type SupportBody = z.infer<typeof SupportBodySchema>
 
+/** The Sentry issue-search URL for an event id, or undefined when there is none.
+ *
+ * Org slug 'devino' is the real, known Sentry org (next.config.mjs). Shared by
+ * both body parts so the text and the HTML can never link to different places.
+ */
+function sentryIssueUrl(sentryEventId: string | undefined): string | undefined {
+    if (!sentryEventId) return undefined
+    return `https://devino.sentry.io/organizations/devino/issues/?query=${encodeURIComponent(
+        sentryEventId,
+    )}`
+}
+
 /** Plain-text support email body — every field an operator needs to triage. */
 function buildEmailText(input: {
     body: SupportBody
@@ -104,17 +118,46 @@ function buildEmailText(input: {
         `PostHog session: ${body.posthog_session_id ?? '(none)'}`,
         `PostHog distinct id: ${body.posthog_distinct_id ?? '(none)'}`,
     ]
-    if (body.sentry_event_id) {
+    const sentryUrl = sentryIssueUrl(body.sentry_event_id)
+    if (body.sentry_event_id && sentryUrl) {
         lines.push(`Sentry event id: ${body.sentry_event_id}`)
-        // Org slug 'devino' is the real, known Sentry org (next.config.mjs);
-        // this searches issues by the event id.
-        lines.push(
-            `Sentry: https://devino.sentry.io/organizations/devino/issues/?query=${encodeURIComponent(
-                body.sentry_event_id,
-            )}`,
-        )
+        lines.push(`Sentry: ${sentryUrl}`)
     }
     return lines.join('\n')
+}
+
+/** The HTML part — the same fields, structured, on the shared Caramel layout.
+ *
+ * Deliberately NOT given a PostHog replay link: a replay URL needs the project
+ * id, and no env in this app carries one (only the E2E test project has an id,
+ * and that is a different project). The session and distinct ids are rendered
+ * as selectable text instead — a guessed URL that 404s is worse than an id the
+ * operator can paste.
+ */
+async function buildEmailHtml(input: {
+    body: SupportBody
+    userId: string | undefined
+    environment: string
+}): Promise<string> {
+    const { body, userId, environment } = input
+    return render(
+        SupportNotificationTemplate({
+            feedbackId: body.feedback_id,
+            feedbackType: body.feedback_type,
+            wantsReply: body.wants_reply,
+            message: body.message,
+            expectedOutcome: body.expected_outcome,
+            appLabel: `${APP_ID} v${APP_VERSION}`,
+            environment,
+            platform: 'web',
+            route: body.route ?? '(unknown)',
+            userLabel: userId ?? 'anonymous',
+            posthogSessionId: body.posthog_session_id,
+            posthogDistinctId: body.posthog_distinct_id,
+            sentryEventId: body.sentry_event_id,
+            sentryUrl: sentryIssueUrl(body.sentry_event_id),
+        }),
+    )
 }
 
 export const POST = withRoute(
@@ -194,6 +237,10 @@ export const POST = withRoute(
                 await sendEmail({
                     to: supportTo,
                     subject: `[Caramel support] ${body.feedback_type} — ${body.feedback_id}`,
+                    // Both parts, from the same submission: the designed HTML
+                    // the operator reads, and the plain text as the real text
+                    // alternative (it used to be BOTH, which is the bug).
+                    html: await buildEmailHtml({ body, userId, environment }),
                     text: buildEmailText({ body, userId, environment }),
                     // replyTo = the customer, ONLY when they want a reply; never
                     // the from/sender.
