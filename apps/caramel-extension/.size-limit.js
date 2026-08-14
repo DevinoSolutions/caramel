@@ -49,7 +49,12 @@ module.exports = [
         // popup-core.js and every render moved to the React popup (its own
         // budget below) — what remains is the pinned logic, measured 5.67 kB.
         // A ratchet locks wins in, not just losses out.
-        limit: '6.5 KB',
+        // 2026-08-14, raised 6.5 -> 9.6 kB: the Safari OAuth poll client came
+        // back (tab + nonce flow, the poll loop, the pending-nonce resume —
+        // Safari has no launchWebAuthFlow, so this is the only in-popup
+        // sign-in it has). Real behaviour, measured 8.71 kB. This is the raise
+        // the header sanctions: a whole flow arrived, not prose.
+        limit: '9.6 KB',
         brotli: false,
     },
     {

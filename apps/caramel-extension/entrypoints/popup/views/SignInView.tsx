@@ -4,8 +4,9 @@ import {
     afterLoginSuccess,
     caramelUrl,
     openWebsiteSignIn,
-    popupOAuthSupported,
+    runSafariSocialSignIn,
     runSocialSignIn,
+    signInStrategy,
 } from '../../../popup-core.js'
 import type { AppApi } from '../types'
 
@@ -13,11 +14,17 @@ import type { AppApi } from '../types'
  * The sign-in prompt (P2 React successor to popup.js renderSignInPrompt):
  * social providers, then email/password, then the sign-up and back links.
  *
- * The OAuth WIRE lives in popup-core's runSocialSignIn — every URL, body and
- * message string there is pinned. This view owns only the UI half of that
- * contract: both providers disable together (only one launchWebAuthFlow can be
- * in flight, so the other really is unavailable), the clicked one reads
- * 'Redirecting...', and onError restores both.
+ * The OAuth WIRE lives in popup-core — every URL, body and message string there
+ * is pinned. This view owns only the UI half of that contract: both providers
+ * disable together (only one sign-in can be in flight, so the other really is
+ * unavailable), the clicked one reads 'Redirecting...', and onError restores
+ * both.
+ *
+ * WHICH wire runs is popup-core's signInStrategy(), and all three branches are
+ * live: 'identity' (Chrome/Edge, launchWebAuthFlow in-popup), 'safari-poll'
+ * (Safari, the tab + nonce poll shim — Safari has no launchWebAuthFlow), and
+ * 'website' (Firefox, which ships no identity permission by design). Collapsing
+ * Safari back into 'website' is the regression popup-oauth-safari-poll guards.
  *
  * Email login has no popup-core seam on purpose — it is a plain form POST with
  * no browser-API choreography to extract. Its copy is frozen by
@@ -38,26 +45,39 @@ export function SignInView({ api }: { api: AppApi }) {
     const [revealed, setRevealed] = useState(false)
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
+    // Safari's flow continues in another tab, so it has something to SAY while
+    // it waits. The other two strategies never set this.
+    const [notice, setNotice] = useState('')
 
     // Read at paint AND again at click: the note explains the fallback the
     // buttons will actually take.
-    const oauthSupported = popupOAuthSupported()
+    const strategy = signInStrategy()
 
     const signInWith = (provider: Provider) => {
-        if (!popupOAuthSupported()) {
+        // Firefox: no in-popup OAuth at all, and no poll shim either — the
+        // website relay is the whole flow, so there is no wire to run.
+        if (signInStrategy() === 'website') {
             openWebsiteSignIn()
             return
         }
-        void runSocialSignIn(provider, {
+        const ui = {
             onPending: () => {
                 setPending(provider)
                 setError('')
+                setNotice('')
             },
             onError: (message: string) => {
                 setPending(null)
                 setError(message)
+                setNotice('')
             },
-        })
+            onNotice: (message: string) => setNotice(message),
+        }
+        // Safari cannot capture an OAuth redirect (no launchWebAuthFlow), so it
+        // takes the tab + nonce poll shim instead of the identity wire.
+        void (signInStrategy() === 'safari-poll'
+            ? runSafariSocialSignIn(provider, ui)
+            : runSocialSignIn(provider, ui))
     }
 
     const handleEmailLogin = async (event: FormEvent<HTMLFormElement>) => {
@@ -166,10 +186,18 @@ export function SignInView({ api }: { api: AppApi }) {
                 </button>
             </div>
 
-            {!oauthSupported && (
+            {strategy === 'website' && (
                 <p className="oauth-note">
                     Sign-in opens grabcaramel.com; the extension picks it up
                     automatically.
+                </p>
+            )}
+
+            {/* Safari's flow leaves the popup; role=status so a screen reader
+                hears where the sign-in went. */}
+            {notice && (
+                <p className="oauth-note" role="status">
+                    {notice}
                 </p>
             )}
 

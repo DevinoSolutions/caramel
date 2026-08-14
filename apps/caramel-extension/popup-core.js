@@ -561,6 +561,238 @@ export function openWebsiteSignIn() {
 }
 
 /* ------------------------------------------------------------ */
+/*  Safari OAuth: tab + nonce polling                           */
+/* ------------------------------------------------------------ */
+/* Safari ships no identity.launchWebAuthFlow, so it cannot capture an OAuth
+ * redirect the way Chrome does. The shipped 1.3.x Safari build compensated with
+ * a poll shim: hand /authorize a one-shot nonce, let the provider come back to
+ * OUR /redirect, which finishes the exchange server-side and stashes the result
+ * under that nonce, and poll /poll until the session token appears.
+ *
+ * The server half of that shim is live and PINNED by the app suite
+ * (apps/caramel-app/tests/unit/extension-oauth-safari-poll-shim.test.ts, whose
+ * header is the wire contract). The client half was lost in the pre-WXT popup
+ * rewrite, which is how in-popup OAuth silently disappeared from Safari with
+ * every gate green — this is that client, ported from popup.js at d86c244 (the
+ * 2026-04-29 store build) rather than reinvented, so the two halves still
+ * describe the same protocol. It keeps the shipped codes and timings:
+ *   204                -> pending, keep polling
+ *   2xx + {token}      -> done
+ *   2xx without token  -> 'Empty response from poll'
+ *   anything else      -> the error body's `.error`
+ *
+ * Two deliberate departures from the shipped client, both because the tree
+ * moved under it: the session lands via caramelSetSession (sessions migrated
+ * from storage.sync to storage.local), and a hard failure falls back to
+ * openWebsiteSignIn() instead of leaving the user at an error with no route
+ * out.
+ */
+const SAFARI_OAUTH_TTL_MS = 5 * 60 * 1000 // the server's own nonce TTL
+const SAFARI_OAUTH_POLL_INTERVAL_MS = 2000
+/* A popup that reopens mid-flow polls in the foreground for this long before
+ * telling the user to come back. Not the TTL: the popup must not hang. */
+const SAFARI_OAUTH_RESUME_BUDGET_MS = 30 * 1000
+const SAFARI_OAUTH_PENDING_KEYS = [
+    'pendingOauthNonce',
+    'pendingOauthExpiresAt',
+    'pendingOauthProvider',
+]
+
+/* Which sign-in route this runtime can actually take. Safari is identified by
+ * the scheme of its OWN extension origin, not by the user agent and not at
+ * build time: the Safari artifact IS the chrome-mv3 build put through
+ * safari-web-extension-converter (see release-extension.yml publish_safari), so
+ * every build-time stamp in it still reads "chrome". */
+export function isSafariExtensionRuntime() {
+    const url = currentBrowser.runtime?.getURL?.('')
+    return typeof url === 'string' && url.startsWith('safari-web-extension://')
+}
+
+/**
+ * 'identity'    — Chrome/Edge: launchWebAuthFlow, in-popup, unchanged.
+ * 'safari-poll' — Safari: the tab + nonce poll shim below.
+ * 'website'     — Firefox: no identity permission BY DESIGN (issue #139), and
+ *                 no poll shim either; the website relay stays its route.
+ */
+export function signInStrategy() {
+    if (popupOAuthSupported()) return 'identity'
+    if (isSafariExtensionRuntime()) return 'safari-poll'
+    return 'website'
+}
+
+function safariPendingGet() {
+    return new Promise(resolve => {
+        currentBrowser.storage.local.get(SAFARI_OAUTH_PENDING_KEYS, res =>
+            resolve(res || {}),
+        )
+    })
+}
+
+function safariPendingSet(pending) {
+    return new Promise(resolve => {
+        currentBrowser.storage.local.set(pending, () => resolve())
+    })
+}
+
+function safariPendingClear() {
+    return new Promise(resolve => {
+        currentBrowser.storage.local.remove(SAFARI_OAUTH_PENDING_KEYS, () =>
+            resolve(),
+        )
+    })
+}
+
+/** One /poll hop. A thrown fetch is 'pending', never an error: Safari drops
+ * connections while a tab takes focus, and treating that blip as a failure
+ * would abandon a sign-in that is still perfectly alive server-side. */
+async function pollSafariOauthOnce(nonce) {
+    const pollUrl = `${CARAMEL_ENV.baseUrl}/api/extension/oauth/poll?nonce=${encodeURIComponent(nonce)}`
+    try {
+        const resp = await fetch(pollUrl, { method: 'GET' })
+        if (resp.status === 204) return { status: 'pending' }
+        if (resp.ok) {
+            const data = await resp.json().catch(() => ({}))
+            if (data && data.token) return { status: 'ok', data }
+            return { status: 'error', error: 'Empty response from poll' }
+        }
+        const errorData = await resp.json().catch(() => ({}))
+        return {
+            status: 'error',
+            error: errorData?.error || `Poll failed (${resp.status})`,
+        }
+    } catch {
+        return { status: 'pending' }
+    }
+}
+
+async function pollSafariOauthUntilDone(nonce, deadlineMs) {
+    while (Date.now() < deadlineMs) {
+        const result = await pollSafariOauthOnce(nonce)
+        if (result.status !== 'pending') return result
+        await new Promise(resolve =>
+            setTimeout(resolve, SAFARI_OAUTH_POLL_INTERVAL_MS),
+        )
+    }
+    return { status: 'timeout', error: 'Sign-in timed out. Please try again.' }
+}
+
+function applySafariOauthResult(data) {
+    return new Promise(resolve => {
+        caramelSetSession(
+            {
+                token: data.token,
+                user: { username: data.username, image: data.image },
+            },
+            () => resolve(),
+        )
+    })
+}
+
+/**
+ * The Safari sign-in the provider buttons take. Returns the terminal outcome
+ * so callers and tests can read it; the UI half goes through `ui`.
+ */
+export async function runSafariSocialSignIn(provider, ui = {}) {
+    ui.onPending?.()
+
+    const nonce = crypto.randomUUID()
+    const expiresAt = Date.now() + SAFARI_OAUTH_TTL_MS
+
+    try {
+        const authorizeUrl = `${CARAMEL_ENV.baseUrl}/api/extension/oauth/authorize?provider=${provider}&redirect_uri=${encodeURIComponent(
+            `${CARAMEL_ENV.baseUrl}/api/extension/oauth/redirect`,
+        )}&nonce=${encodeURIComponent(nonce)}`
+
+        const authorizeResponse = await fetch(authorizeUrl, { method: 'GET' })
+        if (!authorizeResponse.ok) {
+            const errorData = await authorizeResponse.json().catch(() => ({}))
+            throw new Error(
+                errorData.error ||
+                    `HTTP ${authorizeResponse.status}: Failed to get OAuth authorization URL`,
+            )
+        }
+        const responseData = await authorizeResponse.json().catch(() => ({}))
+        if (!responseData.authorizationUrl) {
+            throw new Error('Failed to get OAuth authorization URL')
+        }
+
+        /* Persist BEFORE opening the tab. Safari closes the popup when the new
+         * tab takes focus, killing the poll loop below mid-flight — without the
+         * stored nonce the user lands on "You're signed in" and the extension
+         * never learns the token. resumeSafariOauthIfPending() picks it up on
+         * the next popup open. */
+        await safariPendingSet({
+            pendingOauthNonce: nonce,
+            pendingOauthExpiresAt: expiresAt,
+            pendingOauthProvider: provider,
+        })
+
+        currentBrowser.tabs.create({ url: responseData.authorizationUrl })
+        ui.onNotice?.(
+            'Complete sign-in in the new tab. You can close this popup — it picks up the result when you reopen it.',
+        )
+
+        const result = await pollSafariOauthUntilDone(nonce, expiresAt)
+
+        if (result.status === 'ok') {
+            await applySafariOauthResult(result.data)
+            await safariPendingClear()
+            if (CARAMEL_CALLER_ID || document.visibilityState === 'visible') {
+                afterLoginSuccess()
+            }
+            return { status: 'ok' }
+        }
+
+        throw new Error(result.error)
+    } catch (err) {
+        console.error('Safari OAuth error:', err)
+        /* Nothing left to resume: the nonce is spent or dead, so clear it
+         * rather than let the next popup open poll a corpse. */
+        await safariPendingClear()
+        ui.onError?.(`OAuth sign-in failed: ${err.message}`)
+        // Never a dead end — the website relay still signs this user in.
+        openWebsiteSignIn()
+        return { status: 'error', error: err.message }
+    }
+}
+
+/**
+ * Called at popup boot. Resolves the sign-in the user finished in a tab while
+ * this popup was closed. A no-op with nothing pending, which is every runtime
+ * but Safari — only runSafariSocialSignIn ever writes these keys.
+ *
+ * 'pending' deliberately KEEPS the stored nonce: the flow is still alive
+ * server-side until the TTL, and the next popup open resumes it.
+ */
+export async function resumeSafariOauthIfPending() {
+    const stored = await safariPendingGet()
+    const nonce = stored.pendingOauthNonce
+    const expiresAt = stored.pendingOauthExpiresAt
+    if (!nonce) return { status: 'idle' }
+
+    if (!expiresAt || Date.now() > expiresAt) {
+        await safariPendingClear()
+        return { status: 'expired' }
+    }
+
+    const deadline = Math.min(
+        expiresAt,
+        Date.now() + SAFARI_OAUTH_RESUME_BUDGET_MS,
+    )
+    const result = await pollSafariOauthUntilDone(nonce, deadline)
+
+    if (result.status === 'ok') {
+        await applySafariOauthResult(result.data)
+        await safariPendingClear()
+        return { status: 'ok' }
+    }
+    if (result.status === 'timeout') return { status: 'pending' }
+
+    await safariPendingClear()
+    return { status: 'error', error: result.error }
+}
+
+/* ------------------------------------------------------------ */
 /*  Coupon list constants (data half — the views render them)   */
 /* ------------------------------------------------------------ */
 /* Identity of a coupon ACROSS requests, for the append dedupe.
