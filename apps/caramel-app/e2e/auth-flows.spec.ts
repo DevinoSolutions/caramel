@@ -189,17 +189,33 @@ test.describe('Auth Flows — Signup', () => {
             }),
         )
 
-        await page
-            .getByRole('button', { name: 'Create account', exact: true })
-            .click()
+        // Click-until-the-POST-fires, because the budget-bump lineage below
+        // never addressed the actual failure: on a cold deployed /signup the
+        // click can land BEFORE React hydration attaches the submit handler,
+        // so the click is silently swallowed, the request never leaves, and no
+        // navigation timeout — 10s (flaky 2026-08-09), 30s + test.slow()
+        // (flaky 2026-08-10 and twice on 2026-08-15) — can rescue a click
+        // that did nothing. Each attempt re-clicks and gives the mocked POST
+        // 3s to appear; a swallowed pre-hydration click just retries.
+        await expect(async () => {
+            const signupRequest = page.waitForRequest(
+                '**/api/auth/sign-up/email',
+                { timeout: 3000 },
+            )
+            await page
+                .getByRole('button', { name: 'Create account', exact: true })
+                .click()
+            await signupRequest
+        }).toPass({ timeout: 30000 })
 
-        // Uses window.location.href so wait for navigation. 30s, not 10s:
-        // against the DEPLOYED site this waits for /verify's full `load` event
-        // on a cold first attempt (fonts, analytics), and 10s made this the
-        // suite's one flaky test twice in a row on 2026-08-09 — while a live
-        // measurement put the signup POST itself at 0.8s, so the app is fast
-        // and the old budget was simply tighter than a cold page load.
-        await page.waitForURL('**/verify?signup=success', { timeout: 30000 })
+        // `commit`, not `load`: the redirect goes through window.location.href
+        // and the claim under test is "the app navigated to /verify" — the
+        // full `load` event additionally waits for the deployed site's fonts
+        // and analytics, which is the other half of the old flakiness.
+        await page.waitForURL('**/verify?signup=success', {
+            timeout: 30000,
+            waitUntil: 'commit',
+        })
     })
 
     test('signup with existing email shows error toast', async ({ page }) => {
@@ -221,16 +237,24 @@ test.describe('Auth Flows — Signup', () => {
             }),
         )
 
-        await page
-            .getByRole('button', { name: 'Create account', exact: true })
-            .click()
+        // Same click-until-the-POST-fires shape as the redirect test above,
+        // and for the same reason: a pre-hydration click is swallowed
+        // silently, and the toast this test waits for can only appear after
+        // the (mocked) 422 actually round-trips. Flaky at 5s on 2026-08-09,
+        // and again at 15s on 2026-08-15 — the budget was never the problem.
+        await expect(async () => {
+            const signupRequest = page.waitForRequest(
+                '**/api/auth/sign-up/email',
+                { timeout: 3000 },
+            )
+            await page
+                .getByRole('button', { name: 'Create account', exact: true })
+                .click()
+            await signupRequest
+        }).toPass({ timeout: 30000 })
 
-        // 15s, not 5s: the response is mocked (fulfilled 422 above), so this
-        // only measures the client rendering the toast — but on the deployed
-        // site a cold /signup load can still be hydrating when the click
-        // lands, and 5s went flaky on 2026-08-09 (failOnFlakyTests turns one
-        // slow retry into a red gate). Same budget rationale as the
-        // signup-success redirect above.
+        // The response is mocked (fulfilled 422 above), so once the request
+        // has fired this only measures the client rendering the toast.
         await expect(
             page.getByText(/unable to create your account/i),
         ).toBeVisible({ timeout: 15000 })
