@@ -74,8 +74,9 @@ Response shape:
 
 The `catalog` check is `ok` iff the aggregate query succeeds AND the catalog is
 NON-EMPTY (`count > 0`); its `details` is the structured freshness object above
-(or the raw error string on an unexpected throw). `stale` (newest row older than
-48h) is observability only — it NEVER flips the check to error.
+(or the raw error string on an unexpected throw). `stale` (newest row older
+than 48h by default, tunable per deploy via `CATALOG_MAX_AGE_HOURS`) is
+observability only — it NEVER flips the check to error.
 
 HTTP status: `200` iff **both** checks are `"ok"`; `503` if **either** is
 down; `401` unauthenticated. The monitor's contract (HTTP status code +
@@ -272,8 +273,9 @@ mass-expiry is legitimate (e.g. a genuine large delisting), then re-runs with
 
 **Catalog freshness.** Check it any time via `GET /api/health/db` — the
 `catalog` check's `details` carries `{count, freshestUpdatedAt, ageMinutes,
-stale}`. `stale: true` (newest row older than 48h) is observability only; it
-never fails the check. Only an empty or unreachable catalog is a `503`.
+stale}`. `stale: true` (newest row older than 48h by default, tunable per
+deploy via `CATALOG_MAX_AGE_HOURS`) is observability only; it never fails the
+check. Only an empty or unreachable catalog is a `503`.
 
 ## Post-deploy smoke check
 

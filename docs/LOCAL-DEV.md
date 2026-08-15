@@ -120,9 +120,9 @@ pre-inversion "degraded mode" is retired:
 - `GET /api/health/db` (with `Authorization: Bearer $UPKUMA_HEALTH_SECRET`) →
   `200`, with `checks.auth_db.status: "ok"` and `checks.catalog.status: "ok"`.
   The `catalog` check reports `{count, freshestUpdatedAt, ageMinutes, stale}`;
-  the seeded rows age past the 48h window over time, so `stale: true` is normal
-  locally and never fails the check (only an empty or unreachable catalog is a
-  `503`).
+  the seeded rows age past the 48h (default, `CATALOG_MAX_AGE_HOURS`) window
+  over time, so `stale: true` is normal locally and never fails the check (only
+  an empty or unreachable catalog is a `503`).
 - Any coupon-facing route (`GET /api/coupons`, `/api/coupons/stores`,
   `/api/coupons/filters`, `/api/extension/supported-stores`, the
   `/coupons/[store]` marketing page, …) → `200`, serving the seeded catalog.
