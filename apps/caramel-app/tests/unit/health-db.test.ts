@@ -38,6 +38,10 @@ vi.mock('@/lib/prisma', () => ({
 const { envMock } = vi.hoisted(() => ({
     envMock: {
         UPKUMA_HEALTH_SECRET: 'test-health-secret' as string | undefined,
+        // route.ts reads this at module load to build
+        // CATALOG_STALE_THRESHOLD_MS — omitting it here would make that
+        // constant NaN and silently break every staleness assertion below.
+        CATALOG_MAX_AGE_HOURS: 48,
     },
 }))
 vi.mock('@/lib/env', () => ({ env: envMock }))

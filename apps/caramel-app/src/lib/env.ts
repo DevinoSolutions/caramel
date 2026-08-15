@@ -36,6 +36,12 @@ const serverObjectSchema = z.object({
     COUPONS_DATABASE_URL: z.string().min(1).optional(),
     BETTER_AUTH_URL: z.string().min(1).optional(),
     BCRYPT_SALT_ROUNDS: z.coerce.number().int().positive().default(10),
+    // Catalog freshness window read by GET /api/health/db's checkCatalog
+    // (hours, not ms — an ops-facing knob should be set in a unit a human
+    // reaches for). Staleness alone never fails the health check; this only
+    // tunes when `details.stale` flips true. Default (48h) matches the
+    // previously-hardcoded CATALOG_STALE_THRESHOLD_MS.
+    CATALOG_MAX_AGE_HOURS: z.coerce.number().int().positive().default(48),
     GOOGLE_CLIENT_ID: z.string().optional(),
     GOOGLE_CLIENT_SECRET: z.string().optional(),
     APPLE_CLIENT_ID: z.string().optional(),

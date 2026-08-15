@@ -1,3 +1,4 @@
+import { env } from '@/lib/env'
 import { authorize, timedCheck } from '@/lib/health'
 import prisma from '@/lib/prisma'
 import { type NextRequest, NextResponse } from 'next/server'
@@ -6,9 +7,9 @@ import { type NextRequest, NextResponse } from 'next/server'
 // reported `stale: true` in the details, but staleness ALONE never fails the
 // check (see checkCatalog): the migrated+seeded catalog legitimately ages past
 // this in CI/local, and real bridge-sync lag must not 503-flap the gate.
-// TODO: expose as a zod-validated CATALOG_MAX_AGE env var (src/lib/env.ts) if
-// ops ever wants per-deploy tuning of the staleness window.
-const CATALOG_STALE_THRESHOLD_MS = 48 * 60 * 60 * 1000 // 48h
+// Tunable per-deploy via CATALOG_MAX_AGE_HOURS (src/lib/env.ts, defaults to
+// 48h — the value this constant used to hardcode).
+const CATALOG_STALE_THRESHOLD_MS = env.CATALOG_MAX_AGE_HOURS * 60 * 60 * 1000
 
 interface CatalogDetails {
     count: number
