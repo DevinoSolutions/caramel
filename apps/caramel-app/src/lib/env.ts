@@ -101,6 +101,15 @@ const serverObjectSchema = z.object({
     POSTHOG_DATASET: z
         .enum(['production', 'e2e', 'disabled'])
         .default('disabled'),
+    // Browser URL of THIS deploy's PostHog project UI, project id included
+    // (e.g. "https://posthog.example.com/project/123"). Used ONLY to build the
+    // operator-facing deep link in support emails (the support_request_submitted
+    // event filtered by feedback_id — src/lib/analytics/posthogLinks.ts).
+    // Distinct from NEXT_PUBLIC_POSTHOG_HOST, which is the ingestion endpoint
+    // and carries no project id — the reason the email previously had no link.
+    // Unset → support emails simply carry no PostHog link. The real value lives
+    // in the deploy env, not in this public repo.
+    POSTHOG_PROJECT_UI_URL: z.string().optional(),
 })
 
 const serverSchema = serverObjectSchema.refine(

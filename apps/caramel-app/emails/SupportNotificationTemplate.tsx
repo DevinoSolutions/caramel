@@ -28,6 +28,8 @@ export interface SupportNotificationProps {
     userLabel: string
     posthogSessionId?: string
     posthogDistinctId?: string
+    /** Deep link to THIS submission's support_request_submitted event. */
+    posthogUrl?: string
     sentryEventId?: string
     sentryUrl?: string
 }
@@ -110,6 +112,7 @@ export default function SupportNotificationTemplate(
         userLabel,
         posthogSessionId,
         posthogDistinctId,
+        posthogUrl,
         sentryEventId,
         sentryUrl,
     } = props
@@ -187,6 +190,17 @@ export default function SupportNotificationTemplate(
                 <>
                     <p style={sectionLabel}>Expected outcome</p>
                     <div style={panel}>{renderMessage(expectedOutcome)}</div>
+                </>
+            ) : null}
+
+            {posthogUrl ? (
+                <>
+                    <p style={sectionLabel}>Analytics</p>
+                    <p style={{ ...text.body, margin: '0 0 24px' }}>
+                        <a href={posthogUrl} style={text.link}>
+                            Open this feedback event in PostHog
+                        </a>
+                    </p>
                 </>
             ) : null}
 

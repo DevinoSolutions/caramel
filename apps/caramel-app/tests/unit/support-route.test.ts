@@ -129,6 +129,61 @@ describe('POST /api/support — support/feedback flow', () => {
         expect(parseRecipientList('')).toEqual([])
     })
 
+    it('no POSTHOG_PROJECT_UI_URL configured → NEITHER part carries a PostHog link', async () => {
+        // A guessed URL that 404s is worse than no link — absence must be
+        // graceful, not a broken href.
+        await POST(supportRequest(validBody()))
+
+        const payload = sendEmailMock.mock.calls[0]![0] as {
+            html: string
+            text: string
+        }
+        expect(payload.text).not.toContain('PostHog event:')
+        expect(payload.html).not.toContain('activity/explore')
+        expect(payload.html).not.toContain('Open this feedback event')
+    })
+
+    it('POSTHOG_PROJECT_UI_URL configured → BOTH parts carry the SAME deep link to THIS feedback event', async () => {
+        // env is parsed at module load, so re-evaluate the route against the
+        // stubbed process.env; the hoisted mocks (shared instances) still
+        // intercept the fresh module graph.
+        vi.stubEnv(
+            'POSTHOG_PROJECT_UI_URL',
+            'https://posthog.example.com/project/123',
+        )
+        vi.resetModules()
+        try {
+            const { POST: postWithLink } = await import(
+                '@/app/api/support/route'
+            )
+            const res = await postWithLink(supportRequest(validBody()))
+            expect(res.status).toBe(200)
+
+            const payload = sendEmailMock.mock.calls[0]![0] as {
+                html: string
+                text: string
+            }
+            const textUrl = payload.text
+                .split('PostHog event: ')[1]
+                ?.split('\n')[0]
+            expect(textUrl).toBeTruthy()
+            // The link targets the configured project's activity explorer,
+            // filtered on THIS submission's feedback_id.
+            expect(
+                textUrl!.startsWith(
+                    'https://posthog.example.com/project/123/activity/explore#q=',
+                ),
+            ).toBe(true)
+            expect(textUrl).toContain(FEEDBACK_ID)
+            // The html href is the IDENTICAL url — the two bodies can never
+            // point an operator at different places.
+            expect(payload.html).toContain(`href="${textUrl}"`)
+        } finally {
+            vi.unstubAllEnvs()
+            vi.resetModules()
+        }
+    })
+
     it('sends BOTH a rendered html part and the plain-text part, carrying the same report', async () => {
         // The bug this pins: the route used to pass `text` only, and email.ts
         // dropped that raw text into the html body — so the operator's copy

@@ -15,6 +15,7 @@
 // var could route submissions to it — do NOT invent an id before one exists.
 import SupportNotificationTemplate from '@/emails/SupportNotificationTemplate'
 import { APP_ID } from '@/lib/analytics/posthogDataset'
+import { posthogSupportEventUrl } from '@/lib/analytics/posthogLinks'
 import { captureServerEvent } from '@/lib/analytics/posthogServer'
 import { withRoute } from '@/lib/api/withRoute'
 import { auth } from '@/lib/auth/auth'
@@ -118,6 +119,15 @@ function buildEmailText(input: {
         `PostHog session: ${body.posthog_session_id ?? '(none)'}`,
         `PostHog distinct id: ${body.posthog_distinct_id ?? '(none)'}`,
     ]
+    // Same builder as the HTML part, so the two bodies can never link to
+    // different places; absent when no project UI URL is configured.
+    const posthogUrl = posthogSupportEventUrl(
+        body.feedback_id,
+        env.POSTHOG_PROJECT_UI_URL,
+    )
+    if (posthogUrl) {
+        lines.push(`PostHog event: ${posthogUrl}`)
+    }
     const sentryUrl = sentryIssueUrl(body.sentry_event_id)
     if (body.sentry_event_id && sentryUrl) {
         lines.push(`Sentry event id: ${body.sentry_event_id}`)
@@ -128,11 +138,11 @@ function buildEmailText(input: {
 
 /** The HTML part — the same fields, structured, on the shared Caramel layout.
  *
- * Deliberately NOT given a PostHog replay link: a replay URL needs the project
- * id, and no env in this app carries one (only the E2E test project has an id,
- * and that is a different project). The session and distinct ids are rendered
- * as selectable text instead — a guessed URL that 404s is worse than an id the
- * operator can paste.
+ * The PostHog link is built (never guessed) from POSTHOG_PROJECT_UI_URL — the
+ * env that finally carries a project id — and points at the submission's own
+ * `support_request_submitted` event. Session-REPLAY links are still deliberately
+ * absent: a replay may not exist for an anonymous submitter, and a URL that
+ * 404s is worse than the ids rendered as selectable text.
  */
 async function buildEmailHtml(input: {
     body: SupportBody
@@ -154,6 +164,10 @@ async function buildEmailHtml(input: {
             userLabel: userId ?? 'anonymous',
             posthogSessionId: body.posthog_session_id,
             posthogDistinctId: body.posthog_distinct_id,
+            posthogUrl: posthogSupportEventUrl(
+                body.feedback_id,
+                env.POSTHOG_PROJECT_UI_URL,
+            ),
             sentryEventId: body.sentry_event_id,
             sentryUrl: sentryIssueUrl(body.sentry_event_id),
         }),
