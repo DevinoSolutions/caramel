@@ -31,22 +31,35 @@ body {
     background: var(--cm-bg);
 }
 
-/* --- Loading skeleton ---
-   Light ghost bars INSIDE the card footprint (replaces the old dark scrim +
-   pulsing logo overlay): a header bar ghost + 3 coupon-ticket ghost rows with
-   a subtle background-position shimmer. popup.js keeps the same contract —
-   sets display:none on #loading-container once the real fetch resolves. */
+/* --- Loading overlay ---
+   The full-bleed scrim the popup shows until BOTH the 400ms anti-flicker floor
+   and the real coupon resolve have landed (App.tsx). It holds ONE child: the
+   caramel-ui Spinner, a fixed 28px box.
+
+   The centering is load-bearing, not decoration (reported on Firefox
+   2026-08-18, present in every browser). This was a column flex container with
+   no alignment at all, so the spinner sat at the flex line's start — jammed
+   into the top-left corner of an otherwise empty 420px panel, which reads as a
+   broken popup rather than a loading one. `flex-direction: column` and the
+   14px `gap` came from the multi-child skeleton this overlay used to hold and
+   mean nothing to a single centered child; they are gone with it. */
 .loading-container {
     position: absolute;
     inset: 0;
     z-index: 999;
     display: flex;
-    flex-direction: column;
-    gap: 14px;
+    align-items: center;
+    justify-content: center;
     padding: 24px 20px;
     box-sizing: border-box;
     background: var(--cm-bg);
 }
+
+/* --- Coupon-list skeleton ---
+   The ghost row CouponsView paints in the infinite-scroll footer while the
+   next page is in flight. The header-bar ghost rule that used to sit here died
+   with the boot skeleton above — nothing had rendered it since (2026-08-19),
+   and tests/popup-permission-gate.test.tsx asserts its selector is gone. */
 .skeleton {
     background: linear-gradient(
         90deg,
@@ -57,11 +70,6 @@ body {
     background-size: 200% 100%;
     animation: skeletonShimmer 1.4s var(--cm-ease-in-out) infinite;
     border-radius: var(--cm-radius-md);
-}
-.skeleton-header {
-    height: 36px;
-    width: 60%;
-    margin: 0 auto 6px;
 }
 .skeleton-ticket {
     height: 84px;
@@ -848,6 +856,56 @@ body {
     font-size: 13px;
     line-height: 1.5;
     color: var(--cm-text-secondary);
+}
+
+/* --- Missing-every-website-grant banner -------------------------
+   One slim row, shown ONLY when the browser told us the grant is absent
+   (AllSitesBanner). It sits above content that loaded fine, so it stays
+   deliberately quiet: a tinted strip, not an error. */
+.all-sites-banner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    padding: 9px 10px;
+    border-radius: 10px;
+    background: var(--cm-brand-soft);
+    border: 1px solid var(--cm-brand-soft-4);
+    text-align: left;
+}
+.all-sites-banner p {
+    /* Beats `.no-coupons-view p`, which would add an 18px bottom margin and
+       centre the text inside a row that is neither. */
+    margin: 0;
+    flex: 1;
+    font-size: 12px;
+    line-height: 1.4;
+    color: var(--cm-text-secondary);
+}
+.all-sites-banner-btn {
+    flex: none;
+    padding: 6px 12px;
+    border: none;
+    border-radius: 8px;
+    background: var(--cm-brand);
+    color: var(--cm-on-brand);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background var(--cm-dur-fast) var(--cm-ease);
+}
+.all-sites-banner-btn:hover {
+    background: var(--cm-brand-strong);
+}
+
+/* The Safari fallback instructions under the permission view's button — the
+   every-website grant lives behind Safari's own menus, so the copy has to name
+   them. Quieter than `.no-coupons-view p` and with no trailing margin. */
+.permission-manual-note {
+    margin: 14px 0 0;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--cm-text-muted-2);
 }
 
 /* Stacked full-width actions read far cleaner than a wrapped icon+button row. */
