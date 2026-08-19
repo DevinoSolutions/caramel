@@ -280,6 +280,29 @@ export function initBackground() {
 
     currentBrowser.tabs.onUpdated.addListener(_caramelOnTabUpdated)
 
+    // The user granted us host access (permission-state.js requestAllSites, or
+    // the browser's own permissions UI). The popup does not need telling — it
+    // re-derives permission state on every open — so this records the fact and
+    // nothing else. It exists because Firefox's permission doorhanger can tear
+    // the popup down while the prompt is open, which kills the continuation
+    // that would otherwise have been the only trace that the grant landed.
+    // Guarded: `permissions` is absent in some runtimes, and a missing
+    // listener must not take the worker's registration turn down with it.
+    if (currentBrowser.permissions?.onAdded?.addListener) {
+        currentBrowser.permissions.onAdded.addListener(permissions => {
+            const origins = permissions?.origins ?? []
+            if (CARAMEL_ENV.verbose)
+                console.log('Caramel: permissions granted', origins)
+            try {
+                currentBrowser.storage.local.set({
+                    caramel_all_sites_granted_at: Date.now(),
+                })
+            } catch (err) {
+                logError('permissionsOnAdded', err)
+            }
+        })
+    }
+
     currentBrowser.runtime.onMessage.addListener(
         (message, sender, sendResponse) => {
             if (!message || typeof message.action !== 'string') return

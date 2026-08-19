@@ -9,6 +9,7 @@ import { ToastProvider } from './components/toast'
 import type { AppApi, ResolvedState } from './types'
 import { CouponsView } from './views/CouponsView'
 import { LoadErrorView } from './views/LoadErrorView'
+import { PermissionView } from './views/PermissionView'
 import { ProfileCard } from './views/ProfileCard'
 import { SettingsView } from './views/SettingsView'
 import { SignInView } from './views/SignInView'
@@ -89,12 +90,16 @@ export function App() {
 
     // Vanilla contract: the gear is hidden by default, shown by every view
     // that wires it (coupons/unsupported/profile/settings), hidden again by
-    // the sign-in prompt, and never wired by renderLoadError.
+    // the sign-in prompt, and never wired by renderLoadError. `permission` is
+    // the same kind of dead end as loadError — nothing behind the gear helps
+    // an extension the browser is refusing — so it hides it too.
     const gearVisible =
         booted &&
         overlay !== 'signin' &&
         (overlay === 'settings' ||
-            (resolved !== null && resolved.view !== 'loadError'))
+            (resolved !== null &&
+                resolved.view !== 'loadError' &&
+                resolved.view !== 'permission'))
 
     const domain =
         resolved &&
@@ -190,6 +195,8 @@ export function App() {
                             />
                         ) : resolved?.view === 'profile' ? (
                             <ProfileCard user={resolved.user} api={api} />
+                        ) : resolved?.view === 'permission' ? (
+                            <PermissionView api={api} />
                         ) : resolved?.view === 'loadError' ? (
                             <LoadErrorView onRetry={refresh} />
                         ) : null}

@@ -54,7 +54,14 @@ module.exports = [
         // Safari has no launchWebAuthFlow, so this is the only in-popup
         // sign-in it has). Real behaviour, measured 8.71 kB. This is the raise
         // the header sanctions: a whole flow arrived, not prose.
-        limit: '9.6 KB',
+        // 2026-08-19, raised 9.6 -> 11 kB: permission-state.js joined this
+        // group (it is popup-realm logic — see the GROUPS note in
+        // measure-size.mjs). It is the missing-host-permission machinery: the
+        // promise/callback bridge over the two permissions APIs, the
+        // every-website match pattern per runtime, the reachability probe that
+        // tells "the browser refused us" apart from "you are offline", and the
+        // gesture-safe request. Measured 10.04 kB.
+        limit: '11 KB',
         brotli: false,
     },
     {
@@ -65,7 +72,11 @@ module.exports = [
         // profile, unsupported, load-error), toast, banner, and caramel-ui's
         // sources. Vendor react/react-dom are deliberately NOT weighed — see
         // measure-size.mjs — so growth here is always OUR code growing.
-        limit: '30 KB',
+        // 2026-08-19, raised 30 -> 33.5 kB: a seventh view (PermissionView,
+        // the browser-refused-us state that used to render as a connection
+        // error) plus the AllSitesBanner component for the narrow-grant
+        // install. Measured 30.39 kB — two real surfaces, not prose.
+        limit: '33.5 KB',
         brotli: false,
     },
     {

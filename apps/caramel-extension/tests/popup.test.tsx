@@ -71,6 +71,18 @@ beforeAll(() => {
     initCouponConstants()
     const chromeStub = installChromeStub()
 
+    // A failed coupon fetch now asks WHY before it paints (permission-state.js,
+    // 2026-08-19): a browser that refused the request gets the permission view
+    // instead of connection copy. Both halves of that question are stubbed
+    // here so this pin keeps testing what it was written for — a healthy
+    // permission state, i.e. a genuine outage:
+    //   contains() answers, so the popup does not sit out its bounded wait;
+    //   fetch() RESOLVES, so the probe reads 'ok' rather than reaching for the
+    //   real network — an unstubbed jsdom fetch would make this suite's verdict
+    //   depend on whether the machine running it can see grabcaramel.com.
+    chromeStub.permissions.contains = (_perms: unknown, cb: any) => cb(true)
+    globalThis.fetch = () => Promise.resolve(new Response('{}'))
+
     chromeStub.runtime.sendMessage = (message: any, cb: any) => {
         if (message?.action === 'getActiveTabDomainRecord') {
             cb({ url: 'https://example.com/cart' })

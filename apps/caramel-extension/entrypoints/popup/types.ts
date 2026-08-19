@@ -30,6 +30,17 @@ export interface CouponsPage {
     hasMore?: boolean
 }
 
+/**
+ * Whether the browser holds the every-website host grant, as
+ * permission-state.js resolves it. `null` means the runtime could not tell us
+ * — it is NOT `false`, and only an explicit `false` may show the banner: a
+ * false alarm on a working install is worse than saying nothing.
+ *
+ * Deliberately NOT part of ResolvedState: it is resolved by AllSitesBanner
+ * after mount, so the popup's boot never waits on a permissions API answering.
+ */
+export type AllSitesGranted = boolean | null
+
 export type ResolvedState =
     | {
           view: 'coupons'
@@ -40,6 +51,10 @@ export type ResolvedState =
       }
     | { view: 'unsupported'; user: PopupUser | null; domain?: string }
     | { view: 'profile'; user: PopupUser }
+    /** The browser refused our requests outright — the host grant is missing,
+     *  and the connection copy of `loadError` would send the user hunting for
+     *  a network fault that does not exist. */
+    | { view: 'permission' }
     | { view: 'loadError' }
 
 /** Navigation the App hands every view. */

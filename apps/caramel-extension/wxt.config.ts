@@ -121,6 +121,20 @@ export default defineConfig({
                 ? ['tabs', 'activeTab', 'storage', 'alarms']
                 : ['tabs', 'activeTab', 'storage', 'identity', 'alarms'],
         host_permissions: ['https://*/*'],
+        // Declared for EVERY browser (2026-08-19). `host_permissions` above is
+        // what we ask for at install; this is what may be asked for AGAIN at
+        // runtime, which is what permission-state.js's requestAllSites() does
+        // for the population that ended up without it — Firefox auto-updates
+        // from <=1.0.3 kept only four old narrow host grants, and fresh
+        // installs can leave the box unchecked. The Gecko/WebExtensions
+        // contract is that request() may only name origins the manifest listed
+        // as optional, so spelling it out removes any question of whether the
+        // prompt can be raised at all. A legal no-op on Chrome/Edge, which
+        // already allow requesting a declared host_permission; listing it
+        // there too keeps one code path across all four browsers.
+        // `<all_urls>` rides along because that is the only pattern Safari
+        // accepts as "every website".
+        optional_host_permissions: ['https://*/*', '<all_urls>'],
         web_accessible_resources: [
             {
                 // popup.html is WXT's name for the popup page (was

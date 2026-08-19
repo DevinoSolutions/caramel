@@ -4,6 +4,7 @@ import {
     caramelUrl,
     signOutAndRevoke,
 } from '../../../popup-core.js'
+import { AllSitesBanner } from '../components/AllSitesBanner'
 import type { AppApi, PopupUser } from '../types'
 
 /**
@@ -81,6 +82,8 @@ export function UnsupportedView({
 
             <h3>{heading}</h3>
             <p>{body}</p>
+
+            <AllSitesBanner api={api} />
 
             <div className="no-coupons-actions">
                 {!coveredButDry && (

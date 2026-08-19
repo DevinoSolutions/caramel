@@ -73,6 +73,15 @@ let chromeStub: any
 beforeAll(() => {
     initCouponConstants()
     chromeStub = installChromeStub()
+
+    // See the same note in tests/popup.test.tsx: a failed coupon fetch now
+    // asks permission-state.js why before it paints (2026-08-19). Both halves
+    // are stubbed healthy so this pin keeps owning the loader LIFECYCLE and
+    // nothing else — and so the probe never reaches the real network, which
+    // would make the rejecting-transport case depend on the machine's
+    // connectivity rather than on the transport under test.
+    chromeStub.permissions.contains = (_perms: unknown, cb: any) => cb(true)
+    globalThis.fetch = () => Promise.resolve(new Response('{}'))
 })
 
 beforeEach(() => {

@@ -8,6 +8,7 @@ import {
     signOutAndRevoke,
 } from '../../../popup-core.js'
 import { caramelCopyText } from '../../../UI-helpers.js'
+import { AllSitesBanner } from '../components/AllSitesBanner'
 import { CouponCard } from '../components/CouponCard'
 import { SavingsBanner } from '../components/SavingsBanner'
 import { useToast } from '../components/toast'
@@ -399,6 +400,8 @@ export function CouponsView({
                     </button>
                 )}
             </div>
+
+            <AllSitesBanner api={api} />
 
             <SavingsBanner />
 

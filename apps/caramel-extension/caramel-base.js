@@ -70,6 +70,23 @@ export function initCaramelBase() {
     }
 }
 
+/* Which runtime this build is actually executing in. Safari is identified by
+ * the scheme of its OWN extension origin, not by the user agent and not at
+ * build time: the Safari artifact IS the chrome-mv3 build put through
+ * safari-web-extension-converter (see release-extension.yml publish_safari), so
+ * every build-time stamp in it still reads "chrome".
+ *
+ * Lives here rather than in popup-core.js (its home until 2026-08-19) because
+ * it reads nothing but `currentBrowser`, and two modules now need it —
+ * popup-core's signInStrategy() and permission-state's origin pattern. Leaving
+ * it in popup-core would have made permission-state import popup-core while
+ * popup-core imports permission-state; a cycle whose reads all happen at call
+ * time would work, but the leaf that owns `currentBrowser` is the honest home. */
+export function isSafariExtensionRuntime() {
+    const url = currentBrowser.runtime?.getURL?.('')
+    return typeof url === 'string' && url.startsWith('safari-web-extension://')
+}
+
 /* --------------------------------------------------  tiny helpers */
 // sleep/log/recordTiming/logError were guarded `var`s
 // (`if (typeof sleep === 'undefined') { var sleep = … }`) so a re-injected

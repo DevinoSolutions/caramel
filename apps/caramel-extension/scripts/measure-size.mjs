@@ -71,8 +71,11 @@ export const GROUPS = {
         'inject.js',
     ],
     // popup.js became popup-core.js in P2: the logic module keeps its own
-    // budget, and the React views/shell get theirs below.
-    popup: ['popup-core.js'],
+    // budget, and the React views/shell get theirs below. permission-state.js
+    // is popup-realm logic too (popup-core imports it; the views call its
+    // request helper), so it is weighed here rather than escaping the ratchet
+    // by being a new file.
+    popup: ['popup-core.js', 'permission-state.js'],
     // The popup's OWN React code (P2): everything TSX/TS under the popup
     // entrypoint plus caramel-ui's sources, which ship in the same chunk.
     // Deliberately NOT the built chunk: react/react-dom are a fixed vendor

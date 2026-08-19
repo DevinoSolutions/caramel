@@ -73,6 +73,34 @@
             "added": "2026-08-13"
         },
         {
+            "browser": "chrome",
+            "path": "/version",
+            "reason": "1.4.0 -> 1.4.1 (package.json is the single version authority): the missing-host-permission gate and the top-left loader fix. The goldens are frozen 1.3.1 snapshots relabelled 1.4.0 and cannot follow a release without being re-frozen",
+            "retiredBy": "golden-rebaseline(1.4.1)",
+            "added": "2026-08-19"
+        },
+        {
+            "browser": "chrome",
+            "path": "/optional_host_permissions",
+            "reason": "runtime-requestable every-website grant, added 2026-08-19 so permission-state.js requestAllSites() can ask for it from a click (see the wxt.config.ts note); a no-op on Chrome, declared for all browsers to keep one code path",
+            "retiredBy": "golden-rebaseline(1.4.1)",
+            "added": "2026-08-19"
+        },
+        {
+            "browser": "firefox",
+            "path": "/version",
+            "reason": "1.4.0 -> 1.4.1 (package.json is the single version authority): the missing-host-permission gate and the top-left loader fix. The goldens are frozen 1.3.1 snapshots relabelled 1.4.0 and cannot follow a release without being re-frozen",
+            "retiredBy": "golden-rebaseline(1.4.1)",
+            "added": "2026-08-19"
+        },
+        {
+            "browser": "firefox",
+            "path": "/optional_host_permissions",
+            "reason": "runtime-requestable every-website grant, added 2026-08-19 so permission-state.js requestAllSites() can ask for it from a click; the Gecko contract is that request() may only name origins the manifest listed as optional, and the Firefox <=1.0.3 upgrade cohort is exactly who needs to ask",
+            "retiredBy": "golden-rebaseline(1.4.1)",
+            "added": "2026-08-19"
+        },
+        {
             "browser": "firefox",
             "path": "/background/scripts",
             "reason": "the env stamp is BUNDLED into background.js instead of a separate manifest entry — the stamp-first guarantee moves from manifest order into the module graph (P1 pins it there)",

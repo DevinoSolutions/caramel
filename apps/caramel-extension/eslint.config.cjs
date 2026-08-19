@@ -10,12 +10,19 @@ module.exports = [
         // `pnpm --filter caramel-app generate:coupon-constants`.
         // Build outputs (old build: dist*/; WXT: .output/, .wxt/) are
         // artifacts, never sources — the parity harness owns their contents.
+        // .size-cache/ joined them 2026-08-19: it holds the MINIFIED bundles
+        // `pnpm size` writes for size-limit to weigh, and linting them is
+        // meaningless (two of them fail to even parse, since minifiers reuse
+        // identifiers across the concatenated files). Left unignored, whether
+        // `pnpm lint` passed depended on whether `pnpm size` had been run
+        // first — a gate that answers differently by invocation order.
         ignores: [
             'coupon-constants.generated.js',
             'dist/**',
             'dist-*/**',
             '.output/**',
             '.wxt/**',
+            '.size-cache/**',
         ],
     },
     {

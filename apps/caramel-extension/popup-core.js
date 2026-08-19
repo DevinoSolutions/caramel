@@ -18,10 +18,18 @@ import {
     caramelSetSettings,
     caramelSyncSavings,
     currentBrowser,
+    isSafariExtensionRuntime,
     log,
 } from './caramel-base.js'
 import { CARAMEL_ENV } from './caramel-env.js'
 import { fetchCouponsPage } from './coupon-fetch.js'
+import { resolvePermissionState } from './permission-state.js'
+
+// isSafariExtensionRuntime moved to caramel-base.js (2026-08-19) so
+// permission-state.js could read it without importing this module back. It is
+// re-exported here because signInStrategy() below is its other caller and the
+// Safari OAuth pins address it through this module.
+export { isSafariExtensionRuntime }
 
 // Base URL from the build-time environment stamp (caramel-env.js, the first
 // module the popup realm evaluates). This used to call a shared
@@ -150,12 +158,26 @@ async function getActiveTabDomainRecord() {
  * The decision flow that was initPopup(), returning WHAT to render instead of
  * painting it — React owns the painting (and the 400ms anti-flicker floor the
  * old DOMContentLoaded bootstrap kept). Resolves to one of:
- *   {view:'coupons', coupons, user, domain, page} — page = the full envelope
+ *   {view:'coupons', coupons, user, domain, page}
  *   {view:'unsupported', user, domain}            — domain undefined = no tab
  *   {view:'profile', user}
+ *   {view:'permission'}
  *   {view:'loadError'}
  * `onSessionInvalid` is handed to validateStoredSession — the React app
  * passes its re-resolve so a dead session repaints logged-out.
+ *
+ * Host permission (2026-08-19), on the FAILURE path only. When the fetch
+ * fails, "the network is down" and "the browser refused to make the request"
+ * are indistinguishable from here, and the second one was being reported as
+ * the first — resolvePermissionState() probes and says which, and only an
+ * explicit 'needs_permission' takes over the view. Its extra request is paid
+ * on a path that is already broken.
+ *
+ * The SUCCESS path deliberately asks nothing. A successful fetch already
+ * proves the extension can reach the API, so the probe's answer is known in
+ * advance; and the remaining question — is the grant NARROW, leaving the
+ * content script dead on every store? — is asked by AllSitesBanner after it
+ * mounts, not here. Boot must never wait on a permissions API answering.
  */
 export async function resolvePopupState(onSessionInvalid) {
     // The service worker can reply undefined on a cold start / error; never let
@@ -202,7 +224,7 @@ export async function resolvePopupState(onSessionInvalid) {
             try {
                 page = await fetchCouponsPage(domain, '', '', 1)
             } catch {
-                return { view: 'loadError' }
+                return await failedToLoad()
             }
             const coupons = page.coupons
 
@@ -216,8 +238,20 @@ export async function resolvePopupState(onSessionInvalid) {
         if (token) return { view: 'profile', user }
         return { view: 'unsupported', user: null, domain: undefined }
     } catch {
-        return { view: 'loadError' }
+        return await failedToLoad()
     }
+}
+
+/* The two ways resolvePopupState() gives up, and the one question worth asking
+ * before it does: did the browser refuse the request? Only an explicit
+ * 'needs_permission' takes the view — 'network', 'unknown' and the two grant
+ * answers all keep the honest connection error, because sending someone to a
+ * permission prompt that is already granted is a dead end with no retry. */
+async function failedToLoad() {
+    const permission = await resolvePermissionState()
+    return permission === 'needs_permission'
+        ? { view: 'permission' }
+        : { view: 'loadError' }
 }
 
 /* Validates the stored session token against GET /api/extension/me. The
@@ -597,16 +631,6 @@ const SAFARI_OAUTH_PENDING_KEYS = [
     'pendingOauthExpiresAt',
     'pendingOauthProvider',
 ]
-
-/* Which sign-in route this runtime can actually take. Safari is identified by
- * the scheme of its OWN extension origin, not by the user agent and not at
- * build time: the Safari artifact IS the chrome-mv3 build put through
- * safari-web-extension-converter (see release-extension.yml publish_safari), so
- * every build-time stamp in it still reads "chrome". */
-export function isSafariExtensionRuntime() {
-    const url = currentBrowser.runtime?.getURL?.('')
-    return typeof url === 'string' && url.startsWith('safari-web-extension://')
-}
 
 /**
  * 'identity'    — Chrome/Edge: launchWebAuthFlow, in-popup, unchanged.
