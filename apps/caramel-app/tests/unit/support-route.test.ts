@@ -12,7 +12,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const { sendEmailMock } = vi.hoisted(() => ({
     sendEmailMock: vi.fn(async (_payload: Record<string, unknown>) => {}),
 }))
-vi.mock('@/lib/email', () => ({ sendEmail: sendEmailMock }))
+// Keep the real module (the route also imports parseRecipientList from it) and
+// replace only the wire call.
+vi.mock('@/lib/email', async importOriginal => ({
+    ...(await importOriginal<Record<string, unknown>>()),
+    sendEmail: sendEmailMock,
+}))
 
 const { captureServerEventMock } = vi.hoisted(() => ({
     captureServerEventMock: vi.fn(
@@ -96,6 +101,32 @@ describe('POST /api/support — support/feedback flow', () => {
             event: 'support_request_submitted',
         })
         expect(sendEmailMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('sends to EVERY configured support recipient — the env value is a comma-separated list', async () => {
+        // SUPPORT_EMAIL_TO may hold several operators; the route must pass the
+        // PARSED list, not the raw string (a raw "a@x.com,b@y.com" handed to
+        // the mailer as one address delivers to nobody).
+        const { parseRecipientList } = await import('@/lib/email')
+        const { env } = await import('@/lib/env')
+
+        await POST(supportRequest(validBody()))
+
+        const emailArg = sendEmailMock.mock.calls[0]![0] as {
+            to: string | string[]
+        }
+        expect(Array.isArray(emailArg.to)).toBe(true)
+        expect(emailArg.to).toEqual(parseRecipientList(env.SUPPORT_EMAIL_TO))
+        expect((emailArg.to as string[]).length).toBeGreaterThan(0)
+
+        // The parser itself: split, trim, drop empties — a trailing comma can
+        // never mail a blank recipient.
+        expect(parseRecipientList('a@x.com, b@y.com ,')).toEqual([
+            'a@x.com',
+            'b@y.com',
+        ])
+        expect(parseRecipientList('solo@x.com')).toEqual(['solo@x.com'])
+        expect(parseRecipientList('')).toEqual([])
     })
 
     it('sends BOTH a rendered html part and the plain-text part, carrying the same report', async () => {

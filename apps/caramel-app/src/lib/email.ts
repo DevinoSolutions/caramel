@@ -2,7 +2,7 @@ import { env } from '@/lib/env'
 import { UseSend } from 'usesend-js'
 
 type EmailPayload = {
-    to: string
+    to: string | string[]
     subject: string
     html?: string
     text?: string
@@ -11,6 +11,20 @@ type EmailPayload = {
      * support flow to route a customer reply back to them. */
     replyTo?: string
 }
+
+/**
+ * Split a comma-separated recipient env value into clean addresses.
+ *
+ * The support inbox is configured as ONE env var that may hold several
+ * addresses (`a@x.com,b@y.com`) so adding a teammate is a deploy-env edit, not
+ * a code change. Whitespace around commas is tolerated and empty segments are
+ * dropped, so a trailing comma cannot mail a blank recipient.
+ */
+export const parseRecipientList = (raw: string): string[] =>
+    raw
+        .split(',')
+        .map(part => part.trim())
+        .filter(Boolean)
 
 /** HTML-escape every character that could change the shape of the markup. */
 const escapeHtml = (value: string) =>

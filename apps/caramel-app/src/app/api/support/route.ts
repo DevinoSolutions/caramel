@@ -18,7 +18,7 @@ import { APP_ID } from '@/lib/analytics/posthogDataset'
 import { captureServerEvent } from '@/lib/analytics/posthogServer'
 import { withRoute } from '@/lib/api/withRoute'
 import { auth } from '@/lib/auth/auth'
-import { sendEmail } from '@/lib/email'
+import { parseRecipientList, sendEmail } from '@/lib/email'
 import { env } from '@/lib/env'
 import { APP_VERSION } from '@/lib/env.client'
 import { render } from '@react-email/render'
@@ -224,7 +224,9 @@ export const POST = withRoute(
             const distinctId =
                 userId ?? body.posthog_distinct_id ?? `anon:${body.feedback_id}`
 
-            const supportTo = env.SUPPORT_EMAIL_TO
+            // May be several operators: the env value is a comma-separated
+            // list, and every address gets the same notification.
+            const supportRecipients = parseRecipientList(env.SUPPORT_EMAIL_TO)
 
             const analyticsPromise = captureServerEvent({
                 event: 'support_request_submitted',
@@ -233,9 +235,9 @@ export const POST = withRoute(
             })
 
             const emailPromise: Promise<'ok' | 'skipped'> = (async () => {
-                if (!supportTo) return 'skipped'
+                if (!supportRecipients.length) return 'skipped'
                 await sendEmail({
-                    to: supportTo,
+                    to: supportRecipients,
                     subject: `[Caramel support] ${body.feedback_type} — ${body.feedback_id}`,
                     // Both parts, from the same submission: the designed HTML
                     // the operator reads, and the plain text as the real text

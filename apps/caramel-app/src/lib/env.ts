@@ -71,13 +71,21 @@ const serverObjectSchema = z.object({
     USESEND_API_KEY: z.string().optional(),
     USESEND_FROM_EMAIL: z.string().default('no_reply@grabcaramel.com'),
     USESEND_FROM_NAME: z.string().default('Caramel'),
-    // Destination inbox for the user support/feedback flow (POST /api/support).
+    // Destination inbox(es) for the user support/feedback flow (POST
+    // /api/support). Accepts a COMMA-SEPARATED list ("a@x.com,b@y.com" — split
+    // by parseRecipientList at the send site) so adding a teammate is a deploy
+    // env edit, never a code change; the real recipient list lives in the
+    // deploy env, not in this public repo.
     // aladdin@devino.ca, NOT support@unotes.net: the old default was a
     // copy-paste from uNotes and BOUNCES (same defect PR #150 fixed in the
     // sites/suggest route — a real visitor's mail was lost to it).
     // Set-but-EMPTY (`SUPPORT_EMAIL_TO=`) resolves to '' and makes the support
     // route report email status 'skipped' (analytics still captured) rather
     // than mailing a blank recipient.
+    // TODO(sendly): when Sendly custom-domain inboxes are ready, point this at
+    // a per-app address (support@grabcaramel.com) hosted on Sendly so support
+    // requests become MCP-readable with per-app permission delegation, instead
+    // of landing in personal mailboxes.
     SUPPORT_EMAIL_TO: z.string().default('aladdin@devino.ca'),
     OPENROUTER_API_KEY: z.string().optional(),
     OPENROUTER_MODEL: z.string().default('openai/gpt-5-mini'),
