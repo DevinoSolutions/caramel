@@ -1,6 +1,9 @@
 import { VISIBLE_COUPON_STATUSES } from '@/lib/coupons'
 import { listRecentlyAddedStores } from '@/lib/couponsRepo'
 import { formatStoreAddedLabel } from '@/lib/recentStores'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 // Pins for the /supported-stores "Recently added" strip.
@@ -142,6 +145,38 @@ describe('listRecentlyAddedStores — read boundary', () => {
         mockRows(() => true, [])
 
         await expect(listRecentlyAddedStores(4)).resolves.toEqual([])
+    })
+})
+
+// A relative label ("Added yesterday") is only ever true because the page is
+// rendered per request. Put it behind ANY cache and the string freezes while
+// the clock moves: inside a one-hour window a store added at 23:30 still reads
+// "Added today" at 00:30 the next day, and the page's whole job is to be
+// believed about coverage. Measured on prod 2026-08-20 —
+// `Cache-Control: private, no-cache, no-store, max-age=0, must-revalidate` and
+// `cf-cache-status: DYNAMIC` on https://grabcaramel.com/supported-stores — so
+// the precondition holds today. This gate is what keeps it holding: adding a
+// `revalidate` export (or dropping `force-dynamic`) would silently make every
+// label a claim the page cannot keep, and nothing else in the build would
+// notice. If the page ever MUST be cached, the fix is to drop the relative
+// labels in the same commit that turns this red.
+describe('the page that renders relative labels stays uncached', () => {
+    const pageSource = fs.readFileSync(
+        path.join(
+            path.dirname(fileURLToPath(import.meta.url)),
+            '../../src/app/(marketing)/supported-stores/page.tsx',
+        ),
+        'utf8',
+    )
+
+    it('declares force-dynamic', () => {
+        expect(pageSource).toMatch(
+            /export const dynamic\s*=\s*['"]force-dynamic['"]/,
+        )
+    })
+
+    it('exports no revalidate window', () => {
+        expect(pageSource).not.toMatch(/export const revalidate/)
     })
 })
 
