@@ -10,12 +10,13 @@ the vocabulary.
 
 ## Layout
 
-| File           | Role                                                                                                                                                         |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `probe.mjs`    | The driver. Launches Chromium, seeds a cart, watches the run, emits the report. Needs a browser.                                                             |
-| `verdict.mjs`  | The judgement. Pure — no browser, no filesystem. This is what the unit tests exercise.                                                                       |
-| `seed.mjs`     | The functions that run **inside** the page — platform detection, the per-platform seeders, the cart reader. Self-contained so Playwright can serialise them. |
-| `viewport.mjs` | Which viewport to measure at. Its own module because it is a policy, not a detail — see below.                                                               |
+| File           | Role                                                                                                                                                             |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `probe.mjs`    | The driver. Launches Chromium, seeds a cart, watches the run, emits the report. Needs a browser.                                                                 |
+| `verdict.mjs`  | The judgement. Pure — no browser, no filesystem. This is what the unit tests exercise.                                                                           |
+| `seed.mjs`     | The functions that run **inside** the page — platform detection, the per-platform seeders, the cart reader. Self-contained so Playwright can serialise them.     |
+| `viewport.mjs` | Which viewport to measure at. Its own module because it is a policy, not a detail — see below.                                                                   |
+| `ext-dir.mjs`  | Where a build lands and which one loads by default. The single owner of WXT's output layout for the probe; browser-free, so the default is pinned by unit tests. |
 
 ## Usage
 
@@ -23,20 +24,20 @@ the vocabulary.
 node tools/ext-probe/probe.mjs <url> [width] [tag] [flags]
 ```
 
-| Flag / env           | Default                  | Meaning                                                                                                                                                                                                                                              |
-| -------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `EXT_DIR`            | `apps/caramel-extension` | Which build to load. **Set it** — the WXT build lands in `apps/caramel-extension/.output/chrome-mv3`, and the default path no longer holds a manifest. A directory without a loadable `manifest.json` exits `71` before Chromium starts (see below). |
-| `PROBE_WAIT_MS`      | `30000`                  | How long a shopper waits before we call it a no-show.                                                                                                                                                                                                |
-| `PROBE_ALL_LOGS`     | unset                    | `1` keeps every console line, not just the Caramel-shaped ones.                                                                                                                                                                                      |
-| `--out <path>`       | stdout                   | Write the JSON report to a file instead of stdout. The report is persisted to `--out-dir` regardless.                                                                                                                                                |
-| `--out-dir <path>`   | `.ext-probe/`            | Where the full log, the JSON report, the screenshot and the disposable profile live.                                                                                                                                                                 |
-| `--expect-config`    | —                        | JSON file holding the config under test; enables the staleness compare.                                                                                                                                                                              |
-| `--good-code`        | —                        | A code expected to work — supplies GREEN evidence (6).                                                                                                                                                                                               |
-| `--invalid-code`     | —                        | A deliberately invalid code — the negative control, GREEN evidence (7).                                                                                                                                                                              |
-| `--viewport WxH`     | `1920x1080`              | The viewport to measure at, in the spelling `agent_discovery` uses. Authoritative when given.                                                                                                                                                        |
-| `--width`/`--height` | `1920` / class default   | Set individually. A width alone picks the conventional height for its class (`--width 390` → 390x844), so a mobile pass is one flag.                                                                                                                 |
-| `--tag`              | `probe`                  | Same as the positional form.                                                                                                                                                                                                                         |
-| `--platform-hint`    | —                        | `shopify`/`woocommerce`/`bigcommerce`. Orders the cart-API probe so the likely endpoint is asked first, and names the platform when markup found none. Never overrides markup. An unrecognised value **throws before Chromium starts**.              |
+| Flag / env           | Default                | Meaning                                                                                                                                                                                                                                                                            |
+| -------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `EXT_DIR`            | first loadable build   | Which build to load; always wins when set. The default prefers `apps/caramel-extension/.output/chrome-mv3` (production — what a shopper gets), then `.output/chrome-mv3-dev`; with neither built it stays unloadable on purpose and exits `71` before Chromium starts (see below). |
+| `PROBE_WAIT_MS`      | `30000`                | How long a shopper waits before we call it a no-show.                                                                                                                                                                                                                              |
+| `PROBE_ALL_LOGS`     | unset                  | `1` keeps every console line, not just the Caramel-shaped ones.                                                                                                                                                                                                                    |
+| `--out <path>`       | stdout                 | Write the JSON report to a file instead of stdout. The report is persisted to `--out-dir` regardless.                                                                                                                                                                              |
+| `--out-dir <path>`   | `.ext-probe/`          | Where the full log, the JSON report, the screenshot and the disposable profile live.                                                                                                                                                                                               |
+| `--expect-config`    | —                      | JSON file holding the config under test; enables the staleness compare.                                                                                                                                                                                                            |
+| `--good-code`        | —                      | A code expected to work — supplies GREEN evidence (6).                                                                                                                                                                                                                             |
+| `--invalid-code`     | —                      | A deliberately invalid code — the negative control, GREEN evidence (7).                                                                                                                                                                                                            |
+| `--viewport WxH`     | `1920x1080`            | The viewport to measure at, in the spelling `agent_discovery` uses. Authoritative when given.                                                                                                                                                                                      |
+| `--width`/`--height` | `1920` / class default | Set individually. A width alone picks the conventional height for its class (`--width 390` → 390x844), so a mobile pass is one flag.                                                                                                                                               |
+| `--tag`              | `probe`                | Same as the positional form.                                                                                                                                                                                                                                                       |
+| `--platform-hint`    | —                      | `shopify`/`woocommerce`/`bigcommerce`. Orders the cart-API probe so the likely endpoint is asked first, and names the platform when markup found none. Never overrides markup. An unrecognised value **throws before Chromium starts**.                                            |
 
 Human prose goes to **stderr**; stdout carries the JSON object and nothing else. Three artifacts always
 land in `--out-dir`: `ext-probe-<tag>-<width>.log`, `.json` and `.png`. The **report is an artifact,
@@ -82,6 +83,12 @@ migration moved the build to `.output/chrome-mv3`: days of ext-QA verdicts were 
 empty browser, and the only tell in the whole report was `vnull` in the log header. **A probe that
 cannot load the extension must never produce a verdict**, so the check runs before Chromium is
 launched and the report carries no observation at all.
+
+The gate then produced the opposite failure, because the default still pointed at the pre-WXT path
+while the code knew where a build lands well enough to NAME it in the refusal: every caller that did
+not set `EXT_DIR` got `71` and no verdict — ten discovery runs in one six-hour window on 2026-08-19,
+whose configs were the best of that batch. The default now prefers a loadable build (`ext-dir.mjs`,
+production first) and the refusal is untouched: a checkout with nothing built still exits `71`.
 
 Verdicts are evaluated **first match wins**, in the order listed in `VERDICTS`. `INCONCLUSIVE_SEED`
 is checked before everything else on purpose: an empty cart is not a checkout, so the extension

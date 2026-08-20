@@ -24,6 +24,11 @@ import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 import {
+    extBuildOutputs,
+    extensionLoadProblem,
+    resolveDefaultExtDir,
+} from './ext-dir.mjs'
+import {
     capabilityProbeOrder,
     CART_API_PROBES,
     countPromoInputsInPage,
@@ -52,13 +57,12 @@ import { resolveViewport } from './viewport.mjs'
 // anywhere else, which made the scratch version Windows-only.
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(HERE, '..', '..')
-const DEFAULT_EXT_DIR = join(REPO_ROOT, 'apps', 'caramel-extension')
-// Where a build actually lands. Only used to make the "you pointed me at a
-// directory with no manifest" message name a real path instead of a shrug.
-const BUILD_OUTPUT_HINTS = [
-    join(REPO_ROOT, 'apps', 'caramel-extension', '.output', 'chrome-mv3'),
-    join(REPO_ROOT, 'apps', 'caramel-extension', '.output', 'chrome-mv3-dev'),
-]
+// Where a build actually lands — and, since the default now prefers one, where
+// this probe loads from when nobody passes EXT_DIR. The layout itself lives in
+// ext-dir.mjs so it has exactly one owner (see the note there: knowing the
+// paths well enough to NAME them in an error while refusing to default to them
+// cost ten discovery runs their extension QA).
+const BUILD_OUTPUT_HINTS = extBuildOutputs(REPO_ROOT)
 
 // The extension's own cache key for the supported-domain list (store-detect.js).
 // Cleared before the run so the domain list is always fetched fresh: a verdict
@@ -157,26 +161,19 @@ class NoExtensionError extends Error {
  * thing — the prompt never appeared, no coupons were fetched, nothing was
  * submitted — which is indistinguishable from a genuinely broken store config.
  * That is exactly what happened after the WXT migration moved the build to
- * `.output/chrome-mv3` and left `apps/caramel-extension` (this file's default)
- * without a manifest: days of ext-QA verdicts were measurements of an empty
- * browser, and the single tell was `vnull` in the log header.
+ * `.output/chrome-mv3` and left `apps/caramel-extension` (this file's default
+ * until 2026-08-19) without a manifest: days of ext-QA verdicts were
+ * measurements of an empty browser, and the single tell was `vnull` in the log
+ * header.
+ *
+ * The gate is unchanged by the default now preferring a real build (ext-dir.mjs):
+ * a default is a guess, and a guess that turns out to be unloadable must still
+ * stop the run here rather than launch an empty browser.
  */
 function assertLoadableExtension(extDir) {
-    const manifestPath = join(extDir, 'manifest.json')
-    let problem = null
-    if (!existsSync(manifestPath)) {
-        problem = `no manifest.json in ${extDir}`
-    } else {
-        // A manifest Chromium cannot parse loads exactly as well as no
-        // manifest at all, and produces the same empty browser.
-        try {
-            const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
-            if (!manifest.version)
-                problem = `${manifestPath} carries no version — Chromium refuses a manifest without one`
-        } catch (e) {
-            problem = `${manifestPath} is not parseable JSON: ${e.message}`
-        }
-    }
+    // The same predicate the default resolution uses, so a default can never be
+    // chosen by a laxer rule than the gate standing immediately behind it.
+    const problem = extensionLoadProblem(extDir)
     if (!problem) return
     const built = BUILD_OUTPUT_HINTS.filter(dir =>
         existsSync(join(dir, 'manifest.json')),
@@ -185,7 +182,7 @@ function assertLoadableExtension(extDir) {
         [
             `${problem} — Chromium would have launched with NO extension,`,
             'and every verdict from that run would have been a measurement of an empty browser.',
-            'The WXT build lands in apps/caramel-extension/.output/chrome-mv3; point EXT_DIR (or --ext) at it.',
+            'The WXT build lands in apps/caramel-extension/.output/chrome-mv3, which is the default when it exists; build it, or point EXT_DIR (or --ext) at one.',
             built.length
                 ? `Loadable build(s) found here now: ${built.join(', ')}`
                 : 'No built extension found either — run `pnpm --filter caramel-extension build` first.',
@@ -271,7 +268,11 @@ async function main() {
     // failure as a fact about the store.
     const platformHint = normalizePlatformHint(flags['platform-hint'])
     const tag = flags.tag || tagArg || 'probe'
-    const extDir = resolve(process.env.EXT_DIR || flags.ext || DEFAULT_EXT_DIR)
+    // EXT_DIR (or --ext) always wins: it is the operator's override, and the
+    // default is only a best guess at which build is worth measuring.
+    const extDir = resolve(
+        process.env.EXT_DIR || flags.ext || resolveDefaultExtDir(REPO_ROOT),
+    )
     const waitMs = Number(process.env.PROBE_WAIT_MS || flags.wait || 30000)
     // The auto-apply flow only STARTS once the prompt renders (autoApply
     // defaults on) and then runs under its own wall-clock budget. Reading the
