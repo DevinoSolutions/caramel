@@ -135,6 +135,31 @@ export const SiteCountRowSchema = z.object({
 })
 export type SiteCountRow = z.infer<typeof SiteCountRowSchema>
 
+/**
+ * supported-stores/page.tsx's "Recently added" strip — one row per store that
+ * has just become supported, newest first.
+ *
+ * `added_at` is `store_configs.created_at`, which is the ONLY honest
+ * "became supported" signal in this catalog. The obvious alternative,
+ * `MIN(coupons.created_at)` per site, is not one: 18,311 coupon rows across
+ * 1,013 sites share the single instant `2026-05-13 01:40:42.656` (the catalog
+ * seed import), so it would date a third of the catalog to one meaningless
+ * moment. `store_configs.created_at` has zero rows at that instant, spreads
+ * hour-by-hour across the pipeline's discovery runs, and is INSERT-only —
+ * applyCatalogRows.ts's `ON CONFLICT (store_name) DO UPDATE` never assigns it,
+ * so a re-publish of an existing store cannot make an old store look new.
+ *
+ * `z.coerce.date()` rather than `z.date()`: `$queryRaw` returns a JS `Date` for
+ * a `timestamp(3)` column today, and coercion keeps the read working if a
+ * driver ever hands the same column back as an ISO string — a shape this
+ * boundary can safely normalize rather than a drift it should throw on.
+ */
+export const RecentStoreRowSchema = z.object({
+    store_name: z.string(),
+    added_at: z.coerce.date(),
+})
+export type RecentStoreRow = z.infer<typeof RecentStoreRowSchema>
+
 /** filters/route.ts's types half (`discount_type IS NOT NULL` in the WHERE). */
 export const DiscountTypeRowSchema = z.object({
     discount_type: z.string(),

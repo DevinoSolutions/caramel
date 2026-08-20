@@ -4,7 +4,20 @@ import { motion } from 'framer-motion'
 import Image from 'next/image'
 import Link from 'next/link'
 
-export default function SiteCard({ site }: { site: string }) {
+export default function SiteCard({
+    site,
+    subtitle = 'Coupons available',
+}: {
+    site: string
+    /**
+     * The card's second line. Defaults to the catalog-wide "Coupons available"
+     * every existing caller relies on; the "Recently added" strip passes a
+     * freshness line ("Added yesterday") instead, because on that strip WHEN
+     * the store arrived is the whole point and "Coupons available" is already
+     * implied — the strip only lists stores that have visible coupons.
+     */
+    subtitle?: string
+}) {
     const icon = `https://www.google.com/s2/favicons?sz=128&domain_url=${encodeURIComponent(
         site,
     )}`
@@ -32,7 +45,7 @@ export default function SiteCard({ site }: { site: string }) {
                         {site}
                     </h3>
                     <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
-                        Coupons available
+                        {subtitle}
                     </p>
                 </div>
             </motion.div>

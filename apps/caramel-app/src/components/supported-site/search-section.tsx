@@ -4,14 +4,20 @@ import Loader from '@/components/Loader'
 import { AnimatePresence, motion } from 'framer-motion'
 import debounce from 'lodash.debounce'
 import { useEffect, useRef, useState } from 'react'
+import RecentlyAddedSection, {
+    type RecentlyAddedStore,
+} from './recently-added-section'
 import SiteCard from './site-card'
 import SuggestionForm from './suggestion-form'
 
 export default function SearchSection({
     initialTopSites,
+    recentlyAddedStores,
 }: {
     /** Server-rendered "Top Supported Websites" (SEO) — same read as /api/sites/top-sites. */
     initialTopSites: string[]
+    /** Server-rendered "Recently added" strip — newest supported stores, freshness labels already formatted. */
+    recentlyAddedStores: RecentlyAddedStore[]
 }) {
     const [query, setQuery] = useState('')
     const [sites, setSites] = useState<string[]>([])
@@ -124,6 +130,15 @@ export default function SearchSection({
                                         initialValue={query}
                                     />
                                 )}{' '}
+                                {/* Freshest first: this strip is the proof that
+                                    requested stores turn into coverage, so it
+                                    sits above the (slower-moving) top-sites
+                                    grid. Both live in the no-results branch —
+                                    a shopper mid-search wants their answer,
+                                    not our news. */}
+                                <RecentlyAddedSection
+                                    stores={recentlyAddedStores}
+                                />
                                 {topSites.length > 0 && (
                                     <>
                                         <motion.h2

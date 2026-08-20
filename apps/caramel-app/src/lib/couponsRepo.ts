@@ -38,6 +38,8 @@ import {
     CouponListRowSchema,
     type DiscountTypeRow,
     DiscountTypeRowSchema,
+    type RecentStoreRow,
+    RecentStoreRowSchema,
     type SiteCountRow,
     SiteCountRowSchema,
     type SiteRow,
@@ -354,6 +356,45 @@ export async function listTopSites(): Promise<SiteCountRow[]> {
         LIMIT 4
     `)
     return parseCouponRows(SiteCountRowSchema, rawRows, 'sites.top-sites')
+}
+
+/**
+ * supported-stores/page.tsx — the newest `limit` stores to become supported,
+ * newest first. See RecentStoreRowSchema for why `store_configs.created_at` is
+ * the signal and `MIN(coupons.created_at)` is not.
+ *
+ * The EXISTS gate is not decoration: `store_configs` and the page's store
+ * universe are different populations (the page searches `coupons.site`, and
+ * every tile links to `/coupons/<site>`), so a config whose store has no
+ * visible coupons would render a tile that claims coupons and lands the
+ * shopper on an empty page. Gating on the SAME visibility predicate every
+ * other listing read uses keeps the two in step by construction. Measured on
+ * prod: 28ms, index-only probes via `coupons_site_idx`, against the 145ms the
+ * page's existing listTopSites read already costs — and the page issues both
+ * concurrently, so first paint waits on the slower one, unchanged.
+ *
+ * Unqualified `status`/`expired` inside the subquery resolve to `coupons` (its
+ * innermost FROM); `store_configs` has neither column, so there is nothing for
+ * them to bind to in the outer scope either.
+ */
+export async function listRecentlyAddedStores(
+    limit: number,
+): Promise<RecentStoreRow[]> {
+    const rawRows = await prisma.$queryRaw(Prisma.sql`
+        SELECT sc.store_name, sc.created_at AS added_at
+        FROM store_configs sc
+        WHERE EXISTS (
+            SELECT 1 FROM coupons c
+            WHERE c.site = sc.store_name AND ${visibleCouponsWhere()}
+        )
+        ORDER BY sc.created_at DESC
+        LIMIT ${limit}
+    `)
+    return parseCouponRows(
+        RecentStoreRowSchema,
+        rawRows,
+        'sites.recently-added',
+    )
 }
 
 /** api/sites/search-supported/route.ts POST — fixed LIMIT 20. The route's empty-query early return (`{sites:[]}` without querying) stays there; this fn assumes a non-empty `q`. */
