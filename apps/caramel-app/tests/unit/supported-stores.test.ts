@@ -1,4 +1,5 @@
 import { GET } from '@/app/api/extension/supported-stores/route'
+import { resetSupportedStoresCache } from '@/lib/supportedStoresCache'
 import { NextRequest, NextResponse } from 'next/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -38,6 +39,9 @@ function makeRequest(headers: Record<string, string> = {}) {
 }
 
 beforeEach(() => {
+    // The route serves a 5-min in-process cache of the serialized body; drop
+    // it so every test below reaches the (mocked) query.
+    resetSupportedStoresCache()
     checkRateLimitMock.mockClear()
     checkRateLimitMock.mockImplementation(async () => null)
 })

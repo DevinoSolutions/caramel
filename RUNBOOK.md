@@ -47,7 +47,34 @@ with `ls` or a repo search without knowing the doc structure first.
   its dashboard URL and which monitor entry it is — not present in this
   repo.
 
+## Edge cache (Cloudflare)
+
+Cloudflare sits in front of Traefik and, by default, only caches static
+file extensions — `s-maxage` on an API JSON response is ignored
+(`cf-cache-status: DYNAMIC`). A zone **Cache Rule** ("Cache
+/api/extension/supported-stores and /api/coupons per origin
+Cache-Control", phase `http_request_cache_settings`, created 2026-09-04)
+makes those two paths cache-eligible with edge TTL = respect origin, so
+the route's `s-maxage=300` / `s-maxage=60` actually applies. Verify with
+`curl -sI https://grabcaramel.com/api/extension/supported-stores | grep
+cf-cache-status` — the second hit must say `HIT`. `/api/extension/
+supported-stores` additionally keeps a 5-min in-process cache of its
+serialized 1.2 MB body (`src/lib/supportedStoresCache.ts`, invalidated by
+an ingest push that upserts store_configs), so origin stays cheap even
+when the edge misses.
+
 ## Health checks
+
+`GET /api/health` — container **liveness** (`src/app/api/health/route.ts`),
+the target of the compose `web` healthcheck. No DB, no rate limit, no auth,
+`Cache-Control: no-store`; answers `{"status":"ok"}` whenever the Node
+process accepts requests. It decides ROUTING (Traefik's docker provider
+stops routing to an `unhealthy` container → users get 404), so it must
+only fail when the process is dead or wedged — never because a request
+elsewhere is slow. The Aug 13 - Sep 4 2026 "Caramel is offline" streak was
+exactly that: the probe used to hit the homepage with a 5s timeout and
+flipped the container unhealthy whenever the app was merely slow.
+Do not point the healthcheck back at `/` or at `/api/health/db`.
 
 `GET /api/health/db` — probes the two data dependencies of this app
 (auth_db via Prisma `SELECT 1`, and the app-owned coupon catalog's

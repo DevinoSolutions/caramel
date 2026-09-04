@@ -1,6 +1,7 @@
 import { withRoute } from '@/lib/api/withRoute'
 import { applyCatalogRows } from '@/lib/catalog/applyCatalogRows'
 import { IngestCatalogPayloadSchema } from '@/lib/catalog/ingestSchemas'
+import { resetSupportedStoresCache } from '@/lib/supportedStoresCache'
 import { NextResponse } from 'next/server'
 
 // POST /api/ingest/catalog — the ONE idempotent ingest endpoint of the coupons
@@ -44,6 +45,10 @@ export const POST = withRoute(
                 { status: 409 },
             )
         }
+        // GET /api/extension/supported-stores serves a 5-min in-process cache
+        // of the serialized store_configs projection; drop it the moment a
+        // push changes that table so new selectors are live on the next hit.
+        if (result.storeConfigs.upserted > 0) resetSupportedStoresCache()
         return NextResponse.json({ ok: true, applied: result }, { status: 200 })
     },
 )
