@@ -9,6 +9,12 @@
 import { APP_VERSION, clientEnv } from '@/lib/env.client'
 import * as Sentry from '@sentry/nextjs'
 import posthog from 'posthog-js'
+import { captureFirstTouch } from './firstTouch'
+import {
+    buildIdentityPayload,
+    identityPayloadSignature,
+    type IdentityUser,
+} from './identityProperties'
 import { APP_ID, resolveClientPosthogTarget } from './posthogDataset'
 
 // Shape Playwright injects via addInitScript in the shared e2e project.
@@ -27,9 +33,53 @@ declare global {
 // One-time init guard — React StrictMode / re-renders must not re-init.
 let initialized = false
 
+// The environment of the target we actually initialised against, so identify
+// can stamp it on the person without re-resolving the env every call.
+let activeEnvironment: string | undefined
+
+// Fingerprint of the last identity payload we sent. The session object is
+// re-read on every React commit and refreshed periodically, so without this
+// the same $set would be re-POSTed on every render of every page.
+let lastIdentitySignature: string | null = null
+
+// "First identify opportunity on this page load" — the signup_date fallback
+// for a user whose account-creation date we don't have. Captured once so the
+// payload fingerprint above stays stable across calls.
+const SESSION_STARTED_AT = new Date().toISOString()
+
 /** True once posthog-js has been initialised against a live capture target. */
 export function isPosthogActive(): boolean {
     return initialized
+}
+
+/**
+ * Report an analytics failure loudly (console + Sentry) and swallow it. Every
+ * identity call site is best-effort: enrichment must never be able to break a
+ * render, but it must also never fail silently.
+ */
+function reportIdentityFailure(operation: string, error: unknown): void {
+    console.error(`[posthog] ${operation} failed`, error)
+    // Coarse tag only — the operation name, never the user payload.
+    Sentry.captureException(error, { tags: { operation } })
+}
+
+/**
+ * Browser locale + IANA timezone. Both are read defensively: a locked-down
+ * or exotic runtime that throws here must cost us the two properties, not
+ * the whole identify call.
+ */
+function browserIdentityContext(): { locale?: string; timezone?: string } {
+    const context: { locale?: string; timezone?: string } = {}
+    try {
+        if (typeof navigator !== 'undefined' && navigator.language) {
+            context.locale = navigator.language
+        }
+        const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone
+        if (timezone) context.timezone = timezone
+    } catch (error) {
+        reportIdentityFailure('posthog_identity_context', error)
+    }
+    return context
 }
 
 /** Push the current PostHog identity/session into Sentry for cross-linking. */
@@ -54,6 +104,13 @@ function syncSentryPosthogContext(): void {
 export function initPosthogBrowser(): boolean {
     if (initialized) return true
     if (typeof window === 'undefined') return false
+
+    // Record where this visitor came from BEFORE anything else can navigate:
+    // the landing URL and the external referrer only exist on the first load,
+    // and the first client-side route change erases both. Deliberately ahead
+    // of the target check so an attribution-bearing landing is still banked
+    // when capture is disabled for this deploy.
+    captureFirstTouch()
 
     const target = resolveClientPosthogTarget()
     if (!target) return false
@@ -90,6 +147,7 @@ export function initPosthogBrowser(): boolean {
     })
 
     initialized = true
+    activeEnvironment = target.environment
 
     if (isE2E) {
         const handshake = window.__CARAMEL_E2E__
@@ -108,21 +166,52 @@ export function initPosthogBrowser(): boolean {
     return true
 }
 
-/** Associate the current session with the stable internal user UUID. */
-export function identifyUser(user: {
-    id: string
-    email?: string | null
-}): void {
+/**
+ * Associate the current session with the stable internal user UUID and push
+ * the enriched person profile.
+ *
+ * `$set` carries who/what/where NOW (email, display name, surface, version,
+ * locale, timezone, account age); `$set_once` carries the acquisition story
+ * (signup date, first platform/version, first-touch UTM + referrer + landing
+ * path), which PostHog writes exactly once so a later organic session can
+ * never overwrite the campaign a user originally arrived from. Identical
+ * payloads are skipped, and no failure here can reach the caller.
+ */
+export function identifyUser(user: IdentityUser): void {
     if (!initialized) return
-    // NEVER email as distinct_id — the stable UUID is the identity; email is a
-    // person property only.
-    posthog.identify(user.id, user.email ? { $email: user.email } : undefined)
-    syncSentryPosthogContext()
+    try {
+        const payload = buildIdentityPayload({
+            user,
+            context: {
+                app_id: APP_ID,
+                app_version: APP_VERSION,
+                platform: 'web',
+                environment: activeEnvironment,
+                ...browserIdentityContext(),
+            },
+            firstTouch: captureFirstTouch(),
+            identifiedAt: SESSION_STARTED_AT,
+        })
+
+        const signature = identityPayloadSignature(user.id, payload)
+        if (signature === lastIdentitySignature) return
+
+        // NEVER email as distinct_id — the stable UUID is the identity; email
+        // is a person property only.
+        posthog.identify(user.id, payload.set, payload.setOnce)
+        lastIdentitySignature = signature
+        syncSentryPosthogContext()
+    } catch (error) {
+        reportIdentityFailure('posthog_identify', error)
+    }
 }
 
 /** Clear identity on logout (fresh anonymous id + reset Sentry correlation). */
 export function resetPosthogIdentity(): void {
     if (!initialized) return
+    // Drop the dedupe fingerprint too: after a reset the next identify — even
+    // for the same person — must actually re-send the profile.
+    lastIdentitySignature = null
     posthog.reset()
     syncSentryPosthogContext()
 }
