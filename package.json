@@ -15,11 +15,12 @@
             "vitest>picomatch": "4.0.4",
             "postcss": "8.5.23",
             "sharp": "0.35.3",
-            "fast-uri": "3.1.5",
+            "fast-uri": "3.1.6",
             "brace-expansion@5": "5.0.9",
             "nanoid@<3.3.18": "3.3.18",
             "yaml@<1.10.3": "1.10.3",
-            "deepmerge-ts@<8.0.0": "8.0.1"
+            "deepmerge-ts@<8.0.0": "8.0.1",
+            "browserslist": "4.28.7"
         }
     },
     "scripts": {
