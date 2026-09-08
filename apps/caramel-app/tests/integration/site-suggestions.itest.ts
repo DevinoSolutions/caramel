@@ -1,8 +1,10 @@
 import { POST } from '@/app/api/sites/suggest/route'
 import prisma from '@/lib/prisma'
 import {
-    acknowledgeSiteSuggestions,
     listSiteSuggestions,
+    notifySupportedRequesters,
+    siteSuggestionAutoNotifyEnabled,
+    transitionSiteSuggestions,
 } from '@/lib/siteSuggestions'
 import { NextRequest } from 'next/server'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -173,12 +175,14 @@ describe('site_suggestions — real rows, real FK, real queries', () => {
         expect(listed[0]!.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T.*Z$/)
 
         const firstTwo = listed.slice(0, 2).map(s => s.id)
-        expect(await acknowledgeSiteSuggestions(firstTwo)).toEqual({
-            acknowledged: 2,
-        })
-        expect(await acknowledgeSiteSuggestions(firstTwo)).toEqual({
-            acknowledged: 0,
-        })
+        const acked = await transitionSiteSuggestions(firstTwo, 'imported')
+        expect(new Set(acked.changed)).toEqual(new Set(firstTwo))
+        const reAcked = await transitionSiteSuggestions(firstTwo, 'imported')
+        expect(reAcked.changed).toEqual([])
+        expect(reAcked.refused.map(r => r.reason)).toEqual([
+            'already',
+            'already',
+        ])
 
         const remaining = (
             await listSiteSuggestions({
@@ -222,5 +226,169 @@ describe('site_suggestions — real rows, real FK, real queries', () => {
         expect(after.map(s => s.domain)).toEqual([
             `fresh.${ITEST_DOMAIN_SUFFIX}`,
         ])
+    })
+})
+
+// The status/notice half (#226). These are the facts the in-memory fake in
+// tests/unit cannot judge, because they are properties of the SCHEMA and of
+// Postgres, not of our TypeScript: that the `status_changed_at`/`notified_at`
+// columns really landed, that the allowed-source guard in the transition's
+// WHERE clause is a real predicate the database enforces, and that the
+// `notified_at IS NULL` claim really serialises a send.
+async function createRow(
+    domain: string,
+    overrides: {
+        status?: string
+        requesterEmail?: string | null
+        notifiedAt?: Date | null
+    } = {},
+): Promise<string> {
+    const created = await prisma.siteSuggestion.create({
+        data: {
+            domain,
+            rawUrl: `https://${domain}/`,
+            source: 'web',
+            status: overrides.status ?? 'new',
+            requesterEmail: overrides.requesterEmail ?? null,
+            notifiedAt: overrides.notifiedAt ?? null,
+        },
+        select: { id: true },
+    })
+    return created.id
+}
+
+describe('site suggestions — answering a request (real Postgres)', () => {
+    it('the migration really added status_changed_at and notified_at, and a transition stamps the first', async () => {
+        const id = await createRow(`marks.${ITEST_DOMAIN_SUFFIX}`)
+        const result = await transitionSiteSuggestions([id], 'unsupported')
+        expect(result.changed).toEqual([id])
+
+        const row = await prisma.siteSuggestion.findUniqueOrThrow({
+            where: { id },
+            select: {
+                status: true,
+                statusChangedAt: true,
+                importedAt: true,
+                notifiedAt: true,
+            },
+        })
+        expect(row.status).toBe('unsupported')
+        expect(row.statusChangedAt).toBeInstanceOf(Date)
+        // importedAt dates the pipeline's first hand-over only — a `unsupported`
+        // answer must not invent one.
+        expect(row.importedAt).toBeNull()
+        expect(row.notifiedAt).toBeNull()
+    })
+
+    it('THE PAIR: the closed-row guard is enforced by the DATABASE, not by the read before it', async () => {
+        const id = await createRow(`closed.${ITEST_DOMAIN_SUFFIX}`, {
+            status: 'supported',
+        })
+
+        // The guard lives in the UPDATE's own WHERE clause, so even a caller
+        // that reached it with a stale reading of the row cannot move it.
+        const direct = await prisma.siteSuggestion.updateMany({
+            where: { id, status: { in: ['new'] } },
+            data: { status: 'imported' },
+        })
+        expect(direct.count).toBe(0)
+
+        const refused = await transitionSiteSuggestions([id], 'imported')
+        expect(refused.changed).toEqual([])
+        expect(refused.refused).toEqual([
+            { id, from: 'supported', reason: 'backwards' },
+        ])
+        await expect(
+            prisma.siteSuggestion.findUniqueOrThrow({
+                where: { id },
+                select: { status: true },
+            }),
+        ).resolves.toEqual({ status: 'supported' })
+
+        // ...while a terminal-to-terminal answer really does move it.
+        const moved = await transitionSiteSuggestions([id], 'unsupported')
+        expect(moved.changed).toEqual([id])
+    })
+
+    it('a `supported` ack with the switch OFF marks the row and mails NOBODY', async () => {
+        // Read from the REAL env module (this config loads the package .env):
+        // if a machine has turned the switch on, say so plainly instead of
+        // failing later on a count that looks unexplained.
+        expect(
+            siteSuggestionAutoNotifyEnabled(),
+            'SITE_SUGGESTIONS_AUTO_NOTIFY must be off (its default) for this test',
+        ).toBe(false)
+        const id = await createRow(`quiet.${ITEST_DOMAIN_SUFFIX}`, {
+            requesterEmail: USER_EMAIL,
+        })
+        const result = await transitionSiteSuggestions([id], 'supported')
+        expect(result.notifiedSent).toBe(0)
+        expect(result.notifiedPending).toBe(1)
+        expect(sendEmailMock).not.toHaveBeenCalledWith(
+            expect.objectContaining({ to: USER_EMAIL }),
+        )
+        await expect(
+            prisma.siteSuggestion.findUniqueOrThrow({
+                where: { id },
+                select: { notifiedAt: true },
+            }),
+        ).resolves.toEqual({ notifiedAt: null })
+    })
+
+    it('the notifier claims notified_at BEFORE sending, so a real second call cannot re-send', async () => {
+        const id = await createRow(`told.${ITEST_DOMAIN_SUFFIX}`, {
+            status: 'supported',
+            requesterEmail: USER_EMAIL,
+        })
+        const first = await notifySupportedRequesters([id])
+        expect(first.sent).toBe(1)
+        const stamped = await prisma.siteSuggestion.findUniqueOrThrow({
+            where: { id },
+            select: { notifiedAt: true },
+        })
+        expect(stamped.notifiedAt).toBeInstanceOf(Date)
+
+        const second = await notifySupportedRequesters([id])
+        expect(second.sent).toBe(0)
+        expect(second.alreadyNotified).toBe(1)
+        await expect(
+            prisma.siteSuggestion.findUniqueOrThrow({
+                where: { id },
+                select: { notifiedAt: true },
+            }),
+        ).resolves.toEqual(stamped)
+    })
+
+    it('one mail per requester email per domain — a duplicate row is stamped, never mailed again', async () => {
+        const domain = `dupe.${ITEST_DOMAIN_SUFFIX}`
+        const first = await createRow(domain, {
+            status: 'supported',
+            requesterEmail: USER_EMAIL,
+        })
+        await notifySupportedRequesters([first])
+        const toldAt = (
+            await prisma.siteSuggestion.findUniqueOrThrow({
+                where: { id: first },
+                select: { notifiedAt: true },
+            })
+        ).notifiedAt
+        sendEmailMock.mockClear()
+
+        // The same person asking for the same store again, later.
+        const again = await createRow(domain, {
+            status: 'supported',
+            requesterEmail: USER_EMAIL.toUpperCase(),
+        })
+        const result = await notifySupportedRequesters([again])
+        expect(result.sent).toBe(0)
+        expect(result.alreadyNotified).toBe(1)
+        expect(sendEmailMock).not.toHaveBeenCalled()
+        // Stamped with the instant they were ACTUALLY told.
+        await expect(
+            prisma.siteSuggestion.findUniqueOrThrow({
+                where: { id: again },
+                select: { notifiedAt: true },
+            }),
+        ).resolves.toEqual({ notifiedAt: toldAt })
     })
 })
