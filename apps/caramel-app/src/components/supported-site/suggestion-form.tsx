@@ -14,6 +14,10 @@ export default function SuggestionForm({
     resetValue: () => void
 }) {
     const [url, setUrl] = useState(initialValue)
+    // Optional "tell me when it's supported" contact. Sent ONLY when filled in;
+    // a signed-in visitor's session email overrides it server-side, so this is
+    // the anonymous visitor's one way of being answered.
+    const [email, setEmail] = useState('')
     const [loading, setLoading] = useState(false)
 
     const submit = async (e: React.FormEvent) => {
@@ -25,12 +29,32 @@ export default function SuggestionForm({
         }
         setLoading(true)
         try {
-            await fetch('/api/sites/suggest', {
+            const res = await fetch('/api/sites/suggest', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url }),
+                body: JSON.stringify(
+                    email.trim() ? { url, email: email.trim() } : { url },
+                ),
             })
-            toast.success(`Thanks! We’ll look into supporting ${url} soon`)
+            if (!res.ok) {
+                // The server refused the INPUT (a host that is not a store, a
+                // malformed email) — not a failure to send, so no support
+                // prompt and no reset: keep what was typed so it can be fixed.
+                const { error } = (await res.json().catch(() => ({}))) as {
+                    error?: string
+                }
+                toast.warning(
+                    error ??
+                        'Please enter a store URL (e.g. https://store.com)',
+                )
+                setLoading(false)
+                return
+            }
+            toast.success(
+                email.trim()
+                    ? `Thanks! We’ll email ${email.trim()} once ${url} is supported`
+                    : `Thanks! We’ll look into supporting ${url} soon`,
+            )
         } catch (err) {
             toast.error('Failed to send suggestion. Please try again later.')
             console.error(err)
@@ -60,6 +84,16 @@ export default function SuggestionForm({
                 onChange={e => setUrl(e.target.value)}
                 placeholder="https://example.com"
                 aria-label="Store URL"
+                className="w-full rounded-full border-2 border-caramel/30 bg-white px-6 py-3 text-center placeholder-gray-400 shadow-sm outline-none transition-all focus:border-caramel dark:bg-darkSurface dark:text-white dark:placeholder-gray-500 dark:focus:border-orange-400"
+            />
+            <input
+                type="email"
+                inputMode="email"
+                autoComplete="email"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                placeholder="you@example.com (optional — we’ll email you when it’s supported)"
+                aria-label="Email me when this store is supported (optional)"
                 className="w-full rounded-full border-2 border-caramel/30 bg-white px-6 py-3 text-center placeholder-gray-400 shadow-sm outline-none transition-all focus:border-caramel dark:bg-darkSurface dark:text-white dark:placeholder-gray-500 dark:focus:border-orange-400"
             />
             <motion.button

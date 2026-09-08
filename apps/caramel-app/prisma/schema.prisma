@@ -89,6 +89,7 @@ model User {
   couponReports     CouponReport[]
   favoriteStores    FavoriteStore[]
   savingsEvents     SavingsEvent[]
+  siteSuggestions   SiteSuggestion[]
 
   @@map("users")
 }
@@ -333,6 +334,51 @@ model SavingsEvent {
 
   @@index([userId, occurredAt])
   @@map("savings_events")
+}
+
+/// One "please support this store" request, captured with WHO asked.
+///
+/// Until this table existed the suggest route only sent an ops email, so a
+/// request was un-answerable by construction: nothing recorded the requester
+/// and nothing persisted the domain for the coupons pipeline to pick up. This
+/// is the system of record for both. The pipeline (a separate repo) reads
+/// `status = 'new'` rows through GET /api/ingest/site-suggestions and flips
+/// them to `imported` through the ack endpoint; the requester fields are what
+/// let an operator reply once the store is supported.
+///
+/// `domain` is the bare host (lowercased, leading `www.` removed) so the
+/// pipeline receives one spelling per store; `rawUrl` keeps what the person
+/// typed. `userId`/`requesterEmail` are BOTH nullable: an anonymous request is
+/// the ordinary case (the form lives on a public page), and a signed-out
+/// visitor may leave an email so they can still be told.
+///
+/// `userId` is `onDelete: SetNull`, NOT Cascade: the domain signal is ops data
+/// that must survive the requester's account, but the row must not keep a
+/// dangling FK. TODO: the danger-zone "Delete my data" route
+/// (api/account/data/delete) does not yet scrub `requester_email` from these
+/// rows — a later PR adds it to that transaction.
+///
+/// `status` is an OPEN string, `new` by default; the ingest routes' zod schemas
+/// are the single place the `new` | `imported` vocabulary is declared.
+model SiteSuggestion {
+  id             String    @id @default(cuid())
+  domain         String
+  rawUrl         String    @map("raw_url")
+  userId         String?   @map("user_id")
+  user           User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  requesterEmail String?   @map("requester_email")
+  // Which surface asked: 'web' (the /supported-stores form) or 'extension'
+  // (reserved — the extension has no suggest form today).
+  source         String
+  userAgent      String?   @map("user_agent")
+  status         String    @default("new")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  // Stamped by the ack endpoint when the pipeline confirms it imported the row.
+  importedAt     DateTime? @map("imported_at")
+
+  @@index([status, createdAt])
+  @@index([domain])
+  @@map("site_suggestions")
 }
 
 enum UserStatus {

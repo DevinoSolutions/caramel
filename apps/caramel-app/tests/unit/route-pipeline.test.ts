@@ -88,6 +88,15 @@ vi.mock('@/lib/rateLimit', async importOriginal => {
     return { ...actual, checkRateLimit: vi.fn(async () => null) }
 })
 
+// sites/suggest now declares `auth: 'optional'` (it attributes a suggestion to
+// a signed-in requester), so withRoute lazy-imports the better-auth graph and
+// resolves a session BEFORE the body gate this file pins. Stand the whole
+// graph in with an always-anonymous session, exactly as coupons-report.test.ts
+// does — the 422 below is about the body, not about auth.
+vi.mock('@/lib/auth/auth', () => ({
+    auth: { api: { getSession: vi.fn(async () => null) } },
+}))
+
 const { prismaMock, prismaState } = vi.hoisted(() => {
     const prismaState = {
         existingUser: null as Record<string, unknown> | null,
