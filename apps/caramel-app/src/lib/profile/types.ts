@@ -57,6 +57,20 @@ export interface ProfileOverview {
         recentEvents: SavingsEventSummary[]
     }
     favorites: FavoriteStoreSummary[]
+    /** Store requests this account can still be taken off.
+     *
+     * A COUNT, not a list, and not "things the user owns": the request itself
+     * survives a delete (it is the coupons pipeline's input and other people
+     * may have made it too) — only the requester's identity comes off. The
+     * danger zone needs it because a signed-out request carries nothing but the
+     * email typed into the form, so a user whose ONLY personal data is one of
+     * these would otherwise be told "Nothing to delete" and could never reach
+     * the route that removes it. Counted with the same predicate the scrub
+     * matches on (src/lib/siteSuggestionIdentity.ts), so the button and the
+     * route can never disagree. Falls to 0 once they are scrubbed. */
+    siteSuggestions: {
+        identifyingCount: number
+    }
     reports: {
         reportCount: number
         /** null when not derivable from real records — the UI then falls to a

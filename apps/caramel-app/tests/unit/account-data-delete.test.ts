@@ -168,7 +168,12 @@ describe('POST /api/account/data/delete — scope', () => {
                     },
                 ],
             },
-            data: { userId: null, requesterEmail: null, userAgent: null },
+            data: {
+                userId: null,
+                requesterEmail: null,
+                userAgent: null,
+                rawUrl: '',
+            },
         })
     })
 
@@ -177,11 +182,14 @@ describe('POST /api/account/data/delete — scope', () => {
 
         expect(prismaMock.siteSuggestion.updateMany).toHaveBeenCalledTimes(1)
         expect(prismaMock.siteSuggestion.deleteMany).not.toHaveBeenCalled()
-        // Only the identifying half is nulled. domain/status/created_at are
-        // absent from `data`, so the pipeline's input is untouched, and nothing
-        // new is stamped: a scrub is not an ANSWER to the request.
+        // Only the identifying half goes. domain/status/created_at are absent
+        // from `data`, so the pipeline's input is untouched, and nothing new is
+        // stamped: a scrub is not an ANSWER to the request. `rawUrl` IS in the
+        // list — a pasted URL can carry a session or affiliate token and the
+        // pipeline only ever keys on `domain` (2026-09-08, owner call).
         const [args] = prismaMock.siteSuggestion.updateMany.mock.calls[0]!
         expect(Object.keys(args.data).sort()).toEqual([
+            'rawUrl',
             'requesterEmail',
             'userAgent',
             'userId',

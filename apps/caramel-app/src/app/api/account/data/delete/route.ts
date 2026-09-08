@@ -1,6 +1,9 @@
 import { withRoute } from '@/lib/api/withRoute'
 import prisma from '@/lib/prisma'
-import type { Prisma } from '@prisma/client'
+import {
+    SITE_SUGGESTION_SCRUB_DATA,
+    siteSuggestionIdentityWhere,
+} from '@/lib/siteSuggestionIdentity'
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 
@@ -57,33 +60,13 @@ export const POST = withRoute(
         const userId = session.user.id
         const email = session.user.email ?? null
 
-        // A site suggestion is matched TWO ways, and the second is the one that
-        // matters: `user_id` finds the requests made while signed in, and the
-        // requester email finds the ones made while signed OUT — where the row
-        // carries no user id at all and the address the person typed is the
-        // ONLY thing on it. Matching by user id alone is the fix that looks
-        // right and leaves exactly the email this route exists to remove.
+        // Which rows identify this account, and what a scrub removes from them,
+        // both come from src/lib/siteSuggestionIdentity.ts. GET
+        // /api/account/overview counts rows with the SAME predicate so the
+        // danger-zone button knows whether there is anything to do — two
+        // hand-written copies would let the page say "Nothing to delete" about
+        // rows this route would happily have scrubbed.
         //
-        // Case-insensitive, because the suggest form records what the visitor
-        // typed (`Shopper@Example.com`) while the account holds its own
-        // spelling; a case-sensitive compare would walk straight past the row.
-        // An account with no email on it (the schema allows one) contributes no
-        // email branch rather than a `null` one, which would match every
-        // anonymous suggestion ever made.
-        const suggestionIdentity: Prisma.SiteSuggestionWhereInput[] = [
-            { userId },
-            ...(email
-                ? [
-                      {
-                          requesterEmail: {
-                              equals: email,
-                              mode: 'insensitive' as const,
-                          },
-                      },
-                  ]
-                : []),
-        ]
-
         // ONE transaction. A partial delete is the worst outcome available
         // here: the user is told their data is gone while some of it remains,
         // and the counts the UI just showed them become a lie. If any of the
@@ -101,12 +84,8 @@ export const POST = withRoute(
                 prisma.favoriteStore.deleteMany({ where: { userId } }),
                 prisma.couponReport.deleteMany({ where: { userId } }),
                 prisma.siteSuggestion.updateMany({
-                    where: { OR: suggestionIdentity },
-                    data: {
-                        userId: null,
-                        requesterEmail: null,
-                        userAgent: null,
-                    },
+                    where: siteSuggestionIdentityWhere({ userId, email }),
+                    data: SITE_SUGGESTION_SCRUB_DATA,
                 }),
             ])
 

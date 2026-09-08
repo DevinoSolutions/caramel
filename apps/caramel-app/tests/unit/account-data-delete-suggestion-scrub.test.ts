@@ -168,7 +168,12 @@ describe('delete-my-data scrubs the requester identity — THE PAIR', () => {
         // the same rows through the same fake.
         await siteSuggestionFake.updateMany({
             where: { userId: USER_ID },
-            data: { userId: null, requesterEmail: null, userAgent: null },
+            data: {
+                userId: null,
+                requesterEmail: null,
+                userAgent: null,
+                rawUrl: '',
+            },
         })
 
         expect(row('signed-in').requesterEmail).toBeNull()
@@ -195,6 +200,11 @@ describe('delete-my-data scrubs the requester identity — THE PAIR', () => {
             expect(row(id).userId).toBeNull()
             expect(row(id).requesterEmail).toBeNull()
             expect(row(id).userAgent).toBeNull()
+            // A pasted URL can carry a session or affiliate token, and the
+            // pipeline only ever keys on `domain`. Emptied, not nulled: the
+            // column is NOT NULL and `rawUrl` is a required string on the wire
+            // the coupons repo reads.
+            expect(row(id).rawUrl).toBe('')
         }
     })
 })
@@ -208,10 +218,11 @@ describe('delete-my-data scrubs the requester identity — scope', () => {
             userId: 'a-different-user',
             requesterEmail: 'stranger@example.com',
             userAgent: 'Mozilla/5.0 (not theirs)',
+            rawUrl: 'https://www.somebody-else.example.com/',
         })
     })
 
-    it('the store request SURVIVES: domain, status and created_at are left alone, and nothing new is stamped', async () => {
+    it('the store request SURVIVES: domain, status and created_at are left alone, the pasted URL is not, and nothing new is stamped', async () => {
         seedRow('signed-in', {
             domain: 'worldofbooks.com',
             status: 'supported',
@@ -223,8 +234,11 @@ describe('delete-my-data scrubs the requester identity — scope', () => {
 
         const after = row('signed-in')
         expect(after.domain).toBe('worldofbooks.com')
-        expect(after.rawUrl).toBe(before.rawUrl)
         expect(after.status).toBe('supported')
+        // rawUrl does NOT survive — it is what the person pasted, not the
+        // request. `domain` is the whole of what the pipeline needs.
+        expect(before.rawUrl).not.toBe('')
+        expect(after.rawUrl).toBe('')
         expect(after.createdAt).toEqual(before.createdAt)
         // A scrub is not an ANSWER to the request, so it dates nothing.
         expect(after.statusChangedAt).toBeNull()
