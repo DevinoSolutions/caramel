@@ -1,5 +1,6 @@
 import { withRoute } from '@/lib/api/withRoute'
 import { sendEmail } from '@/lib/email'
+import { SITE_SUGGESTION_OPS_EMAIL } from '@/lib/siteSuggestionNotices'
 import {
     normalizeSuggestedDomain,
     recordSiteSuggestion,
@@ -77,14 +78,13 @@ export const POST = withRoute(
         try {
             // First line kept VERBATIM ("A user suggested a new site: <url>") —
             // the coupons repo's manual import mines this mail by that phrase.
-            // aladdin@devino.ca, NOT support@unotes.net: the old recipient was
-            // a copy-paste from another project whose mailbox bounces, so every
-            // visitor suggestion was silently lost (a real one bounced
-            // 2026-08-08 06:33 UTC and had to be recovered from the UseSend
-            // event log). Deliberately NOT SUPPORT_EMAIL_TO: the pipeline's
-            // manual import mines THIS inbox for the subject line.
+            // ONE constant for the ops inbox (siteSuggestionNotices.ts), which
+            // also carries the reasons it is neither support@unotes.net nor
+            // SUPPORT_EMAIL_TO. Shared with the "store went live" notice on
+            // purpose: an operator who reads one of the two and not the other
+            // cannot close the loop on a request.
             await sendEmail({
-                to: 'aladdin@devino.ca',
+                to: SITE_SUGGESTION_OPS_EMAIL,
                 subject: 'Caramel Site Suggestion',
                 text: [
                     `A user suggested a new site: ${body.url}`,

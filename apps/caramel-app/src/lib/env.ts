@@ -87,6 +87,19 @@ const serverObjectSchema = z.object({
     // requests become MCP-readable with per-app permission delegation, instead
     // of landing in personal mailboxes.
     SUPPORT_EMAIL_TO: z.string().default('aladdin@devino.ca'),
+    // Does a `supported` ack MAIL the requester on its own?
+    //
+    // OFF by default, and the default is the whole point: the ack endpoint is
+    // driven by an automated pipeline, so leaving this on would let a machine
+    // decide that a stranger gets mail. With it off the app only MARKS the row
+    // (`status='supported'`, `notified_at` left NULL) and reports the pending
+    // count in the ops notice; the send is an explicit act — POST
+    // /api/ingest/site-suggestions/notify.
+    //
+    // A strict two-value enum, not a truthiness check: `SITE_SUGGESTIONS_AUTO_NOTIFY=yes`
+    // must fail at boot with a named variable, never be read as "off" (a silent
+    // downgrade) or as "on" (mail nobody asked for).
+    SITE_SUGGESTIONS_AUTO_NOTIFY: z.enum(['true', 'false']).default('false'),
     OPENROUTER_API_KEY: z.string().optional(),
     OPENROUTER_MODEL: z.string().default('openai/gpt-5-mini'),
     API_ENCRYPTION_ENABLED: z.string().optional(),
