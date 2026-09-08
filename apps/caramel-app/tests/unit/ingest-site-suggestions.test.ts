@@ -2,6 +2,12 @@ import { POST as ackPOST } from '@/app/api/ingest/site-suggestions/ack/route'
 import { GET as listGET } from '@/app/api/ingest/site-suggestions/route'
 import { NextRequest } from 'next/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+    resetTable,
+    seedRow,
+    siteSuggestionFake,
+    table,
+} from './support/siteSuggestionsPrismaFake'
 
 // Unit pins for the coupons pipeline's read/ack door onto site_suggestions —
 // the HTTP contract on top of src/lib/siteSuggestions.ts: the apiKey:'ingest'
@@ -10,106 +16,33 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 // the new -> imported flip. The SQL half (a real findMany/updateMany against
 // Postgres) is covered by tests/integration/site-suggestions.itest.ts.
 //
-// ANNOUNCED FAKE: prisma's siteSuggestion.findMany / updateMany are backed by a
-// tiny in-memory table that honours the where/orderBy/take the lib sends, so
-// the status filter, the `since` cut and the only-`new`-flips rule are
-// genuinely exercised rather than asserted from a canned return value.
+// ANNOUNCED FAKE: prisma's siteSuggestion queries are backed by a tiny
+// in-memory table (support/siteSuggestionsPrismaFake.ts) that honours the
+// where/orderBy/take the lib sends, so the status filter, the `since` cut and
+// the only-`new`-flips rule are genuinely exercised rather than asserted from a
+// canned return value. The status MACHINE (the closed-row rule, the requester
+// notice) is pinned next door in site-suggestion-lifecycle.test.ts.
 const { envMock } = vi.hoisted(() => ({
     envMock: { INGEST_API_KEY: undefined as string | undefined },
 }))
 vi.mock('@/lib/env', () => ({ env: envMock }))
 
-const { prismaMock, table } = vi.hoisted(() => {
-    interface Row {
-        id: string
-        domain: string
-        rawUrl: string
-        userId: string | null
-        requesterEmail: string | null
-        source: string
-        userAgent: string | null
-        status: string
-        createdAt: Date
-        importedAt: Date | null
-    }
-    const rows: Row[] = []
-    return {
-        table: rows,
-        prismaMock: {
-            siteSuggestion: {
-                findMany: vi.fn(
-                    async (args: {
-                        where: { status: string; createdAt?: { gte: Date } }
-                        orderBy: { createdAt: 'asc' }
-                        take: number
-                        select: Record<string, true>
-                    }) => {
-                        const since = args.where.createdAt?.gte
-                        // Oldest-first, honouring `orderBy` — an insertion
-                        // sort rather than Array#sort (the tsconfig lib
-                        // predates toSorted, and sort() mutates the table).
-                        const ordered: Row[] = []
-                        for (const row of rows) {
-                            if (row.status !== args.where.status) continue
-                            if (since && row.createdAt < since) continue
-                            const after = ordered.findIndex(
-                                r => r.createdAt > row.createdAt,
-                            )
-                            if (after === -1) ordered.push(row)
-                            else ordered.splice(after, 0, row)
-                        }
-                        return ordered.slice(0, args.take).map(row => {
-                            const picked: Record<string, unknown> = {}
-                            for (const key of Object.keys(args.select)) {
-                                picked[key] = row[key as keyof Row]
-                            }
-                            return picked
-                        })
-                    },
-                ),
-                updateMany: vi.fn(
-                    async (args: {
-                        where: { id: { in: string[] }; status: string }
-                        data: { status: string; importedAt: Date }
-                    }) => {
-                        let count = 0
-                        for (const row of rows) {
-                            if (
-                                args.where.id.in.includes(row.id) &&
-                                row.status === args.where.status
-                            ) {
-                                row.status = args.data.status
-                                row.importedAt = args.data.importedAt
-                                count += 1
-                            }
-                        }
-                        return { count }
-                    },
-                ),
-            },
-        },
-    }
+vi.mock('@/lib/prisma', async () => {
+    const fake = await import('./support/siteSuggestionsPrismaFake')
+    return { default: fake.prismaFake }
 })
-vi.mock('@/lib/prisma', () => ({ default: prismaMock }))
 
 const INGEST_KEY = 'test-ingest-key-suggestions'
 
 function seed(
     id: string,
     createdAt: string,
-    overrides: Partial<(typeof table)[number]> = {},
+    overrides: Record<string, unknown> = {},
 ) {
-    table.push({
-        id,
+    seedRow(id, {
         domain: `${id}.example`,
         rawUrl: `https://www.${id}.example/`,
-        userId: null,
-        requesterEmail: null,
-        source: 'web',
-        userAgent: 'ua',
-        status: 'new',
         createdAt: new Date(createdAt),
-        importedAt: null,
         ...overrides,
     })
 }
@@ -133,9 +66,7 @@ const bearer = { authorization: `Bearer ${INGEST_KEY}` }
 
 beforeEach(() => {
     envMock.INGEST_API_KEY = INGEST_KEY
-    table.length = 0
-    prismaMock.siteSuggestion.findMany.mockClear()
-    prismaMock.siteSuggestion.updateMany.mockClear()
+    resetTable()
 })
 
 describe('GET /api/ingest/site-suggestions — bearer gate (apiKey:ingest)', () => {
@@ -143,7 +74,7 @@ describe('GET /api/ingest/site-suggestions — bearer gate (apiKey:ingest)', () 
         seed('a', '2026-09-01T00:00:00.000Z')
         const res = await listGET(listRequest())
         expect(res.status).toBe(401)
-        expect(prismaMock.siteSuggestion.findMany).not.toHaveBeenCalled()
+        expect(siteSuggestionFake.findMany).not.toHaveBeenCalled()
     })
 
     it('wrong bearer → 401', async () => {
@@ -258,6 +189,11 @@ describe('GET /api/ingest/site-suggestions — the cross-repo contract', () => {
     })
 })
 
+// The ack grew a `status` field (#226). These pin the ORIGINAL contract — an
+// ids-only body from caramel-coupons PR #126 — which must keep behaving exactly
+// as it did: default `imported`, only `new` rows move, `acknowledged` still the
+// count of rows that really flipped. The added keys are asserted with
+// toMatchObject so a later additive key never reds this file.
 describe('POST /api/ingest/site-suggestions/ack — new -> imported', () => {
     it('no bearer → 401, nothing flipped', async () => {
         seed('a', '2026-09-01T00:00:00.000Z')
@@ -272,7 +208,12 @@ describe('POST /api/ingest/site-suggestions/ack — new -> imported', () => {
         seed('c', '2026-09-01T00:00:00.000Z')
         const res = await ackPOST(ackRequest({ ids: ['a', 'b'] }, bearer))
         expect(res.status).toBe(200)
-        expect(await res.json()).toEqual({ ok: true, acknowledged: 2 })
+        expect(await res.json()).toMatchObject({
+            ok: true,
+            status: 'imported',
+            acknowledged: 2,
+            changed: ['a', 'b'],
+        })
         expect(table.map(r => [r.id, r.status])).toEqual([
             ['a', 'imported'],
             ['b', 'imported'],
@@ -288,7 +229,11 @@ describe('POST /api/ingest/site-suggestions/ack — new -> imported', () => {
             importedAt: new Date('2026-09-02T00:00:00.000Z'),
         })
         const res = await ackPOST(ackRequest({ ids: ['a', 'ghost'] }, bearer))
-        expect(await res.json()).toEqual({ ok: true, acknowledged: 0 })
+        expect(await res.json()).toMatchObject({
+            ok: true,
+            acknowledged: 0,
+            changed: [],
+        })
         expect(table[0]!.importedAt).toEqual(
             new Date('2026-09-02T00:00:00.000Z'),
         )
@@ -306,6 +251,6 @@ describe('POST /api/ingest/site-suggestions/ack — new -> imported', () => {
             422,
         )
         expect((await ackPOST(ackRequest({}, bearer))).status).toBe(422)
-        expect(prismaMock.siteSuggestion.updateMany).not.toHaveBeenCalled()
+        expect(siteSuggestionFake.updateManyAndReturn).not.toHaveBeenCalled()
     })
 })
