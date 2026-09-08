@@ -42,8 +42,18 @@ export default function DataPrivacySection({
     const savingsCount = overview?.savings.eventCount ?? 0
     const favoritesCount = overview?.favorites.length ?? 0
     const reportsCount = overview?.reports.reportCount ?? 0
+    // Store requests still carrying this account's identity. In the gate
+    // because a request made while SIGNED OUT holds nothing but the email typed
+    // into the form: without this, the one user whose only personal data is
+    // that email would read "Nothing to delete" and could never reach the route
+    // that removes it. Counted server-side with the same predicate the scrub
+    // matches on, so the button and the route cannot disagree.
+    const suggestionsCount = overview?.siteSuggestions.identifyingCount ?? 0
     const nothingToDelete =
-        savingsCount === 0 && favoritesCount === 0 && reportsCount === 0
+        savingsCount === 0 &&
+        favoritesCount === 0 &&
+        reportsCount === 0 &&
+        suggestionsCount === 0
 
     async function deleteData() {
         setBusy(true)
@@ -76,7 +86,10 @@ export default function DataPrivacySection({
     }
 
     // Only clauses with a real count appear, so the dialog never says
-    // "0 followed stores".
+    // "0 followed stores". Store requests are deliberately NOT in this list:
+    // these clauses complete "This permanently removes ...", and the request
+    // itself is not removed — only the requester's identity comes off it. It
+    // gets its own honest sentence below.
     const clauses = [
         savingsCount > 0
             ? `${savingsCount} savings ${savingsCount === 1 ? 'event' : 'events'}`
@@ -130,8 +143,9 @@ export default function DataPrivacySection({
                         </p>
                         <p className={`${bodyTextClasses} mt-1`}>
                             Removes the stores you follow, your synced savings
-                            history, and your coupon reports. Your account and
-                            sign-in stay. This can&apos;t be undone.
+                            history, and your coupon reports, and takes your
+                            details off any store requests you sent. Your
+                            account and sign-in stay. This can&apos;t be undone.
                         </p>
                         <button
                             type="button"
@@ -159,9 +173,34 @@ export default function DataPrivacySection({
                 body={
                     <>
                         <p className={bodyTextClasses}>
-                            This permanently removes {clauses.join(', ')}. Your
-                            account stays, and Caramel keeps working —
-                            you&apos;ll just be starting from zero.
+                            {clauses.length > 0 && (
+                                <>
+                                    This permanently removes{' '}
+                                    {clauses.join(', ')}.{' '}
+                                </>
+                            )}
+                            {/* Its own sentence, and worded as a removal FROM
+                                something rather than OF it: the store request
+                                survives — other people may have made it too,
+                                and the coupons pipeline still needs it. Saying
+                                "removes 1 store request" would be false. */}
+                            {suggestionsCount > 0 && (
+                                <>
+                                    {clauses.length > 0
+                                        ? 'It also takes'
+                                        : 'This takes'}{' '}
+                                    your email and device details off{' '}
+                                    {suggestionsCount === 1
+                                        ? '1 store request'
+                                        : `${suggestionsCount} store requests`}{' '}
+                                    you sent &mdash;{' '}
+                                    {suggestionsCount === 1
+                                        ? 'the request itself stays'
+                                        : 'the requests themselves stay'}
+                                    , just without you attached.{' '}
+                                </>
+                            )}
+                            Your account stays, and Caramel keeps working.
                         </p>
                         <p className={`${bodyTextClasses} mt-3`}>
                             Want a copy first?{' '}
