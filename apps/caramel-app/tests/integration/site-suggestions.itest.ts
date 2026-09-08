@@ -1,6 +1,7 @@
 import { POST as deleteMyData } from '@/app/api/account/data/delete/route'
 import { POST } from '@/app/api/sites/suggest/route'
 import prisma from '@/lib/prisma'
+import { siteSuggestionIdentityWhere } from '@/lib/siteSuggestionIdentity'
 import {
     listSiteSuggestions,
     notifySupportedRequesters,
@@ -450,12 +451,17 @@ describe('delete-my-data scrubs the requester identity (real Postgres)', () => {
                         userId: true,
                         requesterEmail: true,
                         userAgent: true,
+                        rawUrl: true,
                     },
                 }),
             ).resolves.toEqual({
                 userId: null,
                 requesterEmail: null,
                 userAgent: null,
+                // A pasted URL can carry a session or affiliate token. Emptied,
+                // not nulled: the column is NOT NULL and `rawUrl` is a required
+                // string on the wire the coupons pipeline reads.
+                rawUrl: '',
             })
         }
         await expect(
@@ -495,6 +501,74 @@ describe('delete-my-data scrubs the requester identity (real Postgres)', () => {
             domain: `survives.${ITEST_DOMAIN_SUFFIX}`,
             requesterEmail: null,
             status: 'new',
+            // The store request is the DOMAIN; the URL the person pasted is not
+            // part of it and does not survive.
+            rawUrl: '',
         })
+    })
+})
+
+// The danger-zone gate reads a COUNT from GET /api/account/overview, and it
+// must be the same population the scrub touches: if the two predicates ever
+// disagreed, the page would say "Nothing to delete" about rows the delete route
+// would happily have scrubbed. Both call siteSuggestionIdentityWhere, so this
+// pins the round trip rather than the spelling — including the part only
+// Postgres can settle, that `mode: 'insensitive'` really folds the case.
+describe('the danger-zone count and the scrub agree (real Postgres)', () => {
+    async function identifyingCount(): Promise<number> {
+        return prisma.siteSuggestion.count({
+            where: {
+                AND: [
+                    siteSuggestionIdentityWhere({
+                        userId,
+                        email: USER_EMAIL,
+                    }),
+                    { domain: { endsWith: ITEST_DOMAIN_SUFFIX } },
+                ],
+            },
+        })
+    }
+
+    it('counts the signed-out, email-only request, then counts NOTHING once it is scrubbed', async () => {
+        const anonymous = await createRow(`gate.${ITEST_DOMAIN_SUFFIX}`)
+        await prisma.siteSuggestion.update({
+            where: { id: anonymous },
+            data: { requesterEmail: USER_EMAIL.toUpperCase() },
+        })
+        // The account's ONLY personal data. Before the gate counted these, this
+        // user read "Nothing to delete" and could never reach the route.
+        expect(await identifyingCount()).toBe(1)
+
+        getSessionMock.mockResolvedValue({
+            user: { id: userId, email: USER_EMAIL },
+        })
+        await deleteMyData(
+            new NextRequest('http://localhost/api/account/data/delete', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ confirm: 'DELETE' }),
+            }),
+        )
+
+        // The row still exists, and nothing on it identifies this account any
+        // more — so the button goes back to "Nothing to delete" by itself. No
+        // second "has anything left to scrub" condition is needed for that:
+        // every branch of the predicate requires a non-null column.
+        expect(await identifyingCount()).toBe(0)
+        await expect(
+            prisma.siteSuggestion.findUniqueOrThrow({
+                where: { id: anonymous },
+                select: { domain: true },
+            }),
+        ).resolves.toEqual({ domain: `gate.${ITEST_DOMAIN_SUFFIX}` })
+    })
+
+    it('a request that belongs to NOBODY — no user id, no email, only a user agent — is never counted', async () => {
+        const orphan = await createRow(`orphan.${ITEST_DOMAIN_SUFFIX}`)
+        await prisma.siteSuggestion.update({
+            where: { id: orphan },
+            data: { userAgent: 'somebody else entirely' },
+        })
+        expect(await identifyingCount()).toBe(0)
     })
 })

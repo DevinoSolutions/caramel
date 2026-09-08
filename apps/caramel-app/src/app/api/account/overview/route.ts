@@ -4,6 +4,7 @@ import prisma from '@/lib/prisma'
 import { summarizeReports } from '@/lib/profile/reportImpact'
 import { readSavingsSyncEnabled } from '@/lib/profile/savingsSyncPreference'
 import { RECENT_EVENTS_LIMIT, type ProfileOverview } from '@/lib/profile/types'
+import { siteSuggestionIdentityWhere } from '@/lib/siteSuggestionIdentity'
 import { NextResponse } from 'next/server'
 
 // GET /api/account/overview — the ONE payload the account page reads.
@@ -20,8 +21,12 @@ import { NextResponse } from 'next/server'
 // own the write routes for those tables: it renders correct empty data today
 // and correct populated data the moment they start writing.
 //
-// EVERY query is scoped by `userId: session.user.id`. There is no path through
-// this handler that reads another account's rows.
+// EVERY query is scoped to the caller. Site suggestions are the one place that
+// scoping is not literally `userId`: a request made while signed OUT carries no
+// user id, only the email typed into the form, so it is matched by the shared
+// predicate in src/lib/siteSuggestionIdentity.ts — the SAME one the delete
+// route scrubs with. There is still no path through this handler that reads
+// another account's rows.
 
 export const GET = withRoute(
     {
@@ -48,6 +53,7 @@ export const GET = withRoute(
             favoriteRows,
             reportRows,
             syncEnabled,
+            identifyingSuggestionCount,
         ] = await Promise.all([
             prisma.user.findUnique({
                 where: { id: userId },
@@ -103,6 +109,15 @@ export const GET = withRoute(
                 },
             }),
             readSavingsSyncEnabled(userId),
+            // A COUNT, never the rows: the account page has no reason to render
+            // somebody's store requests back at them, and the danger zone only
+            // needs to know whether there is anything left to take them off.
+            prisma.siteSuggestion.count({
+                where: siteSuggestionIdentityWhere({
+                    userId,
+                    email: session.user.email ?? null,
+                }),
+            }),
         ])
 
         // Per-currency totals. Deliberately NOT summed into one number: a
@@ -168,6 +183,7 @@ export const GET = withRoute(
                 starredAt: row.createdAt.toISOString(),
                 couponCount: couponCounts.get(row.storeName) ?? null,
             })),
+            siteSuggestions: { identifyingCount: identifyingSuggestionCount },
             reports,
         }
 
