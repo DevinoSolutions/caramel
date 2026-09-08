@@ -1,3 +1,4 @@
+import { POST as deleteMyData } from '@/app/api/account/data/delete/route'
 import { POST } from '@/app/api/sites/suggest/route'
 import prisma from '@/lib/prisma'
 import {
@@ -390,5 +391,110 @@ describe('site suggestions — answering a request (real Postgres)', () => {
                 select: { notifiedAt: true },
             }),
         ).resolves.toEqual({ notifiedAt: toldAt })
+    })
+})
+
+// "Delete my data" and the requester identity (#227), on real Postgres.
+//
+// The unit suite imitates `mode: 'insensitive'` in its in-memory fake. Whether
+// Postgres actually folds the case — and whether the OR really reaches a row
+// that carries no user id at all — is a property of the database, so it is
+// settled here.
+describe('delete-my-data scrubs the requester identity (real Postgres)', () => {
+    it('scrubs the signed-in row AND the email-only row typed in a different case, and leaves a third user alone', async () => {
+        const mine = await createRow(`mine.${ITEST_DOMAIN_SUFFIX}`)
+        await prisma.siteSuggestion.update({
+            where: { id: mine },
+            data: {
+                userId,
+                requesterEmail: USER_EMAIL,
+                userAgent: 'their laptop',
+            },
+        })
+        // Made while SIGNED OUT: no user id, and the address as THEY typed it.
+        const anonymous = await createRow(`anon.${ITEST_DOMAIN_SUFFIX}`)
+        await prisma.siteSuggestion.update({
+            where: { id: anonymous },
+            data: {
+                requesterEmail: USER_EMAIL.toUpperCase(),
+                userAgent: 'their phone',
+            },
+        })
+        const stranger = await createRow(`stranger.${ITEST_DOMAIN_SUFFIX}`)
+        await prisma.siteSuggestion.update({
+            where: { id: stranger },
+            data: {
+                requesterEmail: `someone-else@${ITEST_DOMAIN_SUFFIX}`,
+                userAgent: 'not theirs',
+            },
+        })
+
+        getSessionMock.mockResolvedValue({
+            user: { id: userId, email: USER_EMAIL },
+        })
+        const res = await deleteMyData(
+            new NextRequest('http://localhost/api/account/data/delete', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ confirm: 'DELETE' }),
+            }),
+        )
+        expect(res.status).toBe(200)
+        expect((await res.json()).scrubbed).toEqual({ siteSuggestions: 2 })
+
+        for (const id of [mine, anonymous]) {
+            await expect(
+                prisma.siteSuggestion.findUniqueOrThrow({
+                    where: { id },
+                    select: {
+                        userId: true,
+                        requesterEmail: true,
+                        userAgent: true,
+                    },
+                }),
+            ).resolves.toEqual({
+                userId: null,
+                requesterEmail: null,
+                userAgent: null,
+            })
+        }
+        await expect(
+            prisma.siteSuggestion.findUniqueOrThrow({
+                where: { id: stranger },
+                select: { requesterEmail: true, userAgent: true },
+            }),
+        ).resolves.toEqual({
+            requesterEmail: `someone-else@${ITEST_DOMAIN_SUFFIX}`,
+            userAgent: 'not theirs',
+        })
+    })
+
+    it('the store request itself survives the scrub, and stays drainable by the pipeline', async () => {
+        const id = await createRow(`survives.${ITEST_DOMAIN_SUFFIX}`)
+        await prisma.siteSuggestion.update({
+            where: { id },
+            data: { userId, requesterEmail: USER_EMAIL },
+        })
+        getSessionMock.mockResolvedValue({
+            user: { id: userId, email: USER_EMAIL },
+        })
+        await deleteMyData(
+            new NextRequest('http://localhost/api/account/data/delete', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ confirm: 'DELETE' }),
+            }),
+        )
+
+        // Still a `new` row the pipeline will hand out, with its domain intact.
+        const listed = (
+            await listSiteSuggestions({ status: 'new', limit: 500 })
+        ).filter(s => s.id === id)
+        expect(listed).toHaveLength(1)
+        expect(listed[0]).toMatchObject({
+            domain: `survives.${ITEST_DOMAIN_SUFFIX}`,
+            requesterEmail: null,
+            status: 'new',
+        })
     })
 })

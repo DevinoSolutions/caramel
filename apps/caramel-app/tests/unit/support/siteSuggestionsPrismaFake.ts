@@ -53,6 +53,24 @@ function matchesField(value: unknown, cond: Condition): boolean {
                 if (value < (record.gte as Date)) return false
             } else if (key === 'not') {
                 if (matchesField(value, record.not)) return false
+            } else if (key === 'equals') {
+                // `mode: 'insensitive'` is a real Postgres behaviour; imitated
+                // here so the unit suite can exercise the case-folded match,
+                // and pinned for real in the integration suite.
+                if (record.mode === 'insensitive') {
+                    if (
+                        typeof value !== 'string' ||
+                        typeof record.equals !== 'string' ||
+                        value.toLowerCase() !== record.equals.toLowerCase()
+                    ) {
+                        return false
+                    }
+                } else if (!matchesField(value, record.equals)) {
+                    return false
+                }
+            } else if (key === 'mode') {
+                // Read by the `equals` branch above; never a filter on its own.
+                continue
             } else {
                 throw new Error(`fake prisma: unsupported operator "${key}"`)
             }
@@ -70,6 +88,15 @@ export function matchesWhere(
     for (const [key, cond] of Object.entries(where)) {
         if (key === 'NOT') {
             if (matchesWhere(row, cond as Record<string, unknown>)) return false
+            continue
+        }
+        if (key === 'OR') {
+            const branches = cond as Record<string, unknown>[]
+            // An EMPTY OR matches nothing in Prisma. Spelling that out matters:
+            // the scrub builds its OR conditionally, so a bug that produced an
+            // empty list must select no rows here rather than every row.
+            if (!branches.some(branch => matchesWhere(row, branch)))
+                return false
             continue
         }
         if (!(key in row)) {
@@ -106,58 +133,87 @@ function orderedByCreatedAt(rows: FakeSuggestionRow[]): FakeSuggestionRow[] {
     return ordered
 }
 
+/**
+ * Prisma's array-form `$transaction` takes LAZY PrismaPromises: they are built
+ * by the caller and only executed when the transaction awaits them, which is
+ * precisely why a rejected batch leaves the rows untouched. An eager `async`
+ * fake would apply every write while the batch was merely being ASSEMBLED, and
+ * "a partial failure changes nothing" would be untestable here — so these
+ * return a thenable that runs on await instead.
+ */
+function lazy<T>(run: () => T): PromiseLike<T> {
+    return {
+        // 2026-09-08: a hand-made thenable is the POINT here, not an
+        // accident. Prisma's own PrismaPromise is exactly this, and modelling
+        // it is what lets the suite prove that a rejected `$transaction` batch
+        // leaves the rows untouched — the property "the scrub lives inside the
+        // transaction" depends on it. Test-fixture scope only; nothing ships.
+        // The directive must be the LAST comment line above the code it
+        // covers (CLAUDE.md gotcha: prettier reorders otherwise).
+        // oxlint-disable-next-line unicorn/no-thenable
+        then: (onFulfilled, onRejected) =>
+            Promise.resolve().then(run).then(onFulfilled, onRejected),
+    }
+}
+
 export const siteSuggestionFake = {
     findMany: vi.fn(
-        async (args: {
+        (args: {
             where?: Record<string, unknown>
             orderBy?: { createdAt: 'asc' }
             take?: number
             select?: Record<string, true>
-        }) => {
-            let rows = table.filter(row => matchesWhere(row, args.where))
-            if (args.orderBy) rows = orderedByCreatedAt(rows)
-            if (typeof args.take === 'number') rows = rows.slice(0, args.take)
-            return rows.map(row => project(row, args.select))
-        },
+        }) =>
+            lazy(() => {
+                let rows = table.filter(row => matchesWhere(row, args.where))
+                if (args.orderBy) rows = orderedByCreatedAt(rows)
+                if (typeof args.take === 'number') {
+                    rows = rows.slice(0, args.take)
+                }
+                return rows.map(row => project(row, args.select))
+            }),
     ),
     updateMany: vi.fn(
-        async (args: {
+        (args: {
             where?: Record<string, unknown>
             data: Partial<FakeSuggestionRow>
-        }) => {
-            let count = 0
-            for (const row of table) {
-                if (!matchesWhere(row, args.where)) continue
-                Object.assign(row, args.data)
-                count += 1
-            }
-            return { count }
-        },
+        }) =>
+            lazy(() => {
+                let count = 0
+                for (const row of table) {
+                    if (!matchesWhere(row, args.where)) continue
+                    Object.assign(row, args.data)
+                    count += 1
+                }
+                return { count }
+            }),
     ),
     updateManyAndReturn: vi.fn(
-        async (args: {
+        (args: {
             where?: Record<string, unknown>
             data: Partial<FakeSuggestionRow>
             select?: Record<string, true>
-        }) => {
-            const updated: Record<string, unknown>[] = []
-            for (const row of table) {
-                if (!matchesWhere(row, args.where)) continue
-                Object.assign(row, args.data)
-                updated.push(project(row, args.select))
-            }
-            return updated
-        },
+        }) =>
+            lazy(() => {
+                const updated: Record<string, unknown>[] = []
+                for (const row of table) {
+                    if (!matchesWhere(row, args.where)) continue
+                    Object.assign(row, args.data)
+                    updated.push(project(row, args.select))
+                }
+                return updated
+            }),
     ),
     create: vi.fn(
-        async (args: {
+        (args: {
             data: Partial<FakeSuggestionRow>
             select?: Record<string, true>
-        }) => {
-            const row = makeRow(`created-${table.length}`, args.data)
-            table.push(row)
-            return project(row, args.select)
-        },
+        }) =>
+            lazy(() => {
+                const row = makeRow(`created-${table.length}`, args.data)
+                table.push(row)
+                return project(row, args.select)
+            }),
     ),
 }
 
