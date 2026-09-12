@@ -52,6 +52,17 @@ function urlsOf(entries: MetadataRoute.Sitemap): string[] {
     return entries.map(e => e.url)
 }
 
+// `/coupons/<store>` entries only — the A–Z directory also lives under
+// /coupons/ (/coupons/stores, /coupons/stores/<letter>) and is pinned
+// separately below.
+function storeUrlsOf(entries: MetadataRoute.Sitemap): string[] {
+    return urlsOf(entries).filter(
+        u =>
+            u.startsWith(`${ORIGIN}/coupons/`) &&
+            !u.startsWith(`${ORIGIN}/coupons/stores`),
+    )
+}
+
 describe('sitemap.ts — static routes', () => {
     it('lists the public marketing routes including /support (monthly, 0.5) and never the auth/profile pages', async () => {
         const entries = await renderSitemap()
@@ -138,9 +149,7 @@ describe('sitemap.ts — store entries are canonical, lowercase, deduped, policy
         ])
 
         const entries = await renderSitemap()
-        const storeUrls = urlsOf(entries).filter(u =>
-            u.startsWith(`${ORIGIN}/coupons/`),
-        )
+        const storeUrls = storeUrlsOf(entries)
 
         expect(storeUrls).toEqual([
             `${ORIGIN}/coupons/brooklinen.com`,
@@ -211,11 +220,80 @@ describe('sitemap.ts — store entries are canonical, lowercase, deduped, policy
         expect(urlsOf(entries)).toContain(`${ORIGIN}/coupons/mymemory.co.uk`)
     })
 
-    it('with an empty catalog emits only the static routes', async () => {
+    it('with an empty catalog emits only the static routes — no store URLs and no directory pages', async () => {
         const entries = await renderSitemap()
         expect(
             urlsOf(entries).some(u => u.startsWith(`${ORIGIN}/coupons/`)),
         ).toBe(false)
         expect(entries.length).toBe(6)
+    })
+})
+
+describe('sitemap.ts — A–Z store directory pages', () => {
+    it('lists the directory index (weekly, 0.8) and ONLY the letter pages that have stores (weekly, 0.6), bucketed from the same collapsed entries', async () => {
+        repoMock.listStoreSitemapEntries.mockResolvedValue([
+            {
+                site: 'athleta.gap.com',
+                coupon_count: 7,
+                last_updated: d('2026-09-01T00:00:00Z'),
+            },
+            {
+                site: 'brooklinen.com',
+                coupon_count: 9,
+                last_updated: d('2026-09-05T00:00:00Z'),
+            },
+            {
+                site: '123ink.ca',
+                coupon_count: 25,
+                last_updated: d('2026-09-05T00:00:00Z'),
+            },
+            // Not stores / not indexable — must not create a letter page.
+            {
+                site: 'co.uk',
+                coupon_count: 50,
+                last_updated: d('2026-09-01T00:00:00Z'),
+            },
+            {
+                site: 'zero-codes.com',
+                coupon_count: 0,
+                last_updated: d('2026-09-01T00:00:00Z'),
+            },
+        ])
+
+        const entries = await renderSitemap()
+        const urls = urlsOf(entries)
+
+        const index = entries.find(e => e.url === `${ORIGIN}/coupons/stores`)
+        expect(index).toBeDefined()
+        expect(index?.changeFrequency).toBe('weekly')
+        expect(index?.priority).toBe(0.8)
+
+        // athleta.gap.com folds to gap.com → g; brooklinen.com → b; 123ink.ca → 0-9.
+        for (const letter of ['0-9', 'b', 'g']) {
+            const page = entries.find(
+                e => e.url === `${ORIGIN}/coupons/stores/${letter}`,
+            )
+            expect(page, `missing letter page ${letter}`).toBeDefined()
+            expect(page?.changeFrequency).toBe('weekly')
+            expect(page?.priority).toBe(0.6)
+        }
+        // co.uk is not a store and zero-codes.com is not indexable: no c / z.
+        expect(urls).not.toContain(`${ORIGIN}/coupons/stores/c`)
+        expect(urls).not.toContain(`${ORIGIN}/coupons/stores/z`)
+        // Exactly index + 3 letters.
+        expect(
+            urls.filter(u => u.startsWith(`${ORIGIN}/coupons/stores`)),
+        ).toHaveLength(4)
+        // Never a paged URL — page 2+ is noindex.
+        expect(urls.some(u => u.includes('?page='))).toBe(false)
+        // Directory pages never invent a lastModified.
+        expect(index?.lastModified).toBeUndefined()
+
+        // The store entries themselves are unchanged by the addition.
+        expect(storeUrlsOf(entries)).toEqual([
+            `${ORIGIN}/coupons/123ink.ca`,
+            `${ORIGIN}/coupons/brooklinen.com`,
+            `${ORIGIN}/coupons/gap.com`,
+        ])
     })
 })

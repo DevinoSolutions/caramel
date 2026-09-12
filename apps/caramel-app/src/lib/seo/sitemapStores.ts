@@ -15,6 +15,15 @@
 import { evaluateStorePageIndexability } from '@/lib/seo/storeIndexability'
 import { resolveStoreDomain } from '@/lib/storeDomain'
 
+/**
+ * Upper bound on grouped `coupons.site` rows feeding `/coupons/[store]`
+ * entries — shared by the sitemap and the A–Z directory so both read the same
+ * window of the catalog. The sitemap spec caps a single file at 50,000 URLs;
+ * this stays well under it and bounds the query. If the catalog ever outgrows
+ * it, the fix is a sitemap index, not a bigger number.
+ */
+export const STORE_SITEMAP_ROW_LIMIT = 5000
+
 /** One `GROUP BY site` row from couponsRepo.listStoreSitemapEntries. */
 export type StoreSitemapRow = {
     site: string | null
