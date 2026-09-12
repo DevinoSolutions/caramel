@@ -1,6 +1,7 @@
 import CouponsSection from '@/components/coupons/coupons-section'
 import PopularStores from '@/components/coupons/popular-stores'
 import StoreFavoriteStar from '@/components/coupons/store-favorite-star'
+import StoreNeighbours from '@/components/coupons/store-neighbours'
 import { attachSignals } from '@/lib/couponSignals'
 import { listStoreCoupons } from '@/lib/couponsRepo'
 import { BASE_URL } from '@/lib/env.client'
@@ -259,6 +260,10 @@ export default async function StoreCouponsPage({
                 </p>
             </section>
             <PopularStores currentSite={base} />
+            {/* Alphabetical neighbours + this store's directory letter page:
+                the crawl chain that reaches every store page (PopularStores
+                links the same 4 stores site-wide; this links the nearest). */}
+            <StoreNeighbours base={base} />
             <script
                 type="application/ld+json"
                 suppressHydrationWarning

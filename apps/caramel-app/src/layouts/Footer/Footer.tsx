@@ -21,6 +21,7 @@ const productLinks = [
     { name: 'Pricing', url: '/pricing' },
     { name: 'Coupons', url: '/coupons' },
     { name: 'Supported Stores', url: '/supported-stores' },
+    { name: 'Store directory', url: '/coupons/stores' },
     { name: 'Sources', url: '/sources' },
 ]
 

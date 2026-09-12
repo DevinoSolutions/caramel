@@ -41,6 +41,7 @@ const LLMS_TXT = `# Caramel
 - [Coupons](${origin}/coupons): browse the full coupon catalog.
 - [Store coupon pages](${origin}/coupons/amazon.com): per-store codes, one page
   per store domain, e.g. /coupons/amazon.com or /coupons/nike.com.
+- [Store directory A–Z](${origin}/coupons/stores): every store with live codes, by first letter.
 - [Supported stores](${origin}/supported-stores): which stores Caramel can
   auto-apply codes on.
 - [Sources](${origin}/sources): the transparency page listing where Caramel's

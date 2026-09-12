@@ -58,6 +58,11 @@ test.describe('SEO & Accessibility Basics', () => {
 // seeded app (e2e-pr/local) and the deployed dev site (e2e-push). Only the
 // codecademy.com assertion depends on a specific catalog row, so only it is
 // DATABASE_URL-gated; everything else holds on any non-empty catalog.
+// Distinct hrefs matching `re` (group 1) in raw HTML, in document order.
+function hrefsOf(html: string, re: RegExp): string[] {
+    return Array.from(new Set(Array.from(html.matchAll(re)).map(m => m[1]!)))
+}
+
 function extractJsonLd(html: string): Array<Record<string, unknown>> {
     const scriptRe =
         /<script type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/g
@@ -183,6 +188,8 @@ test.describe('Coupon pages — crawler-visible SEO', () => {
             .map(loc => /\/coupons\/([^/?#]+)$/.exec(loc)?.[1])
             .filter((slug): slug is string => Boolean(slug))
             .map(slug => decodeURIComponent(slug))
+            // /coupons/stores is the A–Z directory index, not a store page.
+            .filter(slug => slug !== 'stores')
         // The catalog is never legitimately empty in either context.
         expect(storeSlugs.length).toBeGreaterThan(0)
 
@@ -202,6 +209,87 @@ test.describe('Coupon pages — crawler-visible SEO', () => {
         expect(res.status()).toBe(200)
         const origin = (baseURL ?? '').replace(/\/+$/, '')
         expect(await res.text()).toContain(`<loc>${origin}/support</loc>`)
+    })
+
+    // A–Z store directory (2026-09-12): before it, 8 of ~4,262 store pages
+    // had any internal inbound link — the rest were sitemap-only orphans.
+    // These walk the crawl chain the way a crawler does, from the RAW HTML:
+    // directory index → a letter page → a store page → its neighbours. URLs
+    // are discovered from the served HTML, never assumed, so the tests hold
+    // against the 5-store hermetic seed and the real catalog alike.
+    const letterHrefRe = /href="(\/coupons\/stores\/(?:[a-z]|0-9))"/g
+    const storeHrefRe = /href="(\/coupons\/(?!stores(?:\/|"|$))[^"/?#]+)"/g
+
+    test('/coupons/stores is served with a self canonical, index+follow, and at least one letter link', async ({
+        page,
+    }) => {
+        const res = await page.request.get('/coupons/stores')
+        expect(res.status()).toBe(200)
+        const html = await res.text()
+
+        expect(html).toMatch(
+            /<link rel="canonical" href="[^"]*\/coupons\/stores"\/?>/,
+        )
+        expect(html).not.toMatch(/name="robots"[^>]*noindex/)
+        expect((html.match(/<h1/g) ?? []).length).toBe(1)
+        expect(hrefsOf(html, letterHrefRe).length).toBeGreaterThan(0)
+    })
+
+    test('a letter page found from the directory index is served with a self canonical and lists store links', async ({
+        page,
+    }) => {
+        const index = await page.request.get('/coupons/stores')
+        const letterPath = hrefsOf(await index.text(), letterHrefRe)[0]
+        expect(letterPath).toBeTruthy()
+
+        const res = await page.request.get(letterPath!)
+        expect(res.status()).toBe(200)
+        const html = await res.text()
+
+        expect(html).toMatch(
+            new RegExp(
+                `<link rel="canonical" href="[^"]*${letterPath!.replace(/[/-]/g, '\\$&')}"/?>`,
+            ),
+        )
+        expect(html).not.toMatch(/name="robots"[^>]*noindex/)
+        const storeHrefs = hrefsOf(html, storeHrefRe)
+        expect(storeHrefs.length).toBeGreaterThan(0)
+        // Every listed store is a canonical base (the same rule the sitemap
+        // obeys) and shows a real code count.
+        for (const href of storeHrefs) {
+            const slug = decodeURIComponent(href.slice('/coupons/'.length))
+            expect(resolveStoreDomain(slug), href).toBe(slug)
+        }
+        expect(html).toMatch(/ · \d[\d,]* codes?</)
+    })
+
+    test('a store page reached from a letter page carries a "More stores" section with at least one neighbour link', async ({
+        page,
+    }) => {
+        const index = await page.request.get('/coupons/stores')
+        const letterPath = hrefsOf(await index.text(), letterHrefRe)[0]!
+        const letter = await page.request.get(letterPath)
+        const storePath = hrefsOf(await letter.text(), storeHrefRe)[0]
+        expect(storePath).toBeTruthy()
+
+        const res = await page.request.get(storePath!)
+        expect(res.status()).toBe(200)
+        const html = await res.text()
+
+        expect(html).toContain('More stores')
+        // At least one OTHER store linked from this page (the neighbour chain),
+        // and the way back into the directory letter this store lives on.
+        const others = hrefsOf(html, storeHrefRe).filter(h => h !== storePath)
+        expect(others.length).toBeGreaterThan(0)
+        expect(hrefsOf(html, letterHrefRe)).toContain(letterPath)
+    })
+
+    test('a letter with no stores is a 404, not an empty page', async ({
+        page,
+    }) => {
+        // Not a directory letter at all — always 404 regardless of catalog.
+        const res = await page.request.get('/coupons/stores/zz')
+        expect(res.status()).toBe(404)
     })
 })
 
