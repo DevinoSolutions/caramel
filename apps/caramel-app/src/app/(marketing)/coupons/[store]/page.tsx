@@ -91,8 +91,6 @@ export async function generateMetadata({
     // rather than merging into it, so the inherited og:image has to be restated
     // here or these pages share links with no preview image at all.
     const banner = `${baseUrl}/caramel_banner.png`
-    const title = `${base} Coupons & Promo Codes | Caramel`
-    const description = `Find ${base} coupon codes, promo codes, and discounts — refreshed as new codes are found.`
     // Canonical always points at the NORMALIZED base-domain URL: this route
     // serves the same content for /coupons/www.nike.com, /coupons/shop.nike.com
     // and /coupons/nike.com, so every variant must canonicalize to ONE URL or
@@ -104,6 +102,22 @@ export async function generateMetadata({
     // "no codes right now" pages in the index are soft-404 bloat. cache()
     // makes this share one catalog read with the page body.
     const { total } = await fetchStoreCoupons(storeParam)
+    // Search Console (90 days to 2026-09-11): store pages sit at positions
+    // 25–55 for "<store> promo code" queries. The title/description use only
+    // data the page already renders — the base domain and the live `total`
+    // (the same "N active codes" the prose below states) — never an invented
+    // display name or date. The zero-coupon page keeps the generic title: it
+    // is noindexed above and must not advertise codes it does not have.
+    const count = total.toLocaleString('en-US')
+    const codeWord = total === 1 ? 'code' : 'codes'
+    const title =
+        total > 0
+            ? `${base} coupons & promo codes — ${count} active ${codeWord} | Caramel`
+            : `${base} Coupons & Promo Codes | Caramel`
+    const description =
+        total > 0
+            ? `Caramel lists ${count} active coupon ${codeWord} for ${base} — promo codes and discounts refreshed as new codes are found and dead ones retired.`
+            : `Find ${base} coupon codes, promo codes, and discounts — refreshed as new codes are found.`
 
     return {
         title,

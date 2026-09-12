@@ -2,9 +2,16 @@ import { BASE_URL } from '@/lib/env.client'
 import type { Metadata } from 'next'
 import PricingPageClient from './PricingPageClient'
 
-const title = 'Caramel Pricing | Free Forever Coupon Extension'
+// Search Console (90 days to 2026-09-11): 513 impressions, 2 clicks, position
+// 7.9 — a 0.4% CTR against a ~3% benchmark for that position. Every query
+// that reaches this page is a brand query (`caramel extension`, `caramel
+// coupon`) on which the home page already ranks #1, so a snippet that repeats
+// the home pitch only competes with it. The title/description therefore state
+// the ONE thing this page answers — "Is Caramel free?" — so it wins the
+// price-intent variant instead of duplicating the home snippet.
+const title = 'Is Caramel Free? Yes — Free Forever & Open Source | Caramel'
 const description =
-    'Caramel is 100% free, open source, and privacy-first. No hidden fees, no data selling, no credit card required. Save money with the trusted alternative to Honey.'
+    'Yes, Caramel is free forever: no premium tier, no hidden fees, no credit card. An open-source coupon extension for 4,000+ stores that never sells your data.'
 const canonicalUrl = 'https://grabcaramel.com/pricing'
 const base = BASE_URL
 const banner = `${base}/caramel_banner.png`

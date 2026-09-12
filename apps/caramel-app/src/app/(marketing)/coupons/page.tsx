@@ -17,7 +17,7 @@ const PAGE_SIZE = 5
 
 const title = 'Coupon Codes & Promo Codes for Top Stores | Caramel'
 const description =
-    'Browse coupon codes and promo codes for your favorite stores. Caramel finds and applies the best deals automatically at checkout.'
+    'Browse Caramel coupon codes and promo codes for 4,000+ online stores. The free Caramel extension finds and applies the best codes automatically at checkout.'
 const canonicalUrl = 'https://grabcaramel.com/coupons'
 const banner = `${BASE_URL}/caramel_banner.png`
 
