@@ -140,6 +140,13 @@ export default function Footer() {
                                     </Link>
                                 </li>
                             ))}
+                            {/* Crawlable pointer at the answer-engine summary
+                                (a route handler, so a plain <a>, not <Link>). */}
+                            <li>
+                                <a href="/llms.txt" className={linkClasses}>
+                                    llms.txt
+                                </a>
+                            </li>
                         </ul>
                     </nav>
                 </motion.div>

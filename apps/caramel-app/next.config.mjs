@@ -25,9 +25,14 @@ const SECURITY_HEADERS = [
         key: 'Permissions-Policy',
         value: 'camera=(), microphone=(), geolocation=(), payment=()',
     },
+    // `preload` is the hstspreload.org eligibility flag (max-age >= 1y +
+    // includeSubDomains + preload). Safe here because every subdomain that
+    // serves anything (dev.grabcaramel.com) is already https-only. Actually
+    // submitting the apex to the preload list is an owner action; the header
+    // alone changes nothing until then. Pinned by e2e/seo-regression.spec.ts.
     {
         key: 'Strict-Transport-Security',
-        value: 'max-age=31536000; includeSubDomains',
+        value: 'max-age=31536000; includeSubDomains; preload',
     },
 ]
 
