@@ -195,13 +195,24 @@ export default function SupportedSection() {
                                                     brand PNGs; routing 16 of them
                                                     through sharp on every cold
                                                     load starves 2-core CI runners
-                                                    and flakes the nav e2e suite. */}
+                                                    and flakes the nav e2e suite.
+                                                    fetchPriority="low" (2026-09-12):
+                                                    Next emits a <link rel=preload>
+                                                    for each eager image, so these
+                                                    nine below-the-fold logos were
+                                                    fetched at the SAME priority as
+                                                    the hero wordmark (the mobile
+                                                    LCP image). The attribute lands
+                                                    on both the img and its preload,
+                                                    so they still load eagerly, just
+                                                    behind the LCP image. */}
                                                 <Image
                                                     src={store.image}
                                                     alt={`${store.name} logo`}
                                                     width={80}
                                                     height={80}
                                                     loading="eager"
+                                                    fetchPriority="low"
                                                     unoptimized
                                                     className="h-full w-full object-contain"
                                                 />

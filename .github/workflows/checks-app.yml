@@ -538,12 +538,27 @@ jobs:
         working-directory: ./apps/caramel-app
         run: pnpm lighthouse
 
+      # Mobile pass (2026-09-12): the desktop preset above scored the home page
+      # 90 while PageSpeed's MOBILE lab run scored it 70 with an 8.6 s LCP —
+      # 245 of the last 920 GSC clicks were phones, and the desktop preset
+      # cannot see a mobile regression at all. Same URLs, same server, same
+      # SEO/a11y error budgets; Lighthouse's default mobile emulation +
+      # simulated throttling, median of 3 runs. Performance is WARN with a
+      # floor set from the measured post-fix median (see the config) so a real
+      # regression shows up in the log without letting runner-load variance
+      # red the job.
+      - name: Run Lighthouse CI (mobile)
+        working-directory: ./apps/caramel-app
+        run: pnpm exec lhci autorun --config=lighthouserc.mobile.json
+
       - name: Upload Lighthouse reports
         uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
         with:
           name: lighthouse-reports
-          path: apps/caramel-app/lighthouse-reports/
+          path: |
+            apps/caramel-app/lighthouse-reports/
+            apps/caramel-app/lighthouse-reports-mobile/
           retention-days: 14
 
   # ─────────────────────────────────────────────────────────────

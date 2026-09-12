@@ -10,34 +10,45 @@
 //
 // All fields are optional: a missing/bad public var must never crash the
 // app (required-var fail-fast belongs in env.ts, not here).
-import { z } from 'zod'
+//
+// `zod/mini`, not `zod` (2026-09-12, mobile-performance PR): this module is
+// the ONLY zod importer reachable from browser code, and the classic entry
+// (method-chained API + every locale's error tables) was landing as a 262 KB
+// raw / 64 KB gzip chunk in EVERY route's first-load JS — 15% of the home
+// page's JavaScript, to validate ten optional strings. The mini entry is the
+// same zod 4 core with a functional, tree-shakeable API; `.parse()`, `.shape`
+// and `z.infer` are identical, and the thrown error is the same `$ZodError`
+// (message = the JSON issue list, which is what env.test.ts matches on).
+// env.ts (server only, never bundled for the browser) keeps classic zod.
+import * as z from 'zod/mini'
 
 // Base object (keeps `.shape` for CLIENT_ENV_KEYS + `ClientEnv`). The refined
 // `clientSchema` below adds the cross-field pair checks — mirrors the
 // serverObjectSchema / serverSchema split in env.ts.
 const clientObjectSchema = z.object({
-    NEXT_PUBLIC_BASE_URL: z.string().min(1).optional(),
-    NEXT_PUBLIC_SENTRY_DSN: z.string().optional(),
-    NEXT_PUBLIC_GOOGLE_ANALYTICS_ID: z.string().optional(),
-    NEXT_PUBLIC_API_ENCRYPTION_ENABLED: z.string().optional(),
+    NEXT_PUBLIC_BASE_URL: z.optional(z.string().check(z.minLength(1))),
+    NEXT_PUBLIC_SENTRY_DSN: z.optional(z.string()),
+    NEXT_PUBLIC_GOOGLE_ANALYTICS_ID: z.optional(z.string()),
+    NEXT_PUBLIC_API_ENCRYPTION_ENABLED: z.optional(z.string()),
     // ---- Observability: PostHog dataset routing ------------------------
     // Which PostHog project the BROWSER captures target. Mirrors the server's
     // POSTHOG_DATASET (env.ts) and must agree with it (env.ts fail-fasts on a
     // mismatch). Defaults to 'disabled' so an unconfigured build never
     // captures.
-    NEXT_PUBLIC_POSTHOG_DATASET: z
-        .enum(['production', 'e2e', 'disabled'])
-        .default('disabled'),
+    NEXT_PUBLIC_POSTHOG_DATASET: z._default(
+        z.enum(['production', 'e2e', 'disabled']),
+        'disabled',
+    ),
     // production capture pair (project API key + ingestion host).
-    NEXT_PUBLIC_POSTHOG_HOST: z.string().optional(),
-    NEXT_PUBLIC_POSTHOG_KEY: z.string().optional(),
+    NEXT_PUBLIC_POSTHOG_HOST: z.optional(z.string()),
+    NEXT_PUBLIC_POSTHOG_KEY: z.optional(z.string()),
     // shared E2E test-project capture pair — synthetic Playwright traffic is
     // ingested here ONLY, keeping it out of the production dataset.
-    NEXT_PUBLIC_POSTHOG_E2E_TEST_PROJECT_HOST: z.string().optional(),
-    NEXT_PUBLIC_POSTHOG_E2E_TEST_PROJECT_CAPTURE_TOKEN: z.string().optional(),
+    NEXT_PUBLIC_POSTHOG_E2E_TEST_PROJECT_HOST: z.optional(z.string()),
+    NEXT_PUBLIC_POSTHOG_E2E_TEST_PROJECT_CAPTURE_TOKEN: z.optional(z.string()),
     // Build stamp, injected by next.config.mjs from package.json version
     // (never set by hand). Falls back to '0.0.0-dev' via APP_VERSION below.
-    NEXT_PUBLIC_APP_VERSION: z.string().optional(),
+    NEXT_PUBLIC_APP_VERSION: z.optional(z.string()),
 })
 
 // A configured dataset must carry its capture pair, or capture would silently
@@ -46,33 +57,35 @@ const clientObjectSchema = z.object({
 // eager browser singleton below deliberately swallows that (analytics must
 // never white-screen the app), and the real deploy-time fail-fast lives in
 // env.ts.
-const clientSchema = clientObjectSchema.superRefine((data, ctx) => {
-    if (
-        data.NEXT_PUBLIC_POSTHOG_DATASET === 'production' &&
-        !(data.NEXT_PUBLIC_POSTHOG_HOST && data.NEXT_PUBLIC_POSTHOG_KEY)
-    ) {
-        ctx.addIssue({
-            code: 'custom',
-            path: ['NEXT_PUBLIC_POSTHOG_KEY'],
-            message:
-                'NEXT_PUBLIC_POSTHOG_DATASET=production requires both NEXT_PUBLIC_POSTHOG_HOST and NEXT_PUBLIC_POSTHOG_KEY',
-        })
-    }
-    if (
-        data.NEXT_PUBLIC_POSTHOG_DATASET === 'e2e' &&
-        !(
-            data.NEXT_PUBLIC_POSTHOG_E2E_TEST_PROJECT_HOST &&
-            data.NEXT_PUBLIC_POSTHOG_E2E_TEST_PROJECT_CAPTURE_TOKEN
-        )
-    ) {
-        ctx.addIssue({
-            code: 'custom',
-            path: ['NEXT_PUBLIC_POSTHOG_E2E_TEST_PROJECT_CAPTURE_TOKEN'],
-            message:
-                'NEXT_PUBLIC_POSTHOG_DATASET=e2e requires both NEXT_PUBLIC_POSTHOG_E2E_TEST_PROJECT_HOST and NEXT_PUBLIC_POSTHOG_E2E_TEST_PROJECT_CAPTURE_TOKEN',
-        })
-    }
-})
+const clientSchema = clientObjectSchema.check(
+    z.superRefine((data, ctx) => {
+        if (
+            data.NEXT_PUBLIC_POSTHOG_DATASET === 'production' &&
+            !(data.NEXT_PUBLIC_POSTHOG_HOST && data.NEXT_PUBLIC_POSTHOG_KEY)
+        ) {
+            ctx.addIssue({
+                code: 'custom',
+                path: ['NEXT_PUBLIC_POSTHOG_KEY'],
+                message:
+                    'NEXT_PUBLIC_POSTHOG_DATASET=production requires both NEXT_PUBLIC_POSTHOG_HOST and NEXT_PUBLIC_POSTHOG_KEY',
+            })
+        }
+        if (
+            data.NEXT_PUBLIC_POSTHOG_DATASET === 'e2e' &&
+            !(
+                data.NEXT_PUBLIC_POSTHOG_E2E_TEST_PROJECT_HOST &&
+                data.NEXT_PUBLIC_POSTHOG_E2E_TEST_PROJECT_CAPTURE_TOKEN
+            )
+        ) {
+            ctx.addIssue({
+                code: 'custom',
+                path: ['NEXT_PUBLIC_POSTHOG_E2E_TEST_PROJECT_CAPTURE_TOKEN'],
+                message:
+                    'NEXT_PUBLIC_POSTHOG_DATASET=e2e requires both NEXT_PUBLIC_POSTHOG_E2E_TEST_PROJECT_HOST and NEXT_PUBLIC_POSTHOG_E2E_TEST_PROJECT_CAPTURE_TOKEN',
+            })
+        }
+    }),
+)
 
 export type ClientEnv = z.infer<typeof clientObjectSchema>
 
