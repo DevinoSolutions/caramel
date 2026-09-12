@@ -15,6 +15,17 @@ import { FaChevronDown } from 'react-icons/fa'
 //   + cart-signals.js payload (title/meta/up to 6 item names, no payment data);
 //   sign-in token lives in browser extension storage (popup.js/coupon-runner.js).
 // - browsers: the four live store listings in src/lib/brandLinks.ts.
+// - Safari answer: the App Store listing (SAFARI_APP_STORE_URL) fetched
+//   2026-09-12 states iPhone "Requires iOS 16.4 or later", iPad, Mac
+//   "Requires macOS 13.0 or later" (versions deliberately not quoted here).
+// - SimplyCodes answer: simplycodes.com fetched 2026-09-12 (200) links no
+//   source code / GitHub anywhere — the same absence test claim-inventory
+//   applies to Honey, Capital One Shopping, Rakuten and Coupert. Nothing
+//   else about SimplyCodes is asserted.
+// - Same-as-Honey answer: exists because ~400 impressions/90 days land on
+//   the home page from people searching for Honey itself (`honey coupons`
+//   187 impr, `honey coupon finder` 48, `honey code finder` 38 — positions
+//   9–11); it answers them truthfully instead of pretending to be Honey.
 // - numbers: 107,827 visible codes (GET /api/coupons?limit=1 → total) /
 //   4,314 stores with live codes (sitemap /coupons/<store> URLs) from PROD on
 //   2026-09-11, rounded DOWN. Never round up, and never derive the catalog
@@ -33,12 +44,24 @@ const faqItems = [
         answer: "The extension never sells or shares your personal information, and it contains no ads and no third-party trackers. To do its job it talks to Caramel's own servers: as you browse, it asks whether Caramel has codes for the current site's domain so the toolbar badge can show a count; when you reach checkout on a supported store it fetches those codes, sends the page and cart context (page title and item names — never payment details) so the right category of codes is chosen, and reports whether a code worked (linked to your account only if you're signed in) so rankings stay accurate for everyone. Your settings and optional sign-in are kept in your browser's extension storage.",
     },
     {
+        question: 'Is Caramel the same as Honey?',
+        answer: "No. Caramel is an independent coupon extension, not affiliated with Honey or PayPal. Like Honey, it looks up coupon codes for the store you are checking out on and applies the best one; unlike Honey, its extension and web app are open source, it contains no affiliate code, and it leaves creators' affiliate links untouched.",
+    },
+    {
         question: 'How is Caramel different from Honey?',
         answer: "Honey has been publicly documented replacing creators' affiliate links with its own, and its code is closed source, so its behavior can't be independently audited. Caramel is the opposite by design: fully open source under the AGPL-3.0 license, it never touches affiliate links, and it is free with no premium tier.",
     },
     {
+        question: 'How is Caramel different from SimplyCodes?',
+        answer: "SimplyCodes does not publish its source code, so what its extension does with your data and with affiliate links can only be taken on trust. Caramel's extension and web app are published under the AGPL-3.0 license for anyone to audit, it contains no affiliate code at all, and it works without an account.",
+    },
+    {
         question: 'Which browsers does Caramel support?',
         answer: 'Caramel is available for Chrome on the Chrome Web Store, for Firefox on Firefox Add-ons, for Microsoft Edge on Edge Add-ons, and for Safari through the App Store.',
+    },
+    {
+        question: 'Is there a Caramel coupon extension for Safari?',
+        answer: 'Yes. Caramel ships as a Safari extension through the App Store for Mac (macOS) and for iPhone and iPad (iOS), and it is free there like every other version — the same open-source coupon extension as the Chrome, Firefox and Edge builds.',
     },
     {
         question: 'How many coupon codes does Caramel have?',

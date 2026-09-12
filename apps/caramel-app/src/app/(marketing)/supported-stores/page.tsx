@@ -13,9 +13,13 @@ import type { Metadata } from 'next'
 // never prerendered at build time (same pattern as app/sitemap.ts).
 export const dynamic = 'force-dynamic'
 
-const title = 'Caramel | Supported Stores'
+// Search Console (90 days to 2026-09-11): 175 impressions at position 37 with
+// a title that said nothing a searcher types. The count is the reconciled
+// "4,000+" figure (floor 4,314 store pages in sitemap.xml on 2026-09-11,
+// rounded DOWN — the same constant heroStats.ts / PricingSection.tsx quote).
+const title = '4,000+ Supported Stores — Caramel Coupon Extension'
 const description =
-    'Explore the stores supported by Caramel and start saving with our coupon extension.'
+    'Search the 4,000+ online stores where the free Caramel coupon extension finds and applies promo codes at checkout, and see the stores added most recently.'
 const canonicalUrl = 'https://grabcaramel.com/supported-stores'
 const base = BASE_URL
 const banner = `${base}/caramel_banner.png`
