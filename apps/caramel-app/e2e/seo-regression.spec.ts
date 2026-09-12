@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { INDEXNOW_KEY, INDEXNOW_KEY_PATH } from '../src/lib/seo/indexnow'
 
 // SEO regression gate — everything here reads the RAW server HTML via
 // page.request.get (no JS execution), so it asserts exactly what a crawler
@@ -296,5 +297,20 @@ test.describe('SEO regression gate (raw server HTML)', () => {
         expect(res.headers()['content-type']).toContain('text/plain')
         const body = await res.text()
         expect(body).toContain('Caramel')
+    })
+
+    test('IndexNow key file is served verbatim at /<key>.txt', async ({
+        page,
+    }) => {
+        // IndexNow (Bing/Yandex/Seznam/Naver) validates a submission by
+        // fetching this exact path and comparing the body to the key. The
+        // constant is imported RELATIVELY: src/lib/seo/indexnow.ts is
+        // alias-free and env-free precisely so a spec can reach it without
+        // the `@/` tsconfig alias Playwright does not resolve.
+        const res = await page.request.get(INDEXNOW_KEY_PATH)
+        expect(res.status()).toBe(200)
+        expect(res.headers()['content-type']).toContain('text/plain')
+        const body = await res.text()
+        expect(body.trim()).toBe(INDEXNOW_KEY)
     })
 })
