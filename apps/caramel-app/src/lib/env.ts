@@ -88,7 +88,7 @@ const serverObjectSchema = z.object({
     // of landing in personal mailboxes.
     SUPPORT_EMAIL_TO: z.string().default('aladdin@devino.ca'),
     OPENROUTER_API_KEY: z.string().optional(),
-    OPENROUTER_MODEL: z.string().default('openai/gpt-5-mini'),
+    OPENROUTER_MODEL: z.string().default('anthropic/claude-haiku-4.5'),
     API_ENCRYPTION_ENABLED: z.string().optional(),
     // Which PostHog project this deploy's SERVER-side captures target (the
     // feedback+observability foundation). 'production' → the real project;
