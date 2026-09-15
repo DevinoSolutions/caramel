@@ -1,4 +1,5 @@
 import { BASE_URL } from '@/lib/env.client'
+import { AI_CRAWLERS } from '@/lib/seo/aiCrawlers'
 import type { MetadataRoute } from 'next'
 
 // The only origins that may be indexed. Every other BASE_URL a build can carry
@@ -31,7 +32,18 @@ export default function robots(): MetadataRoute.Robots {
     }
 
     return {
-        rules: [{ userAgent: '*', allow: '/', disallow: DISALLOWED_PATHS }],
+        rules: [
+            { userAgent: '*', allow: '/', disallow: DISALLOWED_PATHS },
+            // Explicit AI-crawler allow group (src/lib/seo/aiCrawlers.ts).
+            // Same disallow set as `*`: the private paths stay private for
+            // answer engines too; the point is an unambiguous, named
+            // invitation for everything else.
+            {
+                userAgent: [...AI_CRAWLERS],
+                allow: '/',
+                disallow: DISALLOWED_PATHS,
+            },
+        ],
         sitemap: `${origin}/sitemap.xml`,
     }
 }

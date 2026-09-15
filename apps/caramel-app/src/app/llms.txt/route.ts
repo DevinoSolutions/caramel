@@ -54,6 +54,11 @@ const LLMS_TXT = `# Caramel
 - Firefox Add-ons: ${FIREFOX_ADDONS_URL}
 - Microsoft Edge Add-ons: ${EDGE_ADDONS_URL}
 - Safari (App Store): ${SAFARI_APP_STORE_URL}
+
+## Optional
+
+- [Full version](${origin}/llms-full.txt): the same facts plus the FAQ
+  questions and answers and a privacy summary, in one document.
 `
 
 export function GET(): Response {

@@ -8,6 +8,7 @@ import {
     SAFARI_APP_STORE_URL,
 } from '@/lib/brandLinks'
 import { BASE_URL } from '@/lib/env.client'
+import { LLMS_TXT_ALTERNATE_TYPES } from '@/lib/seo/llmsTxtAlternate'
 import '@/styles/globals.css'
 import type { Metadata, Viewport } from 'next'
 import { ReactNode } from 'react'
@@ -22,6 +23,7 @@ export const metadata: Metadata = {
     title: 'Caramel | The Trusted Alternative To Honey For Finding Coupons',
     description,
     metadataBase: new URL(BASE_URL),
+    alternates: { types: LLMS_TXT_ALTERNATE_TYPES },
     openGraph: {
         type: 'website',
         title: 'Caramel | The Trusted Alternative To Honey For Finding Coupons',
@@ -62,8 +64,12 @@ const THEME_INIT_SCRIPT = `(function(){var d=false;try{d=localStorage.getItem('t
 // entity: "Caramel coupon extension" + the "grabcaramel" handle. The sameAs
 // URLs come from src/lib/brandLinks.ts — the same constants the footer and
 // llms.txt render, so the graph can't drift from the UI. Price 0 is real
-// (free forever, no paid tier — see /pricing). Deliberately NO
-// aggregateRating/review markup of any kind.
+// (free forever, no paid tier — see /pricing). parentOrganization ties the
+// entity to the company that ships it (the repo lives under the
+// DevinoSolutions GitHub org; devino.ca is the company site, 200 on
+// 2026-09-12). Deliberately NO aggregateRating/review markup of any kind.
+// The @id / alternateName / sameAs / parentOrganization shape is pinned in
+// raw HTML by e2e/seo-regression.spec.ts.
 const ENTITY_STRUCTURED_DATA = {
     '@context': 'https://schema.org',
     '@graph': [
@@ -83,6 +89,11 @@ const ENTITY_STRUCTURED_DATA = {
                 DISCORD_INVITE_URL,
                 INSTAGRAM_URL,
             ],
+            parentOrganization: {
+                '@type': 'Organization',
+                name: 'Devino Solutions',
+                url: 'https://devino.ca',
+            },
         },
         {
             '@type': 'SoftwareApplication',
