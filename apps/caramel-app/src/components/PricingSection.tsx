@@ -6,11 +6,11 @@ import { HiCheckCircle } from 'react-icons/hi'
 
 const features = [
     'Automated coupon application at checkout',
-    'Works on 3,000+ supported stores',
+    'Works on 4,000+ supported stores',
     'Zero ads or data selling',
     'Open source & community-driven',
     'Never hijacks affiliate commissions',
-    'Lightning fast performance',
+    'Fast, lightweight performance',
     'Cross-browser support (Chrome, Firefox, Edge, iOS Safari)',
     'Regular updates & new features',
     'No credit card required',
@@ -29,7 +29,7 @@ const stats = [
         icon: <FaGithub />,
     },
     {
-        title: '3,000+',
+        title: '4,000+',
         desc: 'Stores Supported',
         icon: <FaHeart />,
     },
@@ -299,8 +299,8 @@ export default function PricingSection() {
                                 We believe in transparency.
                             </strong>{' '}
                             Unlike other extensions that monetize your data or
-                            hijack affiliate commissions, Caramel is built by
-                            the community, for the community.
+                            hijack affiliate commissions, Caramel is built in
+                            the open, for the community.
                         </motion.p>
                         <motion.p
                             initial={{ opacity: 0 }}

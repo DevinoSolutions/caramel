@@ -55,7 +55,7 @@ test.describe('Home Page - Critical Sections', () => {
             page.getByRole('heading', { name: 'Creator-Friendly' }),
         ).toBeVisible()
         await expect(
-            page.getByRole('heading', { name: 'Lightning Fast' }),
+            page.getByRole('heading', { name: 'Fast & Lightweight' }),
         ).toBeVisible()
         await expect(
             page.getByRole('heading', { name: 'Cross-Browser Support' }),

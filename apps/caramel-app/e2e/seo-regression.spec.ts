@@ -223,6 +223,33 @@ test.describe('SEO regression gate (raw server HTML)', () => {
         expect(types).toContain('"@type":"SoftwareApplication"')
     })
 
+    // Claim-integrity pin (2026-09-11): the two catalog figures the site is
+    // allowed to quote are "4,000+ stores" and "100,000+ coupon codes",
+    // rounded DOWN from prod on that date (4,314 store pages in sitemap.xml,
+    // 107,827 from GET /api/coupons?limit=1 → total). Both are static copy
+    // (heroStats.ts, FaqSection.tsx, PricingSection.tsx, SupportedSection.tsx)
+    // so this holds in both e2e contexts. The negative pin is the retired
+    // "139,000" FAQ number that outlived the stats-census change for six
+    // weeks — a figure must never drift back silently. Re-verify the live
+    // counts before changing either string; never round up.
+    test('home raw HTML quotes only the reconciled catalog figures', async ({
+        page,
+    }) => {
+        const html = await (await page.request.get('/')).text()
+        expect(html, 'store count must read 4,000+').toContain('4,000+')
+        expect(html, 'coupon count must read 100,000').toContain(
+            'over 100,000 coupon codes across more than 4,000 online stores',
+        )
+        expect(
+            html,
+            'retired FAQ figure 139,000 must not reappear',
+        ).not.toContain('139,000')
+        expect(
+            html,
+            'superseded store count 3,000+ must not reappear',
+        ).not.toContain('3,000+')
+    })
+
     test('robots.txt honours the env-aware indexing contract', async ({
         baseURL,
         page,

@@ -41,10 +41,10 @@ const LLMS_TXT = `# Caramel
 - [Coupons](${origin}/coupons): browse the full coupon catalog.
 - [Store coupon pages](${origin}/coupons/amazon.com): per-store codes, one page
   per store domain, e.g. /coupons/amazon.com or /coupons/nike.com.
-- [Supported stores](${origin}/supported-stores): which stores Caramel can
-  auto-apply codes on.
-- [Sources](${origin}/sources): the transparency page listing where Caramel's
-  coupon codes come from.
+- [Supported stores](${origin}/supported-stores): which stores Caramel holds
+  coupon codes for.
+- [Sources](${origin}/sources): where Caramel's coupon codes come from, and
+  where to request a new source.
 - [Privacy policy](${origin}/privacy): what data Caramel does and does not
   collect.
 

@@ -41,7 +41,7 @@ export default function CouponsSection({
     initialTotal,
     disableInitialFetch = false,
     heroTitle = 'All Coupons',
-    heroSubtitle = 'Browse verified coupon codes, promo codes, and offers.',
+    heroSubtitle = 'Browse coupon codes, promo codes, and offers.',
     heroAction,
 }: CouponsSectionProps) {
     const MIN_LOADING_DELAY_MS = 350
@@ -82,7 +82,7 @@ export default function CouponsSection({
         : '/full-logo.png'
     const sidebarTitle = storeDomain || 'Caramel'
     const sidebarDescription = storeDomain
-        ? `Save at ${storeDomain} with verified coupon codes. Caramel applies the best deals automatically at checkout.`
+        ? `Save at ${storeDomain} with coupon codes. Caramel applies the best deals automatically at checkout.`
         : "The open-source and privacy-first alternative to Honey. Automatically finds and applies the best coupon codes at checkout — without selling your data or hijacking creators' commissions."
 
     useEffect(() => {
@@ -456,11 +456,11 @@ export default function CouponsSection({
 
                     <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-lg dark:border-white/10 dark:bg-darkSurface">
                         <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">
-                            3,000+ Supported Stores
+                            4,000+ Supported Stores
                         </p>
                         <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">
                             From major retailers to niche marketplaces, Caramel
-                            works everywhere you shop online.
+                            works at thousands of stores.
                         </p>
                         <Link
                             href="/supported-stores"

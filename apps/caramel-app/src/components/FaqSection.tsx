@@ -15,8 +15,10 @@ import { FaChevronDown } from 'react-icons/fa'
 //   + cart-signals.js payload (title/meta/up to 6 item names, no payment data);
 //   sign-in token lives in browser extension storage (popup.js/coupon-runner.js).
 // - browsers: the four live store listings in src/lib/brandLinks.ts.
-// - numbers: 139,340 active codes / 3,402 distinct stores from the PROD
-//   /api/coupons/stats + catalog on 2026-07-28, rounded DOWN. Never round up.
+// - numbers: 107,827 visible codes (GET /api/coupons?limit=1 → total) /
+//   4,314 stores with live codes (sitemap /coupons/<store> URLs) from PROD on
+//   2026-09-11, rounded DOWN. Never round up, and never derive the catalog
+//   size from /api/coupons/stats (a valid-only trust census that undercounts).
 const faqItems = [
     {
         question: 'Does Caramel replace or hijack creator affiliate links?',
@@ -28,7 +30,7 @@ const faqItems = [
     },
     {
         question: 'What data does the Caramel extension collect?',
-        answer: "The extension never sells or shares your personal information, and it contains no ads and no third-party trackers. To do its job it talks to Caramel's own servers: when you reach checkout on a supported store it fetches coupon codes for that store's domain, sends the page and cart context (page title and item names — never payment details) so the right category of codes is chosen, and reports whether a code worked so rankings stay accurate for everyone. Your settings and optional sign-in are kept in your browser's extension storage.",
+        answer: "The extension never sells or shares your personal information, and it contains no ads and no third-party trackers. To do its job it talks to Caramel's own servers: as you browse, it asks whether Caramel has codes for the current site's domain so the toolbar badge can show a count; when you reach checkout on a supported store it fetches those codes, sends the page and cart context (page title and item names — never payment details) so the right category of codes is chosen, and reports whether a code worked (linked to your account only if you're signed in) so rankings stay accurate for everyone. Your settings and optional sign-in are kept in your browser's extension storage.",
     },
     {
         question: 'How is Caramel different from Honey?',
@@ -40,7 +42,7 @@ const faqItems = [
     },
     {
         question: 'How many coupon codes does Caramel have?',
-        answer: "Caramel's catalog holds over 139,000 active coupon codes across more than 3,000 online stores, and it is refreshed continuously as new codes are found and dead ones are retired.",
+        answer: "Caramel's catalog holds over 100,000 coupon codes across more than 4,000 online stores, and it is refreshed continuously as new codes are found and dead ones are retired.",
     },
     {
         question: 'Do I need an account to use Caramel?',

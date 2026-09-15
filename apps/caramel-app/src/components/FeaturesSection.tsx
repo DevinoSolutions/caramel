@@ -20,7 +20,7 @@ const features = [
     {
         title: 'Automated Coupon Application',
         desc: 'Saves you money by finding and applying the best coupon codes.',
-        detail: 'We monitor thousands of coupon codes across 3,000+ stores, ensuring you always get the best deal without lifting a finger.',
+        detail: 'We monitor thousands of coupon codes across 4,000+ stores, ensuring you always get the best deal without lifting a finger.',
         icon: <FaDollarSign />,
     },
     {
@@ -42,15 +42,15 @@ const features = [
         icon: <FaHeart />,
     },
     {
-        title: 'Lightning Fast',
-        desc: 'Instant coupon discovery and application at checkout.',
-        detail: 'Our optimized algorithms search and apply coupons in seconds, never slowing down your shopping experience.',
+        title: 'Fast & Lightweight',
+        desc: 'Automatic coupon discovery and application at checkout.',
+        detail: 'Our optimized algorithms search and apply coupons at checkout, never slowing down your shopping experience.',
         icon: <FaBolt />,
     },
     {
         title: 'Cross-Browser Support',
         desc: 'Works seamlessly across Chrome, Firefox, and more.',
-        detail: 'One extension, all browsers. Consistent experience regardless of your browser preference with automatic updates.',
+        detail: 'One extension for Chrome, Firefox, Edge, and Safari. Consistent experience regardless of your browser preference with automatic updates.',
         icon: <FaGlobe />,
     },
 ]
@@ -58,28 +58,28 @@ const features = [
 const comparisonItems = [
     {
         title: 'Privacy Protection',
-        other: 'Opaque data practices',
+        other: 'Often opaque data practices',
         caramel: '100% privacy-first approach',
     },
     {
         title: 'Data Collection',
-        other: 'Tracks your browsing habits',
+        other: 'May track your browsing habits',
         caramel: 'No ad tracking or data selling',
     },
     {
         title: 'Creator Support',
-        other: 'Hijacks affiliate commissions',
+        other: 'Hijacked affiliate commissions',
         caramel: 'Protects creator earnings',
     },
     {
         title: 'Code Transparency',
         other: 'Closed source & hidden',
-        caramel: 'Fully open source & peer-reviewed',
+        caramel: 'Fully open source & publicly reviewable',
     },
     {
         title: 'Performance',
-        other: 'Slow and resource-heavy',
-        caramel: 'Lightning fast & lightweight',
+        other: 'Often resource-heavy',
+        caramel: 'Fast & lightweight',
     },
 ]
 

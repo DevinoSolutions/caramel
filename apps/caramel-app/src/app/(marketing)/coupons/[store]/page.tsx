@@ -92,7 +92,7 @@ export async function generateMetadata({
     // here or these pages share links with no preview image at all.
     const banner = `${baseUrl}/caramel_banner.png`
     const title = `${base} Coupons & Promo Codes | Caramel`
-    const description = `Find verified ${base} coupon codes, promo codes, and discounts. Updated daily.`
+    const description = `Find ${base} coupon codes, promo codes, and discounts — refreshed as new codes are found.`
     // Canonical always points at the NORMALIZED base-domain URL: this route
     // serves the same content for /coupons/www.nike.com, /coupons/shop.nike.com
     // and /coupons/nike.com, so every variant must canonicalize to ONE URL or
@@ -238,9 +238,9 @@ export default async function StoreCouponsPage({
                     codes for that store from its own catalog, tries them in the
                     promo-code field, and keeps the one with the biggest
                     discount. It never replaces affiliate links, and it reports
-                    back only whether a code worked — with no account
-                    information attached — so code rankings stay accurate for
-                    every shopper.
+                    back whether a code worked (linked to your account only when
+                    you're signed in) so code rankings stay accurate for every
+                    shopper.
                 </p>
             </section>
             <PopularStores currentSite={base} />
