@@ -94,11 +94,18 @@ export default function Header({ scrollRef }: HeaderProps) {
                 href="/"
                 className="absolute z-10 ml-5 flex h-full w-[185px] lg:static lg:z-auto lg:ml-0"
             >
+                {/* 196×50 = the PNG's real 1830×467 aspect (3.92:1). It was
+                    declared 120×120, so the browser reserved a SQUARE box
+                    that collapsed to a strip when the file decoded — a
+                    layout shift at the very top of every page (part of the
+                    0.10 mobile CLS PageSpeed measured). Width 196 also makes
+                    the optimizer's 2x variant 384px, i.e. sharp on 3x
+                    phones at the ~148px CSS width it renders at. */}
                 <Image
                     src="/full-logo.png"
                     alt="Caramel"
-                    height={120}
-                    width={120}
+                    width={196}
+                    height={50}
                     className="mb-auto mt-auto w-4/5 cursor-pointer sm:w-5/12"
                 />
             </Link>
