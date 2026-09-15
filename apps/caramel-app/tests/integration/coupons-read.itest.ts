@@ -3,6 +3,7 @@ import {
     getCouponStats,
     listActiveSources,
     listCoupons,
+    listStoreSitemapEntries,
     listSupportedStoreConfigs,
 } from '@/lib/couponsRepo'
 import prisma from '@/lib/prisma'
@@ -197,5 +198,44 @@ describe('listActiveSources — sources ⋈ coupons aggregates (real pg :58005)'
         expect(feedA.total_coupons).toBeGreaterThanOrEqual(16)
         expect(feedA.total_used).toBeGreaterThanOrEqual(2357)
         expect(feedA.total_expired).toBeGreaterThanOrEqual(2)
+    })
+})
+
+describe('listStoreSitemapEntries — per-site visible aggregates for the sitemap (real pg :58005)', () => {
+    it('returns one row per visible site, sorted by site, with an ::int count that matches listCoupons and a real Date last_updated', async () => {
+        const rows = await listStoreSitemapEntries(5000)
+
+        // Non-null sites only, ascending — the GROUP BY / ORDER BY held for real.
+        const sites = rows.map(r => r.site)
+        for (const site of sites) expect(site).toBeTruthy()
+        expect(sites).toEqual([...sites].sort())
+
+        // codecademy.com is the store no other suite writes to, so its
+        // aggregate is asserted exactly against the SAME visibility predicate
+        // listCoupons applies: the sitemap count must equal the page count.
+        const codecademy = rows.find(r => r.site === 'codecademy.com')
+        expect(codecademy).toBeDefined()
+        expect(Number.isInteger(codecademy!.coupon_count)).toBe(true)
+        expect(codecademy!.coupon_count).toBeGreaterThan(0)
+        expect(codecademy!.last_updated).toBeInstanceOf(Date)
+        expect(Number.isNaN(codecademy!.last_updated.getTime())).toBe(false)
+        const { total } = await listCoupons({
+            baseSite: 'codecademy.com',
+            limit: 1,
+            skip: 0,
+        })
+        // listCoupons also matches subdomain rows (LIKE '%.codecademy.com'),
+        // so compare against the sum over every raw site under that base.
+        const underBase = rows
+            .filter(
+                r =>
+                    r.site === 'codecademy.com' ||
+                    r.site.endsWith('.codecademy.com'),
+            )
+            .reduce((sum, r) => sum + r.coupon_count, 0)
+        expect(underBase).toBe(total)
+
+        // LIMIT is bound (the sitemap's 5000 cap is a real bound, not decoration).
+        expect(await listStoreSitemapEntries(2)).toHaveLength(2)
     })
 })

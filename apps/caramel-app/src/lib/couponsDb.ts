@@ -136,6 +136,21 @@ export const SiteCountRowSchema = z.object({
 export type SiteCountRow = z.infer<typeof SiteCountRowSchema>
 
 /**
+ * app/sitemap.ts — one row per RAW `coupons.site` with its visible-coupon
+ * count and newest `updated_at`. `site` is non-null here because the query
+ * filters `site IS NOT NULL` (a per-query guarantee, like CouponListRow's);
+ * `last_updated` is `MAX(updated_at)` over a NOT NULL `timestamp(3)` column, so
+ * a group always has one — `z.coerce.date()` for the same driver-tolerance
+ * reason RecentStoreRowSchema.added_at uses it.
+ */
+export const SiteAggregateRowSchema = z.object({
+    site: z.string(),
+    coupon_count: z.number(),
+    last_updated: z.coerce.date(),
+})
+export type SiteAggregateRow = z.infer<typeof SiteAggregateRowSchema>
+
+/**
  * supported-stores/page.tsx's "Recently added" strip — one row per store that
  * has just become supported, newest first.
  *

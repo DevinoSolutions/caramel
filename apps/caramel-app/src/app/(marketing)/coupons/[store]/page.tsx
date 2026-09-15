@@ -5,6 +5,7 @@ import { attachSignals } from '@/lib/couponSignals'
 import { listStoreCoupons } from '@/lib/couponsRepo'
 import { BASE_URL } from '@/lib/env.client'
 import { jsonLdString } from '@/lib/jsonLd'
+import { evaluateStorePageIndexability } from '@/lib/seo/storeIndexability'
 import { resolveStoreDomain } from '@/lib/storeDomain'
 import type { Coupon } from '@/types/coupon'
 import type { Metadata } from 'next'
@@ -67,11 +68,27 @@ export async function generateMetadata({
     const { store } = await Promise.resolve(params)
     const storeParam = typeof store === 'string' ? safeDecode(store) : ''
     const base = getBaseDomain(storeParam)
-    if (!storeParam || !base) {
+    // ONE indexability policy, shared with the sitemap (app/sitemap.ts via
+    // src/lib/seo/sitemapStores.ts): a slug naming no registrable store, or a
+    // store with zero visible coupons, is `noindex, follow`, and the sitemap
+    // omits exactly those pages. fetchStoreCoupons short-circuits (no catalog
+    // read) when `base` is empty, and cache() shares the read with the body.
+    const { total } = await fetchStoreCoupons(storeParam)
+    const verdict = evaluateStorePageIndexability({
+        base,
+        visibleCouponCount: total,
+    })
+    // `follow` stays on in every noindex case: the links off the page (popular
+    // stores, header, footer) are still worth crawling.
+    const robots = verdict.indexable
+        ? undefined
+        : ({ index: false, follow: true } as const)
+
+    if (verdict.reason === 'not-a-store') {
         /* A slug that resolves to no registrable domain is not a store at all,
          * and this route still answers 200 for it (the body renders the honest
          * empty state rather than 404ing). That is the soft-404 bloat the
-         * zero-coupon rule below exists to keep out of the index — only more so,
+         * zero-coupon rule exists to keep out of the index — only more so,
          * because there is no store here to have coupons in the first place.
          *
          * It only became reachable when getBaseDomain moved to the Public Suffix
@@ -79,12 +96,11 @@ export async function generateMetadata({
          * this branch was effectively dead and inherited no robots directive.
          * Caught by e2e/seo-a11y.spec.ts, which asks for /coupons/…-zz.example —
          * a slug the PSL correctly refuses, since `.example` is reserved and
-         * cannot be registered. `follow` stays on for the same reason it does
-         * below: the links off the page are still worth crawling. */
+         * cannot be registered. */
         return {
             title: 'Coupons | Caramel',
             description: 'Find coupons and promo codes on Caramel.',
-            robots: { index: false, follow: true },
+            robots,
         }
     }
     // Declaring `openGraph` below REPLACES the root layout's object wholesale
@@ -100,16 +116,15 @@ export async function generateMetadata({
     // base-domain URLs — this makes the page agree with it.)
     const canonical = `${baseUrl}/coupons/${encodeURIComponent(base)}`
     // Stores with zero visible coupons stay reachable (the prose section
-    // renders an honest empty state) but are noindexed: thousands of thin
-    // "no codes right now" pages in the index are soft-404 bloat. cache()
-    // makes this share one catalog read with the page body.
-    const { total } = await fetchStoreCoupons(storeParam)
+    // renders an honest empty state) but are noindexed (verdict.reason ===
+    // 'no-coupons'): thousands of thin "no codes right now" pages in the
+    // index are soft-404 bloat.
 
     return {
         title,
         description,
         alternates: { canonical },
-        robots: total === 0 ? { index: false, follow: true } : undefined,
+        robots,
         openGraph: {
             type: 'website',
             url: canonical,
