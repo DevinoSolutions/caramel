@@ -28,6 +28,7 @@
         "seed:e2e-user": "tsx scripts/seed-e2e-user.ts",
         "coupons:clone-local": "bash scripts/internal/clone-coupons-local.sh",
         "smoke": "tsx scripts/smoke.ts",
+        "email:health": "tsx scripts/email-delivery-health.ts",
         "generate:coupon-constants": "tsx scripts/generate-coupon-constants.ts",
         "bridge:sync": "tsx scripts/bridge-sync.ts",
         "audit:prod": "tsx scripts/audit-prod-deps.ts",

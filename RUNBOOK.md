@@ -323,6 +323,71 @@ automatic gate. TODO(human): wire this into the actual Dokploy post-deploy
 hook once the deploy trigger itself (see "Deploys & rollback" above) is
 documented.
 
+## Email delivery health (async provider failures)
+
+Two different failures lose transactional mail, and until 2026-09-16 the app
+only knew about one of them:
+
+1. **The send is refused.** `sendEmail()` throws, `src/lib/auth/auth.ts` reports
+   it to Sentry, flushes and rethrows (`surface: auth-verification-email` /
+   `auth-reset-password-email`). Already loud, unchanged.
+2. **The send is ACCEPTED and then fails.** useSend answers `2xx`, SES takes
+   the message, and it is later marked `BOUNCED` / `FAILED` / `COMPLAINED` /
+   `SUPPRESSED` — or it never leaves `QUEUED`. Nothing in the app ever learned
+   about this: grabcaramel.com's useSend log holds 55 `BOUNCED` and 2 `FAILED`
+   rows that reached no Sentry issue and no human.
+
+`src/lib/emailDeliveryHealthMonitor.ts` closes (2). Once per interval the server
+reads useSend's OWN send log (`GET /api/v1/emails`, filtered to our sending
+domain via `GET /api/v1/domains`), classifies the window, and raises **exactly
+one** Sentry event per bad clock hour:
+
+| Window contains                | Sentry                                                 |
+| ------------------------------ | ------------------------------------------------------ |
+| only `DELIVERED`/`OPENED`/…    | nothing (one `[email-health] ok …` log line)           |
+| any failure status             | `Transactional email delivery degraded`, level `error` |
+| only stuck/delayed sends       | same message, level `warning`                          |
+| provider unreachable / refused | `…health check failed`, level `error`                  |
+
+The event carries counts, statuses, the window and the domain id — **never** a
+recipient, subject or body. The send log's PII fields are dropped at the parse
+boundary (`toEmailLogEntry`).
+
+**Schedule.** Caramel has no cron and no worker, so this is an `unref`'d
+interval started from `instrumentation.ts`'s `register()` — one process, one
+schedule. The first run happens one interval AFTER boot (a crash-looping
+container must not be able to machine-gun Sentry), and the Sentry throttle is
+one event per clock hour per process. If the web service ever scales past one
+replica, move this to a real scheduler rather than adding a lock.
+
+**Config.** `EMAIL_DELIVERY_HEALTH_ENABLED` is unset by default, which means ON
+in production whenever `USESEND_API_KEY` is set and OFF everywhere else; `false`
+opts a prod deploy out, `true` forces it on locally. The window length equals
+`EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES` (default 60). Boot logs the decision
+either way:
+
+```
+[boot] email delivery health ENABLED — production default
+```
+
+**On demand.** The same check runs as a one-shot, from inside the prod container
+or anywhere the `USESEND_*` vars exist (it reads `process.env` directly and does
+NOT need `DATABASE_URL`). Exit code 0 = healthy/skipped, 1 = degraded or
+unreachable:
+
+```bash
+pnpm --filter caramel-app run email:health -- --minutes 1440
+# [email-health] ok window=… scanned=152 failed=0 delayed=0 stuck=0 (DELIVERED=152)
+```
+
+**If it reports degraded:** open useSend (`usesend.devino.ca`) for the affected
+window — the counts in the Sentry event tell you which class. `BOUNCED` in bulk
+usually means a recipient-side or reputation problem (check
+`GET /api/v1/analytics/reputation-metrics`); `FAILED` in bulk usually means SES
+or the domain's verification (`GET /api/v1/domains` → `dkimStatus`/`spfDetails`
+must be `SUCCESS`); a pile of stuck `QUEUED` means useSend accepted mail it is
+not draining.
+
 ## Cross-hop trace correlation (coarse — known debt)
 
 Sentry APM tracing (`tracesSampleRate: 1`, production-only) covers
