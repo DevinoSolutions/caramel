@@ -37,14 +37,14 @@ log "booting $UDID (no-op if already booted)"
 xcrun simctl bootstatus "$UDID" -b
 
 # ---------- 2. install + register app ----------
-if ! xcrun simctl listapps "$UDID" 2>/dev/null | grep -q "$APP_BUNDLE_ID"; then
+if ! grep -q "$APP_BUNDLE_ID" <<<"$(xcrun simctl listapps "$UDID" 2>/dev/null)"; then
   log "app not installed — building unsigned iOS app"
-  APP_PATH=$(find "$PHASE_DIR/xcode" -name "Caramel.app" -path "*iphonesimulator*" -not -path "*Index.noindex*" 2>/dev/null | head -1 || true)
+  APP_PATH=$(find "$PHASE_DIR/xcode" -name "Caramel.app" -path "*iphonesimulator*" -not -path "*Index.noindex*" 2>/dev/null | awk 'NR<=1' || true)
   if [ -z "$APP_PATH" ]; then
     xcodebuild -project "$PHASE_DIR/xcode/Caramel/Caramel.xcodeproj" -scheme "Caramel (iOS)" \
       -sdk iphonesimulator -configuration Debug -derivedDataPath "$PHASE_DIR/xcode/DerivedData" \
       CODE_SIGNING_ALLOWED=NO build
-    APP_PATH=$(find "$PHASE_DIR/xcode/DerivedData" -name "Caramel.app" -path "*iphonesimulator*" | head -1)
+    APP_PATH=$(find "$PHASE_DIR/xcode/DerivedData" -name "Caramel.app" -path "*iphonesimulator*" | awk 'NR<=1')
   fi
   xcrun simctl install "$UDID" "$APP_PATH"
 fi
@@ -57,7 +57,7 @@ xcrun simctl terminate "$UDID" "$APP_BUNDLE_ID" 2>/dev/null || true
 find_safari_container() {
   local meta
   for meta in "$DEV_DATA"/Containers/Data/Application/*/.com.apple.mobile_container_manager.metadata.plist; do
-    if /usr/libexec/PlistBuddy -c 'Print :MCMMetadataIdentifier' "$meta" 2>/dev/null | grep -qx 'com.apple.mobilesafari'; then
+    if grep -qx 'com.apple.mobilesafari' <<<"$(/usr/libexec/PlistBuddy -c 'Print :MCMMetadataIdentifier' "$meta" 2>/dev/null)"; then
       dirname "$meta"; return 0
     fi
   done
@@ -130,22 +130,22 @@ enable_via_ui() {
   tapper com.apple.settings.apps; sleep 1.5
   # scroll until Safari row is visible
   for _ in 1 2 3 4; do
-    tapper --list mobilesafari | grep -q Safari && break
+    grep -q Safari <<<"$(tapper --list mobilesafari)" && break
     swipe 195 700 195 200
   done
   tapper com.apple.mobilesafari; sleep 1.5
   # scroll until Extensions row visible, then nudge it clear of the nav-bar overlay
   for _ in 1 2 3 4; do
-    tapper --list Extensions | grep -q Extensions && break
+    grep -q Extensions <<<"$(tapper --list Extensions)" && break
     swipe 195 700 195 200
   done
   swipe 195 300 195 450   # pull row out from under the large-title header
   tapper Extensions; sleep 1.5
   tapper "Caramel - Trusted"; sleep 1.5
   # toggle: tap the switch element (index 1); retry once with raw coords (iOS 26 sometimes eats the first tap)
-  if tapper --list "Allow Extension" | head -1 | grep -q "| 0 |"; then
+  if grep -q "| 0 |" <<<"$(tapper --list "Allow Extension" | awk 'NR<=1')"; then
     tapper "Allow Extension" --index 1; sleep 2
-    if tapper --list "Allow Extension" | head -1 | grep -q "| 0 |"; then
+    if grep -q "| 0 |" <<<"$(tapper --list "Allow Extension" | awk 'NR<=1')"; then
       "$IDB" --companion localhost:$COMPANION_PORT ui tap 332 356 --duration 0.1; sleep 2
     fi
   fi

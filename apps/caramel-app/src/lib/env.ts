@@ -71,6 +71,20 @@ const serverObjectSchema = z.object({
     USESEND_API_KEY: z.string().optional(),
     USESEND_FROM_EMAIL: z.string().default('no_reply@grabcaramel.com'),
     USESEND_FROM_NAME: z.string().default('Caramel'),
+    // Async email-delivery health (src/lib/emailDeliveryHealthMonitor.ts).
+    // Unset → ON in production whenever USESEND_API_KEY is set, OFF elsewhere.
+    // 'false' opts a production deploy out; 'true' forces it on in dev/CI.
+    // A typo'd value fails the boot instead of silently disabling the check —
+    // "it was never running" is exactly the failure this monitor exists to end.
+    EMAIL_DELIVERY_HEALTH_ENABLED: z.enum(['true', 'false']).optional(),
+    // How often the monitor runs AND how far back each run looks (one window
+    // per interval, no gaps, no overlap). Minutes, because an ops knob should
+    // be set in the unit a human reaches for.
+    EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES: z.coerce
+        .number()
+        .int()
+        .positive()
+        .default(60),
     // Destination inbox(es) for the user support/feedback flow (POST
     // /api/support). Accepts a COMMA-SEPARATED list ("a@x.com,b@y.com" — split
     // by parseRecipientList at the send site) so adding a teammate is a deploy
@@ -88,7 +102,7 @@ const serverObjectSchema = z.object({
     // of landing in personal mailboxes.
     SUPPORT_EMAIL_TO: z.string().default('aladdin@devino.ca'),
     OPENROUTER_API_KEY: z.string().optional(),
-    OPENROUTER_MODEL: z.string().default('openai/gpt-5-mini'),
+    OPENROUTER_MODEL: z.string().default('anthropic/claude-haiku-4.5'),
     API_ENCRYPTION_ENABLED: z.string().optional(),
     // Which PostHog project this deploy's SERVER-side captures target (the
     // feedback+observability foundation). 'production' → the real project;
