@@ -7,6 +7,8 @@ import {
     secondaryButtonClasses,
 } from '@/lib/profile/profileStyles'
 import type { ProfileOverview } from '@/lib/profile/types'
+import { canAdvertiseInstall } from '@/lib/surface/detectSurface'
+import { useSurface } from '@/lib/surface/SurfaceProvider'
 import Link from 'next/link'
 import { HiCheckCircle } from 'react-icons/hi'
 
@@ -22,10 +24,17 @@ export default function GetStartedChecklist({
 }: {
     overview: ProfileOverview
 }) {
+    // Two proofs the extension is installed: the account has produced
+    // extension activity (server-known, any browser), or THIS browser is
+    // running it (surface). Either one ticks the step — telling someone to
+    // install what they are already running is the bug the surface exists to
+    // fix.
+    const { surface } = useSurface()
     const steps = [
         {
             key: 'install',
-            done: overview.hasExtensionActivity,
+            done:
+                overview.hasExtensionActivity || !canAdvertiseInstall(surface),
             title: 'Install the Caramel extension',
             body: 'Caramel finds and applies codes at checkout for you.',
             cta: { label: 'Get the extension', href: CHROME_WEB_STORE_URL },

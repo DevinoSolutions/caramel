@@ -1,10 +1,12 @@
 'use client'
 import ExtensionSessionRelay from '@/components/ExtensionSessionRelay'
+import GrowthPromptHost from '@/components/growth/GrowthPromptHost'
 import SupportDialog from '@/components/support/SupportDialog'
 import Layout from '@/layouts/Layout/Layout'
 import PostHogClientProvider from '@/lib/analytics/PostHogClientProvider'
 import { ThemeContext } from '@/lib/contexts'
 import * as gtag from '@/lib/gtag'
+import { SurfaceProvider } from '@/lib/surface/SurfaceProvider'
 import Hotjar from '@hotjar/browser'
 import { usePathname } from 'next/navigation'
 import Script from 'next/script'
@@ -98,9 +100,15 @@ export default function Providers({ children }: { children: ReactNode }) {
 
     return (
         <PostHogClientProvider>
-            <ThemeContext.Provider value={{ isDarkMode, switchTheme }}>
-                {content}
-            </ThemeContext.Provider>
+            <SurfaceProvider>
+                <ThemeContext.Provider value={{ isDarkMode, switchTheme }}>
+                    {content}
+                </ThemeContext.Provider>
+                {/* The ONE growth-prompt slot on the site (lib/prompts). It
+                    must sit inside SurfaceProvider: it never prompts until
+                    the surface has resolved. */}
+                <GrowthPromptHost />
+            </SurfaceProvider>
             <ExtensionSessionRelay />
             <Toaster
                 position="bottom-right"

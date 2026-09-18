@@ -43,6 +43,9 @@ export interface ProfileOverview {
      * "star a store in the extension" — advice that is a dead end for a user
      * who has not installed it. */
     hasExtensionActivity: boolean
+    /** Settings > "Show tips and prompts" — the growth-prompt kill switch.
+     * True by default; the profile switch writes PATCH /api/account/prompts. */
+    growthPromptsEnabled: boolean
     savings: {
         syncEnabled: boolean
         eventCount: number

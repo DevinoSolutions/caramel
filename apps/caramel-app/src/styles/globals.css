@@ -8,6 +8,15 @@ html {
     scrollbar-gutter: stable both-edges;
 }
 
+/* The Caramel extension stamps <html data-caramel-extension> on our origin at
+   document_idle. Every "get the extension" block is wrapped in
+   InstallSurfaceGate (data-growth="install"), which React removes once the
+   SurfaceProvider has resolved; this rule covers the pre-hydration window so
+   a visitor who already has the extension never sees the CTA at all. */
+html[data-caramel-extension] [data-growth='install'] {
+    display: none;
+}
+
 /* The `dark` class lives on an INNER wrapper div (Layout.tsx, (auth)/layout.tsx)
    AND, since SSR was restored, on <html> itself (stamped pre-hydration by the
    script in app/layout.tsx). Tailwind's `dark:` variant compiles to a

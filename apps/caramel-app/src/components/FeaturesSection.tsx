@@ -1,5 +1,6 @@
 'use client'
 
+import InstallSurfaceGate from '@/components/growth/InstallSurfaceGate'
 import { useReducedMotion } from '@/lib/reducedMotion'
 import { motion } from 'framer-motion'
 import {
@@ -358,97 +359,103 @@ export default function FeaturesSection() {
                 {/* Browser Support Section. The transparent border is always
                     present so the dark theme's caramel border doesn't change
                     the slab's size. */}
-                <motion.div
-                    id="install-extension"
-                    initial={{ opacity: 0, y: 20 }}
-                    whileInView={{ opacity: 1, y: 0 }}
-                    viewport={{ once: true }}
-                    transition={{ duration: 0.6, delay: 0.2, ease: 'easeOut' }}
-                    className="rounded-3xl border border-transparent bg-gradient-to-br from-caramel to-[#c9531a] p-12 text-center text-white shadow-lg ring-1 ring-inset ring-white/20 dark:border-caramel/30 dark:bg-caramel/[0.12] dark:bg-none dark:ring-0 lg:p-8"
-                >
-                    <h3 className="mb-6 text-3xl font-extrabold tracking-tight lg:text-2xl">
-                        Available on Your Favorite Browser!
-                    </h3>
-                    <p className="mx-auto mb-8 max-w-2xl text-lg leading-relaxed opacity-90">
-                        Start saving with Caramel on any browser!
-                    </p>
-                    <div className="flex justify-center gap-6 lg:gap-4 sm:flex-col sm:items-center sm:gap-4">
-                        {[
-                            {
-                                name: 'Chrome',
-                                icon: <FaChrome />,
-                                href: 'https://chromewebstore.google.com/detail/caramel-trusted-honey-alt/gaimofgglbackoimfjopicmbmnlccfoe',
-                                available: true,
-                            },
-                            {
-                                name: 'Safari',
-                                icon: <FaSafari />,
-                                href: 'https://apps.apple.com/ke/app/caramel/id6741873881',
-                                available: true,
-                            },
-                            {
-                                name: 'Firefox',
-                                icon: <FaFirefox />,
-                                href: 'https://addons.mozilla.org/en-US/firefox/addon/grabcaramel/',
-                                available: true,
-                            },
-                            {
-                                name: 'Edge',
-                                icon: <FaEdge />,
-                                href: 'https://microsoftedge.microsoft.com/addons/detail/caramel/leodahchedhnenmiengkfpmmcdendnof',
-                                available: true,
-                            },
-                        ].map((browser, index) => (
-                            <motion.div
-                                key={browser.name}
-                                initial={{ opacity: 0, y: 20 }}
-                                whileInView={{ opacity: 1, y: 0 }}
-                                viewport={{ once: true }}
-                                transition={{
-                                    duration: 0.4,
-                                    delay: index * 0.1,
-                                    type: 'spring',
-                                    stiffness: 120,
-                                }}
-                                className="relative"
-                            >
-                                {browser.available ? (
-                                    <motion.a
-                                        href={browser.href}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        whileHover={{
-                                            scale: 1.05,
-                                            transition: { duration: 0.2 },
-                                        }}
-                                        whileTap={{ scale: 0.95 }}
-                                        className="inline-flex items-center rounded-full bg-white px-8 py-4 font-semibold text-caramel shadow-md transition-all duration-200 ease-caramel hover:bg-orange-50 hover:shadow-xl md:min-w-[200px]"
-                                    >
-                                        <span
-                                            aria-hidden="true"
-                                            className="mr-3 text-2xl"
+                <InstallSurfaceGate>
+                    <motion.div
+                        id="install-extension"
+                        initial={{ opacity: 0, y: 20 }}
+                        whileInView={{ opacity: 1, y: 0 }}
+                        viewport={{ once: true }}
+                        transition={{
+                            duration: 0.6,
+                            delay: 0.2,
+                            ease: 'easeOut',
+                        }}
+                        className="rounded-3xl border border-transparent bg-gradient-to-br from-caramel to-[#c9531a] p-12 text-center text-white shadow-lg ring-1 ring-inset ring-white/20 dark:border-caramel/30 dark:bg-caramel/[0.12] dark:bg-none dark:ring-0 lg:p-8"
+                    >
+                        <h3 className="mb-6 text-3xl font-extrabold tracking-tight lg:text-2xl">
+                            Available on Your Favorite Browser!
+                        </h3>
+                        <p className="mx-auto mb-8 max-w-2xl text-lg leading-relaxed opacity-90">
+                            Start saving with Caramel on any browser!
+                        </p>
+                        <div className="flex justify-center gap-6 lg:gap-4 sm:flex-col sm:items-center sm:gap-4">
+                            {[
+                                {
+                                    name: 'Chrome',
+                                    icon: <FaChrome />,
+                                    href: 'https://chromewebstore.google.com/detail/caramel-trusted-honey-alt/gaimofgglbackoimfjopicmbmnlccfoe',
+                                    available: true,
+                                },
+                                {
+                                    name: 'Safari',
+                                    icon: <FaSafari />,
+                                    href: 'https://apps.apple.com/ke/app/caramel/id6741873881',
+                                    available: true,
+                                },
+                                {
+                                    name: 'Firefox',
+                                    icon: <FaFirefox />,
+                                    href: 'https://addons.mozilla.org/en-US/firefox/addon/grabcaramel/',
+                                    available: true,
+                                },
+                                {
+                                    name: 'Edge',
+                                    icon: <FaEdge />,
+                                    href: 'https://microsoftedge.microsoft.com/addons/detail/caramel/leodahchedhnenmiengkfpmmcdendnof',
+                                    available: true,
+                                },
+                            ].map((browser, index) => (
+                                <motion.div
+                                    key={browser.name}
+                                    initial={{ opacity: 0, y: 20 }}
+                                    whileInView={{ opacity: 1, y: 0 }}
+                                    viewport={{ once: true }}
+                                    transition={{
+                                        duration: 0.4,
+                                        delay: index * 0.1,
+                                        type: 'spring',
+                                        stiffness: 120,
+                                    }}
+                                    className="relative"
+                                >
+                                    {browser.available ? (
+                                        <motion.a
+                                            href={browser.href}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            whileHover={{
+                                                scale: 1.05,
+                                                transition: { duration: 0.2 },
+                                            }}
+                                            whileTap={{ scale: 0.95 }}
+                                            className="inline-flex items-center rounded-full bg-white px-8 py-4 font-semibold text-caramel shadow-md transition-all duration-200 ease-caramel hover:bg-orange-50 hover:shadow-xl md:min-w-[200px]"
                                         >
-                                            {browser.icon}
-                                        </span>
-                                        {browser.name}
-                                    </motion.a>
-                                ) : (
-                                    <div className="relative inline-flex items-center rounded-full bg-white/20 px-8 py-4 font-semibold text-white/70 shadow-md md:min-w-[200px]">
-                                        <span className="mr-3 text-2xl opacity-60">
-                                            {browser.icon}
-                                        </span>
-                                        <span className="opacity-60">
+                                            <span
+                                                aria-hidden="true"
+                                                className="mr-3 text-2xl"
+                                            >
+                                                {browser.icon}
+                                            </span>
                                             {browser.name}
-                                        </span>
-                                        <div className="absolute -right-2 -top-2 rounded-full bg-orange-400 px-2 py-1 text-xs font-bold text-white">
-                                            Soon
+                                        </motion.a>
+                                    ) : (
+                                        <div className="relative inline-flex items-center rounded-full bg-white/20 px-8 py-4 font-semibold text-white/70 shadow-md md:min-w-[200px]">
+                                            <span className="mr-3 text-2xl opacity-60">
+                                                {browser.icon}
+                                            </span>
+                                            <span className="opacity-60">
+                                                {browser.name}
+                                            </span>
+                                            <div className="absolute -right-2 -top-2 rounded-full bg-orange-400 px-2 py-1 text-xs font-bold text-white">
+                                                Soon
+                                            </div>
                                         </div>
-                                    </div>
-                                )}
-                            </motion.div>
-                        ))}
-                    </div>
-                </motion.div>
+                                    )}
+                                </motion.div>
+                            ))}
+                        </div>
+                    </motion.div>
+                </InstallSurfaceGate>
             </div>
         </section>
     )

@@ -24,6 +24,7 @@ import AccountHeaderCard from './sections/AccountHeaderCard'
 import DataPrivacySection from './sections/DataPrivacySection'
 import FavoriteStoresSection from './sections/FavoriteStoresSection'
 import GetStartedChecklist from './sections/GetStartedChecklist'
+import PreferencesSection from './sections/PreferencesSection'
 import ReportsImpactSection from './sections/ReportsImpactSection'
 import SavingsSection from './sections/SavingsSection'
 
@@ -130,6 +131,13 @@ export default function ProfilePageClient() {
         }))
     }
 
+    function applyPromptsChange(enabled: boolean) {
+        patchOverview(current => ({
+            ...current,
+            growthPromptsEnabled: enabled,
+        }))
+    }
+
     /** Back to the zero state, without a refetch: the delete is transactional
      * and its counts are exactly these three collections. */
     function applyDataDeleted() {
@@ -179,6 +187,7 @@ export default function ProfilePageClient() {
         if (overview.reports.reportCount > 0) {
             navItems.push({ id: 'reports', label: 'Reports' })
         }
+        navItems.push({ id: 'preferences', label: 'Preferences' })
     }
     navItems.push({ id: 'account', label: 'Account' })
     navItems.push({ id: 'data', label: 'Data & privacy' })
@@ -250,6 +259,13 @@ export default function ProfilePageClient() {
 
                                 <ReportsImpactSection
                                     reports={overview.reports}
+                                />
+
+                                <PreferencesSection
+                                    promptsEnabled={
+                                        overview.growthPromptsEnabled
+                                    }
+                                    onChange={applyPromptsChange}
                                 />
                             </>
                         ) : null}
