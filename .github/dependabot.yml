@@ -1,0 +1,61 @@
+# Dependabot — SECURITY UPDATES ONLY.
+#
+# Why this file exists
+# --------------------
+# Several repos in this org carry `pnpm.overrides` / `resolutions` entries that were
+# written against a PREVIOUS advisory and pin a package to that advisory's patch floor.
+# The moment the next advisory lands in the same package, that override stops being a
+# floor and becomes a CEILING, and nothing in the repo re-checks it. Four repos were
+# found in exactly that state in one sweep (see the PR description for the evidence).
+# Dependabot alerts are computed from the LOCKFILE, so they still fire when an override
+# caps the resolved version — which is precisely the case a hand-written override hides.
+#
+# Shape, and why it is this shape
+# -------------------------------
+# `open-pull-requests-limit: 0` disables VERSION updates for this ecosystem. That key
+# applies to version updates only: security update pull requests are not subject to it
+# and do not count toward it. So this file adds NO routine dependency PRs and therefore
+# no scheduled CI load on the self-hosted pool. The only PRs it can ever produce are
+# security ones.
+#
+# The `groups` block with `applies-to: security-updates` collapses every npm security
+# fix into ONE pull request instead of one per advisory per manifest. Without it,
+# Dependabot opens a separate PR per affected manifest — this org has live proof of
+# that (upup#388 root and upup#386 `/apps/playground` are two PRs for the same
+# `next` bump), and on a repo carrying a whole Tiptap family that is a dozen-plus PRs
+# and a dozen-plus CI runs for one advisory.
+#
+# There is deliberately NO `ignore:` block. Version updates are already off, so an
+# ignore rule here could only narrow the security surface — which is the opposite of
+# the point. Majors are therefore not ignored either: a security fix that is only
+# available in the next major (Next.js 14 -> 15.5.24 is a live example in this fleet)
+# still gets surfaced rather than silently dropped.
+#
+# `directory: "/"` is the workspace root. Dependabot's npm ecosystem reads
+# npm / pnpm / yarn lockfiles and walks workspace members from the root manifest, so
+# `apps/*` and `packages/*` are covered without a separate entry each. Verified live
+# in this org: upup's config lists only `/` and `/packages/*`, yet Dependabot opened
+# PRs for `/apps/playground` and `/apps/landing`.
+#
+# `target-branch` is deliberately absent. With `target-branch` set, an ecosystem's
+# options stop applying to security updates, which always target the default branch.
+#
+# What this file CANNOT do
+# ------------------------
+# It cannot switch on "Dependabot alerts" or "Dependabot security updates". Both are
+# repository / organization settings, not config. Until they are enabled in
+# Settings -> Advanced Security, this file is inert and costs nothing.
+version: 2
+updates:
+  - package-ecosystem: 'npm' # covers npm, pnpm and yarn lockfiles
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+    # Version updates OFF. Security updates are exempt from this limit.
+    open-pull-requests-limit: 0
+    groups:
+      npm-security:
+        applies-to: security-updates
+        patterns:
+          - '*'

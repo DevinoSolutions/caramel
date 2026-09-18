@@ -38,6 +38,7 @@ jobs:
             'prettier-root',
           ]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - uses: actions/checkout@v4
@@ -163,6 +164,7 @@ jobs:
   audit:
     name: Dependency audit
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v4
@@ -195,6 +197,7 @@ jobs:
     name: Schema Drift
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     services:
       postgres:
@@ -302,6 +305,12 @@ jobs:
     name: E2E & Visual Regression (PR)
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    # DevinoSolutions/artifact/upload@v1 authenticates to the self-hosted store with a
+    # GitHub OIDC token, so this job needs `id-token: write`. A job-level block
+    # REPLACES the workflow-level one, hence `contents: read` is restated here.
+    permissions:
+      id-token: write
+      contents: read
     # Raised from 15: support-flow.spec.ts verifies REAL PostHog ingestion, and
     # the shared self-hosted PostHog's ingestion lag can spike to ~340s per
     # ingestion test (they run serially here — workers=1 in CI).
@@ -374,7 +383,7 @@ jobs:
         run: pnpm test:e2e
 
       - name: Upload test report
-        uses: actions/upload-artifact@v4
+        uses: DevinoSolutions/artifact/upload@v1
         if: ${{ !cancelled() }}
         with:
           name: playwright-report-pr
@@ -388,6 +397,12 @@ jobs:
     name: E2E & Visual Regression (push)
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    # DevinoSolutions/artifact/upload@v1 authenticates to the self-hosted store with a
+    # GitHub OIDC token, so this job needs `id-token: write`. A job-level block
+    # REPLACES the workflow-level one, hence `contents: read` is restated here.
+    permissions:
+      id-token: write
+      contents: read
     # 20 of these belong to the deploy gate below, which waits out a full
     # Dokploy Docker build before a single test runs; the rest is the old
     # budget. 20 rather than 10 is measured: on 2026-08-07 a three-push burst
@@ -463,7 +478,7 @@ jobs:
         run: pnpm test:e2e
 
       - name: Upload test report
-        uses: actions/upload-artifact@v4
+        uses: DevinoSolutions/artifact/upload@v1
         if: ${{ !cancelled() }}
         with:
           name: playwright-report-push
@@ -481,6 +496,12 @@ jobs:
     name: Lighthouse (SEO & a11y budgets)
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    # DevinoSolutions/artifact/upload@v1 authenticates to the self-hosted store with a
+    # GitHub OIDC token, so this job needs `id-token: write`. A job-level block
+    # REPLACES the workflow-level one, hence `contents: read` is restated here.
+    permissions:
+      id-token: write
+      contents: read
     timeout-minutes: 15
     services:
       postgres:
@@ -552,7 +573,7 @@ jobs:
         run: pnpm exec lhci autorun --config=lighthouserc.mobile.json
 
       - name: Upload Lighthouse reports
-        uses: actions/upload-artifact@v4
+        uses: DevinoSolutions/artifact/upload@v1
         if: ${{ !cancelled() }}
         with:
           name: lighthouse-reports

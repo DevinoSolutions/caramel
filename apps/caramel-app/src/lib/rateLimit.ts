@@ -12,6 +12,7 @@
 //
 // Limits are intentionally per-IP, not per-route, so a scraper pivoting
 // between endpoints doesn't get a fresh budget on each one.
+import { reportRateLimitRejection } from '@/lib/abuseSignal'
 import { env } from '@/lib/env'
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
@@ -202,6 +203,18 @@ function logAbuse(
     console.warn(
         `[ratelimit] kind=${kind} ip=${ip} path=${path} retry_after=${retryAfterSec}s ua="${ua}"`,
     )
+    // …and the same rejection to Sentry/PostHog, because a log line inside the
+    // container is invisible to everyone who isn't already SSH'd into prod
+    // (see src/lib/abuseSignal.ts's header for the 2026-09-16 measurement).
+    // Deliberately NOT awaited: the 429 response must not wait on telemetry,
+    // and reportRateLimitRejection never rejects — it reports its own failures.
+    void reportRateLimitRejection({
+        ip,
+        path,
+        kind,
+        userAgent: ua,
+        retryAfterSec,
+    })
 }
 
 /**
