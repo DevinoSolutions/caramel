@@ -102,6 +102,12 @@
         },
         {
             "browser": "firefox",
+            "path": "/browser_specific_settings/gecko_android",
+            "reason": "Firefox for Android availability (issue #218): AMO derives a version's Android compatibility from this key — the live 1.4.1 listing carries no android entry, so the extension was never offered on Firefox for Android. strict_min_version 120.0 = the first Android Firefox with the open extension ecosystem",
+            "added": "2026-09-18"
+        },
+        {
+            "browser": "firefox",
             "path": "/background/scripts",
             "reason": "the env stamp is BUNDLED into background.js instead of a separate manifest entry — the stamp-first guarantee moves from manifest order into the module graph (P1 pins it there)",
             "retiredBy": "golden-rebaseline(1.4.0)",
