@@ -44,6 +44,7 @@ import {
     isTrustedServer,
     type LimitKind,
 } from '@/lib/rateLimit'
+import * as Sentry from '@sentry/nextjs'
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import type { z } from 'zod'
@@ -228,6 +229,16 @@ export function withRoute<TBody = undefined>(
             if (!session && config.auth === 'session') {
                 return unauthorized(cors)
             }
+            // The ONE place the server learns who is calling — so it is the one
+            // place that tells Sentry. Everything thrown from here on (the
+            // handler, handleRouteError, onRequestError) is now attributed to
+            // `users.id`, the same id PostHog identifies on and the same id
+            // every query in these handlers is scoped by. ID only: no email,
+            // no name, `sendDefaultPii` stays off. A 401'd or anonymous request
+            // reaches this line with `session === null` and clears the field,
+            // so a pooled/reused server context cannot leak the previous
+            // caller's identity onto an anonymous error.
+            Sentry.setUser(session?.user?.id ? { id: session.user.id } : null)
         }
 
         if (config.rateLimit) {

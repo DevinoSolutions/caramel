@@ -14,7 +14,7 @@
             "effect": "3.20.0",
             "vitest>picomatch": "4.0.4",
             "postcss": "8.5.23",
-            "sharp": "0.35.3",
+            "sharp": "0.35.4",
             "fast-uri": "3.1.6",
             "brace-expansion@5": "5.0.9",
             "nanoid@<3.3.18": "3.3.18",

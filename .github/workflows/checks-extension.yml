@@ -9,11 +9,15 @@ env:
   # Fork PRs never receive repository `vars`, so this must fall back to the real
   # package directory — not the workspace root, where every `pnpm run` 404s.
   WORKING_DIRECTORY: ${{ vars.WORKING_DIRECTORY || 'apps/caramel-extension' }}
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   lint_and_build:
     name: checks
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: ${{ env.WORKING_DIRECTORY }}

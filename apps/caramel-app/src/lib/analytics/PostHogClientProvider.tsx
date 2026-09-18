@@ -11,6 +11,7 @@ import {
     identifyUser,
     initPosthogBrowser,
     resetPosthogIdentity,
+    setSentryUser,
 } from './identity'
 
 export default function PostHogClientProvider({
@@ -31,8 +32,17 @@ export default function PostHogClientProvider({
     }, [])
 
     useEffect(() => {
-        if (!activeRef.current) return
         const userId = session?.user?.id ?? null
+
+        // Sentry's user field is synced on EVERY identity transition, whether
+        // or not PostHog has a capture target. They are different systems with
+        // different configuration: a deploy with no PostHog key must still
+        // produce Sentry issues attributable to an account. (Before this, the
+        // only identity call lived behind the PostHog guard below, and
+        // `Sentry.setUser` was never called at all.)
+        setSentryUser(userId)
+
+        if (!activeRef.current) return
 
         if (userId && identifiedRef.current !== userId) {
             identifyUser({ id: userId, email: session?.user?.email })
