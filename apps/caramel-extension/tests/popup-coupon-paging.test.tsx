@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { initBackground } from '../background.js'
 import { initCaramelBase } from '../caramel-base.js'
 import { initCouponConstants } from '../coupon-constants.generated.js'
@@ -344,6 +344,11 @@ async function bootPopup({
     if (!withObserver) delete (globalThis as any).IntersectionObserver
 
     installClipboardStub()
+    // A successful copy now closes the popup (issue #249), and jsdom's REAL
+    // window.close() tears the whole test environment down — every test after
+    // the first copy in this file would fail on a dead document. The close is
+    // pinned by popup-closes-after-copy.test.tsx; here it is simply not real.
+    window.close = vi.fn()
 
     const view = render(<App />)
     // The list painting IS the boot signal: App resolves, then CouponsView

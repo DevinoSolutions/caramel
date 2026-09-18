@@ -37,6 +37,12 @@ interface PagingState {
 
 type FooterState = 'idle' | 'loading' | 'error' | 'end'
 
+/** How long the popup stays open after a SUCCESSFUL copy before closing itself
+ *  (issue #249). Long enough for the "Copied" toast to be seen (it only starts
+ *  fading at 2000ms), short enough that the shopper is back on the page while
+ *  the code is still in their head. A failed copy never closes — see copyCode. */
+export const CLOSE_AFTER_COPY_MS = 900
+
 /** Stroke star when not following, filled when following — the popup's icon
  *  convention (16px, currentColor), so it inherits .coupons-logout-button's
  *  brand colour and its dark value from --cm-* with no colour of its own. */
@@ -245,6 +251,13 @@ export function CouponsView({
                     ? `Copied "${code}" to clipboard!`
                     : `Couldn't copy — code is ${code}`,
             )
+            // Issue #249: once the code is on the clipboard the popup has done
+            // its job and is in the way of the page the shopper wants to paste
+            // into, so it gets out of the way by itself. Only on SUCCESS — a
+            // failed copy leaves the popup open, because the toast's text IS
+            // the code and closing would take the fallback away with it. The
+            // beat before closing is what lets the "Copied" toast register.
+            if (ok) setTimeout(() => window.close(), CLOSE_AFTER_COPY_MS)
         },
         [showToast],
     )
