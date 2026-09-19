@@ -1,5 +1,6 @@
 'use client'
 
+import InstallSurfaceGate from '@/components/growth/InstallSurfaceGate'
 import { useReducedMotion } from '@/lib/reducedMotion'
 import { motion } from 'framer-motion'
 import Image from 'next/image'
@@ -347,17 +348,19 @@ export default function WhyNotHoneySection() {
                         protection.
                     </p>
                     <div className="flex justify-center gap-6 lg:flex-col lg:items-center lg:gap-4">
-                        <motion.a
-                            href="#install-extension"
-                            className="inline-flex items-center rounded-full bg-white px-8 py-4 font-semibold text-caramel shadow-md transition-all duration-200 hover:bg-orange-50 hover:shadow-xl"
-                            whileHover={{
-                                scale: 1.05,
-                                transition: { duration: 0.2 },
-                            }}
-                            whileTap={{ scale: 0.95 }}
-                        >
-                            Install Caramel Now
-                        </motion.a>
+                        <InstallSurfaceGate className="contents">
+                            <motion.a
+                                href="#install-extension"
+                                className="inline-flex items-center rounded-full bg-white px-8 py-4 font-semibold text-caramel shadow-md transition-all duration-200 hover:bg-orange-50 hover:shadow-xl"
+                                whileHover={{
+                                    scale: 1.05,
+                                    transition: { duration: 0.2 },
+                                }}
+                                whileTap={{ scale: 0.95 }}
+                            >
+                                Install Caramel Now
+                            </motion.a>
+                        </InstallSurfaceGate>
                         <motion.a
                             href="#features"
                             className="inline-flex items-center rounded-full border-2 border-white bg-transparent px-8 py-4 font-semibold text-white transition-all duration-200 hover:bg-white hover:text-caramel"

@@ -94,6 +94,7 @@ describe('GET /api/account/overview — the zero-data user (the DEFAULT)', () =>
         expect(body).toEqual({
             memberSince: MEMBER_SINCE.toISOString(),
             hasExtensionActivity: false,
+            growthPromptsEnabled: true,
             savings: {
                 syncEnabled: false,
                 eventCount: 0,

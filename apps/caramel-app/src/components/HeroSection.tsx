@@ -24,6 +24,7 @@
 // The scene's frameloop is paused (frameloop='never') whenever the hero is
 // scrolled out of view via an IntersectionObserver.
 
+import InstallSurfaceGate from '@/components/growth/InstallSurfaceGate'
 import { ThemeContext } from '@/lib/contexts'
 import {
     formatStat,
@@ -611,40 +612,43 @@ export default function HeroSection() {
                         className="hero-enter flex flex-wrap items-center justify-start gap-3 lg:justify-center md:flex-col md:items-center"
                         style={{ animationDelay: '0.8s' }}
                     >
-                        <motion.a
-                            href="#install-extension"
-                            className="rounded-full bg-gradient-to-r from-caramel to-orange-600 px-6 py-3 text-sm font-semibold text-black shadow-lg transition-all duration-300 hover:from-orange-600 hover:to-caramel hover:shadow-xl md:w-full md:text-center"
-                            initial={{
-                                boxShadow: '0 0 10px rgba(234,105,37,0.5)',
-                            }}
-                            animate={
-                                reduceMotion
-                                    ? {
-                                          boxShadow:
-                                              '0 0 18px rgba(234,105,37,0.6)',
-                                      }
-                                    : {
-                                          scale: [1, 1.04, 1],
-                                          boxShadow: [
-                                              '0 0 10px rgba(234,105,37,0.5)',
-                                              '0 0 24px rgba(234,105,37,0.85)',
-                                              '0 0 10px rgba(234,105,37,0.5)',
-                                          ],
-                                      }
-                            }
-                            transition={{
-                                duration: 2.2,
-                                repeat: reduceMotion ? 0 : Infinity,
-                                ease: 'easeInOut',
-                            }}
-                            whileHover={{
-                                scale: 1.05,
-                                boxShadow: '0 20px 40px rgba(234,105,37,0.35)',
-                            }}
-                            whileTap={{ scale: 0.95 }}
-                        >
-                            Install Extension
-                        </motion.a>
+                        <InstallSurfaceGate className="contents">
+                            <motion.a
+                                href="#install-extension"
+                                className="rounded-full bg-gradient-to-r from-caramel to-orange-600 px-6 py-3 text-sm font-semibold text-black shadow-lg transition-all duration-300 hover:from-orange-600 hover:to-caramel hover:shadow-xl md:w-full md:text-center"
+                                initial={{
+                                    boxShadow: '0 0 10px rgba(234,105,37,0.5)',
+                                }}
+                                animate={
+                                    reduceMotion
+                                        ? {
+                                              boxShadow:
+                                                  '0 0 18px rgba(234,105,37,0.6)',
+                                          }
+                                        : {
+                                              scale: [1, 1.04, 1],
+                                              boxShadow: [
+                                                  '0 0 10px rgba(234,105,37,0.5)',
+                                                  '0 0 24px rgba(234,105,37,0.85)',
+                                                  '0 0 10px rgba(234,105,37,0.5)',
+                                              ],
+                                          }
+                                }
+                                transition={{
+                                    duration: 2.2,
+                                    repeat: reduceMotion ? 0 : Infinity,
+                                    ease: 'easeInOut',
+                                }}
+                                whileHover={{
+                                    scale: 1.05,
+                                    boxShadow:
+                                        '0 20px 40px rgba(234,105,37,0.35)',
+                                }}
+                                whileTap={{ scale: 0.95 }}
+                            >
+                                Install Extension
+                            </motion.a>
+                        </InstallSurfaceGate>
                         <motion.a
                             href="https://github.com/DevinoSolutions/caramel"
                             target="_blank"

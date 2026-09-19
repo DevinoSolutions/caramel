@@ -51,7 +51,7 @@ export const GET = withRoute(
         ] = await Promise.all([
             prisma.user.findUnique({
                 where: { id: userId },
-                select: { createdAt: true },
+                select: { createdAt: true, growthPromptsEnabled: true },
             }),
             // ONE groupBy carries three of the four savings figures: per-
             // currency totals, the distinct-store count, and the event count.
@@ -146,6 +146,7 @@ export const GET = withRoute(
             // someone to "star a store in the extension" — advice that is a
             // dead end for a user who has not installed it.
             hasExtensionActivity: eventCount > 0 || reports.reportCount > 0,
+            growthPromptsEnabled: user?.growthPromptsEnabled ?? true,
             savings: {
                 syncEnabled,
                 eventCount,

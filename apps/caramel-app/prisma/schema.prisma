@@ -84,6 +84,13 @@ model User {
   // the website. chrome.storage.sync is the cache; this column is the truth.
   savingsSyncEnabled Boolean        @default(false) @map("savings_sync_enabled")
 
+  // Settings > "Show tips and prompts" — the growth-prompt kill switch (fleet
+  // growth-prompts spec §B). DEFAULT TRUE: prompts are on until the user turns
+  // them off, and the switch is free for everyone, never premium-gated. Lives
+  // on User for the same reason savingsSyncEnabled does: every device the
+  // user signs in on must agree, and a localStorage flag cannot travel.
+  growthPromptsEnabled Boolean      @default(true) @map("growth_prompts_enabled")
+
   accounts          Account[]
   sessions          Session[]
   couponReports     CouponReport[]
