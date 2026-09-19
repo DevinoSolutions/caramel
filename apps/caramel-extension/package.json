@@ -1,6 +1,6 @@
 {
     "name": "caramel-extension",
-    "version": "1.4.1",
+    "version": "1.4.2",
     "description": "Caramel browser extension",
     "private": true,
     "scripts": {

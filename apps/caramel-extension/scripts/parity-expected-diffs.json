@@ -75,9 +75,9 @@
         {
             "browser": "chrome",
             "path": "/version",
-            "reason": "1.4.0 -> 1.4.1 (package.json is the single version authority): the missing-host-permission gate and the top-left loader fix. The goldens are frozen 1.3.1 snapshots relabelled 1.4.0 and cannot follow a release without being re-frozen",
-            "retiredBy": "golden-rebaseline(1.4.1)",
-            "added": "2026-08-19"
+            "reason": "1.4.1 -> 1.4.2 (package.json is the single version authority): the popup closes itself once a code is copied (#249) and Firefox for Android availability via gecko_android (#218). The goldens are frozen 1.3.1 snapshots relabelled 1.4.0 and cannot follow a release without being re-frozen",
+            "retiredBy": "golden-rebaseline(1.4.2)",
+            "added": "2026-09-19"
         },
         {
             "browser": "chrome",
@@ -89,9 +89,9 @@
         {
             "browser": "firefox",
             "path": "/version",
-            "reason": "1.4.0 -> 1.4.1 (package.json is the single version authority): the missing-host-permission gate and the top-left loader fix. The goldens are frozen 1.3.1 snapshots relabelled 1.4.0 and cannot follow a release without being re-frozen",
-            "retiredBy": "golden-rebaseline(1.4.1)",
-            "added": "2026-08-19"
+            "reason": "1.4.1 -> 1.4.2 (package.json is the single version authority): the popup closes itself once a code is copied (#249) and Firefox for Android availability via gecko_android (#218). The goldens are frozen 1.3.1 snapshots relabelled 1.4.0 and cannot follow a release without being re-frozen",
+            "retiredBy": "golden-rebaseline(1.4.2)",
+            "added": "2026-09-19"
         },
         {
             "browser": "firefox",
