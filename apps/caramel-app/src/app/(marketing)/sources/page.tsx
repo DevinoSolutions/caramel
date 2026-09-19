@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic'
 
 const title = 'Where Caramel Coupon Codes Come From | Sources'
 const description =
-    'See every source Caramel pulls coupon codes from, how many codes each one contributes, and its success rate — or request a new source.'
+    "Where Caramel's coupon codes come from: the sources feeding the catalog, with the code count and success rate of each one as it is published — or request a new source."
 const base = BASE_URL
 const canonicalUrl = `${base}/sources`
 const banner = `${base}/caramel_banner.png`

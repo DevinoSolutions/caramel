@@ -81,7 +81,7 @@ export default function Footer() {
                                 src="/full-logo.png"
                                 alt="Caramel"
                                 width={140}
-                                height={45}
+                                height={36}
                                 className="brightness-0 invert"
                             />
                         </Link>

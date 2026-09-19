@@ -18,7 +18,7 @@ const PAGE_SIZE = 5
 
 const title = 'Coupon Codes & Promo Codes for Top Stores | Caramel'
 const description =
-    'Browse verified coupon codes and promo codes for your favorite stores. Caramel finds and applies the best deals automatically at checkout.'
+    'Browse coupon codes and promo codes for your favorite stores. Caramel finds and applies the best deals automatically at checkout.'
 const canonicalUrl = 'https://grabcaramel.com/coupons'
 const banner = `${BASE_URL}/caramel_banner.png`
 
@@ -65,7 +65,7 @@ export default async function CouponsPage() {
     const structuredData = {
         '@context': 'https://schema.org',
         '@type': 'ItemList',
-        name: 'Verified coupon codes and promo codes',
+        name: 'Coupon codes and promo codes',
         url: canonicalUrl,
         numberOfItems: total,
         itemListElement: couponsWithSignals.map((coupon, idx) => ({
@@ -83,8 +83,8 @@ export default async function CouponsPage() {
                 initialCoupons={couponsWithSignals}
                 initialTotal={total}
                 disableInitialFetch
-                heroTitle="Today's Verified Coupon Codes"
-                heroSubtitle="Browse verified coupon codes, promo codes, and offers for your favorite stores."
+                heroTitle="Today's Coupon Codes"
+                heroSubtitle="Browse coupon codes, promo codes, and offers for your favorite stores."
             />
             <PopularStores />
             {/* Server-rendered letter strip into the A–Z directory — the hub's

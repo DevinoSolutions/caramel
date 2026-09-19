@@ -60,7 +60,7 @@ describe('parseServerEnv', () => {
     it('(e) optional vars absent succeed with schema defaults', () => {
         const parsed = parseServerEnv(validServerFixture)
         expect(parsed.BCRYPT_SALT_ROUNDS).toBe(10)
-        expect(parsed.OPENROUTER_MODEL).toBe('openai/gpt-5-mini')
+        expect(parsed.OPENROUTER_MODEL).toBe('anthropic/claude-haiku-4.5')
         expect(parsed.ALLOWED_ORIGINS).toBe('')
         expect(parsed.USESEND_FROM_EMAIL).toBe('no_reply@grabcaramel.com')
         expect(parsed.USESEND_FROM_NAME).toBe('Caramel')

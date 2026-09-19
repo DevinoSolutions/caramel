@@ -42,6 +42,12 @@ jobs:
   eval:
     name: Cart classifier eval
     runs-on: ubuntu-latest
+    # DevinoSolutions/artifact/upload@v1 authenticates to the self-hosted store with a
+    # GitHub OIDC token, so this job needs `id-token: write`. A job-level block
+    # REPLACES the workflow-level one, hence `contents: read` is restated here.
+    permissions:
+      id-token: write
+      contents: read
     timeout-minutes: 15
     # Fork guard — a `pull_request` (not `pull_request_target`) from a fork
     # never receives repo secrets anyway, but this makes the intent
@@ -92,7 +98,7 @@ jobs:
 
       - name: Upload eval report
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: DevinoSolutions/artifact/upload@v1
         with:
           name: cart-classifier-eval-report
           path: apps/caramel-app/eval-report.txt
@@ -103,6 +109,7 @@ jobs:
     needs: eval
     if: failure() && github.event_name == 'schedule'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       issues: write
