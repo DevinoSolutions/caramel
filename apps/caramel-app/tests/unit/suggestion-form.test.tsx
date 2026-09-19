@@ -69,4 +69,61 @@ describe('SuggestionForm (NF-05)', () => {
         })
         await waitFor(() => expect(resetValue).toHaveBeenCalledTimes(1))
     })
+
+    it('an optional email, when filled in, rides along as `email` (omitted when blank — the previous pin)', async () => {
+        render(
+            <SuggestionForm
+                initialValue="https://initial.example.com"
+                resetValue={vi.fn()}
+            />,
+        )
+        const emailInput = screen.getByLabelText(
+            'Email me when this store is supported (optional)',
+        )
+        fireEvent.change(emailInput, {
+            target: { value: '  shopper@example.com ' },
+        })
+        fireEvent.submit(emailInput.closest('form') as HTMLFormElement)
+
+        await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1))
+        const [, options] = (fetch as ReturnType<typeof vi.fn>).mock
+            .calls[0] as [string, RequestInit]
+        expect(JSON.parse(options.body as string)).toEqual({
+            url: 'https://initial.example.com',
+            email: 'shopper@example.com',
+        })
+        await waitFor(() =>
+            expect(toastMock.success).toHaveBeenCalledWith(
+                expect.stringContaining('shopper@example.com'),
+            ),
+        )
+    })
+
+    it('a 4xx from the route (not a store) → warning with the server message, NO success toast, NO reset', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue({
+                ok: false,
+                status: 400,
+                json: async () => ({ error: 'Please enter a store URL' }),
+            }),
+        )
+        const resetValue = vi.fn()
+        render(
+            <SuggestionForm
+                initialValue="https://not-a-store.example"
+                resetValue={resetValue}
+            />,
+        )
+        const input = screen.getByPlaceholderText('https://example.com')
+        fireEvent.submit(input.closest('form') as HTMLFormElement)
+
+        await waitFor(() =>
+            expect(toastMock.warning).toHaveBeenCalledWith(
+                'Please enter a store URL',
+            ),
+        )
+        expect(toastMock.success).not.toHaveBeenCalled()
+        expect(resetValue).not.toHaveBeenCalled()
+    })
 })
