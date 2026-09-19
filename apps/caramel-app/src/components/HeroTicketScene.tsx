@@ -74,7 +74,7 @@ const STAT_FRONT = STAT.depth / 2 + STAT.bevel
 // the third (no straight line through the scatter). Varied x/y/z, individual
 // base rotations and per-coupon float parameters keep it reading as coupons
 // drifting in space:
-//   [0] "3,000+ Supported Stores" — bottom-left, nearest the camera and the
+//   [0] "4,000+ Supported Stores" — bottom-left, nearest the camera and the
 //       largest (the headline stat). Its top-right corner deliberately fans
 //       OVER the deeper [2] ticket's blank bottom-left corner — a coupon-
 //       stack moment, kept clear of [2]'s type (see the occlusion contract
@@ -423,7 +423,7 @@ interface MeasuredText extends THREE.Mesh {
 
 // Digits + smaller suffix, centered AS A PAIR from LIVE troika measurements.
 // The value counts up from 0, so the digit run's width changes every frame
-// ("0" → "3,000") — hard-coded offsets would only fit the final number.
+// ("0" → "4,000") — hard-coded offsets would only fit the final number.
 // onSync fires after every glyph-layout pass; re-centering there keeps the
 // pair balanced mid-count-up AND at rest.
 function StatValueText({

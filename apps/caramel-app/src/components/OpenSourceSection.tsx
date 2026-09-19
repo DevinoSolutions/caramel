@@ -75,7 +75,7 @@ const contributions = [
 const securityFeatures = [
     {
         title: 'Open Security Reviews',
-        desc: 'Every change is peer-reviewed in public',
+        desc: 'Every change is publicly reviewable',
         icon: <FaLock />,
     },
     {
@@ -85,7 +85,7 @@ const securityFeatures = [
     },
     {
         title: 'No Ad Tracking',
-        desc: 'We never sell or share your personal information',
+        desc: 'We never sell your personal information or share it with advertisers',
         icon: <FaBan />,
     },
     {
@@ -119,9 +119,10 @@ export default function OpenSourceSection() {
                         Open Source & Community Driven
                     </h2>
                     <p className="mx-auto max-w-3xl text-xl leading-relaxed text-gray-600 dark:text-gray-300 lg:text-lg">
-                        Transparency is our core. Every line of code is open,
-                        auditable, and community-driven. Join the developers
-                        building a better alternative to proprietary extensions.
+                        Transparency is our core. The extension and web app are
+                        open, auditable, and community-driven. Join the
+                        developers building a better alternative to proprietary
+                        extensions.
                     </p>
                 </motion.div>
 

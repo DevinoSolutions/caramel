@@ -102,6 +102,21 @@ class TombstoneGateError extends Error {
     }
 }
 
+/**
+ * The ONE write-side normalization in this engine: `site` is stored lowercase.
+ * Domains are case-insensitive, but every store read matches
+ * `site = $base OR site LIKE '%.' || $base` case-SENSITIVELY (plain equality
+ * keeps `coupons_site_idx` usable) against a base resolveStoreDomain has
+ * lowercased — so a mixed-case producer value was unreachable from its own
+ * canonical page (prod 2026-09-11: `eNasco.com`, `Brooklinen.com`). The
+ * `lowercase_coupon_sites` migration backfilled existing rows; this keeps new
+ * ones honest. Everything else (status, discount_type, code) stays RAW per
+ * ingestSchemas.ts — this is a domain-name identity, not a vocabulary.
+ */
+function normalizeSite(site: string | null): string | null {
+    return site == null ? null : site.toLowerCase()
+}
+
 function chunk<T>(items: readonly T[], size: number): T[][] {
     const out: T[][] = []
     for (let i = 0; i < items.length; i += size) {
@@ -339,7 +354,7 @@ export async function applyCatalogRows(
                     for (const rowChunk of chunk(toWrite, WRITE_CHUNK)) {
                         const tuples = rowChunk.map(
                             r =>
-                                Prisma.sql`(${r.id}, ${r.code}, ${r.site}, ${r.title}, ${r.description}, ${r.rating}, ${r.discount_type}, ${r.discount_amount}, ${r.expiry}, ${r.expired}, ${r.times_used}, ${r.last_time_used ?? null}, ${r.status}, ${r.verification_message}, ${r.created_at ?? new Date()}, ${r.updated_at})`,
+                                Prisma.sql`(${r.id}, ${r.code}, ${normalizeSite(r.site)}, ${r.title}, ${r.description}, ${r.rating}, ${r.discount_type}, ${r.discount_amount}, ${r.expiry}, ${r.expired}, ${r.times_used}, ${r.last_time_used ?? null}, ${r.status}, ${r.verification_message}, ${r.created_at ?? new Date()}, ${r.updated_at})`,
                         )
                         await tx.$executeRaw(
                             Prisma.sql`

@@ -80,11 +80,9 @@ describe('FaqSection — visible copy is the source of truth for the JSON-LD', (
         expect(raw).not.toMatch(/aggregateRating|reviewRating|"Review"/i)
     })
 
-    it('states only verified numbers: 139,000+ codes and 3,000+ stores, rounded DOWN', () => {
+    it('states only verified numbers: 100,000+ codes and 4,000+ stores, rounded DOWN', () => {
         renderAndParseJsonLd()
-        expect(
-            screen.getByText(/over 139,000 active coupon codes/),
-        ).toBeTruthy()
-        expect(screen.getByText(/more than 3,000 online stores/)).toBeTruthy()
+        expect(screen.getByText(/over 100,000 coupon codes/)).toBeTruthy()
+        expect(screen.getByText(/more than 4,000 online stores/)).toBeTruthy()
     })
 })
