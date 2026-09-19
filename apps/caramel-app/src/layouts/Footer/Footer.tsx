@@ -21,6 +21,7 @@ const productLinks = [
     { name: 'Pricing', url: '/pricing' },
     { name: 'Coupons', url: '/coupons' },
     { name: 'Supported Stores', url: '/supported-stores' },
+    { name: 'Store directory', url: '/coupons/stores' },
     { name: 'Sources', url: '/sources' },
 ]
 
@@ -140,6 +141,13 @@ export default function Footer() {
                                     </Link>
                                 </li>
                             ))}
+                            {/* Crawlable pointer at the answer-engine summary
+                                (a route handler, so a plain <a>, not <Link>). */}
+                            <li>
+                                <a href="/llms.txt" className={linkClasses}>
+                                    llms.txt
+                                </a>
+                            </li>
                         </ul>
                     </nav>
                 </motion.div>

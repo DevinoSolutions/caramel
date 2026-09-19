@@ -1,6 +1,10 @@
 import { listActiveSources, listStoreSitemapEntries } from '@/lib/couponsRepo'
 import { BASE_URL } from '@/lib/env.client'
-import { collapseStoreRows } from '@/lib/seo/sitemapStores'
+import {
+    STORE_SITEMAP_ROW_LIMIT,
+    collapseStoreRows,
+} from '@/lib/seo/sitemapStores'
+import { bucketStoresByLetter, directoryPath } from '@/lib/seo/storeDirectory'
 import type { MetadataRoute } from 'next'
 
 // The store half of this sitemap reads the coupon catalog from Postgres, and
@@ -11,12 +15,6 @@ import type { MetadataRoute } from 'next'
 export const dynamic = 'force-dynamic'
 
 const origin = BASE_URL.replace(/\/+$/, '')
-
-// Upper bound on grouped `coupons.site` rows feeding `/coupons/[store]`
-// entries. The sitemap spec caps a single file at 50,000 URLs; this stays well
-// under it and bounds the query. If the catalog ever outgrows it, the fix is a
-// sitemap index, not a bigger number.
-const STORE_URL_LIMIT = 5000
 
 type StaticRoute = {
     path: string
@@ -56,7 +54,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     // newest `coupons.updated_at` folded into that base: a real catalog
     // timestamp, the freshness signal Google needs to re-read a sitemap.
     const [storeRows, activeSources] = await Promise.all([
-        listStoreSitemapEntries(STORE_URL_LIMIT),
+        listStoreSitemapEntries(STORE_SITEMAP_ROW_LIMIT),
         listActiveSources(),
     ])
     const stores = collapseStoreRows(storeRows)
@@ -66,8 +64,30 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
             ? [...STATIC_ROUTES, SOURCES_ROUTE]
             : [...STATIC_ROUTES]
 
+    // The A–Z directory: its index plus ONLY the letter pages that have
+    // stores, bucketed from the SAME collapsed entries as the store URLs
+    // below (a letter with no stores is a 404, never an empty page). The
+    // directory is the crawl path into the store pages — 8 of ~4,262 had any
+    // internal inbound link before it — so it is listed with the hubs'
+    // weight. Page 2+ of a split letter is noindex and deliberately absent.
+    const letterPages: StaticRoute[] =
+        stores.length > 0
+            ? [
+                  {
+                      path: directoryPath(),
+                      changeFrequency: 'weekly',
+                      priority: 0.8,
+                  },
+                  ...bucketStoresByLetter(stores).map(bucket => ({
+                      path: directoryPath(bucket.letter),
+                      changeFrequency: 'weekly' as const,
+                      priority: 0.6,
+                  })),
+              ]
+            : []
+
     return [
-        ...staticRoutes.map(route => ({
+        ...[...staticRoutes, ...letterPages].map(route => ({
             url: `${origin}${route.path}`,
             changeFrequency: route.changeFrequency,
             priority: route.priority,

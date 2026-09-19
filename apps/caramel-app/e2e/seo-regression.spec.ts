@@ -354,6 +354,90 @@ test.describe('SEO regression gate (raw server HTML)', () => {
         expect(body).toContain('Caramel')
     })
 
+    test('llms-full.txt is served for answer engines and carries the FAQ', async ({
+        page,
+    }) => {
+        // Measured 404 on prod 2026-09-11 (audit-findings.md "Host hygiene").
+        const res = await page.request.get('/llms-full.txt')
+        expect(res.ok()).toBe(true)
+        expect(res.headers()['content-type']).toContain('text/plain')
+        const body = await res.text()
+        expect(body).toContain('Caramel')
+        // The FAQ block is rendered from the SAME array as the landing FAQ
+        // (src/lib/faqItems.ts) — one question is enough to prove the wiring.
+        expect(body).toContain('Is Caramel really free?')
+        expect(body).toContain('/privacy')
+    })
+
+    test('home raw HTML links llms.txt (rel=alternate + a crawlable footer <a>)', async ({
+        page,
+    }) => {
+        const html = await (await page.request.get('/')).text()
+        // Next renders alternates.types as
+        // <link rel="alternate" type="text/plain" href="…/llms.txt" title="llms.txt"/>
+        // (href absolute via metadataBase). Attribute order is Next's, not ours.
+        expect(html).toMatch(
+            /<link rel="alternate" type="text\/plain" href="[^"]*\/llms\.txt"/,
+        )
+        // A client-only pointer is invisible to crawlers; the footer anchor is
+        // a plain <a href> in the server HTML.
+        expect(html).toMatch(/<a href="\/llms\.txt"[^>]*>llms\.txt<\/a>/)
+    })
+
+    test('home Organization JSON-LD keeps its entity anchors (@id, alternateName, sameAs, parentOrganization)', async ({
+        page,
+    }) => {
+        const html = await (await page.request.get('/')).text()
+        type Node = {
+            '@type'?: string
+            '@id'?: string
+            alternateName?: string[]
+            sameAs?: string[]
+            parentOrganization?: { '@type'?: string; url?: string }
+        }
+        const nodes = extractJsonLdBlocks(html).flatMap(block => {
+            const parsed = JSON.parse(block) as { '@graph'?: Node[] } & Node
+            return parsed['@graph'] ?? [parsed]
+        })
+        const org = nodes.find(node => node['@type'] === 'Organization')
+        expect(org, 'home must ship an Organization node').toBeTruthy()
+        expect(org!['@id']).toMatch(/#organization$/)
+        expect(org!.alternateName).toContain('Caramel coupon extension')
+        expect(Array.isArray(org!.sameAs)).toBe(true)
+        expect(org!.sameAs!.length).toBeGreaterThan(0)
+        for (const url of org!.sameAs!) {
+            expect(url).toMatch(/^https:\/\//)
+        }
+        expect(org!.parentOrganization?.['@type']).toBe('Organization')
+        expect(org!.parentOrganization?.url).toBe('https://devino.ca')
+    })
+
+    test('HSTS carries preload (next.config.mjs SECURITY_HEADERS, every context)', async ({
+        page,
+    }) => {
+        // Set by next.config.mjs headers(), so it holds on the hermetic server
+        // and on the deployed site alike. Measured missing on prod 2026-09-11.
+        const res = await page.request.get('/')
+        const hsts = res.headers()['strict-transport-security'] ?? ''
+        expect(hsts).toMatch(/max-age=31536000/)
+        expect(hsts).toMatch(/includeSubDomains/)
+        expect(hsts).toMatch(/preload/)
+    })
+
+    for (const routePath of ['/login', '/signup', '/verify']) {
+        test(`${routePath.slice(1)} raw HTML carries a robots noindex meta (belt-and-braces with robots.txt)`, async ({
+            page,
+        }) => {
+            // robots.txt only asks crawlers not to FETCH these; a link-discovered
+            // URL can still be indexed title-only unless the page says noindex.
+            const res = await page.request.get(routePath)
+            expect(res.ok(), `${routePath} must return 2xx`).toBe(true)
+            const html = await res.text()
+            expect(html).toMatch(/name="robots"[^>]*content="[^"]*noindex/)
+            expect(html).toMatch(/name="robots"[^>]*content="[^"]*nofollow/)
+        })
+    }
+
     test('IndexNow key file is served verbatim at /<key>.txt', async ({
         page,
     }) => {

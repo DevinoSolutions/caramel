@@ -41,6 +41,7 @@ const LLMS_TXT = `# Caramel
 - [Coupons](${origin}/coupons): browse the full coupon catalog.
 - [Store coupon pages](${origin}/coupons/amazon.com): per-store codes, one page
   per store domain, e.g. /coupons/amazon.com or /coupons/nike.com.
+- [Store directory A–Z](${origin}/coupons/stores): every store with live codes, by first letter.
 - [Supported stores](${origin}/supported-stores): which stores Caramel holds
   coupon codes for.
 - [Sources](${origin}/sources): where Caramel's coupon codes come from, and
@@ -54,6 +55,11 @@ const LLMS_TXT = `# Caramel
 - Firefox Add-ons: ${FIREFOX_ADDONS_URL}
 - Microsoft Edge Add-ons: ${EDGE_ADDONS_URL}
 - Safari (App Store): ${SAFARI_APP_STORE_URL}
+
+## Optional
+
+- [Full version](${origin}/llms-full.txt): the same facts plus the FAQ
+  questions and answers and a privacy summary, in one document.
 `
 
 export function GET(): Response {

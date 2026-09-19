@@ -3,6 +3,7 @@ import {
     getCouponStats,
     listActiveSources,
     listCoupons,
+    listNeighbourStoreRows,
     listStoreSitemapEntries,
     listSupportedStoreConfigs,
 } from '@/lib/couponsRepo'
@@ -237,5 +238,40 @@ describe('listStoreSitemapEntries — per-site visible aggregates for the sitema
 
         // LIMIT is bound (the sitemap's 5000 cap is a real bound, not decoration).
         expect(await listStoreSitemapEntries(2)).toHaveLength(2)
+    })
+})
+
+describe('listNeighbourStoreRows — alphabetical windows around a store (real pg :58005)', () => {
+    it('returns the visible sites strictly before (nearest first) and after (nearest first) the base, each bounded by limit, as parsed aggregate rows', async () => {
+        // The seed's visible sites, in order: amazon.com, codecademy.com,
+        // ebay.com, target.com, walmart.com. Around ebay.com with limit 2 the
+        // windows are exact — no other suite writes a site between them
+        // (ingest-catalog only touches ebay.com itself, and files run serially).
+        const { before, after } = await listNeighbourStoreRows('ebay.com', 2)
+
+        expect(before.map(r => r.site)).toEqual([
+            'codecademy.com',
+            'amazon.com',
+        ])
+        expect(after.map(r => r.site)).toEqual(['target.com', 'walmart.com'])
+
+        for (const row of [...before, ...after]) {
+            // ::int count as a JS number ≥ 1 (a neighbour is always a store
+            // with visible coupons), and a real Date for the newest updated_at.
+            expect(Number.isInteger(row.coupon_count)).toBe(true)
+            expect(row.coupon_count).toBeGreaterThan(0)
+            expect(row.last_updated).toBeInstanceOf(Date)
+        }
+
+        // The window counts agree with the sitemap aggregate for the same site.
+        const sitemapRows = await listStoreSitemapEntries(5000)
+        const codecademy = sitemapRows.find(r => r.site === 'codecademy.com')
+        expect(before[0]!.coupon_count).toBe(codecademy!.coupon_count)
+
+        // The catalog's first site has an empty `before` window; the limit is
+        // a real bound.
+        const edge = await listNeighbourStoreRows('amazon.com', 1)
+        expect(edge.before).toEqual([])
+        expect(edge.after.map(r => r.site)).toEqual(['codecademy.com'])
     })
 })

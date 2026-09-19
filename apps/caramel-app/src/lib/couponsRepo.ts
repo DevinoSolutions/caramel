@@ -356,6 +356,74 @@ export async function listStoreSitemapEntries(
     return parseCouponRows(SiteAggregateRowSchema, rawRows, 'sitemap.stores')
 }
 
+/** The two raw-slug windows around a store, for the store page's "More stores" links. */
+export type NeighbourStoreRowsResult = {
+    /** `site < base`, nearest first (ORDER BY site DESC). */
+    before: SiteAggregateRow[]
+    /** `site > base`, nearest first (ORDER BY site ASC). */
+    after: SiteAggregateRow[]
+}
+
+/**
+ * (marketing)/coupons/[store]/page.tsx's "More stores" section — the `limit`
+ * visible sites alphabetically just before and just after `base`, as the same
+ * per-site aggregate rows the sitemap reads (count + newest updated_at), so
+ * src/lib/seo/storeDirectory.ts's pickNeighbourStores can collapse them with
+ * the sitemap's own collapseStoreRows and show real coupon counts.
+ *
+ * Why this exists: every store page linking to its alphabetical neighbours
+ * turns ~4,262 sitemap-only orphans into one crawl chain across the whole
+ * catalog (audit 2026-09-11: 8 store pages had any internal inbound link).
+ *
+ * Two range scans, not one: `site < base ORDER BY site DESC LIMIT n` and
+ * `site > base ORDER BY site ASC LIMIT n` each walk `coupons_site_idx` from
+ * the boundary and stop after n groups — a single query would need a window
+ * function over every site. Comparison is on the RAW slug (the index's
+ * collation order); the caller collapses subdomain/mixed-case slugs to their
+ * base afterwards, which is why it over-fetches (NEIGHBOUR_FETCH_LIMIT).
+ * `visibleCouponsWhere()` keeps every row here a store with ≥1 visible coupon,
+ * i.e. an indexable page worth linking to.
+ */
+export async function listNeighbourStoreRows(
+    base: string,
+    limit: number,
+): Promise<NeighbourStoreRowsResult> {
+    const [beforeRaw, afterRaw] = await Promise.all([
+        prisma.$queryRaw(Prisma.sql`
+            SELECT site,
+                   COUNT(*)::int AS coupon_count,
+                   MAX(updated_at) AS last_updated
+            FROM coupons
+            WHERE ${visibleCouponsWhere()} AND site IS NOT NULL AND site < ${base}
+            GROUP BY site
+            ORDER BY site DESC
+            LIMIT ${limit}
+        `),
+        prisma.$queryRaw(Prisma.sql`
+            SELECT site,
+                   COUNT(*)::int AS coupon_count,
+                   MAX(updated_at) AS last_updated
+            FROM coupons
+            WHERE ${visibleCouponsWhere()} AND site IS NOT NULL AND site > ${base}
+            GROUP BY site
+            ORDER BY site ASC
+            LIMIT ${limit}
+        `),
+    ])
+    return {
+        before: parseCouponRows(
+            SiteAggregateRowSchema,
+            beforeRaw,
+            'store.neighbours.before',
+        ),
+        after: parseCouponRows(
+            SiteAggregateRowSchema,
+            afterRaw,
+            'store.neighbours.after',
+        ),
+    }
+}
+
 /** api/coupons/filters/route.ts GET — sites half. The route's `includeSites` gate stays there (calls this only when true); this fn only owns its own `sitesLimit<=0` short-circuit. */
 export async function listFilterSites(sitesLimit: number): Promise<SiteRow[]> {
     if (sitesLimit <= 0) return []

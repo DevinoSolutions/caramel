@@ -1,3 +1,4 @@
+import StoreLetterStrip from '@/components/coupons/store-letter-strip'
 import SearchSection from '@/components/supported-site/search-section'
 import { listRecentlyAddedStores, listTopSites } from '@/lib/couponsRepo'
 import { BASE_URL } from '@/lib/env.client'
@@ -87,6 +88,12 @@ export default async function SupportedSitesPage() {
                 initialTopSites={initialTopSites}
                 recentlyAddedStores={recentlyAddedStores}
             />
+            {/* Server-rendered (outside the client search component) so the
+                letter links exist in the crawler-visible HTML — the grid above
+                is a client-side search and links only 8 stores. */}
+            <div className="w-full px-6 lg:px-8">
+                <StoreLetterStrip />
+            </div>
         </main>
     )
 }

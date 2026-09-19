@@ -1,5 +1,6 @@
 import CouponsSection from '@/components/coupons/coupons-section'
 import PopularStores from '@/components/coupons/popular-stores'
+import StoreLetterStrip from '@/components/coupons/store-letter-strip'
 import { attachSignals } from '@/lib/couponSignals'
 import { listCoupons } from '@/lib/couponsRepo'
 import { BASE_URL } from '@/lib/env.client'
@@ -86,6 +87,9 @@ export default async function CouponsPage() {
                 heroSubtitle="Browse coupon codes, promo codes, and offers for your favorite stores."
             />
             <PopularStores />
+            {/* Server-rendered letter strip into the A–Z directory — the hub's
+                crawl path to every store page, not just the 4 popular ones. */}
+            <StoreLetterStrip />
             <script
                 type="application/ld+json"
                 suppressHydrationWarning
