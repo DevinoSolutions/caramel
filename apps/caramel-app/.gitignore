@@ -48,3 +48,4 @@ next-env.d.ts
 # lighthouse ci (checks-app.yml lighthouse job) — local + CI report output
 /.lighthouseci/
 /lighthouse-reports/
+/lighthouse-reports-mobile/

@@ -37,10 +37,18 @@ vi.mock('@/lib/rateLimit', async importOriginal => {
     return { ...actual, checkRateLimit: checkRateLimitMock }
 })
 
-const { captureExceptionMock } = vi.hoisted(() => ({
+const { captureExceptionMock, setUserMock } = vi.hoisted(() => ({
     captureExceptionMock: vi.fn(),
+    // withRoute stamps the resolved session onto Sentry's user field in the one
+    // place it learns who is calling — see the `auth` block in withRoute.ts.
+    // Behaviour is pinned in tests/unit/stable-user-id.test.ts; this mock only
+    // has to exist so the auth tests below don't fault on a missing export.
+    setUserMock: vi.fn(),
 }))
-vi.mock('@sentry/nextjs', () => ({ captureException: captureExceptionMock }))
+vi.mock('@sentry/nextjs', () => ({
+    captureException: captureExceptionMock,
+    setUser: setUserMock,
+}))
 
 // Typed with better-auth's actual call shape ({ headers }) so the
 // auth: 'optional' tests can assert the wrapper really forwarded the request's

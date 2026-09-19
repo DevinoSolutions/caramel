@@ -45,6 +45,23 @@ function syncSentryPosthogContext(): void {
 }
 
 /**
+ * Put the app's stable user id in Sentry's USER field — not just in a context
+ * blob. The context above carries `posthog_distinct_id`, which reads fine to a
+ * human but is invisible to everything Sentry does with identity: "users
+ * affected" counts, `user.id:<id>` search, and issue-to-account attribution all
+ * read `Sentry.setUser`. Until this call existed, `grep setUser` over the repo
+ * returned nothing and no Sentry issue could be tied back to an account.
+ *
+ * ID ONLY, deliberately: it is the same UUID PostHog identifies on
+ * (`identifyUser` below) and the same `users.id` the DB and every API route are
+ * keyed by, so one id joins Sentry ↔ PostHog ↔ Postgres. Email is NOT sent —
+ * `sendDefaultPii` is off and an error report does not need the address.
+ */
+export function setSentryUser(userId: string | null): void {
+    Sentry.setUser(userId ? { id: userId } : null)
+}
+
+/**
  * Initialise posthog-js exactly once, when a capture target is configured.
  * Enables SPA pageviews + pageleave and privacy-preserving session recording,
  * registers the shared super properties, and (in the e2e dataset) accepts
@@ -117,6 +134,7 @@ export function identifyUser(user: {
     // NEVER email as distinct_id — the stable UUID is the identity; email is a
     // person property only.
     posthog.identify(user.id, user.email ? { $email: user.email } : undefined)
+    setSentryUser(user.id)
     syncSentryPosthogContext()
 }
 
@@ -124,5 +142,8 @@ export function identifyUser(user: {
 export function resetPosthogIdentity(): void {
     if (!initialized) return
     posthog.reset()
+    // Clear Sentry's user too, or the next anonymous visitor on this device
+    // keeps reporting errors as the account that just logged out.
+    setSentryUser(null)
     syncSentryPosthogContext()
 }

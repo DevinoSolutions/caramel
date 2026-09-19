@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { INDEXNOW_KEY, INDEXNOW_KEY_PATH } from '../src/lib/seo/indexnow'
 
 // SEO regression gate — everything here reads the RAW server HTML via
 // page.request.get (no JS execution), so it asserts exactly what a crawler
@@ -28,6 +29,7 @@ import { expect, test } from '@playwright/test'
 //   /pricing           1453 / 1453   -> min 1000
 //   /sources            499 /  499   -> min  350
 //   /privacy           2780 / 2784   -> min 1900
+//   /support            547 (prod, 2026-09-11)   -> min 380
 // (/coupons is thin on purpose: the card grid is a client fetch; its server
 // HTML carries the shell copy + sidebar. If a route legitimately gains or
 // loses big copy, re-measure with the snippet in the PR that added this file
@@ -39,6 +41,7 @@ const ROUTES: ReadonlyArray<{ path: string; minVisibleChars: number }> = [
     { path: '/pricing', minVisibleChars: 1000 },
     { path: '/sources', minVisibleChars: 350 },
     { path: '/privacy', minVisibleChars: 1900 },
+    { path: '/support', minVisibleChars: 380 },
 ]
 
 // Same production-origin set as src/app/robots.ts (and next.config.mjs's
@@ -307,13 +310,39 @@ test.describe('SEO regression gate (raw server HTML)', () => {
             (xml.match(/<\/loc>/g) ?? []).length,
         )
 
-        // The 6 static marketing routes, emitted against the deployment's
+        // The static marketing routes, emitted against the deployment's
         // own origin (sitemap.ts builds each <loc> from BASE_URL, which
         // matches the origin this suite targets in all CI contexts).
+        //
+        // /sources is the one conditional entry: sitemap.ts lists it only
+        // when there is ≥1 ACTIVE source (otherwise the page is an empty
+        // shell that noindexes itself), so it is asserted against the SAME
+        // read the sitemap uses — /api/sources — rather than assumed. The
+        // hermetic seed has 2 ACTIVE sources; the deployed site may have 0.
         const origin = stripTrailingSlash(baseURL ?? '')
         for (const { path: routePath } of ROUTES) {
+            if (routePath === '/sources') continue
             const loc = `<loc>${origin}${routePath}</loc>`
             expect(xml, `sitemap.xml missing ${loc}`).toContain(loc)
+        }
+
+        const sourcesRes = await page.request.get('/api/sources')
+        expect(sourcesRes.ok()).toBe(true)
+        const sourcesBody = (await sourcesRes.json()) as { data?: unknown }
+        const activeSources = Array.isArray(sourcesBody.data)
+            ? sourcesBody.data.length
+            : 0
+        const sourcesLoc = `<loc>${origin}/sources</loc>`
+        if (activeSources > 0) {
+            expect(
+                xml,
+                `${activeSources} ACTIVE source(s) but sitemap.xml omits ${sourcesLoc}`,
+            ).toContain(sourcesLoc)
+        } else {
+            expect(
+                xml,
+                `0 ACTIVE sources but sitemap.xml lists ${sourcesLoc}`,
+            ).not.toContain(sourcesLoc)
         }
     })
 
@@ -323,5 +352,20 @@ test.describe('SEO regression gate (raw server HTML)', () => {
         expect(res.headers()['content-type']).toContain('text/plain')
         const body = await res.text()
         expect(body).toContain('Caramel')
+    })
+
+    test('IndexNow key file is served verbatim at /<key>.txt', async ({
+        page,
+    }) => {
+        // IndexNow (Bing/Yandex/Seznam/Naver) validates a submission by
+        // fetching this exact path and comparing the body to the key. The
+        // constant is imported RELATIVELY: src/lib/seo/indexnow.ts is
+        // alias-free and env-free precisely so a spec can reach it without
+        // the `@/` tsconfig alias Playwright does not resolve.
+        const res = await page.request.get(INDEXNOW_KEY_PATH)
+        expect(res.status()).toBe(200)
+        expect(res.headers()['content-type']).toContain('text/plain')
+        const body = await res.text()
+        expect(body.trim()).toBe(INDEXNOW_KEY)
     })
 })

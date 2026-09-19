@@ -40,6 +40,23 @@ export async function register() {
     if (captured) {
         console.log('[boot] posthog: app_server_started captured')
     }
+
+    // Async email-delivery health. sendEmail() throwing is already loud (see
+    // src/lib/auth/auth.ts); what was invisible until now is useSend accepting
+    // a send with a 2xx and the message later going BOUNCED/FAILED or never
+    // leaving QUEUED — 57 such rows on grabcaramel.com reached nobody. This
+    // starts the only schedule the app has: an unref'd interval on the one
+    // long-running process it owns. Dynamically imported for the same reason
+    // as the PostHog helper above (never load it into the edge runtime), and
+    // the decision is LOGGED either way so "is the check running?" is never a
+    // guess.
+    const { startEmailDeliveryHealthMonitor } = await import(
+        '@/lib/emailDeliveryHealthMonitor'
+    )
+    const decision = startEmailDeliveryHealthMonitor()
+    console.log(
+        `[boot] email delivery health ${decision.enabled ? 'ENABLED' : 'DISABLED'} — ${decision.reason}`,
+    )
 }
 
 export const onRequestError = Sentry.captureRequestError

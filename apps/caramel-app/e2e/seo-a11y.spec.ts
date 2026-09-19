@@ -1,4 +1,9 @@
 import { expect, test } from '@playwright/test'
+// The app's own slug→registrable-domain rule (tldts / Public Suffix List).
+// Relative import on purpose: e2e collection runs in BOTH contexts (hermetic
+// and deployed, no generated prisma client) and this module is pure — no
+// `@/` alias, no prisma, no env.
+import { resolveStoreDomain } from '../src/lib/storeDomain'
 
 test.describe('SEO & Accessibility Basics', () => {
     test('home page has correct title', async ({ page }) => {
@@ -151,6 +156,52 @@ test.describe('Coupon pages — crawler-visible SEO', () => {
 
         const robots = await page.request.get('/robots.txt')
         expect(robots.status()).toBe(200)
+    })
+
+    // Sitemap ↔ canonical agreement (GSC audit 2026-09-11: 84 subdomain slugs,
+    // 2 mixed-case slugs and 1 non-domain were listed whose own page
+    // canonicalized elsewhere, and 4,289 of 4,317 sitemap URLs were unknown to
+    // Google). Every store <loc> must BE the canonical the page emits — i.e.
+    // its own resolveStoreDomain, lowercase — and nothing may repeat. Holds
+    // on any non-empty catalog, so it stays ungated (two-context rule).
+    test('every store <loc> in sitemap.xml is its own canonical base (lowercase, PSL-resolved) and no <loc> repeats', async ({
+        page,
+    }) => {
+        const res = await page.request.get('/sitemap.xml')
+        expect(res.status()).toBe(200)
+        const xml = await res.text()
+
+        const locs = Array.from(xml.matchAll(/<loc>([^<]+)<\/loc>/g)).map(
+            m => m[1]!,
+        )
+        expect(locs.length).toBeGreaterThan(0)
+        expect(new Set(locs).size, 'duplicate <loc> in sitemap.xml').toBe(
+            locs.length,
+        )
+
+        const storeSlugs = locs
+            .map(loc => /\/coupons\/([^/?#]+)$/.exec(loc)?.[1])
+            .filter((slug): slug is string => Boolean(slug))
+            .map(slug => decodeURIComponent(slug))
+        // The catalog is never legitimately empty in either context.
+        expect(storeSlugs.length).toBeGreaterThan(0)
+
+        const offenders = storeSlugs.filter(
+            slug =>
+                slug !== slug.toLowerCase() ||
+                resolveStoreDomain(slug) !== slug,
+        )
+        expect(
+            offenders,
+            `store <loc>s that are not their own canonical base: ${offenders.slice(0, 20).join(', ')}`,
+        ).toEqual([])
+    })
+
+    test('/support is listed in sitemap.xml', async ({ baseURL, page }) => {
+        const res = await page.request.get('/sitemap.xml')
+        expect(res.status()).toBe(200)
+        const origin = (baseURL ?? '').replace(/\/+$/, '')
+        expect(await res.text()).toContain(`<loc>${origin}/support</loc>`)
     })
 })
 
