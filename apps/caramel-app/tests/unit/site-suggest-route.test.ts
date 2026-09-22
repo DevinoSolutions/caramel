@@ -62,12 +62,18 @@ vi.mock('@/lib/email', async importOriginal => ({
     sendEmail: sendEmailMock,
 }))
 
-const { captureExceptionMock } = vi.hoisted(() => ({
+const { captureExceptionMock, setUserMock } = vi.hoisted(() => ({
     captureExceptionMock: vi.fn(
         (_error: unknown, _context?: Record<string, unknown>) => 'evt_test',
     ),
+    // `withRoute` calls Sentry.setUser on every request since the stable-user-id
+    // work; a mock without it throws "No setUser export is defined".
+    setUserMock: vi.fn((_user: unknown) => undefined),
 }))
-vi.mock('@sentry/nextjs', () => ({ captureException: captureExceptionMock }))
+vi.mock('@sentry/nextjs', () => ({
+    captureException: captureExceptionMock,
+    setUser: setUserMock,
+}))
 
 vi.mock('@/lib/rateLimit', async importOriginal => {
     const actual = await importOriginal<typeof import('@/lib/rateLimit')>()
