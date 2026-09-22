@@ -6,6 +6,11 @@
 // from appsAdvantages.ts (read its header before adding a line); the sibling
 // apps come from the shared manifest via crossAppPromotions.ts.
 //
+// BREAKPOINTS: this repo's Tailwind screens are MAX-width (`md:` = ≤767px),
+// so the base class is the desktop layout and `md:` collapses it. Shipping the
+// mobile-first reading of these classes put two columns on phones (caught
+// in PR #255 review screenshots).
+//
 // SURFACE: on the `extension` surface the badges are NOT rendered — nothing
 // that advertises the extension may render where it already is (spec §A).
 // The page still has a job there (the sibling apps), so it is not redirected
@@ -238,7 +243,7 @@ export default function AppsPageClient() {
                         >
                             Choose your browser
                         </h2>
-                        <ul className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                        <ul className="grid grid-cols-2 gap-4 md:grid-cols-1">
                             {ordered.map(card => (
                                 <BrowserCard
                                     key={card.platform}
@@ -270,7 +275,7 @@ export default function AppsPageClient() {
                     <p className="mb-4 text-sm text-gray-600 dark:text-gray-300">
                         Caramel is built by Devino, which also makes:
                     </p>
-                    <ul className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                    <ul className="grid grid-cols-3 gap-4 md:grid-cols-1">
                         {CROSS_APP_PROMOTIONS.map(app => (
                             <li key={app.id}>
                                 <a
