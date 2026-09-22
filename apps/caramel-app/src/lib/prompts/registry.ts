@@ -9,6 +9,8 @@ import type {
     PromptContext,
     PromptRegistration,
 } from '@/lib/prompts/orchestrator'
+import { CROSS_APP_PROMPT } from '@/lib/prompts/policies/crossApp'
+import { INSTALL_EXTENSION_PROMPT } from '@/lib/prompts/policies/installExtension'
 
 /** What the shared card shows for a prompt. */
 export type PromptCardContent = {
@@ -25,10 +27,11 @@ export interface GrowthPromptDefinition extends PromptRegistration {
 }
 
 /**
- * TODO: growth-prompts step 4 — register `install_extension` (2nd visit or
- * first value moment, 7d snooze, 3 dismissals) and `cross_app` ("More from
- * Devino", audience-matched via the shared manifest) here. Until then the
- * host renders nothing; the orchestrator, caps, kill switch and card are
- * live and unit-tested so those two land as pure policies + copy.
+ * The live registry. Order here is irrelevant — the orchestrator consults
+ * PROMPT_PRIORITY. Each entry's policy lives in lib/prompts/policies/ and is
+ * unit-tested on its own.
  */
-export const GROWTH_PROMPTS: readonly GrowthPromptDefinition[] = []
+export const GROWTH_PROMPTS: readonly GrowthPromptDefinition[] = [
+    INSTALL_EXTENSION_PROMPT,
+    CROSS_APP_PROMPT,
+]

@@ -38,6 +38,9 @@ const LLMS_TXT = `# Caramel
 
 - [Home](${origin}/): what Caramel is and how it works.
 - [Pricing](${origin}/pricing): the plan structure — Caramel is free.
+- [Get the extension](${origin}/apps): official store badges for Chrome,
+  Firefox, Edge and Safari, what the installed extension does on each, and
+  other Devino apps.
 - [Coupons](${origin}/coupons): browse the full coupon catalog.
 - [Store coupon pages](${origin}/coupons/amazon.com): per-store codes, one page
   per store domain, e.g. /coupons/amazon.com or /coupons/nike.com.

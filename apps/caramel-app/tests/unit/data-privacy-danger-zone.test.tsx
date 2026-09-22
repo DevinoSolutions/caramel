@@ -30,6 +30,7 @@ function emptyOverview(): ProfileOverview {
     return {
         memberSince: '2026-03-14T10:00:00.000Z',
         hasExtensionActivity: false,
+        growthPromptsEnabled: true,
         savings: {
             syncEnabled: false,
             eventCount: 0,

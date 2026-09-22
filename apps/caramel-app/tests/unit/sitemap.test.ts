@@ -72,6 +72,7 @@ describe('sitemap.ts — static routes', () => {
             '/',
             '/coupons',
             '/supported-stores',
+            '/apps',
             '/pricing',
             '/support',
             '/privacy',
@@ -225,7 +226,7 @@ describe('sitemap.ts — store entries are canonical, lowercase, deduped, policy
         expect(
             urlsOf(entries).some(u => u.startsWith(`${ORIGIN}/coupons/`)),
         ).toBe(false)
-        expect(entries.length).toBe(6)
+        expect(entries.length).toBe(7)
     })
 })
 

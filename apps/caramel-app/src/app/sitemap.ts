@@ -30,6 +30,7 @@ const STATIC_ROUTES: ReadonlyArray<StaticRoute> = [
     { path: '/', changeFrequency: 'weekly', priority: 1 },
     { path: '/coupons', changeFrequency: 'daily', priority: 0.9 },
     { path: '/supported-stores', changeFrequency: 'weekly', priority: 0.8 },
+    { path: '/apps', changeFrequency: 'weekly', priority: 0.8 },
     { path: '/pricing', changeFrequency: 'monthly', priority: 0.7 },
     { path: '/support', changeFrequency: 'monthly', priority: 0.5 },
     { path: '/privacy', changeFrequency: 'yearly', priority: 0.3 },

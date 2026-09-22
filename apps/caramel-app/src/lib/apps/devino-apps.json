@@ -1,0 +1,214 @@
+{
+    "_vendored": {
+        "source": "https://devino.ca/devino-apps.json",
+        "producer": "DevinoSolutions/devino-landing-page - data/apps.ts, served by app/devino-apps.json/route.ts",
+        "producerCommit": "685a235",
+        "vendoredAt": "2026-09-22",
+        "note": "Copy of the shared Devino cross-app promotion manifest (fleet spec section D), taken from the same producer commit uNotes vendored. Do NOT hand-edit. Unknown keys (this one included) are stripped by src/lib/apps/devinoAppsManifest.ts. A store missing from an app's `stores` array means that app is NOT LISTED on that store yet - /apps renders a non-clickable \"Coming soon\" badge for it. Caramel itself is NOT in the producer list yet; its entry lives in src/lib/apps/caramelApp.ts until the producer adds it (TODO there)."
+    },
+    "schemaVersion": 1,
+    "directory": "https://devino.ca/apps",
+    "apps": [
+        {
+            "id": "unotes",
+            "name": "uNotes",
+            "tagline": "Past papers, notes and solutions shared by students, searchable by course.",
+            "url": "https://unotes.net",
+            "icon": "https://devino.ca/app-icons/unotes.png",
+            "stores": [
+                {
+                    "type": "ios",
+                    "url": "https://apps.apple.com/ie/app/unotes/id6477337434"
+                },
+                {
+                    "type": "android",
+                    "url": "https://play.google.com/store/apps/details?id=net.unotes.twa"
+                },
+                {
+                    "type": "macos",
+                    "url": "https://apps.apple.com/ie/app/unotes/id6477337434"
+                },
+                {
+                    "type": "windows",
+                    "url": "https://apps.microsoft.com/detail/9nsmfdd0r238"
+                }
+            ],
+            "audiences": ["students"],
+            "mcp": true
+        },
+        {
+            "id": "shorty",
+            "name": "Shorty",
+            "tagline": "AI summaries of YouTube videos, podcasts and documents. No login needed to start.",
+            "url": "https://aishorty.com",
+            "icon": "https://devino.ca/app-icons/shorty.png",
+            "stores": [
+                {
+                    "type": "ios",
+                    "url": "https://apps.apple.com/us/app/shorty-ai-summarizer/id6740627456"
+                },
+                {
+                    "type": "android",
+                    "url": "https://play.google.com/store/apps/details?id=ai.shortee.twa"
+                },
+                {
+                    "type": "macos",
+                    "url": "https://apps.apple.com/us/app/shorty-ai-summarizer/id6740627456"
+                },
+                {
+                    "type": "windows",
+                    "url": "https://apps.microsoft.com/detail/9nphlg2cfnwb"
+                },
+                {
+                    "type": "chrome",
+                    "url": "https://chromewebstore.google.com/detail/shorty-ai-youtube-summari/pndkkfhcfhhhebmmndaiohkbknenlchl"
+                },
+                {
+                    "type": "firefox",
+                    "url": "https://addons.mozilla.org/firefox/addon/shorty-ai-youtube-summarizer/"
+                }
+            ],
+            "audiences": ["students", "marketers"],
+            "mcp": true
+        },
+        {
+            "id": "getitdone",
+            "name": "GetItDone",
+            "tagline": "Tasks, daily updates and time tracking in one place, for people and their AI agents.",
+            "url": "https://nowgetitdone.com",
+            "icon": "https://devino.ca/app-icons/getitdone.png",
+            "stores": [],
+            "audiences": ["students", "freelancers", "founders"],
+            "mcp": true
+        },
+        {
+            "id": "superbooks",
+            "name": "SuperBooks",
+            "tagline": "Connects to your bank, reads each transaction and reconciles your books for you.",
+            "url": "https://superbooks.io",
+            "icon": "https://devino.ca/app-icons/superbooks.png",
+            "stores": [],
+            "audiences": ["freelancers", "founders"],
+            "mcp": true
+        },
+        {
+            "id": "postify",
+            "name": "Postify",
+            "tagline": "Compose once, tailor per platform, then schedule or publish to your social channels.",
+            "url": "https://usepostify.com",
+            "icon": "https://devino.ca/app-icons/postify.png",
+            "stores": [],
+            "audiences": ["marketers", "founders", "freelancers"],
+            "mcp": true
+        },
+        {
+            "id": "uptimely",
+            "name": "Uptimely",
+            "tagline": "Uptime checks, on-call paging and status pages in one product.",
+            "url": "https://getuptimely.com",
+            "icon": "https://devino.ca/app-icons/uptimely.png",
+            "stores": [],
+            "audiences": ["developers", "ops", "founders"],
+            "mcp": true
+        },
+        {
+            "id": "snapvisor",
+            "name": "Snapvisor",
+            "tagline": "Screenshots your UI on each pull request and diffs it against your baseline.",
+            "url": "https://snapvisor.io",
+            "icon": "https://devino.ca/app-icons/snapvisor.png",
+            "stores": [],
+            "audiences": ["developers", "ops"],
+            "mcp": true
+        },
+        {
+            "id": "bioflow",
+            "name": "BioFlow",
+            "tagline": "Link-in-bio pages with live routes, integrations and scheduling from a single link.",
+            "url": "https://getbioflow.com",
+            "icon": "https://devino.ca/app-icons/bioflow.png",
+            "stores": [
+                {
+                    "type": "android",
+                    "url": "https://play.google.com/store/apps/details?id=com.devino.bioflow"
+                },
+                {
+                    "type": "windows",
+                    "url": "https://apps.microsoft.com/detail/9n699lqbnxsj"
+                }
+            ],
+            "audiences": ["marketers", "freelancers"],
+            "mcp": true
+        },
+        {
+            "id": "dodomain",
+            "name": "DoDomain",
+            "tagline": "Lets your users connect custom domains, with live DNS verification and signed webhooks.",
+            "url": "https://dodomain.io",
+            "icon": "https://devino.ca/app-icons/dodomain.png",
+            "stores": [],
+            "audiences": ["developers", "founders"],
+            "mcp": true
+        },
+        {
+            "id": "sendly",
+            "name": "Sendly",
+            "tagline": "Transactional email, campaigns and visual workflows behind one API and one workspace.",
+            "url": "https://sendly.now",
+            "icon": "https://devino.ca/app-icons/sendly.png",
+            "stores": [],
+            "audiences": ["founders", "marketers", "developers"],
+            "mcp": true
+        },
+        {
+            "id": "notifly",
+            "name": "Notifly",
+            "tagline": "Hosted notification infrastructure: email, SMS, push and in-app from one API.",
+            "url": "https://notifly.io",
+            "icon": "https://devino.ca/app-icons/notifly.png",
+            "stores": [],
+            "audiences": ["developers", "founders"],
+            "mcp": true
+        },
+        {
+            "id": "upapi",
+            "name": "upAPI",
+            "tagline": "One key and one gateway for a marketplace of APIs, with snippets in eight languages.",
+            "url": "https://upapi.io",
+            "icon": "https://devino.ca/app-icons/upapi.png",
+            "stores": [],
+            "audiences": ["developers"],
+            "mcp": true
+        },
+        {
+            "id": "demofy",
+            "name": "Demofy",
+            "tagline": "Paste a URL and Demofy films a narrated demo video of your app, re-shot when the UI changes.",
+            "url": "https://demofy.io",
+            "icon": "https://devino.ca/app-icons/demofy.png",
+            "stores": [],
+            "audiences": ["founders", "marketers", "developers"],
+            "mcp": false
+        },
+        {
+            "id": "marka",
+            "name": "Marka",
+            "tagline": "Buy and sell one-of-a-kind goods directly, with payments landing in your own Stripe account.",
+            "url": "https://joinmarka.com",
+            "icon": "https://devino.ca/app-icons/marka.png",
+            "stores": [],
+            "audiences": ["freelancers", "marketers"],
+            "mcp": false
+        },
+        {
+            "id": "safemeet",
+            "name": "SafeMeet",
+            "tagline": "Anonymous 1:1 chat with AI moderation. No account needed to start.",
+            "url": "https://safemeet.now",
+            "icon": "https://devino.ca/app-icons/safemeet.png",
+            "stores": [],
+            "audiences": ["students"],
+            "mcp": false
+        }
+    ]
+}

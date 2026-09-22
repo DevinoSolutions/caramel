@@ -38,6 +38,7 @@ const ROUTES: ReadonlyArray<{ path: string; minVisibleChars: number }> = [
     { path: '/', minVisibleChars: 6000 },
     { path: '/coupons', minVisibleChars: 600 },
     { path: '/supported-stores', minVisibleChars: 320 },
+    { path: '/apps', minVisibleChars: 900 },
     { path: '/pricing', minVisibleChars: 1000 },
     { path: '/sources', minVisibleChars: 350 },
     { path: '/privacy', minVisibleChars: 1900 },

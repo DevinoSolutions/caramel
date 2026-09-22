@@ -5,6 +5,8 @@ import {
     GITHUB_REPO_URL,
     INSTAGRAM_URL,
 } from '@/lib/brandLinks'
+import { canAdvertiseInstall } from '@/lib/surface/detectSurface'
+import { useSurface } from '@/lib/surface/SurfaceProvider'
 import { motion } from 'framer-motion'
 import Image from 'next/image'
 import Link from 'next/link'
@@ -18,6 +20,7 @@ const currentYear = new Date().getFullYear()
 
 const productLinks = [
     { name: 'Home', url: '/' },
+    { name: 'Get the extension', url: '/apps', installOnly: true },
     { name: 'Pricing', url: '/pricing' },
     { name: 'Coupons', url: '/coupons' },
     { name: 'Supported Stores', url: '/supported-stores' },
@@ -51,6 +54,7 @@ const linkClasses =
     'rounded text-[15px] text-white transition-colors hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 dark:text-gray-300 dark:hover:text-white dark:focus-visible:ring-caramel/70'
 
 export default function Footer() {
+    const { surface } = useSurface()
     return (
         // WCAG AA: white 15px links need 4.5:1 against BOTH gradient stops.
         // The brand slab (from-caramel #ea6925 → #c9531a) gives 3.21/4.43 —
@@ -94,16 +98,29 @@ export default function Footer() {
                     <nav aria-label="Product">
                         <h2 className={headingClasses}>Product</h2>
                         <ul className="mt-4 flex flex-col gap-2.5">
-                            {productLinks.map(link => (
-                                <li key={link.name}>
-                                    <Link
-                                        href={link.url}
-                                        className={linkClasses}
+                            {productLinks
+                                .filter(
+                                    link =>
+                                        !link.installOnly ||
+                                        canAdvertiseInstall(surface),
+                                )
+                                .map(link => (
+                                    <li
+                                        key={link.name}
+                                        data-growth={
+                                            link.installOnly
+                                                ? 'install'
+                                                : undefined
+                                        }
                                     >
-                                        {link.name}
-                                    </Link>
-                                </li>
-                            ))}
+                                        <Link
+                                            href={link.url}
+                                            className={linkClasses}
+                                        >
+                                            {link.name}
+                                        </Link>
+                                    </li>
+                                ))}
                         </ul>
                     </nav>
 
