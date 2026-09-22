@@ -26,6 +26,8 @@ const productLinks = [
     { name: 'Supported Stores', url: '/supported-stores' },
     { name: 'Store directory', url: '/coupons/stores' },
     { name: 'Sources', url: '/sources' },
+    { name: 'FAQ', url: '/faq' },
+    { name: 'For AI agents', url: '/agent-setup' },
 ]
 
 const communityLinks = [

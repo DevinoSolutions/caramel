@@ -1,0 +1,27 @@
+{
+    "name": "devino-caramel",
+    "owner": {
+        "name": "Devino Solutions",
+        "email": "hello@devino.ca"
+    },
+    "metadata": {
+        "description": "Caramel: look up coupon codes for any store through the public grabcaramel.com API before you buy.",
+        "version": "1.0.0"
+    },
+    "plugins": [
+        {
+            "name": "caramel",
+            "source": "./plugins/caramel",
+            "description": "Coupon-code lookup skill for the Caramel public API (no key needed).",
+            "version": "1.0.0",
+            "author": {
+                "name": "Devino Solutions"
+            },
+            "homepage": "https://grabcaramel.com/agent-setup",
+            "repository": "https://github.com/DevinoSolutions/caramel",
+            "license": "MIT",
+            "keywords": ["coupons", "promo codes", "shopping", "caramel"],
+            "category": "productivity"
+        }
+    ]
+}

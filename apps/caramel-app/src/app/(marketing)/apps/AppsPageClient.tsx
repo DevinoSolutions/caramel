@@ -15,6 +15,7 @@
 // that advertises the extension may render where it already is (spec §A).
 // The page still has a job there (the sibling apps), so it is not redirected
 // away; it opens with an "already installed" note instead.
+import AgentSetupPill from '@/components/growth/AgentSetupPill'
 import { trackGrowthEvent } from '@/lib/analytics/growthEvents'
 import { canAdvertiseInstall } from '@/lib/surface/detectSurface'
 import { useSurface } from '@/lib/surface/SurfaceProvider'
@@ -230,6 +231,7 @@ export default function AppsPageClient() {
                             </span>
                         </p>
                     )}
+                    <AgentSetupPill surface="apps" className="w-fit" />
                 </header>
 
                 {advertise && (

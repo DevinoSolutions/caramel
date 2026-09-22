@@ -24,6 +24,7 @@
 // The scene's frameloop is paused (frameloop='never') whenever the hero is
 // scrolled out of view via an IntersectionObserver.
 
+import AgentSetupPill from '@/components/growth/AgentSetupPill'
 import InstallSurfaceGate from '@/components/growth/InstallSurfaceGate'
 import { ThemeContext } from '@/lib/contexts'
 import {
@@ -671,6 +672,12 @@ export default function HeroSection() {
                         >
                             Why Choose Caramel?
                         </motion.a>
+                    </div>
+                    <div
+                        className="hero-enter mt-4 flex justify-start lg:justify-center"
+                        style={{ animationDelay: '1s' }}
+                    >
+                        <AgentSetupPill surface="hero" />
                     </div>
                 </div>
 

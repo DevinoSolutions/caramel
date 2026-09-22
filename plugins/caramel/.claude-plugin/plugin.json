@@ -1,0 +1,13 @@
+{
+    "name": "caramel",
+    "version": "1.0.0",
+    "description": "Coupon-code lookup skill for the Caramel public API (no key needed).",
+    "author": {
+        "name": "Devino Solutions",
+        "email": "hello@devino.ca"
+    },
+    "homepage": "https://grabcaramel.com/agent-setup",
+    "repository": "https://github.com/DevinoSolutions/caramel",
+    "license": "MIT",
+    "keywords": ["coupons", "promo codes", "shopping", "caramel"]
+}

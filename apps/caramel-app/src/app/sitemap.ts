@@ -5,6 +5,7 @@ import {
     collapseStoreRows,
 } from '@/lib/seo/sitemapStores'
 import { bucketStoresByLetter, directoryPath } from '@/lib/seo/storeDirectory'
+import { AGENT_GUIDES, AGENT_SETUP_PATH } from '@/lib/agentSetup/agentSetup.config'
 import type { MetadataRoute } from 'next'
 
 // The store half of this sitemap reads the coupon catalog from Postgres, and
@@ -31,6 +32,13 @@ const STATIC_ROUTES: ReadonlyArray<StaticRoute> = [
     { path: '/coupons', changeFrequency: 'daily', priority: 0.9 },
     { path: '/supported-stores', changeFrequency: 'weekly', priority: 0.8 },
     { path: '/apps', changeFrequency: 'weekly', priority: 0.8 },
+    { path: '/faq', changeFrequency: 'monthly', priority: 0.7 },
+    { path: AGENT_SETUP_PATH, changeFrequency: 'monthly', priority: 0.6 },
+    ...AGENT_GUIDES.map(guide => ({
+        path: `${AGENT_SETUP_PATH}/${guide.id}`,
+        changeFrequency: 'monthly' as const,
+        priority: 0.5,
+    })),
     { path: '/pricing', changeFrequency: 'monthly', priority: 0.7 },
     { path: '/support', changeFrequency: 'monthly', priority: 0.5 },
     { path: '/privacy', changeFrequency: 'yearly', priority: 0.3 },

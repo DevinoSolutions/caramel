@@ -1,4 +1,5 @@
 import sitemap from '@/app/sitemap'
+import { AGENT_GUIDES } from '@/lib/agentSetup/agentSetup.config'
 import type { MetadataRoute } from 'next'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -73,6 +74,9 @@ describe('sitemap.ts — static routes', () => {
             '/coupons',
             '/supported-stores',
             '/apps',
+            '/faq',
+            '/agent-setup',
+            '/agent-setup/claude-code',
             '/pricing',
             '/support',
             '/privacy',
@@ -226,7 +230,8 @@ describe('sitemap.ts — store entries are canonical, lowercase, deduped, policy
         expect(
             urlsOf(entries).some(u => u.startsWith(`${ORIGIN}/coupons/`)),
         ).toBe(false)
-        expect(entries.length).toBe(7)
+        // 7 marketing routes + /faq + /agent-setup + one page per agent guide
+        expect(entries.length).toBe(9 + AGENT_GUIDES.length)
     })
 })
 

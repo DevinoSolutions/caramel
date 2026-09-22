@@ -1,5 +1,6 @@
 'use client'
 
+import AgentSetupPill from '@/components/growth/AgentSetupPill'
 import ProfileSection from '@/components/profile/ProfileSection'
 import SwitchField from '@/components/profile/SwitchField'
 import { useSession } from '@/lib/auth/client'
@@ -77,6 +78,9 @@ export default function PreferencesSection({
                 browser or trying another Devino app. One at a time, never more
                 than one per visit, and off entirely when this is off.
             </p>
+            <div className="mt-4">
+                <AgentSetupPill surface="profile" />
+            </div>
         </ProfileSection>
     )
 }
