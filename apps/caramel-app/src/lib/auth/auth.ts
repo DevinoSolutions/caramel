@@ -153,6 +153,15 @@ export const auth = betterAuth({
                 type: 'string',
                 required: false,
             },
+            // Read-only on the session user so the growth-prompt host can
+            // honour Settings > "Show tips and prompts" on every page without
+            // a fetch. Written ONLY by PATCH /api/account/prompts.
+            growthPromptsEnabled: {
+                type: 'boolean',
+                required: false,
+                defaultValue: true,
+                input: false,
+            },
         },
     },
     session: {

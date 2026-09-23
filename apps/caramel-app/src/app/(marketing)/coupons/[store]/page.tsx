@@ -1,10 +1,12 @@
 import CouponsSection from '@/components/coupons/coupons-section'
 import PopularStores from '@/components/coupons/popular-stores'
 import StoreFavoriteStar from '@/components/coupons/store-favorite-star'
+import StoreNeighbours from '@/components/coupons/store-neighbours'
 import { attachSignals } from '@/lib/couponSignals'
 import { listStoreCoupons } from '@/lib/couponsRepo'
 import { BASE_URL } from '@/lib/env.client'
 import { jsonLdString } from '@/lib/jsonLd'
+import { evaluateStorePageIndexability } from '@/lib/seo/storeIndexability'
 import { resolveStoreDomain } from '@/lib/storeDomain'
 import type { Coupon } from '@/types/coupon'
 import type { Metadata } from 'next'
@@ -67,11 +69,27 @@ export async function generateMetadata({
     const { store } = await Promise.resolve(params)
     const storeParam = typeof store === 'string' ? safeDecode(store) : ''
     const base = getBaseDomain(storeParam)
-    if (!storeParam || !base) {
+    // ONE indexability policy, shared with the sitemap (app/sitemap.ts via
+    // src/lib/seo/sitemapStores.ts): a slug naming no registrable store, or a
+    // store with zero visible coupons, is `noindex, follow`, and the sitemap
+    // omits exactly those pages. fetchStoreCoupons short-circuits (no catalog
+    // read) when `base` is empty, and cache() shares the read with the body.
+    const { total } = await fetchStoreCoupons(storeParam)
+    const verdict = evaluateStorePageIndexability({
+        base,
+        visibleCouponCount: total,
+    })
+    // `follow` stays on in every noindex case: the links off the page (popular
+    // stores, header, footer) are still worth crawling.
+    const robots = verdict.indexable
+        ? undefined
+        : ({ index: false, follow: true } as const)
+
+    if (verdict.reason === 'not-a-store') {
         /* A slug that resolves to no registrable domain is not a store at all,
          * and this route still answers 200 for it (the body renders the honest
          * empty state rather than 404ing). That is the soft-404 bloat the
-         * zero-coupon rule below exists to keep out of the index — only more so,
+         * zero-coupon rule exists to keep out of the index — only more so,
          * because there is no store here to have coupons in the first place.
          *
          * It only became reachable when getBaseDomain moved to the Public Suffix
@@ -79,20 +97,17 @@ export async function generateMetadata({
          * this branch was effectively dead and inherited no robots directive.
          * Caught by e2e/seo-a11y.spec.ts, which asks for /coupons/…-zz.example —
          * a slug the PSL correctly refuses, since `.example` is reserved and
-         * cannot be registered. `follow` stays on for the same reason it does
-         * below: the links off the page are still worth crawling. */
+         * cannot be registered. */
         return {
             title: 'Coupons | Caramel',
             description: 'Find coupons and promo codes on Caramel.',
-            robots: { index: false, follow: true },
+            robots,
         }
     }
     // Declaring `openGraph` below REPLACES the root layout's object wholesale
     // rather than merging into it, so the inherited og:image has to be restated
     // here or these pages share links with no preview image at all.
     const banner = `${baseUrl}/caramel_banner.png`
-    const title = `${base} Coupons & Promo Codes | Caramel`
-    const description = `Find verified ${base} coupon codes, promo codes, and discounts. Updated daily.`
     // Canonical always points at the NORMALIZED base-domain URL: this route
     // serves the same content for /coupons/www.nike.com, /coupons/shop.nike.com
     // and /coupons/nike.com, so every variant must canonicalize to ONE URL or
@@ -100,16 +115,32 @@ export async function generateMetadata({
     // base-domain URLs — this makes the page agree with it.)
     const canonical = `${baseUrl}/coupons/${encodeURIComponent(base)}`
     // Stores with zero visible coupons stay reachable (the prose section
-    // renders an honest empty state) but are noindexed: thousands of thin
-    // "no codes right now" pages in the index are soft-404 bloat. cache()
-    // makes this share one catalog read with the page body.
-    const { total } = await fetchStoreCoupons(storeParam)
+    // renders an honest empty state) but are noindexed (verdict.reason ===
+    // 'no-coupons'): thousands of thin "no codes right now" pages in the
+    // index are soft-404 bloat. `total` is the same cached catalog read as the
+    // indexability verdict above.
+    // Search Console (90 days to 2026-09-11): store pages sit at positions
+    // 25–55 for "<store> promo code" queries. The title/description use only
+    // data the page already renders — the base domain and the live `total`
+    // (the same "N active codes" the prose below states) — never an invented
+    // display name or date. The zero-coupon page keeps the generic title: it
+    // is noindexed above and must not advertise codes it does not have.
+    const count = total.toLocaleString('en-US')
+    const codeWord = total === 1 ? 'code' : 'codes'
+    const title =
+        total > 0
+            ? `${base} coupons & promo codes — ${count} active ${codeWord} | Caramel`
+            : `${base} Coupons & Promo Codes | Caramel`
+    const description =
+        total > 0
+            ? `Caramel lists ${count} active coupon ${codeWord} for ${base} — promo codes and discounts refreshed as new codes are found and dead ones retired.`
+            : `Find ${base} coupon codes, promo codes, and discounts — refreshed as new codes are found.`
 
     return {
         title,
         description,
         alternates: { canonical },
-        robots: total === 0 ? { index: false, follow: true } : undefined,
+        robots,
         openGraph: {
             type: 'website',
             url: canonical,
@@ -238,12 +269,16 @@ export default async function StoreCouponsPage({
                     codes for that store from its own catalog, tries them in the
                     promo-code field, and keeps the one with the biggest
                     discount. It never replaces affiliate links, and it reports
-                    back only whether a code worked — with no account
-                    information attached — so code rankings stay accurate for
-                    every shopper.
+                    back whether a code worked (linked to your account only when
+                    you're signed in) so code rankings stay accurate for every
+                    shopper.
                 </p>
             </section>
             <PopularStores currentSite={base} />
+            {/* Alphabetical neighbours + this store's directory letter page:
+                the crawl chain that reaches every store page (PopularStores
+                links the same 4 stores site-wide; this links the nearest). */}
+            <StoreNeighbours base={base} />
             <script
                 type="application/ld+json"
                 suppressHydrationWarning

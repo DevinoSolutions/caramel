@@ -7,7 +7,7 @@ test.describe('Coupons Page', () => {
         await expect(
             page.getByRole('heading', {
                 level: 1,
-                name: /verified coupon codes/i,
+                name: /today's coupon codes/i,
             }),
         ).toBeVisible()
         await expect(page.getByText(/browse.*coupon/i).first()).toBeVisible()

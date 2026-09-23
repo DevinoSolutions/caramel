@@ -1,5 +1,6 @@
 'use client'
 
+import InstallSurfaceGate from '@/components/growth/InstallSurfaceGate'
 import { useReducedMotion } from '@/lib/reducedMotion'
 import { motion } from 'framer-motion'
 import Image from 'next/image'
@@ -15,7 +16,7 @@ import {
 import { HiCheckCircle } from 'react-icons/hi'
 
 const VIDEO_ID = 'vc4yL3YTwWk'
-const VIDEO_TITLE = 'The Truth About Honey'
+const VIDEO_TITLE = 'Exposing the Honey Influencer Scam'
 // maxresdefault verified 200 (166 KB) for this video; i.ytimg.com is
 // allowlisted in next.config.mjs images.remotePatterns.
 const VIDEO_THUMBNAIL = `https://i.ytimg.com/vi/${VIDEO_ID}/maxresdefault.jpg`
@@ -23,27 +24,30 @@ const VIDEO_THUMBNAIL = `https://i.ytimg.com/vi/${VIDEO_ID}/maxresdefault.jpg`
 // Rendered as the "Honey vs Caramel" comparison below (wired 2026-07-28 —
 // this copy sat unrendered since the F-009 oxlint sweep flagged it). The
 // Honey-side claims are documented public reporting (affiliate-link
-// replacement, data collection, creator revenue loss, closed source); the
-// Caramel-side claims are scoped to what the extension verifiably does.
+// replacement, data collection, creator revenue loss, closed source), kept in
+// the PAST tense with their dates — PayPal changed the behaviour after the
+// Dec-2024 MegaLag report, Google's 2025 policy update and a Jan-2026
+// admission (claim-integrity pass 2026-09-11); the Caramel-side claims are
+// scoped to what the extension verifiably does.
 const problemsWithHoney = [
     {
         title: 'Affiliate Link Hijacking',
-        desc: "Honey secretly replaces creators' affiliate links with their own, stealing commissions from content creators you want to support",
+        desc: "Honey was documented replacing creators' affiliate links with its own (MegaLag, December 2024), taking commissions from content creators you want to support",
         icon: <FaTimesCircle />,
     },
     {
         title: 'Hidden Data Collection',
-        desc: 'Your browsing data, purchase history, and personal information is collected and sold to third parties without clear disclosure',
+        desc: 'Your browsing data, purchase history, and personal information is reportedly collected without clear disclosure',
         icon: <FaEye />,
     },
     {
         title: 'Creator Revenue Loss',
-        desc: 'YouTubers, bloggers, and influencers lose millions in rightful earnings when Honey overrides their referral links',
+        desc: 'YouTubers, bloggers, and influencers lost rightful earnings when Honey overrode their referral links',
         icon: <FaHandHoldingHeart />,
     },
     {
         title: 'Closed Source Operation',
-        desc: "You can't verify what Honey actually does behind the scenes - their code is completely hidden from public scrutiny",
+        desc: "You can't verify what Honey actually does behind the scenes - their code is closed source, with nothing published for independent audit",
         icon: <FaShieldAlt />,
     },
 ]
@@ -51,8 +55,10 @@ const problemsWithHoney = [
 // Paired row-for-row with problemsWithHoney in the comparison grid below.
 // "No Data Selling" is deliberately NOT "zero data collection": the extension
 // does send cart/page context to Caramel's own API to classify the cart, and
-// the website runs standard analytics — the honest, verifiable claim is that
-// personal information is never sold or shared (claim-verify ruling 2026-07-28).
+// the website runs standard analytics (GA, Hotjar, Sentry — disclosed in the
+// privacy policy) — the honest, verifiable claim is that personal information
+// is never sold or shared with advertisers (claim-verify ruling 2026-07-28,
+// "shared" scoped to advertisers 2026-09-11).
 const caramelSolutions = [
     {
         title: 'Respects Creator Links',
@@ -60,7 +66,7 @@ const caramelSolutions = [
     },
     {
         title: 'No Data Selling',
-        desc: 'Your browsing habits stay private - we never sell or share your personal information',
+        desc: 'Your browsing habits stay private - we never sell your personal information or share it with advertisers',
     },
     {
         title: 'Supports Content Creators',
@@ -68,7 +74,7 @@ const caramelSolutions = [
     },
     {
         title: 'Fully Open Source',
-        desc: 'Every line of code is public and auditable under the AGPL-3.0 license - see exactly what the extension does',
+        desc: 'The extension and web app are public and auditable under the AGPL-3.0 license - see exactly what the extension does',
     },
 ]
 
@@ -342,17 +348,19 @@ export default function WhyNotHoneySection() {
                         protection.
                     </p>
                     <div className="flex justify-center gap-6 lg:flex-col lg:items-center lg:gap-4">
-                        <motion.a
-                            href="#install-extension"
-                            className="inline-flex items-center rounded-full bg-white px-8 py-4 font-semibold text-caramel shadow-md transition-all duration-200 hover:bg-orange-50 hover:shadow-xl"
-                            whileHover={{
-                                scale: 1.05,
-                                transition: { duration: 0.2 },
-                            }}
-                            whileTap={{ scale: 0.95 }}
-                        >
-                            Install Caramel Now
-                        </motion.a>
+                        <InstallSurfaceGate className="contents">
+                            <motion.a
+                                href="#install-extension"
+                                className="inline-flex items-center rounded-full bg-white px-8 py-4 font-semibold text-caramel shadow-md transition-all duration-200 hover:bg-orange-50 hover:shadow-xl"
+                                whileHover={{
+                                    scale: 1.05,
+                                    transition: { duration: 0.2 },
+                                }}
+                                whileTap={{ scale: 0.95 }}
+                            >
+                                Install Caramel Now
+                            </motion.a>
+                        </InstallSurfaceGate>
                         <motion.a
                             href="#features"
                             className="inline-flex items-center rounded-full border-2 border-white bg-transparent px-8 py-4 font-semibold text-white transition-all duration-200 hover:bg-white hover:text-caramel"

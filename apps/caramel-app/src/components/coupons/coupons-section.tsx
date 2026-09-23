@@ -1,5 +1,6 @@
 'use client'
 
+import InstallSurfaceGate from '@/components/growth/InstallSurfaceGate'
 import Loader from '@/components/Loader'
 import { promptSupportOnFailure } from '@/lib/feedback/promptSupportOnFailure'
 import type { Coupon, CouponFilters } from '@/types/coupon'
@@ -41,7 +42,7 @@ export default function CouponsSection({
     initialTotal,
     disableInitialFetch = false,
     heroTitle = 'All Coupons',
-    heroSubtitle = 'Browse verified coupon codes, promo codes, and offers.',
+    heroSubtitle = 'Browse coupon codes, promo codes, and offers.',
     heroAction,
 }: CouponsSectionProps) {
     const MIN_LOADING_DELAY_MS = 350
@@ -82,7 +83,7 @@ export default function CouponsSection({
         : '/full-logo.png'
     const sidebarTitle = storeDomain || 'Caramel'
     const sidebarDescription = storeDomain
-        ? `Save at ${storeDomain} with verified coupon codes. Caramel applies the best deals automatically at checkout.`
+        ? `Save at ${storeDomain} with coupon codes. Caramel applies the best deals automatically at checkout.`
         : "The open-source and privacy-first alternative to Honey. Automatically finds and applies the best coupon codes at checkout — without selling your data or hijacking creators' commissions."
 
     useEffect(() => {
@@ -406,61 +407,63 @@ export default function CouponsSection({
                         </p>
                     </div>
 
-                    <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-lg dark:border-white/10 dark:bg-darkSurface">
-                        <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">
-                            Available on Your Favorite Browser
-                        </p>
-                        <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">
-                            Start saving with Caramel on any browser!
-                        </p>
-                        <div className="mt-3 grid grid-cols-2 gap-2 text-sm font-medium text-gray-800 dark:text-gray-100">
-                            {[
-                                {
-                                    name: 'Chrome',
-                                    icon: <FaChrome />,
-                                    href: 'https://chromewebstore.google.com/detail/caramel-trusted-honey-alt/gaimofgglbackoimfjopicmbmnlccfoe',
-                                    available: true,
-                                },
-                                {
-                                    name: 'Safari',
-                                    icon: <FaSafari />,
-                                    href: 'https://apps.apple.com/ke/app/caramel/id6741873881',
-                                    available: true,
-                                },
-                                {
-                                    name: 'Firefox',
-                                    icon: <FaFirefox />,
-                                    href: 'https://addons.mozilla.org/en-US/firefox/addon/grabcaramel/',
-                                    available: true,
-                                },
-                                {
-                                    name: 'Edge',
-                                    icon: <FaEdge />,
-                                    href: 'https://microsoftedge.microsoft.com/addons/detail/caramel/leodahchedhnenmiengkfpmmcdendnof',
-                                    available: true,
-                                },
-                            ].map(browser => (
-                                <a
-                                    key={browser.name}
-                                    href={browser.href}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="inline-flex items-center gap-2 rounded-full bg-gray-50 px-6 py-3 text-center shadow-sm transition hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 dark:bg-white/5 dark:hover:bg-white/10 dark:focus-visible:ring-offset-darkSurface"
-                                >
-                                    {browser.icon}
-                                    {browser.name}
-                                </a>
-                            ))}
+                    <InstallSurfaceGate>
+                        <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-lg dark:border-white/10 dark:bg-darkSurface">
+                            <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">
+                                Available on Your Favorite Browser
+                            </p>
+                            <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">
+                                Start saving with Caramel on any browser!
+                            </p>
+                            <div className="mt-3 grid grid-cols-2 gap-2 text-sm font-medium text-gray-800 dark:text-gray-100">
+                                {[
+                                    {
+                                        name: 'Chrome',
+                                        icon: <FaChrome />,
+                                        href: 'https://chromewebstore.google.com/detail/caramel-trusted-honey-alt/gaimofgglbackoimfjopicmbmnlccfoe',
+                                        available: true,
+                                    },
+                                    {
+                                        name: 'Safari',
+                                        icon: <FaSafari />,
+                                        href: 'https://apps.apple.com/ke/app/caramel/id6741873881',
+                                        available: true,
+                                    },
+                                    {
+                                        name: 'Firefox',
+                                        icon: <FaFirefox />,
+                                        href: 'https://addons.mozilla.org/en-US/firefox/addon/grabcaramel/',
+                                        available: true,
+                                    },
+                                    {
+                                        name: 'Edge',
+                                        icon: <FaEdge />,
+                                        href: 'https://microsoftedge.microsoft.com/addons/detail/caramel/leodahchedhnenmiengkfpmmcdendnof',
+                                        available: true,
+                                    },
+                                ].map(browser => (
+                                    <a
+                                        key={browser.name}
+                                        href={browser.href}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center gap-2 rounded-full bg-gray-50 px-6 py-3 text-center shadow-sm transition hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 dark:bg-white/5 dark:hover:bg-white/10 dark:focus-visible:ring-offset-darkSurface"
+                                    >
+                                        {browser.icon}
+                                        {browser.name}
+                                    </a>
+                                ))}
+                            </div>
                         </div>
-                    </div>
+                    </InstallSurfaceGate>
 
                     <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-lg dark:border-white/10 dark:bg-darkSurface">
                         <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">
-                            3,000+ Supported Stores
+                            4,000+ Supported Stores
                         </p>
                         <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">
                             From major retailers to niche marketplaces, Caramel
-                            works everywhere you shop online.
+                            works at thousands of stores.
                         </p>
                         <Link
                             href="/supported-stores"

@@ -1,6 +1,7 @@
 import { applyCatalogRows } from '@/lib/catalog/applyCatalogRows'
 import type { IngestCatalogPayload } from '@/lib/catalog/ingestSchemas'
 import { VISIBLE_COUPON_STATUSES } from '@/lib/coupons'
+import { listStoreCoupons, listStoreSitemapEntries } from '@/lib/couponsRepo'
 import prisma from '@/lib/prisma'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
 
@@ -248,6 +249,49 @@ describe('applyCatalogRows — transaction atomicity', () => {
         // The good row must NOT have persisted — the transaction rolled back.
         expect(
             await prisma.coupon.findUnique({ where: { id: goodId } }),
+        ).toBeNull()
+    })
+})
+
+describe('applyCatalogRows — site is stored lowercase, so the canonical (lowercase) store page finds it', () => {
+    // Prod 2026-09-11: `eNasco.com` rows were unreachable from /coupons/enasco.com
+    // AND /coupons/eNasco.com (case-sensitive `site = $base` on a lowercased
+    // base). A private `.example`-free but still made-up host so it cannot
+    // collide with the seed or any other suite's rows.
+    const mixedCase = 'ITest-MixedCase-Store.test'
+    const lower = 'itest-mixedcase-store.test'
+
+    it('stores the lowercase site, and listStoreCoupons/listStoreSitemapEntries see it under the lowercase base', async () => {
+        const id = '800000090'
+        const r = await applyCatalogRows(
+            push([coupon(id, '2026-07-14T12:00:00.000Z', { site: mixedCase })]),
+        )
+        expect(r.gated).toBe(false)
+
+        expect((await prisma.coupon.findUnique({ where: { id } }))?.site).toBe(
+            lower,
+        )
+
+        // The page read: a mixed-case caller is lowercased before binding.
+        const viaMixed = await listStoreCoupons(mixedCase, 5)
+        const viaLower = await listStoreCoupons(lower, 5)
+        expect(viaLower.total).toBe(1)
+        expect(viaMixed.total).toBe(1)
+        expect(viaLower.coupons[0]?.id).toBe(id)
+
+        // The sitemap read groups it under the lowercase site.
+        const entries = await listStoreSitemapEntries(5000)
+        expect(entries.find(e => e.site === lower)?.coupon_count).toBe(1)
+        expect(entries.find(e => e.site === mixedCase)).toBeUndefined()
+    })
+
+    it('a null site stays null (the column is nullable; nothing is invented)', async () => {
+        const id = '800000091'
+        await applyCatalogRows(
+            push([coupon(id, '2026-07-14T12:00:00.000Z', { site: null })]),
+        )
+        expect(
+            (await prisma.coupon.findUnique({ where: { id } }))?.site,
         ).toBeNull()
     })
 })

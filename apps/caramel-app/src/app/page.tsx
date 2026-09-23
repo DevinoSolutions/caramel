@@ -7,11 +7,14 @@ import OpenSourceSection from '@/components/OpenSourceSection'
 import SectionDivider from '@/components/SectionDivider'
 import SupportedSection from '@/components/SupportedSection'
 import WhyNotHoneySection from '@/components/WhyNot'
+import { LLMS_TXT_ALTERNATE_TYPES } from '@/lib/seo/llmsTxtAlternate'
 import type { Metadata } from 'next'
 import { Suspense } from 'react'
 
 export const metadata: Metadata = {
-    alternates: { canonical: '/' },
+    // `alternates` replaces the root layout's wholesale, so the llms.txt
+    // pointer has to be re-stated next to the canonical (see llmsTxtAlternate).
+    alternates: { canonical: '/', types: LLMS_TXT_ALTERNATE_TYPES },
 }
 
 // Server component on purpose. The sections below are still client components

@@ -96,11 +96,11 @@ export default function SupportedSection() {
                     className="mb-20 text-center"
                 >
                     <h2 className="mb-8 bg-gradient-to-r from-caramel to-orange-600 bg-clip-text pb-1 text-5xl font-extrabold leading-tight tracking-tight text-transparent lg:text-4xl">
-                        3,000+ Supported Stores
+                        4,000+ Supported Stores
                     </h2>
                     <p className="max-w mx-auto text-xl leading-relaxed text-gray-600 dark:text-gray-300 lg:text-lg">
                         From major retailers to niche marketplaces, Caramel
-                        works everywhere you shop online.
+                        works at thousands of stores.
                     </p>
                     <motion.div className="mt-8">
                         <motion.a
@@ -195,13 +195,24 @@ export default function SupportedSection() {
                                                     brand PNGs; routing 16 of them
                                                     through sharp on every cold
                                                     load starves 2-core CI runners
-                                                    and flakes the nav e2e suite. */}
+                                                    and flakes the nav e2e suite.
+                                                    fetchPriority="low" (2026-09-12):
+                                                    Next emits a <link rel=preload>
+                                                    for each eager image, so these
+                                                    nine below-the-fold logos were
+                                                    fetched at the SAME priority as
+                                                    the hero wordmark (the mobile
+                                                    LCP image). The attribute lands
+                                                    on both the img and its preload,
+                                                    so they still load eagerly, just
+                                                    behind the LCP image. */}
                                                 <Image
                                                     src={store.image}
                                                     alt={`${store.name} logo`}
                                                     width={80}
                                                     height={80}
                                                     loading="eager"
+                                                    fetchPriority="low"
                                                     unoptimized
                                                     className="h-full w-full object-contain"
                                                 />

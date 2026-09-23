@@ -8,6 +8,15 @@ html {
     scrollbar-gutter: stable both-edges;
 }
 
+/* The Caramel extension stamps <html data-caramel-extension> on our origin at
+   document_idle. Every "get the extension" block is wrapped in
+   InstallSurfaceGate (data-growth="install"), which React removes once the
+   SurfaceProvider has resolved; this rule covers the pre-hydration window so
+   a visitor who already has the extension never sees the CTA at all. */
+html[data-caramel-extension] [data-growth='install'] {
+    display: none;
+}
+
 /* The `dark` class lives on an INNER wrapper div (Layout.tsx, (auth)/layout.tsx)
    AND, since SSR was restored, on <html> itself (stamped pre-hydration by the
    script in app/layout.tsx). Tailwind's `dark:` variant compiles to a
@@ -239,5 +248,58 @@ html.dark select:-webkit-autofill:focus {
 @media (prefers-reduced-motion: reduce) {
     html {
         scroll-behavior: auto;
+    }
+}
+
+/* Hero entrance (mobile LCP fix, 2026-09-12). The hero copy — the h1, the
+   wordmark, the lead paragraph and the CTA row — used to enter through
+   framer-motion `initial={{ opacity: 0 }}`, which framer serialises into the
+   server HTML as `style="opacity:0"`. Every LCP candidate was therefore
+   invisible until the whole first-load bundle had downloaded, parsed and
+   hydrated, and PageSpeed measured the home page's mobile LCP at 8.6 s
+   (desktop hid it behind a fast CPU). These keyframes keep the same rise /
+   scale-in motion (same 0.6 s / cubic-bezier(0.22,1,0.36,1) / per-element
+   delays) as a CSS animation, so the entrance starts at first paint with no
+   JavaScript on the critical path.
+
+   TRANSFORM ONLY — deliberately no opacity. A first attempt kept the fade
+   (opacity 0 → 1) and measured LCP barely moved: Chrome's paint-timing
+   detector skips an element that first paints at opacity 0, and a
+   compositor-driven opacity animation never repaints it on the main thread,
+   so the hero copy simply never became an LCP candidate — the metric fell
+   through to the stat cards that appear after hydration (render delay
+   5.3 s). Transform-only means the h1, wordmark and paragraph are painted
+   (and recorded) on the very first frame and just settle into place.
+   Reduced motion: no animation at all (the elements are already at rest). */
+@keyframes caramel-hero-enter {
+    from {
+        transform: translateY(20px);
+    }
+    to {
+        transform: none;
+    }
+}
+
+@keyframes caramel-hero-enter-scale {
+    from {
+        transform: scale(0.9);
+    }
+    to {
+        transform: none;
+    }
+}
+
+.hero-enter {
+    animation: caramel-hero-enter 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.hero-enter-scale {
+    animation: caramel-hero-enter-scale 0.8s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .hero-enter,
+    .hero-enter-scale {
+        animation: none;
     }
 }

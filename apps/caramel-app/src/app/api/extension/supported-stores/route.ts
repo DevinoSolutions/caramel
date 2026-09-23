@@ -1,6 +1,6 @@
 import { handleRouteError } from '@/lib/api/handleRouteError'
 import { withRoute } from '@/lib/api/withRoute'
-import { listSupportedStoreConfigs } from '@/lib/couponsRepo'
+import { getSupportedStoresPayload } from '@/lib/supportedStoresCache'
 import { NextResponse } from 'next/server'
 
 // Public read: the payload is xpath selectors already shipped to every
@@ -9,6 +9,14 @@ import { NextResponse } from 'next/server'
 // stale x-api-key header from a pre-F-003 extension build is simply
 // ignored — no cutover required, see PLAN-F-003.md §Breaking. KEYLESS by
 // design post-F-003 — CR-8: no apiKey concern on this route.
+//
+// The ~1.2 MB body is built once per 5 min by supportedStoresCache (the
+// SELECT + row mapping + stringify used to run on EVERY hit and blocked the
+// event loop for seconds — one of the loads behind the 2026-08/09
+// healthcheck-flap outages). The strong ETag lets a client that already
+// holds the current payload get a 304 instead of 1.2 MB.
+const CACHE_CONTROL = 'public, s-maxage=300, stale-while-revalidate=300'
+
 export const GET = withRoute(
     {
         method: 'GET',
@@ -17,31 +25,23 @@ export const GET = withRoute(
     },
     async ({ req }) => {
         try {
-            // One row per store, highest-priority active config that has xpath
-            // selectors (excludes API-only configs which the extension can't use).
-            const rows = await listSupportedStoreConfigs()
+            const { body, etag } = await getSupportedStoresPayload()
 
-            const supported = rows.map(r => ({
-                domain: r.store_name,
-                couponInput: r.coupon_input_xpath,
-                couponSubmit: r.apply_button_xpath,
-                priceContainer: r.price_container_xpath ?? undefined,
-                showInput: r.show_input_xpath ?? undefined,
-                dismissButton: r.dismiss_button_xpath ?? undefined,
-                successIndicator: r.success_indicator_xpath ?? undefined,
-                errorIndicator: r.error_indicator_xpath ?? undefined,
-                couponRemove: r.coupon_remove_xpath ?? undefined,
-            }))
+            if (req.headers.get('if-none-match') === etag) {
+                return new NextResponse(null, {
+                    status: 304,
+                    headers: { ETag: etag, 'Cache-Control': CACHE_CONTROL },
+                })
+            }
 
-            return NextResponse.json(
-                { supported },
-                {
-                    headers: {
-                        'Cache-Control':
-                            'public, s-maxage=300, stale-while-revalidate=300',
-                    },
+            return new NextResponse(body, {
+                status: 200,
+                headers: {
+                    'Content-Type': 'application/json',
+                    ETag: etag,
+                    'Cache-Control': CACHE_CONTROL,
                 },
-            )
+            })
         } catch (error) {
             console.error('[API][extension/supported-stores] error', error)
             return handleRouteError(error, {

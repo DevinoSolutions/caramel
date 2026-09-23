@@ -16,6 +16,8 @@ export const metadata: Metadata = {
     alternates: {
         canonical: canonicalUrl,
     },
+    /* Belt-and-braces with robots.ts's Disallow — see login/page.tsx. */
+    robots: { index: false, follow: false },
     openGraph: {
         type: 'website',
         url: canonicalUrl,

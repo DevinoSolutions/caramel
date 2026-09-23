@@ -17,7 +17,7 @@ export interface HeroStat {
 // (entry 0 = the front/largest coupon); the DOM fallback renders them as a
 // uniform row left→right in the same order.
 export const HERO_STATS: HeroStat[] = [
-    { value: 3000, suffix: '+', label: 'Supported Stores', format: 'comma' },
+    { value: 4000, suffix: '+', label: 'Supported Stores', format: 'comma' },
     { value: 100, suffix: '%', label: 'Open Source' },
     { value: 0, suffix: '%', label: 'Data Selling' },
 ]
@@ -43,7 +43,7 @@ export function formatStat(value: number, stat: HeroStat): string {
 // The state starts at `target`, not 0, in BOTH motion modes deliberately: the
 // server can't know the visitor's motion preference, so seeding from `reduce`
 // made the server render "0+" while a reduced-motion client's first render said
-// "3,000+" — a hydration TEXT mismatch that made React regenerate the whole
+// "4,000+" — a hydration TEXT mismatch that made React regenerate the whole
 // tree. Starting at `target` also means the server HTML ships the real stat
 // values, which is what crawlers read. The ramp restarts from 0 inside the
 // effect, i.e. strictly after hydration.

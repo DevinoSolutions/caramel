@@ -1292,6 +1292,30 @@ export async function startApplyingCoupons(rec, options) {
  * token in storage IS the acknowledgement. Bounded tightly — this is a courtesy
  * handshake on our own origin, not a retry loop worth spending a page's life on.
  */
+// Presence stamp for the website (fleet growth-prompts spec §A). On our own
+// origins the site must never tell a visitor to "get the extension" when it
+// is already running in their browser, so the content script marks <html>
+// with `data-caramel-extension="<version>"` — readable by CSS before the
+// page's JavaScript has even hydrated — and posts a `caramel-ext-present`
+// message for the SurfaceProvider. Unlike the sign-in hello below this is
+// NOT session-gated: a signed-in extension user is exactly who the site
+// used to advertise to. Exported for the suite; called from initCouponRunner.
+export const CARAMEL_PRESENCE_ATTRIBUTE = 'data-caramel-extension'
+export function caramelStampPresence() {
+    let version = ''
+    try {
+        version = currentBrowser?.runtime?.getManifest?.()?.version || ''
+    } catch (err) {
+        // The stamp still lands — the site only needs to know we are here.
+        logError('PRESENCE_STAMP_VERSION_FAILED', err)
+    }
+    document.documentElement.setAttribute(CARAMEL_PRESENCE_ATTRIBUTE, version)
+    window.postMessage(
+        { type: 'caramel-ext-present', version },
+        location.origin,
+    )
+}
+
 const CARAMEL_HELLO_TRIES = 5
 const CARAMEL_HELLO_GAP_MS = 600
 // Called from initCouponRunner() below; exported for the suite.
@@ -1391,6 +1415,7 @@ export function initCouponRunner() {
         // const simply did not exist. The import at the top of this file is
         // that guarantee now, so the guard would be dead weight.
         if (CARAMEL_ALLOWED_ORIGINS.has(location.origin)) {
+            caramelStampPresence()
             caramelAnnounceToWebsite()
         }
 

@@ -11,6 +11,8 @@ import {
     tintedPanelClasses,
 } from '@/lib/profile/profileStyles'
 import type { FavoriteStoreSummary } from '@/lib/profile/types'
+import { canAdvertiseInstall } from '@/lib/surface/detectSurface'
+import { useSurface } from '@/lib/surface/SurfaceProvider'
 import Image from 'next/image'
 import Link from 'next/link'
 import { FaStar } from 'react-icons/fa'
@@ -50,6 +52,11 @@ export default function FavoriteStoresSection({
     /** Put it back — undo, or a failed delete. */
     onRestore: (store: FavoriteStoreSummary) => void
 }) {
+    // The account's history OR this browser's surface — either proves the
+    // extension is installed, and "get the extension" is a dead end for both.
+    const { surface } = useSurface()
+    const extensionKnown = hasExtensionActivity || !canAdvertiseInstall(surface)
+
     async function callFavorite(domain: string, method: 'PUT' | 'DELETE') {
         const res = await fetch(
             `/api/account/favorites/${encodeURIComponent(domain)}`,
@@ -107,7 +114,7 @@ export default function FavoriteStoresSection({
                         heading="Follow the stores you shop"
                         body="Star a store and its best working codes are always one click away — in the extension and here."
                         footnote={
-                            hasExtensionActivity
+                            extensionKnown
                                 ? "Two ways to star a store: open the Caramel extension while you're on a store and tap the star, or find the store on our site and star it there."
                                 : 'Get the Caramel extension first — starring happens while you shop, right from the popup.'
                         }
@@ -122,7 +129,7 @@ export default function FavoriteStoresSection({
                                 {/* Telling someone without the extension to
                                     use it is a dead end — give them the way
                                     to get it. */}
-                                {hasExtensionActivity ? null : (
+                                {extensionKnown ? null : (
                                     <a
                                         href={CHROME_WEB_STORE_URL}
                                         target="_blank"

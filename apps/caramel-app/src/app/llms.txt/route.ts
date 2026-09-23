@@ -38,13 +38,17 @@ const LLMS_TXT = `# Caramel
 
 - [Home](${origin}/): what Caramel is and how it works.
 - [Pricing](${origin}/pricing): the plan structure — Caramel is free.
+- [Get the extension](${origin}/apps): official store badges for Chrome,
+  Firefox, Edge and Safari, what the installed extension does on each, and
+  other Devino apps.
 - [Coupons](${origin}/coupons): browse the full coupon catalog.
 - [Store coupon pages](${origin}/coupons/amazon.com): per-store codes, one page
   per store domain, e.g. /coupons/amazon.com or /coupons/nike.com.
-- [Supported stores](${origin}/supported-stores): which stores Caramel can
-  auto-apply codes on.
-- [Sources](${origin}/sources): the transparency page listing where Caramel's
-  coupon codes come from.
+- [Store directory A–Z](${origin}/coupons/stores): every store with live codes, by first letter.
+- [Supported stores](${origin}/supported-stores): which stores Caramel holds
+  coupon codes for.
+- [Sources](${origin}/sources): where Caramel's coupon codes come from, and
+  where to request a new source.
 - [Privacy policy](${origin}/privacy): what data Caramel does and does not
   collect.
 
@@ -54,6 +58,11 @@ const LLMS_TXT = `# Caramel
 - Firefox Add-ons: ${FIREFOX_ADDONS_URL}
 - Microsoft Edge Add-ons: ${EDGE_ADDONS_URL}
 - Safari (App Store): ${SAFARI_APP_STORE_URL}
+
+## Optional
+
+- [Full version](${origin}/llms-full.txt): the same facts plus the FAQ
+  questions and answers and a privacy summary, in one document.
 `
 
 export function GET(): Response {

@@ -1,5 +1,6 @@
 import CouponsSection from '@/components/coupons/coupons-section'
 import PopularStores from '@/components/coupons/popular-stores'
+import StoreLetterStrip from '@/components/coupons/store-letter-strip'
 import { attachSignals } from '@/lib/couponSignals'
 import { listCoupons } from '@/lib/couponsRepo'
 import { BASE_URL } from '@/lib/env.client'
@@ -17,7 +18,7 @@ const PAGE_SIZE = 5
 
 const title = 'Coupon Codes & Promo Codes for Top Stores | Caramel'
 const description =
-    'Browse verified coupon codes and promo codes for your favorite stores. Caramel finds and applies the best deals automatically at checkout.'
+    'Browse Caramel coupon codes and promo codes for 4,000+ online stores. The free Caramel extension finds and applies the best codes automatically at checkout.'
 const canonicalUrl = 'https://grabcaramel.com/coupons'
 const banner = `${BASE_URL}/caramel_banner.png`
 
@@ -64,7 +65,7 @@ export default async function CouponsPage() {
     const structuredData = {
         '@context': 'https://schema.org',
         '@type': 'ItemList',
-        name: 'Verified coupon codes and promo codes',
+        name: 'Coupon codes and promo codes',
         url: canonicalUrl,
         numberOfItems: total,
         itemListElement: couponsWithSignals.map((coupon, idx) => ({
@@ -82,10 +83,13 @@ export default async function CouponsPage() {
                 initialCoupons={couponsWithSignals}
                 initialTotal={total}
                 disableInitialFetch
-                heroTitle="Today's Verified Coupon Codes"
-                heroSubtitle="Browse verified coupon codes, promo codes, and offers for your favorite stores."
+                heroTitle="Today's Coupon Codes"
+                heroSubtitle="Browse coupon codes, promo codes, and offers for your favorite stores."
             />
             <PopularStores />
+            {/* Server-rendered letter strip into the A–Z directory — the hub's
+                crawl path to every store page, not just the 4 popular ones. */}
+            <StoreLetterStrip />
             <script
                 type="application/ld+json"
                 suppressHydrationWarning

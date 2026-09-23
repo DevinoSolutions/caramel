@@ -8,23 +8,32 @@ import {
     SAFARI_APP_STORE_URL,
 } from '@/lib/brandLinks'
 import { BASE_URL } from '@/lib/env.client'
+import { LLMS_TXT_ALTERNATE_TYPES } from '@/lib/seo/llmsTxtAlternate'
 import '@/styles/globals.css'
 import type { Metadata, Viewport } from 'next'
 import { ReactNode } from 'react'
 import Providers from './providers'
 
-// Kept at 157 chars so Google/social cards never truncate it mid-claim; the
-// openGraph copy below is the same string on purpose.
+// Kept under 160 chars so Google/social cards never truncate it mid-claim; the
+// openGraph copy below is the same string on purpose. Title + description are
+// query-driven (Search Console, 90 days to 2026-09-11): the home page owns the
+// "honey alternative" cluster at position ~2.3 (615 impr on `honey alternative
+// extension` alone), so "Honey Alternative" stays in the title; "coupon
+// extension" is added for the generic cluster (`coupon extension` 117 impr at
+// position 10.2, `coupon extension safari` 63 at 9.7) and "app" + the browser
+// list for `caramel app` (67 impr, position 6.0) / `caramel chrome` (28, 4.3).
+// "Caramel" stays first: brand queries sit at position 1.3.
 const description =
-    "Open-source, privacy-first coupon extension that finds and applies the best codes at checkout — without selling your data or hijacking creators' commissions."
+    'Free, open-source coupon extension and app for Chrome, Firefox, Edge & Safari — the privacy-first Honey alternative that applies the best codes at checkout.'
 
 export const metadata: Metadata = {
-    title: 'Caramel | The Trusted Alternative To Honey For Finding Coupons',
+    title: 'Caramel: Free Coupon Extension & Trusted Honey Alternative',
     description,
     metadataBase: new URL(BASE_URL),
+    alternates: { types: LLMS_TXT_ALTERNATE_TYPES },
     openGraph: {
         type: 'website',
-        title: 'Caramel | The Trusted Alternative To Honey For Finding Coupons',
+        title: 'Caramel: Free Coupon Extension & Trusted Honey Alternative',
         description,
         url: '/',
         images: ['/caramel_banner.png'],
@@ -62,8 +71,12 @@ const THEME_INIT_SCRIPT = `(function(){var d=false;try{d=localStorage.getItem('t
 // entity: "Caramel coupon extension" + the "grabcaramel" handle. The sameAs
 // URLs come from src/lib/brandLinks.ts — the same constants the footer and
 // llms.txt render, so the graph can't drift from the UI. Price 0 is real
-// (free forever, no paid tier — see /pricing). Deliberately NO
-// aggregateRating/review markup of any kind.
+// (free forever, no paid tier — see /pricing). parentOrganization ties the
+// entity to the company that ships it (the repo lives under the
+// DevinoSolutions GitHub org; devino.ca is the company site, 200 on
+// 2026-09-12). Deliberately NO aggregateRating/review markup of any kind.
+// The @id / alternateName / sameAs / parentOrganization shape is pinned in
+// raw HTML by e2e/seo-regression.spec.ts.
 const ENTITY_STRUCTURED_DATA = {
     '@context': 'https://schema.org',
     '@graph': [
@@ -83,6 +96,11 @@ const ENTITY_STRUCTURED_DATA = {
                 DISCORD_INVITE_URL,
                 INSTAGRAM_URL,
             ],
+            parentOrganization: {
+                '@type': 'Organization',
+                name: 'Devino Solutions',
+                url: 'https://devino.ca',
+            },
         },
         {
             '@type': 'SoftwareApplication',

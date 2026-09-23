@@ -112,6 +112,20 @@ export default defineConfig({
                       }
                     : {}),
             },
+            // Firefox for Android (issue #218, 2026-09-18). AMO derives a
+            // version's Android availability from THIS key, not from a
+            // listing toggle: the live 1.4.1 listing's compatibility reads
+            // {"firefox": {min 109}} with NO "android" entry, so Firefox on
+            // Android has never been offered the extension whatever was
+            // ticked at submission. 120 is the first Firefox for Android
+            // with the open extension ecosystem (MV3 action popups, content
+            // scripts, alarms, storage — everything this manifest asks for;
+            // `identity` is not requested on the Firefox build). Firefox-only
+            // for the same reason as data_collection_permissions above: the
+            // chrome parity golden stays exact.
+            ...(browser === 'firefox'
+                ? { gecko_android: { strict_min_version: '120.0' } }
+                : {}),
         },
         // `identity` (launchWebAuthFlow) exists on Chrome/Edge/Safari builds
         // only; its absence on Firefox is what routes popup sign-in through

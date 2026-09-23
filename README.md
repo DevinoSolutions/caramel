@@ -5,7 +5,7 @@
 # Caramel - Trusted Coupon Finder
 
 **Caramel is the open‑source, privacy‑first alternative to Honey.**  
-It automatically tests codes at checkout, never sells your data, and never overwrites creators’ affiliate links. Today Caramel already supports more than **5 000 stores**. You can find even more information at https://grabcaramel.com.
+It automatically tests codes at checkout, never sells your data, and never overwrites creators’ affiliate links. Today Caramel already supports more than **4,000 stores**. You can find even more information at https://grabcaramel.com.
 
 <a href="https://grabcaramel.com">
   <img width="300" height="180" alt="caramel-banner" src="https://grabcaramel.com/caramel_banner.png" />
@@ -14,8 +14,8 @@ It automatically tests codes at checkout, never sells your data, and never overw
 ## Why choose Caramel?
 
 - **100% open source** – every release is on GitHub for public audit
-- **Privacy first** – the extension only asks for tab access while you shop, nothing more
-- **Real‑time savings meter** – see exactly how much a coupon saves you before you commit
+- **Privacy first** – the extension asks only for the permissions it needs to find the store you're on, read the checkout page and apply codes (tabs, storage, sign-in) – no ads, no third‑party trackers
+- **Real‑time savings meter** – see exactly how much each code saved as it is tested
 - **Creator‑friendly** – Caramel keeps existing affiliate links intact so influencers get the credit they deserve
 - **Community‑powered** – join our Discord, file issues, or open PRs to make Caramel even sweeter
 

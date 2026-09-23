@@ -101,16 +101,31 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      # busybox wget (node:22-alpine) — a plain unauthenticated GET on the
-      # homepage. Deliberately NOT /api/health/db: that route is bearer-gated
-      # (401 without UPKUMA_HEALTH_SECRET), so it can't serve as an
-      # unauthenticated container liveness probe.
+      # busybox wget (node:22-alpine) against the dedicated LIVENESS route
+      # (src/app/api/health/route.ts: no DB, no rate limit, no-store).
+      #
+      # This used to be a 5s-timeout GET on the homepage, 10 retries at 15s.
+      # Aug 13 - Sep 4 2026 the container never crashed once, yet the site
+      # was "offline" several times a day: any ~2.5 min of SLOW homepage
+      # renders (a 1.2 MB supported-stores build, an ingest push, a scraper
+      # burst) flipped it `unhealthy`, Traefik's docker provider dropped the
+      # router (404 for everyone) and it only came back after 10 clean
+      # probes. A liveness probe decides ROUTING, so it must only fail when
+      # the process is actually dead or wedged: cheap target, generous
+      # budget (-T is busybox wget's per-phase timeout; keep it under
+      # `timeout`), and ~4 min of consecutive failures before we un-route.
+      # Deliberately NOT /api/health/db: bearer-gated (401 without
+      # UPKUMA_HEALTH_SECRET) and it probes Postgres, which is the
+      # monitoring contract, not a reason to stop routing.
       test:
-        ['CMD-SHELL', 'wget -q -O /dev/null http://127.0.0.1:3000/ || exit 1']
-      interval: 15s
-      timeout: 5s
-      retries: 10
-      start_period: 40s
+        [
+          'CMD-SHELL',
+          'wget -q -T 12 -O /dev/null http://127.0.0.1:3000/api/health || exit 1',
+        ]
+      interval: 30s
+      timeout: 15s
+      retries: 8
+      start_period: 90s
 
 volumes:
   caramel-auth-db-data:

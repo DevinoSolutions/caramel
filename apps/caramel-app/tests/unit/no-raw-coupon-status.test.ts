@@ -83,6 +83,18 @@ const SKIP_DIR_NAMES = new Set([
     // gate left this suite red for anyone who then ran the app tests locally.
     // A gate that fires on its own build output is noise, not a finding.
     '.size-cache',
+    // WXT's build directory, gitignored, written by `pnpm --filter
+    // caramel-extension build` (and by every store release). Exactly the
+    // `.size-cache` case above: the bundler inlines popup.js's allowlisted
+    // restriction sentences into `content-scripts/content.js`, and the
+    // allowlist is keyed on the SOURCE basename, so a bundle that contains
+    // no new code reds this suite for anyone who had built the extension.
+    // Measured 2026-09-22: a stale firefox-mv3 bundle failed the gate on
+    // `category_restricted` + `seller_specific` while the extension source
+    // contained neither. CI never saw it — no CI job builds the extension
+    // before `unit` — which is the worse half: the red only reaches whoever
+    // runs the suite locally, i.e. the person least able to tell it from real.
+    '.output',
 ])
 
 function walk(dir: string, extensions: string[]): string[] {

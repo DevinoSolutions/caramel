@@ -6,11 +6,11 @@ import { HiCheckCircle } from 'react-icons/hi'
 
 const features = [
     'Automated coupon application at checkout',
-    'Works on 3,000+ supported stores',
+    'Works on 4,000+ supported stores',
     'Zero ads or data selling',
     'Open source & community-driven',
     'Never hijacks affiliate commissions',
-    'Lightning fast performance',
+    'Fast, lightweight performance',
     'Cross-browser support (Chrome, Firefox, Edge, iOS Safari)',
     'Regular updates & new features',
     'No credit card required',
@@ -29,7 +29,7 @@ const stats = [
         icon: <FaGithub />,
     },
     {
-        title: '3,000+',
+        title: '4,000+',
         desc: 'Stores Supported',
         icon: <FaHeart />,
     },
@@ -57,40 +57,34 @@ export default function PricingSection() {
             </div>
 
             <div className="relative z-10 mx-auto max-w-7xl px-6 lg:px-8">
-                {/* Header */}
-                <motion.div
-                    initial={{ opacity: 0, y: 30 }}
-                    whileInView={{ opacity: 1, y: 0 }}
-                    viewport={{ once: true }}
-                    transition={{ duration: 0.6 }}
-                    className="mb-20 mt-32 text-center"
-                >
+                {/* Header — enters via the CSS `hero-enter*` keyframes
+                    (globals.css), not framer `initial`/`whileInView`: this
+                    block is the page's LCP element on phones, and framer's
+                    serialised `opacity:0` kept it invisible until hydration
+                    (Lighthouse mobile: LCP render delay 5.3 s of a 5.4 s LCP).
+                    It sits at the top of the viewport, so "on load" and
+                    "when in view" are the same moment. */}
+                <div className="hero-enter mb-20 mt-32 text-center">
                     {/* h1, not h2: this is /pricing's page title, and that route
                         had no h1 at all. Only PricingPageClient renders this
                         section, so `/` keeps its single hero h1. Tailwind's
                         preflight resets heading size/weight to inherit, so the
                         classes below render this byte-identically to the h2. */}
-                    <motion.h1
-                        className="mb-6 text-5xl font-bold text-gray-900 dark:text-white lg:text-4xl"
-                        initial={{ opacity: 0, scale: 0.95 }}
-                        whileInView={{ opacity: 1, scale: 1 }}
-                        viewport={{ once: true }}
-                        transition={{ duration: 0.5, delay: 0.2 }}
+                    <h1
+                        className="hero-enter-scale mb-6 text-5xl font-bold text-gray-900 dark:text-white lg:text-4xl"
+                        style={{ animationDelay: '0.2s' }}
                     >
                         Simple, Transparent{' '}
                         <span className="text-caramel">Pricing</span>
-                    </motion.h1>
-                    <motion.p
-                        className="mx-auto max-w-3xl text-xl text-gray-600 dark:text-gray-300 lg:text-lg"
-                        initial={{ opacity: 0 }}
-                        whileInView={{ opacity: 1 }}
-                        viewport={{ once: true }}
-                        transition={{ duration: 0.5, delay: 0.3 }}
+                    </h1>
+                    <p
+                        className="hero-enter mx-auto max-w-3xl text-xl text-gray-600 dark:text-gray-300 lg:text-lg"
+                        style={{ animationDelay: '0.3s' }}
                     >
                         No tricks, no hidden fees. Caramel is completely free
                         and always will be.
-                    </motion.p>
-                </motion.div>
+                    </p>
+                </div>
 
                 {/* Stats Grid */}
                 <motion.div
@@ -299,8 +293,8 @@ export default function PricingSection() {
                                 We believe in transparency.
                             </strong>{' '}
                             Unlike other extensions that monetize your data or
-                            hijack affiliate commissions, Caramel is built by
-                            the community, for the community.
+                            hijack affiliate commissions, Caramel is built in
+                            the open, for the community.
                         </motion.p>
                         <motion.p
                             initial={{ opacity: 0 }}

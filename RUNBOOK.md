@@ -47,7 +47,34 @@ with `ls` or a repo search without knowing the doc structure first.
   its dashboard URL and which monitor entry it is — not present in this
   repo.
 
+## Edge cache (Cloudflare)
+
+Cloudflare sits in front of Traefik and, by default, only caches static
+file extensions — `s-maxage` on an API JSON response is ignored
+(`cf-cache-status: DYNAMIC`). A zone **Cache Rule** ("Cache
+/api/extension/supported-stores and /api/coupons per origin
+Cache-Control", phase `http_request_cache_settings`, created 2026-09-04)
+makes those two paths cache-eligible with edge TTL = respect origin, so
+the route's `s-maxage=300` / `s-maxage=60` actually applies. Verify with
+`curl -sI https://grabcaramel.com/api/extension/supported-stores | grep
+cf-cache-status` — the second hit must say `HIT`. `/api/extension/
+supported-stores` additionally keeps a 5-min in-process cache of its
+serialized 1.2 MB body (`src/lib/supportedStoresCache.ts`, invalidated by
+an ingest push that upserts store_configs), so origin stays cheap even
+when the edge misses.
+
 ## Health checks
+
+`GET /api/health` — container **liveness** (`src/app/api/health/route.ts`),
+the target of the compose `web` healthcheck. No DB, no rate limit, no auth,
+`Cache-Control: no-store`; answers `{"status":"ok"}` whenever the Node
+process accepts requests. It decides ROUTING (Traefik's docker provider
+stops routing to an `unhealthy` container → users get 404), so it must
+only fail when the process is dead or wedged — never because a request
+elsewhere is slow. The Aug 13 - Sep 4 2026 "Caramel is offline" streak was
+exactly that: the probe used to hit the homepage with a 5s timeout and
+flipped the container unhealthy whenever the app was merely slow.
+Do not point the healthcheck back at `/` or at `/api/health/db`.
 
 `GET /api/health/db` — probes the two data dependencies of this app
 (auth_db via Prisma `SELECT 1`, and the app-owned coupon catalog's
@@ -295,6 +322,71 @@ command a human (or a future CI/CD step) runs after a deploy, not an
 automatic gate. TODO(human): wire this into the actual Dokploy post-deploy
 hook once the deploy trigger itself (see "Deploys & rollback" above) is
 documented.
+
+## Email delivery health (async provider failures)
+
+Two different failures lose transactional mail, and until 2026-09-16 the app
+only knew about one of them:
+
+1. **The send is refused.** `sendEmail()` throws, `src/lib/auth/auth.ts` reports
+   it to Sentry, flushes and rethrows (`surface: auth-verification-email` /
+   `auth-reset-password-email`). Already loud, unchanged.
+2. **The send is ACCEPTED and then fails.** useSend answers `2xx`, SES takes
+   the message, and it is later marked `BOUNCED` / `FAILED` / `COMPLAINED` /
+   `SUPPRESSED` — or it never leaves `QUEUED`. Nothing in the app ever learned
+   about this: grabcaramel.com's useSend log holds 55 `BOUNCED` and 2 `FAILED`
+   rows that reached no Sentry issue and no human.
+
+`src/lib/emailDeliveryHealthMonitor.ts` closes (2). Once per interval the server
+reads useSend's OWN send log (`GET /api/v1/emails`, filtered to our sending
+domain via `GET /api/v1/domains`), classifies the window, and raises **exactly
+one** Sentry event per bad clock hour:
+
+| Window contains                | Sentry                                                 |
+| ------------------------------ | ------------------------------------------------------ |
+| only `DELIVERED`/`OPENED`/…    | nothing (one `[email-health] ok …` log line)           |
+| any failure status             | `Transactional email delivery degraded`, level `error` |
+| only stuck/delayed sends       | same message, level `warning`                          |
+| provider unreachable / refused | `…health check failed`, level `error`                  |
+
+The event carries counts, statuses, the window and the domain id — **never** a
+recipient, subject or body. The send log's PII fields are dropped at the parse
+boundary (`toEmailLogEntry`).
+
+**Schedule.** Caramel has no cron and no worker, so this is an `unref`'d
+interval started from `instrumentation.ts`'s `register()` — one process, one
+schedule. The first run happens one interval AFTER boot (a crash-looping
+container must not be able to machine-gun Sentry), and the Sentry throttle is
+one event per clock hour per process. If the web service ever scales past one
+replica, move this to a real scheduler rather than adding a lock.
+
+**Config.** `EMAIL_DELIVERY_HEALTH_ENABLED` is unset by default, which means ON
+in production whenever `USESEND_API_KEY` is set and OFF everywhere else; `false`
+opts a prod deploy out, `true` forces it on locally. The window length equals
+`EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES` (default 60). Boot logs the decision
+either way:
+
+```
+[boot] email delivery health ENABLED — production default
+```
+
+**On demand.** The same check runs as a one-shot, from inside the prod container
+or anywhere the `USESEND_*` vars exist (it reads `process.env` directly and does
+NOT need `DATABASE_URL`). Exit code 0 = healthy/skipped, 1 = degraded or
+unreachable:
+
+```bash
+pnpm --filter caramel-app run email:health -- --minutes 1440
+# [email-health] ok window=… scanned=152 failed=0 delayed=0 stuck=0 (DELIVERED=152)
+```
+
+**If it reports degraded:** open useSend (`usesend.devino.ca`) for the affected
+window — the counts in the Sentry event tell you which class. `BOUNCED` in bulk
+usually means a recipient-side or reputation problem (check
+`GET /api/v1/analytics/reputation-metrics`); `FAILED` in bulk usually means SES
+or the domain's verification (`GET /api/v1/domains` → `dkimStatus`/`spfDetails`
+must be `SUCCESS`); a pile of stuck `QUEUED` means useSend accepted mail it is
+not draining.
 
 ## Cross-hop trace correlation (coarse — known debt)
 

@@ -40,6 +40,8 @@ import {
     DiscountTypeRowSchema,
     type RecentStoreRow,
     RecentStoreRowSchema,
+    type SiteAggregateRow,
+    SiteAggregateRowSchema,
     type SiteCountRow,
     SiteCountRowSchema,
     type SiteRow,
@@ -125,8 +127,14 @@ export async function listCoupons(
     const conditions: Prisma.Sql[] = [visibleCouponsWhere()]
 
     if (baseSite) {
+        // `site` is stored lowercase (applyCatalogRows + the
+        // lowercase_coupon_sites migration) and this predicate is case-
+        // sensitive on purpose — plain equality keeps using coupons_site_idx.
+        // Lowercasing the bound value is the one-line guard that keeps a
+        // mixed-case caller from matching nothing.
+        const base = baseSite.toLowerCase()
         conditions.push(
-            Prisma.sql`(site = ${baseSite} OR site LIKE ${'%.' + baseSite})`,
+            Prisma.sql`(site = ${base} OR site LIKE ${'%.' + base})`,
         )
     }
 
@@ -202,6 +210,11 @@ export async function listStoreCoupons(
     // client fetch agree (no hydration flash) — see lib/coupons.ts's
     // VISIBLE_COUPON_STATUSES doc comment for the full rationale.
     const visible = visibleCouponsWhere()
+    // Same one-line guard as listCoupons: the column is lowercase, the
+    // predicate is case-sensitive (index-friendly), so the bound base must be
+    // lowercase too. resolveStoreDomain already lowercases for the page; this
+    // makes the read correct for any caller.
+    const base = baseSite.toLowerCase()
     const [rawCoupons, rawTotalRow] = await Promise.all([
         prisma.$queryRaw(Prisma.sql`
             SELECT id, code, site, title, description, rating,
@@ -210,14 +223,14 @@ export async function listStoreCoupons(
                    status, verification_message AS "verificationMessage"
             FROM coupons
             WHERE ${visible}
-              AND (site = ${baseSite} OR site LIKE ${'%.' + baseSite})
+              AND (site = ${base} OR site LIKE ${'%.' + base})
             ORDER BY ${rankingOrderSql()}
             LIMIT ${limit}
         `),
         prisma.$queryRaw(Prisma.sql`
             SELECT COUNT(*)::int AS total FROM coupons
             WHERE ${visible}
-              AND (site = ${baseSite} OR site LIKE ${'%.' + baseSite})
+              AND (site = ${base} OR site LIKE ${'%.' + base})
         `),
     ])
     const coupons = parseCouponRows(
@@ -308,6 +321,107 @@ export async function listStoreOptions(
               LIMIT ${limit}
           `)
     return parseCouponRows(SiteRowSchema, rawRows, 'coupons.stores')
+}
+
+/**
+ * app/sitemap.ts — one aggregate row per RAW `coupons.site` among VISIBLE
+ * coupons: its visible-coupon count and its newest `updated_at`.
+ *
+ * Deliberately NOT collapsed to the registrable domain here: the slug→base
+ * rule lives in exactly one place (src/lib/storeDomain.ts's resolveStoreDomain,
+ * Public-Suffix-List backed) and src/lib/seo/sitemapStores.ts applies it plus
+ * the shared indexability policy to these rows. That keeps this read a plain
+ * indexed GROUP BY (no SQL re-implementation of the PSL) and keeps the sitemap's
+ * "which base, is it indexable" decisions testable without a database.
+ *
+ * `MAX(updated_at)` is the sitemap's `<lastmod>` source — a real catalog
+ * timestamp (the producer's last-write stamp), never an invented date.
+ * `visibleCouponsWhere()` is the same predicate the store page counts with, so
+ * a site that appears here has ≥1 visible coupon under that raw slug.
+ * `site IS NOT NULL` makes the row's `site` non-null (SiteAggregateRowSchema).
+ */
+export async function listStoreSitemapEntries(
+    limit: number,
+): Promise<SiteAggregateRow[]> {
+    const rawRows = await prisma.$queryRaw(Prisma.sql`
+        SELECT site,
+               COUNT(*)::int AS coupon_count,
+               MAX(updated_at) AS last_updated
+        FROM coupons
+        WHERE ${visibleCouponsWhere()} AND site IS NOT NULL
+        GROUP BY site
+        ORDER BY site ASC
+        LIMIT ${limit}
+    `)
+    return parseCouponRows(SiteAggregateRowSchema, rawRows, 'sitemap.stores')
+}
+
+/** The two raw-slug windows around a store, for the store page's "More stores" links. */
+export type NeighbourStoreRowsResult = {
+    /** `site < base`, nearest first (ORDER BY site DESC). */
+    before: SiteAggregateRow[]
+    /** `site > base`, nearest first (ORDER BY site ASC). */
+    after: SiteAggregateRow[]
+}
+
+/**
+ * (marketing)/coupons/[store]/page.tsx's "More stores" section — the `limit`
+ * visible sites alphabetically just before and just after `base`, as the same
+ * per-site aggregate rows the sitemap reads (count + newest updated_at), so
+ * src/lib/seo/storeDirectory.ts's pickNeighbourStores can collapse them with
+ * the sitemap's own collapseStoreRows and show real coupon counts.
+ *
+ * Why this exists: every store page linking to its alphabetical neighbours
+ * turns ~4,262 sitemap-only orphans into one crawl chain across the whole
+ * catalog (audit 2026-09-11: 8 store pages had any internal inbound link).
+ *
+ * Two range scans, not one: `site < base ORDER BY site DESC LIMIT n` and
+ * `site > base ORDER BY site ASC LIMIT n` each walk `coupons_site_idx` from
+ * the boundary and stop after n groups — a single query would need a window
+ * function over every site. Comparison is on the RAW slug (the index's
+ * collation order); the caller collapses subdomain/mixed-case slugs to their
+ * base afterwards, which is why it over-fetches (NEIGHBOUR_FETCH_LIMIT).
+ * `visibleCouponsWhere()` keeps every row here a store with ≥1 visible coupon,
+ * i.e. an indexable page worth linking to.
+ */
+export async function listNeighbourStoreRows(
+    base: string,
+    limit: number,
+): Promise<NeighbourStoreRowsResult> {
+    const [beforeRaw, afterRaw] = await Promise.all([
+        prisma.$queryRaw(Prisma.sql`
+            SELECT site,
+                   COUNT(*)::int AS coupon_count,
+                   MAX(updated_at) AS last_updated
+            FROM coupons
+            WHERE ${visibleCouponsWhere()} AND site IS NOT NULL AND site < ${base}
+            GROUP BY site
+            ORDER BY site DESC
+            LIMIT ${limit}
+        `),
+        prisma.$queryRaw(Prisma.sql`
+            SELECT site,
+                   COUNT(*)::int AS coupon_count,
+                   MAX(updated_at) AS last_updated
+            FROM coupons
+            WHERE ${visibleCouponsWhere()} AND site IS NOT NULL AND site > ${base}
+            GROUP BY site
+            ORDER BY site ASC
+            LIMIT ${limit}
+        `),
+    ])
+    return {
+        before: parseCouponRows(
+            SiteAggregateRowSchema,
+            beforeRaw,
+            'store.neighbours.before',
+        ),
+        after: parseCouponRows(
+            SiteAggregateRowSchema,
+            afterRaw,
+            'store.neighbours.after',
+        ),
+    }
 }
 
 /** api/coupons/filters/route.ts GET — sites half. The route's `includeSites` gate stays there (calls this only when true); this fn only owns its own `sitesLimit<=0` short-circuit. */

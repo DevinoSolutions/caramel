@@ -84,11 +84,19 @@ model User {
   // the website. chrome.storage.sync is the cache; this column is the truth.
   savingsSyncEnabled Boolean        @default(false) @map("savings_sync_enabled")
 
+  // Settings > "Show tips and prompts" — the growth-prompt kill switch (fleet
+  // growth-prompts spec §B). DEFAULT TRUE: prompts are on until the user turns
+  // them off, and the switch is free for everyone, never premium-gated. Lives
+  // on User for the same reason savingsSyncEnabled does: every device the
+  // user signs in on must agree, and a localStorage flag cannot travel.
+  growthPromptsEnabled Boolean      @default(true) @map("growth_prompts_enabled")
+
   accounts          Account[]
   sessions          Session[]
   couponReports     CouponReport[]
   favoriteStores    FavoriteStore[]
   savingsEvents     SavingsEvent[]
+  siteSuggestions   SiteSuggestion[]
 
   @@map("users")
 }
@@ -333,6 +341,73 @@ model SavingsEvent {
 
   @@index([userId, occurredAt])
   @@map("savings_events")
+}
+
+/// One "please support this store" request, captured with WHO asked.
+///
+/// Until this table existed the suggest route only sent an ops email, so a
+/// request was un-answerable by construction: nothing recorded the requester
+/// and nothing persisted the domain for the coupons pipeline to pick up. This
+/// is the system of record for both. The pipeline (a separate repo) reads
+/// `status = 'new'` rows through GET /api/ingest/site-suggestions and flips
+/// them to `imported` through the ack endpoint; the requester fields are what
+/// let an operator reply once the store is supported.
+///
+/// `domain` is the bare host (lowercased, leading `www.` removed) so the
+/// pipeline receives one spelling per store; `rawUrl` keeps what the person
+/// typed. `userId`/`requesterEmail` are BOTH nullable: an anonymous request is
+/// the ordinary case (the form lives on a public page), and a signed-out
+/// visitor may leave an email so they can still be told.
+///
+/// `userId` is `onDelete: SetNull`, NOT Cascade: the domain signal is ops data
+/// that must survive the requester's account, but the row must not keep a
+/// dangling FK. TODO: the danger-zone "Delete my data" route
+/// (api/account/data/delete) does not yet scrub `requester_email` from these
+/// rows — a later PR adds it to that transaction.
+///
+/// `status` is an OPEN string, `new` by default; src/lib/siteSuggestions.ts is
+/// the single place the vocabulary (`new` | `imported` | `rejected` |
+/// `unsupported` | `supported`) AND the allowed transitions are declared. It is
+/// a string, not a Prisma enum, so a later status is a one-line change there
+/// and never a migration. The ack endpoint stamps `statusChangedAt` on every
+/// transition; `supported` is the one that matters to the requester, and
+/// `notifiedAt` records that the "your store is now supported" notice went out
+/// (once per requester email per domain — a duplicate suggestion is stamped
+/// alongside the one that was actually mailed).
+///
+/// A `supported` row WITH a `requesterEmail` and a NULL `notifiedAt` is a
+/// notice AWAITING THE OWNER'S DECISION. Nothing mails a requester on its own
+/// unless SITE_SUGGESTIONS_AUTO_NOTIFY is on; otherwise the notice goes out
+/// only when POST /api/ingest/site-suggestions/notify names the row.
+model SiteSuggestion {
+  id              String    @id @default(cuid())
+  domain          String
+  rawUrl          String    @map("raw_url")
+  userId          String?   @map("user_id")
+  user            User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  requesterEmail  String?   @map("requester_email")
+  // Which surface asked: 'web' (the /supported-stores form) or 'extension'
+  // (reserved — the extension has no suggest form today).
+  source          String
+  userAgent       String?   @map("user_agent")
+  status          String    @default("new")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  // Stamped by the ack endpoint when the pipeline confirms it imported the row.
+  importedAt      DateTime? @map("imported_at")
+  // Stamped on EVERY status transition (imported, rejected, unsupported,
+  // supported); importedAt is the legacy stamp for the first one only.
+  statusChangedAt DateTime? @map("status_changed_at")
+  // When the requester was told this store is supported. NULL on a `supported`
+  // row that carries an email = the notice is still pending a decision.
+  notifiedAt      DateTime? @map("notified_at")
+
+  @@index([status, createdAt])
+  // Also the "has this person already been told about this store?" lookup the
+  // notifier runs before every send (`domain IN (...)`, then the requester
+  // email is folded and matched in memory over the handful of rows a store
+  // has) — one mail per requester email per domain.
+  @@index([domain])
+  @@map("site_suggestions")
 }
 
 enum UserStatus {

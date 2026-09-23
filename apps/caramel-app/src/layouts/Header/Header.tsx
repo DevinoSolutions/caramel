@@ -3,6 +3,8 @@ import { useScrollDirection } from '@/hooks/useScrollDirection'
 import { useWindowSize } from '@/hooks/useWindowSize'
 import { resetPosthogIdentity } from '@/lib/analytics/identity'
 import { signOut, useSession } from '@/lib/auth/client'
+import { canAdvertiseInstall } from '@/lib/surface/detectSurface'
+import { useSurface } from '@/lib/surface/SurfaceProvider'
 import { userInitial } from '@/lib/userInitial'
 import { AnimatePresence, motion } from 'framer-motion'
 import Image from 'next/image'
@@ -21,10 +23,15 @@ interface NavLink {
     /* Full accessible name where the visible label is abbreviated to keep the
        nav pill on one line. */
     ariaLabel?: string
+    /* Advertises the extension: hidden on the `extension` surface (fleet
+       growth-prompts spec §A) and stamped data-growth="install" so the CSS
+       rule in globals.css hides it pre-hydration too. */
+    installOnly?: boolean
 }
 
 const links: NavLink[] = [
     { name: 'Home', url: '/' },
+    { name: 'Get Caramel', url: '/apps', installOnly: true },
     { name: 'Coupons', url: '/coupons' },
     { name: 'Pricing', url: '/pricing' },
     { name: 'Privacy', url: '/privacy' },
@@ -40,6 +47,10 @@ export default function Header({ scrollRef }: HeaderProps) {
     const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
     const userMenuRef = useRef<HTMLDivElement>(null)
     const { isScrollingDown, isScrollingUp } = useScrollDirection(scrollRef)
+    const { surface } = useSurface()
+    const visibleLinks = links.filter(
+        link => !link.installOnly || canAdvertiseInstall(surface),
+    )
     const { windowSize } = useWindowSize()
     const { data: session } = useSession()
 
@@ -94,11 +105,18 @@ export default function Header({ scrollRef }: HeaderProps) {
                 href="/"
                 className="absolute z-10 ml-5 flex h-full w-[185px] lg:static lg:z-auto lg:ml-0"
             >
+                {/* 196×50 = the PNG's real 1830×467 aspect (3.92:1). It was
+                    declared 120×120, so the browser reserved a SQUARE box
+                    that collapsed to a strip when the file decoded — a
+                    layout shift at the very top of every page (part of the
+                    0.10 mobile CLS PageSpeed measured). Width 196 also makes
+                    the optimizer's 2x variant 384px, i.e. sharp on 3x
+                    phones at the ~148px CSS width it renders at. */}
                 <Image
                     src="/full-logo.png"
                     alt="Caramel"
-                    height={120}
-                    width={120}
+                    width={196}
+                    height={50}
                     className="mb-auto mt-auto w-4/5 cursor-pointer sm:w-5/12"
                 />
             </Link>
@@ -113,7 +131,7 @@ export default function Header({ scrollRef }: HeaderProps) {
                     paddingRight: '32px',
                 }}
             >
-                {links.map(link => {
+                {visibleLinks.map(link => {
                     const isActive = pathname === link.url
 
                     return (
@@ -122,6 +140,9 @@ export default function Header({ scrollRef }: HeaderProps) {
                             href={link.url || ''}
                             aria-label={link.ariaLabel}
                             aria-current={isActive ? 'page' : undefined}
+                            data-growth={
+                                link.installOnly ? 'install' : undefined
+                            }
                             className={`whitespace-nowrap px-6 py-2.5 hover:scale-105 2xl:px-4 ${isActive ? 'bg-caramel text-white shadow-sm' : 'text-caramel hover:bg-caramel/10'} inline-flex cursor-pointer items-center justify-center gap-2.5 rounded-3xl transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/60 xl:px-3 xl:text-sm`}
                         >
                             {link.name}
@@ -206,7 +227,7 @@ export default function Header({ scrollRef }: HeaderProps) {
                         exit={{ y: -50, opacity: 0 }}
                         className="absolute left-0 top-full mt-4 flex h-[calc(90svh-100%)] w-full flex-col justify-center gap-4 overflow-auto overscroll-none rounded-xl bg-inherit py-2 !pl-4 !pr-4 pt-11 text-xs font-medium uppercase tracking-wider shadow"
                     >
-                        {links.map(link => {
+                        {visibleLinks.map(link => {
                             const isActive = pathname === link.url
                             return (
                                 <Link
@@ -215,6 +236,9 @@ export default function Header({ scrollRef }: HeaderProps) {
                                     href={link.url || ''}
                                     aria-label={link.ariaLabel}
                                     aria-current={isActive ? 'page' : undefined}
+                                    data-growth={
+                                        link.installOnly ? 'install' : undefined
+                                    }
                                     className={`px-[30px] py-2.5 ${isActive ? 'bg-caramel text-white shadow-sm' : 'text-caramel hover:bg-caramel/10'} inline-flex cursor-pointer items-center justify-center gap-2.5 whitespace-nowrap rounded-3xl transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/60`}
                                 >
                                     {link.name}

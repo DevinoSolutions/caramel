@@ -24,6 +24,7 @@
 // The scene's frameloop is paused (frameloop='never') whenever the hero is
 // scrolled out of view via an IntersectionObserver.
 
+import InstallSurfaceGate from '@/components/growth/InstallSurfaceGate'
 import { ThemeContext } from '@/lib/contexts'
 import {
     formatStat,
@@ -494,53 +495,43 @@ export default function HeroSection() {
                 {/* LEFT column: the hero copy, re-aligned left on desktop and
                     re-centered (as before) below lg. */}
                 <div className="flex w-[55%] flex-col items-start text-left lg:w-full lg:items-center lg:text-center">
-                    <motion.h1
-                        initial={
-                            reduceMotion
-                                ? { opacity: 0 }
-                                : { opacity: 0, y: 20 }
-                        }
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.6, ease: revealEase }}
-                        className="mb-6 flex flex-col items-start text-5xl font-bold tracking-tight lg:items-center lg:text-4xl md:text-3xl"
-                    >
-                        <motion.div
-                            initial={
-                                reduceMotion
-                                    ? { opacity: 0 }
-                                    : { opacity: 0, y: 20 }
-                            }
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ duration: 0.6, ease: revealEase }}
-                            className="mb-4 text-gray-700 dark:text-white"
-                        >
+                    {/* The h1, wordmark, lead paragraph and CTA row enter via
+                        the CSS `hero-enter*` keyframes (globals.css), not
+                        framer `initial`: framer serialised `opacity:0` into
+                        the server HTML, so every LCP candidate stayed
+                        invisible until the full bundle had hydrated — the
+                        8.6 s mobile LCP PageSpeed measured. Same timings and
+                        easing as before, transform-only (see globals.css for
+                        why the fade had to go); reduced motion is honoured by
+                        the stylesheet. framer stays for hover/tap/loops. */}
+                    <h1 className="hero-enter mb-6 flex flex-col items-start text-5xl font-bold tracking-tight lg:items-center lg:text-4xl md:text-3xl">
+                        <div className="mb-4 text-gray-700 dark:text-white">
                             Welcome to
-                        </motion.div>
+                        </div>
                         <motion.div
-                            initial={
-                                reduceMotion
-                                    ? { opacity: 0 }
-                                    : { opacity: 0, scale: 0.9 }
-                            }
-                            animate={{ opacity: 1, scale: 1 }}
-                            transition={{
-                                duration: 0.8,
-                                delay: 0.3,
-                                type: 'spring',
-                                stiffness: 100,
-                                damping: 15,
-                            }}
-                            className="relative"
+                            className="hero-enter-scale relative"
+                            style={{ animationDelay: '0.3s' }}
                             whileHover={
                                 reduceMotion ? undefined : { scale: 1.02 }
                             }
                         >
                             {/* unoptimized on purpose: the wordmark is a 40KB
-                                PNG, but width=2000 makes the optimizer build a
-                                w=3840 variant ON the LCP critical path — a
+                                PNG, and a large width makes the optimizer build
+                                a w=3840 variant ON the LCP critical path — a
                                 cold-cache sharp conversion that starves 2-core
                                 CI runners (nav e2e flakes) for zero visual
                                 gain. Static serve is instant and cacheable. */}
+                            {/* 1830×467 = the PNG's real pixel size. It was
+                                declared 2000×2000, so until the file decoded
+                                the browser reserved a SQUARE box (~448px tall
+                                on phones) that then collapsed to a 3.9:1 strip
+                                — the largest single layout shift on the page
+                                (PageSpeed mobile CLS 0.10). The CSS width
+                                rules are unchanged, so the rendered size is
+                                identical once loaded. fetchPriority="high"
+                                stamps the img AND its preload so the LCP
+                                image is fetched ahead of the store logos the
+                                page also preloads. */}
                             {/* alt completes the h1: the wordmark IS the rest of
                                 the heading, so crawlers (which count img alt
                                 inside an h1) read "Welcome to Caramel — the
@@ -549,28 +540,19 @@ export default function HeroSection() {
                             <Image
                                 src="/full-logo.png"
                                 alt="Caramel — the open-source coupon extension"
-                                height={2000}
-                                width={2000}
+                                height={467}
+                                width={1830}
                                 className="max-w-md drop-shadow-lg lg:mx-auto lg:w-full"
                                 priority
+                                fetchPriority="high"
                                 unoptimized
                             />
                         </motion.div>
-                    </motion.h1>
+                    </h1>
 
-                    <motion.p
-                        initial={
-                            reduceMotion
-                                ? { opacity: 0 }
-                                : { opacity: 0, y: 10 }
-                        }
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{
-                            duration: 0.6,
-                            delay: 0.4,
-                            ease: revealEase,
-                        }}
-                        className="mb-10 max-w-xl text-xl leading-relaxed text-gray-600 dark:text-gray-300 lg:mx-auto lg:max-w-2xl lg:text-lg md:text-base"
+                    <p
+                        className="hero-enter mb-10 max-w-xl text-xl leading-relaxed text-gray-600 dark:text-gray-300 lg:mx-auto lg:max-w-2xl lg:text-lg md:text-base"
+                        style={{ animationDelay: '0.4s' }}
                     >
                         The{' '}
                         <motion.a
@@ -621,59 +603,52 @@ export default function HeroSection() {
                             hijacking creatorsʼ commissions
                         </motion.a>
                         .
-                    </motion.p>
+                    </p>
 
                     {/* CTA Buttons — sized to sit inline on one row on desktop
                         (stacked below md). The stats moved to the coupon cards
                         in the right column. */}
-                    <motion.div
-                        initial={
-                            reduceMotion
-                                ? { opacity: 0 }
-                                : { opacity: 0, y: 20 }
-                        }
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{
-                            duration: 0.6,
-                            delay: 0.8,
-                            ease: revealEase,
-                        }}
-                        className="flex flex-wrap items-center justify-start gap-3 lg:justify-center md:flex-col md:items-center"
+                    <div
+                        className="hero-enter flex flex-wrap items-center justify-start gap-3 lg:justify-center md:flex-col md:items-center"
+                        style={{ animationDelay: '0.8s' }}
                     >
-                        <motion.a
-                            href="#install-extension"
-                            className="rounded-full bg-gradient-to-r from-caramel to-orange-600 px-6 py-3 text-sm font-semibold text-black shadow-lg transition-all duration-300 hover:from-orange-600 hover:to-caramel hover:shadow-xl md:w-full md:text-center"
-                            initial={{
-                                boxShadow: '0 0 10px rgba(234,105,37,0.5)',
-                            }}
-                            animate={
-                                reduceMotion
-                                    ? {
-                                          boxShadow:
-                                              '0 0 18px rgba(234,105,37,0.6)',
-                                      }
-                                    : {
-                                          scale: [1, 1.04, 1],
-                                          boxShadow: [
-                                              '0 0 10px rgba(234,105,37,0.5)',
-                                              '0 0 24px rgba(234,105,37,0.85)',
-                                              '0 0 10px rgba(234,105,37,0.5)',
-                                          ],
-                                      }
-                            }
-                            transition={{
-                                duration: 2.2,
-                                repeat: reduceMotion ? 0 : Infinity,
-                                ease: 'easeInOut',
-                            }}
-                            whileHover={{
-                                scale: 1.05,
-                                boxShadow: '0 20px 40px rgba(234,105,37,0.35)',
-                            }}
-                            whileTap={{ scale: 0.95 }}
-                        >
-                            Install Extension
-                        </motion.a>
+                        <InstallSurfaceGate className="contents">
+                            <motion.a
+                                href="#install-extension"
+                                className="rounded-full bg-gradient-to-r from-caramel to-orange-600 px-6 py-3 text-sm font-semibold text-black shadow-lg transition-all duration-300 hover:from-orange-600 hover:to-caramel hover:shadow-xl md:w-full md:text-center"
+                                initial={{
+                                    boxShadow: '0 0 10px rgba(234,105,37,0.5)',
+                                }}
+                                animate={
+                                    reduceMotion
+                                        ? {
+                                              boxShadow:
+                                                  '0 0 18px rgba(234,105,37,0.6)',
+                                          }
+                                        : {
+                                              scale: [1, 1.04, 1],
+                                              boxShadow: [
+                                                  '0 0 10px rgba(234,105,37,0.5)',
+                                                  '0 0 24px rgba(234,105,37,0.85)',
+                                                  '0 0 10px rgba(234,105,37,0.5)',
+                                              ],
+                                          }
+                                }
+                                transition={{
+                                    duration: 2.2,
+                                    repeat: reduceMotion ? 0 : Infinity,
+                                    ease: 'easeInOut',
+                                }}
+                                whileHover={{
+                                    scale: 1.05,
+                                    boxShadow:
+                                        '0 20px 40px rgba(234,105,37,0.35)',
+                                }}
+                                whileTap={{ scale: 0.95 }}
+                            >
+                                Install Extension
+                            </motion.a>
+                        </InstallSurfaceGate>
                         <motion.a
                             href="https://github.com/DevinoSolutions/caramel"
                             target="_blank"
@@ -696,7 +671,7 @@ export default function HeroSection() {
                         >
                             Why Choose Caramel?
                         </motion.a>
-                    </motion.div>
+                    </div>
                 </div>
 
                 {/* RIGHT column: on desktop, ONE interactive WebGL box holds

@@ -220,6 +220,15 @@ describe('StoreCouponsPage generateMetadata — canonical normalization + thin-p
         expect(metadata.openGraph?.url).toBe(`${BASE_URL}/coupons/example.com`)
         // A store WITH coupons is indexable — no robots override.
         expect(metadata.robots).toBeUndefined()
+        // Title/description carry the live code count (the only data the
+        // page has besides the base domain) — singular for exactly one code.
+        expect(metadata.title).toBe(
+            'example.com coupons & promo codes — 1 active code | Caramel',
+        )
+        expect(metadata.description).toBe(
+            'Caramel lists 1 active coupon code for example.com — promo codes and discounts refreshed as new codes are found and dead ones retired.',
+        )
+        expect(metadata.openGraph?.title).toBe(metadata.title)
     })
 
     it('noindexes (but still follows) a store page with zero visible coupons', async () => {
@@ -234,5 +243,13 @@ describe('StoreCouponsPage generateMetadata — canonical normalization + thin-p
         })
 
         expect(metadata.robots).toEqual({ index: false, follow: true })
+        // The empty state keeps the generic title: it must never advertise a
+        // code count it does not have.
+        expect(metadata.title).toBe(
+            'example.com Coupons & Promo Codes | Caramel',
+        )
+        expect(metadata.description).toBe(
+            'Find example.com coupon codes, promo codes, and discounts — refreshed as new codes are found.',
+        )
     })
 })

@@ -2,6 +2,9 @@ import {
     expireCoupons,
     getCouponStats,
     listCoupons,
+    listNeighbourStoreRows,
+    listStoreCoupons,
+    listStoreSitemapEntries,
     requestSource,
 } from '@/lib/couponsRepo'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -23,6 +26,9 @@ let rules: MockRule[] = []
 // Raw SQL text of every DB call, in order — lets a test assert on the
 // generated QUERY SHAPE itself.
 let capturedQueries: string[] = []
+// The bound parameter VALUES of every $queryRaw, in the same order — lets a
+// test assert on what was actually bound (e.g. the lowercased store base).
+let capturedValues: unknown[][] = []
 // Affected-row count the mocked $executeRaw returns (expire).
 let executeRawResult = 0
 // Args every prisma.source.create() was called with (requestSource).
@@ -35,8 +41,9 @@ function mockRows(match: (sql: string) => boolean, rows: unknown[]) {
 // composed, flattened query text (nested fragments inlined, values as `?`).
 vi.mock('@/lib/prisma', () => ({
     default: {
-        $queryRaw: (arg: { sql: string }) => {
+        $queryRaw: (arg: { sql: string; values: unknown[] }) => {
             capturedQueries.push(arg.sql)
+            capturedValues.push(arg.values)
             const rows = rules.find(r => r.match(arg.sql))?.rows ?? []
             return Promise.resolve(rows)
         },
@@ -57,6 +64,7 @@ vi.mock('@/lib/prisma', () => ({
 beforeEach(() => {
     rules = []
     capturedQueries = []
+    capturedValues = []
     executeRawResult = 0
     capturedSourceCreates = []
 })
@@ -215,5 +223,172 @@ describe('requestSource (write, app sources INSERT via prisma.source.create)', (
         // id is minted app-side (Source.id has no DB default) — a non-empty string.
         expect(typeof arg.data.id).toBe('string')
         expect(arg.data.id.length).toBeGreaterThan(0)
+    })
+})
+
+describe('listStoreSitemapEntries (app/sitemap.ts read)', () => {
+    it('groups VISIBLE sited coupons per raw site with an ::int count and MAX(updated_at), ordered by site, LIMIT-bound', async () => {
+        mockRows(
+            sql => sql.includes('MAX(updated_at)'),
+            [
+                {
+                    site: 'athleta.gap.com',
+                    coupon_count: 7,
+                    last_updated: new Date('2026-09-01T00:00:00.000Z'),
+                },
+                {
+                    site: 'gap.com',
+                    coupon_count: 30,
+                    // A driver handing the timestamp back as a string is
+                    // normalized, not treated as drift (z.coerce.date).
+                    last_updated: '2026-08-15T00:00:00.000Z',
+                },
+            ],
+        )
+
+        const rows = await listStoreSitemapEntries(5000)
+
+        expect(rows).toEqual([
+            {
+                site: 'athleta.gap.com',
+                coupon_count: 7,
+                last_updated: new Date('2026-09-01T00:00:00.000Z'),
+            },
+            {
+                site: 'gap.com',
+                coupon_count: 30,
+                last_updated: new Date('2026-08-15T00:00:00.000Z'),
+            },
+        ])
+
+        // Query shape: the shared visibility predicate (the same fragment
+        // every listing read inlines), sited rows only, grouped per raw site.
+        expect(capturedQueries).toHaveLength(1)
+        const q = capturedQueries[0]!
+        expect(q).toContain('COUNT(*)::int AS coupon_count')
+        expect(q).toContain('MAX(updated_at) AS last_updated')
+        expect(q).toContain('expired = FALSE')
+        expect(q).toContain('status IN (')
+        expect(q).toContain('site IS NOT NULL')
+        expect(q).toContain('GROUP BY site')
+        expect(q).toContain('ORDER BY site ASC')
+        expect(q).toContain('LIMIT ?')
+        expect(capturedValues[0]).toContain(5000)
+    })
+
+    it('a row missing coupon_count fails the zod boundary loudly (drift, not silent zeros)', async () => {
+        mockRows(
+            sql => sql.includes('MAX(updated_at)'),
+            [{ site: 'gap.com', last_updated: new Date() }],
+        )
+        await expect(listStoreSitemapEntries(10)).rejects.toThrow(
+            /coupons-db schema drift \[sitemap\.stores\]/,
+        )
+    })
+})
+
+describe('store-matching reads bind the LOWERCASE base (site column is stored lowercase)', () => {
+    it('listStoreCoupons("eNasco.com") binds enasco.com / %.enasco.com in BOTH the list and the count query', async () => {
+        mockRows(
+            sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
+            [],
+        )
+        mockRows(sql => sql.includes('COUNT(*)::int AS total'), [{ total: 0 }])
+
+        await listStoreCoupons('eNasco.com', 5)
+
+        expect(capturedValues).toHaveLength(2)
+        for (const values of capturedValues) {
+            expect(values).toContain('enasco.com')
+            expect(values).toContain('%.enasco.com')
+            expect(values).not.toContain('eNasco.com')
+            expect(values).not.toContain('%.eNasco.com')
+        }
+        // The predicate itself stays plain, index-friendly equality — no
+        // LOWER(site) wrapper that would defeat coupons_site_idx.
+        for (const q of capturedQueries) {
+            expect(q).toMatch(/\(site = \? OR site LIKE \?\)/)
+            expect(q).not.toMatch(/lower\(site\)/i)
+        }
+    })
+
+    it('listCoupons({ baseSite: "Brooklinen.com" }) binds brooklinen.com', async () => {
+        mockRows(
+            sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
+            [],
+        )
+        mockRows(sql => sql.includes('COUNT(*)'), [{ total: 0 }])
+
+        await listCoupons({ baseSite: 'Brooklinen.com', limit: 10, skip: 0 })
+
+        expect(capturedValues).toHaveLength(2)
+        for (const values of capturedValues) {
+            expect(values).toContain('brooklinen.com')
+            expect(values).toContain('%.brooklinen.com')
+            expect(values).not.toContain('Brooklinen.com')
+        }
+    })
+})
+
+// A production-shaped `GROUP BY site` aggregate row (listNeighbourStoreRows).
+const aggregateRow = (site: string) => ({
+    site,
+    coupon_count: 3,
+    last_updated: '2026-09-01T00:00:00.000Z',
+})
+
+describe('listNeighbourStoreRows — the two raw-slug windows behind "More stores"', () => {
+    it('issues one DESC window below and one ASC window above the base, both under the shared visibility predicate, GROUP BY site, bound LIMIT', async () => {
+        mockRows(
+            sql => sql.includes('site < ?'),
+            [aggregateRow('gaomon.com'), aggregateRow('gamestop.com')],
+        )
+        mockRows(
+            sql => sql.includes('site > ?'),
+            [aggregateRow('gapfactory.com')],
+        )
+
+        const result = await listNeighbourStoreRows('gap.com', 15)
+
+        expect(capturedQueries).toHaveLength(2)
+        const [before, after] = capturedQueries as [string, string]
+        // Same predicate every listing read uses — a neighbour is always a
+        // store with ≥1 visible coupon (i.e. an indexable page).
+        for (const q of [before, after]) {
+            expect(q).toMatch(/status IN \(\?,\?(,\?)*\) AND expired = FALSE/)
+            expect(q).toContain('site IS NOT NULL')
+            expect(q).toContain('COUNT(*)::int AS coupon_count')
+            expect(q).toContain('MAX(updated_at) AS last_updated')
+            expect(q).toContain('GROUP BY site')
+            expect(q).toMatch(/LIMIT \?/)
+            // Raw-slug comparison on the indexed column — never LOWER(site).
+            expect(q).not.toMatch(/lower\(site\)/i)
+        }
+        expect(before).toContain('site < ?')
+        expect(before).toContain('ORDER BY site DESC')
+        expect(after).toContain('site > ?')
+        expect(after).toContain('ORDER BY site ASC')
+
+        // The base and the limit are bound parameters of BOTH queries.
+        for (const values of capturedValues) {
+            expect(values).toContain('gap.com')
+            expect(values).toContain(15)
+        }
+
+        // Rows parse through SiteAggregateRowSchema (Date coercion, ::int).
+        expect(result.before.map(r => r.site)).toEqual([
+            'gaomon.com',
+            'gamestop.com',
+        ])
+        expect(result.after.map(r => r.site)).toEqual(['gapfactory.com'])
+        expect(result.before[0]!.last_updated).toBeInstanceOf(Date)
+        expect(result.before[0]!.coupon_count).toBe(3)
+    })
+
+    it('a base at either end of the catalog yields an empty window on that side, not an error', async () => {
+        mockRows(sql => sql.includes('site > ?'), [aggregateRow('b.com')])
+        const result = await listNeighbourStoreRows('a.com', 15)
+        expect(result.before).toEqual([])
+        expect(result.after.map(r => r.site)).toEqual(['b.com'])
     })
 })

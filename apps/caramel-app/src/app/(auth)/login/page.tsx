@@ -19,6 +19,10 @@ export const metadata: Metadata = {
     alternates: {
         canonical: canonicalUrl,
     },
+    /* Belt-and-braces with robots.ts's Disallow: robots.txt only asks a
+     * crawler not to FETCH the page; a URL discovered through a link can still
+     * be indexed title-only unless the page itself says noindex. */
+    robots: { index: false, follow: false },
     openGraph: {
         type: 'website',
         url: canonicalUrl,

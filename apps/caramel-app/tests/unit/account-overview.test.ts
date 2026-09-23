@@ -26,6 +26,7 @@ const { prismaMock } = vi.hoisted(() => ({
         },
         favoriteStore: { findMany: vi.fn() },
         couponReport: { findMany: vi.fn() },
+        siteSuggestion: { count: vi.fn() },
     },
 }))
 vi.mock('@/lib/prisma', () => ({ default: prismaMock }))
@@ -52,6 +53,9 @@ vi.mock('@/lib/rateLimit', async importOriginal => {
 })
 
 const USER_ID = 'user-under-test'
+// The account's OWN spelling of the address. A suggestion made while signed out
+// records what the visitor TYPED, which is why the match is case-insensitive.
+const USER_EMAIL = 'shopper@example.com'
 const OTHER_USER_ID = 'someone-else'
 const MEMBER_SINCE = new Date('2026-03-14T10:00:00.000Z')
 
@@ -76,12 +80,15 @@ function stubEmptyDatabase() {
     prismaMock.savingsEvent.findMany.mockResolvedValue([])
     prismaMock.favoriteStore.findMany.mockResolvedValue([])
     prismaMock.couponReport.findMany.mockResolvedValue([])
+    prismaMock.siteSuggestion.count.mockResolvedValue(0)
     countCouponsForStoresMock.mockResolvedValue(new Map())
 }
 
 beforeEach(() => {
     vi.clearAllMocks()
-    getSessionMock.mockResolvedValue({ user: { id: USER_ID } })
+    getSessionMock.mockResolvedValue({
+        user: { id: USER_ID, email: USER_EMAIL },
+    })
     stubEmptyDatabase()
 })
 
@@ -94,6 +101,7 @@ describe('GET /api/account/overview — the zero-data user (the DEFAULT)', () =>
         expect(body).toEqual({
             memberSince: MEMBER_SINCE.toISOString(),
             hasExtensionActivity: false,
+            growthPromptsEnabled: true,
             savings: {
                 syncEnabled: false,
                 eventCount: 0,
@@ -103,6 +111,7 @@ describe('GET /api/account/overview — the zero-data user (the DEFAULT)', () =>
                 recentEvents: [],
             },
             favorites: [],
+            siteSuggestions: { identifyingCount: 0 },
             reports: {
                 reportCount: 0,
                 // null, NOT 0 — with nothing to confirm there is no
@@ -118,6 +127,47 @@ describe('GET /api/account/overview — the zero-data user (the DEFAULT)', () =>
             await GET(overviewRequest())
         ).json()) as ProfileOverview
         expect(body.savings.totals).toEqual([])
+    })
+
+    it('counts the store requests that still identify the caller — matched the SAME way the scrub matches, so the danger zone and the delete route agree', async () => {
+        prismaMock.siteSuggestion.count.mockResolvedValue(2)
+        const body = (await (
+            await GET(overviewRequest())
+        ).json()) as ProfileOverview
+
+        expect(body.siteSuggestions).toEqual({ identifyingCount: 2 })
+        // Both branches, and no third: a signed-in request found by user id,
+        // and a signed-OUT one found only by the email typed into the form.
+        expect(prismaMock.siteSuggestion.count).toHaveBeenCalledWith({
+            where: {
+                OR: [
+                    { userId: USER_ID },
+                    {
+                        requesterEmail: {
+                            equals: USER_EMAIL,
+                            mode: 'insensitive',
+                        },
+                    },
+                ],
+            },
+        })
+    })
+
+    it('an account with NO email contributes no email branch — a count that matched every anonymous request would enable the danger zone for everyone', async () => {
+        getSessionMock.mockResolvedValue({ user: { id: USER_ID } })
+        await GET(overviewRequest())
+
+        expect(prismaMock.siteSuggestion.count).toHaveBeenCalledWith({
+            where: { OR: [{ userId: USER_ID }] },
+        })
+    })
+
+    it('reads a COUNT, never the rows — the page has no reason to render somebody’s store requests back at them', async () => {
+        await GET(overviewRequest())
+        expect(prismaMock.siteSuggestion.count).toHaveBeenCalledTimes(1)
+        expect(
+            (prismaMock.siteSuggestion as Record<string, unknown>).findMany,
+        ).toBeUndefined()
     })
 
     it('skips the catalog count query entirely when there are no favorites', async () => {
