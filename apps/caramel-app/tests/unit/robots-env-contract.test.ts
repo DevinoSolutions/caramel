@@ -110,7 +110,10 @@ describe('robots.ts env-aware indexing contract', () => {
         const result = await robotsFor('https://grabcaramel.com')
         const [, aiGroup] = rulesOf(result)
         expect(aiGroup.userAgent).toEqual(EXPECTED_AI_CRAWLERS)
-        expect(aiGroup.allow).toBe('/')
+        // /api/coupons is the API the caramel-coupons skill and
+        // /agent-setup/prompt.md tell agents to call; the longer allow rule
+        // beats the `/api/` disallow for robots-honouring fetchers (#257).
+        expect(aiGroup.allow).toEqual(['/', '/api/coupons'])
         // Private paths stay private for answer engines too.
         expect(aiGroup.disallow).toEqual(DISALLOWED_PATHS)
     })
