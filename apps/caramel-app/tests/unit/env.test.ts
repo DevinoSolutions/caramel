@@ -3,6 +3,7 @@ import { BASE_URL, CLIENT_ENV_KEYS, parseClientEnv } from '@/lib/env.client'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { parseEnv } from 'node:util'
 import { describe, expect, it } from 'vitest'
 
 // F-005 pins — zod-validated env contract. Relocated per CR-1 (co-located
@@ -185,5 +186,24 @@ describe('.env.example drift', () => {
                 `${key} is in the env schema but missing from .env.example`,
             ).toBe(true)
         }
+    })
+
+    // The documented setup is "cp .env.example .env && pnpm dev", so the
+    // template itself must boot. A set-but-EMPTY line for a strict enum or
+    // .min(1) var (EMAIL_DELIVERY_HEALTH_ENABLED= did this after #248) crashes
+    // the container at instrumentation time; ship such vars commented out.
+    it('the template, copied verbatim, passes both boot-time env schemas', () => {
+        const testDir = path.dirname(fileURLToPath(import.meta.url))
+        const envExamplePath = path.resolve(testDir, '../../.env.example')
+        const template = parseEnv(fs.readFileSync(envExamplePath, 'utf8'))
+
+        expect(() => parseServerEnv(template)).not.toThrow()
+        expect(() =>
+            parseClientEnv(
+                Object.fromEntries(
+                    CLIENT_ENV_KEYS.map(key => [key, template[key]]),
+                ),
+            ),
+        ).not.toThrow()
     })
 })
