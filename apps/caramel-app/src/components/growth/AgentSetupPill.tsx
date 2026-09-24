@@ -82,8 +82,9 @@ export default function AgentSetupPill({
 
     const onCopy = async () => {
         const ok = await copyText(AGENT_SETUP_COPY_TEXT)
-        trackAgentSetupCopied({ surface, agent: 'copy' })
         if (ok) {
+            // Only a real copy counts; a denied clipboard is not a conversion.
+            trackAgentSetupCopied({ surface, agent: 'copy' })
             setCopied(true)
             toast.success(AGENT_SETUP_TOAST)
             window.setTimeout(() => setCopied(false), 2000)
@@ -102,7 +103,7 @@ export default function AgentSetupPill({
             <button
                 type="button"
                 onClick={() => void onCopy()}
-                aria-label={`Copy the ${APP_NAME} agent setup prompt`}
+                aria-label={`Onboard your agent to ${APP_NAME}: copy the setup prompt`}
                 className="inline-flex items-center gap-2 rounded-full font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-caramel"
             >
                 <span>Onboard your agent to {APP_NAME}</span>
@@ -118,7 +119,11 @@ export default function AgentSetupPill({
                     />
                 )}
             </button>
-            <span className="flex items-center gap-1" aria-label="Agent guides">
+            <span
+                role="group"
+                className="flex items-center gap-1"
+                aria-label="Agent guides"
+            >
                 {AGENT_GUIDES.map(guide => (
                     <Link
                         key={guide.id}

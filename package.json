@@ -33,8 +33,8 @@
         "test": "turbo run test",
         "prettier-write": "turbo run prettier-write",
         "prettier-check": "turbo run prettier-check",
-        "prettier-check:root": "prettier --check '*.{json,md,mjs,yaml,yml}' '.*.{json,yaml,yml}' '.github/**/*.{yml,yaml,md}' 'tools/**/*.{mjs,md}'",
-        "prettier-write:root": "prettier --write '*.{json,md,mjs,yaml,yml}' '.*.{json,yaml,yml}' '.github/**/*.{yml,yaml,md}' 'tools/**/*.{mjs,md}'",
+        "prettier-check:root": "prettier --check '*.{json,md,mjs,yaml,yml}' '.*.{json,yaml,yml}' '.claude-plugin/**/*.json' 'plugins/**/*.{json,md}' '.github/**/*.{yml,yaml,md}' 'tools/**/*.{mjs,md}'",
+        "prettier-write:root": "prettier --write '*.{json,md,mjs,yaml,yml}' '.*.{json,yaml,yml}' '.claude-plugin/**/*.json' 'plugins/**/*.{json,md}' '.github/**/*.{yml,yaml,md}' 'tools/**/*.{mjs,md}'",
         "prepare": "husky"
     },
     "lint-staged": {

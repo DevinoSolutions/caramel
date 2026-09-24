@@ -13,7 +13,6 @@
             "name": "caramel",
             "source": "./plugins/caramel",
             "description": "Coupon-code lookup skill for the Caramel public API (no key needed).",
-            "version": "1.0.0",
             "author": {
                 "name": "Devino Solutions"
             },

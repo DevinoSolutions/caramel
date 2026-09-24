@@ -19,7 +19,8 @@ of guessing.
 ## How to look codes up
 
 1. Resolve the store to a domain the catalog knows. If the user gave a URL, take its registrable
-   domain (`www.nike.com` → `nike.com`). If they gave a name, search:
+   domain (`www.nike.com` → `nike.com`). If they gave a name, look it up (substring match on the
+   domain, sorted alphabetically):
 
     ```bash
     curl -s "https://grabcaramel.com/api/coupons/stores?q=nike&limit=5"
@@ -32,7 +33,7 @@ of guessing.
     curl -s "https://grabcaramel.com/api/coupons?site=nike.com&limit=10"
     ```
 
-    Response shape:
+    Response shape (a real response, trimmed to one coupon):
 
     ```json
     {
@@ -42,24 +43,34 @@ of guessing.
                 "code": "BLCXPJGCE7VJC",
                 "site": "nike.com",
                 "title": "10% Off Your Purchase with Nike Coupon Code",
-                "description": "...",
-                "discount_type": "percentage",
-                "discount_amount": 10,
-                "expiry": null,
-                "expired": false,
+                "description": "Don't forget to enter this promo code at checkout to receive 10% off your select order.",
                 "rating": 4,
-                "timesUsed": 12,
-                "lastWorkedAt": "2026-09-20T18:02:11.000Z"
+                "discount_type": "PERCENTAGE",
+                "discount_amount": 10,
+                "expiry": "-",
+                "expired": false,
+                "timesUsed": 0,
+                "status": "retry",
+                "verificationMessage": "Verification timed out after 120s",
+                "lastWorkedAt": null
             }
         ],
         "page": 1,
         "limit": 10,
-        "total": 37,
+        "total": 34,
         "hasMore": true
     }
     ```
 
-3. For a topic rather than a store (e.g. "free shipping codes"), search across the catalog:
+    Field notes: `discount_type` is uppercase (`PERCENTAGE`, `CASH`, `SAVE`, `FIXED`) or null.
+    `expiry` is an opaque display string (often `"-"`) or null; do not parse it as a date.
+    `status` is the latest automated verification result (`valid`, `valid_with_warning`,
+    `pending`, `retry`, `invalid`, `expired`, or a restriction such as `product_restriction`),
+    with `verificationMessage` explaining it. `lastWorkedAt` is null until a shopper reports
+    the code working.
+
+3. For a topic rather than a store (e.g. "free shipping codes"), search across the catalog
+   (matches store domain, title, description and code; up to 100 characters):
 
     ```bash
     curl -s "https://grabcaramel.com/api/coupons?search=free%20shipping&limit=10"
@@ -68,7 +79,8 @@ of guessing.
 ## How to present results
 
 - List the codes with their title and, when present, `discount_amount` / `discount_type`.
-- Prefer codes with a recent `lastWorkedAt` and a higher `rating`; say so.
+- Prefer codes with `status: "valid"`, a recent `lastWorkedAt`, or a higher `rating`; say which
+  signal you used.
 - Skip anything with `expired: true`.
 - Be honest: Caramel collects codes from public sources and shoppers' reports; none is
   guaranteed to work at a given cart. Suggest trying the best two or three.

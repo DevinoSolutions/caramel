@@ -24,6 +24,7 @@ export const metadata: Metadata = {
         title,
         description,
         siteName: 'Caramel',
+        images: ['/caramel_banner.png'],
     },
 }
 

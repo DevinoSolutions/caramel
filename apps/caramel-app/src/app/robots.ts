@@ -38,9 +38,13 @@ export default function robots(): MetadataRoute.Robots {
             // Same disallow set as `*`: the private paths stay private for
             // answer engines too; the point is an unambiguous, named
             // invitation for everything else.
+            // /api/coupons is the one API an agent is TOLD to call (the
+            // caramel-coupons skill, /agent-setup/prompt.md); a fetch tool
+            // that honours robots must not be locked out of it. The longer
+            // allow rule wins over the shorter `/api/` disallow.
             {
                 userAgent: [...AI_CRAWLERS],
-                allow: '/',
+                allow: ['/', '/api/coupons'],
                 disallow: DISALLOWED_PATHS,
             },
         ],

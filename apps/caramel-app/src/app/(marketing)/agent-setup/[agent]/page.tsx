@@ -35,6 +35,16 @@ export async function generateMetadata({
         title,
         description: guide.summary,
         alternates: { canonical: `${origin}${AGENT_SETUP_PATH}/${guide.id}` },
+        // A page-level openGraph replaces the root layout's wholesale, so
+        // url/title/image are restated here (same as /pricing).
+        openGraph: {
+            type: 'website',
+            url: `${origin}${AGENT_SETUP_PATH}/${guide.id}`,
+            title,
+            description: guide.summary,
+            siteName: APP_NAME,
+            images: ['/caramel_banner.png'],
+        },
     }
 }
 

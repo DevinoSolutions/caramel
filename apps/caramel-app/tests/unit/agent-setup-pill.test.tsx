@@ -30,6 +30,7 @@ describe('AgentSetupPill', () => {
     beforeEach(() => {
         trackMock.mockReset()
         toastMock.success.mockReset()
+        toastMock.error.mockReset()
         writeText.mockClear()
         Object.defineProperty(window.navigator, 'clipboard', {
             value: { writeText },
@@ -42,7 +43,7 @@ describe('AgentSetupPill', () => {
         render(<AgentSetupPill surface="hero" />)
         fireEvent.click(
             screen.getByRole('button', {
-                name: 'Copy the Caramel agent setup prompt',
+                name: 'Onboard your agent to Caramel: copy the setup prompt',
             }),
         )
         await waitFor(() =>
@@ -55,6 +56,23 @@ describe('AgentSetupPill', () => {
             surface: 'hero',
             agent: 'copy',
         })
+    })
+
+    it('reports a denied clipboard with an error toast and no conversion event', async () => {
+        writeText.mockRejectedValueOnce(new Error('denied'))
+        const consoleError = vi
+            .spyOn(console, 'error')
+            .mockImplementation(() => undefined)
+        render(<AgentSetupPill surface="hero" />)
+        fireEvent.click(
+            screen.getByRole('button', {
+                name: 'Onboard your agent to Caramel: copy the setup prompt',
+            }),
+        )
+        await waitFor(() => expect(toastMock.error).toHaveBeenCalledTimes(1))
+        expect(toastMock.success).not.toHaveBeenCalled()
+        expect(trackMock).not.toHaveBeenCalled()
+        consoleError.mockRestore()
     })
 
     it('links one chip per agent guide and reports which one was opened', () => {

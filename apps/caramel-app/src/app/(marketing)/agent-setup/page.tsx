@@ -31,6 +31,7 @@ export const metadata: Metadata = {
         title,
         description,
         siteName: APP_NAME,
+        images: ['/caramel_banner.png'],
     },
 }
 
@@ -101,7 +102,8 @@ export default function AgentSetupPage() {
                         <li>
                             The <code>caramel-coupons</code> skill: when you are
                             about to buy something, it fetches live codes for
-                            that store and tells you which worked most recently.
+                            that store, with each code's latest verification
+                            status.
                         </li>
                         <li>
                             The public coupon API:{' '}

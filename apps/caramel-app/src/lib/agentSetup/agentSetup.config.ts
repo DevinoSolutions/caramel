@@ -76,7 +76,12 @@ export type AgentGuide = {
     userFollowUp: readonly string[]
 }
 
+// Without `--agent`, `skills add --yes` installs into EVERY agent it
+// detects; each guide names its own target. The generic fallback ("any
+// other agent") deliberately keeps the detect-all behaviour.
 const skillsCliInstall = `npx -y skills add ${SKILLS_REPO} --skill ${SKILL_NAME} --yes --global`
+const skillsCliInstallFor = (agent: string) =>
+    `${skillsCliInstall} --agent ${agent}`
 
 /**
  * Per-agent instructions. Claude Code gets the plugin (marketplace +
@@ -103,7 +108,7 @@ export const AGENT_GUIDES: readonly AgentGuide[] = [
         name: 'Codex',
         summary:
             'The Caramel coupon skill installed globally for Codex via the skills CLI.',
-        commands: [skillsCliInstall],
+        commands: [skillsCliInstallFor('codex')],
         userFollowUp: ['Start a new Codex session so the skill is loaded.'],
     },
     {
@@ -111,7 +116,7 @@ export const AGENT_GUIDES: readonly AgentGuide[] = [
         name: 'Cursor',
         summary:
             'The Caramel coupon skill installed for Cursor via the skills CLI.',
-        commands: [skillsCliInstall],
+        commands: [skillsCliInstallFor('cursor')],
         userFollowUp: ['Reload the Cursor window so the skill is loaded.'],
     },
     {
@@ -119,7 +124,7 @@ export const AGENT_GUIDES: readonly AgentGuide[] = [
         name: 'OpenCode',
         summary:
             'The Caramel coupon skill installed for OpenCode via the skills CLI.',
-        commands: [skillsCliInstall],
+        commands: [skillsCliInstallFor('opencode')],
         userFollowUp: ['Start a new OpenCode session so the skill is loaded.'],
     },
     {
@@ -127,7 +132,7 @@ export const AGENT_GUIDES: readonly AgentGuide[] = [
         name: 'GitHub Copilot',
         summary:
             'The Caramel coupon skill installed for GitHub Copilot via the skills CLI.',
-        commands: [skillsCliInstall],
+        commands: [skillsCliInstallFor('github-copilot')],
         userFollowUp: ['Reload VS Code so Copilot picks the skill up.'],
     },
 ]
@@ -210,9 +215,9 @@ If \`npx\` is unavailable, fetch ${RESOURCES.skill} and place its contents where
 
 ## 3. What the skill gives you
 
-- \`GET ${API.coupons}?site=<store domain>&limit=<n>\` returns live coupon codes for a store: \`coupons[]\` objects carry \`code\`, \`title\`, \`description\`, \`site\`, \`discount_type\`, \`discount_amount\`, \`expiry\`, \`expired\`, \`rating\`, \`timesUsed\` and \`lastWorkedAt\`; \`total\`, \`page\`, \`limit\` and \`hasMore\` describe the page (limit caps at 50).
-- \`GET ${API.coupons}?search=<text>&limit=<n>\` searches titles and descriptions across every store.
-- \`GET ${API.stores}?q=<prefix>&limit=<n>\` returns \`{ "sites": [...] }\`, the store domains matching a prefix — use it to resolve what the user calls a shop into the \`site\` value above.
+- \`GET ${API.coupons}?site=<store domain>&limit=<n>\` returns coupon codes for a store (limit defaults to 10, caps at 50; \`page=<n>\` pages). Each \`coupons[]\` object carries \`id\`, \`code\`, \`site\`, \`title\`, \`description\`, \`rating\`, \`discount_type\` (uppercase, e.g. \`PERCENTAGE\`, or null), \`discount_amount\` (number or null), \`expiry\` (an opaque display string such as \`"-"\`, or null; do not parse it as a date), \`expired\`, \`timesUsed\`, \`status\` (the latest verification result, e.g. \`valid\`, \`pending\`, \`retry\`, \`invalid\`), \`verificationMessage\` and \`lastWorkedAt\` (ISO time or null). \`total\`, \`page\`, \`limit\` and \`hasMore\` describe the page.
+- \`GET ${API.coupons}?search=<text>&limit=<n>\` matches the text (up to 100 characters) against store domain, title, description and code across every store.
+- \`GET ${API.stores}?q=<text>&limit=<n>\` returns \`{ "sites": [...] }\`, store domains containing the text, sorted alphabetically. Use it to turn what the user calls a shop into the \`site\` value above.
 - Rate-limited per client IP as a public read endpoint; be polite (one call per question, cache within a session).
 - Codes are found by ${APP_NAME}'s pipeline and reported on by real shoppers; none is guaranteed to work. The browser extension tries them at checkout automatically.
 

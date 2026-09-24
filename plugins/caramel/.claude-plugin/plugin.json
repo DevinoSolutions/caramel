@@ -1,6 +1,5 @@
 {
     "name": "caramel",
-    "version": "1.0.0",
     "description": "Coupon-code lookup skill for the Caramel public API (no key needed).",
     "author": {
         "name": "Devino Solutions",
