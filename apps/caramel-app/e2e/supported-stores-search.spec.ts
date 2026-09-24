@@ -25,9 +25,20 @@ test.describe('Supported stores search', () => {
             .find(match => match !== undefined)
         expect(site, 'a supported store on the page to search for').toBeTruthy()
 
-        await page
-            .getByLabel('Search for a supported store')
-            .fill(`https://www.${site}/some/product-page?ref=e2e#reviews`)
+        // The store's card is already in the "Top Supported Websites" grid
+        // before any search, so the card alone proves nothing: the search
+        // response itself must carry the store, and only after it lands do
+        // the "not supported" and top-stores blocks count as gone (both are
+        // also briefly absent while the debounced search is loading).
+        const url = `https://www.${site}/some/product-page?ref=e2e#reviews`
+        const searched = page.waitForResponse(
+            res =>
+                res.url().includes('/api/sites/search-supported') &&
+                res.request().postData()?.includes('product-page') === true,
+        )
+        await page.getByLabel('Search for a supported store').fill(url)
+        const body = (await (await searched).json()) as { sites: string[] }
+        expect(body.sites).toContain(site)
 
         await expect(
             page.locator(`main a[href="/coupons/${site}"]`).first(),

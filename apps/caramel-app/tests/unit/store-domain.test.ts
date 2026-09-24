@@ -103,6 +103,17 @@ describe('storeSearchTerm', () => {
         )
     })
 
+    it('keeps the store label under a private suffix instead of the platform', () => {
+        // Collapsing these to `myshopify.com` / `github.io` would search every
+        // store on the platform, not the one the shopper pasted.
+        expect(storeSearchTerm('https://mystore.myshopify.com/cart')).toBe(
+            'mystore.myshopify.com',
+        )
+        expect(storeSearchTerm('www.someone.github.io/shop')).toBe(
+            'someone.github.io',
+        )
+    })
+
     it('leaves a bare domain as it was, lower-cased and trimmed', () => {
         expect(storeSearchTerm('bobshop.co.za')).toBe('bobshop.co.za')
         expect(storeSearchTerm('  NIKE.COM ')).toBe('nike.com')

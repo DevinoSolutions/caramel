@@ -513,11 +513,19 @@ export async function listRecentlyAddedStores(
 
 /** api/sites/search-supported/route.ts POST — fixed LIMIT 20. The route's empty-query early return (`{sites:[]}` without querying) stays there; this fn assumes a non-empty `q`. */
 export async function searchSupportedSites(q: string): Promise<SiteRow[]> {
+    // Ranked before the LIMIT, or an exact store loses its slot to longer
+    // names that merely contain it: `on.com` sorts after 20 `…on.com` stores
+    // alphabetically. Exact match, then prefix, then shortest name. The outer
+    // SELECT exists because Postgres only lets a DISTINCT query ORDER BY
+    // expressions in its select list.
     const rawRows = await prisma.$queryRaw(Prisma.sql`
-        SELECT DISTINCT site FROM coupons
-        WHERE ${visibleCouponsWhere()}
-          AND (site ILIKE ${'%' + q + '%'} OR site ILIKE ${q + '%'})
-        ORDER BY site ASC
+        SELECT site FROM (
+            SELECT DISTINCT site FROM coupons
+            WHERE ${visibleCouponsWhere()}
+              AND site ILIKE ${'%' + q + '%'}
+        ) matches
+        ORDER BY (site = ${q}) DESC, (site ILIKE ${q + '%'}) DESC,
+                 length(site) ASC, site ASC
         LIMIT 20
     `)
     return parseCouponRows(SiteRowSchema, rawRows, 'sites.search-supported')

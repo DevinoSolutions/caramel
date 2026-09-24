@@ -75,9 +75,12 @@ export function resolveStoreDomain(raw: string): string | null {
  * several on supported stores).
  *
  * A complete host resolves to its store domain (subdomains collapse, as on
- * the coupon pages). Anything that is not a complete host yet — a partial
- * type-ahead (`amaz`, `amazon.c`) or a store name with spaces — keeps its
- * stripped text, so the substring match still suggests as you type.
+ * the coupon pages) — except under a PRIVATE suffix (`myshopify.com`,
+ * `github.io`), where the label in front IS the store: `mystore.myshopify.com`
+ * stays whole, or the search would list every Shopify store instead. Anything
+ * that is not a complete host yet — a partial type-ahead (`amaz`, `amazon.c`)
+ * or a store name with spaces — keeps its stripped text, so the substring
+ * match still suggests as you type.
  */
 export function storeSearchTerm(raw: string): string {
     const host = String(raw ?? '')
@@ -91,5 +94,6 @@ export function storeSearchTerm(raw: string): string {
     // An email address is not a store; resolving it would read the part
     // before `@` as URL credentials and search the mail provider instead.
     if (host.includes('@')) return host
-    return resolveStoreDomain(host) ?? host
+    if (!resolveStoreDomain(host)) return host
+    return getDomain(host, { allowPrivateDomains: true }) ?? host
 }

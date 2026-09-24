@@ -6,6 +6,7 @@ import {
     listNeighbourStoreRows,
     listStoreSitemapEntries,
     listSupportedStoreConfigs,
+    searchSupportedSites,
 } from '@/lib/couponsRepo'
 import prisma from '@/lib/prisma'
 import { afterAll, describe, expect, it } from 'vitest'
@@ -273,5 +274,36 @@ describe('listNeighbourStoreRows — alphabetical windows around a store (real p
         const edge = await listNeighbourStoreRows('amazon.com', 1)
         expect(edge.before).toEqual([])
         expect(edge.after.map(r => r.site)).toEqual(['codecademy.com'])
+    })
+})
+
+describe('searchSupportedSites — ranked store search (real pg :58005)', () => {
+    const SEEDED_SITES = new Set([
+        'amazon.com',
+        'codecademy.com',
+        'ebay.com',
+        'target.com',
+        'walmart.com',
+    ])
+
+    it('ranks an exact store first, then prefix matches, then shortest name', async () => {
+        // The ranking is what keeps a short store (`on.com`) from losing its
+        // slot under LIMIT 20 to longer names that contain it; the outer
+        // SELECT around the DISTINCT is what makes that ORDER BY legal in
+        // Postgres, which only a real query proves.
+        const exact = (await searchSupportedSites('ebay.com')).map(r => r.site)
+        expect(exact[0]).toBe('ebay.com')
+
+        const rows = await searchSupportedSites('a')
+        const seeded = rows
+            .map(r => r.site)
+            .filter((site): site is string => SEEDED_SITES.has(site ?? ''))
+        expect(seeded).toEqual([
+            'amazon.com',
+            'ebay.com',
+            'target.com',
+            'walmart.com',
+            'codecademy.com',
+        ])
     })
 })
