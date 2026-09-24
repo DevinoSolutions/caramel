@@ -98,7 +98,7 @@ export default function AgentSetupPill({
     return (
         <div
             data-agent-setup-pill={surface}
-            className={`inline-flex max-w-full flex-wrap items-center gap-2 rounded-full border border-caramel/40 bg-white/80 py-1.5 pl-4 pr-2 text-sm text-gray-900 shadow-caramel-sm backdrop-blur-sm dark:bg-darkSurface dark:text-gray-100 ${className}`}
+            className={`inline-flex max-w-full flex-wrap items-center justify-center gap-2 rounded-full border border-caramel/40 bg-white/80 py-1.5 pl-4 pr-2 text-sm text-gray-900 shadow-caramel-sm backdrop-blur-sm dark:bg-darkSurface dark:text-gray-100 ${className}`}
         >
             <button
                 type="button"

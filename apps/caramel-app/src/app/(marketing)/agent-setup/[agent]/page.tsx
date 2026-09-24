@@ -11,6 +11,7 @@ import { BASE_URL } from '@/lib/env.client'
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
+import InlineCode from '../InlineCode'
 
 // One human guide per agent (spec §3), rendered from the same manifest as
 // prompt.md so the commands can never differ between the two.
@@ -124,7 +125,7 @@ export default async function AgentGuidePage({
                         <code>{`curl -s "${API.verifyUrl}"`}</code>
                     </pre>
                     <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
-                        Success: {API.verifyExpectation}
+                        Success: <InlineCode text={API.verifyExpectation} />
                     </p>
                     <p className="mt-4 text-sm text-gray-600 dark:text-gray-300">
                         The machine-readable version of this page is{' '}

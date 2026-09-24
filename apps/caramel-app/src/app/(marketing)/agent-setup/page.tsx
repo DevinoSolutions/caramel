@@ -11,6 +11,7 @@ import {
 import { BASE_URL } from '@/lib/env.client'
 import type { Metadata } from 'next'
 import Link from 'next/link'
+import InlineCode from './InlineCode'
 
 // The human index for "Onboard your agent to Caramel" (fleet agent-onboarding
 // spec §3): the pill, one card per agent, what you get, the verify step.
@@ -57,7 +58,7 @@ export default function AgentSetupPage() {
                         through our public API. No API key, no account.
                     </p>
                     <AgentSetupPill surface="agent-setup" className="w-fit" />
-                    <pre className="overflow-x-auto rounded-xl bg-darkBg px-4 py-3 text-sm text-gray-100 ring-1 ring-white/10">
+                    <pre className="whitespace-pre-wrap break-all rounded-xl bg-darkBg px-4 py-3 text-sm text-gray-100 ring-1 ring-white/10">
                         <code>{AGENT_SETUP_COPY_TEXT}</code>
                     </pre>
                 </header>
@@ -141,7 +142,7 @@ export default function AgentSetupPage() {
                         <code>{`curl -s "${API.verifyUrl}"`}</code>
                     </pre>
                     <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
-                        Success: {API.verifyExpectation}
+                        Success: <InlineCode text={API.verifyExpectation} />
                     </p>
                 </section>
 
