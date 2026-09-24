@@ -12,6 +12,7 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import InlineCode from '../InlineCode'
+import UrlBreakableText from '../UrlBreakableText'
 
 // One human guide per agent (spec §3), rendered from the same manifest as
 // prompt.md so the commands can never differ between the two.
@@ -92,8 +93,10 @@ export default async function AgentGuidePage({
                     <ol className="list-decimal space-y-3 pl-5 text-sm text-gray-600 dark:text-gray-300">
                         {guide.commands.map(command => (
                             <li key={command}>
-                                <pre className="mt-1 overflow-x-auto rounded-xl bg-darkBg px-4 py-3 text-gray-100 ring-1 ring-white/10">
-                                    <code>{command}</code>
+                                <pre className="mt-1 whitespace-pre-wrap break-words rounded-xl bg-darkBg px-4 py-3 text-gray-100 ring-1 ring-white/10">
+                                    <code>
+                                        <UrlBreakableText text={command} />
+                                    </code>
                                 </pre>
                             </li>
                         ))}
@@ -121,8 +124,12 @@ export default async function AgentGuidePage({
                     >
                         Verify
                     </h2>
-                    <pre className="overflow-x-auto rounded-xl bg-darkBg px-4 py-3 text-sm text-gray-100 ring-1 ring-white/10">
-                        <code>{`curl -s "${API.verifyUrl}"`}</code>
+                    <pre className="whitespace-pre-wrap break-words rounded-xl bg-darkBg px-4 py-3 text-sm text-gray-100 ring-1 ring-white/10">
+                        <code>
+                            <UrlBreakableText
+                                text={`curl -s "${API.verifyUrl}"`}
+                            />
+                        </code>
                     </pre>
                     <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
                         Success: <InlineCode text={API.verifyExpectation} />
@@ -131,9 +138,9 @@ export default async function AgentGuidePage({
                         The machine-readable version of this page is{' '}
                         <a
                             href={PROMPT_MD_URL}
-                            className="font-mono text-caramel underline hover:no-underline"
+                            className="break-words font-mono text-caramel underline hover:no-underline"
                         >
-                            {PROMPT_MD_URL}
+                            <UrlBreakableText text={PROMPT_MD_URL} />
                         </a>
                         .
                     </p>
