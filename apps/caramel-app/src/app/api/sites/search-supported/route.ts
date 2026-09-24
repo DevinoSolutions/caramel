@@ -1,6 +1,7 @@
 import { handleRouteError } from '@/lib/api/handleRouteError'
 import { withRoute } from '@/lib/api/withRoute'
 import { searchSupportedSites } from '@/lib/couponsRepo'
+import { storeSearchTerm } from '@/lib/storeDomain'
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 
@@ -24,9 +25,11 @@ export const POST = withRoute(
         body: SearchSupportedBodySchema,
     },
     async ({ req, body }) => {
-        const q = String(body?.query ?? '')
-            .trim()
-            .slice(0, 100)
+        // Shoppers paste full URLs (the box's placeholder is one), so the
+        // query is reduced to a store domain before the substring match.
+        const q = storeSearchTerm(
+            String(body?.query ?? '').slice(0, 2048),
+        ).slice(0, 100)
         if (!q) return NextResponse.json({ sites: [] })
 
         try {

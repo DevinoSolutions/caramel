@@ -60,3 +60,36 @@ export function resolveStoreDomain(raw: string): string | null {
     const domain = getDomain(hostname)
     return domain ? domain.toLowerCase() : null
 }
+
+/**
+ * The text to search the supported-store list with, from whatever a shopper
+ * typed into /supported-stores.
+ *
+ * WHY THIS EXISTS. That search box's placeholder is `https://example.com`, so
+ * shoppers type or paste URLs: `https://www.amazon.com/dp/B09…`,
+ * `www.amazon.it/`, `https://youtooz.com`. The catalogue stores bare
+ * registrable domains (`amazon.com`) and the search is a substring match, so
+ * any scheme, `www.` or path made a supported store come back as "We don't
+ * support that store yet" and pushed the shopper to "Request Support" for a
+ * store we already carry (PostHog, 2026-09: 60+ such clicks in 60 days,
+ * several on supported stores).
+ *
+ * A complete host resolves to its store domain (subdomains collapse, as on
+ * the coupon pages). Anything that is not a complete host yet — a partial
+ * type-ahead (`amaz`, `amazon.c`) or a store name with spaces — keeps its
+ * stripped text, so the substring match still suggests as you type.
+ */
+export function storeSearchTerm(raw: string): string {
+    const host = String(raw ?? '')
+        .trim()
+        .toLowerCase()
+        .replace(/^[a-z][a-z0-9+.-]*:\/\//, '')
+        .split(/[/?#]/)[0]
+        .replace(/:\d*$/, '')
+        .replace(/^www\d*\./, '')
+        .replace(/\.$/, '')
+    // An email address is not a store; resolving it would read the part
+    // before `@` as URL credentials and search the mail provider instead.
+    if (host.includes('@')) return host
+    return resolveStoreDomain(host) ?? host
+}

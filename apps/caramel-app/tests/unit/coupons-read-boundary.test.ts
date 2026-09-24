@@ -31,6 +31,7 @@ let rules: MockRule[] = []
 // reference a column that doesn't exist"), which the rule-based row mocking
 // can't: rules only ever match `sql`, never expose it to the test.
 let capturedQueries: string[] = []
+let capturedValues: unknown[][] = []
 
 function mockRows(match: (sql: string) => boolean, rows: unknown[]) {
     rules.push({ match, rows })
@@ -42,8 +43,9 @@ function mockRows(match: (sql: string) => boolean, rows: unknown[]) {
 // composed query text.
 vi.mock('@/lib/prisma', () => ({
     default: {
-        $queryRaw: (arg: { sql: string }) => {
+        $queryRaw: (arg: { sql: string; values?: unknown[] }) => {
             capturedQueries.push(arg.sql)
+            capturedValues.push(arg.values ?? [])
             const rows = rules.find(r => r.match(arg.sql))?.rows ?? []
             return Promise.resolve(rows)
         },
@@ -71,6 +73,7 @@ vi.mock('@sentry/nextjs', () => ({
 beforeEach(() => {
     rules = []
     capturedQueries = []
+    capturedValues = []
     captureExceptionMock.mockClear()
 })
 
@@ -232,6 +235,32 @@ describe('POST /api/sites/search-supported (SiteRow)', () => {
         const res = await searchSupportedPOST(req)
         expect(res.status).toBe(200)
         expect(await res.json()).toEqual({ sites: ['example.com'] })
+    })
+
+    it('searches a pasted product URL by its store domain', async () => {
+        // The box's placeholder is a URL, so shoppers paste one; the catalogue
+        // holds bare domains, so the SQL must see `amazon.com`, not the URL.
+        mockRows(
+            sql => sql.includes('SELECT DISTINCT site'),
+            [{ site: 'amazon.com' }],
+        )
+
+        const req = new NextRequest(
+            'http://localhost/api/sites/search-supported',
+            {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({
+                    query: 'https://www.amazon.com/dp/B092PZ16MC?ref=cm_sw_r',
+                }),
+            },
+        )
+        const res = await searchSupportedPOST(req)
+        expect(res.status).toBe(200)
+        expect(await res.json()).toEqual({ sites: ['amazon.com'] })
+        expect(capturedValues[capturedValues.length - 1]).toContain(
+            '%amazon.com%',
+        )
     })
 })
 

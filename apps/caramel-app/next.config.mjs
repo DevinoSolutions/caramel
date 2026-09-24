@@ -103,6 +103,18 @@ const nextConfig = {
             },
         ],
     },
+    async redirects() {
+        return [
+            // Extension builds before the "Supported Sites" -> "Supported
+            // Stores" rename (d03102c) link here, and Safari/Firefox users on
+            // those builds still land on it (PostHog: a 404 every few days).
+            {
+                source: '/supported-sites',
+                destination: '/supported-stores',
+                permanent: true,
+            },
+        ]
+    },
     async headers() {
         const headers = [{ source: '/:path*', headers: SECURITY_HEADERS }]
         // Belt-and-braces with src/app/robots.ts: robots.txt only asks a

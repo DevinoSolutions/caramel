@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { resolveStoreDomain } from '../../src/lib/storeDomain'
+import { resolveStoreDomain, storeSearchTerm } from '../../src/lib/storeDomain'
 
 // Two hand-rolled copies of a "last two labels" base-domain helper used to
 // collapse any three-label host onto its own public suffix:
@@ -79,5 +79,52 @@ describe('resolveStoreDomain', () => {
         expect(resolveStoreDomain('notarealstore12345.co.uk')).toBe(
             'notarealstore12345.co.uk',
         )
+    })
+})
+
+// The /supported-stores search box. Inputs below are what shoppers actually
+// typed (PostHog, Aug-Sep 2026); before storeSearchTerm, every URL-shaped one
+// matched nothing, supported stores included.
+describe('storeSearchTerm', () => {
+    it('reduces a pasted URL to the store domain the catalogue holds', () => {
+        expect(
+            storeSearchTerm(
+                'https://www.amazon.com/dp/B092PZ16MC?ref=cm_sw_r_cso_cp_apan_dp',
+            ),
+        ).toBe('amazon.com')
+        expect(storeSearchTerm('https://youtooz.com')).toBe('youtooz.com')
+        expect(storeSearchTerm('https://www.nike.com/')).toBe('nike.com')
+        expect(storeSearchTerm('www.amazon.it/')).toBe('amazon.it')
+        expect(storeSearchTerm('https://www.amazon.com.au/')).toBe(
+            'amazon.com.au',
+        )
+        expect(storeSearchTerm('http://shop.bombas.com:443/cart#top')).toBe(
+            'bombas.com',
+        )
+    })
+
+    it('leaves a bare domain as it was, lower-cased and trimmed', () => {
+        expect(storeSearchTerm('bobshop.co.za')).toBe('bobshop.co.za')
+        expect(storeSearchTerm('  NIKE.COM ')).toBe('nike.com')
+    })
+
+    it('keeps partial type-ahead as text so the substring match still suggests', () => {
+        expect(storeSearchTerm('amazon')).toBe('amazon')
+        expect(storeSearchTerm('amaz')).toBe('amaz')
+        expect(storeSearchTerm('https://www.ama')).toBe('ama')
+        expect(storeSearchTerm('amazon.c')).toBe('amazon.c')
+        expect(storeSearchTerm('spanish boot company')).toBe(
+            'spanish boot company',
+        )
+    })
+
+    it('does not turn an email address into its mail provider', () => {
+        expect(storeSearchTerm('someone@yahoo.com')).toBe('someone@yahoo.com')
+    })
+
+    it('returns empty text for input with no host in it', () => {
+        expect(storeSearchTerm('')).toBe('')
+        expect(storeSearchTerm('https://')).toBe('')
+        expect(storeSearchTerm('   ')).toBe('')
     })
 })
