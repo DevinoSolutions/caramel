@@ -21,49 +21,49 @@ of guessing.
 1. Resolve the store to a domain the catalog knows. If the user gave a URL, take its registrable
    domain (`www.nike.com` → `nike.com`). If they gave a name, search:
 
-   ```bash
-   curl -s "https://grabcaramel.com/api/coupons/stores?q=nike&limit=5"
-   # → {"sites":["nike.com", ...]}
-   ```
+    ```bash
+    curl -s "https://grabcaramel.com/api/coupons/stores?q=nike&limit=5"
+    # → {"sites":["nike.com", ...]}
+    ```
 
 2. Fetch codes for that domain (limit caps at 50; default 10):
 
-   ```bash
-   curl -s "https://grabcaramel.com/api/coupons?site=nike.com&limit=10"
-   ```
+    ```bash
+    curl -s "https://grabcaramel.com/api/coupons?site=nike.com&limit=10"
+    ```
 
-   Response shape:
+    Response shape:
 
-   ```json
-   {
-       "coupons": [
-           {
-               "id": "219854",
-               "code": "BLCXPJGCE7VJC",
-               "site": "nike.com",
-               "title": "10% Off Your Purchase with Nike Coupon Code",
-               "description": "...",
-               "discount_type": "percentage",
-               "discount_amount": 10,
-               "expiry": null,
-               "expired": false,
-               "rating": 4,
-               "timesUsed": 12,
-               "lastWorkedAt": "2026-09-20T18:02:11.000Z"
-           }
-       ],
-       "page": 1,
-       "limit": 10,
-       "total": 37,
-       "hasMore": true
-   }
-   ```
+    ```json
+    {
+        "coupons": [
+            {
+                "id": "219854",
+                "code": "BLCXPJGCE7VJC",
+                "site": "nike.com",
+                "title": "10% Off Your Purchase with Nike Coupon Code",
+                "description": "...",
+                "discount_type": "percentage",
+                "discount_amount": 10,
+                "expiry": null,
+                "expired": false,
+                "rating": 4,
+                "timesUsed": 12,
+                "lastWorkedAt": "2026-09-20T18:02:11.000Z"
+            }
+        ],
+        "page": 1,
+        "limit": 10,
+        "total": 37,
+        "hasMore": true
+    }
+    ```
 
 3. For a topic rather than a store (e.g. "free shipping codes"), search across the catalog:
 
-   ```bash
-   curl -s "https://grabcaramel.com/api/coupons?search=free%20shipping&limit=10"
-   ```
+    ```bash
+    curl -s "https://grabcaramel.com/api/coupons?search=free%20shipping&limit=10"
+    ```
 
 ## How to present results
 

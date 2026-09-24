@@ -44,8 +44,9 @@ const LLMS_TXT = `# Caramel
 - [FAQ](${origin}/faq): the questions shoppers actually ask, answered.
 - [Agent setup](${origin}/agent-setup): onboard an AI coding agent; the
   machine-readable instructions are at ${origin}/agent-setup/prompt.md.
-- [Coupon API](${origin}/api/coupons): public, read-only JSON — `?site=<domain>`
-  or `?search=<text>`; `${origin}/api/coupons/stores?q=<prefix>` resolves stores.
+- [Coupon API](${origin}/api/coupons): public, read-only JSON; query with
+  ?site=<domain> or ?search=<text>; ${origin}/api/coupons/stores?q=<prefix>
+  resolves store domains.
 - [Coupons](${origin}/coupons): browse the full coupon catalog.
 - [Store coupon pages](${origin}/coupons/amazon.com): per-store codes, one page
   per store domain, e.g. /coupons/amazon.com or /coupons/nike.com.

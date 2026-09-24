@@ -4,9 +4,9 @@ import {
     AGENT_SETUP_COPY_TEXT,
     API,
     PROMPT_MD_URL,
+    renderPromptMd,
     SKILL_NAME,
     SKILLS_REPO,
-    renderPromptMd,
 } from '@/lib/agentSetup/agentSetup.config'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -49,7 +49,9 @@ describe('agent-setup prompt.md', () => {
                 expect(body).toContain(command)
             }
         }
-        expect(body).toContain('Do not ask the user to run any of these commands.')
+        expect(body).toContain(
+            'Do not ask the user to run any of these commands.',
+        )
         // Placeholders the spec template uses; none may survive rendering.
         expect(body).not.toMatch(/<App>|<docs-host>|<app-domain>|TODO|lorem/i)
         // No invented integrations: Caramel has no MCP server or SDK.
@@ -79,7 +81,11 @@ describe('agent-setup prompt.md', () => {
         expect(await res.text()).toBe(body)
         expect(captureMock).toHaveBeenCalledTimes(1)
         const call = captureMock.mock.calls[0] as unknown as [
-            { event: string; distinctId: string; properties: Record<string, unknown> },
+            {
+                event: string
+                distinctId: string
+                properties: Record<string, unknown>
+            },
         ]
         expect(call[0].event).toBe('agent_setup_prompt_fetched')
         expect(call[0].distinctId).toMatch(/^agent-setup:[0-9a-f]{32}$/)
@@ -113,9 +119,13 @@ describe('agent-setup prompt.md', () => {
     })
 
     it('every URL in prompt.md answers 200 on the live site', async () => {
+        // Placeholder URLs (`?site=<store domain>`) document a shape, not a
+        // page; only concrete URLs are fetched.
         const urls = Array.from(
             new Set(body.match(/https?:\/\/[^\s)`>"]+/g) ?? []),
-        ).map(url => url.replace(/[.,]$/, ''))
+        )
+            .map(url => url.replace(/[.,;]$/, ''))
+            .filter(url => !url.includes('<'))
         expect(urls.length).toBeGreaterThan(5)
         // Pages that only exist once this branch is deployed are checked by
         // the e2e suite instead; the live check covers everything else.

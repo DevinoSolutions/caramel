@@ -105,15 +105,15 @@ export default function AgentSetupPage() {
                         </li>
                         <li>
                             The public coupon API:{' '}
-                            <code className="break-all">{API.coupons}</code>{' '}
-                            (by store or search) and{' '}
+                            <code className="break-all">{API.coupons}</code> (by
+                            store or search) and{' '}
                             <code className="break-all">{API.stores}</code>{' '}
                             (store lookup).
                         </li>
                         <li>
                             Nothing that needs a key. There is no {APP_NAME} MCP
-                            server or SDK; the browser extension itself is
-                            yours to install from{' '}
+                            server or SDK; the browser extension itself is yours
+                            to install from{' '}
                             <Link
                                 href="/apps"
                                 className="text-caramel underline hover:no-underline"

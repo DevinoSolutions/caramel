@@ -40,13 +40,19 @@ function AgentGlyph({ id }: { id: string }) {
             return <SiGithubcopilot className={cls} aria-hidden="true" />
         case 'cursor':
             return (
-                <span className="text-[10px] font-bold leading-none" aria-hidden="true">
+                <span
+                    className="text-[10px] font-bold leading-none"
+                    aria-hidden="true"
+                >
                     Cu
                 </span>
             )
         default:
             return (
-                <span className="text-[10px] font-bold leading-none" aria-hidden="true">
+                <span
+                    className="text-[10px] font-bold leading-none"
+                    aria-hidden="true"
+                >
                     Oc
                 </span>
             )
@@ -82,7 +88,9 @@ export default function AgentSetupPill({
             toast.success(AGENT_SETUP_TOAST)
             window.setTimeout(() => setCopied(false), 2000)
         } else {
-            toast.error('Could not copy. The sentence is on the agent setup page.')
+            toast.error(
+                'Could not copy. The sentence is on the agent setup page.',
+            )
         }
     }
 
@@ -99,9 +107,15 @@ export default function AgentSetupPill({
             >
                 <span>Onboard your agent to {APP_NAME}</span>
                 {copied ? (
-                    <FiCheck className="h-4 w-4 text-green-600" aria-hidden="true" />
+                    <FiCheck
+                        className="h-4 w-4 text-green-600"
+                        aria-hidden="true"
+                    />
                 ) : (
-                    <FiCopy className="h-4 w-4 text-caramel" aria-hidden="true" />
+                    <FiCopy
+                        className="h-4 w-4 text-caramel"
+                        aria-hidden="true"
+                    />
                 )}
             </button>
             <span className="flex items-center gap-1" aria-label="Agent guides">

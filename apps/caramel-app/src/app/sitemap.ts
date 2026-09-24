@@ -1,3 +1,7 @@
+import {
+    AGENT_GUIDES,
+    AGENT_SETUP_PATH,
+} from '@/lib/agentSetup/agentSetup.config'
 import { listActiveSources, listStoreSitemapEntries } from '@/lib/couponsRepo'
 import { BASE_URL } from '@/lib/env.client'
 import {
@@ -5,7 +9,6 @@ import {
     collapseStoreRows,
 } from '@/lib/seo/sitemapStores'
 import { bucketStoresByLetter, directoryPath } from '@/lib/seo/storeDirectory'
-import { AGENT_GUIDES, AGENT_SETUP_PATH } from '@/lib/agentSetup/agentSetup.config'
 import type { MetadataRoute } from 'next'
 
 // The store half of this sitemap reads the coupon catalog from Postgres, and

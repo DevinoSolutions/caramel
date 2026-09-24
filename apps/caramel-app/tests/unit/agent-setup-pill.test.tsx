@@ -4,7 +4,13 @@ import {
     AGENT_GUIDES,
     AGENT_SETUP_COPY_TEXT,
 } from '@/lib/agentSetup/agentSetup.config'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import {
+    cleanup,
+    fireEvent,
+    render,
+    screen,
+    waitFor,
+} from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // The pill copies EXACTLY the manifest sentence, toasts, and reports which
@@ -45,7 +51,10 @@ describe('AgentSetupPill', () => {
         expect(toastMock.success).toHaveBeenCalledWith(
             'Copied. Paste into any AI coding agent.',
         )
-        expect(trackMock).toHaveBeenCalledWith({ surface: 'hero', agent: 'copy' })
+        expect(trackMock).toHaveBeenCalledWith({
+            surface: 'hero',
+            agent: 'copy',
+        })
     })
 
     it('links one chip per agent guide and reports which one was opened', () => {

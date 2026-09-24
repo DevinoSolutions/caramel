@@ -21,11 +21,10 @@
 //     on /apps) — an agent cannot install it, so prompt.md points the user.
 // So "set me up for Caramel" = install the skill (Claude Code: plugin;
 // everyone else: `npx skills add`), know the API, verify with one call.
-import { BASE_URL } from '@/lib/env.client'
 import { GITHUB_REPO_URL } from '@/lib/brandLinks'
+import { BASE_URL } from '@/lib/env.client'
 
 export const APP_NAME = 'Caramel'
-export const APP_ID_SLUG = 'caramel'
 
 const origin = BASE_URL.replace(/\/+$/, '')
 
