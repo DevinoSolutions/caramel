@@ -136,13 +136,15 @@ describe('agent-setup prompt.md', () => {
         async () => {
             // Placeholder URLs (`?site=<store domain>`) document a shape,
             // not a page; only concrete URLs are fetched.
-            const urls = Array.from(
+            const linkedUrls = Array.from(
                 new Set(body.match(/https?:\/\/[^\s)`>"]+/g) ?? []),
             )
                 .map(url => url.replace(/[.,;]$/, ''))
                 .filter(url => !url.includes('<'))
-            expect(urls).toContain(PROMPT_MD_URL)
-            expect(urls.length).toBeGreaterThan(5)
+            expect(linkedUrls.length).toBeGreaterThan(5)
+            // prompt.md never links to itself, so its own URL is fetched
+            // explicitly: the live file must answer too.
+            const urls = Array.from(new Set([PROMPT_MD_URL, ...linkedUrls]))
             const results = await Promise.all(
                 urls.map(async url => {
                     const res = await fetch(url, {
