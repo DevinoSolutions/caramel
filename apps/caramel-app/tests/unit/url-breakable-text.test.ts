@@ -39,6 +39,13 @@ describe('urlBreakSegments', () => {
         }
     })
 
+    it('never leaves a leading slash alone on its own segment', () => {
+        expect(urlBreakSegments('/agent-setup/prompt.md')).toEqual([
+            '/agent-setup/',
+            'prompt.md',
+        ])
+    })
+
     it('returns no empty segments', () => {
         expect(urlBreakSegments('a/')).toEqual(['a/'])
         expect(urlBreakSegments('')).toEqual([])

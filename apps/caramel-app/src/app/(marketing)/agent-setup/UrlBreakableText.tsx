@@ -2,7 +2,8 @@ import { Fragment } from 'react'
 
 /**
  * Splits text into segments that end at a URL boundary: after a path `/`
- * (never inside the `//` of a scheme), after `?`, and after `&`.
+ * (never inside the `//` of a scheme, never a leading `/`), after `?`, and
+ * after `&`.
  */
 export function urlBreakSegments(text: string): string[] {
     const segments: string[] = []
@@ -10,7 +11,7 @@ export function urlBreakSegments(text: string): string[] {
     for (let i = 0; i < text.length; i++) {
         const ch = text[i]
         const isPathSlash =
-            ch === '/' && text[i - 1] !== '/' && text[i + 1] !== '/'
+            ch === '/' && i > 0 && text[i - 1] !== '/' && text[i + 1] !== '/'
         if (isPathSlash || ch === '?' || ch === '&') {
             segments.push(text.slice(start, i + 1))
             start = i + 1

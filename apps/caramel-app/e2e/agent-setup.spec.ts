@@ -19,7 +19,9 @@ const COPY_SENTENCE =
 const VERIFY_COMMAND =
     /^curl -s "https?:\/\/\S+\/api\/coupons\?site=nike\.com&limit=1"$/
 // A wrapped line may only start after one of these: a space, or a URL /
-// command boundary (path slash, query ?/&, hyphen).
+// command boundary (path slash, query ?/&, hyphen). Browsers break after a
+// hyphen natively, so "agent-|setup" is accepted; what this catches is a
+// break between two letters, the old `break-all` failure ("ag|ent").
 const ALLOWED_BEFORE_WRAP = /[\s/?&-]/
 
 /**
@@ -70,7 +72,9 @@ async function expectNoHorizontalScroll(page: Page) {
 }
 
 async function expectCleanWraps(page: Page) {
-    const targets = page.locator('main pre, main a[href$="/prompt.md"]')
+    const targets = page.locator(
+        'main pre, main code, main a[href$="/prompt.md"]',
+    )
     const count = await targets.count()
     expect(count).toBeGreaterThan(0)
     for (let i = 0; i < count; i++) {
@@ -175,22 +179,25 @@ test.describe('Agent setup index', () => {
 })
 
 test.describe('Agent setup guides', () => {
-    test('every guide linked from the index wraps cleanly on a phone', async ({
-        page,
-    }) => {
-        await page.goto('/agent-setup')
-        const hrefs = await page
-            .locator('main a[href^="/agent-setup/"]')
-            .evaluateAll(links =>
-                Array.from(
-                    new Set(links.map(a => a.getAttribute('href') ?? '')),
-                ),
-            )
-        const guides = hrefs.filter(href => !href.endsWith('.md'))
-        expect(guides.length).toBeGreaterThanOrEqual(5)
-
-        for (const width of PHONE_WIDTHS) {
+    // One test per width: each visits every guide (5+ page loads), and the
+    // deployed e2e context runs against a live site that can be slow.
+    for (const width of PHONE_WIDTHS) {
+        test(`every guide linked from the index wraps cleanly at ${width}px`, async ({
+            page,
+        }) => {
+            test.slow()
             await page.setViewportSize({ width, height: 800 })
+            await page.goto('/agent-setup')
+            const hrefs = await page
+                .locator('main a[href^="/agent-setup/"]')
+                .evaluateAll(links =>
+                    Array.from(
+                        new Set(links.map(a => a.getAttribute('href') ?? '')),
+                    ),
+                )
+            const guides = hrefs.filter(href => !href.endsWith('.md'))
+            expect(guides.length).toBeGreaterThanOrEqual(5)
+
             for (const href of guides) {
                 await test.step(`${href} at ${width}px`, async () => {
                     await page.goto(href)
@@ -204,6 +211,6 @@ test.describe('Agent setup guides', () => {
                     await expectCleanWraps(page)
                 })
             }
-        }
-    })
+        })
+    }
 })

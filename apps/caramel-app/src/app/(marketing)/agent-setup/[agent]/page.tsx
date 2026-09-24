@@ -103,7 +103,7 @@ export default async function AgentGuidePage({
                         {guide.configFile && (
                             <li>
                                 Write <code>{guide.configFile.path}</code>:
-                                <pre className="mt-1 overflow-x-auto rounded-xl bg-darkBg px-4 py-3 text-gray-100 ring-1 ring-white/10">
+                                <pre className="mt-1 whitespace-pre-wrap break-words rounded-xl bg-darkBg px-4 py-3 text-gray-100 ring-1 ring-white/10">
                                     <code>{guide.configFile.contents}</code>
                                 </pre>
                             </li>
