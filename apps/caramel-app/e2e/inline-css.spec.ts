@@ -9,19 +9,28 @@ import { expect, test, type Page } from '@playwright/test'
 // nothing (the hero text included) painted until ~980 ms. next.config.mjs now
 // sets experimental.inlineCss, which puts the CSS in a <style> in the <head>.
 //
-// Production builds only: `next dev` always uses <link> tags. The hermetic
-// lane (DATABASE_URL set) runs `next dev`, so this spec skips there, and the
+// Production builds only: `next dev` always uses <link> tags, so the spec
+// skips when the server is `next dev` (the hermetic e2e-pr lane); the
 // compose-build CI job asserts the same thing on a real production build
-// instead. It runs against every deployed build (e2e-push, prod).
+// there. It runs against every production build: e2e-push, prod, and a local
+// `pnpm dev` (the root compose).
 //
 // JavaScript is off: this is the page a browser can paint before hydration.
 
 test.use({ javaScriptEnabled: false })
 
-test.skip(
-    !!process.env.DATABASE_URL,
-    'hermetic lane serves `next dev`, which never inlines CSS (covered by the compose-build CI job)',
-)
+// The direct signal for `next dev`: it tags each stylesheet with
+// data-precedence="next_<path>" (a per-file precedence keeps HMR ordering);
+// a production build uses "next", inlined or not
+// (next/dist/server/app-render/render-css-resource.js). A production build
+// that regressed to a <link> still says "next", so it still fails below.
+test.beforeEach(async ({ request }) => {
+    const html = await (await request.get('/supported-stores')).text()
+    test.skip(
+        /data-precedence="next_/.test(html),
+        '`next dev` never inlines CSS (the compose-build CI job covers this lane)',
+    )
+})
 
 async function stylesheetRequests(page: Page, path: string) {
     const requested: string[] = []
