@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, type Page, test } from '@playwright/test'
 
 // Better-auth reports a failed sign-in by redirecting with `?error=<code>`.
 // Before this spec, production sent those redirects to `/?error=<code>` and
@@ -12,6 +12,11 @@ import { expect, test } from '@playwright/test'
 // writes to the database, so they are deployment-safe and run in both e2e
 // contexts.
 
+// Filtered by its title: Next's route announcer is a second role=alert on
+// every page, so a bare getByRole('alert') is ambiguous.
+const noticeWith = (page: Page, title: string) =>
+    page.getByRole('alert').filter({ hasText: title })
+
 test.describe('Auth error landing', () => {
     test('a bad verification link from an email explains itself on /login', async ({
         page,
@@ -23,8 +28,8 @@ test.describe('Auth error landing', () => {
         )
 
         await expect(page).toHaveURL(/\/login\?error=INVALID_TOKEN$/)
-        const alert = page.getByRole('alert')
-        await expect(alert).toContainText('Verification link not valid')
+        const alert = noticeWith(page, 'Verification link not valid')
+        await expect(alert).toBeVisible()
         await alert.getByRole('button', { name: 'Request New Link' }).click()
         await expect(page).toHaveURL(/\/verify$/)
     })
@@ -44,9 +49,9 @@ test.describe('Auth error landing', () => {
 
         await page.goto('/?error=TOKEN_EXPIRED')
         await expect(page).toHaveURL(/\/login\?error=TOKEN_EXPIRED$/)
-        await expect(page.getByRole('alert')).toContainText(
-            'Verification link expired',
-        )
+        await expect(
+            noticeWith(page, 'Verification link expired'),
+        ).toBeVisible()
     })
 
     test('a Google callback this browser did not start lands on /login with a notice', async ({
@@ -59,9 +64,7 @@ test.describe('Auth error landing', () => {
         )
 
         await expect(page).toHaveURL(/\/login\?error=state_[a-z_]+$/)
-        await expect(page.getByRole('alert')).toContainText(
-            'Sign-in was interrupted',
-        )
+        await expect(noticeWith(page, 'Sign-in was interrupted')).toBeVisible()
         // The retry is the Google button right below the notice.
         await expect(
             page.getByRole('button', { name: 'Sign in with Google' }),
