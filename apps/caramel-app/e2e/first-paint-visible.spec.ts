@@ -45,11 +45,10 @@ async function firstStoreWithCoupons(page: Page): Promise<string> {
     const site = hrefs
         .map(href => STORE_LINK.exec(href)?.[1])
         .find(match => match !== undefined)
-    expect(
-        site,
-        'a store with coupons linked from /supported-stores',
-    ).toBeTruthy()
-    return site as string
+    if (!site) {
+        throw new Error('no store with coupons linked from /supported-stores')
+    }
+    return site
 }
 
 test.describe('Above-the-fold content paints before any JavaScript runs', () => {

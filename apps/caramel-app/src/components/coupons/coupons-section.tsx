@@ -317,7 +317,9 @@ export default function CouponsSection({
                         </div>
                     ) : coupons.length === 0 ? (
                         <motion.div
-                            initial={{ opacity: 0 }}
+                            // Server-rendered for a store with no coupons:
+                            // never opacity 0 in the HTML (see the header note).
+                            initial={false}
                             animate={{ opacity: 1 }}
                             className="flex min-h-[400px] flex-col items-center justify-center rounded-3xl border-2 border-dashed border-caramel/25 bg-white p-12 text-center shadow-sm dark:border-caramel/30 dark:bg-darkSurface"
                         >
@@ -346,7 +348,9 @@ export default function CouponsSection({
                             }
                             endMessage={
                                 <motion.div
-                                    initial={{ opacity: 0 }}
+                                    // Server-rendered when every coupon fits
+                                    // the first page: start at rest.
+                                    initial={false}
                                     animate={{ opacity: 1 }}
                                     className="mt-8 rounded-3xl bg-gradient-to-r from-caramel to-orange-600 p-8 text-center text-white shadow-xl"
                                 >
