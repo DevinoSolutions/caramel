@@ -231,6 +231,28 @@ describe('StoreCouponsPage generateMetadata — canonical normalization + thin-p
         expect(metadata.openGraph?.title).toBe(metadata.title)
     })
 
+    it('speaks UK search vocabulary on a UK store page', async () => {
+        // UK shoppers search "<store> discount code" / "voucher code"; the
+        // US "coupons & promo codes" wording matched almost none of it.
+        mockRows(
+            sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
+            [couponFixture],
+        )
+        mockRows(sql => sql.includes('COUNT(*)::int AS total'), [{ total: 1 }])
+
+        const metadata = await generateMetadata({
+            params: { store: 'example.co.uk' },
+        })
+
+        expect(metadata.title).toBe(
+            'example.co.uk discount codes & voucher codes — 1 active code | Caramel',
+        )
+        expect(metadata.description).toBe(
+            'Caramel lists 1 active discount code for example.co.uk — voucher codes and promo codes refreshed as new codes are found and dead ones retired.',
+        )
+        expect(metadata.openGraph?.title).toBe(metadata.title)
+    })
+
     it('noindexes (but still follows) a store page with zero visible coupons', async () => {
         mockRows(
             sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),

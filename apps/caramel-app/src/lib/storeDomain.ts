@@ -1,4 +1,4 @@
-import { getDomain, parse } from 'tldts'
+import { getDomain, getPublicSuffix, parse } from 'tldts'
 
 /**
  * The registrable domain a coupon `site` belongs to, or null if the input
@@ -96,4 +96,17 @@ export function storeSearchTerm(raw: string): string {
     if (host.includes('@')) return host
     if (!resolveStoreDomain(host)) return host
     return getDomain(host, { allowPrivateDomains: true }) ?? host
+}
+
+/**
+ * Whether a store domain sits under a UK public suffix (`co.uk`, `org.uk`,
+ * `uk`, ...), so its page can speak the words UK shoppers search with.
+ *
+ * Search Console (28 days to 2026-09-22): 90% of the impressions on UK store
+ * pages came from "<store> discount code" / "voucher code" queries, which a
+ * "coupons & promo codes" title never mentions.
+ */
+export function isUkStoreDomain(domain: string): boolean {
+    const suffix = getPublicSuffix(String(domain ?? '').toLowerCase())
+    return suffix === 'uk' || (suffix?.endsWith('.uk') ?? false)
 }

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { resolveStoreDomain, storeSearchTerm } from '../../src/lib/storeDomain'
+import {
+    isUkStoreDomain,
+    resolveStoreDomain,
+    storeSearchTerm,
+} from '../../src/lib/storeDomain'
 
 // Two hand-rolled copies of a "last two labels" base-domain helper used to
 // collapse any three-label host onto its own public suffix:
@@ -137,5 +141,20 @@ describe('storeSearchTerm', () => {
         expect(storeSearchTerm('')).toBe('')
         expect(storeSearchTerm('https://')).toBe('')
         expect(storeSearchTerm('   ')).toBe('')
+    })
+})
+
+describe('isUkStoreDomain', () => {
+    it('is true under any UK public suffix', () => {
+        expect(isUkStoreDomain('damart.co.uk')).toBe(true)
+        expect(isUkStoreDomain('example.org.uk')).toBe(true)
+        expect(isUkStoreDomain('example.uk')).toBe(true)
+    })
+
+    it('is false elsewhere, including lookalikes', () => {
+        expect(isUkStoreDomain('amazon.com')).toBe(false)
+        expect(isUkStoreDomain('uk.example.com')).toBe(false)
+        expect(isUkStoreDomain('amazon.com.au')).toBe(false)
+        expect(isUkStoreDomain('')).toBe(false)
     })
 })

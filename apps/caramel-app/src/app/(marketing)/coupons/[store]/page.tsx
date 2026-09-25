@@ -7,7 +7,7 @@ import { listStoreCoupons } from '@/lib/couponsRepo'
 import { BASE_URL } from '@/lib/env.client'
 import { jsonLdString } from '@/lib/jsonLd'
 import { evaluateStorePageIndexability } from '@/lib/seo/storeIndexability'
-import { resolveStoreDomain } from '@/lib/storeDomain'
+import { isUkStoreDomain, resolveStoreDomain } from '@/lib/storeDomain'
 import type { Coupon } from '@/types/coupon'
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
@@ -125,16 +125,25 @@ export async function generateMetadata({
     // (the same "N active codes" the prose below states) — never an invented
     // display name or date. The zero-coupon page keeps the generic title: it
     // is noindexed above and must not advertise codes it does not have.
+    // UK stores use UK search vocabulary ("discount code", "voucher code"):
+    // see isUkStoreDomain for the Search Console numbers behind it.
     const count = total.toLocaleString('en-US')
     const codeWord = total === 1 ? 'code' : 'codes'
-    const title =
-        total > 0
-            ? `${base} coupons & promo codes — ${count} active ${codeWord} | Caramel`
-            : `${base} Coupons & Promo Codes | Caramel`
-    const description =
-        total > 0
-            ? `Caramel lists ${count} active coupon ${codeWord} for ${base} — promo codes and discounts refreshed as new codes are found and dead ones retired.`
-            : `Find ${base} coupon codes, promo codes, and discounts — refreshed as new codes are found.`
+    const uk = isUkStoreDomain(base)
+    const title = uk
+        ? total > 0
+            ? `${base} discount codes & voucher codes — ${count} active ${codeWord} | Caramel`
+            : `${base} Discount Codes & Voucher Codes | Caramel`
+        : total > 0
+          ? `${base} coupons & promo codes — ${count} active ${codeWord} | Caramel`
+          : `${base} Coupons & Promo Codes | Caramel`
+    const description = uk
+        ? total > 0
+            ? `Caramel lists ${count} active discount ${codeWord} for ${base} — voucher codes and promo codes refreshed as new codes are found and dead ones retired.`
+            : `Find ${base} discount codes, voucher codes, and promo codes — refreshed as new codes are found.`
+        : total > 0
+          ? `Caramel lists ${count} active coupon ${codeWord} for ${base} — promo codes and discounts refreshed as new codes are found and dead ones retired.`
+          : `Find ${base} coupon codes, promo codes, and discounts — refreshed as new codes are found.`
 
     return {
         title,
