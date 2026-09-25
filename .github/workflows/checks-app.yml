@@ -653,6 +653,23 @@ jobs:
         if: steps.filter.outputs.run == 'true'
         run: curl -fsS -o /dev/null -w 'homepage HTTP %{http_code}\n' http://127.0.0.1:58000/
 
+      # next.config.mjs experimental.inlineCss: the production build must ship
+      # its CSS in a <style> in the HTML, not a render-blocking <link> (a
+      # whole extra round trip before first paint on mobile). `next dev`
+      # never inlines, so the hermetic e2e lane cannot see this; this is the
+      # PR-time check on a real production build (e2e/inline-css.spec.ts
+      # covers deployed builds).
+      - name: Assert CSS is inlined (no render-blocking stylesheet)
+        if: steps.filter.outputs.run == 'true'
+        run: |
+          html="$(curl -fsS http://127.0.0.1:58000/supported-stores)"
+          if printf '%s' "$html" | grep -Eq '<link[^>]*rel="stylesheet"'; then
+            echo '::error::/supported-stores still links a stylesheet; experimental.inlineCss is not in effect'
+            exit 1
+          fi
+          printf '%s' "$html" | grep -q '<style' || { echo '::error::no inline <style> in /supported-stores'; exit 1; }
+          echo 'CSS inlined: no <link rel="stylesheet">, inline <style> present'
+
       - name: Tear down (clean volumes)
         if: ${{ always() && steps.filter.outputs.run == 'true' }}
         run: docker compose down -v

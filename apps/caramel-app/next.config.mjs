@@ -69,6 +69,18 @@ const nextConfig = {
     // outputFileTracingRoot below (monorepo root) so the trace resolves
     // workspace deps correctly.
     output: 'standalone',
+    // Inline the (Tailwind, ~13 KB gzipped) stylesheet into the HTML <head>
+    // instead of a render-blocking <link>. Lighthouse mobile with APPLIED
+    // throttling (2026-09-25, store page): the HTML had fully arrived at
+    // 252 ms, but the one stylesheet cost its own round trip (requested at
+    // 51 ms, first byte at 645 ms), so nothing — the hero text included —
+    // could paint until ~980 ms. Most visits are first-time landings from
+    // search, which have no cached stylesheet to reuse. Production builds only
+    // (next dev always uses <link>): the compose-build CI job and
+    // e2e/inline-css.spec.ts assert it on a real production build.
+    experimental: {
+        inlineCss: true,
+    },
     outputFileTracingRoot: workspaceRoot,
     // The visual-regression job screenshots a `next dev` server, and dev mode
     // paints Next's on-screen dev indicator (a dark "N" badge, position:fixed
