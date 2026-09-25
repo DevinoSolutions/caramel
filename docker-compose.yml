@@ -126,6 +126,13 @@ services:
       timeout: 15s
       retries: 8
       start_period: 90s
+      # Probe every 2s until the first healthy result, then every 30s. Traefik
+      # routes only to a healthy container, so on a deploy the FIRST probe
+      # decides when grabcaramel.com comes back. Docker's default start
+      # interval is 5s (first probe measured at +5.3s on the host, +2.2s with
+      # this), and until then another app's router answers the extension.
+      # Needs Docker Engine 25+; the host runs 28.5.
+      start_interval: 2s
 
 volumes:
   caramel-auth-db-data:
