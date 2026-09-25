@@ -30,7 +30,7 @@ export type GrowthEventProperties = {
     store?: string
     target_app?: string
     /** Which page section an install CTA sat in (`install_cta_click`). */
-    placement?: string
+    placement?: 'supported_stores'
 }
 
 export function trackGrowthEvent(

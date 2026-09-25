@@ -1,7 +1,7 @@
 import { devices, expect, test, type Page } from '@playwright/test'
 
-// /supported-stores was the second-biggest landing page and had no install
-// link at all: 5 of 175 landing sessions ever reached a browser store, against
+// /supported-stores was the second-biggest landing page and had no
+// browser-store link: 5 of 175 landing sessions ever reached a browser store, against
 // 621 of 1,310 for the homepage (PostHog, 30 days to 2026-09-25). These pin
 // the install step that now sits under the search box.
 //
@@ -51,9 +51,10 @@ test.describe('Supported stores install step', () => {
                 'e2e',
             ),
         )
-        await expect(
-            page.getByText('Found your store?', { exact: true }),
-        ).toBeHidden()
+        // Count 0, not just hidden: globals.css also hides
+        // [data-growth="install"] under the stamp, so toBeHidden() alone
+        // would pass even if InstallSurfaceGate never unmounted the callout.
+        await expect(calloutLink(page)).toHaveCount(0)
     })
 })
 
@@ -70,6 +71,10 @@ test.describe('Supported stores install step on a phone', () => {
         page,
     }) => {
         await page.goto('/supported-stores')
+        // The server HTML already says "Get Caramel" (the browser is unknown
+        // before hydration), so wait until the page has actually detected an
+        // iPhone — otherwise this would only test the server render.
+        await expect(page.locator('[data-surface="web"]')).toHaveCount(1)
 
         const link = calloutLink(page)
         await expect(link).toHaveText('Get Caramel')

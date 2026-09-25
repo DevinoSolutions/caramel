@@ -1,4 +1,8 @@
-import { detectBrowser, detectPlatform } from '@/lib/surface/detectPlatform'
+import {
+    canInstallExtension,
+    detectBrowser,
+    detectPlatform,
+} from '@/lib/surface/detectPlatform'
 import { describe, expect, it } from 'vitest'
 
 // Copied from uNotes' detectPlatform.test.ts (fleet growth-prompts spec) plus
@@ -51,6 +55,19 @@ describe('detectPlatform', () => {
 
     it('returns unknown for desktop Linux', () => {
         expect(detectPlatform(UA.linuxFirefox)).toBe('unknown')
+    })
+})
+
+describe('canInstallExtension', () => {
+    it('is true on desktops, including Linux reported as unknown', () => {
+        expect(canInstallExtension('macos')).toBe(true)
+        expect(canInstallExtension('windows')).toBe(true)
+        expect(canInstallExtension('unknown')).toBe(true)
+    })
+
+    it('is false on phones and tablets, where no store sells an installable build', () => {
+        expect(canInstallExtension('ios')).toBe(false)
+        expect(canInstallExtension('android')).toBe(false)
     })
 })
 

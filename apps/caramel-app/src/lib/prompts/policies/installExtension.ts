@@ -3,7 +3,8 @@
 // SLOT 2 — "get the extension". PURE policy + copy for the orchestrator
 // (lib/prompts/orchestrator.ts); the host supplies the inputs.
 //
-// WHEN: on the web surface only (never where the extension already is), never
+// WHEN: on the web surface only (never where the extension already is), on a
+// device that can install an extension at all (not a phone), never
 // on /apps (the page IS the pitch) or the auth pages, only for a browser
 // Caramel is actually listed for, from the SECOND visit — or on the first
 // visit at a value moment, a store coupon page (`/coupons/<store>`), where a
@@ -19,6 +20,7 @@ import {
     type PromptHistory,
 } from '@/lib/prompts/orchestrator'
 import type { GrowthPromptDefinition } from '@/lib/prompts/registry'
+import { canInstallExtension } from '@/lib/surface/detectPlatform'
 
 const AUTH_PATHS = new Set([
     '/login',
@@ -45,6 +47,11 @@ export function decideInstallExtension(
     }
     if (AUTH_PATHS.has(context.pathname)) {
         return { show: false, reason: 'auth_page' }
+    }
+    if (!canInstallExtension(context.platform)) {
+        // An iPhone reports `safari` and would be offered the MAC App Store
+        // listing; an Android phone reports `chrome` and cannot run one.
+        return { show: false, reason: 'platform_cannot_install' }
     }
     if (listingForBrowser(context.browser) === null) {
         return { show: false, reason: 'no_listing_for_browser' }

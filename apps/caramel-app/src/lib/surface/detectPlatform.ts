@@ -42,6 +42,22 @@ export function detectPlatform(
 }
 
 /**
+ * Whether this device can install Caramel from a browser store at all. A phone
+ * cannot: Android Chrome has no extensions, and Caramel's Safari build is a Mac
+ * app (the App Store listing is `mt=12`, the Mac App Store). `unknown` is
+ * Linux / ChromeOS / anything unrecognised on a desktop — treated as desktop,
+ * because every Chromium and Firefox there installs from the stores.
+ *
+ * The ONE place this rule lives: the install prompt and the /supported-stores
+ * callout both ask it, so they cannot disagree about a phone.
+ */
+export function canInstallExtension(platform: DevicePlatform): boolean {
+    return (
+        platform === 'macos' || platform === 'windows' || platform === 'unknown'
+    )
+}
+
+/**
  * Order matters here too: Edge and every Chromium browser say "Chrome", and
  * Chrome (like everything WebKit-derived) says "Safari", so the more specific
  * token is tested first. Anything Chromium we have no listing for (Brave,

@@ -54,7 +54,7 @@ describe('install_extension policy', () => {
         ).toMatchObject({ show: false, reason: 'surface_not_web' })
     })
 
-    it('stays quiet on /apps, on auth pages, and for a browser with no listing', () => {
+    it('stays quiet on /apps, on auth pages, on phones, and for a browser with no listing', () => {
         expect(
             decideInstallExtension(context({ pathname: '/apps' }), fresh),
         ).toMatchObject({ reason: 'on_apps_page' })
@@ -64,6 +64,19 @@ describe('install_extension policy', () => {
         expect(
             decideInstallExtension(context({ browser: 'other' }), fresh),
         ).toMatchObject({ reason: 'no_listing_for_browser' })
+        // An iPhone says Safari, but the Safari listing is the Mac App Store.
+        expect(
+            decideInstallExtension(
+                context({ platform: 'ios', browser: 'safari' }),
+                fresh,
+            ),
+        ).toEqual({ show: false, reason: 'platform_cannot_install' })
+        expect(
+            decideInstallExtension(
+                context({ platform: 'android', browser: 'chrome' }),
+                fresh,
+            ),
+        ).toEqual({ show: false, reason: 'platform_cannot_install' })
     })
 
     it('waits for the second visit unless the shopper is on a store coupon page', () => {
