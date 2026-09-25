@@ -107,6 +107,6 @@ export function storeSearchTerm(raw: string): string {
  * "coupons & promo codes" title never mentions.
  */
 export function isUkStoreDomain(domain: string): boolean {
-    const suffix = getPublicSuffix(String(domain ?? '').toLowerCase())
+    const suffix = getPublicSuffix(domain)
     return suffix === 'uk' || (suffix?.endsWith('.uk') ?? false)
 }

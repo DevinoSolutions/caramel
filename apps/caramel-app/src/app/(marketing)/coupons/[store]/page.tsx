@@ -155,14 +155,14 @@ export async function generateMetadata({
             url: canonical,
             title,
             description,
-            locale: 'en_US',
+            locale: uk ? 'en_GB' : 'en_US',
             siteName: 'Caramel',
             images: [
                 {
                     url: banner,
                     width: 1200,
                     height: 630,
-                    alt: `${base} coupon codes on Caramel`,
+                    alt: `${base} ${uk ? 'discount' : 'coupon'} codes on Caramel`,
                 },
             ],
         },
@@ -188,6 +188,11 @@ export default async function StoreCouponsPage({
     }
 
     const { coupons, total, base } = await fetchStoreCoupons(storeParam)
+    // The body speaks the same vocabulary as the title (see generateMetadata):
+    // Google rewrites titles from the h1, and "discount code" must appear in
+    // the visible page for a UK store to be relevant to the search.
+    const uk = isUkStoreDomain(base)
+    const codeNoun = uk ? 'discount' : 'coupon'
 
     // Same normalized URL the canonical uses — structured data pointing at a
     // slug variant would contradict the canonical it sits next to.
@@ -196,7 +201,9 @@ export default async function StoreCouponsPage({
     const structuredData = {
         '@context': 'https://schema.org',
         '@type': 'ItemList',
-        name: `${base} coupons and promo codes`,
+        name: uk
+            ? `${base} discount codes and voucher codes`
+            : `${base} coupons and promo codes`,
         url: storeUrl,
         numberOfItems: total,
         itemListElement: (coupons || []).map((coupon: Coupon, idx: number) => ({
@@ -247,7 +254,7 @@ export default async function StoreCouponsPage({
                 heroAction={
                     base ? <StoreFavoriteStar store={base} /> : undefined
                 }
-                heroTitle={`Best ${base} coupon codes today`}
+                heroTitle={`Best ${base} ${codeNoun} codes today`}
                 heroSubtitle={`Save at ${base} with Caramel—the privacy-first coupon finder that applies the top deals automatically at checkout.`}
             />
             {/* AEO citable prose — server-rendered visible copy (AI engines
@@ -264,12 +271,12 @@ export default async function StoreCouponsPage({
                     id="how-caramel-works-heading"
                     className="mb-4 text-2xl font-bold tracking-tight text-gray-900 dark:text-white"
                 >
-                    How Caramel finds {base} coupon codes
+                    How Caramel finds {base} {codeNoun} codes
                 </h2>
                 <p className="mb-4 leading-relaxed text-gray-600 dark:text-gray-400">
                     {total > 0
-                        ? `Caramel's catalog currently lists ${total.toLocaleString('en-US')} active coupon ${total === 1 ? 'code' : 'codes'} for ${base}.`
-                        : `Caramel's catalog has no active coupon codes for ${base} right now — new codes are added automatically as they are found.`}{' '}
+                        ? `Caramel's catalog currently lists ${total.toLocaleString('en-US')} active ${codeNoun} ${total === 1 ? 'code' : 'codes'} for ${base}.`
+                        : `Caramel's catalog has no active ${codeNoun} codes for ${base} right now — new codes are added automatically as they are found.`}{' '}
                     The Caramel coupon extension is free, open source, and
                     available for Chrome, Firefox, Edge, and Safari.
                 </p>

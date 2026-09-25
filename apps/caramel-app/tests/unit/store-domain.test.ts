@@ -149,6 +149,8 @@ describe('isUkStoreDomain', () => {
         expect(isUkStoreDomain('damart.co.uk')).toBe(true)
         expect(isUkStoreDomain('example.org.uk')).toBe(true)
         expect(isUkStoreDomain('example.uk')).toBe(true)
+        expect(isUkStoreDomain('example.ltd.uk')).toBe(true)
+        expect(isUkStoreDomain('DAMART.CO.UK')).toBe(true)
     })
 
     it('is false elsewhere, including lookalikes', () => {

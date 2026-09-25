@@ -182,6 +182,26 @@ describe('StoreCouponsPage — CouponListRow + TotalCountRow', () => {
         expect(breadcrumb.itemListElement[2].item).toBeUndefined()
     })
 
+    it('a UK store page body uses the same discount-code wording as its title', async () => {
+        mockRows(
+            sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
+            [couponFixture],
+        )
+        mockRows(sql => sql.includes('COUNT(*)::int AS total'), [{ total: 1 }])
+
+        const mainEl = (await StoreCouponsPage({
+            params: { store: 'example.co.uk' },
+        })) as ReactElement<{ children: ReactElement[] }>
+
+        const pageJson = JSON.stringify(mainEl)
+        expect(pageJson).toContain('Best example.co.uk discount codes today')
+        expect(pageJson).toContain('active discount code for example.co.uk')
+        expect(pageJson).toContain(
+            'example.co.uk discount codes and voucher codes',
+        )
+        expect(pageJson).not.toContain('coupon codes today')
+    })
+
     it('with zero coupons the prose section says so honestly instead of inventing a count', async () => {
         mockRows(
             sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
