@@ -113,6 +113,17 @@ const nextConfig = {
                 destination: '/supported-stores',
                 permanent: true,
             },
+            // Better-auth sends a failed email-verification link back to its
+            // callbackURL with `?error=TOKEN_EXPIRED` (or INVALID_TOKEN, ...),
+            // and signup emails carry callbackURL `/`, including every link
+            // already sitting in an inbox. /login is the page that explains
+            // each code; the query string passes through unchanged.
+            {
+                source: '/',
+                has: [{ type: 'query', key: 'error' }],
+                destination: '/login',
+                permanent: false,
+            },
         ]
     },
     async headers() {

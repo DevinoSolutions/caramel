@@ -105,7 +105,6 @@ export const auth = betterAuth({
                 throw error
             }
         },
-        callbackOnError: '/verify?error=token_expired',
     },
     socialProviders: {
         google: {
@@ -178,6 +177,12 @@ export const auth = betterAuth({
     secret: env.BETTER_AUTH_SECRET ?? env.JWT_SECRET ?? '',
     baseURL,
     trustedOrigins,
+    // Where better-auth sends a failed Google/Apple sign-in (and its own
+    // /api/auth/error page) as `?error=<code>`. Without it, production sends
+    // them to `/?error=<code>`, which the homepage never read: the shopper was
+    // dropped on the landing page with no word about what went wrong. /login
+    // turns every code into a notice (src/lib/auth/authErrors.ts).
+    onAPIError: { errorURL: '/login' },
     advanced: {
         // Enable secure cookies when using HTTPS (required for ngrok/tunnels)
         // This ensures cookies are properly sent during OAuth redirects

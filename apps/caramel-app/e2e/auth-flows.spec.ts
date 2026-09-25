@@ -133,8 +133,9 @@ test.describe('Auth Flows — Login', () => {
     }) => {
         await page.goto('/login?error=invalid_token')
 
+        // Its own copy now: the link was rejected, not expired.
         await expect(
-            page.getByText(/verification link has expired or is invalid/i),
+            page.getByText(/verification link not valid/i),
         ).toBeVisible({ timeout: 5000 })
     })
 

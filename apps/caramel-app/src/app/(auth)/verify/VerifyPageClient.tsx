@@ -7,6 +7,7 @@ import {
     linkClasses,
     primaryButtonClasses,
 } from '@/components/auth/authStyles'
+import { describeAuthError } from '@/lib/auth/authErrors'
 import { authClient } from '@/lib/auth/client'
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
@@ -22,6 +23,7 @@ export default function VerifyPageClient({
     const [email, setEmail] = useState('')
     const [resendingEmail, setResendingEmail] = useState(false)
     const isNewSignup = signup === 'success'
+    const errorNotice = describeAuthError(error)
 
     useEffect(() => {
         // Small delay to ensure Toaster is ready
@@ -31,16 +33,13 @@ export default function VerifyPageClient({
                     'Account created! Please check your email to verify your account.',
                     { duration: 6000 },
                 )
-            } else if (error === 'token_expired') {
-                toast.error(
-                    'Verification link has expired. Please request a new one.',
-                    { duration: 5000 },
-                )
+            } else if (errorNotice) {
+                toast.error(errorNotice.body, { duration: 5000 })
             }
         }, 100)
 
         return () => clearTimeout(timer)
-    }, [signup, error])
+    }, [signup, errorNotice])
 
     const handleResendVerification = async () => {
         if (!email) {

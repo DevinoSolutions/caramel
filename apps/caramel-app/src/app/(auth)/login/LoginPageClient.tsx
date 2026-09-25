@@ -9,6 +9,7 @@ import {
 } from '@/components/auth/authStyles'
 import PasswordField from '@/components/auth/PasswordField'
 import SocialSignIn from '@/components/auth/SocialSignIn'
+import { describeAuthError } from '@/lib/auth/authErrors'
 import { signIn } from '@/lib/auth/client'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -31,28 +32,19 @@ export default function LoginPageClient({
     /* Derived, not state: the alert is a function of the URL, and as state it
      * could only ever appear one hydration + 100ms after the page did.
      *
-     * These two are deliberately the same expression, which preserves exactly
-     * what the effect used to do — it set both flags in the one branch. The
-     * consequence is that the alert's other wording ("Email verification
-     * required" / "Verify Email Now") is currently unreachable, and that
-     * `?error=invalid_token` tells the shopper their link EXPIRED when it was
-     * rejected as invalid. TODO: decide which copy each error deserves; this
-     * change deliberately does not alter product copy while fixing a race.
+     * Every better-auth failure lands here with `?error=<code>` (auth.ts's
+     * onAPIError.errorURL, plus next.config's `/?error=` redirect for links
+     * already sitting in inboxes), so any code gets a notice — see authErrors.
      */
-    const showVerificationAlert =
-        error === 'token_expired' || error === 'invalid_token'
-    const isTokenExpired = showVerificationAlert
+    const errorNotice = describeAuthError(error)
+    const errorAction = errorNotice?.action ?? null
 
     useEffect(() => {
         // Toasts are client-only by nature, and the small delay is here to let
-        // the Toaster mount. Only the toast needs to wait now.
+        // the Toaster mount. The error needs no toast: its alert is in the
+        // server-rendered HTML and does not auto-dismiss.
         const timer = setTimeout(() => {
-            if (error === 'token_expired' || error === 'invalid_token') {
-                toast.error(
-                    'Verification link has expired or is invalid. Please request a new one.',
-                    { duration: 5000 },
-                )
-            } else if (verified === 'true' && !error) {
+            if (verified === 'true' && !error) {
                 toast.success(
                     'Email verified successfully! You can now sign in.',
                     { duration: 5000 },
@@ -108,30 +100,26 @@ export default function LoginPageClient({
                 </p>
             }
         >
-            {showVerificationAlert && (
+            {errorNotice && (
                 <div
                     role="alert"
                     className="mb-6 rounded-xl border border-orange-300 bg-orange-50 p-4 dark:border-caramel/40 dark:bg-caramel/10"
                 >
                     <p className="text-sm font-semibold text-orange-800 dark:text-orange-200">
-                        {isTokenExpired
-                            ? 'Verification link expired'
-                            : 'Email verification required'}
+                        {errorNotice.title}
                     </p>
                     <p className="mt-1 text-sm text-orange-700 dark:text-orange-300">
-                        {isTokenExpired
-                            ? 'Your verification link has expired. Please request a new one to continue.'
-                            : 'Please verify your email address to continue.'}
+                        {errorNotice.body}
                     </p>
-                    <button
-                        type="button"
-                        onClick={() => router.push('/verify')}
-                        className="mt-3 w-full rounded-lg border border-orange-300 bg-white px-4 py-2 text-sm font-semibold text-caramel shadow-sm transition duration-200 hover:bg-orange-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/50 focus-visible:ring-offset-2 dark:border-caramel/40 dark:bg-darkBg dark:shadow-none dark:hover:bg-caramel/10 dark:focus-visible:ring-offset-darkerBg"
-                    >
-                        {isTokenExpired
-                            ? 'Request New Link'
-                            : 'Verify Email Now'}
-                    </button>
+                    {errorAction ? (
+                        <button
+                            type="button"
+                            onClick={() => router.push(errorAction.href)}
+                            className="mt-3 w-full rounded-lg border border-orange-300 bg-white px-4 py-2 text-sm font-semibold text-caramel shadow-sm transition duration-200 hover:bg-orange-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/50 focus-visible:ring-offset-2 dark:border-caramel/40 dark:bg-darkBg dark:shadow-none dark:hover:bg-caramel/10 dark:focus-visible:ring-offset-darkerBg"
+                        >
+                            {errorAction.label}
+                        </button>
+                    ) : null}
                 </div>
             )}
 
