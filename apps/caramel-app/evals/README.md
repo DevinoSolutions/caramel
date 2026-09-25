@@ -148,6 +148,19 @@ Stage-3 report. Whoever adds the CI secret above should add the matching
 Dokploy env var at the same time, and update this note with whatever
 model id ends up pinned.
 
+### Routing through the Devino proxy
+
+`OPENROUTER_API_URL` (default `https://openrouter.ai/api/v1`) sets the base
+the classifier POSTs `<base>/chat/completions` to. To move production off
+OpenRouter, set three env vars together on the deploy:
+`OPENROUTER_API_URL=https://proxyai.devino.ca/v1`, `OPENROUTER_API_KEY` = a
+Caramel proxy key, and `OPENROUTER_MODEL` = the eval-gated proxy pin in
+`SCOREBOARD.md` (2026-09-26: `cohere/command-a-plus-05-2026`). Rollback =
+unset `OPENROUTER_API_URL` and restore the OpenRouter key and model. CI moves
+the same way: `ai-evals.yml` reads the repo variables `OPENROUTER_API_URL`
+and `OPENROUTER_MODEL` when they are set (empty = the code defaults), and
+the `OPENROUTER_API_KEY` secret must then hold a proxy key.
+
 ## Codify
 
 > AI model/prompt changes are eval-gated: `pnpm eval` green **twice**
