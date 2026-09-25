@@ -38,7 +38,9 @@ export default function RecentlyAddedSection({
         <section aria-labelledby="recently-added-heading">
             <motion.h2
                 id="recently-added-heading"
-                initial={{ opacity: 0, y: 10 }}
+                // Server-rendered data: at rest in the HTML, never opacity 0
+                // (see the LCP note in search-section.tsx).
+                initial={false}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.3 }}
                 className="mb-10 border-b border-caramel/15 pb-10 text-center text-2xl font-bold text-gray-800 dark:border-white/10 dark:text-gray-200"
@@ -49,7 +51,7 @@ export default function RecentlyAddedSection({
                 {stores.map(store => (
                     <motion.div
                         key={store.site}
-                        initial={{ opacity: 0, y: 20 }}
+                        initial={false}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.3 }}
                     >

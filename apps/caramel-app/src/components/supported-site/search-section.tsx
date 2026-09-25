@@ -63,14 +63,14 @@ export default function SearchSection({
     return (
         <>
             <section className="mx-auto w-full max-w-3xl px-4 sm:px-6">
-                <motion.h1
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.5 }}
-                    className="mb-10 bg-gradient-to-r from-caramel to-orange-600 bg-clip-text text-center text-4xl font-extrabold text-transparent dark:from-orange-400 dark:to-caramel md:text-3xl"
-                >
+                {/* globals.css .hero-enter: a framer-motion
+                `initial={{ opacity: 0 }}` ships as style="opacity:0" in the
+                server HTML, so this text could not paint (and could not be
+                the LCP) until hydration — mobile LCP 4.7-8.6 s. CSS,
+                transform only, paints on the first frame. */}
+                <h1 className="hero-enter mb-10 bg-gradient-to-r from-caramel to-orange-600 bg-clip-text text-center text-4xl font-extrabold text-transparent dark:from-orange-400 dark:to-caramel md:text-3xl">
                     Is your favourite store supported?
-                </motion.h1>
+                </h1>
 
                 <input
                     type="url"
@@ -100,7 +100,9 @@ export default function SearchSection({
                 {/* results / top sites / suggestion */}
                 {!loading && (
                     <motion.div
-                        initial={{ opacity: 0, y: 20 }}
+                        // Server-rendered at rest (no opacity 0 in the HTML);
+                        // animates in only when a search re-mounts it.
+                        initial={searched ? { opacity: 0, y: 20 } : false}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.4 }}
                         className="mb-10 mt-12 space-y-6"
@@ -145,7 +147,7 @@ export default function SearchSection({
                                 {topSites.length > 0 && (
                                     <>
                                         <motion.h2
-                                            initial={{ opacity: 0, y: 10 }}
+                                            initial={false}
                                             animate={{ opacity: 1, y: 0 }}
                                             transition={{ duration: 0.3 }}
                                             className="mb-10 border-b border-caramel/15 pb-10 text-center text-2xl font-bold text-gray-800 dark:border-white/10 dark:text-gray-200"
@@ -156,10 +158,7 @@ export default function SearchSection({
                                             {topSites.map(s => (
                                                 <motion.div
                                                     key={s}
-                                                    initial={{
-                                                        opacity: 0,
-                                                        y: 20,
-                                                    }}
+                                                    initial={false}
                                                     animate={{
                                                         opacity: 1,
                                                         y: 0,
