@@ -19,6 +19,7 @@ export type GrowthEventName =
     | 'prompt_accepted'
     | 'apps_page_view'
     | 'store_badge_click'
+    | 'install_cta_click'
     | 'crossapp_click'
 
 export type GrowthEventProperties = {
@@ -28,6 +29,8 @@ export type GrowthEventProperties = {
     browser?: string
     store?: string
     target_app?: string
+    /** Which page section an install CTA sat in (`install_cta_click`). */
+    placement?: string
 }
 
 export function trackGrowthEvent(

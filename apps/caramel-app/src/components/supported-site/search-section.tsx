@@ -4,6 +4,7 @@ import Loader from '@/components/Loader'
 import { AnimatePresence, motion } from 'framer-motion'
 import debounce from 'lodash.debounce'
 import { useEffect, useRef, useState } from 'react'
+import InstallCallout from './install-callout'
 import RecentlyAddedSection, {
     type RecentlyAddedStore,
 } from './recently-added-section'
@@ -80,6 +81,8 @@ export default function SearchSection({
                     aria-label="Search for a supported store"
                     className="w-full rounded-full border-2 border-caramel/30 bg-white px-6 py-4 text-lg placeholder-gray-400 shadow-md outline-none transition-all focus:border-caramel focus:shadow-lg dark:bg-darkSurface dark:text-white dark:placeholder-gray-500 dark:focus:border-orange-400 sm:text-base"
                 />
+
+                <InstallCallout />
 
                 {/* loader */}
                 <AnimatePresence>
