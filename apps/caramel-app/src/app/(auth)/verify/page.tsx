@@ -60,12 +60,12 @@ export const metadata: Metadata = {
 export default async function VerifyPage({
     searchParams,
 }: {
-    searchParams: Promise<{ signup?: string; error?: string }>
+    searchParams: Promise<{ signup?: string }>
 }) {
-    const { signup, error } = await searchParams
+    const { signup } = await searchParams
     return (
         <Suspense fallback={<div>Loading...</div>}>
-            <VerifyPageClient signup={signup} error={error} />
+            <VerifyPageClient signup={signup} />
         </Suspense>
     )
 }

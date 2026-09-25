@@ -57,7 +57,7 @@ export const metadata: Metadata = {
 export default async function Login({
     searchParams,
 }: {
-    searchParams: Promise<{ verified?: string; error?: string }>
+    searchParams: Promise<{ verified?: string; error?: string | string[] }>
 }) {
     const { verified, error } = await searchParams
     return <LoginPageClient verified={verified} error={error} />

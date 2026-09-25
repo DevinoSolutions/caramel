@@ -71,6 +71,20 @@ test.describe('Auth error landing', () => {
         ).toBeVisible()
     })
 
+    test('a repeated error param renders the first code instead of crashing the page', async ({
+        page,
+    }) => {
+        // Next hands a repeated key to the page as string[]; the old
+        // `.trim()` on it would have thrown and 500'd /login.
+        const res = await page.goto(
+            '/login?error=TOKEN_EXPIRED&error=state_mismatch',
+        )
+        expect(res?.status()).toBe(200)
+        await expect(
+            noticeWith(page, 'Verification link expired'),
+        ).toBeVisible()
+    })
+
     test('the homepage without an error is untouched', async ({ page }) => {
         const res = await page.request.get('/', { maxRedirects: 0 })
         expect(res.status()).toBe(200)

@@ -21,7 +21,7 @@ export default function LoginPageClient({
     error,
 }: {
     verified?: string
-    error?: string
+    error?: string | string[]
 }) {
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')

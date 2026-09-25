@@ -7,23 +7,15 @@ import {
     linkClasses,
     primaryButtonClasses,
 } from '@/components/auth/authStyles'
-import { describeAuthError } from '@/lib/auth/authErrors'
 import { authClient } from '@/lib/auth/client'
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 
-export default function VerifyPageClient({
-    signup,
-    error,
-}: {
-    signup?: string
-    error?: string
-}) {
+export default function VerifyPageClient({ signup }: { signup?: string }) {
     const [email, setEmail] = useState('')
     const [resendingEmail, setResendingEmail] = useState(false)
     const isNewSignup = signup === 'success'
-    const errorNotice = describeAuthError(error)
 
     useEffect(() => {
         // Small delay to ensure Toaster is ready
@@ -33,13 +25,11 @@ export default function VerifyPageClient({
                     'Account created! Please check your email to verify your account.',
                     { duration: 6000 },
                 )
-            } else if (errorNotice) {
-                toast.error(errorNotice.body, { duration: 5000 })
             }
         }, 100)
 
         return () => clearTimeout(timer)
-    }, [signup, errorNotice])
+    }, [signup])
 
     const handleResendVerification = async () => {
         if (!email) {

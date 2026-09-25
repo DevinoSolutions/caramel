@@ -73,13 +73,19 @@ const NOTICES: Record<string, AuthErrorNotice> = {
     },
     state_mismatch: SOCIAL_SIGN_IN_INTERRUPTED,
     state_not_found: SOCIAL_SIGN_IN_INTERRUPTED,
+    state_invalid: SOCIAL_SIGN_IN_INTERRUPTED,
+    state_security_mismatch: SOCIAL_SIGN_IN_INTERRUPTED,
     please_restart_the_process: SOCIAL_SIGN_IN_INTERRUPTED,
 }
 
+// `code` is the raw `error` search param, so it is an array when the key
+// repeats (`?error=a&error=b`); the first value wins rather than crashing
+// the page on `.trim()`.
 export function describeAuthError(
-    code: string | undefined,
+    code: string | string[] | undefined,
 ): AuthErrorNotice | null {
-    const normalized = code?.trim().toLowerCase()
+    const first = Array.isArray(code) ? code[0] : code
+    const normalized = first?.trim().toLowerCase()
     if (!normalized) return null
     return NOTICES[normalized] ?? SIGN_IN_FAILED
 }

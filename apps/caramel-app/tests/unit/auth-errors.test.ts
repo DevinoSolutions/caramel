@@ -45,12 +45,21 @@ describe('describeAuthError', () => {
         for (const code of [
             'state_mismatch',
             'state_not_found',
+            'state_invalid',
+            'state_security_mismatch',
             'please_restart_the_process',
         ]) {
             const notice = describeAuthError(code)
             expect(notice?.title).toBe('Sign-in was interrupted')
             expect(notice?.action).toBeNull()
         }
+    })
+
+    it('a repeated `error` param (Next hands over string[]) uses the first value instead of throwing', () => {
+        expect(describeAuthError(['TOKEN_EXPIRED', 'state_mismatch'])).toBe(
+            describeAuthError('TOKEN_EXPIRED'),
+        )
+        expect(describeAuthError([])).toBeNull()
     })
 
     it('any other code still gets a notice rather than silence', () => {
