@@ -122,7 +122,9 @@ describe('listCoupons — visible seed, ranking, exact row shape (real pg :58005
             expired: false,
             timesUsed: 415,
             status: 'valid',
-            verificationMessage: 'Verified working on 2026-07-13',
+            // The seeded row carries 'Verified working on 2026-07-13'; a valid
+            // coupon's verifier text is never served (couponVerificationText.ts).
+            verificationMessage: null,
         })
     })
 })

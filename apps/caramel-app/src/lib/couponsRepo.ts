@@ -55,6 +55,7 @@ import {
     TotalCountRowSchema,
     parseCouponRows,
 } from '@/lib/couponsDb'
+import { shopperVerificationText } from '@/lib/couponVerificationText'
 import prisma from '@/lib/prisma'
 import { Prisma } from '@prisma/client'
 import { randomUUID } from 'node:crypto'
@@ -187,10 +188,8 @@ export async function listCoupons(
             Prisma.sql`SELECT COUNT(*)::int AS total FROM coupons WHERE ${whereClause}`,
         ),
     ])
-    const coupons = parseCouponRows(
-        CouponListRowSchema,
-        rawCoupons,
-        'coupons.list',
+    const coupons = forShoppers(
+        parseCouponRows(CouponListRowSchema, rawCoupons, 'coupons.list'),
     )
     const totalRow = parseCouponRows(
         TotalCountRowSchema,
@@ -233,10 +232,8 @@ export async function listStoreCoupons(
               AND (site = ${base} OR site LIKE ${'%.' + base})
         `),
     ])
-    const coupons = parseCouponRows(
-        CouponListRowSchema,
-        rawCoupons,
-        'store-page.coupons',
+    const coupons = forShoppers(
+        parseCouponRows(CouponListRowSchema, rawCoupons, 'store-page.coupons'),
     )
     const totalRow = parseCouponRows(
         TotalCountRowSchema,
@@ -245,6 +242,23 @@ export async function listStoreCoupons(
     )
 
     return { coupons, total: totalRow[0]?.total ?? 0 }
+}
+
+/**
+ * The coupon rows a shopper-facing surface may render: the verifier's
+ * `verification_message` is replaced by what a shopper may read of it, which
+ * is usually nothing (couponVerificationText.ts has the prod vocabulary that
+ * made this necessary). Both listing reads go through it, so /api/coupons
+ * (the extension popup, agents) and the SSR pages agree.
+ */
+function forShoppers(rows: CouponListRow[]): CouponListRow[] {
+    return rows.map(row => ({
+        ...row,
+        verificationMessage: shopperVerificationText(
+            row.status,
+            row.verificationMessage,
+        ),
+    }))
 }
 
 /** api/coupons/stats/route.ts GET — trust census (verifiedCensusSql, NOT visibleCouponsWhere — see the fragment doc comment). Falls back to a zeroed row (no `{total:0,expired:0}` shaping left for the route). */

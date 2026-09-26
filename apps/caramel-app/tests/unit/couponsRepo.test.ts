@@ -100,6 +100,54 @@ describe('listCoupons', () => {
         expect(result.total).toBe(1)
     })
 
+    it('both listing reads hand shoppers the store sentence of a restricted coupon and never the verifier log', async () => {
+        const rows = [
+            {
+                ...couponFixture,
+                id: 1,
+                status: 'valid',
+                verificationMessage:
+                    'Discount code accepted (Shopify cart.json; cart 1 item / 45.00 USD)',
+            },
+            {
+                ...couponFixture,
+                id: 2,
+                status: 'retry',
+                verificationMessage: 'Verification timed out after 120s',
+            },
+            {
+                ...couponFixture,
+                id: 3,
+                status: 'product_restriction',
+                verificationMessage: 'basket.error.bagNotFound',
+            },
+            {
+                ...couponFixture,
+                id: 4,
+                status: 'product_restriction',
+                verificationMessage: 'Your cart contains ineligible products.',
+            },
+        ]
+        mockRows(
+            sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
+            rows,
+        )
+        mockRows(sql => sql.includes('COUNT(*)'), [{ total: 4 }])
+
+        for (const read of [
+            () => listCoupons({ limit: 10, skip: 0 }),
+            () => listStoreCoupons('example.com', 10),
+        ]) {
+            const { coupons } = await read()
+            expect(coupons.map(c => [c.id, c.verificationMessage])).toEqual([
+                ['1', null],
+                ['2', null],
+                ['3', null],
+                ['4', 'Your cart contains ineligible products.'],
+            ])
+        }
+    })
+
     it('an empty total row falls back to 0 (no coupons is legitimate, not drift)', async () => {
         mockRows(
             sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
