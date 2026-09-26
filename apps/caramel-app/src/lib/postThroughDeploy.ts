@@ -1,7 +1,7 @@
 // A browser POST to one of Caramel's own API routes that rides out a deploy.
 //
 // Every Caramel API route answers JSON, whatever the status. During the few
-// seconds a deploy takes grabcaramel.com off the edge (swap drill 2026-09-26:
+// seconds a deploy takes grabcaramel.com off the edge (swap drill 2026-09-25:
 // ~4.5 s), the request is answered by something in FRONT of Caramel instead:
 // Cloudflare's 502/503/504/52x page, or another app's HTML 404 (the host's
 // catch-all router). Such an answer never reached the route, so re-sending it

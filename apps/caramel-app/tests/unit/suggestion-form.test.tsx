@@ -42,7 +42,7 @@ vi.mock('@/lib/postThroughDeploy', async importOriginal => {
 })
 
 // What the edge answers while a deploy has Caramel off it (swap drill
-// 2026-09-26): another app's HTML 404 page, not Caramel's JSON.
+// 2026-09-25): another app's HTML 404 page, not Caramel's JSON.
 const foreignHtml404 = () => ({
     ok: false,
     status: 404,
