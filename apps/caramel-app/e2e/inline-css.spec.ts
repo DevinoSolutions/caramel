@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { firstLinkedStoreDomain } from './support/stores'
 
 // The stylesheet ships inside the HTML, so a first visit paints without
 // waiting on a second round trip.
@@ -57,24 +58,13 @@ async function expectStyledFromInlineCss(page: Page, path: string) {
     )
 }
 
-const STORE_LINK = /^\/coupons\/([a-z0-9-]+(?:\.[a-z0-9-]+)+)$/
-
 test.describe('CSS is inlined into the HTML', () => {
     test('/supported-stores', async ({ page }) => {
         await expectStyledFromInlineCss(page, '/supported-stores')
     })
 
     test('a store page', async ({ page }) => {
-        await page.goto('/supported-stores')
-        const hrefs = await page
-            .locator('main a[href^="/coupons/"]')
-            .evaluateAll(links => links.map(a => a.getAttribute('href') ?? ''))
-        const site = hrefs
-            .map(href => STORE_LINK.exec(href)?.[1])
-            .find(match => match !== undefined)
-        if (!site) {
-            throw new Error('no store linked from /supported-stores')
-        }
+        const site = await firstLinkedStoreDomain(page)
         await expectStyledFromInlineCss(page, `/coupons/${site}`)
     })
 })

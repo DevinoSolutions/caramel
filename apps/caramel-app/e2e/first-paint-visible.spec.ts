@@ -1,4 +1,5 @@
-import { expect, test, type Locator, type Page } from '@playwright/test'
+import { expect, test, type Locator } from '@playwright/test'
+import { firstLinkedStoreDomain } from './support/stores'
 
 // The text a visitor lands on must be visible in the server HTML itself.
 //
@@ -35,22 +36,6 @@ async function expectPaintedWithoutJs(locator: Locator, what: string) {
     expect(await effectiveOpacity(locator), `${what} opacity`).toBe(1)
 }
 
-const STORE_LINK = /^\/coupons\/([a-z0-9-]+(?:\.[a-z0-9-]+)+)$/
-
-async function firstStoreWithCoupons(page: Page): Promise<string> {
-    await page.goto('/supported-stores')
-    const hrefs = await page
-        .locator('main a[href^="/coupons/"]')
-        .evaluateAll(links => links.map(a => a.getAttribute('href') ?? ''))
-    const site = hrefs
-        .map(href => STORE_LINK.exec(href)?.[1])
-        .find(match => match !== undefined)
-    if (!site) {
-        throw new Error('no store with coupons linked from /supported-stores')
-    }
-    return site
-}
-
 test.describe('Above-the-fold content paints before any JavaScript runs', () => {
     test('/supported-stores: the heading and the first store card', async ({
         page,
@@ -72,7 +57,7 @@ test.describe('Above-the-fold content paints before any JavaScript runs', () => 
     test('a store page: the heading, the intro and the first coupon', async ({
         page,
     }) => {
-        const site = await firstStoreWithCoupons(page)
+        const site = await firstLinkedStoreDomain(page)
         await page.goto(`/coupons/${site}`)
 
         await expectPaintedWithoutJs(

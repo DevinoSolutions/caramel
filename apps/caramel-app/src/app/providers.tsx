@@ -8,6 +8,7 @@ import { ThemeContext } from '@/lib/contexts'
 import * as gtag from '@/lib/gtag'
 import { SurfaceProvider } from '@/lib/surface/SurfaceProvider'
 import Hotjar from '@hotjar/browser'
+import * as Sentry from '@sentry/nextjs'
 import { usePathname } from 'next/navigation'
 import Script from 'next/script'
 import { ReactNode, useEffect, useMemo, useState } from 'react'
@@ -74,10 +75,16 @@ export default function Providers({ children }: { children: ReactNode }) {
     }, [pathname])
 
     useEffect(() => {
-        if (process.env.NODE_ENV === 'production') {
-            try {
-                Hotjar.init(6369129, 6)
-            } catch {}
+        if (process.env.NODE_ENV !== 'production') return
+        try {
+            Hotjar.init(6369129, 6)
+        } catch (error) {
+            // Analytics must never break the page, but must not fail
+            // silently either.
+            console.error('[hotjar] init failed', error)
+            Sentry.captureException(error, {
+                tags: { operation: 'hotjar_init' },
+            })
         }
     }, [])
 
@@ -123,19 +130,29 @@ export default function Providers({ children }: { children: ReactNode }) {
             {/* App-level support modal — opened via the module-level registry
                 (promptSupportOnFailure) without prop drilling. */}
             <SupportDialog />
-            {/* GA */}
-            <Script
-                strategy="afterInteractive"
-                src={`https://www.googletagmanager.com/gtag/js?id=${gtag.GA_TRACKING_ID}`}
-            />
-            <Script id="gtag-init" strategy="afterInteractive">
-                {`
+            {/* GA, only where a measurement id is configured (without one
+                this used to fetch gtag.js?id=undefined for nothing).
+                gtag.js (173 KB) loads after the load event, when the main
+                thread is idle: fetched early it competed with the app's own
+                JS on slow connections. The inline init below still runs
+                right after hydration, so window.gtag exists for pageView()
+                and every command queues in dataLayer until gtag.js loads. */}
+            {gtag.GA_TRACKING_ID && (
+                <>
+                    <Script
+                        strategy="lazyOnload"
+                        src={`https://www.googletagmanager.com/gtag/js?id=${gtag.GA_TRACKING_ID}`}
+                    />
+                    <Script id="gtag-init" strategy="afterInteractive">
+                        {`
           window.dataLayer = window.dataLayer || [];
           function gtag(){dataLayer.push(arguments);}
           gtag('js', new Date());
           gtag('config', '${gtag.GA_TRACKING_ID}');
         `}
-            </Script>
+                    </Script>
+                </>
+            )}
         </PostHogClientProvider>
     )
 }

@@ -148,6 +148,11 @@ export function initPosthogBrowser(): boolean {
             maskTextSelector: '[data-sentry-mask], [data-ph-mask]',
             blockSelector: '#card-element',
         },
+        // The Caramel project has no surveys (checked 2026-09-26), so don't
+        // fetch the surveys bundle (30 KB, 102 KB to parse, measured on prod)
+        // on every page.
+        // TODO: remove when the first survey is created, or it will never show.
+        disable_surveys: true,
         // PostHog drops headless/synthetic UAs by default. Accept them ONLY in
         // the shared e2e project so Playwright runs actually land.
         opt_out_useragent_filter: isE2E,
