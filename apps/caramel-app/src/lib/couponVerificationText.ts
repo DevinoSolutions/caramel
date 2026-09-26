@@ -4,14 +4,14 @@
 //
 // The column is written by the coupons verifier (the Python producer) and is
 // mostly its own log text. Prod, 2026-09-26, visible coupons only:
-//   retry  34,102 rows: "Verification timed out after 120s" (10,503),
+//   awaiting a re-check, 34,102 rows: "Verification timed out after 120s" (10,503),
 //          "API request failed: … curl: (56) CONNECT tunnel failed …",
 //          "Headful browser launch failed", "Coupon input selector was not
 //          found on https://…"
-//   valid  19,463 rows: "Discount code accepted (Shopify cart.json; cart 1
+//   verified, 19,463 rows: "Discount code accepted (Shopify cart.json; cart 1
 //          item / 45 USD)", "Coupon accepted (structural discriminator)",
 //          "Discount code classified as valid (HTML+LLM)"
-//   product_restriction 1,728 rows: "basket.error.bagNotFound",
+//   restricted to some products, 1,728 rows: "basket.error.bagNotFound",
 //          "NO_ITEMS_QUALIFY", "code accepted (not rejected as invalid) but
 //          produced no discount on the seeded c…", next to real store
 //          sentences such as "Your cart contains ineligible products."
@@ -20,7 +20,7 @@
 // shoppers. Every read that serves coupons (couponsRepo) now passes the text
 // through shopperVerificationText. Only a restricted coupon keeps a message,
 // because only there does it explain something to the shopper (why the code
-// may not apply to their cart); on 'valid'/'retry'/'pending' it is the
+// may not apply to their cart); on every other status it is the
 // verifier's own log or whatever the store page printed (newsletter popups,
 // "Email is a required field."). Even then it is kept only when it reads as
 // a sentence written for a person, normally the store's own words. Otherwise
