@@ -232,6 +232,9 @@ describe('POST /api/sites/suggest — persistence + requester identity', () => {
     })
 
     it('the row is the system of record: a failed ops email is reported to Sentry, the suggestion is still saved, the caller sees notified:false', async () => {
+        const consoleError = vi
+            .spyOn(console, 'error')
+            .mockImplementation(() => {})
         sendEmailMock.mockRejectedValueOnce(new Error('usesend down'))
         const res = await POST(
             suggestRequest({
@@ -253,5 +256,11 @@ describe('POST /api/sites/suggest — persistence + requester identity', () => {
             tags: { operation: 'site_suggestion_email' },
             extra: { suggestionId: 'suggestion-1' },
         })
+        // A trace that does not depend on Sentry being reachable.
+        expect(consoleError).toHaveBeenCalledWith(
+            '[sites/suggest] ops email failed for suggestion suggestion-1 (example-store.com):',
+            error,
+        )
+        consoleError.mockRestore()
     })
 })
