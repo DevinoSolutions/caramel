@@ -1,7 +1,12 @@
 'use client'
 
 import { promptSupportOnFailure } from '@/lib/feedback/promptSupportOnFailure'
+import {
+    DEPLOY_GAP_MESSAGE,
+    postJsonThroughDeploy,
+} from '@/lib/postThroughDeploy'
 import { isValidUrl } from '@/lib/urlHelper'
+import * as Sentry from '@sentry/nextjs'
 import { motion } from 'framer-motion'
 import { useState } from 'react'
 import { toast } from 'sonner'
@@ -29,13 +34,26 @@ export default function SuggestionForm({
         }
         setLoading(true)
         try {
-            const res = await fetch('/api/sites/suggest', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(
-                    email.trim() ? { url, email: email.trim() } : { url },
-                ),
-            })
+            const res = await postJsonThroughDeploy(
+                '/api/sites/suggest',
+                email.trim() ? { url, email: email.trim() } : { url },
+                {
+                    onGap: report =>
+                        Sentry.captureMessage(
+                            report.recovered
+                                ? 'Site suggestion rode out a deploy gap'
+                                : 'Site suggestion not sent: deploy gap outlasted the retries',
+                            { level: 'warning', extra: { ...report } },
+                        ),
+                },
+            )
+            if (!res) {
+                // Nothing reached Caramel (a deploy was swapping it). Keep
+                // what was typed; the input was fine.
+                toast.error(DEPLOY_GAP_MESSAGE)
+                setLoading(false)
+                return
+            }
             if (!res.ok) {
                 // The server refused the INPUT (a host that is not a store, a
                 // malformed email) — not a failure to send, so no support

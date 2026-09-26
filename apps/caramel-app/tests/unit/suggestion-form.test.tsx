@@ -19,11 +19,44 @@ const { toastMock } = vi.hoisted(() => ({
     toastMock: { success: vi.fn(), warning: vi.fn(), error: vi.fn() },
 }))
 vi.mock('sonner', () => ({ toast: toastMock }))
+const { sentryMock } = vi.hoisted(() => ({
+    sentryMock: { captureMessage: vi.fn() },
+}))
+vi.mock('@sentry/nextjs', () => sentryMock)
+// The real retry logic, without the real waits between attempts.
+vi.mock('@/lib/postThroughDeploy', async importOriginal => {
+    const real =
+        await importOriginal<typeof import('@/lib/postThroughDeploy')>()
+    return {
+        ...real,
+        postJsonThroughDeploy: (
+            ...[url, body, options]: Parameters<
+                typeof real.postJsonThroughDeploy
+            >
+        ) =>
+            real.postJsonThroughDeploy(url, body, {
+                ...options,
+                sleep: async () => {},
+            }),
+    }
+})
+
+// What the edge answers while a deploy has Caramel off it (swap drill
+// 2026-09-26): another app's HTML 404 page, not Caramel's JSON.
+const foreignHtml404 = () => ({
+    ok: false,
+    status: 404,
+    headers: new Headers({ 'content-type': 'text/html; charset=utf-8' }),
+    json: async () => {
+        throw new SyntaxError('Unexpected token <')
+    },
+})
 
 beforeEach(() => {
     toastMock.success.mockClear()
     toastMock.warning.mockClear()
     toastMock.error.mockClear()
+    sentryMock.captureMessage.mockClear()
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }))
 })
 
@@ -123,6 +156,61 @@ describe('SuggestionForm (NF-05)', () => {
                 'Please enter a store URL',
             ),
         )
+        expect(toastMock.success).not.toHaveBeenCalled()
+        expect(resetValue).not.toHaveBeenCalled()
+    })
+
+    it('a deploy gap (a foreign HTML 404) is ridden out: the same suggestion is re-sent and succeeds, no "bad URL" warning', async () => {
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValueOnce(foreignHtml404())
+            .mockResolvedValueOnce(foreignHtml404())
+            .mockResolvedValueOnce({ ok: true, status: 200 })
+        vi.stubGlobal('fetch', fetchMock)
+        const resetValue = vi.fn()
+        render(
+            <SuggestionForm
+                initialValue="https://store.example.com"
+                resetValue={resetValue}
+            />,
+        )
+        const input = screen.getByPlaceholderText('https://example.com')
+        fireEvent.submit(input.closest('form') as HTMLFormElement)
+
+        await waitFor(() => expect(toastMock.success).toHaveBeenCalledTimes(1))
+        expect(fetchMock).toHaveBeenCalledTimes(3)
+        expect(toastMock.warning).not.toHaveBeenCalled()
+        expect(resetValue).toHaveBeenCalledTimes(1)
+        expect(sentryMock.captureMessage).toHaveBeenCalledWith(
+            'Site suggestion rode out a deploy gap',
+            expect.objectContaining({
+                extra: { recovered: true, attempts: 3, lastStatus: 404 },
+            }),
+        )
+    })
+
+    it('a deploy gap that outlasts the retries says so in a sentence and keeps the input (never "enter a store URL")', async () => {
+        const fetchMock = vi
+            .fn()
+            .mockImplementation(async () => foreignHtml404())
+        vi.stubGlobal('fetch', fetchMock)
+        const resetValue = vi.fn()
+        render(
+            <SuggestionForm
+                initialValue="https://store.example.com"
+                resetValue={resetValue}
+            />,
+        )
+        const input = screen.getByPlaceholderText('https://example.com')
+        fireEvent.submit(input.closest('form') as HTMLFormElement)
+
+        await waitFor(() =>
+            expect(toastMock.error).toHaveBeenCalledWith(
+                'Caramel is restarting after an update, so this was not sent. Please try again in a minute.',
+            ),
+        )
+        expect(fetchMock).toHaveBeenCalledTimes(5)
+        expect(toastMock.warning).not.toHaveBeenCalled()
         expect(toastMock.success).not.toHaveBeenCalled()
         expect(resetValue).not.toHaveBeenCalled()
     })
