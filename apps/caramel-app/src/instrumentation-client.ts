@@ -1,5 +1,10 @@
 import * as Sentry from '@sentry/nextjs'
 
+// Next.js only loads client instrumentation from `instrumentation-client.ts`.
+// This file was named `instrumentation.client.ts` until 2026-09-26, so the
+// browser SDK never started: 0 browser events in 90 days of Sentry, and no
+// client-side report (error boundary, captureMessage) ever arrived.
+
 const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN
 
 if (process.env.NODE_ENV === 'production' && dsn) {
@@ -8,7 +13,9 @@ if (process.env.NODE_ENV === 'production' && dsn) {
         integrations: [
             Sentry.replayIntegration({
                 blockAllMedia: false,
-                maskAllInputs: false,
+                // Every input masked, matching PostHog's session recording
+                // (lib/analytics/identity.ts). Text stays readable.
+                maskAllInputs: true,
                 maskAllText: false,
                 mask: [
                     'input[type="password"]',
