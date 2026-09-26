@@ -140,7 +140,7 @@ export function initPosthogBrowser(): boolean {
         capture_pageview: 'history_change',
         capture_pageleave: true,
         // Session recording ON, masked to match the Sentry Replay privacy
-        // config in instrumentation.client.ts (passwords/emails/card + any
+        // config in instrumentation-client.ts (every input, card + any
         // element explicitly flagged for masking).
         disable_session_recording: false,
         session_recording: {

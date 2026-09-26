@@ -70,7 +70,7 @@ export default [
             // Instrumentation bootstrapping runs around/before the env door
             // (Sentry init, edge-runtime discrimination) — out of scope.
             '**/src/instrumentation.ts',
-            '**/src/instrumentation.client.ts',
+            '**/src/instrumentation-client.ts',
             // Documented exception (2026-07-14): decryptJsonData.ts must read
             // NEXT_PUBLIC_API_ENCRYPTION_ENABLED live (not via the clientEnv
             // singleton, which parses once at import) so decryptJsonData.test.ts
