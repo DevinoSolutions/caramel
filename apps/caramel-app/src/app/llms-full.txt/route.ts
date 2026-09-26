@@ -37,7 +37,7 @@ const faqSection = faqItems
 
 const comparisonTable = COMPARED_EXTENSIONS.map(
     row =>
-        `- ${row.name} (${row.maker}). Price: ${row.price}. How it makes money: ${row.revenue}. Rewards: ${row.rewards}. Account to use codes: ${row.account}. Browsers: ${row.browsers}. Source code: ${row.sourceCode}.`,
+        `- ${row.name} (${row.maker}). Price: ${row.price}. How it makes money: ${row.revenue}. Rewards: ${row.rewards}. Account, per its own guide: ${row.account}. Browsers: ${row.browsers}. Source code: ${row.sourceCode}.`,
 ).join('\n')
 
 const honeyTimeline = HONEY_TIMELINE.map(

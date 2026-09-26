@@ -230,8 +230,10 @@ describe('sitemap.ts — store entries are canonical, lowercase, deduped, policy
         expect(
             urlsOf(entries).some(u => u.startsWith(`${ORIGIN}/coupons/`)),
         ).toBe(false)
-        // 7 marketing routes + /faq + /agent-setup + one page per agent guide
-        expect(entries.length).toBe(9 + AGENT_GUIDES.length)
+        // 7 marketing routes + /faq + /compare/coupon-extensions +
+        // /agent-setup + one page per agent guide
+        expect(entries.length).toBe(10 + AGENT_GUIDES.length)
+        expect(urlsOf(entries)).toContain(`${ORIGIN}/compare/coupon-extensions`)
     })
 })
 

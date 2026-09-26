@@ -29,7 +29,7 @@ const checkedOn = formatComparisonDate(COMPARISON_CHECKED_ON)
 const year = COMPARISON_CHECKED_ON.getUTCFullYear()
 
 const title = `Best Coupon Extensions ${year}: Honey vs SimplyCodes | Caramel`
-const description = `Honey, Capital One Shopping, SimplyCodes, Rakuten, Coupert and Caramel compared: price, how each earns money, rewards, accounts and browsers. Checked ${checkedOn}.`
+const description = `Honey, Capital One Shopping, SimplyCodes, Rakuten, Coupert and Caramel compared on price, business model, rewards and browsers. Checked ${checkedOn}.`
 const banner = `${origin}/caramel_banner.png`
 
 export const metadata: Metadata = {
@@ -59,7 +59,7 @@ const sourceOrder = comparisonSourceOrder()
 
 function SourceRefs({ ids }: { ids: ReadonlyArray<ComparisonSourceId> }) {
     return (
-        <span className="whitespace-nowrap">
+        <span>
             {ids.map(id => {
                 const n = sourceOrder.indexOf(id) + 1
                 return (
@@ -129,8 +129,8 @@ export default function CompareCouponExtensionsPage() {
                         <table className="w-full min-w-[56rem] border-collapse text-left text-sm">
                             <caption className="sr-only">
                                 Coupon extensions compared on price, revenue,
-                                rewards, account, browsers and source code, as
-                                checked on {checkedOn}
+                                rewards, account, browsers, source code and
+                                sources, as checked on {checkedOn}
                             </caption>
                             <thead className="bg-gray-50 text-gray-900 dark:bg-darkSurface dark:text-white">
                                 <tr>
@@ -147,13 +147,16 @@ export default function CompareCouponExtensionsPage() {
                                         Rewards
                                     </th>
                                     <th scope="col" className="px-4 py-3">
-                                        Account to use codes
+                                        Account, per its own guide
                                     </th>
                                     <th scope="col" className="px-4 py-3">
                                         Browsers
                                     </th>
                                     <th scope="col" className="px-4 py-3">
                                         Source code
+                                    </th>
+                                    <th scope="col" className="px-4 py-3">
+                                        Sources
                                     </th>
                                 </tr>
                             </thead>
@@ -168,7 +171,6 @@ export default function CompareCouponExtensionsPage() {
                                             <span className="block text-xs font-normal text-gray-500 dark:text-gray-400">
                                                 {row.maker}
                                             </span>
-                                            <SourceRefs ids={row.sources} />
                                         </th>
                                         <td className="px-4 py-3">
                                             {row.price}
@@ -187,6 +189,9 @@ export default function CompareCouponExtensionsPage() {
                                         </td>
                                         <td className="px-4 py-3">
                                             {row.sourceCode}
+                                        </td>
+                                        <td className="px-4 py-3">
+                                            <SourceRefs ids={row.sources} />
                                         </td>
                                     </tr>
                                 ))}
@@ -228,7 +233,7 @@ export default function CompareCouponExtensionsPage() {
                     </h2>
                     <ol className="space-y-4 border-l-2 border-caramel/30 pl-6">
                         {HONEY_TIMELINE.map(event => (
-                            <li key={event.date}>
+                            <li key={`${event.date}-${event.text}`}>
                                 <time
                                     dateTime={event.date}
                                     className="block text-sm font-semibold text-caramel"

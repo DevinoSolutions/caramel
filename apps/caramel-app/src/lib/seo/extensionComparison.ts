@@ -13,15 +13,24 @@
 // answer engines quote it verbatim. Every competitor statement below was read
 // from the vendor's own site, its browser store listing, a court order or a
 // named outlet on COMPARISON_CHECKED_ON, and each row/event cites its sources.
+// Money wording follows the vendors' own hedges ("stores may pay us"). The
+// account column reports only what each vendor's own how-to shows, never
+// that an account is REQUIRED.
+//
 // Deliberately NOT claimed (tempting, unverified on 2026-09-26): that Rakuten's
 // extension was pulled from Chrome (its install link showed "This item is not
-// available" from Canada; could be regional), that Honey or Capital One
-// Shopping REQUIRE an account to apply codes (neither says so), that Honey
-// stopped earning commissions when no code applies, any Honey user-loss or
-// merchant-count figure, other affiliate networks dropping Honey, and PayPal
-// "saying merchants decide which coupons are offered" (that is USA TODAY's
-// paraphrase, not a PayPal quote). Re-check everything before changing the
-// date.
+// available" from Canada; could be regional); that SimplyCodes needs no
+// account (its site blocks automated reads and no store listing says so);
+// Edge builds of SimplyCodes and Coupert (the Edge store page only renders in
+// a browser); that Honey stopped earning commissions when no code applies;
+// any Honey user-loss or merchant-count figure; other affiliate networks
+// dropping Honey. PayPal's "merchants ultimately decide" line is USA TODAY's
+// reported speech, so it is attributed to USA TODAY, never quoted.
+//
+// Vendor help centers lag their products: the first draft of this page took
+// SimplyCodes' token rewards from its help pages, but its August 2026 release
+// notes had already removed them. Prefer release notes and store listings,
+// and re-check every row before changing COMPARISON_CHECKED_ON.
 import { GITHUB_REPO_URL } from '@/lib/brandLinks'
 
 /** The day every competitor fact below was last read from its source. */
@@ -77,20 +86,20 @@ export const COMPARISON_SOURCES = {
         publisher: 'Chrome Web Store',
         url: 'https://chromewebstore.google.com/detail/nenlahapcbofgnanklpelkaejcehkggg',
     },
-    simplyCodesExtension: {
-        title: 'SimplyCodes extension',
-        publisher: 'SimplyCodes',
-        url: 'https://simplycodes.com/extension',
-    },
-    simplyCodesHelp: {
-        title: 'SimplyCodes help',
-        publisher: 'SimplyCodes',
-        url: 'https://simplycodes.com/help',
-    },
     simplyCodesChrome: {
         title: 'SimplyCodes',
         publisher: 'Chrome Web Store',
         url: 'https://chromewebstore.google.com/detail/gfkpklgmocbcbdabfellcnikamdaeajd',
+    },
+    simplyCodesFirefoxVersions: {
+        title: 'SimplyCodes version history (release notes for 2.10.0, August 3, 2026)',
+        publisher: 'Firefox Add-ons',
+        url: 'https://addons.mozilla.org/en-US/firefox/addon/simplycodes/versions/',
+    },
+    simplyCodesSafari: {
+        title: 'SimplyCodes: Coupons & Rewards',
+        publisher: 'Mac App Store',
+        url: 'https://apps.apple.com/us/app/simplycodes-coupons-rewards/id1538885494',
     },
     rakutenHowItWorks: {
         title: 'How Does Rakuten Work?',
@@ -107,10 +116,25 @@ export const COMPARISON_SOURCES = {
         publisher: 'Coupert Help Center',
         url: 'https://help.coupert.com/platform-products/coupert-extension-faq/is-coupert-free-to-use/',
     },
+    coupertMoney: {
+        title: 'How Coupert Makes Money?',
+        publisher: 'Coupert Help Center',
+        url: 'https://help.coupert.com/platform-products/coupert-extension-faq/how-coupert-makes-money/',
+    },
     coupertChrome: {
         title: 'Coupert',
         publisher: 'Chrome Web Store',
         url: 'https://chromewebstore.google.com/detail/mfidniedemcgceagapgdekdbmanojomk',
+    },
+    coupertFirefox: {
+        title: 'Coupert',
+        publisher: 'Firefox Add-ons',
+        url: 'https://addons.mozilla.org/en-US/firefox/addon/coupert/',
+    },
+    coupertSafari: {
+        title: 'Coupert: Automatic Coupons',
+        publisher: 'Mac App Store',
+        url: 'https://apps.apple.com/us/app/coupert-automatic-coupons/id1531442936',
     },
     coupertPureChrome: {
         title: 'Coupert Pure',
@@ -170,7 +194,7 @@ export type ComparedExtension = {
     /** How it earns money, as the vendor itself states it. */
     revenue: string
     rewards: string
-    /** Whether codes work without an account, as the vendor states it. */
+    /** What the vendor's own how-to shows about an account. */
     account: string
     browsers: string
     sourceCode: string
@@ -194,9 +218,9 @@ export const COMPARED_EXTENSIONS: ReadonlyArray<ComparedExtension> = [
         name: 'Honey',
         maker: 'PayPal',
         price: 'Free',
-        revenue: 'Affiliate commissions from merchants',
-        rewards: 'PayPal Rewards',
-        account: 'Only mentioned for rewards',
+        revenue: 'Says merchants may pay it affiliate commissions',
+        rewards: 'PayPal Rewards points',
+        account: 'Signing up is the first step in its help guide',
         browsers:
             'Chrome, Edge, Safari, Opera; Firefox listing last updated February 2021',
         sourceCode: 'Not published',
@@ -213,7 +237,7 @@ export const COMPARED_EXTENSIONS: ReadonlyArray<ComparedExtension> = [
         price: 'Free; no Capital One bank account needed',
         revenue: 'Affiliate commissions from merchants, shared as rewards',
         rewards: 'Capital One Shopping Rewards',
-        account: 'Not stated for codes',
+        account: 'Its promo-code steps include creating an account',
         browsers: 'Chrome, Firefox, Edge, Safari',
         sourceCode: 'Not published',
         sources: ['capitalOneHelp', 'capitalOneChrome'],
@@ -222,15 +246,15 @@ export const COMPARED_EXTENSIONS: ReadonlyArray<ComparedExtension> = [
         name: 'SimplyCodes',
         maker: 'Demand.io',
         price: 'Free',
-        revenue: 'Merchant commissions on sales made with its codes',
-        rewards: 'Tokens (100 tokens = $1)',
-        account: 'Not needed to find and use codes',
-        browsers: 'Chrome, Firefox, Safari, Edge',
+        revenue: 'Says it may earn a commission when you buy through its links',
+        rewards: 'Tokens and prize bags, removed in August 2026',
+        account: 'Not stated in its store listings',
+        browsers: 'Chrome, Firefox, Safari',
         sourceCode: 'Not published',
         sources: [
-            'simplyCodesExtension',
-            'simplyCodesHelp',
             'simplyCodesChrome',
+            'simplyCodesFirefoxVersions',
+            'simplyCodesSafari',
         ],
     },
     {
@@ -239,7 +263,7 @@ export const COMPARED_EXTENSIONS: ReadonlyArray<ComparedExtension> = [
         price: 'Free',
         revenue: 'Store commissions, part shared as Cash Back',
         rewards: 'Rakuten Cash Back',
-        account: 'Only mentioned for Cash Back',
+        account: 'Cash Back is tracked in your Rakuten account',
         browsers: 'Chrome, Edge, Firefox, Safari (as Rakuten lists them)',
         sourceCode: 'Not published',
         sources: ['rakutenHowItWorks', 'rakutenExtension'],
@@ -247,31 +271,39 @@ export const COMPARED_EXTENSIONS: ReadonlyArray<ComparedExtension> = [
     {
         name: 'Coupert',
         maker: 'Coupert',
-        price: 'Free; a separate paid version, Coupert Pure, is also offered',
-        revenue: 'Affiliate commissions from stores, shared as Cash Back',
+        price: 'Free; Coupert Pure is a separate paid version with a 3-day free trial',
+        revenue:
+            'Free extension: affiliate commissions from stores, shared as Cash Back. Coupert Pure says it has no merchant ties',
         rewards: 'Cash Back',
-        account: 'Only mentioned for Cash Back',
-        browsers: 'Chrome, Safari, Firefox, Edge',
+        account: 'Its how-to has you sign up or log in (step 2)',
+        browsers: 'Chrome, Firefox, Safari',
         sourceCode: 'Not published',
-        sources: ['coupertFree', 'coupertChrome', 'coupertPureChrome'],
+        sources: [
+            'coupertFree',
+            'coupertMoney',
+            'coupertChrome',
+            'coupertFirefox',
+            'coupertSafari',
+            'coupertPureChrome',
+        ],
     },
 ]
 
 /** The opening answer: what an answer engine should be able to quote alone. */
 export const COMPARISON_SUMMARY =
-    'Every coupon extension compared here is free to install. What differs is how each makes money, what it asks of you, and whether you can check what it does. Honey, Capital One Shopping, SimplyCodes, Rakuten and Coupert each state that stores pay them commissions on your purchases, and most share part of that back as rewards. Caramel contains no affiliate code, has no rewards program, and is the only one here that publishes its source code.'
+    'Every coupon extension compared here is free to install. What differs is how each makes money, what it asks of you, and whether you can check what it does. Honey, Capital One Shopping, SimplyCodes, Rakuten and Coupert each say stores may pay them commissions when you shop with them, and all but SimplyCodes share part of that back as rewards. Caramel contains no affiliate code, has no rewards program, and is the only one here that publishes its source code.'
 
 export type ComparisonPick = { need: string; answer: string }
 
 /** "Which one should you use?": each answer follows from the table rows. */
 export const COMPARISON_PICKS: ReadonlyArray<ComparisonPick> = [
     {
-        need: 'You want cash back',
-        answer: 'Rakuten, Capital One Shopping, Coupert and Honey share the commissions stores pay them with you as rewards. Caramel has no rewards program.',
+        need: 'You want rewards or cash back',
+        answer: 'Rakuten and Coupert pay Cash Back, and Capital One Shopping and Honey give rewards you redeem later (Capital One Shopping Rewards, PayPal Rewards points). SimplyCodes ended its token rewards in August 2026, and Caramel has no rewards program.',
     },
     {
         need: "You don't want an account",
-        answer: 'SimplyCodes says its codes work without one, and Caramel needs none.',
+        answer: "Caramel needs none. Honey's help guide starts with signing up, Capital One Shopping's promo-code steps include creating an account, and Coupert's how-to has you sign up or log in.",
     },
     {
         need: 'You want to check what the extension does',
@@ -279,7 +311,7 @@ export const COMPARISON_PICKS: ReadonlyArray<ComparisonPick> = [
     },
     {
         need: "You buy through creators' links",
-        answer: "Caramel contains no affiliate code, so a creator's referral link stays untouched. The others earn commissions from stores on your purchases; the timeline below covers the dispute over Honey and creators' links.",
+        answer: "Caramel contains no affiliate code, so it never adds or replaces a referral link or cookie. Honey, Capital One Shopping, SimplyCodes, Rakuten and the free Coupert extension say stores may pay them commissions when you shop with them; Coupert's paid Coupert Pure says it has no merchant ties or cookie overrides. The timeline below covers the lawsuit over Honey and creators' links.",
     },
 ]
 
@@ -294,7 +326,7 @@ export type ComparisonEvent = {
 export const HONEY_TIMELINE: ReadonlyArray<ComparisonEvent> = [
     {
         date: '2024-12-21',
-        text: 'YouTuber MegaLag publishes "Exposing the Honey Influencer Scam", alleging that Honey replaced creators\' affiliate links with its own and showed shoppers limited coupon options at partner stores. PayPal responded that "Honey follows industry rules and practices, including last-click attribution."',
+        text: 'YouTuber MegaLag publishes "Exposing the Honey Influencer Scam", alleging that Honey replaced creators\' affiliate links with its own and showed shoppers limited coupon options at partner stores. PayPal responded that "Honey follows industry rules and practices, including last-click attribution," and told USA TODAY that merchants ultimately decide which coupons are offered through Honey.',
         sources: ['usaToday', 'fortune'],
     },
     {
@@ -309,7 +341,7 @@ export const HONEY_TIMELINE: ReadonlyArray<ComparisonEvent> = [
     },
     {
         date: '2025-11-21',
-        text: "In the creators' class action against PayPal over Honey (Wendover Productions v. PayPal, N.D. Cal., case 5:24-cv-09470), the court dismisses the first amended complaint with leave to amend, because it did not plausibly show an injury traceable to PayPal.",
+        text: 'In a proposed class action brought by creators against PayPal over Honey (Wendover Productions v. PayPal, N.D. Cal., case 5:24-cv-09470), the court dismisses the first amended complaint with leave to amend, because it did not plausibly show an injury traceable to PayPal.',
         sources: ['courtOrder2025'],
     },
     {
@@ -329,20 +361,20 @@ export type ComparisonFaqItem = { question: string; answer: string }
 export const COMPARISON_FAQ: ReadonlyArray<ComparisonFaqItem> = [
     {
         question: 'What is the best coupon extension?',
-        answer: 'It depends on what you want in return. For cash back, Rakuten, Capital One Shopping, Coupert and Honey share merchant commissions with you as rewards. To use codes without an account, SimplyCodes says none is needed and Caramel needs none. For an extension you can audit that never touches affiliate links, Caramel is the only one of these that publishes its source code, and it contains no affiliate code.',
+        answer: 'It depends on what you want in return. For cash back, Rakuten and Coupert pay Cash Back, and Capital One Shopping and Honey give rewards you redeem later. For an extension that needs no account and whose behavior you can check yourself, Caramel publishes its source code and contains no affiliate code.',
     },
     {
         question: 'SimplyCodes vs Honey: which is better?',
-        answer: "They work alike: both are free, both find and apply codes at checkout, and both earn commissions from merchants. SimplyCodes says you don't need an account to use its codes and rewards you in tokens; Honey rewards you through PayPal Rewards and is far larger, with 13,000,000 Chrome Web Store users against SimplyCodes' 90,000 (September 26, 2026). Neither publishes its source code.",
+        answer: "They work alike: both are free, both find coupon codes for you at checkout, and both say they may earn commissions when you shop. Honey pays PayPal Rewards points; SimplyCodes removed its token rewards in August 2026, saying they never made the codes better. Honey is also far larger, with 13,000,000 Chrome Web Store users against SimplyCodes' 90,000 (September 26, 2026). Neither publishes its source code.",
     },
     {
         question: 'Do coupon extensions make money from affiliate links?',
-        answer: 'Most do. Honey, Capital One Shopping, SimplyCodes, Rakuten and Coupert each state on their own site or store listing that stores pay them commissions on sales. Caramel is the exception: its extension contains no affiliate code.',
+        answer: "Most do. Honey, Capital One Shopping, SimplyCodes, Rakuten and the free Coupert extension each say on their own site or store listing that stores may pay them commissions when you shop with them. The exceptions here are Caramel, whose extension contains no affiliate code, and Coupert's paid Coupert Pure, which says it has no merchant ties.",
     },
     {
         question:
             'Is there an alternative to Capital One Shopping that needs no account?',
-        answer: "Yes. SimplyCodes states that you don't need an account to find and use its codes (one is only needed to earn tokens), and Caramel needs no account at all. Capital One Shopping itself doesn't require you to be a Capital One bank customer, and pays its rewards as Capital One Shopping Rewards.",
+        answer: "Yes. Caramel finds and applies coupon codes with no account at all. Capital One Shopping's own promo-code steps include creating an account (you don't need to be a Capital One bank customer), and it pays its rewards as Capital One Shopping Rewards.",
     },
     {
         question: 'Is Honey still available in 2026?',
