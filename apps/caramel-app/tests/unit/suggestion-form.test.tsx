@@ -52,6 +52,15 @@ const foreignHtml404 = () => ({
     },
 })
 
+// The host's catch-all router, which has answered unknown hosts with this
+// since 2026-09-26 (swap drill on the #273 deploy).
+const misdirected421 = () => ({
+    ok: false,
+    status: 421,
+    headers: new Headers({ 'content-type': 'application/json' }),
+    json: async () => ({ error: 'misdirected_request' }),
+})
+
 beforeEach(() => {
     toastMock.success.mockClear()
     toastMock.warning.mockClear()
@@ -187,6 +196,26 @@ describe('SuggestionForm (NF-05)', () => {
                 extra: { recovered: true, attempts: 3, lastStatus: 404 },
             }),
         )
+    })
+
+    it('the catch-all router\'s 421 JSON during a deploy is ridden out too; the shopper never sees "misdirected_request"', async () => {
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValueOnce(misdirected421())
+            .mockResolvedValueOnce({ ok: true, status: 200 })
+        vi.stubGlobal('fetch', fetchMock)
+        render(
+            <SuggestionForm
+                initialValue="https://store.example.com"
+                resetValue={vi.fn()}
+            />,
+        )
+        const input = screen.getByPlaceholderText('https://example.com')
+        fireEvent.submit(input.closest('form') as HTMLFormElement)
+
+        await waitFor(() => expect(toastMock.success).toHaveBeenCalledTimes(1))
+        expect(fetchMock).toHaveBeenCalledTimes(2)
+        expect(toastMock.warning).not.toHaveBeenCalled()
     })
 
     it('a deploy gap that outlasts the retries says so in a sentence and keeps the input (never "enter a store URL")', async () => {

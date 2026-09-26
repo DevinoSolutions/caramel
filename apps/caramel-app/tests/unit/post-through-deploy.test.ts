@@ -22,6 +22,15 @@ describe('isDeployGapAnswer: only answers that did not come from Caramel', () =>
         expect(isDeployGapAnswer(answer(status, type))).toBe(true)
     })
 
+    it("421 is a gap even as JSON: the host's catch-all answers unknown hosts with it", () => {
+        // Verbatim from the swap drill on the #273 deploy (2026-09-26).
+        const misdirected = new Response('{"error":"misdirected_request"}', {
+            status: 421,
+            headers: { 'content-type': 'application/json' },
+        })
+        expect(isDeployGapAnswer(misdirected)).toBe(true)
+    })
+
     it.each([
         [404, 'application/json'],
         [503, 'application/json'],
