@@ -40,8 +40,8 @@ async function openStorePage(page: Page) {
     return { site, requests }
 }
 
-/** Wait for a resource matching `pattern`, then report its URL and when it
- *  started relative to the load event (both on the page's performance clock). */
+/** Wait for a resource matching `pattern`, then report when it started
+ *  relative to the load event (both on the page's performance clock). */
 async function resourceRelativeToLoad(
     page: Page,
     pattern: RegExp,
@@ -68,7 +68,6 @@ async function resourceRelativeToLoad(
             'navigation',
         ) as PerformanceNavigationTiming[]
         return {
-            url: entry?.name ?? '',
             startTime: Math.round(entry?.startTime ?? -1),
             loadEventStart: Math.round(nav.loadEventStart),
         }
@@ -76,6 +75,16 @@ async function resourceRelativeToLoad(
 }
 
 const GTAG_JS = /googletagmanager\.com\/gtag\/js/
+
+/** Whether this deploy has a GA measurement id: providers.tsx renders the
+ *  inline `gtag-init` script only then, from an effect that runs before the
+ *  one stamping html[data-hydrated]. */
+async function gaConfigured(page: Page): Promise<boolean> {
+    await page.locator('html[data-hydrated="true"]').waitFor({
+        state: 'attached',
+    })
+    return (await page.locator('script#gtag-init').count()) > 0
+}
 
 /** A GA4 page_view hit for `path`. GA4 sends single hits as GET query params
  *  and batches as a POST body with one hit per line, each hit carrying the
@@ -108,6 +117,10 @@ function isPageViewFor(request: Request, path: string): boolean {
 test.describe('Analytics scripts load after the page, not with it', () => {
     test('gtag.js is fetched after the load event', async ({ page }) => {
         await openStorePage(page)
+        test.skip(
+            !(await gaConfigured(page)),
+            'no GA measurement id configured here',
+        )
         const t = await resourceRelativeToLoad(page, GTAG_JS, 'gtag.js')
         expect(t.startTime, JSON.stringify(t)).toBeGreaterThanOrEqual(
             t.loadEventStart,
@@ -116,11 +129,11 @@ test.describe('Analytics scripts load after the page, not with it', () => {
 
     test('the store page still sends its GA page_view', async ({ page }) => {
         const { site, requests } = await openStorePage(page)
-        const gtag = await resourceRelativeToLoad(page, GTAG_JS, 'gtag.js')
         test.skip(
-            !new URL(gtag.url).searchParams.get('id'),
+            !(await gaConfigured(page)),
             'no GA measurement id configured here',
         )
+        await resourceRelativeToLoad(page, GTAG_JS, 'gtag.js')
         // The page_view is queued in dataLayer by the inline init before
         // gtag.js arrives; gtag.js must replay it, attributed to this page.
         await expect
