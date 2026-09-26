@@ -26,7 +26,8 @@ if (process.env.NODE_ENV === 'production' && dsn) {
                 ],
             }),
         ],
-        tracesSampleRate: 1,
+        // Same intake bucket as the server's errors: see sentry.common.config.ts.
+        tracesSampleRate: 0.05,
         replaysSessionSampleRate: 0.1,
         replaysOnErrorSampleRate: 1.0,
         debug: false,
