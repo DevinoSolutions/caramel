@@ -6,3 +6,30 @@
 export function jsonLdString(data: unknown): string {
     return JSON.stringify(data).replace(/</g, '\\u003c')
 }
+
+export type FaqPageJsonLd = {
+    '@context': 'https://schema.org'
+    '@type': 'FAQPage'
+    mainEntity: Array<{
+        '@type': 'Question'
+        name: string
+        acceptedAnswer: { '@type': 'Answer'; text: string }
+    }>
+}
+
+/** FAQPage JSON-LD for questions a page ALSO renders visibly: Google only
+ *  honours FAQ markup that matches the page's own text, so build both from
+ *  the same list. */
+export function faqPageJsonLd(
+    items: ReadonlyArray<{ question: string; answer: string }>,
+): FaqPageJsonLd {
+    return {
+        '@context': 'https://schema.org',
+        '@type': 'FAQPage',
+        mainEntity: items.map(item => ({
+            '@type': 'Question',
+            name: item.question,
+            acceptedAnswer: { '@type': 'Answer', text: item.answer },
+        })),
+    }
+}

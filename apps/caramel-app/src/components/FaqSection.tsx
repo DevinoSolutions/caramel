@@ -1,4 +1,7 @@
 import { faqItems } from '@/lib/faqItems'
+import { faqPageJsonLd, jsonLdString } from '@/lib/jsonLd'
+import { COMPARISON_PATH } from '@/lib/seo/extensionComparison'
+import Link from 'next/link'
 import { FaChevronDown } from 'react-icons/fa'
 
 // Deliberately a SERVER component (no 'use client'): AI answer engines and
@@ -10,18 +13,7 @@ import { FaChevronDown } from 'react-icons/fa'
 // array itself (and its claim-integrity ledger) lives in src/lib/faqItems.ts
 // so /llms-full.txt can render the same strings.
 
-const faqStructuredData = {
-    '@context': 'https://schema.org',
-    '@type': 'FAQPage',
-    mainEntity: faqItems.map(item => ({
-        '@type': 'Question',
-        name: item.question,
-        acceptedAnswer: {
-            '@type': 'Answer',
-            text: item.answer,
-        },
-    })),
-}
+const faqStructuredData = faqPageJsonLd(faqItems)
 
 export default function FaqSection(): React.JSX.Element {
     return (
@@ -68,6 +60,16 @@ export default function FaqSection(): React.JSX.Element {
                             </p>
                         </details>
                     ))}
+                    <p className="pt-4 text-center text-base text-gray-600 dark:text-gray-400">
+                        Weighing Caramel against Honey, SimplyCodes or Rakuten?{' '}
+                        <Link
+                            href={COMPARISON_PATH}
+                            className="font-semibold text-caramel hover:underline"
+                        >
+                            See the coupon extensions compared
+                        </Link>
+                        .
+                    </p>
                 </div>
             </div>
 
@@ -77,7 +79,7 @@ export default function FaqSection(): React.JSX.Element {
             <script
                 type="application/ld+json"
                 dangerouslySetInnerHTML={{
-                    __html: JSON.stringify(faqStructuredData),
+                    __html: jsonLdString(faqStructuredData),
                 }}
             />
         </section>

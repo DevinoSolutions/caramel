@@ -1,5 +1,6 @@
 import type { StoreCouponFacts } from '@/lib/couponsRepo'
-import { buildStoreFaq, storeFaqJsonLd } from '@/lib/seo/storeFaq'
+import { faqPageJsonLd } from '@/lib/jsonLd'
+import { buildStoreFaq } from '@/lib/seo/storeFaq'
 import { describe, expect, it } from 'vitest'
 
 // The store page's FAQ (src/lib/seo/storeFaq.ts) states per-store numbers
@@ -126,7 +127,7 @@ describe('buildStoreFaq', () => {
     })
 })
 
-describe('storeFaqJsonLd', () => {
+describe('faqPageJsonLd', () => {
     it('marks up exactly the rendered questions and answers', () => {
         const items = buildStoreFaq({
             base: 'tradeinn.com',
@@ -135,7 +136,7 @@ describe('storeFaqJsonLd', () => {
             topCouponTitle: null,
             uk: false,
         })
-        const jsonLd = storeFaqJsonLd(items)
+        const jsonLd = faqPageJsonLd(items)
         expect(jsonLd['@type']).toBe('FAQPage')
         expect(
             jsonLd.mainEntity.map(q => [q.name, q.acceptedAnswer.text]),

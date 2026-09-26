@@ -22,6 +22,9 @@ export type GrowthEventName =
     | 'install_cta_click'
     | 'crossapp_click'
 
+/** Which page an in-content install CTA sat on (`install_cta_click`). */
+export type InstallCtaPlacement = 'supported_stores' | 'compare_extensions'
+
 export type GrowthEventProperties = {
     prompt_id?: string
     surface?: string
@@ -29,8 +32,7 @@ export type GrowthEventProperties = {
     browser?: string
     store?: string
     target_app?: string
-    /** Which page section an install CTA sat in (`install_cta_click`). */
-    placement?: 'supported_stores'
+    placement?: InstallCtaPlacement
 }
 
 export function trackGrowthEvent(

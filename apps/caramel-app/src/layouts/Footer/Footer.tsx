@@ -5,6 +5,7 @@ import {
     GITHUB_REPO_URL,
     INSTAGRAM_URL,
 } from '@/lib/brandLinks'
+import { COMPARISON_PATH } from '@/lib/seo/extensionComparison'
 import { canAdvertiseInstall } from '@/lib/surface/detectSurface'
 import { useSurface } from '@/lib/surface/SurfaceProvider'
 import { motion } from 'framer-motion'
@@ -27,6 +28,7 @@ const productLinks = [
     { name: 'Store directory', url: '/coupons/stores' },
     { name: 'Sources', url: '/sources' },
     { name: 'FAQ', url: '/faq' },
+    { name: 'Compare extensions', url: COMPARISON_PATH },
     { name: 'For AI agents', url: '/agent-setup' },
 ]
 

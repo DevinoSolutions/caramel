@@ -203,6 +203,57 @@ test.describe('Coupon pages — crawler-visible SEO', () => {
         )
     })
 
+    test('the coupon extension comparison answers in the server HTML, its FAQPage markup matches the visible questions, and the home page links to it', async ({
+        page,
+    }) => {
+        // No catalog read on this page, so nothing here depends on the
+        // context's data. ONE navigation: raw HTML and DOM from one response.
+        const res = await page.goto('/compare/coupon-extensions')
+        expect(res?.status()).toBe(200)
+        const html = await res!.text()
+
+        // The table and the sources are server-rendered, not client-only.
+        expect(html).toContain('id="compare-table-heading"')
+        expect(html).toContain('id="source-1"')
+        const rows = page.locator('tbody th[scope="row"]')
+        await expect(rows).toContainText(['Caramel', 'Honey', 'SimplyCodes'])
+
+        const faq = extractJsonLd(html).find(d => d['@type'] === 'FAQPage') as
+            | {
+                  mainEntity: Array<{
+                      name: string
+                      acceptedAnswer: { text: string }
+                  }>
+              }
+            | undefined
+        expect(faq, 'FAQPage JSON-LD').toBeTruthy()
+        const section = page.locator(
+            'section[aria-labelledby="compare-faq-heading"]',
+        )
+        await expect(section.locator('h3')).toHaveText(
+            faq!.mainEntity.map(q => q.name),
+        )
+        await expect(section.locator('h3 + p')).toHaveText(
+            faq!.mainEntity.map(q => q.acceptedAnswer.text),
+        )
+
+        // Every footnote points at a listed source.
+        const refs = await page
+            .locator('a[href^="#source-"]')
+            .evaluateAll(links => links.map(a => a.getAttribute('href')))
+        expect(refs.length).toBeGreaterThan(0)
+        for (const ref of Array.from(new Set(refs))) {
+            await expect(page.locator(ref!)).toHaveCount(1)
+        }
+
+        // Internal links: the home page's FAQ and the footer both point here.
+        const home = await page.request.get('/')
+        const homeHtml = await home.text()
+        expect(
+            homeHtml.split('href="/compare/coupon-extensions"').length - 1,
+        ).toBeGreaterThanOrEqual(2)
+    })
+
     test('sitemap.xml and robots.txt are served', async ({ page }) => {
         const sitemap = await page.request.get('/sitemap.xml')
         expect(sitemap.status()).toBe(200)

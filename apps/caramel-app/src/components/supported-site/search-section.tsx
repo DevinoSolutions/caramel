@@ -1,10 +1,10 @@
 'use client'
 
+import InstallCallout from '@/components/growth/InstallCallout'
 import Loader from '@/components/Loader'
 import { AnimatePresence, motion } from 'framer-motion'
 import debounce from 'lodash.debounce'
 import { useEffect, useRef, useState } from 'react'
-import InstallCallout from './install-callout'
 import RecentlyAddedSection, {
     type RecentlyAddedStore,
 } from './recently-added-section'
@@ -82,7 +82,11 @@ export default function SearchSection({
                     className="w-full rounded-full border-2 border-caramel/30 bg-white px-6 py-4 text-lg placeholder-gray-400 shadow-md outline-none transition-all focus:border-caramel focus:shadow-lg dark:bg-darkSurface dark:text-white dark:placeholder-gray-500 dark:focus:border-orange-400 sm:text-base"
                 />
 
-                <InstallCallout />
+                <InstallCallout
+                    placement="supported_stores"
+                    lead="Found your store?"
+                    body="Caramel applies the best code for you at checkout. Free and open source."
+                />
 
                 {/* loader */}
                 <AnimatePresence>

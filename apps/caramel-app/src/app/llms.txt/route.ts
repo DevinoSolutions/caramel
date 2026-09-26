@@ -6,6 +6,7 @@ import {
     SAFARI_APP_STORE_URL,
 } from '@/lib/brandLinks'
 import { BASE_URL } from '@/lib/env.client'
+import { COMPARISON_PATH } from '@/lib/seo/extensionComparison'
 
 // Deliberately NOT a `withRoute` handler: withRoute owns the /api surface
 // (CORS, rate limits, origin gates, zod bodies). This is a static public text
@@ -42,6 +43,9 @@ const LLMS_TXT = `# Caramel
   Firefox, Edge and Safari, what the installed extension does on each, and
   other Devino apps.
 - [FAQ](${origin}/faq): the questions shoppers actually ask, answered.
+- [Coupon extensions compared](${origin}${COMPARISON_PATH}): Honey, Capital
+  One Shopping, SimplyCodes, Rakuten, Coupert and Caramel side by side (price,
+  how each makes money, rewards, accounts, browsers), every claim sourced.
 - [Agent setup](${origin}/agent-setup): onboard an AI coding agent; the
   machine-readable instructions are at ${origin}/agent-setup/prompt.md.
 - [Coupon API](${origin}/api/coupons): public, read-only JSON; query with

@@ -5,8 +5,8 @@ import StoreNeighbours from '@/components/coupons/store-neighbours'
 import { attachSignals } from '@/lib/couponSignals'
 import { type StoreCouponFacts, listStoreCoupons } from '@/lib/couponsRepo'
 import { BASE_URL } from '@/lib/env.client'
-import { jsonLdString } from '@/lib/jsonLd'
-import { buildStoreFaq, storeFaqJsonLd } from '@/lib/seo/storeFaq'
+import { faqPageJsonLd, jsonLdString } from '@/lib/jsonLd'
+import { buildStoreFaq } from '@/lib/seo/storeFaq'
 import { evaluateStorePageIndexability } from '@/lib/seo/storeIndexability'
 import { isUkStoreDomain, resolveStoreDomain } from '@/lib/storeDomain'
 import type { Coupon } from '@/types/coupon'
@@ -368,7 +368,7 @@ export default async function StoreCouponsPage({
                     type="application/ld+json"
                     suppressHydrationWarning
                     dangerouslySetInnerHTML={{
-                        __html: jsonLdString(storeFaqJsonLd(faqItems)),
+                        __html: jsonLdString(faqPageJsonLd(faqItems)),
                     }}
                 />
             )}

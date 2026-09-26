@@ -137,28 +137,3 @@ export function buildStoreFaq(input: StoreFaqInput): StoreFaqItem[] {
 
     return items
 }
-
-type FaqPageJsonLd = {
-    '@context': 'https://schema.org'
-    '@type': 'FAQPage'
-    mainEntity: Array<{
-        '@type': 'Question'
-        name: string
-        acceptedAnswer: { '@type': 'Answer'; text: string }
-    }>
-}
-
-/** FAQPage JSON-LD for the same items the page renders. */
-export function storeFaqJsonLd(
-    items: ReadonlyArray<StoreFaqItem>,
-): FaqPageJsonLd {
-    return {
-        '@context': 'https://schema.org',
-        '@type': 'FAQPage',
-        mainEntity: items.map(item => ({
-            '@type': 'Question',
-            name: item.question,
-            acceptedAnswer: { '@type': 'Answer', text: item.answer },
-        })),
-    }
-}
