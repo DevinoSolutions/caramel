@@ -4,10 +4,12 @@ import GrowthPromptHost from '@/components/growth/GrowthPromptHost'
 import SupportDialog from '@/components/support/SupportDialog'
 import Layout from '@/layouts/Layout/Layout'
 import PostHogClientProvider from '@/lib/analytics/PostHogClientProvider'
+import { runAfterLoadWhenIdle } from '@/lib/analytics/runAfterLoadWhenIdle'
 import { ThemeContext } from '@/lib/contexts'
 import * as gtag from '@/lib/gtag'
 import { SurfaceProvider } from '@/lib/surface/SurfaceProvider'
 import Hotjar from '@hotjar/browser'
+import * as Sentry from '@sentry/nextjs'
 import { usePathname } from 'next/navigation'
 import Script from 'next/script'
 import { ReactNode, useEffect, useMemo, useState } from 'react'
@@ -73,12 +75,22 @@ export default function Providers({ children }: { children: ReactNode }) {
         handleRouteChange(pathname || '/')
     }, [pathname])
 
+    // Hotjar waits for the load event + an idle main thread
+    // (lib/analytics/runAfterLoadWhenIdle.ts has the measurement).
     useEffect(() => {
-        if (process.env.NODE_ENV === 'production') {
+        if (process.env.NODE_ENV !== 'production') return
+        return runAfterLoadWhenIdle(() => {
             try {
                 Hotjar.init(6369129, 6)
-            } catch {}
-        }
+            } catch (error) {
+                // Analytics must never break the page, but must not fail
+                // silently either.
+                console.error('[hotjar] init failed', error)
+                Sentry.captureException(error, {
+                    tags: { operation: 'hotjar_init' },
+                })
+            }
+        })
     }, [])
 
     const switchTheme = () => {
@@ -123,9 +135,13 @@ export default function Providers({ children }: { children: ReactNode }) {
             {/* App-level support modal — opened via the module-level registry
                 (promptSupportOnFailure) without prop drilling. */}
             <SupportDialog />
-            {/* GA */}
+            {/* GA. gtag.js (173 KB) loads after the load event, when the
+                main thread is idle: fetched early it competed with the app's
+                own JS on slow connections. The inline init below still runs
+                right after hydration, so window.gtag exists for pageView()
+                and every command queues in dataLayer until gtag.js loads. */}
             <Script
-                strategy="afterInteractive"
+                strategy="lazyOnload"
                 src={`https://www.googletagmanager.com/gtag/js?id=${gtag.GA_TRACKING_ID}`}
             />
             <Script id="gtag-init" strategy="afterInteractive">
