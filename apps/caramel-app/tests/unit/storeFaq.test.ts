@@ -34,14 +34,14 @@ describe('buildStoreFaq', () => {
             'Does Caramel change affiliate links when I shop at tradeinn.com?',
         ])
         expect(answerTo(items, /best/)).toContain(
-            'The biggest discount among the 17 active tradeinn.com coupon codes Caramel lists is 20% off.',
+            'The biggest percent-off discount among the 17 active tradeinn.com coupon codes Caramel lists is 20% off.',
         )
         expect(answerTo(items, /best/)).toContain(
             'The one Caramel ranks first is "15% Off Your Cart".',
         )
-        // 17 - 12 - 3 = 2 offers without an amount.
+        // 17 - 12 - 3 = 2 other offers.
         expect(answerTo(items, /How many/)).toBe(
-            "Caramel's catalog lists 17 active coupon codes for tradeinn.com: 12 percent-off codes (up to 20% off), 3 fixed-amount codes and 2 offers without a stated amount. The list was last updated on September 24, 2026; codes that stop working are retired as they are found.",
+            "Caramel's catalog lists 17 active coupon codes for tradeinn.com: 12 percent-off codes (up to 20% off), 3 fixed-amount codes and 2 other offers. The list was last updated on September 24, 2026; codes that stop working are retired as they are found.",
         )
     })
 
@@ -106,7 +106,7 @@ describe('buildStoreFaq', () => {
             uk: false,
         })
         expect(answerTo(items, /best/)).toContain(
-            'none of them states a discount amount up front.',
+            'none of them states a usable discount amount up front.',
         )
         expect(answerTo(items, /How many/)).toBe(
             "Caramel's catalog lists 2 active coupon codes for example.com.",

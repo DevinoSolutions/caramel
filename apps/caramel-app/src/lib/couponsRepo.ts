@@ -105,11 +105,13 @@ const rankingOrderSql = () => Prisma.sql`rating DESC, created_at DESC, id DESC`
 const verifiedCensusSql = () => Prisma.sql`status = 'valid'`
 
 /**
- * A percent-off coupon, by the SAME rule coupon-card.tsx badges one "N% off":
- * discount_type PERCENTAGE (the read boundary upper-cases the producer's
- * open vocabulary, so the SQL does too) with a real amount. Amounts of 100 or
- * more are left out: "100% off" is a producer error, not a claim to repeat.
- * Every other coupon WITH an amount is badged as a fixed amount off.
+ * The store FAQ's coupon kinds (storeFaq.ts), close to coupon-card.tsx's
+ * badge rule. Percent-off: discount_type PERCENTAGE (the read boundary
+ * upper-cases the producer's open vocabulary, so the SQL does too) with an
+ * amount above 0 and below 100. The card badges any PERCENTAGE amount "N%",
+ * but "100% off" is a producer error, not a claim to repeat, so those rows
+ * fall into the FAQ's "other offers". Fixed amount: any other type WITH an
+ * amount, which the card badges "$N".
  */
 const percentOffSql = () =>
     Prisma.sql`UPPER(discount_type) = 'PERCENTAGE' AND discount_amount > 0 AND discount_amount < 100`

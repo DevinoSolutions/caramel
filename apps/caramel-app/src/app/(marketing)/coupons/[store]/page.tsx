@@ -285,9 +285,10 @@ export default async function StoreCouponsPage({
             {/* AEO citable prose — server-rendered visible copy (AI engines
                 extract visible HTML, not JSON-LD). The count is the same
                 server-side `total` the list uses; the mechanics paragraph is
-                generic and truthful (no per-store invented facts). No
-                freshness/"last verified" date is rendered because no such
-                verification timestamp exists in the row data. */}
+                generic and truthful (no per-store invented facts). The FAQ
+                below states the store's newest updated_at as "last updated"
+                (storeFaq.ts), never a "last verified" date: no verification
+                timestamp exists in the row data. */}
             <section
                 aria-labelledby="how-caramel-works-heading"
                 className="mx-auto max-w-4xl pb-24 pt-16"

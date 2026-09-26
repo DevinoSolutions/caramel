@@ -162,9 +162,12 @@ test.describe('Coupon pages — crawler-visible SEO', () => {
         // (listTopSites, so it has codes) and every expectation is read off
         // the page itself, never a catalog value named here.
         const site = await firstLinkedStoreDomain(page)
-        const res = await page.request.get(`/coupons/${site}`)
-        expect(res.status()).toBe(200)
-        const html = await res.text()
+        // ONE navigation: the raw HTML and the rendered DOM below come from
+        // the same response, so a catalog push between two requests (the
+        // deployed lanes serve live data) can't make them disagree.
+        const res = await page.goto(`/coupons/${site}`)
+        expect(res?.status()).toBe(200)
+        const html = await res!.text()
 
         // Server-rendered, not client-only: answer engines read raw HTML.
         expect(html).toContain('id="store-faq-heading"')
@@ -189,7 +192,6 @@ test.describe('Coupon pages — crawler-visible SEO', () => {
         )
 
         // What a shopper sees is what the markup claims, question by question.
-        await page.goto(`/coupons/${site}`)
         const section = page.locator(
             'section[aria-labelledby="store-faq-heading"]',
         )

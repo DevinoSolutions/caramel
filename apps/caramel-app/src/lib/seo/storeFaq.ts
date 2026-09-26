@@ -58,7 +58,7 @@ export function buildStoreFaq(input: StoreFaqInput): StoreFaqItem[] {
     const bestParts: string[] = []
     if (facts.bestPercentOff !== null) {
         bestParts.push(
-            `The biggest discount among the ${plural(total, `active ${base} ${noun}`, `active ${base} ${nouns}`)} Caramel lists is ${formatPercent(facts.bestPercentOff)} off.`,
+            `The biggest percent-off discount among the ${plural(total, `active ${base} ${noun}`, `active ${base} ${nouns}`)} Caramel lists is ${formatPercent(facts.bestPercentOff)} off.`,
         )
     } else if (facts.fixedAmountCodes > 0) {
         const fixed = facts.fixedAmountCodes
@@ -67,7 +67,7 @@ export function buildStoreFaq(input: StoreFaqInput): StoreFaqItem[] {
         )
     } else {
         bestParts.push(
-            `Caramel lists ${plural(total, `active ${base} ${noun}`, `active ${base} ${nouns}`)}; none of them states a discount amount up front.`,
+            `Caramel lists ${plural(total, `active ${base} ${noun}`, `active ${base} ${nouns}`)}; none of them states a usable discount amount up front.`,
         )
     }
     if (topCouponTitle) {
@@ -101,11 +101,9 @@ export function buildStoreFaq(input: StoreFaqInput): StoreFaqItem[] {
     }
     if (otherOffers > 0 && breakdown.length > 0) {
         breakdown.push(
-            plural(
-                otherOffers,
-                'offer without a stated amount',
-                'offers without a stated amount',
-            ),
+            // Codes with no amount, and percent-off amounts of 100 or more
+            // (a producer error, see couponsRepo.ts percentOffSql).
+            plural(otherOffers, 'other offer', 'other offers'),
         )
     }
     const lastPart = breakdown.pop()
@@ -134,7 +132,7 @@ export function buildStoreFaq(input: StoreFaqInput): StoreFaqItem[] {
     // 4. The trust question (claims verified for the landing FAQ).
     items.push({
         question: `Does Caramel change affiliate links when I shop at ${base}?`,
-        answer: 'No. Caramel contains no affiliate code: it never adds, replaces or removes affiliate links, so whoever referred you to the store keeps the credit. The extension and the website are open source under the AGPL-3.0 license, so anyone can check this.',
+        answer: 'No. The Caramel extension contains no affiliate code: it never adds, replaces or removes affiliate links, so whoever referred you to the store keeps the credit. The extension and the website are open source under the AGPL-3.0 license, so anyone can check this.',
     })
 
     return items
