@@ -91,7 +91,8 @@ const PrivacyPolicy = () => {
                         </li>
                         <li className="flex items-start gap-3">
                             <span className="mt-2 h-2 w-2 flex-shrink-0 rounded-full bg-caramel"></span>
-                            PostHog — usage analytics on our website, including
+                            PostHog — usage analytics on our website, linked to
+                            your account when you are signed in, including
                             session recordings with every form field masked.
                         </li>
                         <li className="flex items-start gap-3">

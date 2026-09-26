@@ -147,11 +147,22 @@ test.describe('Analytics scripts load after the page, not with it', () => {
     })
 
     test('no Hotjar script loads', async ({ page }) => {
+        // Only discriminating against a production build: Hotjar's init was
+        // guarded by NODE_ENV === 'production', so the PR lane (`next dev`)
+        // passes either way. The e2e-push lane and the post-deploy run
+        // against prod are the ones that would catch it coming back.
         const { requests } = await openStorePage(page)
-        // Hotjar used to initialise in an effect right after hydration.
+        // Hotjar used to initialise in an effect right after hydration; the
+        // idle wait also covers a tag deferred like gtag.js (lazyOnload).
         await page.locator('html[data-hydrated="true"]').waitFor({
             state: 'attached',
         })
+        await page.evaluate(
+            () =>
+                new Promise(resolve =>
+                    requestIdleCallback(resolve, { timeout: 5_000 }),
+                ),
+        )
         const hotjar = [
             ...requests.map(request => request.url()),
             ...(await page.evaluate(() => [
