@@ -115,6 +115,19 @@ const serverObjectSchema = z.object({
     // downgrade) or as "on" (mail nobody asked for).
     SITE_SUGGESTIONS_AUTO_NOTIFY: z.enum(['true', 'false']).default('false'),
     OPENROUTER_API_KEY: z.string().optional(),
+    // Base URL of the OpenAI-compatible chat API that openrouter.ts POSTs
+    // `${OPENROUTER_API_URL}/chat/completions` to. Unset (or blank) =
+    // OpenRouter itself, byte-identical to the old hardcoded URL. Set to the
+    // Devino proxy (https://proxyai.devino.ca/v1) to route the classifier
+    // there; OPENROUTER_API_KEY and OPENROUTER_MODEL must then be a proxy key
+    // and a proxy pin. Trailing slashes are stripped; a non-URL fails boot.
+    OPENROUTER_API_URL: z
+        .string()
+        .optional()
+        .transform(v =>
+            (v?.trim() || 'https://openrouter.ai/api/v1').replace(/\/+$/, ''),
+        )
+        .pipe(z.url()),
     OPENROUTER_MODEL: z.string().default('anthropic/claude-haiku-4.5'),
     API_ENCRYPTION_ENABLED: z.string().optional(),
     // Which PostHog project this deploy's SERVER-side captures target (the
