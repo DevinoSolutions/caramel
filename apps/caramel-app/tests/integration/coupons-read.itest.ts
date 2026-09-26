@@ -4,6 +4,7 @@ import {
     listActiveSources,
     listCoupons,
     listNeighbourStoreRows,
+    listStoreCoupons,
     listStoreSitemapEntries,
     listSupportedStoreConfigs,
     searchSupportedSites,
@@ -241,6 +242,67 @@ describe('listStoreSitemapEntries — per-site visible aggregates for the sitema
 
         // LIMIT is bound (the sitemap's 5000 cap is a real bound, not decoration).
         expect(await listStoreSitemapEntries(2)).toHaveLength(2)
+    })
+})
+
+describe('listStoreCoupons — the store page count and its FAQ facts in one aggregate (real pg :58005)', () => {
+    it('counts percent-off and fixed-amount codes by the coupon-card badge rule, and agrees with listCoupons and the sitemap', async () => {
+        // codecademy.com is written by no other suite. Its visible seed rows
+        // mix upper-case 'PERCENTAGE' rows with a lower-case 'fixed' row
+        // (PROMO7, $7 off), so the aggregate's UPPER() rule runs for real.
+        const { total, facts } = await listStoreCoupons('codecademy.com', 5)
+
+        // The expected facts, derived independently in JS from the rows
+        // listCoupons serves (discount_type already upper-normalized there).
+        const { coupons } = await listCoupons({
+            baseSite: 'codecademy.com',
+            limit: 500,
+            skip: 0,
+        })
+        const hasAmount = (c: (typeof coupons)[number]) =>
+            c.discount_amount !== null && c.discount_amount > 0
+        const percentOff = coupons.filter(
+            c =>
+                c.discount_type === 'PERCENTAGE' &&
+                hasAmount(c) &&
+                c.discount_amount! < 100,
+        )
+        expect(total).toBe(coupons.length)
+        expect(facts.percentOffCodes).toBe(percentOff.length)
+        expect(facts.fixedAmountCodes).toBe(
+            coupons.filter(
+                c => c.discount_type !== 'PERCENTAGE' && hasAmount(c),
+            ).length,
+        )
+        expect(facts.bestPercentOff).toBe(
+            Math.max(...percentOff.map(c => c.discount_amount!)),
+        )
+        // Seed-pinned: LEARN40 is the best, PROMO7 the one fixed-amount code.
+        expect(facts.bestPercentOff).toBe(40)
+        expect(facts.fixedAmountCodes).toBe(1)
+
+        // The "last updated" date is the sitemap's lastModified for the store.
+        const sitemapRow = (await listStoreSitemapEntries(5000)).find(
+            r => r.site === 'codecademy.com',
+        )
+        expect(facts.lastUpdated).toBeInstanceOf(Date)
+        expect(facts.lastUpdated!.getTime()).toBe(
+            sitemapRow!.last_updated.getTime(),
+        )
+    })
+
+    it('returns zero facts and nulls, not a parse error, for a store with no visible codes', async () => {
+        const { total, facts } = await listStoreCoupons(
+            'no-such-store.example',
+            5,
+        )
+        expect(total).toBe(0)
+        expect(facts).toEqual({
+            percentOffCodes: 0,
+            bestPercentOff: null,
+            fixedAmountCodes: 0,
+            lastUpdated: null,
+        })
     })
 })
 

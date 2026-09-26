@@ -115,6 +115,21 @@ export const TotalCountRowSchema = z.object({
     total: z.number(),
 })
 
+/** [store]/page.tsx's count, with the store facts its FAQ is written from
+ *  (src/lib/seo/storeFaq.ts) folded into the SAME aggregate so the page
+ *  still scans the store's rows once. `best_percent_off` is null when the
+ *  store has no percent-off code; `last_updated` is null only when the store
+ *  has no visible rows at all (MAX over nothing). `discount_amount` is
+ *  float8 and `updated_at` a timestamp, so $queryRaw hands back a JS number
+ *  and a Date — no coercion (z.coerce.number() would turn a NULL into 0). */
+export const StoreCouponAggregateRowSchema = z.object({
+    total: z.number(),
+    percent_off_codes: z.number(),
+    best_percent_off: z.number().nullable(),
+    fixed_amount_codes: z.number(),
+    last_updated: z.date().nullable(),
+})
+
 /** coupons/stats/route.ts's total+expired aggregate. */
 export const StatsRowSchema = z.object({
     total: z.number(),

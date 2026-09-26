@@ -69,6 +69,18 @@ beforeEach(() => {
     capturedSourceCreates = []
 })
 
+/** The store page's count row: the total plus the FAQ facts folded into the
+ *  same aggregate (couponsDb.ts StoreCouponAggregateRowSchema). */
+function storeAggregateRow(total: number) {
+    return {
+        total,
+        percent_off_codes: total,
+        best_percent_off: total > 0 ? 10 : null,
+        fixed_amount_codes: 0,
+        last_updated: total > 0 ? new Date('2026-09-24T12:00:00Z') : null,
+    }
+}
+
 const couponFixture = {
     id: 42,
     code: 'SAVE10',
@@ -132,7 +144,7 @@ describe('listCoupons', () => {
             sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
             rows,
         )
-        mockRows(sql => sql.includes('COUNT(*)'), [{ total: 4 }])
+        mockRows(sql => sql.includes('COUNT(*)'), [storeAggregateRow(4)])
 
         for (const read of [
             () => listCoupons({ limit: 10, skip: 0 }),
@@ -341,7 +353,10 @@ describe('store-matching reads bind the LOWERCASE base (site column is stored lo
             sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
             [],
         )
-        mockRows(sql => sql.includes('COUNT(*)::int AS total'), [{ total: 0 }])
+        mockRows(
+            sql => sql.includes('COUNT(*)::int AS total'),
+            [storeAggregateRow(0)],
+        )
 
         await listStoreCoupons('eNasco.com', 5)
 

@@ -4,6 +4,7 @@ import { expect, test } from '@playwright/test'
 // and deployed, no generated prisma client) and this module is pure — no
 // `@/` alias, no prisma, no env.
 import { resolveStoreDomain } from '../src/lib/storeDomain'
+import { firstLinkedStoreDomain } from './support/stores'
 
 test.describe('SEO & Accessibility Basics', () => {
     test('home page has correct title', async ({ page }) => {
@@ -152,6 +153,52 @@ test.describe('Coupon pages — crawler-visible SEO', () => {
         // Server-rendered internal links to other store pages (orphan-page
         // fix) — the popular-stores block must be in the raw HTML.
         expect(html).toContain('Popular coupon stores')
+    })
+
+    test('a store page answers its FAQ in the server HTML, and the FAQPage markup matches the visible questions', async ({
+        page,
+    }) => {
+        // Deployment-safe: the store comes from the site's own links
+        // (listTopSites, so it has codes) and every expectation is read off
+        // the page itself, never a catalog value named here.
+        const site = await firstLinkedStoreDomain(page)
+        const res = await page.request.get(`/coupons/${site}`)
+        expect(res.status()).toBe(200)
+        const html = await res.text()
+
+        // Server-rendered, not client-only: answer engines read raw HTML.
+        expect(html).toContain('id="store-faq-heading"')
+        const jsonLd = extractJsonLd(html)
+        const faq = jsonLd.find(d => d['@type'] === 'FAQPage') as
+            | {
+                  mainEntity: Array<{
+                      name: string
+                      acceptedAnswer: { text: string }
+                  }>
+              }
+            | undefined
+        expect(faq, 'FAQPage JSON-LD').toBeTruthy()
+        const itemList = jsonLd.find(d => d['@type'] === 'ItemList')
+        const total = Number(itemList!.numberOfItems)
+        expect(total).toBeGreaterThan(0)
+
+        // The count the FAQ states is the count the page lists.
+        const howMany = faq!.mainEntity.find(q => q.name.startsWith('How many'))
+        expect(howMany!.acceptedAnswer.text).toContain(
+            `lists ${total.toLocaleString('en-US')} active `,
+        )
+
+        // What a shopper sees is what the markup claims, question by question.
+        await page.goto(`/coupons/${site}`)
+        const section = page.locator(
+            'section[aria-labelledby="store-faq-heading"]',
+        )
+        await expect(section.locator('h3')).toHaveText(
+            faq!.mainEntity.map(q => q.name),
+        )
+        await expect(section.locator('p')).toHaveText(
+            faq!.mainEntity.map(q => q.acceptedAnswer.text),
+        )
     })
 
     test('sitemap.xml and robots.txt are served', async ({ page }) => {

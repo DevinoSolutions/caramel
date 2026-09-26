@@ -3,9 +3,10 @@ import PopularStores from '@/components/coupons/popular-stores'
 import StoreFavoriteStar from '@/components/coupons/store-favorite-star'
 import StoreNeighbours from '@/components/coupons/store-neighbours'
 import { attachSignals } from '@/lib/couponSignals'
-import { listStoreCoupons } from '@/lib/couponsRepo'
+import { type StoreCouponFacts, listStoreCoupons } from '@/lib/couponsRepo'
 import { BASE_URL } from '@/lib/env.client'
 import { jsonLdString } from '@/lib/jsonLd'
+import { buildStoreFaq, storeFaqJsonLd } from '@/lib/seo/storeFaq'
 import { evaluateStorePageIndexability } from '@/lib/seo/storeIndexability'
 import { isUkStoreDomain, resolveStoreDomain } from '@/lib/storeDomain'
 import type { Coupon } from '@/types/coupon'
@@ -35,13 +36,25 @@ function getBaseDomain(raw: string): string {
 
 type StoreParams = { store: string }
 
+const NO_FACTS: StoreCouponFacts = {
+    percentOffCodes: 0,
+    bestPercentOff: null,
+    fixedAmountCodes: 0,
+    lastUpdated: null,
+}
+
 // cache(): generateMetadata needs the coupon total too (for the zero-coupon
 // noindex below), and React request-level caching makes that share ONE catalog
 // read with the page body instead of doubling every store-page query.
 const fetchStoreCoupons = cache(async (storeParam: string) => {
     const base = getBaseDomain(storeParam)
     if (!base) {
-        return { coupons: [] as Coupon[], total: 0, base: storeParam }
+        return {
+            coupons: [] as Coupon[],
+            total: 0,
+            facts: NO_FACTS,
+            base: storeParam,
+        }
     }
 
     // parseCouponRows's output (CouponListRow) is a strict superset of
@@ -56,9 +69,9 @@ const fetchStoreCoupons = cache(async (storeParam: string) => {
     // OUR Postgres) onto each row so the SSR HTML and the client fetch agree —
     // the store page must attach it too, or its server-rendered cards would
     // never show "worked Xh ago". Empty signals → lastWorkedAt:null (unshown).
-    const { coupons, total } = await listStoreCoupons(base, PAGE_SIZE)
+    const { coupons, total, facts } = await listStoreCoupons(base, PAGE_SIZE)
     const couponsWithSignals = await attachSignals(coupons)
-    return { coupons: couponsWithSignals as Coupon[], total, base }
+    return { coupons: couponsWithSignals as Coupon[], total, facts, base }
 })
 
 export async function generateMetadata({
@@ -187,12 +200,24 @@ export default async function StoreCouponsPage({
         notFound()
     }
 
-    const { coupons, total, base } = await fetchStoreCoupons(storeParam)
+    const { coupons, total, facts, base } = await fetchStoreCoupons(storeParam)
     // The body speaks the same vocabulary as the title (see generateMetadata):
     // Google rewrites titles from the h1, and "discount code" must appear in
     // the visible page for a UK store to be relevant to the search.
     const uk = isUkStoreDomain(base)
     const codeNoun = uk ? 'discount' : 'coupon'
+    // Per-store questions answered from the catalog read above (see
+    // storeFaq.ts for what may and may not be claimed). Empty when the store
+    // has no active codes, and for a slug that names no store.
+    const faqItems = base
+        ? buildStoreFaq({
+              base,
+              total,
+              facts,
+              topCouponTitle: coupons[0]?.title ?? null,
+              uk,
+          })
+        : []
 
     // Same normalized URL the canonical uses — structured data pointing at a
     // slug variant would contradict the canonical it sits next to.
@@ -290,6 +315,34 @@ export default async function StoreCouponsPage({
                     shopper.
                 </p>
             </section>
+            {faqItems.length > 0 && (
+                // Visible questions and answers, not a collapsed accordion:
+                // answer engines quote visible text, and FAQPage markup must
+                // match what the page shows.
+                <section
+                    aria-labelledby="store-faq-heading"
+                    className="mx-auto max-w-4xl pb-16"
+                >
+                    <h2
+                        id="store-faq-heading"
+                        className="mb-6 text-2xl font-bold tracking-tight text-gray-900 dark:text-white"
+                    >
+                        {base} {codeNoun} code questions
+                    </h2>
+                    <div className="space-y-6">
+                        {faqItems.map(item => (
+                            <div key={item.question}>
+                                <h3 className="mb-2 text-lg font-semibold text-gray-900 dark:text-white">
+                                    {item.question}
+                                </h3>
+                                <p className="leading-relaxed text-gray-600 dark:text-gray-400">
+                                    {item.answer}
+                                </p>
+                            </div>
+                        ))}
+                    </div>
+                </section>
+            )}
             <PopularStores currentSite={base} />
             {/* Alphabetical neighbours + this store's directory letter page:
                 the crawl chain that reaches every store page (PopularStores
@@ -309,6 +362,15 @@ export default async function StoreCouponsPage({
                     __html: jsonLdString(breadcrumbData),
                 }}
             />
+            {faqItems.length > 0 && (
+                <script
+                    type="application/ld+json"
+                    suppressHydrationWarning
+                    dangerouslySetInnerHTML={{
+                        __html: jsonLdString(storeFaqJsonLd(faqItems)),
+                    }}
+                />
+            )}
         </main>
     )
 }

@@ -42,6 +42,18 @@ beforeEach(() => {
     rules = []
 })
 
+/** The store page's count row: the total plus the FAQ facts folded into the
+ *  same aggregate (couponsDb.ts StoreCouponAggregateRowSchema). */
+function storeAggregateRow(total: number) {
+    return {
+        total,
+        percent_off_codes: total,
+        best_percent_off: total > 0 ? 10 : null,
+        fixed_amount_codes: 0,
+        last_updated: total > 0 ? new Date('2026-09-24T12:00:00Z') : null,
+    }
+}
+
 const couponFixture = {
     id: 42,
     code: 'SAVE10',
@@ -64,7 +76,10 @@ describe('StoreCouponsPage — CouponListRow + TotalCountRow', () => {
             sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
             [couponFixture],
         )
-        mockRows(sql => sql.includes('COUNT(*)::int AS total'), [{ total: 1 }])
+        mockRows(
+            sql => sql.includes('COUNT(*)::int AS total'),
+            [storeAggregateRow(1)],
+        )
 
         const mainEl = (await StoreCouponsPage({
             params: { store: 'example.com' },
@@ -152,12 +167,15 @@ describe('StoreCouponsPage — CouponListRow + TotalCountRow', () => {
         expect(couponsSectionEl.props.initialTotal).toBe(0)
     })
 
-    it('renders a BreadcrumbList script alongside the ItemList (second ld+json)', async () => {
+    it('renders BreadcrumbList and FAQPage scripts alongside the ItemList', async () => {
         mockRows(
             sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
             [couponFixture],
         )
-        mockRows(sql => sql.includes('COUNT(*)::int AS total'), [{ total: 1 }])
+        mockRows(
+            sql => sql.includes('COUNT(*)::int AS total'),
+            [storeAggregateRow(1)],
+        )
 
         const mainEl = (await StoreCouponsPage({
             params: { store: 'example.com' },
@@ -170,7 +188,7 @@ describe('StoreCouponsPage — CouponListRow + TotalCountRow', () => {
                 dangerouslySetInnerHTML: { __html: string }
             }> => (c as ReactElement)?.type === 'script',
         )
-        expect(scripts).toHaveLength(2)
+        expect(scripts).toHaveLength(3)
         const breadcrumb = JSON.parse(
             // oxlint-disable-next-line no-underscore-dangle -- React's own prop name
             scripts[1]!.props.dangerouslySetInnerHTML.__html,
@@ -180,6 +198,36 @@ describe('StoreCouponsPage — CouponListRow + TotalCountRow', () => {
         expect(breadcrumb.itemListElement[1].item).toBe(`${BASE_URL}/coupons`)
         // The final crumb is the current page: name only, no `item` URL.
         expect(breadcrumb.itemListElement[2].item).toBeUndefined()
+
+        // The FAQPage markup states the numbers the aggregate row carries.
+        const faq = JSON.parse(
+            // oxlint-disable-next-line no-underscore-dangle -- React's own prop name
+            scripts[2]!.props.dangerouslySetInnerHTML.__html,
+        )
+        expect(faq['@type']).toBe('FAQPage')
+        expect(faq.mainEntity).toHaveLength(4)
+        expect(faq.mainEntity[1].acceptedAnswer.text).toContain(
+            'lists 1 active coupon code for example.com: 1 percent-off code (up to 10% off).',
+        )
+    })
+
+    it('a store with no active codes gets no FAQ section and no FAQPage markup', async () => {
+        mockRows(
+            sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
+            [],
+        )
+        mockRows(
+            sql => sql.includes('COUNT(*)::int AS total'),
+            [storeAggregateRow(0)],
+        )
+
+        const mainEl = (await StoreCouponsPage({
+            params: { store: 'example.com' },
+        })) as ReactElement<{ children: ReactElement[] }>
+
+        const pageJson = JSON.stringify(mainEl)
+        expect(pageJson).not.toContain('store-faq-heading')
+        expect(pageJson).not.toContain('FAQPage')
     })
 
     it('a UK store page body uses the same discount-code wording as its title', async () => {
@@ -187,7 +235,10 @@ describe('StoreCouponsPage — CouponListRow + TotalCountRow', () => {
             sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
             [couponFixture],
         )
-        mockRows(sql => sql.includes('COUNT(*)::int AS total'), [{ total: 1 }])
+        mockRows(
+            sql => sql.includes('COUNT(*)::int AS total'),
+            [storeAggregateRow(1)],
+        )
 
         const mainEl = (await StoreCouponsPage({
             params: { store: 'example.co.uk' },
@@ -207,7 +258,10 @@ describe('StoreCouponsPage — CouponListRow + TotalCountRow', () => {
             sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
             [],
         )
-        mockRows(sql => sql.includes('COUNT(*)::int AS total'), [{ total: 0 }])
+        mockRows(
+            sql => sql.includes('COUNT(*)::int AS total'),
+            [storeAggregateRow(0)],
+        )
 
         const mainEl = (await StoreCouponsPage({
             params: { store: 'example.com' },
@@ -228,7 +282,10 @@ describe('StoreCouponsPage generateMetadata — canonical normalization + thin-p
             sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
             [couponFixture],
         )
-        mockRows(sql => sql.includes('COUNT(*)::int AS total'), [{ total: 1 }])
+        mockRows(
+            sql => sql.includes('COUNT(*)::int AS total'),
+            [storeAggregateRow(1)],
+        )
 
         const metadata = await generateMetadata({
             params: { store: 'www.example.com' },
@@ -258,7 +315,10 @@ describe('StoreCouponsPage generateMetadata — canonical normalization + thin-p
             sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
             [couponFixture],
         )
-        mockRows(sql => sql.includes('COUNT(*)::int AS total'), [{ total: 1 }])
+        mockRows(
+            sql => sql.includes('COUNT(*)::int AS total'),
+            [storeAggregateRow(1)],
+        )
 
         const metadata = await generateMetadata({
             params: { store: 'example.co.uk' },
@@ -278,7 +338,10 @@ describe('StoreCouponsPage generateMetadata — canonical normalization + thin-p
             sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
             [],
         )
-        mockRows(sql => sql.includes('COUNT(*)::int AS total'), [{ total: 0 }])
+        mockRows(
+            sql => sql.includes('COUNT(*)::int AS total'),
+            [storeAggregateRow(0)],
+        )
 
         const metadata = await generateMetadata({
             params: { store: 'example.com' },
