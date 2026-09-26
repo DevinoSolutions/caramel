@@ -15,9 +15,9 @@ describe('Sentry tracing leaves room for errors in the shared intake bucket', ()
         '%s samples at most 10% of transactions',
         file => {
             const source = readFileSync(join(app, file), 'utf8')
-            const rates = [
-                ...source.matchAll(/tracesSampleRate:\s*([0-9.]+)/g),
-            ].map(m => Number(m[1]))
+            const rates = (
+                source.match(/tracesSampleRate:\s*[0-9.]+/g) ?? []
+            ).map(m => Number(m.split(':')[1]))
             expect(rates.length).toBeGreaterThan(0)
             for (const rate of rates) expect(rate).toBeLessThanOrEqual(CEILING)
         },
