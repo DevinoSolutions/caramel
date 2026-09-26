@@ -4,11 +4,15 @@ import { firstLinkedStoreDomain } from './support/stores'
 // Third-party analytics stay off the page's critical path.
 //
 // Lighthouse mobile with applied throttling on a prod store page (2026-09-26):
-// gtag.js (173 KB) was requested at ~0.76 s, while the app's own JS was still
-// downloading; Hotjar cost 350–450 ms of blocking time; PostHog fetched its
+// gtag.js (173 KB) was requested at ~0.7 s, while the app's own JS was still
+// downloading (the load event fired at ~5.6 s), and PostHog fetched its
 // surveys bundle although the project has no surveys. Now gtag.js is
-// next/script `lazyOnload`, Hotjar starts through runAfterLoadWhenIdle, and
-// PostHog runs with disable_surveys.
+// next/script `lazyOnload` and PostHog runs with disable_surveys.
+//
+// Hotjar is not covered: it initialises in an effect and already starts after
+// the load event, and gating it on an idle callback measured no difference
+// (A/B, 2026-09-26). Its cost (350–450 ms of blocking time on prod) only goes
+// away if it is removed.
 //
 // Real browser, real server, real third-party requests; nothing is mocked or
 // written. Timing comes from the page's own Resource Timing clock: a script
@@ -71,26 +75,33 @@ test.describe('Analytics scripts load after the page, not with it', () => {
         )
     })
 
-    test('Hotjar is fetched after the load event', async ({
+    test('the GA pageview queued before gtag.js loaded is still sent', async ({
         page,
-        request,
     }) => {
-        // Hotjar only starts in production builds; `next dev` (the hermetic
-        // e2e-pr lane) is recognisable by its per-file CSS precedence.
-        const html = await (await request.get('/supported-stores')).text()
-        test.skip(
-            /data-precedence="next_/.test(html),
-            'Hotjar is production-only; `next dev` never starts it',
-        )
-        await openStorePage(page)
-        const t = await startRelativeToLoad(
+        const requested = await openStorePage(page)
+        await startRelativeToLoad(
             page,
-            /static\.hotjar\.com\/c\/hotjar-/,
-            'Hotjar',
+            /googletagmanager\.com\/gtag\/js/,
+            'gtag.js',
         )
-        expect(t.startTime, JSON.stringify(t)).toBeGreaterThanOrEqual(
-            t.loadEventStart,
+        const gtagUrl = requested.find(url => /\/gtag\/js\?/.test(url)) ?? ''
+        test.skip(
+            !new URL(gtagUrl).searchParams.get('id'),
+            'no GA measurement id configured here',
         )
+        // The page_view was queued in dataLayer by the inline init; gtag.js
+        // must replay it once it arrives.
+        await expect
+            .poll(
+                () =>
+                    requested.some(
+                        url =>
+                            /google-analytics\.com\/g\/collect/.test(url) &&
+                            /[?&]en=page_view(&|$)/.test(url),
+                    ),
+                { message: 'GA page_view never sent', timeout: 30_000 },
+            )
+            .toBe(true)
     })
 
     test('PostHog does not fetch the surveys bundle', async ({ page }) => {

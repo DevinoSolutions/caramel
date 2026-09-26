@@ -4,7 +4,6 @@ import GrowthPromptHost from '@/components/growth/GrowthPromptHost'
 import SupportDialog from '@/components/support/SupportDialog'
 import Layout from '@/layouts/Layout/Layout'
 import PostHogClientProvider from '@/lib/analytics/PostHogClientProvider'
-import { runAfterLoadWhenIdle } from '@/lib/analytics/runAfterLoadWhenIdle'
 import { ThemeContext } from '@/lib/contexts'
 import * as gtag from '@/lib/gtag'
 import { SurfaceProvider } from '@/lib/surface/SurfaceProvider'
@@ -75,22 +74,18 @@ export default function Providers({ children }: { children: ReactNode }) {
         handleRouteChange(pathname || '/')
     }, [pathname])
 
-    // Hotjar waits for the load event + an idle main thread
-    // (lib/analytics/runAfterLoadWhenIdle.ts has the measurement).
     useEffect(() => {
         if (process.env.NODE_ENV !== 'production') return
-        return runAfterLoadWhenIdle(() => {
-            try {
-                Hotjar.init(6369129, 6)
-            } catch (error) {
-                // Analytics must never break the page, but must not fail
-                // silently either.
-                console.error('[hotjar] init failed', error)
-                Sentry.captureException(error, {
-                    tags: { operation: 'hotjar_init' },
-                })
-            }
-        })
+        try {
+            Hotjar.init(6369129, 6)
+        } catch (error) {
+            // Analytics must never break the page, but must not fail
+            // silently either.
+            console.error('[hotjar] init failed', error)
+            Sentry.captureException(error, {
+                tags: { operation: 'hotjar_init' },
+            })
+        }
     }, [])
 
     const switchTheme = () => {
