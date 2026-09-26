@@ -7,6 +7,7 @@ import PostHogClientProvider from '@/lib/analytics/PostHogClientProvider'
 import { ThemeContext } from '@/lib/contexts'
 import * as gtag from '@/lib/gtag'
 import { SurfaceProvider } from '@/lib/surface/SurfaceProvider'
+import { domAnimation, LazyMotion } from 'framer-motion'
 import { usePathname } from 'next/navigation'
 import Script from 'next/script'
 import { ReactNode, useEffect, useMemo, useState } from 'react'
@@ -90,53 +91,66 @@ export default function Providers({ children }: { children: ReactNode }) {
     )
 
     return (
-        <PostHogClientProvider>
-            <SurfaceProvider>
-                <ThemeContext.Provider value={{ isDarkMode, switchTheme }}>
-                    {content}
-                </ThemeContext.Provider>
-                {/* The ONE growth-prompt slot on the site (lib/prompts). It
+        // The home page's sections and the shared Header/Footer/support form
+        // animate with `m.*` components, which carry no animation code of
+        // their own; domAnimation (animate/exit, whileInView, hover, tap,
+        // focus: all they use, no drag or layout animations) is supplied once
+        // here. `motion.*` pulled framer's full feature set (drag, layout
+        // projection) into the landing page's first load. Loaded
+        // synchronously on purpose: an async loader made every m.* re-render
+        // in one ~600 ms task when the features arrived (mobile Lighthouse,
+        // 2026-09-26). Not `strict`: the pages that still use `motion.*`
+        // (pricing, coupons, auth, ...) work unchanged and load the full
+        // bundle, exactly as before.
+        <LazyMotion features={domAnimation}>
+            <PostHogClientProvider>
+                <SurfaceProvider>
+                    <ThemeContext.Provider value={{ isDarkMode, switchTheme }}>
+                        {content}
+                    </ThemeContext.Provider>
+                    {/* The ONE growth-prompt slot on the site (lib/prompts). It
                     must sit inside SurfaceProvider: it never prompts until
                     the surface has resolved. */}
-                <GrowthPromptHost />
-            </SurfaceProvider>
-            <ExtensionSessionRelay />
-            <Toaster
-                position="bottom-right"
-                toastOptions={{
-                    style: {
-                        background: '#ea6925',
-                        color: '#ffffff',
-                        border: 'none',
-                    },
-                }}
-            />
-            {/* App-level support modal — opened via the module-level registry
+                    <GrowthPromptHost />
+                </SurfaceProvider>
+                <ExtensionSessionRelay />
+                <Toaster
+                    position="bottom-right"
+                    toastOptions={{
+                        style: {
+                            background: '#ea6925',
+                            color: '#ffffff',
+                            border: 'none',
+                        },
+                    }}
+                />
+                {/* App-level support modal — opened via the module-level registry
                 (promptSupportOnFailure) without prop drilling. */}
-            <SupportDialog />
-            {/* GA, only where a measurement id is configured (without one
+                <SupportDialog />
+                {/* GA, only where a measurement id is configured (without one
                 this used to fetch gtag.js?id=undefined for nothing).
                 gtag.js (173 KB) loads after the load event, when the main
                 thread is idle: fetched early it competed with the app's own
                 JS on slow connections. The inline init below still runs
                 right after hydration, so window.gtag exists for pageView()
                 and every command queues in dataLayer until gtag.js loads. */}
-            {gtag.GA_TRACKING_ID && (
-                <>
-                    <Script
-                        strategy="lazyOnload"
-                        src={`https://www.googletagmanager.com/gtag/js?id=${gtag.GA_TRACKING_ID}`}
-                    />
-                    <Script id="gtag-init" strategy="afterInteractive">
-                        {`
+                {gtag.GA_TRACKING_ID && (
+                    <>
+                        <Script
+                            strategy="lazyOnload"
+                            src={`https://www.googletagmanager.com/gtag/js?id=${gtag.GA_TRACKING_ID}`}
+                        />
+                        <Script id="gtag-init" strategy="afterInteractive">
+                            {`
           window.dataLayer = window.dataLayer || [];
           function gtag(){dataLayer.push(arguments);}
           gtag('js', new Date());
           gtag('config', '${gtag.GA_TRACKING_ID}');
         `}
-                    </Script>
-                </>
-            )}
-        </PostHogClientProvider>
+                        </Script>
+                    </>
+                )}
+            </PostHogClientProvider>
+        </LazyMotion>
     )
 }

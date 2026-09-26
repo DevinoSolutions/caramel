@@ -5,9 +5,8 @@
 // AND the error-prompt SupportDialog. Visual language mirrors
 // supported-site/suggestion-form.tsx (caramel palette, rounded-3xl card,
 // rounded-full inputs, framer-motion whileTap, sonner toasts, dark mode).
-import { isPosthogActive } from '@/lib/analytics/identity'
-import { motion } from 'framer-motion'
-import posthog from 'posthog-js'
+import { getLoadedPosthog } from '@/lib/analytics/posthogBrowser'
+import { m } from 'framer-motion'
 import { useRef, useState } from 'react'
 import { toast } from 'sonner'
 
@@ -88,12 +87,11 @@ export default function SupportForm({
             return
         }
 
-        let posthogSessionId: string | undefined
-        let posthogDistinctId: string | undefined
-        if (isPosthogActive()) {
-            posthogSessionId = posthog.get_session_id() ?? undefined
-            posthogDistinctId = posthog.get_distinct_id() ?? undefined
-        }
+        // null until posthog-js has loaded (after the page load event) or when
+        // PostHog is off for this deploy; the ticket then goes without ids.
+        const posthog = getLoadedPosthog()
+        const posthogSessionId = posthog?.get_session_id() ?? undefined
+        const posthogDistinctId = posthog?.get_distinct_id() ?? undefined
 
         // E2E-ONLY: forward the shared Playwright handshake's test_run_id so the
         // SERVER-captured support event is tagged with it (a browser super-prop
@@ -198,14 +196,14 @@ export default function SupportForm({
                     We&apos;ve received your message
                     {wantsReply ? ' and will reply soon.' : '.'}
                 </p>
-                <motion.button
+                <m.button
                     type="button"
                     whileTap={{ scale: 0.95 }}
                     onClick={() => setSubmitted(false)}
                     className="rounded-full bg-gradient-to-r from-caramel to-orange-600 px-6 py-2 text-sm font-semibold text-white shadow transition-all hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-900"
                 >
                     Send another
-                </motion.button>
+                </m.button>
             </div>
         )
     }
@@ -348,14 +346,14 @@ export default function SupportForm({
                 </label>
             </div>
 
-            <motion.button
+            <m.button
                 type="submit"
                 disabled={loading}
                 whileTap={{ scale: 0.95 }}
                 className="rounded-full bg-gradient-to-r from-caramel to-orange-600 px-8 py-3 font-semibold text-white shadow transition-all hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 dark:focus-visible:ring-offset-gray-900"
             >
                 {loading ? 'Sending…' : 'Send feedback'}
-            </motion.button>
+            </m.button>
         </form>
     )
 }

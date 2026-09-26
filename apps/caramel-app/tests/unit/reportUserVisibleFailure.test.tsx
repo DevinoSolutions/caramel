@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 import { reportUserVisibleFailure } from '@/lib/feedback/reportUserVisibleFailure'
 import * as Sentry from '@sentry/nextjs'
-import posthog from 'posthog-js'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 // Sentry always fires; PostHog + a downstream prompt fire at most once per
@@ -9,12 +8,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('@sentry/nextjs', () => ({
     captureException: vi.fn(() => 'evt_abc'),
 }))
-vi.mock('posthog-js', () => ({ default: { capture: vi.fn() } }))
-// Force PostHog "active" so the capture branch is exercised without a real init.
-vi.mock('@/lib/analytics/identity', () => ({ isPosthogActive: () => true }))
+// PostHog live: the capture goes straight to this stand-in, so the capture
+// branch is exercised without loading posthog-js. (The queue and timestamp
+// behaviour of capturePosthog is pinned in posthog-browser-deferred.test.ts.)
+const phCapture = vi.hoisted(() => vi.fn())
+vi.mock('@/lib/analytics/posthogBrowser', () => ({
+    capturePosthog: (event: string, properties: Record<string, unknown>) =>
+        phCapture(event, properties),
+}))
 
 const captureException = vi.mocked(Sentry.captureException)
-const phCapture = vi.mocked(posthog.capture)
 
 describe('reportUserVisibleFailure', () => {
     beforeEach(() => {

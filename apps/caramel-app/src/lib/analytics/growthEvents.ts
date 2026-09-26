@@ -6,12 +6,12 @@
 // names and their property vocabulary cannot drift between the prompt host,
 // the /apps page and the "More from Devino" links.
 //
-// Browser-only (posthog-js). Best-effort like identity.ts: a capture failure
+// Browser-only (posthog-js, via posthogBrowser.ts, which queues a capture
+// fired while the SDK loads). Best-effort like identity.ts: a capture failure
 // is reported (console + Sentry) and swallowed — analytics must never break a
 // render, and must never fail silently either.
 import * as Sentry from '@sentry/nextjs'
-import posthog from 'posthog-js'
-import { isPosthogActive } from './identity'
+import { capturePosthog } from './posthogBrowser'
 
 export type GrowthEventName =
     | 'prompt_shown'
@@ -37,13 +37,10 @@ export function trackGrowthEvent(
     name: GrowthEventName,
     properties: GrowthEventProperties,
 ): void {
-    if (!isPosthogActive()) return
-    try {
-        posthog.capture(name, properties)
-    } catch (error) {
+    capturePosthog(name, properties, error => {
         console.error(`[analytics] growth event "${name}" failed`, error)
         Sentry.captureException(error, {
             tags: { analytics_operation: 'growth_event', event: name },
         })
-    }
+    })
 }

@@ -1,7 +1,7 @@
 'use client'
 
 import { useReducedMotion } from '@/lib/reducedMotion'
-import { motion } from 'framer-motion'
+import { m } from 'framer-motion'
 import {
     FaArrowRight,
     FaBan,
@@ -108,7 +108,7 @@ export default function OpenSourceSection() {
 
             <div className="relative z-10 mx-auto max-w-7xl px-6 lg:px-8">
                 {/* Header Section */}
-                <motion.div
+                <m.div
                     initial={{ opacity: 0, y: 30 }}
                     whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true }}
@@ -124,10 +124,10 @@ export default function OpenSourceSection() {
                         developers building a better alternative to proprietary
                         extensions.
                     </p>
-                </motion.div>
+                </m.div>
 
                 {/* Security First */}
-                <motion.div
+                <m.div
                     initial={{ opacity: 0, y: 30 }}
                     whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true }}
@@ -144,7 +144,7 @@ export default function OpenSourceSection() {
                         third row of hero cards. */}
                     <div className="grid grid-cols-4 gap-6 lg:grid-cols-2 sm:grid-cols-1">
                         {securityFeatures.map((feature, index) => (
-                            <motion.div
+                            <m.div
                                 key={feature.title}
                                 initial={
                                     reduceMotion
@@ -193,13 +193,13 @@ export default function OpenSourceSection() {
                                         </div>
                                     </div>
                                 </div>
-                            </motion.div>
+                            </m.div>
                         ))}
                     </div>
-                </motion.div>
+                </m.div>
 
                 {/* Community Platforms */}
-                <motion.div
+                <m.div
                     initial={{ opacity: 0, y: 30 }}
                     whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true }}
@@ -211,7 +211,7 @@ export default function OpenSourceSection() {
                     </h3>
                     <div className="grid grid-cols-3 gap-8 lg:grid-cols-2 sm:grid-cols-1">
                         {platforms.map((platform, index) => (
-                            <motion.a
+                            <m.a
                                 key={platform.name}
                                 href={platform.href}
                                 target="_blank"
@@ -242,7 +242,7 @@ export default function OpenSourceSection() {
                                         aria-hidden="true"
                                         className="absolute inset-0 opacity-5"
                                     >
-                                        <motion.div
+                                        <m.div
                                             className="h-full w-full"
                                             style={{
                                                 backgroundImage: `
@@ -271,7 +271,7 @@ export default function OpenSourceSection() {
                                         />
                                     </div>
                                     <div className="relative z-10 flex items-start gap-6 sm:flex-col sm:items-center sm:gap-4">
-                                        <motion.div
+                                        <m.div
                                             className="flex h-16 w-16 items-center justify-center rounded-2xl bg-caramel/10 text-2xl text-caramel dark:bg-caramel/20"
                                             animate={
                                                 reduceMotion
@@ -291,7 +291,7 @@ export default function OpenSourceSection() {
                                             <span className="block transition-transform duration-300 group-hover:scale-110">
                                                 {platform.icon}
                                             </span>
-                                        </motion.div>
+                                        </m.div>
                                         <div className="flex-1 sm:text-center">
                                             <h3 className="mb-3 text-2xl font-bold text-gray-800 dark:text-white sm:text-xl">
                                                 {platform.name}
@@ -309,13 +309,13 @@ export default function OpenSourceSection() {
                                         </div>
                                     </div>
                                 </div>
-                            </motion.a>
+                            </m.a>
                         ))}
                     </div>
-                </motion.div>
+                </m.div>
 
                 {/* Contribution Pathways */}
-                <motion.div
+                <m.div
                     initial={{ opacity: 0, y: 30 }}
                     whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true }}
@@ -327,7 +327,7 @@ export default function OpenSourceSection() {
                     </h3>
                     <div className="grid grid-cols-2 gap-8 sm:grid-cols-1 sm:gap-6">
                         {contributions.map((contribution, index) => (
-                            <motion.div
+                            <m.div
                                 key={contribution.title}
                                 initial={
                                     reduceMotion
@@ -355,7 +355,7 @@ export default function OpenSourceSection() {
                                         aria-hidden="true"
                                         className="absolute inset-0 opacity-5"
                                     >
-                                        <motion.div
+                                        <m.div
                                             className="h-full w-full"
                                             style={{
                                                 backgroundImage: `
@@ -384,7 +384,7 @@ export default function OpenSourceSection() {
                                         />
                                     </div>
                                     <div className="relative z-10 flex items-start gap-6 sm:flex-col sm:items-center sm:gap-4">
-                                        <motion.div
+                                        <m.div
                                             className="text-4xl text-caramel sm:text-3xl"
                                             animate={
                                                 reduceMotion
@@ -404,7 +404,7 @@ export default function OpenSourceSection() {
                                             <span className="block transition-transform duration-300 group-hover:scale-110">
                                                 {contribution.icon}
                                             </span>
-                                        </motion.div>
+                                        </m.div>
                                         <div className="flex-1 sm:text-center">
                                             <h4 className="mb-3 text-2xl font-bold text-gray-800 dark:text-white sm:text-xl">
                                                 {contribution.title}
@@ -412,7 +412,7 @@ export default function OpenSourceSection() {
                                             <p className="mb-6 text-base leading-relaxed text-gray-600 dark:text-gray-400 sm:text-sm">
                                                 {contribution.desc}
                                             </p>
-                                            <motion.a
+                                            <m.a
                                                 href={contribution.href}
                                                 target="_blank"
                                                 rel="noopener noreferrer"
@@ -426,17 +426,17 @@ export default function OpenSourceSection() {
                                                 whileTap={{ scale: 0.95 }}
                                             >
                                                 {contribution.action}
-                                            </motion.a>
+                                            </m.a>
                                         </div>
                                     </div>
                                 </div>
-                            </motion.div>
+                            </m.div>
                         ))}
                     </div>
-                </motion.div>
+                </m.div>
 
                 {/* Call to Action */}
-                <motion.div
+                <m.div
                     initial={{ opacity: 0, y: 30 }}
                     whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true }}
@@ -452,7 +452,7 @@ export default function OpenSourceSection() {
                         how small, helps build a better internet for everyone.
                     </p>
                     <div className="flex justify-center gap-6 lg:flex-col lg:items-center lg:gap-4">
-                        <motion.a
+                        <m.a
                             href="https://github.com/DevinoSolutions/caramel"
                             target="_blank"
                             rel="noopener noreferrer"
@@ -464,8 +464,8 @@ export default function OpenSourceSection() {
                             whileTap={{ scale: 0.95 }}
                         >
                             View on GitHub
-                        </motion.a>
-                        <motion.a
+                        </m.a>
+                        <m.a
                             href="https://discord.com/invite/2vVVrQ5CEB"
                             target="_blank"
                             rel="noopener noreferrer"
@@ -477,9 +477,9 @@ export default function OpenSourceSection() {
                             whileTap={{ scale: 0.95 }}
                         >
                             Join Discord
-                        </motion.a>
+                        </m.a>
                     </div>
-                </motion.div>
+                </m.div>
             </div>
         </section>
     )

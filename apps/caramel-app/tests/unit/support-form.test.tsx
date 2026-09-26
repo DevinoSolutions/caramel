@@ -21,9 +21,10 @@ const { toastMock } = vi.hoisted(() => ({
     },
 }))
 vi.mock('sonner', () => ({ toast: toastMock }))
-// PostHog inactive → no session/distinct id branch (keeps the body minimal).
-vi.mock('@/lib/analytics/identity', () => ({ isPosthogActive: () => false }))
-vi.mock('posthog-js', () => ({ default: {} }))
+// PostHog not loaded → no session/distinct id branch (keeps the body minimal).
+vi.mock('@/lib/analytics/posthogBrowser', () => ({
+    getLoadedPosthog: () => null,
+}))
 
 function postedBody(callIndex: number): Record<string, unknown> {
     const call = (fetch as ReturnType<typeof vi.fn>).mock.calls[callIndex] as [

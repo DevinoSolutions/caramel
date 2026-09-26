@@ -1,7 +1,7 @@
 'use client'
 
 import { useReducedMotion } from '@/lib/reducedMotion'
-import { motion } from 'framer-motion'
+import { m } from 'framer-motion'
 import Image from 'next/image'
 
 // The store scroller runs on CSS keyframes rather than a framer x-loop for one
@@ -24,6 +24,12 @@ const marqueeStyles = `
 }
 `
 
+// Logos render in an 80px box, so 240px (3x) is the most any screen can use.
+// Six of the source PNGs were 637–3840px wide (221 KB for the eight); every
+// one loads eagerly with the page (see the marquee note below), so on mobile
+// they shared the network with the hero wordmark, the LCP image. The
+// /home-stores copies are the same logos at 240px, lossless WebP (62 KB total);
+// Amazon and Target were already small and stay as they were.
 const featuredStores = [
     {
         name: 'Amazon',
@@ -34,19 +40,19 @@ const featuredStores = [
     {
         name: 'eBay',
         desc: 'Auction marketplace for buyers & sellers',
-        image: '/ebay.png',
+        image: '/home-stores/ebay.webp',
         category: 'marketplace',
     },
     {
         name: 'Codecademy',
         desc: 'Interactive platform to learn coding',
-        image: '/codeAcademy.png',
+        image: '/home-stores/codeAcademy.webp',
         category: 'education',
     },
     {
         name: 'Best Buy',
         desc: 'Electronics and tech retailer',
-        image: '/bestbuy.png',
+        image: '/home-stores/bestbuy.webp',
         category: 'electronics',
     },
     {
@@ -58,19 +64,19 @@ const featuredStores = [
     {
         name: 'Walmart',
         desc: 'Multinational retail corporation',
-        image: '/walmart.png',
+        image: '/home-stores/walmart.webp',
         category: 'retail',
     },
     {
         name: 'Nike',
         desc: 'Athletic footwear and apparel',
-        image: '/nike.png',
+        image: '/home-stores/nike.webp',
         category: 'fashion',
     },
     {
         name: 'Adidas',
         desc: 'Sports clothing and accessories',
-        image: '/adidas.png',
+        image: '/home-stores/adidas.webp',
         category: 'fashion',
     },
 ]
@@ -88,7 +94,7 @@ export default function SupportedSection() {
 
             <div className="relative z-10 mx-auto max-w-7xl px-6 lg:px-8">
                 {/* Header Section */}
-                <motion.div
+                <m.div
                     initial={{ opacity: 0, y: 30 }}
                     whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true }}
@@ -102,8 +108,8 @@ export default function SupportedSection() {
                         From major retailers to niche marketplaces, Caramel
                         works at thousands of stores.
                     </p>
-                    <motion.div className="mt-8">
-                        <motion.a
+                    <m.div className="mt-8">
+                        <m.a
                             href="/supported-stores"
                             whileHover={{
                                 scale: 1.05,
@@ -113,12 +119,12 @@ export default function SupportedSection() {
                             className="inline-flex items-center rounded-full bg-gradient-to-r from-caramel to-orange-600 px-6 py-3 font-semibold text-white shadow-lg transition-all duration-200 hover:shadow-xl"
                         >
                             View All Supported Stores
-                        </motion.a>
-                    </motion.div>
-                </motion.div>
+                        </m.a>
+                    </m.div>
+                </m.div>
 
                 {/* Carousel View */}
-                <motion.div
+                <m.div
                     initial={{ opacity: 0, y: 30 }}
                     whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true }}
@@ -145,7 +151,7 @@ export default function SupportedSection() {
                                             aria-hidden="true"
                                             className="absolute inset-0 opacity-5"
                                         >
-                                            <motion.div
+                                            <m.div
                                                 className="h-full w-full"
                                                 style={{
                                                     backgroundImage: `
@@ -191,8 +197,12 @@ export default function SupportedSection() {
                                                     waits 60s for them and times
                                                     out the home-page screenshot.
                                                     unoptimized on purpose too:
-                                                    these are right-sized ≤10KB
-                                                    brand PNGs; routing 16 of them
+                                                    these are right-sized brand
+                                                    images (≤240px, ≤14KB: the
+                                                    /home-stores WebPs are
+                                                    downscaled from source PNGs
+                                                    of up to 3840px and 43KB,
+                                                    2026-09-26); routing 16 of them
                                                     through sharp on every cold
                                                     load starves 2-core CI runners
                                                     and flakes the nav e2e suite.
@@ -229,10 +239,10 @@ export default function SupportedSection() {
                             )}
                         </div>
                     </div>
-                </motion.div>
+                </m.div>
 
                 {/* Call to Action */}
-                <motion.div
+                <m.div
                     initial={{ opacity: 0, y: 30 }}
                     whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true }}
@@ -246,7 +256,7 @@ export default function SupportedSection() {
                         Weʼre constantly adding new stores to our platform.
                         Request yours today!
                     </p>
-                    <motion.a
+                    <m.a
                         href="https://github.com/DevinoSolutions/caramel/issues/new?assignees=&labels=store-request&projects=&template=store-request.md&title=%5BStore+Request%5D+Add+support+for+"
                         target="_blank"
                         rel="noopener noreferrer"
@@ -258,8 +268,8 @@ export default function SupportedSection() {
                         className="inline-flex items-center rounded-full bg-white px-8 py-4 font-semibold text-caramel shadow-md transition-all duration-200 hover:bg-orange-50 hover:shadow-xl"
                     >
                         Request a Store
-                    </motion.a>
-                </motion.div>
+                    </m.a>
+                </m.div>
             </div>
         </section>
     )

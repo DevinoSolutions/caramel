@@ -2,7 +2,7 @@
 
 import InstallSurfaceGate from '@/components/growth/InstallSurfaceGate'
 import { useReducedMotion } from '@/lib/reducedMotion'
-import { motion } from 'framer-motion'
+import { m } from 'framer-motion'
 import {
     FaBolt,
     FaChrome,
@@ -97,7 +97,7 @@ export default function FeaturesSection() {
 
             <div className="relative z-10 mx-auto max-w-7xl px-6 lg:px-8">
                 {/* Header Section */}
-                <motion.div
+                <m.div
                     initial={{ opacity: 0, y: 30 }}
                     whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true }}
@@ -111,10 +111,10 @@ export default function FeaturesSection() {
                         The ethical alternative that puts your privacy first
                         while maximizing your savings
                     </p>
-                </motion.div>
+                </m.div>
 
                 {/* Features Grid */}
-                <motion.div
+                <m.div
                     initial={{ opacity: 0, y: 30 }}
                     whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true }}
@@ -123,7 +123,7 @@ export default function FeaturesSection() {
                 >
                     <div className="grid grid-cols-3 gap-8 lg:grid-cols-2 sm:grid-cols-1">
                         {features.map((feat, index) => (
-                            <motion.div
+                            <m.div
                                 key={feat.title}
                                 initial={
                                     reduceMotion
@@ -157,7 +157,7 @@ export default function FeaturesSection() {
                                         aria-hidden="true"
                                         className="absolute inset-0 opacity-5"
                                     >
-                                        <motion.div
+                                        <m.div
                                             className="h-full w-full"
                                             style={{
                                                 backgroundImage: `
@@ -196,7 +196,7 @@ export default function FeaturesSection() {
                                             aria-hidden="true"
                                             className="mx-auto mb-6 text-6xl text-caramel transition-transform duration-300 group-hover:scale-110 xl:block lg:hidden"
                                         >
-                                            <motion.div
+                                            <m.div
                                                 animate={
                                                     reduceMotion
                                                         ? undefined
@@ -217,7 +217,7 @@ export default function FeaturesSection() {
                                                 }}
                                             >
                                                 {feat.icon}
-                                            </motion.div>
+                                            </m.div>
                                         </div>
 
                                         {/* Mobile layout - icon + title in one row */}
@@ -252,13 +252,13 @@ export default function FeaturesSection() {
                                         </div>
                                     </div>
                                 </div>
-                            </motion.div>
+                            </m.div>
                         ))}
                     </div>
-                </motion.div>
+                </m.div>
 
                 {/* Comparison Section */}
-                <motion.div
+                <m.div
                     initial={{ opacity: 0, y: 20 }}
                     whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true }}
@@ -292,7 +292,7 @@ export default function FeaturesSection() {
 
                         <div className="space-y-4">
                             {comparisonItems.map((item, index) => (
-                                <motion.div
+                                <m.div
                                     key={item.title}
                                     initial={
                                         reduceMotion
@@ -350,17 +350,17 @@ export default function FeaturesSection() {
                                             </p>
                                         </div>
                                     </div>
-                                </motion.div>
+                                </m.div>
                             ))}
                         </div>
                     </div>
-                </motion.div>
+                </m.div>
 
                 {/* Browser Support Section. The transparent border is always
                     present so the dark theme's caramel border doesn't change
                     the slab's size. */}
                 <InstallSurfaceGate>
-                    <motion.div
+                    <m.div
                         id="install-extension"
                         initial={{ opacity: 0, y: 20 }}
                         whileInView={{ opacity: 1, y: 0 }}
@@ -405,7 +405,7 @@ export default function FeaturesSection() {
                                     available: true,
                                 },
                             ].map((browser, index) => (
-                                <motion.div
+                                <m.div
                                     key={browser.name}
                                     initial={{ opacity: 0, y: 20 }}
                                     whileInView={{ opacity: 1, y: 0 }}
@@ -419,7 +419,7 @@ export default function FeaturesSection() {
                                     className="relative"
                                 >
                                     {browser.available ? (
-                                        <motion.a
+                                        <m.a
                                             href={browser.href}
                                             target="_blank"
                                             rel="noopener noreferrer"
@@ -437,7 +437,7 @@ export default function FeaturesSection() {
                                                 {browser.icon}
                                             </span>
                                             {browser.name}
-                                        </motion.a>
+                                        </m.a>
                                     ) : (
                                         <div className="relative inline-flex items-center rounded-full bg-white/20 px-8 py-4 font-semibold text-white/70 shadow-md md:min-w-[200px]">
                                             <span className="mr-3 text-2xl opacity-60">
@@ -451,10 +451,10 @@ export default function FeaturesSection() {
                                             </div>
                                         </div>
                                     )}
-                                </motion.div>
+                                </m.div>
                             ))}
                         </div>
-                    </motion.div>
+                    </m.div>
                 </InstallSurfaceGate>
             </div>
         </section>
