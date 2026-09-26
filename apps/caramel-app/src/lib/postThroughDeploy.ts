@@ -12,6 +12,14 @@
 // retried when the body is NOT Caramel's JSON.
 const GAP_STATUSES = new Set([404, 502, 503, 504, 520, 521, 522, 523, 524, 530])
 
+// 421 Misdirected Request means "this server is not for this host", which
+// Caramel never answers, so it is a gap even with a JSON body. The host's
+// catch-all router has answered unknown hosts with 421
+// {"error":"misdirected_request"} since 2026-09-26 (swap drill on the #273
+// deploy: 4 answers in a ~4.3 s gap), and the form showed that code to the
+// shopper as if Caramel had refused the URL.
+const ALWAYS_GAP_STATUSES = new Set([421])
+
 // Waits between attempts. ~9 s in total covers the measured ~4.5 s gap twice.
 const DEFAULT_DELAYS_MS = [1_000, 2_000, 3_000, 3_000]
 
@@ -32,6 +40,7 @@ export interface PostThroughDeployOptions {
 }
 
 export function isDeployGapAnswer(res: Response): boolean {
+    if (ALWAYS_GAP_STATUSES.has(res.status)) return true
     if (res.ok || !GAP_STATUSES.has(res.status)) return false
     const type = res.headers?.get?.('content-type') ?? ''
     return !type.includes('application/json')
