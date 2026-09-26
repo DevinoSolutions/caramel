@@ -62,9 +62,6 @@ importers:
       '@heroicons/react':
         specifier: 2.2.0
         version: 2.2.0(react@19.2.3)
-      '@hotjar/browser':
-        specifier: 1.0.9
-        version: 1.0.9
       '@prisma/client':
         specifier: 6.14.0
         version: 6.14.0(prisma@6.14.0(magicast@0.5.4)(typescript@5.9.2))(typescript@5.9.2)
@@ -1005,9 +1002,6 @@ packages:
     resolution: {integrity: sha512-LMcepvRaS9LYHJGsF0zzmgKCUim/X3N/DQKc4jepAXJ7l8QxJ1PmxJzqplF2Z3FE4PqBAIGyJAQ/w4B5dsqbtQ==}
     peerDependencies:
       react: '>= 16 || ^19.0.0-rc'
-
-  '@hotjar/browser@1.0.9':
-    resolution: {integrity: sha512-n9akDMod8BLGpYEQCrHwlYWWd63c1HlhUSXNIDfClZtKYXbUjIUOFlNZNNcUxgHTCsi4l2i+SWKsGsO0t93S8w==}
 
   '@humanfs/core@0.19.2':
     resolution: {integrity: sha512-UhXNm+CFMWcbChXywFwkmhqjs3PRCmcSa/hfBgLIb7oQ5HNb1wS0icWsGtSAUNgefHeI+eBrA8I1fxmbHsGdvA==}
@@ -8354,8 +8348,6 @@ snapshots:
   '@heroicons/react@2.2.0(react@19.2.3)':
     dependencies:
       react: 19.2.3
-
-  '@hotjar/browser@1.0.9': {}
 
   '@humanfs/core@0.19.2':
     dependencies:

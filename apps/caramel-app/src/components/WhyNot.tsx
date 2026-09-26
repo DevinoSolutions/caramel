@@ -55,7 +55,7 @@ const problemsWithHoney = [
 // Paired row-for-row with problemsWithHoney in the comparison grid below.
 // "No Data Selling" is deliberately NOT "zero data collection": the extension
 // does send cart/page context to Caramel's own API to classify the cart, and
-// the website runs standard analytics (GA, Hotjar, Sentry — disclosed in the
+// the website runs standard analytics (GA, PostHog, Sentry — disclosed in the
 // privacy policy) — the honest, verifiable claim is that personal information
 // is never sold or shared with advertisers (claim-verify ruling 2026-07-28,
 // "shared" scoped to advertisers 2026-09-11).
