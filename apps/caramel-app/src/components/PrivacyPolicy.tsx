@@ -91,7 +91,8 @@ const PrivacyPolicy = () => {
                         </li>
                         <li className="flex items-start gap-3">
                             <span className="mt-2 h-2 w-2 flex-shrink-0 rounded-full bg-caramel"></span>
-                            Hotjar — usage analytics on our website.
+                            PostHog — usage analytics on our website, including
+                            session recordings with every form field masked.
                         </li>
                         <li className="flex items-start gap-3">
                             <span className="mt-2 h-2 w-2 flex-shrink-0 rounded-full bg-caramel"></span>
@@ -168,7 +169,7 @@ const PrivacyPolicy = () => {
             >
                 <div className="mb-6 inline-flex items-center gap-3 rounded-full bg-caramel/10 px-6 py-3 text-sm font-semibold text-caramel">
                     <FaShieldAlt className="h-4 w-4" />
-                    Effective Date: July 28, 2026
+                    Effective Date: September 26, 2026
                 </div>
                 <p className="mx-auto max-w-4xl text-lg leading-relaxed text-gray-600 dark:text-gray-300">
                     Welcome to{' '}

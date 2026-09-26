@@ -7,8 +7,6 @@ import PostHogClientProvider from '@/lib/analytics/PostHogClientProvider'
 import { ThemeContext } from '@/lib/contexts'
 import * as gtag from '@/lib/gtag'
 import { SurfaceProvider } from '@/lib/surface/SurfaceProvider'
-import Hotjar from '@hotjar/browser'
-import * as Sentry from '@sentry/nextjs'
 import { usePathname } from 'next/navigation'
 import Script from 'next/script'
 import { ReactNode, useEffect, useMemo, useState } from 'react'
@@ -73,20 +71,6 @@ export default function Providers({ children }: { children: ReactNode }) {
         const handleRouteChange = (url: string) => gtag.pageView(url)
         handleRouteChange(pathname || '/')
     }, [pathname])
-
-    useEffect(() => {
-        if (process.env.NODE_ENV !== 'production') return
-        try {
-            Hotjar.init(6369129, 6)
-        } catch (error) {
-            // Analytics must never break the page, but must not fail
-            // silently either.
-            console.error('[hotjar] init failed', error)
-            Sentry.captureException(error, {
-                tags: { operation: 'hotjar_init' },
-            })
-        }
-    }, [])
 
     const switchTheme = () => {
         const next = !isDarkMode

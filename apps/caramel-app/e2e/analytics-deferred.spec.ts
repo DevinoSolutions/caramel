@@ -10,10 +10,9 @@ import { firstLinkedStoreDomain } from './support/stores'
 // although the project has no surveys. Now gtag.js is next/script
 // `lazyOnload` and PostHog runs with disable_surveys.
 //
-// Hotjar is not covered: it initialises in an effect and already starts after
-// the load event, and gating it on an idle callback measured no difference
-// (A/B, 2026-09-26). Its cost (350–450 ms of blocking time on prod) only goes
-// away if it is removed.
+// Hotjar was removed outright (2026-09-26): 350–450 ms of blocking time on
+// prod, and a third session recorder next to PostHog and Sentry Replay. The
+// 'no Hotjar script loads' case keeps it gone.
 //
 // Real browser, real server, real third-party requests, nothing mocked. The
 // only writes are the analytics hits any page view sends. Timing comes from
@@ -145,6 +144,22 @@ test.describe('Analytics scripts load after the page, not with it', () => {
                 { message: 'GA page_view never sent', timeout: 20_000 },
             )
             .toBe(true)
+    })
+
+    test('no Hotjar script loads', async ({ page }) => {
+        const { requests } = await openStorePage(page)
+        // Hotjar used to initialise in an effect right after hydration.
+        await page.locator('html[data-hydrated="true"]').waitFor({
+            state: 'attached',
+        })
+        const hotjar = [
+            ...requests.map(request => request.url()),
+            ...(await page.evaluate(() => [
+                ...performance.getEntriesByType('resource').map(e => e.name),
+                ...Array.from(document.scripts, script => script.src),
+            ])),
+        ].filter(url => /hotjar\.(com|io)/.test(url))
+        expect(hotjar).toEqual([])
     })
 
     test('PostHog does not fetch the surveys bundle', async ({ page }) => {

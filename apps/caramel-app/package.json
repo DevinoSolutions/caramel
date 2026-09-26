@@ -36,7 +36,6 @@
     },
     "dependencies": {
         "@heroicons/react": "2.2.0",
-        "@hotjar/browser": "1.0.9",
         "@prisma/client": "6.14.0",
         "@react-email/render": "1.2.1",
         "@react-three/drei": "10.7.4",
