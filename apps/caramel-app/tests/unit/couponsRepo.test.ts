@@ -348,7 +348,7 @@ describe('listStoreSitemapEntries (app/sitemap.ts read)', () => {
 })
 
 describe('store-matching reads bind the LOWERCASE base (site column is stored lowercase)', () => {
-    it('listStoreCoupons("eNasco.com") binds enasco.com / %.enasco.com in BOTH the list and the count query', async () => {
+    it('listStoreCoupons("eNasco.com") binds enasco.com, and no LIKE pattern, in BOTH the list and the count query', async () => {
         mockRows(
             sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
             [],
@@ -363,14 +363,17 @@ describe('store-matching reads bind the LOWERCASE base (site column is stored lo
         expect(capturedValues).toHaveLength(2)
         for (const values of capturedValues) {
             expect(values).toContain('enasco.com')
-            expect(values).toContain('%.enasco.com')
             expect(values).not.toContain('eNasco.com')
-            expect(values).not.toContain('%.eNasco.com')
+            expect(values).not.toContain('%.enasco.com')
         }
         // The predicate itself stays plain, index-friendly equality — no
-        // LOWER(site) wrapper that would defeat coupons_site_idx.
+        // LOWER(site) wrapper that would defeat coupons_site_idx — and the
+        // subdomain suffix is compared as text, never as a LIKE pattern.
         for (const q of capturedQueries) {
-            expect(q).toMatch(/\(site = \? OR site LIKE \?\)/)
+            expect(q).toMatch(
+                /\(site = \? OR right\(site, length\(\?\) \+ 1\) = '\.' \|\| \?\)/,
+            )
+            expect(q).not.toMatch(/site LIKE/i)
             expect(q).not.toMatch(/lower\(site\)/i)
         }
     })
@@ -387,8 +390,8 @@ describe('store-matching reads bind the LOWERCASE base (site column is stored lo
         expect(capturedValues).toHaveLength(2)
         for (const values of capturedValues) {
             expect(values).toContain('brooklinen.com')
-            expect(values).toContain('%.brooklinen.com')
             expect(values).not.toContain('Brooklinen.com')
+            expect(values).not.toContain('%.brooklinen.com')
         }
     })
 })

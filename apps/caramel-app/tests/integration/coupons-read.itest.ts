@@ -1,5 +1,6 @@
 import { VISIBLE_COUPON_STATUSES } from '@/lib/coupons'
 import {
+    countCouponsForStores,
     getCouponStats,
     listActiveSources,
     listCoupons,
@@ -11,7 +12,7 @@ import {
     searchSupportedSites,
 } from '@/lib/couponsRepo'
 import prisma from '@/lib/prisma'
-import { afterAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 // W4 integration — the flipped coupon READS exercised against the REAL prisma
 // client + live local Postgres (:58005), catalog tables migrated + seeded (the
@@ -23,8 +24,9 @@ import { afterAll, describe, expect, it } from 'vitest'
 // the BigInt that z.number() would reject) — something the mocked unit tests
 // can't reach.
 //
-// Robustness: this suite is READ-ONLY and asserts against the deterministic
-// seed. Where a seeded value can be perturbed by a concurrently-running
+// Robustness: this suite asserts against the deterministic seed, and is
+// READ-ONLY except for the last describe, which inserts its own rows in a
+// private 700072xxx id range and deletes them when it ends. Where a seeded value can be perturbed by a concurrently-running
 // integration file, the assertion is scoped so it can't flake:
 //   * ingest-catalog.itest.ts transiently inserts coupons on site 'ebay.com'
 //     with ids in the 8000xxxxx range (times_used 0), deleted after each test.
@@ -230,7 +232,7 @@ describe('listStoreSitemapEntries — per-site visible aggregates for the sitema
             limit: 1,
             skip: 0,
         })
-        // listCoupons also matches subdomain rows (LIKE '%.codecademy.com'),
+        // listCoupons also matches subdomain rows (`*.codecademy.com`),
         // so compare against the sum over every raw site under that base.
         const underBase = rows
             .filter(
@@ -438,5 +440,68 @@ describe('search terms are matched literally, never as an ILIKE pattern (real pg
         expect(seededSites(await searchSupportedSites('bay'))).toEqual([
             'ebay.com',
         ])
+    })
+})
+
+// Two places the literal-match fix has to hold that the seed cannot reach,
+// because no seeded site holds an `_`. The rows are this describe's own, in a
+// private 700072xxx range, inserted when it starts and deleted when it ends,
+// so the describes above never see them.
+describe('prefix ranking and store matching read `_` literally (real pg :58005)', () => {
+    const ROWS = [
+        { id: '700072001', site: 'a_shopping.com' },
+        { id: '700072002', site: 'ab_a_x.com' },
+        { id: '700072003', site: 'shop.abcd.com' },
+    ]
+
+    beforeAll(async () => {
+        await prisma.coupon.createMany({
+            data: ROWS.map(({ id, site }) => ({
+                id,
+                code: `LITERAL-ITEST-${id}`,
+                site,
+                title: 'literal-match itest coupon',
+                description: 'synthetic row for the literal-match itest',
+                // Visible, but NOT 'valid': stays out of getCouponStats' census.
+                status: 'pending',
+                expired: false,
+            })),
+        })
+    })
+
+    afterAll(async () => {
+        await prisma.coupon.deleteMany({
+            where: { id: { in: ROWS.map(r => r.id) } },
+        })
+    })
+
+    it('ranks a site that starts with `a_` ahead of a shorter one that only matches `a_` as a pattern', async () => {
+        // Both hold a literal `a_`, so both pass the filter, but only
+        // a_shopping.com starts with it. Read as a pattern, the prefix test
+        // `a_%` also takes ab_a_x.com ("a", then any character), and the
+        // shorter name then wins the length tie-break. The lengths differ on
+        // purpose: at equal length the order falls to `site ASC`, which
+        // depends on the database collation.
+        const sites = (await searchSupportedSites('a_')).map(r => r.site)
+        expect(
+            sites.filter(s => s === 'a_shopping.com' || s === 'ab_a_x.com'),
+        ).toEqual(['a_shopping.com', 'ab_a_x.com'])
+    })
+
+    it('files a subdomain under its store, and nothing under a store name whose `_` would match it as a pattern', async () => {
+        // `%.a_cd.com` matches shop.abcd.com. Callers bind a
+        // resolveStoreDomain result today, which cannot hold an `_`; this pins
+        // that the reads stay literal without relying on that.
+        const counts = await countCouponsForStores(['abcd.com', 'a_cd.com'])
+        expect(counts.get('abcd.com')).toBe(1)
+        expect(counts.get('a_cd.com')).toBe(0)
+
+        expect((await listStoreCoupons('abcd.com', 5)).total).toBe(1)
+        expect((await listStoreCoupons('a_cd.com', 5)).total).toBe(0)
+
+        const listed = (baseSite: string) =>
+            listCoupons({ baseSite, limit: 5, skip: 0 })
+        expect((await listed('abcd.com')).total).toBe(1)
+        expect((await listed('a_cd.com')).total).toBe(0)
     })
 })
