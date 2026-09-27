@@ -7,7 +7,9 @@ export const GET = withRoute(
     { method: 'GET', routeName: 'coupons/stores', rateLimit: 'read' },
     async ({ req }) => {
         const url = new URL(req.url)
-        const q = url.searchParams.get('q')?.trim() || ''
+        // Capped like /api/coupons' `search` and the supported-store search,
+        // to keep the ILIKE pattern cheap.
+        const q = (url.searchParams.get('q')?.trim() || '').slice(0, 100)
         const rawLimit = parseInt(url.searchParams.get('limit') || '20', 10)
         const limit = Math.min(Math.max(rawLimit, 1), 50)
 

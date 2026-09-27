@@ -99,18 +99,6 @@ const visibleCouponsWhere = () =>
     Prisma.sql`status IN (${Prisma.join([...VISIBLE_COUPON_STATUSES])}) AND expired = FALSE`
 
 /**
- * "This coupon belongs to store `base`": the store page's own predicate — the
- * exact domain, or any subdomain of it. `base` MUST already be lowercase: the
- * `site` column is stored lowercase and this comparison is case-sensitive on
- * purpose (plain equality keeps using coupons_site_idx), so every caller
- * lowercases before binding. Shared by both listings AND by the shopper-
- * submission dedupe, so a code is "already listed" under exactly the rule the
- * store page uses to list it.
- */
-const siteBaseMatchSql = (base: string) =>
-    Prisma.sql`(site = ${base} OR site LIKE ${'%.' + base})`
-
-/**
  * Shared ranking order — the list query and the marketing store page both sort
  * by this identical order.
  *
@@ -161,6 +149,28 @@ const fixedAmountOffSql = () =>
  */
 const likeLiteral = (typed: string) => typed.replace(/[\\%_]/g, '\\$&')
 
+/**
+ * A coupon belongs to a store when its `site` IS the store or one of its
+ * subdomains. The suffix is compared as text with `right()`, so every character
+ * of the store matches only itself. The `site LIKE '%.' || store` this replaced
+ * read `_` and `%` as wildcards: `a_cd.com` owned shop.abcd.com's codes. The
+ * callers bind resolveStoreDomain output, which cannot hold either character,
+ * so that was never reachable. This keeps it so without relying on the callers
+ * (2026-09-27, fleet ILIKE sweep).
+ *
+ * Case-sensitive on purpose: `site` is stored lowercase, callers lowercase the
+ * store, and plain equality keeps using coupons_site_idx. It is the ONE copy of
+ * the predicate, so the store page, /api/coupons, the followed-store counts
+ * and the shopper-submission known-store probe and dedupe cannot disagree about
+ * which rows a store owns. `store` is a bound value or a
+ * column expression, and `site` names the coupons column (aliased in a join).
+ */
+const onStoreSql = (
+    store: string | Prisma.Sql,
+    site: Prisma.Sql = Prisma.sql`site`,
+) =>
+    Prisma.sql`(${site} = ${store} OR right(${site}, length(${store}) + 1) = '.' || ${store})`
+
 // ---------------------------------------------------------------------------
 // Reads
 
@@ -191,8 +201,7 @@ export async function listCoupons(
         // sensitive on purpose — plain equality keeps using coupons_site_idx.
         // Lowercasing the bound value is the one-line guard that keeps a
         // mixed-case caller from matching nothing.
-        const base = baseSite.toLowerCase()
-        conditions.push(siteBaseMatchSql(base))
+        conditions.push(onStoreSql(baseSite.toLowerCase()))
     }
 
     if (search) {
@@ -302,7 +311,7 @@ export async function listStoreCoupons(
                    (submission_source IS NULL) AS "isSupplier"
             FROM coupons
             WHERE ${visible}
-              AND ${siteBaseMatchSql(base)}
+              AND ${onStoreSql(base)}
             ORDER BY ${rankingOrderSql()}
             LIMIT ${limit}
         `),
@@ -316,7 +325,7 @@ export async function listStoreCoupons(
                    MAX(updated_at) AS last_updated
             FROM coupons
             WHERE ${visible}
-              AND ${siteBaseMatchSql(base)}
+              AND ${onStoreSql(base)}
         `),
     ])
     const listRows = parseCouponRows(
@@ -387,10 +396,10 @@ export async function getCouponStats(): Promise<StatsRow> {
  *
  * Lives here rather than in the account route for the same reason every other
  * catalog read does: it must share `visibleCouponsWhere()` and the
- * `site = store OR site LIKE '%.' || store` store-matching predicate with
- * listStoreCoupons, or the count under a favorite would disagree with the
- * store page that favorite links to. A second hand-written copy of either
- * predicate is exactly the F-006 drift this module exists to prevent.
+ * `onStoreSql()` store-matching predicate with listStoreCoupons, or the count
+ * under a favorite would disagree with the store page that favorite links to.
+ * A second hand-written copy of either predicate is exactly the F-006 drift
+ * this module exists to prevent.
  *
  * `stores` are already-normalized registrable domains (resolveStoreDomain
  * output, the same vocabulary favorite_stores.store_name stores). UNNEST turns
@@ -406,7 +415,7 @@ export async function countCouponsForStores(
         SELECT f.store AS site, COUNT(c.id)::int AS coupon_count
         FROM UNNEST(${stores}::text[]) AS f(store)
         LEFT JOIN coupons c
-               ON (c.site = f.store OR c.site LIKE '%.' || f.store)
+               ON ${onStoreSql(Prisma.sql`f.store`, Prisma.sql`c.site`)}
               AND ${visibleCouponsWhere()}
         GROUP BY f.store
     `)
@@ -843,9 +852,9 @@ const SHOPPER_STORE_BASE_PATTERN = /^[a-z0-9.-]+$/
  * indexable and sitemap-listed). resolveStoreDomain only proves the string is a
  * registrable domain; THIS is what proves it is one of ours.
  *
- * `base` is matched with the store page's own predicate (siteBaseMatchSql:
- * exact or any subdomain) on both tables, and is bound into a LIKE pattern, so
- * it must be a clean lowercase hostname (throws a plain Error otherwise, like
+ * `base` is matched with the store page's own predicate (onStoreSql: exact
+ * or any subdomain, compared as text) on both tables, and it must be a clean
+ * lowercase hostname (throws a plain Error otherwise, like
  * submitShopperCoupon). `client` lets submitShopperCoupon run the probe inside
  * its own transaction.
  */
@@ -865,12 +874,12 @@ export async function isKnownStore(
             SELECT (
                 EXISTS (
                     SELECT 1 FROM coupons
-                    WHERE ${siteBaseMatchSql(lowered)}
+                    WHERE ${onStoreSql(lowered)}
                       AND submission_source IS NULL
                 )
                 OR EXISTS (
                     SELECT 1 FROM store_configs
-                    WHERE (store_name = ${lowered} OR store_name LIKE ${'%.' + lowered})
+                    WHERE ${onStoreSql(lowered, Prisma.sql`store_name`)}
                 )
             ) AS known
         `),
@@ -976,7 +985,7 @@ export async function submitShopperCoupon(
             await tx.$queryRaw(Prisma.sql`
                 SELECT id FROM coupons
                 WHERE lower(code) = lower(${code})
-                  AND ${siteBaseMatchSql(base)}
+                  AND ${onStoreSql(base)}
                   AND ${visibleCouponsWhere()}
                 ORDER BY created_at, id
                 LIMIT 1

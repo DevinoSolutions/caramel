@@ -475,7 +475,7 @@ describe('listStoreCoupons — supplier-row flag (lets the store page skip the k
 })
 
 describe('store-matching reads bind the LOWERCASE base (site column is stored lowercase)', () => {
-    it('listStoreCoupons("eNasco.com") binds enasco.com / %.enasco.com in BOTH the list and the count query', async () => {
+    it('listStoreCoupons("eNasco.com") binds enasco.com, and no LIKE pattern, in BOTH the list and the count query', async () => {
         mockRows(
             sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
             [],
@@ -490,14 +490,17 @@ describe('store-matching reads bind the LOWERCASE base (site column is stored lo
         expect(capturedValues).toHaveLength(2)
         for (const values of capturedValues) {
             expect(values).toContain('enasco.com')
-            expect(values).toContain('%.enasco.com')
             expect(values).not.toContain('eNasco.com')
-            expect(values).not.toContain('%.eNasco.com')
+            expect(values).not.toContain('%.enasco.com')
         }
         // The predicate itself stays plain, index-friendly equality — no
-        // LOWER(site) wrapper that would defeat coupons_site_idx.
+        // LOWER(site) wrapper that would defeat coupons_site_idx — and the
+        // subdomain suffix is compared as text, never as a LIKE pattern.
         for (const q of capturedQueries) {
-            expect(q).toMatch(/\(site = \? OR site LIKE \?\)/)
+            expect(q).toMatch(
+                /\(site = \? OR right\(site, length\(\?\) \+ 1\) = '\.' \|\| \?\)/,
+            )
+            expect(q).not.toMatch(/site LIKE/i)
             expect(q).not.toMatch(/lower\(site\)/i)
         }
     })
@@ -514,8 +517,8 @@ describe('store-matching reads bind the LOWERCASE base (site column is stored lo
         expect(capturedValues).toHaveLength(2)
         for (const values of capturedValues) {
             expect(values).toContain('brooklinen.com')
-            expect(values).toContain('%.brooklinen.com')
             expect(values).not.toContain('Brooklinen.com')
+            expect(values).not.toContain('%.brooklinen.com')
         }
     })
 })
@@ -713,7 +716,9 @@ describe('submitShopperCoupon (THIRD sanctioned write: shopper-submitted codes)'
         const sql = capturedQueries[i] ?? ''
         // Supplier-sourced coupons only: shopper rows must prove nothing.
         expect(sql).toContain('FROM coupons')
-        expect(sql).toContain('(site = ? OR site LIKE ?)')
+        expect(sql).toContain(
+            "(site = ? OR right(site, length(?) + 1) = '.' || ?)",
+        )
         expect(sql).toContain('submission_source IS NULL')
         // NOT the user column: ON DELETE SET NULL nulls it for a deleted
         // shopper's rows, which would turn those orphans into 'supplier' rows.
@@ -723,13 +728,10 @@ describe('submitShopperCoupon (THIRD sanctioned write: shopper-submitted codes)'
         expect(sql).not.toContain('expired = FALSE')
         // The published apply-config table.
         expect(sql).toContain('FROM store_configs')
-        expect(sql).toContain('store_name = ? OR store_name LIKE ?')
-        expect(capturedValues[i]).toEqual([
-            'ebay.com',
-            '%.ebay.com',
-            'ebay.com',
-            '%.ebay.com',
-        ])
+        expect(sql).toContain(
+            "(store_name = ? OR right(store_name, length(?) + 1) = '.' || ?)",
+        )
+        expect(capturedValues[i]).toEqual(Array(6).fill('ebay.com'))
     })
 
     it('(g) an UNKNOWN store throws UnknownStoreError after the locks and BEFORE the dedupe, the cap and the insert', async () => {
@@ -794,18 +796,21 @@ describe('submitShopperCoupon (THIRD sanctioned write: shopper-submitted codes)'
         expect(i).toBeGreaterThanOrEqual(0)
         const sql = capturedQueries[i] ?? ''
         expect(sql).toContain('lower(code) = lower(')
-        // The store page's own predicate (siteBaseMatchSql), not a re-written one.
-        expect(sql).toContain('(site = ? OR site LIKE ?)')
+        // The store page's own predicate (onStoreSql), not a re-written one.
+        expect(sql).toContain(
+            "(site = ? OR right(site, length(?) + 1) = '.' || ?)",
+        )
         // The store page's own visibility rule (visibleCouponsWhere): a code
         // the page would NOT show (invalid/expired status) is not "already listed".
         expect(sql).toContain('status IN (')
         expect(sql).toContain('expired = FALSE')
-        // Bound: the code as typed, the LOWERCASE base twice (equality +
-        // suffix), then the visible-status list.
+        // Bound: the code as typed, the LOWERCASE base three times
+        // (equality, suffix length, suffix), then the visible-status list.
         expect(capturedValues[i]).toEqual([
             'SaVe10',
             'ebay.com',
-            '%.ebay.com',
+            'ebay.com',
+            'ebay.com',
             ...VISIBLE_COUPON_STATUSES,
         ])
         expect(capturedValues[i]).not.toContain('invalid')
