@@ -22,7 +22,7 @@
         "@argos-ci/cli",
         "@tailwindcss/forms",
         "@types/gtag.js",
-        "@typescript-eslint/parser",
+        "eslint",
         "eslint-config-next",
         "prettier-plugin-organize-imports",
         "prettier-plugin-tailwindcss",
