@@ -1,4 +1,5 @@
 import { POST as deleteMyData } from '@/app/api/account/data/delete/route'
+import { GET as accountOverview } from '@/app/api/account/overview/route'
 import { POST } from '@/app/api/sites/suggest/route'
 import prisma from '@/lib/prisma'
 import { siteSuggestionIdentityWhere } from '@/lib/siteSuggestionIdentity'
@@ -75,7 +76,15 @@ async function cleanup() {
     await prisma.siteSuggestion.deleteMany({
         where: { domain: { endsWith: ITEST_DOMAIN_SUFFIX } },
     })
-    await prisma.user.deleteMany({ where: { email: USER_EMAIL } })
+    await prisma.user.deleteMany({
+        where: {
+            OR: [
+                { email: USER_EMAIL },
+                // The lookalike accounts the exact-identity suite registers.
+                { email: { endsWith: `@${ITEST_DOMAIN_SUFFIX}` } },
+            ],
+        },
+    })
 }
 
 beforeEach(async () => {
@@ -376,10 +385,12 @@ describe('site suggestions — answering a request (real Postgres)', () => {
         ).notifiedAt
         sendEmailMock.mockClear()
 
-        // The same person asking for the same store again, later.
+        // The same person asking for the same store again, later. (Stored
+        // folded whatever they typed — the database refuses anything else —
+        // so this is the same address the first row carries.)
         const again = await createRow(domain, {
             status: 'supported',
-            requesterEmail: USER_EMAIL.toUpperCase(),
+            requesterEmail: USER_EMAIL,
         })
         const result = await notifySupportedRequesters([again])
         expect(result.sent).toBe(0)
@@ -397,10 +408,9 @@ describe('site suggestions — answering a request (real Postgres)', () => {
 
 // "Delete my data" and the requester identity (#227), on real Postgres.
 //
-// The unit suite imitates `mode: 'insensitive'` in its in-memory fake. Whether
-// Postgres actually folds the case — and whether the OR really reaches a row
-// that carries no user id at all — is a property of the database, so it is
-// settled here.
+// Whether the OR really reaches a row that carries no user id at all — and
+// whether an address typed in another case is still found once the suggest
+// route has folded it — is a property of the database, so it is settled here.
 describe('delete-my-data scrubs the requester identity (real Postgres)', () => {
     it('scrubs the signed-in row AND the email-only row typed in a different case, and leaves a third user alone', async () => {
         const mine = await createRow(`mine.${ITEST_DOMAIN_SUFFIX}`)
@@ -412,15 +422,14 @@ describe('delete-my-data scrubs the requester identity (real Postgres)', () => {
                 userAgent: 'their laptop',
             },
         })
-        // Made while SIGNED OUT: no user id, and the address as THEY typed it.
-        const anonymous = await createRow(`anon.${ITEST_DOMAIN_SUFFIX}`)
-        await prisma.siteSuggestion.update({
-            where: { id: anonymous },
-            data: {
-                requesterEmail: USER_EMAIL.toUpperCase(),
-                userAgent: 'their phone',
-            },
+        // Made while SIGNED OUT: no user id, and the address as THEY typed it,
+        // through the real suggest route (which stores it folded).
+        const typed = await suggest({
+            url: `anon.${ITEST_DOMAIN_SUFFIX}`,
+            email: USER_EMAIL.toUpperCase(),
         })
+        expect(typed.status).toBe(200)
+        const { id: anonymous } = (await typed.json()) as { id: string }
         const stranger = await createRow(`stranger.${ITEST_DOMAIN_SUFFIX}`)
         await prisma.siteSuggestion.update({
             where: { id: stranger },
@@ -512,8 +521,8 @@ describe('delete-my-data scrubs the requester identity (real Postgres)', () => {
 // must be the same population the scrub touches: if the two predicates ever
 // disagreed, the page would say "Nothing to delete" about rows the delete route
 // would happily have scrubbed. Both call siteSuggestionIdentityWhere, so this
-// pins the round trip rather than the spelling — including the part only
-// Postgres can settle, that `mode: 'insensitive'` really folds the case.
+// pins the round trip rather than the spelling — including an address typed in
+// another case, which the suggest route stores folded.
 describe('the danger-zone count and the scrub agree (real Postgres)', () => {
     async function identifyingCount(): Promise<number> {
         return prisma.siteSuggestion.count({
@@ -530,11 +539,12 @@ describe('the danger-zone count and the scrub agree (real Postgres)', () => {
     }
 
     it('counts the signed-out, email-only request, then counts NOTHING once it is scrubbed', async () => {
-        const anonymous = await createRow(`gate.${ITEST_DOMAIN_SUFFIX}`)
-        await prisma.siteSuggestion.update({
-            where: { id: anonymous },
-            data: { requesterEmail: USER_EMAIL.toUpperCase() },
+        const typed = await suggest({
+            url: `gate.${ITEST_DOMAIN_SUFFIX}`,
+            email: USER_EMAIL.toUpperCase(),
         })
+        expect(typed.status).toBe(200)
+        const { id: anonymous } = (await typed.json()) as { id: string }
         // The account's ONLY personal data. Before the gate counted these, this
         // user read "Nothing to delete" and could never reach the route.
         expect(await identifyingCount()).toBe(1)
@@ -570,5 +580,117 @@ describe('the danger-zone count and the scrub agree (real Postgres)', () => {
             data: { userAgent: 'somebody else entirely' },
         })
         expect(await identifyingCount()).toBe(0)
+    })
+})
+
+// The requester identity is an EXACT address, never a pattern (real Postgres).
+//
+// Prisma compiles `{ equals, mode: 'insensitive' }` to an UNESCAPED `ILIKE`, so
+// an `_` or `%` in the account's email used to be a WILDCARD: an account
+// registered as `j_hn@…` counted — and, on delete-my-data, SCRUBBED — the
+// store requests `john@…` made while signed out. Only Postgres can show that,
+// so it is pinned here, through both callers of siteSuggestionIdentityWhere.
+describe('the requester identity is an exact address, never a pattern (real Postgres)', () => {
+    const VICTIM_EMAIL = `john@${ITEST_DOMAIN_SUFFIX}`
+
+    function deleteAs(email: string, id: string) {
+        getSessionMock.mockResolvedValue({ user: { id, email } })
+        return deleteMyData(
+            new NextRequest('http://localhost/api/account/data/delete', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ confirm: 'DELETE' }),
+            }),
+        )
+    }
+
+    // Made while SIGNED OUT by somebody else entirely: no user id, only the
+    // address they typed.
+    function victimRow(): Promise<string> {
+        return createRow(`victim.${ITEST_DOMAIN_SUFFIX}`, {
+            requesterEmail: VICTIM_EMAIL,
+        })
+    }
+
+    for (const lookalike of [
+        `j_hn@${ITEST_DOMAIN_SUFFIX}`,
+        `%@${ITEST_DOMAIN_SUFFIX}`,
+    ]) {
+        it(`delete-my-data as "${lookalike}" scrubs its own request and never touches "${VICTIM_EMAIL}"'s`, async () => {
+            const victim = await victimRow()
+            const own = await createRow(`own.${ITEST_DOMAIN_SUFFIX}`, {
+                requesterEmail: lookalike,
+            })
+
+            const res = await deleteAs(lookalike, 'itest-lookalike-user')
+            expect(res.status).toBe(200)
+            expect((await res.json()).scrubbed).toEqual({ siteSuggestions: 1 })
+
+            await expect(
+                prisma.siteSuggestion.findUniqueOrThrow({
+                    where: { id: victim },
+                    select: { requesterEmail: true, rawUrl: true },
+                }),
+            ).resolves.toEqual({
+                requesterEmail: VICTIM_EMAIL,
+                rawUrl: `https://victim.${ITEST_DOMAIN_SUFFIX}/`,
+            })
+            await expect(
+                prisma.siteSuggestion.findUniqueOrThrow({
+                    where: { id: own },
+                    select: { requesterEmail: true },
+                }),
+            ).resolves.toEqual({ requesterEmail: null })
+        })
+
+        it(`the danger-zone count for "${lookalike}" does not count "${VICTIM_EMAIL}"'s request`, async () => {
+            await victimRow()
+            const lookalikeUser = await prisma.user.create({
+                data: {
+                    email: lookalike,
+                    name: 'Lookalike Itest',
+                    emailVerified: true,
+                },
+                select: { id: true },
+            })
+            getSessionMock.mockResolvedValue({
+                user: { id: lookalikeUser.id, email: lookalike },
+            })
+            const res = await accountOverview(
+                new NextRequest('http://localhost/api/account/overview'),
+            )
+            expect(res.status).toBe(200)
+            expect((await res.json()).siteSuggestions).toEqual({
+                identifyingCount: 0,
+            })
+        })
+    }
+
+    it('an address typed in ANY case is stored folded, so the exact match still finds it', async () => {
+        const res = await suggest({
+            url: `typed.${ITEST_DOMAIN_SUFFIX}`,
+            email: USER_EMAIL.toUpperCase(),
+        })
+        expect(res.status).toBe(200)
+        const { id } = (await res.json()) as { id: string }
+        await expect(
+            prisma.siteSuggestion.findUniqueOrThrow({
+                where: { id },
+                select: { requesterEmail: true },
+            }),
+        ).resolves.toEqual({ requesterEmail: USER_EMAIL })
+
+        // An account whose session spells its own address in another case
+        // still reaches it: the predicate folds its input the same way.
+        const deleted = await deleteAs(USER_EMAIL.toUpperCase(), userId)
+        expect((await deleted.json()).scrubbed).toEqual({ siteSuggestions: 1 })
+    })
+
+    it('the DATABASE refuses an unfolded requester email, so no writer can store one the exact match would miss', async () => {
+        await expect(
+            createRow(`unfolded.${ITEST_DOMAIN_SUFFIX}`, {
+                requesterEmail: 'Shopper@Example.COM',
+            }),
+        ).rejects.toThrow(/site_suggestions_requester_email_folded/)
     })
 })

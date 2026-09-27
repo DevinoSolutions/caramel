@@ -31,6 +31,7 @@
         "lint": "turbo run lint",
         "lint:oxlint": "oxlint",
         "test": "turbo run test",
+        "test:eslint-rules": "node --test tools/eslint-rules/*.test.mjs",
         "prettier-write": "turbo run prettier-write",
         "prettier-check": "turbo run prettier-check",
         "prettier-check:root": "prettier --check '*.{json,md,mjs,yaml,yml}' '.*.{json,yaml,yml}' '.claude-plugin/**/*.json' 'plugins/**/*.{json,md}' '.github/**/*.{yml,yaml,md}' 'tools/**/*.{mjs,md}'",
