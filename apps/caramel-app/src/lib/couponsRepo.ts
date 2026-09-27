@@ -118,6 +118,39 @@ const percentOffSql = () =>
 const fixedAmountOffSql = () =>
     Prisma.sql`UPPER(discount_type) IS DISTINCT FROM 'PERCENTAGE' AND discount_amount > 0`
 
+/**
+ * What a shopper typed, made safe to put inside a LIKE/ILIKE pattern: `\`, `%`
+ * and `_` are backslash-escaped, the escape Postgres uses by default, so each
+ * one matches itself. The backslash goes first so the escapes added here are
+ * not escaped again. Every pattern built from input goes through this, and the
+ * caller adds its own `%` around the result. Without it a search for `%`
+ * listed every code and `e_ay` found ebay.com (2026-09-27, fleet ILIKE sweep).
+ * The value is still a bound parameter; this changes what the pattern means,
+ * not how it reaches the database.
+ */
+const likeLiteral = (typed: string) => typed.replace(/[\\%_]/g, '\\$&')
+
+/**
+ * A coupon belongs to a store when its `site` IS the store or one of its
+ * subdomains. The suffix is compared as text with `right()`, so every character
+ * of the store matches only itself. The `site LIKE '%.' || store` this replaced
+ * read `_` and `%` as wildcards: `a_cd.com` owned shop.abcd.com's codes. The
+ * callers bind resolveStoreDomain output, which cannot hold either character,
+ * so that was never reachable. This keeps it so without relying on the callers
+ * (2026-09-27, fleet ILIKE sweep).
+ *
+ * Case-sensitive on purpose: `site` is stored lowercase, callers lowercase the
+ * store, and plain equality keeps using coupons_site_idx. It is the ONE copy of
+ * the predicate, so the store page, /api/coupons and the followed-store counts
+ * cannot disagree about which rows a store owns. `store` is a bound value or a
+ * column expression, and `site` names the coupons column (aliased in a join).
+ */
+const onStoreSql = (
+    store: string | Prisma.Sql,
+    site: Prisma.Sql = Prisma.sql`site`,
+) =>
+    Prisma.sql`(${site} = ${store} OR right(${site}, length(${store}) + 1) = '.' || ${store})`
+
 // ---------------------------------------------------------------------------
 // Reads
 
@@ -148,14 +181,11 @@ export async function listCoupons(
         // sensitive on purpose — plain equality keeps using coupons_site_idx.
         // Lowercasing the bound value is the one-line guard that keeps a
         // mixed-case caller from matching nothing.
-        const base = baseSite.toLowerCase()
-        conditions.push(
-            Prisma.sql`(site = ${base} OR site LIKE ${'%.' + base})`,
-        )
+        conditions.push(onStoreSql(baseSite.toLowerCase()))
     }
 
     if (search) {
-        const s = `%${search}%`
+        const s = `%${likeLiteral(search)}%`
         conditions.push(
             Prisma.sql`(site ILIKE ${s} OR title ILIKE ${s} OR description ILIKE ${s} OR code ILIKE ${s})`,
         )
@@ -164,8 +194,9 @@ export async function listCoupons(
     if (keyWords) {
         const patterns = keyWords
             .split(',')
-            .map(k => `%${k.trim()}%`)
-            .filter(k => k.length > 2)
+            .map(k => k.trim())
+            .filter(k => k.length > 0)
+            .map(k => `%${likeLiteral(k)}%`)
         if (patterns.length > 0) {
             // Prisma's raw layer won't reliably bind a JS array to an
             // array-typed parameter, so build `ANY(ARRAY[?,?,...]::text[])`
@@ -252,7 +283,7 @@ export async function listStoreCoupons(
                    status, verification_message AS "verificationMessage"
             FROM coupons
             WHERE ${visible}
-              AND (site = ${base} OR site LIKE ${'%.' + base})
+              AND ${onStoreSql(base)}
             ORDER BY ${rankingOrderSql()}
             LIMIT ${limit}
         `),
@@ -266,7 +297,7 @@ export async function listStoreCoupons(
                    MAX(updated_at) AS last_updated
             FROM coupons
             WHERE ${visible}
-              AND (site = ${base} OR site LIKE ${'%.' + base})
+              AND ${onStoreSql(base)}
         `),
     ])
     const coupons = forShoppers(
@@ -326,10 +357,10 @@ export async function getCouponStats(): Promise<StatsRow> {
  *
  * Lives here rather than in the account route for the same reason every other
  * catalog read does: it must share `visibleCouponsWhere()` and the
- * `site = store OR site LIKE '%.' || store` store-matching predicate with
- * listStoreCoupons, or the count under a favorite would disagree with the
- * store page that favorite links to. A second hand-written copy of either
- * predicate is exactly the F-006 drift this module exists to prevent.
+ * `onStoreSql()` store-matching predicate with listStoreCoupons, or the count
+ * under a favorite would disagree with the store page that favorite links to.
+ * A second hand-written copy of either predicate is exactly the F-006 drift
+ * this module exists to prevent.
  *
  * `stores` are already-normalized registrable domains (resolveStoreDomain
  * output, the same vocabulary favorite_stores.store_name stores). UNNEST turns
@@ -345,7 +376,7 @@ export async function countCouponsForStores(
         SELECT f.store AS site, COUNT(c.id)::int AS coupon_count
         FROM UNNEST(${stores}::text[]) AS f(store)
         LEFT JOIN coupons c
-               ON (c.site = f.store OR c.site LIKE '%.' || f.store)
+               ON ${onStoreSql(Prisma.sql`f.store`, Prisma.sql`c.site`)}
               AND ${visibleCouponsWhere()}
         GROUP BY f.store
     `)
@@ -370,7 +401,7 @@ export async function listStoreOptions(
         ? await prisma.$queryRaw(Prisma.sql`
               SELECT DISTINCT site FROM coupons
               WHERE ${visibleCouponsWhere()}
-                AND (site ILIKE ${'%' + q + '%'} OR site ILIKE ${q + '%'})
+                AND (site ILIKE ${'%' + likeLiteral(q) + '%'} OR site ILIKE ${likeLiteral(q) + '%'})
               ORDER BY site ASC
               LIMIT ${limit}
           `)
@@ -582,9 +613,9 @@ export async function searchSupportedSites(q: string): Promise<SiteRow[]> {
         SELECT site FROM (
             SELECT DISTINCT site FROM coupons
             WHERE ${visibleCouponsWhere()}
-              AND site ILIKE ${'%' + q + '%'}
+              AND site ILIKE ${'%' + likeLiteral(q) + '%'}
         ) matches
-        ORDER BY (site = ${q}) DESC, (site ILIKE ${q + '%'}) DESC,
+        ORDER BY (site = ${q}) DESC, (site ILIKE ${likeLiteral(q) + '%'}) DESC,
                  length(site) ASC, site ASC
         LIMIT 20
     `)
