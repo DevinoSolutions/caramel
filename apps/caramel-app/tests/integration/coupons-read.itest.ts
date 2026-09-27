@@ -5,6 +5,7 @@ import {
     listCoupons,
     listNeighbourStoreRows,
     listStoreCoupons,
+    listStoreOptions,
     listStoreSitemapEntries,
     listSupportedStoreConfigs,
     searchSupportedSites,
@@ -368,6 +369,74 @@ describe('searchSupportedSites — ranked store search (real pg :58005)', () => 
             'target.com',
             'walmart.com',
             'codecademy.com',
+        ])
+    })
+})
+
+// The public search boxes (/api/coupons `search` and `key_words`, the store
+// autocomplete, the extension's supported-store search) put what was typed
+// straight into an ILIKE pattern, so `%` and `_` were wildcards and `\`
+// escaped the next character: a search for `%` listed every code, and `e_ay`
+// found ebay.com (2026-09-27, fleet ILIKE sweep).
+describe('search terms are matched literally, never as an ILIKE pattern (real pg :58005)', () => {
+    const SEEDED_SITES = new Set([
+        'amazon.com',
+        'codecademy.com',
+        'ebay.com',
+        'target.com',
+        'walmart.com',
+    ])
+    const seededSites = (rows: { site: string | null }[]) =>
+        rows.map(r => r.site).filter(site => SEEDED_SITES.has(site ?? ''))
+
+    // 900000001 says "10% off"; 900000002 is free shipping over $25 and holds
+    // no `%` in its site, title, description or code.
+    it('a coupon search for `%` finds the codes whose text holds a percent sign, not every code', async () => {
+        const { coupons } = await listCoupons({
+            search: '%',
+            limit: 500,
+            skip: 0,
+        })
+        const ids = coupons.map(c => c.id)
+        expect(ids).toContain('900000001')
+        expect(ids).not.toContain('900000002')
+    })
+
+    it('a keyword of `%` keeps only descriptions that hold a percent sign', async () => {
+        const { coupons } = await listCoupons({
+            keyWords: '%',
+            limit: 500,
+            skip: 0,
+        })
+        const ids = coupons.map(c => c.id)
+        expect(ids).toContain('900000001')
+        expect(ids).not.toContain('900000002')
+    })
+
+    it('a coupon search for `e_ay` finds no ebay.com code', async () => {
+        const { coupons } = await listCoupons({
+            search: 'e_ay',
+            limit: 500,
+            skip: 0,
+        })
+        expect(coupons.filter(c => c.id.startsWith('9000000'))).toEqual([])
+    })
+
+    it('the store autocomplete matches `%`, `e_ay` and `eb\\ay` literally, and still finds `bay`', async () => {
+        expect(seededSites(await listStoreOptions('%', 50))).toEqual([])
+        expect(seededSites(await listStoreOptions('e_ay', 50))).toEqual([])
+        expect(seededSites(await listStoreOptions('eb\\ay', 50))).toEqual([])
+        expect(seededSites(await listStoreOptions('bay', 50))).toEqual([
+            'ebay.com',
+        ])
+    })
+
+    it('the supported-store search matches `%`, `e_ay` and `eb\\ay` literally, and still finds `bay`', async () => {
+        expect(seededSites(await searchSupportedSites('%'))).toEqual([])
+        expect(seededSites(await searchSupportedSites('e_ay'))).toEqual([])
+        expect(seededSites(await searchSupportedSites('eb\\ay'))).toEqual([])
+        expect(seededSites(await searchSupportedSites('bay'))).toEqual([
+            'ebay.com',
         ])
     })
 })
