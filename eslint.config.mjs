@@ -96,6 +96,24 @@ export default [
                     message:
                         'Read env only through src/lib/env.ts (server) or src/lib/env.client.ts (client) — the zod-validated env door (DESIGN.md §1). process.env.NODE_ENV / NEXT_RUNTIME (framework flags) are exempt.',
                 },
+                {
+                    // 2026-09-27 — Prisma compiles `{ equals, mode:
+                    // 'insensitive' }` to an UNESCAPED `ILIKE`, so an `_` or
+                    // `%` in the value is a wildcard: an account registered as
+                    // `j_hn@x` matched, and delete-my-data scrubbed, the rows
+                    // `john@x` owned (siteSuggestionIdentity.ts). Fold the value
+                    // in JS and store it folded, then match with a plain
+                    // equals. Lives in this block, not its own: a second
+                    // `no-restricted-syntax` entry for the same files would
+                    // REPLACE the env-door selector above, not add to it.
+                    // Sibling combinators, both orders, so the two keys must
+                    // sit in the SAME object literal; the second value form
+                    // covers `'insensitive' as const`.
+                    selector:
+                        "Property[key.name='equals'] ~ Property[key.name='mode']:matches([value.value='insensitive'], [value.expression.value='insensitive']), Property[key.name='mode']:matches([value.value='insensitive'], [value.expression.value='insensitive']) ~ Property[key.name='equals']",
+                    message:
+                        "Never `{ equals, mode: 'insensitive' }` — Prisma compiles it to an unescaped ILIKE, so `_`/`%` in the value become wildcards (a lookalike email matches someone else's rows). Store the value folded and match it exactly (see src/lib/siteSuggestionIdentity.ts foldRequesterEmail).",
+                },
             ],
         },
     },
