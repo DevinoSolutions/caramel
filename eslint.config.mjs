@@ -1,4 +1,5 @@
 import next from 'eslint-config-next'
+import { fileURLToPath } from 'node:url'
 import noInsensitivePrismaLiteralMatch from './tools/eslint-rules/no-insensitive-prisma-literal-match.mjs'
 
 /** @type {import('eslint').Linter.Config[]} */
@@ -113,7 +114,17 @@ export default [
         // door's instead of adding to it. What it sees and what it cannot
         // (spreads, parameters, raw SQL) is in the rule's header.
         // No env-door `ignores` here: the ban holds for env.ts and friends too.
-        files: ['**/src/**/*.{ts,tsx}'],
+        //
+        // Scope: ALL of apps/caramel-app, not just src/. scripts/ (bridge-sync
+        // writes to the database), e2e/support (seeds and cleans it), prisma/
+        // and the tests talk to Prisma too. An ABSOLUTE `basePath` instead of
+        // the `**/` prefix the blocks above use: this array is loaded from the
+        // repo root (husky) and from apps/caramel-app (`pnpm lint`, CI), and a
+        // `**/` pattern that catches the whole app from one base catches the
+        // whole repo from the other. Checked from both bases by
+        // tools/eslint-rules/no-insensitive-prisma-literal-match.test.mjs.
+        basePath: fileURLToPath(new URL('./apps/caramel-app', import.meta.url)),
+        files: ['**/*.{ts,tsx,mts,cts,js,mjs}'],
         plugins: {
             caramel: {
                 rules: {

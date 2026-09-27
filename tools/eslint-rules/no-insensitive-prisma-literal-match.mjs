@@ -17,10 +17,19 @@
 // or string literals (quoted, or computed `['equals']`), and a `mode` value
 // that is `'insensitive'` (also as a template literal, or behind `as` /
 // `satisfies` / `!`), any `X.insensitive` / `X['insensitive']` member (e.g.
-// `Prisma.QueryMode.insensitive`), or an identifier (shorthand `{ mode }`
-// included) bound by a single `const` to one of those. What it cannot see, and
-// so never reports: spreads (`...caseInsensitive`), a `mode` that arrives as a
-// parameter, a `let`, or an import, and raw SQL (`$queryRaw` ILIKE/LIKE).
+// `Prisma.QueryMode.insensitive`), a ternary or `??` / `||` / `&&` with one
+// such branch, or an identifier (shorthand `{ mode }` included) bound by a
+// single `const` to one of those.
+//
+// What it cannot see, and so never reports (each one DOES compile to the
+// unescaped ILIKE; the test file pins them as known misses):
+// - a destructured binding: `const { insensitive } = Prisma.QueryMode`;
+// - a member of an object constant: `CASE_INSENSITIVE.mode`;
+// - an enum alias under another member name:
+//   `enum Mode { CaseInsensitive = 'insensitive' }` then `Mode.CaseInsensitive`;
+// - spreads: `{ equals: email, ...caseInsensitive }`;
+// - a `mode` that arrives as a parameter, a `let`, or an import;
+// - raw SQL (`$queryRaw` ILIKE/LIKE).
 
 const LITERAL_MATCH_OPERATORS = new Set([
     'equals',
@@ -73,6 +82,21 @@ function isInsensitiveMode(node, scope, followed = new Set()) {
                 ? value.property.type === 'Literal' &&
                       value.property.value === 'insensitive'
                 : value.property.name === 'insensitive'
+        // `loose ? 'insensitive' : 'default'`, `mode ?? 'insensitive'`: one
+        // branch that can pick it is enough to ship the unescaped ILIKE.
+        case 'ConditionalExpression':
+            return (
+                isInsensitiveMode(value.consequent, scope, followed) ||
+                isInsensitiveMode(value.alternate, scope, followed)
+            )
+        case 'LogicalExpression':
+            // `a && b` can only evaluate to `a` when `a` is falsy, and
+            // 'insensitive' is not, so for `&&` only `b` counts.
+            return (
+                (value.operator !== '&&' &&
+                    isInsensitiveMode(value.left, scope, followed)) ||
+                isInsensitiveMode(value.right, scope, followed)
+            )
         case 'Identifier': {
             const variable = findVariable(scope, value.name)
             if (!variable || followed.has(variable)) return false
