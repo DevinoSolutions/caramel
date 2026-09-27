@@ -149,6 +149,18 @@ const percentOffSql = () =>
 const fixedAmountOffSql = () =>
     Prisma.sql`UPPER(discount_type) IS DISTINCT FROM 'PERCENTAGE' AND discount_amount > 0`
 
+/**
+ * What a shopper typed, made safe to put inside a LIKE/ILIKE pattern: `\`, `%`
+ * and `_` are backslash-escaped, the escape Postgres uses by default, so each
+ * one matches itself. The backslash goes first so the escapes added here are
+ * not escaped again. Every pattern built from input goes through this, and the
+ * caller adds its own `%` around the result. Without it a search for `%`
+ * listed every code and `e_ay` found ebay.com (2026-09-27, fleet ILIKE sweep).
+ * The value is still a bound parameter; this changes what the pattern means,
+ * not how it reaches the database.
+ */
+const likeLiteral = (typed: string) => typed.replace(/[\\%_]/g, '\\$&')
+
 // ---------------------------------------------------------------------------
 // Reads
 
@@ -184,7 +196,7 @@ export async function listCoupons(
     }
 
     if (search) {
-        const s = `%${search}%`
+        const s = `%${likeLiteral(search)}%`
         conditions.push(
             Prisma.sql`(site ILIKE ${s} OR title ILIKE ${s} OR description ILIKE ${s} OR code ILIKE ${s})`,
         )
@@ -193,8 +205,9 @@ export async function listCoupons(
     if (keyWords) {
         const patterns = keyWords
             .split(',')
-            .map(k => `%${k.trim()}%`)
-            .filter(k => k.length > 2)
+            .map(k => k.trim())
+            .filter(k => k.length > 0)
+            .map(k => `%${likeLiteral(k)}%`)
         if (patterns.length > 0) {
             // Prisma's raw layer won't reliably bind a JS array to an
             // array-typed parameter, so build `ANY(ARRAY[?,?,...]::text[])`
@@ -418,7 +431,7 @@ export async function listStoreOptions(
         ? await prisma.$queryRaw(Prisma.sql`
               SELECT DISTINCT site FROM coupons
               WHERE ${visibleCouponsWhere()}
-                AND (site ILIKE ${'%' + q + '%'} OR site ILIKE ${q + '%'})
+                AND (site ILIKE ${'%' + likeLiteral(q) + '%'} OR site ILIKE ${likeLiteral(q) + '%'})
               ORDER BY site ASC
               LIMIT ${limit}
           `)
@@ -681,9 +694,9 @@ export async function searchSupportedSites(q: string): Promise<SiteRow[]> {
         SELECT site FROM (
             SELECT DISTINCT site FROM coupons
             WHERE ${visibleCouponsWhere()}
-              AND site ILIKE ${'%' + q + '%'}
+              AND site ILIKE ${'%' + likeLiteral(q) + '%'}
         ) matches
-        ORDER BY (site = ${q}) DESC, (site ILIKE ${q + '%'}) DESC,
+        ORDER BY (site = ${q}) DESC, (site ILIKE ${likeLiteral(q) + '%'}) DESC,
                  length(site) ASC, site ASC
         LIMIT 20
     `)
