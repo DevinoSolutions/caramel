@@ -16,6 +16,12 @@ export const metadata: Metadata = {
     alternates: { canonical: '/', types: LLMS_TXT_ALTERNATE_TYPES },
 }
 
+// ISR, not fully static: RecentlyWorkedSection reads the catalog on the
+// server so its store links are in the HTML. Visitors still get a cached copy
+// (served as fast as the old static page); it is regenerated in the background
+// at most once per 60s. See RecentlyWorkedSection.tsx for the build-time rule.
+export const revalidate = 60
+
 // Server component on purpose. The sections below are still client components
 // and still animate exactly as before — they just server-render their markup
 // now, so crawlers get the h1, the copy and the internal links instead of an
@@ -37,10 +43,8 @@ export default function Page(): React.JSX.Element {
                     lineClassName="bg-gradient-to-r from-transparent via-orange-600/40 to-transparent"
                     glowClassName="bg-gradient-to-r from-transparent via-caramel/20 to-transparent blur-sm"
                 />
-                {/* Below the fold, fetched after hydration, and absent (no
-                    heading, no box) until at least one code worked in the last
-                    24h — so it cannot shift the hero or make this page
-                    render per request. */}
+                {/* Below the fold, server-rendered (ISR), and absent (no
+                    heading, no box) unless a code worked in the last 24h. */}
                 <RecentlyWorkedSection />
                 <SupportedSection />
                 <SectionDivider

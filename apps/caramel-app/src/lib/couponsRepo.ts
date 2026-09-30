@@ -62,6 +62,7 @@ import {
     TotalCountRowSchema,
     parseCouponRows,
 } from '@/lib/couponsDb'
+import { shopperCouponTitle } from '@/lib/couponTitleText'
 import { shopperVerificationText } from '@/lib/couponVerificationText'
 import prisma from '@/lib/prisma'
 import { Prisma } from '@prisma/client'
@@ -315,12 +316,15 @@ export async function listStoreCoupons(
  * The coupon rows a shopper-facing surface may render: the verifier's
  * `verification_message` is replaced by what a shopper may read of it, which
  * is usually nothing (couponVerificationText.ts has the prod vocabulary that
- * made this necessary). Both listing reads go through it, so /api/coupons
- * (the extension popup, agents) and the SSR pages agree.
+ * made this necessary), and a title that is only a button label or scraped
+ * page chrome is replaced by one built from the row (couponTitleText.ts).
+ * Both listing reads go through it, so /api/coupons (the extension popup,
+ * agents) and the SSR pages agree.
  */
 function forShoppers(rows: CouponListRow[]): CouponListRow[] {
     return rows.map(row => ({
         ...row,
+        title: shopperCouponTitle(row),
         verificationMessage: shopperVerificationText(
             row.status,
             row.verificationMessage,
@@ -631,11 +635,13 @@ export async function listRecentlyWorkedCoupons(
         ORDER BY s.last_worked_at DESC, s.coupon_id DESC
         LIMIT ${limit}
     `)
+    // Same shopper-facing title as the listing reads (forShoppers), so a tile
+    // and the store page it links to name the code the same way.
     return parseCouponRows(
         RecentlyWorkedCouponRowSchema,
         rawRows,
         'coupons.recently-worked',
-    )
+    ).map(row => ({ ...row, title: shopperCouponTitle(row) }))
 }
 
 /** api/sites/search-supported/route.ts POST — fixed LIMIT 20. The route's empty-query early return (`{sites:[]}` without querying) stays there; this fn assumes a non-empty `q`. */

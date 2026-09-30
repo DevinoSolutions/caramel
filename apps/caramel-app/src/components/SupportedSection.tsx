@@ -3,6 +3,7 @@
 import { useReducedMotion } from '@/lib/reducedMotion'
 import { m } from 'framer-motion'
 import Image from 'next/image'
+import Link from 'next/link'
 
 // The store scroller runs on CSS keyframes rather than a framer x-loop for one
 // reason: `animation-play-state: paused` (the hover pause) only acts on CSS
@@ -30,51 +31,63 @@ const marqueeStyles = `
 // they shared the network with the hero wordmark, the LCP image. The
 // /home-stores copies are the same logos at 240px, lossless WebP (62 KB total);
 // Amazon and Target were already small and stay as they were.
+// Each card links to its store's coupon page. Until 2026-09-30 the landing,
+// the page with nearly all of the site's organic clicks, linked to no store
+// page in its HTML at all; these eight are stores with live codes in the
+// catalog (checked on prod that day: 22-221 visible codes each).
 const featuredStores = [
     {
         name: 'Amazon',
+        domain: 'amazon.com',
         desc: 'Worldʼs largest online retailer',
         image: '/amazon.png',
         category: 'marketplace',
     },
     {
         name: 'eBay',
+        domain: 'ebay.com',
         desc: 'Auction marketplace for buyers & sellers',
         image: '/home-stores/ebay.webp',
         category: 'marketplace',
     },
     {
         name: 'Codecademy',
+        domain: 'codecademy.com',
         desc: 'Interactive platform to learn coding',
         image: '/home-stores/codeAcademy.webp',
         category: 'education',
     },
     {
         name: 'Best Buy',
+        domain: 'bestbuy.com',
         desc: 'Electronics and tech retailer',
         image: '/home-stores/bestbuy.webp',
         category: 'electronics',
     },
     {
         name: 'Target',
+        domain: 'target.com',
         desc: 'Department store chain',
         image: '/target.png',
         category: 'retail',
     },
     {
         name: 'Walmart',
+        domain: 'walmart.com',
         desc: 'Multinational retail corporation',
         image: '/home-stores/walmart.webp',
         category: 'retail',
     },
     {
         name: 'Nike',
+        domain: 'nike.com',
         desc: 'Athletic footwear and apparel',
         image: '/home-stores/nike.webp',
         category: 'fashion',
     },
     {
         name: 'Adidas',
+        domain: 'adidas.com',
         desc: 'Sports clothing and accessories',
         image: '/home-stores/adidas.webp',
         category: 'fashion',
@@ -139,13 +152,26 @@ export default function SupportedSection() {
                         <div className="caramel-marquee-track flex gap-4 hover:[animation-play-state:paused]">
                             {[...featuredStores, ...featuredStores].map(
                                 (store, index) => (
-                                    <div
+                                    <Link
                                         key={`${store.name}-${index}`}
+                                        href={`/coupons/${store.domain}`}
+                                        // Hidden marquee duplicates stay out
+                                        // of the tab order too (an aria-hidden
+                                        // subtree must hold nothing focusable).
                                         aria-hidden={
                                             index >= featuredStores.length ||
                                             undefined
                                         }
-                                        className="group relative min-w-[280px] flex-shrink-0 overflow-hidden rounded-3xl border border-caramel/20 bg-gradient-to-br from-caramel/5 via-orange-50/30 to-caramel/5 p-8 transition-all duration-300 hover:-translate-y-1 hover:border-caramel/60 hover:shadow-[0_12px_32px_-8px_rgba(234,105,37,0.35)] dark:border-caramel/30 dark:from-caramel/10 dark:via-orange-900/20 dark:to-caramel/10 lg:min-w-[240px] sm:min-w-[200px] sm:p-6"
+                                        tabIndex={
+                                            index >= featuredStores.length
+                                                ? -1
+                                                : undefined
+                                        }
+                                        aria-label={`${store.name} coupon codes`}
+                                        // No prefetch: 16 cards scroll past on
+                                        // every visit to the busiest page.
+                                        prefetch={false}
+                                        className="group relative block min-w-[280px] flex-shrink-0 overflow-hidden rounded-3xl border border-caramel/20 bg-gradient-to-br from-caramel/5 via-orange-50/30 to-caramel/5 p-8 transition-all duration-300 hover:-translate-y-1 hover:border-caramel/60 hover:shadow-[0_12px_32px_-8px_rgba(234,105,37,0.35)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel dark:border-caramel/30 dark:from-caramel/10 dark:via-orange-900/20 dark:to-caramel/10 lg:min-w-[240px] sm:min-w-[200px] sm:p-6"
                                     >
                                         <div
                                             aria-hidden="true"
@@ -234,7 +260,7 @@ export default function SupportedSection() {
                                                 {store.desc}
                                             </p>
                                         </div>
-                                    </div>
+                                    </Link>
                                 ),
                             )}
                         </div>

@@ -1,16 +1,15 @@
-// In-process cache behind GET /api/coupons/recently-worked (the landing
-// page's "Codes that just worked" section).
+// In-process cache behind GET /api/coupons/recently-worked, the public read of
+// the "Codes that just worked" list. (The landing page itself server-renders
+// the list through readRecentlyWorkedCoupons below, not through this route.)
 //
-// Why cache: the landing page is the busiest page on the site, and every
-// visitor's browser asks for this strip once. The read itself is cheap (an
-// index range scan over one day of coupon_signals, LIMIT 8 — see
-// couponsRepo.listRecentlyWorkedCoupons), but "cheap × every visitor" on the
+// Why cache: the route is public and unauthenticated. The read itself is
+// cheap (an index range scan over one day of coupon_signals, LIMIT 8 — see
+// couponsRepo.listRecentlyWorkedCoupons), but "cheap × every caller" on the
 // single Node main thread is exactly the load shape behind the Aug–Sep
 // healthcheck flaps. One read per 5 minutes per process makes it free; the
 // route adds a matching `s-maxage=300` so an edge cache can absorb it too.
 // Five minutes of staleness is harmless: rows carry an absolute lastWorkedAt
-// that the browser formats against its own clock, and the section re-applies
-// the 24h window client-side (coupons.ts isRecentlyWorked).
+// that the caller formats against its own clock (coupons.ts isRecentlyWorked).
 //
 // Same shape as storeDirectoryCache.ts / supportedStoresCache.ts: in-flight
 // builds are de-duplicated (a stampede after expiry runs ONE query), and a
@@ -33,7 +32,16 @@ type CachedRecentlyWorked = {
 let cached: CachedRecentlyWorked | null = null
 let inFlight: Promise<CachedRecentlyWorked> | null = null
 
-async function build(): Promise<CachedRecentlyWorked> {
+/**
+ * The newest codes shoppers applied successfully in the last 24h, read now
+ * (UNCACHED), as the section renders them. The landing page calls this
+ * directly: `/` is an ISR page, so its own revalidate window is the cache and
+ * a second in-process layer would only delay a fresh code by another 5
+ * minutes. The API route goes through getRecentlyWorkedCoupons below.
+ */
+export async function readRecentlyWorkedCoupons(): Promise<
+    RecentlyWorkedCoupon[]
+> {
     const rows = await listRecentlyWorkedCoupons(RECENTLY_WORKED_COUPONS_LIMIT)
     const coupons: RecentlyWorkedCoupon[] = []
     for (const row of rows) {
@@ -53,7 +61,11 @@ async function build(): Promise<CachedRecentlyWorked> {
             lastWorkedAt: row.lastWorkedAt.toISOString(),
         })
     }
-    return { coupons, builtAt: Date.now() }
+    return coupons
+}
+
+async function build(): Promise<CachedRecentlyWorked> {
+    return { coupons: await readRecentlyWorkedCoupons(), builtAt: Date.now() }
 }
 
 /**

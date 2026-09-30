@@ -162,6 +162,35 @@ describe('listCoupons', () => {
         }
     })
 
+    it('both listing reads replace a placeholder or scraped-chrome title with one built from the row (couponTitleText.ts)', async () => {
+        const rows = [
+            { ...couponFixture, id: 1, title: 'CODE', discount_amount: null },
+            {
+                ...couponFixture,
+                id: 2,
+                title: "10% off • 154 Competitor Deals • Last Checked: Just now Top codes Activity Saving hacks FAQ Today's Coursera promo codes & verif",
+            },
+            { ...couponFixture, id: 3 },
+        ]
+        mockRows(
+            sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
+            rows,
+        )
+        mockRows(sql => sql.includes('COUNT(*)'), [storeAggregateRow(3)])
+
+        for (const read of [
+            () => listCoupons({ limit: 10, skip: 0 }),
+            () => listStoreCoupons('example.com', 10),
+        ]) {
+            const { coupons } = await read()
+            expect(coupons.map(c => c.title)).toEqual([
+                'example.com promo code SAVE10',
+                '10% off at example.com',
+                'Save 10% at Example',
+            ])
+        }
+    })
+
     it('an empty total row falls back to 0 (no coupons is legitimate, not drift)', async () => {
         mockRows(
             sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),

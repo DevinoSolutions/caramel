@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
-import RecentlyWorkedSection, {
+import RecentlyWorkedCouponsStrip, {
     RecentlyWorkedCouponsList,
-} from '@/components/RecentlyWorkedSection'
+} from '@/components/RecentlyWorkedCouponsStrip'
+import RecentlyWorkedSection from '@/components/RecentlyWorkedSection'
 import type { RecentlyWorkedCoupon } from '@/lib/recentlyWorkedCoupons'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { PHASE_PRODUCTION_BUILD } from 'next/constants'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 // The landing page's "Codes that just worked" strip. The case that matters
@@ -16,10 +18,20 @@ const { sentryMock } = vi.hoisted(() => ({
 }))
 vi.mock('@sentry/nextjs', () => sentryMock)
 
+// The server section's one data dependency: the uncached catalog read.
+// (Its SQL is pinned in couponsRepo.test.ts and run for real in
+// tests/integration/recently-worked.itest.ts.)
+const { readMock } = vi.hoisted(() => ({ readMock: vi.fn() }))
+vi.mock('@/lib/recentlyWorkedCouponsCache', () => ({
+    readRecentlyWorkedCoupons: readMock,
+}))
+
 afterEach(() => {
     cleanup()
-    vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
+    vi.useRealTimers()
     sentryMock.captureException.mockReset()
+    readMock.mockReset()
 })
 
 const NOW = Date.parse('2026-09-30T12:00:00.000Z')
@@ -112,59 +124,76 @@ describe('RecentlyWorkedCouponsList', () => {
     })
 })
 
-describe('RecentlyWorkedSection (fetching wrapper)', () => {
-    it('fetches the cached API once and renders what it returns', async () => {
-        const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
-            Response.json({
-                coupons: [coupon({ lastWorkedAt: new Date().toISOString() })],
-            }),
-        )
-        vi.stubGlobal('fetch', fetchMock)
+describe('RecentlyWorkedCouponsStrip (client clock)', () => {
+    it('hydrates with the render time, then re-judges against the visitor clock: a row that aged out while the ISR copy was cached disappears', async () => {
+        // Rendered 23h after the apply; the visitor arrives 2h later.
+        vi.useFakeTimers({ toFake: ['Date'] })
+        vi.setSystemTime(NOW + 2 * HOUR)
 
-        render(<RecentlyWorkedSection />)
-
-        await waitFor(() =>
-            expect(screen.getByText('Just worked')).toBeDefined(),
+        const { container } = render(
+            <RecentlyWorkedCouponsStrip
+                coupons={[
+                    coupon({
+                        lastWorkedAt: new Date(NOW - 23 * HOUR).toISOString(),
+                    }),
+                ]}
+                renderedAt={NOW}
+            />,
         )
-        expect(fetchMock).toHaveBeenCalledTimes(1)
-        expect(fetchMock.mock.calls[0]![0]).toBe('/api/coupons/recently-worked')
+
+        await waitFor(() => expect(container.innerHTML).toBe(''))
     })
 
-    it('an empty response renders nothing', async () => {
-        const fetchMock = vi.fn(async () => Response.json({ coupons: [] }))
-        vi.stubGlobal('fetch', fetchMock)
+    it('relabels "Worked Xh ago" with the visitor clock', async () => {
+        vi.useFakeTimers({ toFake: ['Date'] })
+        vi.setSystemTime(NOW + 3 * HOUR)
 
-        const { container } = render(<RecentlyWorkedSection />)
-
-        await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
-        expect(container.innerHTML).toBe('')
-    })
-
-    it('a failed request keeps the section absent AND reports to Sentry (not swallowed)', async () => {
-        vi.stubGlobal(
-            'fetch',
-            vi.fn(async () => new Response('nope', { status: 500 })),
+        render(
+            <RecentlyWorkedCouponsStrip
+                coupons={[
+                    coupon({ lastWorkedAt: new Date(NOW).toISOString() }),
+                ]}
+                renderedAt={NOW}
+            />,
         )
-
-        const { container } = render(<RecentlyWorkedSection />)
 
         await waitFor(() =>
-            expect(sentryMock.captureException).toHaveBeenCalledTimes(1),
+            expect(screen.getByText('Worked 3h ago')).toBeDefined(),
         )
-        expect(container.innerHTML).toBe('')
+    })
+})
+
+describe('RecentlyWorkedSection (server)', () => {
+    it('renders the catalog read into the HTML: tiles and their store links', async () => {
+        readMock.mockResolvedValue([
+            coupon({ lastWorkedAt: new Date().toISOString() }),
+        ])
+
+        render(await RecentlyWorkedSection())
+
+        expect(
+            screen.getByRole('heading', { name: 'Codes that just worked' }),
+        ).toBeDefined()
+        expect(screen.getByRole('link').getAttribute('href')).toBe(
+            '/coupons/codecademy.com',
+        )
+        expect(readMock).toHaveBeenCalledTimes(1)
     })
 
-    it('a response that breaks the contract is reported, not rendered', async () => {
-        vi.stubGlobal(
-            'fetch',
-            vi.fn(async () => Response.json({ coupons: [{ id: 1 }] })),
-        )
+    it('renders nothing and reads nothing during `next build` (the image builds against an unreachable placeholder DB)', async () => {
+        vi.stubEnv('NEXT_PHASE', PHASE_PRODUCTION_BUILD)
 
-        const { container } = render(<RecentlyWorkedSection />)
+        expect(await RecentlyWorkedSection()).toBeNull()
+        expect(readMock).not.toHaveBeenCalled()
+    })
 
-        await waitFor(() =>
-            expect(sentryMock.captureException).toHaveBeenCalledTimes(1),
-        )
-        expect(container.innerHTML).toBe('')
+    it('a failed read leaves the section out AND reports to Sentry (not swallowed)', async () => {
+        const failure = new Error('db down')
+        readMock.mockRejectedValue(failure)
+
+        expect(await RecentlyWorkedSection()).toBeNull()
+        expect(sentryMock.captureException).toHaveBeenCalledWith(failure, {
+            tags: { area: 'landing.recently-worked' },
+        })
     })
 })

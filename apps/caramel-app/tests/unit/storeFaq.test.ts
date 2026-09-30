@@ -24,7 +24,7 @@ describe('buildStoreFaq', () => {
             base: 'tradeinn.com',
             total: 17,
             facts: facts(),
-            topCouponTitle: '15% Off Your Cart ',
+            topCoupon: { title: '15% Off Your Cart ', code: 'CART15' },
             uk: false,
         })
 
@@ -38,7 +38,21 @@ describe('buildStoreFaq', () => {
             'The biggest percent-off discount among the 17 active tradeinn.com coupon codes Caramel lists is 20% off.',
         )
         expect(answerTo(items, /best/)).toContain(
-            'The one Caramel ranks first is "15% Off Your Cart".',
+            'The one Caramel ranks first is "15% Off Your Cart" (code CART15).',
+        )
+        // A title built from the code (couponTitleText.ts) already names it.
+        const codeTitled = buildStoreFaq({
+            base: 'eharmony.ca',
+            total: 12,
+            facts: facts(),
+            topCoupon: {
+                title: 'eharmony.ca promo code EHLOVE20',
+                code: 'EHLOVE20',
+            },
+            uk: false,
+        })
+        expect(answerTo(codeTitled, /best/)).toContain(
+            'The one Caramel ranks first is "eharmony.ca promo code EHLOVE20".',
         )
         // 17 - 12 - 3 = 2 other offers.
         expect(answerTo(items, /How many/)).toBe(
@@ -56,7 +70,7 @@ describe('buildStoreFaq', () => {
                 fixedAmountCodes: 0,
                 lastUpdated: new Date('2026-09-24T23:30:00Z'),
             }),
-            topCouponTitle: null,
+            topCoupon: null,
             uk: true,
         })
         expect(items[0]?.question).toBe(
@@ -82,7 +96,7 @@ describe('buildStoreFaq', () => {
                 bestPercentOff: null,
                 fixedAmountCodes: 4,
             }),
-            topCouponTitle: null,
+            topCoupon: null,
             uk: false,
         })
         const best = answerTo(items, /best/)
@@ -103,7 +117,7 @@ describe('buildStoreFaq', () => {
                 fixedAmountCodes: 0,
                 lastUpdated: null,
             }),
-            topCouponTitle: null,
+            topCoupon: null,
             uk: false,
         })
         expect(answerTo(items, /best/)).toContain(
@@ -120,7 +134,7 @@ describe('buildStoreFaq', () => {
                 base: 'example.com',
                 total: 0,
                 facts: facts(),
-                topCouponTitle: null,
+                topCoupon: null,
                 uk: false,
             }),
         ).toEqual([])
@@ -133,7 +147,7 @@ describe('faqPageJsonLd', () => {
             base: 'tradeinn.com',
             total: 17,
             facts: facts(),
-            topCouponTitle: null,
+            topCoupon: null,
             uk: false,
         })
         const jsonLd = faqPageJsonLd(items)

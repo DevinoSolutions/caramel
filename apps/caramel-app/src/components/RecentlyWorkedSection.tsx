@@ -1,168 +1,52 @@
-'use client'
-
-import CouponStatusBadge from '@/components/coupons/coupon-status-badge'
-import {
-    couponBadge,
-    discountBadgeText,
-    isRecentlyWorked,
-    WORKED_VERIFIED_WINDOW_HOURS,
-} from '@/lib/coupons'
+import RecentlyWorkedCouponsStrip from '@/components/RecentlyWorkedCouponsStrip'
 import type { RecentlyWorkedCoupon } from '@/lib/recentlyWorkedCoupons'
-import { RecentlyWorkedCouponsResponseSchema } from '@/lib/recentlyWorkedCoupons'
-import { formatWorkedAgo } from '@/lib/relativeTime'
+import { readRecentlyWorkedCoupons } from '@/lib/recentlyWorkedCouponsCache'
 import * as Sentry from '@sentry/nextjs'
-import Link from 'next/link'
-import { useEffect, useState } from 'react'
+import { PHASE_PRODUCTION_BUILD } from 'next/constants'
 
-// The landing page's "Codes that just worked" strip: the newest codes Caramel
-// shoppers applied successfully in the last 24 hours (coupon_signals), each
-// shown Verified — the proof-by-use rule in lib/coupons.ts.
+// The landing page's "Codes that just worked" section, server-rendered.
 //
-// Fetched from /api/coupons/recently-worked AFTER hydration instead of being
-// server-rendered, so `/` stays a static, prebuilt page (see the route's
-// header) and nothing here competes with the hero for first paint. It sits
-// below the fold and renders NOTHING until there is at least one code — no
-// heading over an empty box, no skeleton that could shift the page.
+// It used to be fetched in the browser after hydration, which kept `/` a
+// purely static page but left its tiles, and the /coupons/<store> links in
+// them, out of the HTML crawlers read. The landing is the site's strongest
+// page (it takes nearly all organic clicks) and linked to no store page at
+// all, while the store pages rank p5-10 for head terms with almost no clicks.
+// Now `/` is an ISR page (page.tsx `revalidate`): the served HTML is still a
+// cached copy, regenerated in the background at most once per window, so this
+// read runs at most once a minute however busy the page is.
+//
+// Build time: the production image builds against an unreachable placeholder
+// DATABASE_URL (Dockerfile `.invalid` builder env, DESIGN.md §2(m)), and `/`
+// is prerendered during `next build`. That prerender renders no section; the
+// first regeneration after deploy (the first request once the window has
+// passed) fills it in.
+//
+// Runtime failure: the section is left out and the error goes to Sentry. A
+// below-the-fold strip must never take the landing page down with it.
+export default async function RecentlyWorkedSection() {
+    if (process.env.NEXT_PHASE === PHASE_PRODUCTION_BUILD) return null
 
-/**
- * The strip itself — pure, so it is testable without a network. Re-applies the
- * 24h window against `now` (the API is edge-cached for 5 minutes, so a row can
- * age out between the read and the render) and renders nothing when no code
- * is left.
- */
-export function RecentlyWorkedCouponsList({
-    coupons,
-    now,
-}: {
-    coupons: ReadonlyArray<RecentlyWorkedCoupon>
-    now: number
-}) {
-    const fresh = coupons.filter(c => isRecentlyWorked(c.lastWorkedAt, now))
-    if (fresh.length === 0) return null
-
+    let read: { coupons: RecentlyWorkedCoupon[]; readAt: number }
+    try {
+        read = await readWithTimestamp()
+    } catch (error) {
+        Sentry.captureException(error, {
+            tags: { area: 'landing.recently-worked' },
+        })
+        return null
+    }
     return (
-        <section
-            id="just-worked"
-            aria-labelledby="just-worked-heading"
-            className="relative py-24"
-        >
-            <div className="relative z-10 mx-auto max-w-7xl px-6 lg:px-8">
-                <div className="mb-12 text-center">
-                    <h2
-                        id="just-worked-heading"
-                        className="mb-4 text-4xl font-extrabold leading-tight tracking-tight text-caramel lg:text-3xl"
-                    >
-                        Codes that just worked
-                    </h2>
-                    <p className="mx-auto max-w-2xl text-lg leading-relaxed text-gray-600 dark:text-gray-300">
-                        Real checkouts: codes Caramel shoppers applied
-                        successfully in the last {WORKED_VERIFIED_WINDOW_HOURS}{' '}
-                        hours, newest first.
-                    </p>
-                </div>
-                <ul className="grid grid-cols-4 gap-5 xl:grid-cols-3 lg:grid-cols-2 sm:grid-cols-1">
-                    {fresh.map(coupon => (
-                        <RecentlyWorkedTile
-                            key={coupon.id}
-                            coupon={coupon}
-                            now={now}
-                        />
-                    ))}
-                </ul>
-            </div>
-        </section>
+        <RecentlyWorkedCouponsStrip
+            coupons={read.coupons}
+            renderedAt={read.readAt}
+        />
     )
 }
 
-function RecentlyWorkedTile({
-    coupon,
-    now,
-}: {
-    coupon: RecentlyWorkedCoupon
-    now: number
-}) {
-    const discount = discountBadgeText(
-        coupon.discountType,
-        coupon.discountAmount,
-    )
-    const workedAgo = formatWorkedAgo(coupon.lastWorkedAt, now)
-    // Always the proven-by-use Verified badge here (every row is inside the
-    // window by construction), derived through the same rule the /coupons
-    // card uses rather than hard-coded, so the two can never disagree.
-    const badge = couponBadge(null, coupon.lastWorkedAt, now)
-
-    return (
-        <li>
-            {/* prefetch off: up to 8 tiles scrolling into view would otherwise
-                fire 8 RSC requests for dynamic store pages on every landing
-                visit — load the app does not need on its busiest page. */}
-            <Link
-                href={`/coupons/${coupon.storeDomain}`}
-                prefetch={false}
-                className="group flex h-full flex-col rounded-3xl border border-orange-100 bg-gradient-to-br from-orange-50/50 via-white to-orange-50/40 p-5 shadow-md transition-all duration-200 hover:-translate-y-0.5 hover:border-orange-200 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel dark:border-orange-900/50 dark:from-darkSurface dark:via-darkSurface dark:to-darkSurface dark:hover:border-orange-800/70"
-            >
-                <div className="mb-3 flex items-start justify-between gap-3">
-                    <span className="min-w-0 break-words text-sm font-semibold text-gray-500 dark:text-gray-400">
-                        {coupon.storeDomain}
-                    </span>
-                    <span className="shrink-0 rounded-xl bg-gradient-to-br from-caramel to-orange-600 px-2.5 py-1 text-sm font-black text-white shadow-sm">
-                        {discount ? `${discount} off` : 'DEAL'}
-                    </span>
-                </div>
-                <h3 className="mb-3 line-clamp-2 font-semibold text-gray-900 dark:text-white">
-                    {coupon.title}
-                </h3>
-                <div className="mt-auto flex flex-wrap items-center gap-2">
-                    <code className="rounded-lg border border-dashed border-caramel/50 px-2 py-0.5 font-mono text-sm font-bold text-caramel">
-                        {coupon.code}
-                    </code>
-                    {badge && <CouponStatusBadge badge={badge} />}
-                </div>
-                {workedAgo && (
-                    <p className="mt-2 text-xs font-medium text-green-700 dark:text-green-400">
-                        {workedAgo}
-                    </p>
-                )}
-            </Link>
-        </li>
-    )
-}
-
-export default function RecentlyWorkedSection() {
-    const [coupons, setCoupons] = useState<RecentlyWorkedCoupon[]>([])
-    const [now, setNow] = useState(0)
-
-    useEffect(() => {
-        const controller = new AbortController()
-        const load = async () => {
-            try {
-                const res = await fetch('/api/coupons/recently-worked', {
-                    signal: controller.signal,
-                })
-                if (!res.ok) {
-                    throw new Error(
-                        `GET /api/coupons/recently-worked failed with status ${res.status}`,
-                    )
-                }
-                const parsed = RecentlyWorkedCouponsResponseSchema.parse(
-                    await res.json(),
-                )
-                setNow(Date.now())
-                setCoupons(parsed.coupons)
-            } catch (error) {
-                if (controller.signal.aborted) return
-                // A decorative strip failing must not disturb the page (the
-                // section simply stays absent), but it is still a defect to
-                // see: server errors are already in Sentry via
-                // handleRouteError; this catches network and contract drift.
-                Sentry.captureException(error, {
-                    tags: { area: 'landing.recently-worked' },
-                })
-            }
-        }
-        void load()
-        return () => controller.abort()
-    }, [])
-
-    return <RecentlyWorkedCouponsList coupons={coupons} now={now} />
+// The clock the ISR copy was rendered against: the strip first renders with
+// it (so hydration matches the server HTML), then re-judges the 24h window
+// against the visitor's clock.
+async function readWithTimestamp() {
+    const coupons = await readRecentlyWorkedCoupons()
+    return { coupons, readAt: Date.now() }
 }

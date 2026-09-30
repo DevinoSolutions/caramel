@@ -44,6 +44,7 @@ export default function CouponCard({ coupon, index }: CouponCardProps) {
 
     return (
         <motion.div
+            data-testid="coupon-card"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.9 }}

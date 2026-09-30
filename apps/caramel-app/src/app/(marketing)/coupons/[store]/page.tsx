@@ -14,7 +14,13 @@ import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { cache } from 'react'
 
-const PAGE_SIZE = 5
+// Codes server-rendered on a store page, and CouponsSection's page size for
+// "load more" (the two must match: see its `pageSize` prop). Was 5, the
+// /coupons listing's page size: the pages that outrank Caramel for "<store>
+// promo code" (SimplyCodes, CouponFollow, Knoji, WeThrift) list 20-30 codes
+// in their HTML, and five codes was a thin page. 20 rows is one LIMIT on the
+// store's index plus one signals lookup, the same two reads as before.
+const STORE_PAGE_SIZE = 20
 const baseUrl = BASE_URL
 
 function safeDecode(value: string): string {
@@ -69,7 +75,10 @@ const fetchStoreCoupons = cache(async (storeParam: string) => {
     // OUR Postgres) onto each row so the SSR HTML and the client fetch agree —
     // the store page must attach it too, or its server-rendered cards would
     // never show "worked Xh ago". Empty signals → lastWorkedAt:null (unshown).
-    const { coupons, total, facts } = await listStoreCoupons(base, PAGE_SIZE)
+    const { coupons, total, facts } = await listStoreCoupons(
+        base,
+        STORE_PAGE_SIZE,
+    )
     const couponsWithSignals = await attachSignals(coupons)
     return { coupons: couponsWithSignals as Coupon[], total, facts, base }
 })
@@ -214,7 +223,9 @@ export default async function StoreCouponsPage({
               base,
               total,
               facts,
-              topCouponTitle: coupons[0]?.title ?? null,
+              topCoupon: coupons[0]
+                  ? { title: coupons[0].title, code: coupons[0].code }
+                  : null,
               uk,
           })
         : []
@@ -264,6 +275,7 @@ export default async function StoreCouponsPage({
                 initialCoupons={coupons}
                 initialTotal={total}
                 disableInitialFetch
+                pageSize={STORE_PAGE_SIZE}
                 // `base` — not the raw slug — because that is the normalized
                 // store key favorites are filed under (the same value the
                 // canonical URL uses), so /coupons/www.nike.com and
