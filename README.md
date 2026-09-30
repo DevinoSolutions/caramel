@@ -11,6 +11,16 @@ It automatically tests codes at checkout, never sells your data, and never overw
   <img width="300" height="180" alt="caramel-banner" src="https://grabcaramel.com/caramel_banner.png" />
 </a>
 
+## See it work: about 10% off a real Corsair order
+
+A live checkout on corsair.com for a niche part, the Corsair Type-4 Debossed PATA power cable. Caramel pops up at checkout, tries the store's codes one by one and keeps the best: **LOCHVANESS** takes the item from **$99.95 to $90.00** (CA$9.95 saved, about 10%). The shopper's personal details are blurred.
+
+<a href="docs/media/corsair-demo.mp4">
+  <img width="720" alt="Caramel finding and applying the code LOCHVANESS on a Corsair checkout, taking the item from $99.95 to $90.00" src="docs/media/corsair-demo.gif" />
+</a>
+
+[Watch the full-quality video (MP4)](docs/media/corsair-demo.mp4)
+
 ## Why choose Caramel?
 
 - **100% open source** – every release is on GitHub for public audit
