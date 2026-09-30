@@ -58,22 +58,27 @@ export function isUnusableCouponTitle(title: string): boolean {
 
 /**
  * The title a shopper sees for a coupon: the catalog title when it is one,
- * otherwise one built from the row's discount ("20% off at chewy.com") or,
- * with no usable amount, its code ("eharmony.ca promo code EHLOVE20").
+ * otherwise one built from the row's percent off ("20% off at chewy.com") or,
+ * failing that, its code ("eharmony.ca promo code EHLOVE20").
  *
- * Percent-off amounts of 100 or more are producer errors (couponsRepo.ts
- * percentOffSql) and are not repeated as a title; the code fallback is used.
+ * Only a percentage is stated. A fixed amount has no currency in the catalog
+ * (storeFaq.ts states none for the same reason), and this title is repeated
+ * in JSON-LD and the FAQ answer, so "$10 off at boots.co.uk" would be a
+ * claim the row cannot back. Percent-off amounts of 100 or more are producer
+ * errors (couponsRepo.ts percentOffSql); both fall back to the code.
  */
 export function shopperCouponTitle(row: CouponTitleSource): string {
     if (!isUnusableCouponTitle(row.title)) {
         return row.title.replace(/\s+/g, ' ').trim()
     }
     const site = row.site.trim()
-    const percent = row.discount_type === 'PERCENTAGE'
     const amount = row.discount_amount
-    const usableAmount =
-        amount !== null && amount > 0 && (!percent || amount < 100)
-    const badge = usableAmount
+    const usablePercent =
+        row.discount_type === 'PERCENTAGE' &&
+        amount !== null &&
+        amount > 0 &&
+        amount < 100
+    const badge = usablePercent
         ? discountBadgeText(row.discount_type, amount)
         : null
     if (badge) return `${badge} off at ${site}`

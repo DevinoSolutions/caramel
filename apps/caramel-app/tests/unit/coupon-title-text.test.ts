@@ -66,16 +66,16 @@ describe('shopperCouponTitle', () => {
         ).toBe('10% off at coursera.org')
     })
 
-    it('builds a fixed-amount title with the same text the card badge shows', () => {
+    it('never states a fixed amount: the catalog has no currency, so it names the code', () => {
         expect(
             shopperCouponTitle(
                 row({
-                    site: 'chewy.com',
+                    site: 'boots.co.uk',
                     discount_type: 'CASH',
-                    discount_amount: 20,
+                    discount_amount: 10,
                 }),
             ),
-        ).toBe('$20 off at chewy.com')
+        ).toBe('boots.co.uk promo code EHLOVE20')
     })
 
     it('names the code when the row has no usable amount', () => {

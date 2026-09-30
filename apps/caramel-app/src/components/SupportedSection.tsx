@@ -149,7 +149,7 @@ export default function SupportedSection() {
                         reach ~20px below the card and would otherwise be
                         guillotined by this element's own overflow-hidden. */}
                     <div className="relative w-full overflow-hidden py-6 [-webkit-mask-image:linear-gradient(to_right,transparent,black_6%,black_94%,transparent)] [mask-image:linear-gradient(to_right,transparent,black_6%,black_94%,transparent)]">
-                        <div className="caramel-marquee-track flex gap-4 hover:[animation-play-state:paused]">
+                        <div className="caramel-marquee-track flex gap-4 focus-within:[animation-play-state:paused] hover:[animation-play-state:paused]">
                             {[...featuredStores, ...featuredStores].map(
                                 (store, index) => (
                                     <Link

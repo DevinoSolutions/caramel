@@ -14,7 +14,8 @@ import { firstLinkedStoreDomain } from './support/stores'
 
 const PLACEHOLDER =
     /^(code|codes|coupon|coupons|coupon code|promo|promo code|discount|discount code|voucher|voucher code|deal|deals|sale|offer|offers|get code|show code|get deal)$/i
-const SCRAPED_CHROME = /competitor deals|last checked:|show code|uses today:/i
+const SCRAPED_CHROME =
+    /\bcompetitor deals\b|\blast checked:|\bshow code\b|\buses today:/i
 
 const STORE_PAGE_SIZE = 20
 

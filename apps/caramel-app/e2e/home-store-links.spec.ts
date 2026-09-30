@@ -70,32 +70,34 @@ test.describe('home page "Codes that just worked" (server-rendered)', () => {
     )
 
     // TEST-ONLY DB access, announced: the report route below writes the
-    // signal the real way; this only records whether a row existed first
-    // and removes the one the test created, so the visual-regression home
-    // screenshot (same run, same DB) never sees a strip it did not expect.
-    let signalExisted = false
+    // signal the real way; this only snapshots the row first and puts it
+    // back afterwards (deleting the one the test created), so the
+    // visual-regression home screenshot (same run, same DB) never sees a
+    // strip it did not expect. The type import is erased at runtime.
+    let signalBefore: import('@prisma/client').CouponSignal | null = null
 
     test.beforeAll(async () => {
         const { PrismaClient } = await import('@prisma/client')
         const prisma = new PrismaClient()
         try {
-            signalExisted =
-                (await prisma.couponSignal.findUnique({
-                    where: { couponId: SEED_COUPON_ID },
-                })) !== null
+            signalBefore = await prisma.couponSignal.findUnique({
+                where: { couponId: SEED_COUPON_ID },
+            })
         } finally {
             await prisma.$disconnect()
         }
     })
 
     test.afterAll(async () => {
-        if (signalExisted) return
         const { PrismaClient } = await import('@prisma/client')
         const prisma = new PrismaClient()
         try {
             await prisma.couponSignal.deleteMany({
                 where: { couponId: SEED_COUPON_ID },
             })
+            if (signalBefore) {
+                await prisma.couponSignal.create({ data: signalBefore })
+            }
         } finally {
             await prisma.$disconnect()
         }

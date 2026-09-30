@@ -48,7 +48,10 @@ export default function CouponCard({ coupon, index }: CouponCardProps) {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.9 }}
-            transition={{ duration: 0.3, delay: index * 0.05 }}
+            // Stagger within a batch only: `index` counts from the top of
+            // the whole list, and a 20-card page would otherwise hold the
+            // next page's cards back 1-2s.
+            transition={{ duration: 0.3, delay: (index % 10) * 0.05 }}
             className="group relative overflow-hidden rounded-3xl border border-orange-100 bg-gradient-to-br from-orange-50/50 via-white to-orange-50/40 p-5 shadow-md transition-all duration-200 hover:-translate-y-0.5 hover:border-orange-200 hover:shadow-lg dark:border-orange-900/50 dark:from-darkSurface dark:via-darkSurface dark:to-darkSurface dark:hover:border-orange-800/70"
         >
             <div className="flex items-center gap-5 md:flex-col md:items-start">
