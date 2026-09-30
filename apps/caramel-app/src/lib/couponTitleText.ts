@@ -12,6 +12,9 @@
 //     Today's Groupon promo code" (groupon, coursera, chewy, adorama,
 //     ticketmaster, dhgate, gopuff, lyft, dominos), and "15% off Code Code
 //     Verified Storewide Show Code … Last used: Recently Uses today: 0".
+//   * the store's name plus a label: "amazon.com coupon" (6 of amazon.com's
+//     top 20, 6 of adidas.com's; 16 of 374 rows across 20 top stores) — the
+//     same words on every such card, so the list reads as duplicates.
 // Each store page prints the title as the coupon's heading, in its ItemList
 // JSON-LD and in its FAQ answer ('The one Caramel ranks first is "CODE"'), so
 // those pages told Google, and shoppers, nothing about the code. Every read
@@ -48,12 +51,32 @@ type CouponTitleSource = {
     discount_amount: number | null
 }
 
-/** True when the catalog title says nothing a shopper can use. */
-export function isUnusableCouponTitle(title: string): boolean {
+/**
+ * True when the catalog title says nothing a shopper can use. With `site`,
+ * the store's name followed by a placeholder ("amazon.com coupon", "Amazon
+ * promo code") counts as a placeholder too.
+ */
+export function isUnusableCouponTitle(title: string, site?: string): boolean {
     const text = title.replace(/\s+/g, ' ').trim()
     if (text === '') return true
     if (PLACEHOLDER_TITLE.test(text)) return true
+    if (site && PLACEHOLDER_TITLE.test(withoutStoreName(text, site))) {
+        return true
+    }
     return SCRAPED_CHROME_MARKERS.some(marker => marker.test(text))
+}
+
+/** `text` minus a leading store domain or brand ("amazon" for amazon.com). */
+function withoutStoreName(text: string, site: string): string {
+    const domain = site.trim().toLowerCase()
+    const brand = domain.split('.')[0] ?? ''
+    const lower = text.toLowerCase()
+    for (const name of [domain, brand]) {
+        if (name && lower.startsWith(`${name} `)) {
+            return text.slice(name.length + 1)
+        }
+    }
+    return text
 }
 
 /**
@@ -68,7 +91,7 @@ export function isUnusableCouponTitle(title: string): boolean {
  * errors (couponsRepo.ts percentOffSql); both fall back to the code.
  */
 export function shopperCouponTitle(row: CouponTitleSource): string {
-    if (!isUnusableCouponTitle(row.title)) {
+    if (!isUnusableCouponTitle(row.title, row.site)) {
         return row.title.replace(/\s+/g, ' ').trim()
     }
     const site = row.site.trim()

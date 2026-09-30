@@ -46,7 +46,41 @@ describe('isUnusableCouponTitle', () => {
     })
 })
 
+describe('isUnusableCouponTitle with the store', () => {
+    it.each([
+        ['amazon.com coupon', 'amazon.com'],
+        ['Amazon Promo Code', 'amazon.com'],
+        ['adidas.com  coupons', 'adidas.com'],
+        ['argos discount code', 'argos.co.uk'],
+    ])('rejects %j on %s', (title, site) => {
+        expect(isUnusableCouponTitle(title, site)).toBe(true)
+    })
+
+    it.each([
+        ['amazon.com coupon: 20% off Echo', 'amazon.com'],
+        ['Amazon Basics sale', 'amazon.com'],
+        // Another store's name is not this store's placeholder.
+        ['walmart.com coupon', 'amazon.com'],
+    ])('keeps %j on %s', (title, site) => {
+        expect(isUnusableCouponTitle(title, site)).toBe(false)
+    })
+})
+
 describe('shopperCouponTitle', () => {
+    it('replaces "<store> coupon" with a title built from the row', () => {
+        expect(
+            shopperCouponTitle(
+                row({
+                    title: 'amazon.com coupon',
+                    site: 'amazon.com',
+                    code: 'SAVE20',
+                    discount_type: 'PERCENTAGE',
+                    discount_amount: 20,
+                }),
+            ),
+        ).toBe('20% off at amazon.com')
+    })
+
     it('keeps a real title, whitespace-normalized', () => {
         expect(
             shopperCouponTitle(row({ title: '  15% Off   Your Order ' })),

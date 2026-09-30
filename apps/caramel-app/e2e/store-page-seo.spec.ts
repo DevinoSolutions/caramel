@@ -68,6 +68,11 @@ test.describe('store page SEO content', () => {
 
         for (const title of titles) {
             expect(title, 'placeholder card title').not.toMatch(PLACEHOLDER)
+            expect(
+                title.toLowerCase().startsWith(`${store} `) &&
+                    PLACEHOLDER.test(title.slice(store.length + 1)),
+                `"<store> <placeholder>" card title: ${title}`,
+            ).toBe(false)
             expect(title, 'scraped page chrome as a title').not.toMatch(
                 SCRAPED_CHROME,
             )
