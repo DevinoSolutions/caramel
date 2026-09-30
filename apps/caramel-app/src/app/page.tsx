@@ -3,6 +3,7 @@ import FaqSection from '@/components/FaqSection'
 import FeaturesSection from '@/components/FeaturesSection'
 import HeroSection from '@/components/HeroSection'
 import OpenSourceSection from '@/components/OpenSourceSection'
+import RecentlyWorkedSection from '@/components/RecentlyWorkedSection'
 import SectionDivider from '@/components/SectionDivider'
 import SupportedSection from '@/components/SupportedSection'
 import WhyNotHoneySection from '@/components/WhyNot'
@@ -36,6 +37,11 @@ export default function Page(): React.JSX.Element {
                     lineClassName="bg-gradient-to-r from-transparent via-orange-600/40 to-transparent"
                     glowClassName="bg-gradient-to-r from-transparent via-caramel/20 to-transparent blur-sm"
                 />
+                {/* Below the fold, fetched after hydration, and absent (no
+                    heading, no box) until at least one code worked in the last
+                    24h — so it cannot shift the hero or make this page
+                    render per request. */}
+                <RecentlyWorkedSection />
                 <SupportedSection />
                 <SectionDivider
                     lineClassName="bg-gradient-to-r from-transparent via-orange-500/40 to-transparent"

@@ -3,6 +3,7 @@ import {
     getCouponStats,
     listCoupons,
     listNeighbourStoreRows,
+    listRecentlyWorkedCoupons,
     listStoreCoupons,
     listStoreSitemapEntries,
     requestSource,
@@ -453,5 +454,95 @@ describe('listNeighbourStoreRows — the two raw-slug windows behind "More store
         const result = await listNeighbourStoreRows('a.com', 15)
         expect(result.before).toEqual([])
         expect(result.after.map(r => r.site)).toEqual(['b.com'])
+    })
+})
+
+describe('listRecentlyWorkedCoupons (landing "Codes that just worked" read)', () => {
+    it('joins coupon_signals to VISIBLE sited coupons inside the 24h UTC window, newest apply first, LIMIT-bound — and only SELECTs', async () => {
+        mockRows(
+            sql => sql.includes('FROM coupon_signals s'),
+            [
+                {
+                    id: 900000017,
+                    code: 'LEARN40',
+                    site: 'codecademy.com',
+                    title: '40% off Pro annual',
+                    discount_type: 'percentage',
+                    discount_amount: 40,
+                    lastWorkedAt: new Date('2026-09-30T11:50:00.000Z'),
+                },
+                {
+                    id: '900000001',
+                    code: 'EBAY5',
+                    site: 'ebay.com',
+                    title: '$5 off',
+                    discount_type: null,
+                    discount_amount: null,
+                    // Driver tolerance: an ISO string normalizes to a Date.
+                    lastWorkedAt: '2026-09-30T02:00:00.000Z',
+                },
+            ],
+        )
+
+        const rows = await listRecentlyWorkedCoupons(8)
+
+        expect(rows).toEqual([
+            {
+                id: '900000017',
+                code: 'LEARN40',
+                site: 'codecademy.com',
+                title: '40% off Pro annual',
+                discount_type: 'PERCENTAGE',
+                discount_amount: 40,
+                lastWorkedAt: new Date('2026-09-30T11:50:00.000Z'),
+            },
+            {
+                id: '900000001',
+                code: 'EBAY5',
+                site: 'ebay.com',
+                title: '$5 off',
+                discount_type: null,
+                discount_amount: null,
+                lastWorkedAt: new Date('2026-09-30T02:00:00.000Z'),
+            },
+        ])
+
+        expect(capturedQueries).toHaveLength(1)
+        const q = capturedQueries[0]!
+        // Read-only: a SELECT over the join, never a write to either table.
+        expect(q.trim().startsWith('SELECT')).toBe(true)
+        expect(q).not.toMatch(/\b(UPDATE|INSERT|DELETE)\b/)
+        expect(q).toContain('FROM coupon_signals s')
+        expect(q).toContain('JOIN coupons c ON c.id = s.coupon_id')
+        // The window: coupons.ts's 24h constant, compared as UTC wall-clock
+        // time against the timestamp-without-time-zone column.
+        expect(q).toContain(
+            "s.last_worked_at >= (NOW() AT TIME ZONE 'UTC') - INTERVAL '24 hours'",
+        )
+        // The shared visibility predicate (same fragment every listing inlines).
+        expect(q).toMatch(/status IN \(\?(?:,\?)*\) AND expired = FALSE/)
+        expect(q).toContain('c.site IS NOT NULL')
+        expect(q).toContain('ORDER BY s.last_worked_at DESC, s.coupon_id DESC')
+        expect(q).toContain('LIMIT ?')
+        expect(capturedValues[0]).toContain(8)
+    })
+
+    it('a row missing lastWorkedAt fails the zod boundary loudly (drift, not a silent undated tile)', async () => {
+        mockRows(
+            sql => sql.includes('FROM coupon_signals s'),
+            [
+                {
+                    id: '1',
+                    code: 'X',
+                    site: 'example.com',
+                    title: 'X',
+                    discount_type: null,
+                    discount_amount: null,
+                },
+            ],
+        )
+        await expect(listRecentlyWorkedCoupons(8)).rejects.toThrow(
+            /coupons-db schema drift \[coupons\.recently-worked\]/,
+        )
     })
 })

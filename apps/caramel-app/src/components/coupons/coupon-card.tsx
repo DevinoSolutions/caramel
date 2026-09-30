@@ -1,7 +1,7 @@
 'use client'
 
-import type { CouponStatusTier } from '@/lib/coupons'
-import { STATUS_META } from '@/lib/coupons'
+import CouponStatusBadge from '@/components/coupons/coupon-status-badge'
+import { couponBadge, discountBadgeText } from '@/lib/coupons'
 import { formatWorkedAgo } from '@/lib/relativeTime'
 import type { Coupon } from '@/types/coupon'
 import { motion } from 'framer-motion'
@@ -11,19 +11,6 @@ import { toast } from 'sonner'
 interface CouponCardProps {
     coupon: Coupon
     index: number
-}
-
-// Verification badge: green = machine-verified, amber = verified-but-restricted,
-// grey = not yet verified (grace), red = known not valid. Labels + which
-// status maps to which tier live in lib/coupons.ts's STATUS_META (F-006) —
-// this Tailwind palette is the app-local half (the extension's popup badge
-// keeps its own hex equivalent; the 4-tier axis can't drift the way the
-// 9-status axis did).
-const TIER_CLS: Record<CouponStatusTier, string> = {
-    green: 'bg-green-100 text-green-700 ring-green-200 dark:bg-green-900/30 dark:text-green-300 dark:ring-green-900/50',
-    amber: 'bg-amber-100 text-amber-700 ring-amber-200 dark:bg-amber-900/30 dark:text-amber-300 dark:ring-amber-900/50',
-    grey: 'bg-gray-100 text-gray-600 ring-gray-200 dark:bg-white/10 dark:text-gray-300 dark:ring-white/20',
-    red: 'bg-red-100 text-red-700 ring-red-200 dark:bg-red-900/30 dark:text-red-300 dark:ring-red-900/50',
 }
 
 export default function CouponCard({ coupon, index }: CouponCardProps) {
@@ -41,16 +28,19 @@ export default function CouponCard({ coupon, index }: CouponCardProps) {
     // Honest badge only: when the catalog has no discount amount the badge
     // says "DEAL" — it must NEVER invent a number (a fabricated "20% off"
     // is a false public claim on every unquantified coupon).
-    const discount = coupon.discount_amount
-        ? coupon.discount_type === 'PERCENTAGE'
-            ? `${coupon.discount_amount}%`
-            : `$${coupon.discount_amount}`
-        : null
+    const discount = discountBadgeText(
+        coupon.discount_type,
+        coupon.discount_amount,
+    )
 
-    // App-owned trust signal (W1) — "worked Xh ago" when the extension last
-    // reported this coupon working, and only if that was recent (<7 days).
-    // null (unshown) is the normal state until the extension starts reporting.
+    // App-owned trust signal (W1) — "Just worked" / "Worked Xh ago" when the
+    // extension last reported this coupon working, and only if that was
+    // recent (<7 days). null (unshown) when there is no such report.
     const workedAgo = formatWorkedAgo(coupon.lastWorkedAt)
+    // Catalog status badge, upgraded to Verified when a shopper's apply in
+    // the last 24h proved an unverified code (coupons.ts couponBadge) — so a
+    // green "Just worked" line never sits next to an "Unverified" badge.
+    const badge = couponBadge(coupon.status, coupon.lastWorkedAt)
 
     return (
         <motion.div
@@ -107,13 +97,12 @@ export default function CouponCard({ coupon, index }: CouponCardProps) {
                             {workedAgo}
                         </p>
                     )}
-                    {coupon.status && STATUS_META[coupon.status] && (
-                        <span
-                            title={coupon.verificationMessage ?? undefined}
-                            className={`mt-2 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ${TIER_CLS[STATUS_META[coupon.status].tier]}`}
-                        >
-                            {STATUS_META[coupon.status].label}
-                        </span>
+                    {badge && (
+                        <CouponStatusBadge
+                            badge={badge}
+                            verificationMessage={coupon.verificationMessage}
+                            className="mt-2"
+                        />
                     )}
                 </div>
 

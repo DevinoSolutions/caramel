@@ -149,3 +149,123 @@ export const STATUS_META: Readonly<
     },
     {} as Record<CouponStatus, { label: string; tier: CouponStatusTier }>,
 )
+
+/**
+ * The discount badge text a coupon card shows: "15%" for a PERCENTAGE amount,
+ * "$20" for any other type with an amount, and null when the catalog has no
+ * amount — the caller then renders a number-free "DEAL", and must NEVER invent
+ * a figure (a fabricated "20% off" is a false public claim). The read boundary
+ * upper-cases discount_type, so the comparison is exact.
+ */
+export function discountBadgeText(
+    discountType: string | null | undefined,
+    discountAmount: number | null | undefined,
+): string | null {
+    if (!discountAmount) return null
+    return discountType === 'PERCENTAGE'
+        ? `${discountAmount}%`
+        : `$${discountAmount}`
+}
+
+// ---------------------------------------------------------------------------
+// Proven-by-use trust (the "just worked" rule, 2026-09-30).
+//
+// The extension reports every successful checkout apply to
+// POST /api/coupons/[id]/report, which stamps the app-owned
+// `coupon_signals.last_worked_at` (couponSignals.recordWorked). A code a real
+// shopper applied successfully in the last day has stronger proof than the
+// verification pipeline's "not checked yet" — so an UNVERIFIED (grey-tier)
+// code with such a signal is DISPLAYED as Verified. This is a read-time
+// derivation only: nothing writes the catalog's `status`, and the next
+// catalog push from the pipeline stays authoritative for it.
+//
+// Scope of the upgrade, deliberately narrow:
+//   * grey (pending/retry) or no status → Verified (the contradiction users
+//     saw: a green "worked 0h ago" line next to an "Unverified" badge).
+//   * amber (restriction-tagged) stays amber — a restricted code that worked
+//     for one cart can still fail on yours, and the amber label is the useful
+//     warning ("Restrictions apply"), not a lack of proof.
+//   * red (invalid/expired) stays red — never surfaced in a listing anyway,
+//     and a conflicting report there is a question for the pipeline.
+//
+// The window + predicate below are the ONLY definition: the SQL read behind
+// the landing page's "Codes that just worked" section (couponsRepo.ts's
+// listRecentlyWorkedCoupons) inlines WORKED_VERIFIED_WINDOW_HOURS, and the
+// extension popup reads WORKED_VERIFIED_WINDOW_MS +
+// WORKED_AT_CLOCK_SKEW_TOLERANCE_MS from coupon-constants.generated.js.
+
+/** How recent a successful apply must be to count as proof (hours). */
+export const WORKED_VERIFIED_WINDOW_HOURS = 24
+
+/** WORKED_VERIFIED_WINDOW_HOURS in milliseconds. */
+export const WORKED_VERIFIED_WINDOW_MS =
+    WORKED_VERIFIED_WINDOW_HOURS * 60 * 60 * 1000
+
+/**
+ * `last_worked_at` is stamped by the SERVER clock but compared against
+ * whatever clock renders it (a shopper's browser may run minutes behind).
+ * A timestamp up to this far in the future is treated as "just now" rather
+ * than as a bogus future value — otherwise a slow client clock would hide
+ * exactly the freshest signals.
+ */
+export const WORKED_AT_CLOCK_SKEW_TOLERANCE_MS = 5 * 60 * 1000
+
+/**
+ * Milliseconds since `lastWorkedAt` (clamped to 0 within the clock-skew
+ * tolerance), or null when there is no usable signal: absent, unparseable, or
+ * further in the future than the tolerance allows.
+ */
+export function workedAgeMs(
+    lastWorkedAt: string | Date | null | undefined,
+    now: number = Date.now(),
+): number | null {
+    if (!lastWorkedAt) return null
+    const then =
+        typeof lastWorkedAt === 'string'
+            ? Date.parse(lastWorkedAt)
+            : lastWorkedAt.getTime()
+    if (Number.isNaN(then)) return null
+    const age = now - then
+    if (age < -WORKED_AT_CLOCK_SKEW_TOLERANCE_MS) return null
+    return Math.max(0, age)
+}
+
+/** True when a shopper's successful apply was reported within WORKED_VERIFIED_WINDOW_MS. */
+export function isRecentlyWorked(
+    lastWorkedAt: string | Date | null | undefined,
+    now: number = Date.now(),
+): boolean {
+    const age = workedAgeMs(lastWorkedAt, now)
+    return age !== null && age <= WORKED_VERIFIED_WINDOW_MS
+}
+
+/** The badge a coupon card renders, plus WHY it is green when that is proof-by-use. */
+export type CouponBadge = {
+    label: string
+    tier: CouponStatusTier
+    /** True when the badge is Verified because of a recent successful apply, not the catalog status. */
+    provenByRecentWork: boolean
+}
+
+/**
+ * The status badge to DISPLAY for a coupon: the catalog status's STATUS_META
+ * entry, upgraded to the Verified badge when the code is unverified (grey) or
+ * status-less AND isRecentlyWorked(). Null when there is nothing to show (no
+ * status, no recent proof — or a status outside this vocabulary). See the
+ * block comment above for why amber and red are never upgraded.
+ */
+export function couponBadge(
+    status: string | null | undefined,
+    lastWorkedAt: string | Date | null | undefined,
+    now: number = Date.now(),
+): CouponBadge | null {
+    const catalogMeta =
+        status && Object.prototype.hasOwnProperty.call(STATUS_META, status)
+            ? STATUS_META[status as CouponStatus]
+            : null
+    const upgradable = catalogMeta === null || catalogMeta.tier === 'grey'
+    if (upgradable && isRecentlyWorked(lastWorkedAt, now)) {
+        return { ...STATUS_META.valid, provenByRecentWork: true }
+    }
+    return catalogMeta ? { ...catalogMeta, provenByRecentWork: false } : null
+}

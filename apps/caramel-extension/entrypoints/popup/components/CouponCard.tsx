@@ -1,5 +1,5 @@
 import { CaramelCoupons } from '../../../coupon-constants.generated.js'
-import { formatWorkedAgo } from '../../../popup-core.js'
+import { couponBadgeMeta, formatWorkedAgo } from '../../../popup-core.js'
 import type { Coupon } from '../types'
 
 /**
@@ -15,13 +15,6 @@ import type { Coupon } from '../types'
 /** Statuses whose rows carry the restriction warning. */
 const RESTRICTED_STATUSES = new Set<string>(CaramelCoupons.RESTRICTED_STATUSES)
 
-/** The 4-tier badge axis. Indexed by a status the API may extend at any
- *  time, so an unknown status legitimately answers undefined (no badge). */
-const STATUS_META = CaramelCoupons.STATUS_META as Record<
-    string,
-    { label: string; tier: string } | undefined
->
-
 export function CouponCard({
     coupon,
     onCopy,
@@ -32,9 +25,16 @@ export function CouponCard({
     const status = coupon.status ?? ''
     const isRestricted = RESTRICTED_STATUSES.has(status)
     const isDead = status === 'invalid' || status === 'expired'
-    const meta = STATUS_META[status]
-    // App-owned trust signal (W1): "worked Xh ago" when the extension last
-    // reported this coupon working (<7 days), '' when it hasn't.
+    // The 4-tier badge (STATUS_META), upgraded to Verified when a shopper's
+    // apply in the last 24h proved an Unverified code — the app's
+    // coupons.ts couponBadge rule. An unknown status legitimately answers
+    // undefined (no badge).
+    const meta: { label: string; tier: string } | undefined = couponBadgeMeta(
+        status,
+        coupon.lastWorkedAt,
+    )
+    // App-owned trust signal (W1): "Just worked" / "Worked Xh ago" when the
+    // extension last reported this coupon working (<7 days), '' when it hasn't.
     const workedAgo: string = formatWorkedAgo(coupon.lastWorkedAt)
 
     const baseMsg =

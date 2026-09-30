@@ -5,7 +5,11 @@
 // `coupon_signals` Prisma access lives — written by POST
 // /api/coupons/[id]/report (worked/failed outcomes → recordWorked/recordFailed)
 // and POST /api/coupons/increment (a use → recordUsage, W4-D2) — and read back
-// by attachSignals() to surface "worked Xh ago" on the web card + popup.
+// by attachSignals() to surface "Just worked" / "Worked Xh ago" on the web
+// card + popup. The ONE other reader is couponsRepo.listRecentlyWorkedCoupons:
+// a read-only SQL JOIN of coupon_signals onto the catalog (the landing page's
+// "Codes that just worked"), which lives in couponsRepo because every
+// catalog-joining query does. No other module may write this table.
 //
 // Field ownership — each writer owns exactly ONE field, so a successful apply
 // (which fires BOTH report{worked} AND increment) never double-counts:

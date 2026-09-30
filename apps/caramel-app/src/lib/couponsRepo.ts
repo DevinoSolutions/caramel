@@ -32,7 +32,10 @@
 // `getBaseDomain`/domain-validation 400s, response envelopes, cache
 // headers, `hasMore`/`active` computed fields, and auth/rate-limit/origin
 // gates all stay in the calling route (`withRoute` config + the route body).
-import { VISIBLE_COUPON_STATUSES } from '@/lib/coupons'
+import {
+    VISIBLE_COUPON_STATUSES,
+    WORKED_VERIFIED_WINDOW_HOURS,
+} from '@/lib/coupons'
 import {
     type CouponListRow,
     CouponListRowSchema,
@@ -40,6 +43,8 @@ import {
     DiscountTypeRowSchema,
     type RecentStoreRow,
     RecentStoreRowSchema,
+    type RecentlyWorkedCouponRow,
+    RecentlyWorkedCouponRowSchema,
     type SiteAggregateRow,
     SiteAggregateRowSchema,
     type SiteCountRow,
@@ -117,6 +122,21 @@ const percentOffSql = () =>
     Prisma.sql`UPPER(discount_type) = 'PERCENTAGE' AND discount_amount > 0 AND discount_amount < 100`
 const fixedAmountOffSql = () =>
     Prisma.sql`UPPER(discount_type) IS DISTINCT FROM 'PERCENTAGE' AND discount_amount > 0`
+
+/**
+ * "A shopper's apply succeeded within the proof window" — coupons.ts's
+ * isRecentlyWorked() expressed in SQL over the `coupon_signals s` alias.
+ *
+ * `last_worked_at` is a `timestamp(3)` WITHOUT time zone that Prisma always
+ * writes in UTC, so the cutoff is computed as UTC wall-clock time
+ * (`NOW() AT TIME ZONE 'UTC'`) — comparing it against bare `NOW()` would
+ * reinterpret the column in the session's TimeZone and shift the window on
+ * any non-UTC server. The window length is our own numeric constant (never
+ * input), inlined as an interval literal via Prisma.raw so there is no
+ * integer-vs-interval parameter typing to get wrong.
+ */
+const recentlyWorkedSql = () =>
+    Prisma.sql`s.last_worked_at >= (NOW() AT TIME ZONE 'UTC') - ${Prisma.raw(`INTERVAL '${WORKED_VERIFIED_WINDOW_HOURS} hours'`)}`
 
 // ---------------------------------------------------------------------------
 // Reads
@@ -568,6 +588,48 @@ export async function listRecentlyAddedStores(
         RecentStoreRowSchema,
         rawRows,
         'sites.recently-added',
+    )
+}
+
+/**
+ * api/coupons/recently-worked GET (via recentlyWorkedCouponsCache.ts) — the
+ * landing page's "Codes that just worked": the newest `limit` VISIBLE coupons a
+ * shopper applied successfully within WORKED_VERIFIED_WINDOW_HOURS, newest
+ * first. Read-only: it joins the app-owned `coupon_signals` (written only by
+ * couponSignals.recordWorked) to the catalog and writes neither.
+ *
+ * A SQL join rather than attachSignals()'s app-side merge because the
+ * question runs the other way: attachSignals decorates coupons a listing
+ * already picked, while this read picks coupons BY their signal — which only
+ * the join can do without pulling every signal row into memory. Both tables
+ * live in the app's own Postgres since the ownership inversion.
+ *
+ * Plan: the window predicate is a range scan on
+ * `coupon_signals_last_worked_at_idx` (DESC) over at most a day of signals,
+ * each probing `coupons_pkey` — no catalog scan. `visibleCouponsWhere()`'s
+ * unqualified `status`/`expired` resolve to `coupons` (coupon_signals has
+ * neither column). `s.coupon_id DESC` makes the order total so ties on the
+ * same millisecond cannot reorder between cache rebuilds.
+ */
+export async function listRecentlyWorkedCoupons(
+    limit: number,
+): Promise<RecentlyWorkedCouponRow[]> {
+    const rawRows = await prisma.$queryRaw(Prisma.sql`
+        SELECT c.id, c.code, c.site, c.title,
+               c.discount_type, c.discount_amount,
+               s.last_worked_at AS "lastWorkedAt"
+        FROM coupon_signals s
+        JOIN coupons c ON c.id = s.coupon_id
+        WHERE ${recentlyWorkedSql()}
+          AND ${visibleCouponsWhere()}
+          AND c.site IS NOT NULL
+        ORDER BY s.last_worked_at DESC, s.coupon_id DESC
+        LIMIT ${limit}
+    `)
+    return parseCouponRows(
+        RecentlyWorkedCouponRowSchema,
+        rawRows,
+        'coupons.recently-worked',
     )
 }
 

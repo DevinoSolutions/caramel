@@ -110,6 +110,31 @@ export const CouponListRowSchema = z.object({
 })
 export type CouponListRow = z.infer<typeof CouponListRowSchema>
 
+/**
+ * couponsRepo.ts listRecentlyWorkedCoupons — the landing page's "Codes that
+ * just worked": a visible coupon joined to its app-owned coupon_signals row.
+ * The coupon fields reuse CouponListRowSchema's own definitions (same id
+ * normalization, same tolerant discount_type) so the two reads cannot parse
+ * the same column differently. `site` is non-null by the query's
+ * `c.site IS NOT NULL` (a per-query guarantee, as with CouponListRow).
+ * `lastWorkedAt` is `coupon_signals.last_worked_at`, non-null by the query's
+ * window predicate; `z.coerce.date()` for the same driver tolerance
+ * RecentStoreRowSchema documents.
+ */
+export const RecentlyWorkedCouponRowSchema = CouponListRowSchema.pick({
+    id: true,
+    code: true,
+    site: true,
+    title: true,
+    discount_type: true,
+    discount_amount: true,
+}).extend({
+    lastWorkedAt: z.coerce.date(),
+})
+export type RecentlyWorkedCouponRow = z.infer<
+    typeof RecentlyWorkedCouponRowSchema
+>
+
 /** `SELECT COUNT(*)::int AS total` — coupons/route.ts + [store]/page.tsx. */
 export const TotalCountRowSchema = z.object({
     total: z.number(),

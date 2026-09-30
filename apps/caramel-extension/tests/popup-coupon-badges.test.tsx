@@ -1,9 +1,13 @@
 import { render } from '@testing-library/react'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { initCaramelBase } from '../caramel-base.js'
-import { initCouponConstants } from '../coupon-constants.generated.js'
+import {
+    CaramelCoupons,
+    initCouponConstants,
+} from '../coupon-constants.generated.js'
 import type { AppApi, Coupon } from '../entrypoints/popup/types'
 import { CouponsView } from '../entrypoints/popup/views/CouponsView'
+import { couponBadgeMeta, formatWorkedAgo } from '../popup-core.js'
 
 // F-006 — proves the coupon card's badge label + restriction-warning
 // rendering derives from CaramelCoupons.STATUS_META / RESTRICTED_STATUSES
@@ -151,5 +155,82 @@ describe('coupon card — badges + restriction banner (F-006)', () => {
             items[1]!.querySelector('.coupon-restriction-icon svg'),
         ).not.toBeNull()
         expect(items[3]!.className).toContain('coupon-item-dead')
+    })
+})
+
+// "Just worked" is Verified (2026-09-30): the popup twins of the app's
+// proof-by-use rule. A grey/absent status with a successful apply inside the
+// generated 24h window wears the Verified badge; amber/red never upgrade; the
+// trust line never says "worked 0h ago".
+describe('popup twins — formatWorkedAgo + couponBadgeMeta', () => {
+    const NOW = Date.parse('2026-09-30T12:00:00.000Z')
+    const MIN = 60 * 1000
+    const HOUR = 60 * MIN
+    const ago = (ms: number) => new Date(NOW - ms).toISOString()
+
+    it('formatWorkedAgo: Just worked under an hour, then Xh / Xd, blank past 7d or when absent', () => {
+        expect(formatWorkedAgo(ago(0), NOW)).toBe('Just worked')
+        expect(formatWorkedAgo(ago(59 * MIN), NOW)).toBe('Just worked')
+        expect(formatWorkedAgo(ago(HOUR), NOW)).toBe('Worked 1h ago')
+        expect(formatWorkedAgo(ago(23 * HOUR + 59 * MIN), NOW)).toBe(
+            'Worked 23h ago',
+        )
+        expect(formatWorkedAgo(ago(2 * 24 * HOUR), NOW)).toBe('Worked 2d ago')
+        expect(formatWorkedAgo(ago(8 * 24 * HOUR), NOW)).toBe('')
+        expect(formatWorkedAgo(undefined, NOW)).toBe('')
+        expect(formatWorkedAgo('not-a-date', NOW)).toBe('')
+        // A slightly-fast server clock still reads as just worked; a far
+        // future stamp is nonsense and renders nothing.
+        expect(formatWorkedAgo(ago(-2 * MIN), NOW)).toBe('Just worked')
+        expect(formatWorkedAgo(ago(-HOUR), NOW)).toBe('')
+    })
+
+    it('couponBadgeMeta: grey or missing status + apply within 24h → Verified; amber/red never upgrade', () => {
+        const verified = CaramelCoupons.STATUS_META.valid
+        expect(couponBadgeMeta('pending', ago(10 * MIN), NOW)).toEqual(verified)
+        expect(couponBadgeMeta(undefined, ago(10 * MIN), NOW)).toEqual(verified)
+        expect(couponBadgeMeta('pending', ago(24 * HOUR), NOW)).toEqual(
+            verified,
+        )
+        expect(couponBadgeMeta('pending', ago(24 * HOUR + MIN), NOW)).toEqual(
+            CaramelCoupons.STATUS_META.pending,
+        )
+        expect(couponBadgeMeta('pending', undefined, NOW)).toEqual(
+            CaramelCoupons.STATUS_META.pending,
+        )
+        expect(couponBadgeMeta('invalid', ago(MIN), NOW)).toEqual(
+            CaramelCoupons.STATUS_META.invalid,
+        )
+        expect(couponBadgeMeta('product_restriction', ago(MIN), NOW)).toEqual(
+            CaramelCoupons.STATUS_META.product_restriction,
+        )
+        expect(couponBadgeMeta(undefined, undefined, NOW)).toBeUndefined()
+    })
+
+    it('the rendered card: an Unverified code applied minutes ago shows "Just worked" + the Verified badge, never "Unverified"', () => {
+        const recent = new Date(Date.now() - 10 * MIN).toISOString()
+        const coupons: Coupon[] = [
+            {
+                code: 'FRESH10',
+                title: 'Pending but proven',
+                status: 'pending',
+                lastWorkedAt: recent,
+            },
+        ]
+        const { container } = render(
+            <CouponsView
+                coupons={coupons}
+                user={null}
+                domain="example.com"
+                page={{ coupons }}
+                api={makeApi()}
+            />,
+        )
+        const badge = container.querySelector('.coupon-badge')!
+        expect(badge.textContent).toBe('✓ Verified')
+        expect(badge.className).toContain('coupon-badge--green')
+        expect(container.textContent).toContain('Just worked')
+        expect(container.textContent).not.toContain('Unverified')
+        expect(container.textContent).not.toMatch(/0h ago/)
     })
 })
