@@ -33,6 +33,7 @@
 // headers, `hasMore`/`active` computed fields, and auth/rate-limit/origin
 // gates all stay in the calling route (`withRoute` config + the route body).
 import {
+    RESTRICTED_COUPON_STATUSES,
     VISIBLE_COUPON_STATUSES,
     WORKED_VERIFIED_WINDOW_HOURS,
 } from '@/lib/coupons'
@@ -611,6 +612,9 @@ export async function listRecentlyAddedStores(
  * neither column). `s.coupon_id DESC` makes the order total so ties on the
  * same millisecond cannot reorder between cache rebuilds.
  */
+// Restriction-tagged codes are left out: the landing tile always renders the
+// proven-by-use Verified badge, and couponBadge() keeps restricted codes amber,
+// so featuring one would show a badge its store page contradicts.
 export async function listRecentlyWorkedCoupons(
     limit: number,
 ): Promise<RecentlyWorkedCouponRow[]> {
@@ -622,6 +626,7 @@ export async function listRecentlyWorkedCoupons(
         JOIN coupons c ON c.id = s.coupon_id
         WHERE ${recentlyWorkedSql()}
           AND ${visibleCouponsWhere()}
+          AND c.status NOT IN (${Prisma.join([...RESTRICTED_COUPON_STATUSES])})
           AND c.site IS NOT NULL
         ORDER BY s.last_worked_at DESC, s.coupon_id DESC
         LIMIT ${limit}

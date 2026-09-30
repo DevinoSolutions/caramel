@@ -1,3 +1,4 @@
+import { RESTRICTED_COUPON_STATUSES } from '@/lib/coupons'
 import {
     expireCoupons,
     getCouponStats,
@@ -521,6 +522,11 @@ describe('listRecentlyWorkedCoupons (landing "Codes that just worked" read)', ()
         )
         // The shared visibility predicate (same fragment every listing inlines).
         expect(q).toMatch(/status IN \(\?(?:,\?)*\) AND expired = FALSE/)
+        // Restricted (amber) codes never feature: every tile renders Verified.
+        expect(q).toMatch(/c\.status NOT IN \(\?(?:,\?)*\)/)
+        for (const status of RESTRICTED_COUPON_STATUSES) {
+            expect(capturedValues[0]).toContain(status)
+        }
         expect(q).toContain('c.site IS NOT NULL')
         expect(q).toContain('ORDER BY s.last_worked_at DESC, s.coupon_id DESC')
         expect(q).toContain('LIMIT ?')
