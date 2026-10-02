@@ -1,7 +1,6 @@
 import { env } from '@/lib/env'
 import * as Sentry from '@sentry/nextjs'
 
-const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
 const DEFAULT_MODEL = env.OPENROUTER_MODEL
 
 export interface ChatMessage {
@@ -56,7 +55,11 @@ export async function chat(
             body.response_format = { type: 'json_object' }
         }
 
-        const res = await fetch(OPENROUTER_URL, {
+        // env.OPENROUTER_API_URL defaults to https://openrouter.ai/api/v1 (no
+        // trailing slash), so with it unset this is exactly the URL this file
+        // used to hardcode; set, it points at an OpenAI-compatible relay such
+        // as the Devino proxy (https://proxyai.devino.ca/v1).
+        const res = await fetch(`${env.OPENROUTER_API_URL}/chat/completions`, {
             method: 'POST',
             signal: controller.signal,
             headers: {

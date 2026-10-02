@@ -51,6 +51,28 @@ describe('parseServerEnv', () => {
         expect(() => parseServerEnv(rest)).toThrow(/JWT_SECRET/)
     })
 
+    it('(o) OPENROUTER_API_URL unset or blank defaults to https://openrouter.ai/api/v1; a set value loses its trailing slash; a non-URL fails boot', () => {
+        expect(parseServerEnv(validServerFixture).OPENROUTER_API_URL).toBe(
+            'https://openrouter.ai/api/v1',
+        )
+        expect(
+            parseServerEnv({ ...validServerFixture, OPENROUTER_API_URL: '' })
+                .OPENROUTER_API_URL,
+        ).toBe('https://openrouter.ai/api/v1')
+        expect(
+            parseServerEnv({
+                ...validServerFixture,
+                OPENROUTER_API_URL: 'https://proxyai.devino.ca/v1//',
+            }).OPENROUTER_API_URL,
+        ).toBe('https://proxyai.devino.ca/v1')
+        expect(() =>
+            parseServerEnv({
+                ...validServerFixture,
+                OPENROUTER_API_URL: 'proxyai.devino.ca',
+            }),
+        ).toThrow(/OPENROUTER_API_URL/)
+    })
+
     it('(d.1) JWT_SECRET alone (no BETTER_AUTH_SECRET) satisfies the requirement', () => {
         const { BETTER_AUTH_SECRET: _omit, ...rest } = validServerFixture
         expect(() =>
