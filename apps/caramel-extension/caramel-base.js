@@ -326,8 +326,15 @@ export function caramelClearSession(done) {
 
 /* --------------------------------------------------  user settings */
 // One storage.sync object so preferences roam with the browser profile.
-// Shape: { autoApply: boolean, disabledSites: string[], syncSavings: boolean }
-// — read through this helper only, so defaults live in exactly one place.
+// Shape: { autoApply: boolean, disabledSites: string[], syncSavings: boolean,
+// shareCheckoutCodes: boolean } — read through this helper only, so defaults
+// live in exactly one place.
+//
+// `shareCheckoutCodes` DEFAULTS TRUE (written `!== false`, like autoApply): it
+// is the user-level switch for code-capture.js, which shares a code the
+// shopper typed ONLY after the store accepted it, and only for signed-in users
+// while the server flag is on (background.js gates both). Turning it off is the
+// per-user opt-out the privacy copy promises.
 //
 // `syncSavings` DEFAULTS FALSE, and unlike `autoApply` it is written as
 // `=== true` rather than `!== false`: an absent key must read as "has not
@@ -347,6 +354,7 @@ export function caramelGetSettings() {
                         ? s.disabledSites
                         : [],
                     syncSavings: s.syncSavings === true,
+                    shareCheckoutCodes: s.shareCheckoutCodes !== false,
                 })
             })
         } catch {
@@ -354,6 +362,7 @@ export function caramelGetSettings() {
                 autoApply: true,
                 disabledSites: [],
                 syncSavings: false,
+                shareCheckoutCodes: true,
             })
         }
     })

@@ -134,6 +134,131 @@ async function fetchCaramelApi(url, opts = {}, timeoutMs = FETCH_TIMEOUT_MS) {
     )
 }
 
+/* --------------------------------------------------  shopper code sharing
+ * code-capture.js (content script) hands us a code the shopper typed and the
+ * store accepted. Whether it may leave the browser is decided HERE, not in the
+ * page: signed in, and the server flag on. The flag is read from the public
+ * features endpoint and cached for 6h (storage.session when the browser has it,
+ * so a restarted worker does not refetch; memory otherwise). A cached `false`
+ * is therefore honoured for up to 6h after the owner flips the flag on, which
+ * is the intended trade: this is a rollout switch, not a live control.
+ *
+ * Outcomes are returned to the content script as `{ skipped }` for every
+ * expected refusal (signed out, flag off, store/code refused, rate limits) and
+ * as a THROW (logged by the caller, answered as `{ error }`) for anything that
+ * is a real failure: 5xx, network, an unreadable body, the extension-only
+ * origin guard. */
+const FEATURES_CACHE_KEY = 'caramel_features'
+const FEATURES_CACHE_TTL_MS = 6 * 60 * 60 * 1000
+let _featuresMemo = null // { shopperCodeCapture, ts }
+
+function _readFeaturesSession() {
+    return new Promise(resolve => {
+        const area = currentBrowser.storage?.session
+        if (!area) return resolve(null)
+        try {
+            area.get([FEATURES_CACHE_KEY], res =>
+                resolve(res?.[FEATURES_CACHE_KEY] ?? null),
+            )
+        } catch {
+            // session storage unavailable in this runtime: memory-only cache.
+            resolve(null)
+        }
+    })
+}
+
+function _writeFeaturesSession(entry) {
+    try {
+        currentBrowser.storage?.session?.set({ [FEATURES_CACHE_KEY]: entry })
+    } catch {
+        // session storage unavailable in this runtime: memory-only cache.
+    }
+}
+
+async function _shopperCaptureEnabled() {
+    const fresh = e =>
+        e &&
+        typeof e.shopperCodeCapture === 'boolean' &&
+        Date.now() - e.ts < FEATURES_CACHE_TTL_MS
+    if (fresh(_featuresMemo)) return _featuresMemo.shopperCodeCapture
+    const stored = await _readFeaturesSession()
+    if (fresh(stored)) {
+        _featuresMemo = stored
+        return stored.shopperCodeCapture
+    }
+    // Public, anonymous: no bearer (nothing user-scoped in the answer).
+    const r = await fetchWithTimeout(caramelUrl('api/extension/features'))
+    if (!r.ok) throw new Error(`features HTTP ${r.status}`)
+    const json = await r.json()
+    if (typeof json?.shopperCodeCapture !== 'boolean')
+        throw new Error('features: shopperCodeCapture is not a boolean')
+    _featuresMemo = {
+        shopperCodeCapture: json.shopperCodeCapture,
+        ts: Date.now(),
+    }
+    _writeFeaturesSession(_featuresMemo)
+    return json.shopperCodeCapture
+}
+
+function _forgetFeatures() {
+    _featuresMemo = null
+    try {
+        currentBrowser.storage?.session?.remove?.([FEATURES_CACHE_KEY])
+    } catch {
+        // session storage unavailable in this runtime: memory-only cache.
+    }
+}
+
+// Exported for tests/background-shopper-code.test.mjs.
+export async function submitShopperCode(message) {
+    const { site, code } = message
+    if (typeof site !== 'string' || typeof code !== 'string')
+        throw new Error('submitShopperCode: site and code must be strings')
+    if (!(await getStoredToken())) return { skipped: 'signed-out' }
+    if (!(await _shopperCaptureEnabled())) return { skipped: 'disabled' }
+
+    const r = await fetchCaramelApi(caramelUrl('api/coupons/submit'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ site, code, source: 'checkout' }),
+    })
+    // On a refusal the body is only used to NAME it; one we cannot read just
+    // falls back to the generic reason below.
+    const body = r.ok ? await r.json() : await r.json().catch(() => null)
+
+    if (r.ok) {
+        if (typeof body?.couponId !== 'string')
+            throw new Error('submit: response has no couponId')
+        return {
+            couponId: body.couponId,
+            created: body.created === true,
+            status: body.status,
+        }
+    }
+    if (r.status === 401) return { skipped: 'signed-out' }
+    if (r.status === 403 && body?.error === 'capture-disabled') {
+        // The server disagrees with our cached flag: refresh it next time.
+        _forgetFeatures()
+        return { skipped: 'disabled' }
+    }
+    if (r.status === 422) {
+        // Expected refusals (not a store we know, not a plausible code).
+        if (CARAMEL_ENV.verbose)
+            console.debug('Caramel: shopper code refused', body?.error)
+        return { skipped: body?.error || 'refused' }
+    }
+    if (r.status === 429)
+        return {
+            skipped:
+                body?.error === 'daily-limit' ? 'daily-limit' : 'rate-limited',
+        }
+    // 5xx, and the extension-only origin guard (a 403 we should never see from
+    // our own worker): real failures, loud.
+    throw new Error(
+        `submit HTTP ${r.status}${body?.error ? ` ${body.error}` : ''}`,
+    )
+}
+
 function isServiceWorkerContext() {
     return (
         typeof ServiceWorkerGlobalScope !== 'undefined' &&
@@ -418,6 +543,15 @@ export function initBackground() {
                     }).catch(err => logError('increment', err))
                 }
                 sendResponse({ success: true })
+                return true
+            } else if (message.action === 'submitShopperCode') {
+                submitShopperCode(message)
+                    .then(resp => sendResponse(resp))
+                    .catch(err => {
+                        logError('submitShopperCode', err)
+                        sendResponse({ error: String(err) })
+                    })
+
                 return true
             } else if (message.action === 'getFavoriteStores') {
                 // The stores this account follows. fetchCaramelApi so the stored

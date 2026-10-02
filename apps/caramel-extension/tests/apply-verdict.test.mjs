@@ -1,0 +1,140 @@
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+
+/**
+ * Characterization of applyCoupon()'s snapshot -> verdict path.
+ *
+ * Pinned 2026-10-02, BEFORE the snapshot/verdict logic was extracted into
+ * caramelSnapshotCart / caramelAwaitCouponVerdict (shared with
+ * code-capture.js, which judges a shopper-typed code by the same rule). The
+ * suites around it (apply-multi-price-total, false-success,
+ * pre-existing-discount, ...) pin the price arithmetic and the runner's
+ * reaction to a verdict; none of them pins the SUCCESS RULE itself:
+ *
+ *     priceDropped || (committed && stuck) || (committed && !errorMsg)
+ *
+ * These drive the REAL applyCoupon against a real (jsdom) checkout and assert
+ * the verdict triple for each branch, so the extraction cannot move it.
+ */
+
+let applyCoupon
+
+const BASE = {
+    domain: 'example.com',
+    couponInput: '#promo',
+    couponSubmit: '#apply',
+}
+
+/** jsdom has no layout: innerText is undefined and nothing is "visible".
+ *  textContent is set too, because the price watcher observes DOM mutations
+ *  and a bare property definition mutates nothing. */
+function setText(el, text) {
+    el.textContent = text
+    Object.defineProperty(el, 'innerText', {
+        value: text,
+        configurable: true,
+    })
+}
+
+/** The store answers one tick AFTER the click, like a real round-trip (the
+ *  verdict waiter baselines the page right after the submit is dispatched). */
+function respond(fn) {
+    document.getElementById('apply').addEventListener('click', () => {
+        setTimeout(fn, 150)
+    })
+}
+
+function mountAppliedRow() {
+    const row = document.createElement('div')
+    row.id = 'applied-row'
+    setText(row, 'SAVE10 applied')
+    document.body.appendChild(row)
+}
+
+function showError(text) {
+    const err = document.getElementById('err')
+    setText(err, text)
+}
+
+beforeAll(() => {
+    const { Element } = globalThis.window ?? globalThis
+    Element.prototype.checkVisibility = () => true
+})
+
+beforeEach(async () => {
+    document.body.innerHTML =
+        '<input id="promo" /><button id="apply">Apply</button>' +
+        '<div id="total"></div><div id="err"></div>'
+    setText(document.getElementById('total'), '$100.00')
+    vi.resetModules()
+    ;({ applyCoupon } = await import('../coupon-apply.js'))
+})
+
+describe('applyCoupon verdict — success rule', () => {
+    it('a price drop alone is a success, with the moved total', async () => {
+        const rec = { ...BASE, priceContainer: '#total' }
+        respond(() => setText(document.getElementById('total'), '$90.00'))
+
+        const res = await applyCoupon('SAVE10', rec)
+
+        expect(res.success).toBe(true)
+        expect(res.newTotal).toBe(90)
+        expect(res.committed).toBe(false)
+        expect(res.errorMsg).toBeNull()
+    })
+
+    it('error text with no applied row and no price move is a failure', async () => {
+        const rec = { ...BASE, errorIndicator: '#err' }
+        respond(() => showError('This code is invalid'))
+
+        const res = await applyCoupon('NOPE', rec)
+
+        expect(res.success).toBe(false)
+        expect(res.committed).toBe(false)
+        expect(res.errorMsg).toBe('This code is invalid')
+        expect(res.errorIsNew).toBe(true)
+    })
+
+    it('an applied row that stays, with no error, is a success', async () => {
+        const rec = { ...BASE, successIndicator: '#applied-row' }
+        respond(mountAppliedRow)
+
+        const res = await applyCoupon('SAVE10', rec)
+
+        expect(res.success).toBe(true)
+        expect(res.committed).toBe(true)
+        expect(res.errorMsg).toBeNull()
+    })
+
+    it('a row that sticks beats a noisy error region (rule 2)', async () => {
+        const rec = {
+            ...BASE,
+            successIndicator: '#applied-row',
+            errorIndicator: '#err',
+        }
+        respond(() => {
+            mountAppliedRow()
+            showError('Your code is invalid for some items')
+        })
+
+        const res = await applyCoupon('SAVE10', rec)
+
+        expect(res.committed).toBe(true)
+        expect(res.errorMsg).toBeTruthy()
+        expect(res.success).toBe(true)
+    })
+
+    it('returns exactly the documented verdict keys', async () => {
+        const rec = { ...BASE, successIndicator: '#applied-row' }
+        respond(mountAppliedRow)
+
+        const res = await applyCoupon('SAVE10', rec)
+
+        expect(Object.keys(res).sort()).toEqual([
+            'committed',
+            'errorIsNew',
+            'errorMsg',
+            'newTotal',
+            'success',
+        ])
+    })
+})
