@@ -141,6 +141,11 @@ export const CouponIdRowSchema = z.object({
     id: couponIdSchema,
 })
 
+/** `SELECT (EXISTS(...) OR EXISTS(...)) AS known` — couponsRepo.isKnownStore. */
+export const KnownStoreRowSchema = z.object({
+    known: z.boolean(),
+})
+
 /** `SELECT COUNT(*)::int AS total` — coupons/route.ts + [store]/page.tsx. */
 export const TotalCountRowSchema = z.object({
     total: z.number(),

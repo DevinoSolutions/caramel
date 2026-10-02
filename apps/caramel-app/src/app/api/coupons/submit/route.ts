@@ -2,8 +2,10 @@ import { withRoute } from '@/lib/api/withRoute'
 import { recordWorked } from '@/lib/couponSignals'
 import { submitShopperCoupon } from '@/lib/couponsRepo'
 import { env } from '@/lib/env'
+import { isExtensionOrigin } from '@/lib/rateLimit'
 import {
     ShopperSubmissionLimitError,
+    UnknownStoreError,
     normalizeShopperCode,
 } from '@/lib/shopperCoupons'
 import { resolveStoreDomain } from '@/lib/storeDomain'
@@ -37,12 +39,22 @@ import { z } from 'zod'
 // existing couponSignals.recordWorked (the same writer POST /coupons/[id]/report
 // uses) and the #284 "just worked" display logic needs no new code. Checkout
 // capture is switchable globally: SHOPPER_CODE_CAPTURE_ENABLED off → 403
-// 'capture-disabled' and nothing is written.
+// 'capture-disabled' and nothing is written. Only the extension may send
+// source 'checkout': a request carrying an Origin that is not an extension
+// origin (a web page, the Caramel site included) gets 403
+// 'checkout-source-extension-only'. A MISSING Origin is accepted, since a
+// background fetch under host_permissions may omit it. This is depth, not
+// authentication: Origin is trivially forged by a non-browser client (see the
+// recordWorked TODO below).
 //
-// "A real store" is exactly what the store page uses to decide it is a store
-// (resolveStoreDomain non-null; storeIndexability's 'not-a-store'), so a manual
-// add from any /coupons/<store> page that renders the form always resolves.
-// A store with no coupons yet is still a store.
+// "A real store" is two checks. resolveStoreDomain (the store page's own
+// canonicalizer; null means 'not-a-store') proves the string is a registrable
+// domain, which any spam domain is. submitShopperCoupon then proves it is a
+// KNOWN store (a supplier coupon or a store_configs row exists; shopper rows
+// prove nothing) and throws UnknownStoreError otherwise. Both map to the same
+// 422 { error: 'not-a-store' }: without the second, one shopper row would make
+// /coupons/<any-domain> indexable and sitemap-listed. A known store with no
+// coupons yet is still a store.
 const SubmitBodySchema = z.object({
     site: z.string().trim().min(1).max(253),
     code: z.string(),
@@ -58,12 +70,22 @@ export const POST = withRoute(
         auth: 'session',
         body: SubmitBodySchema,
     },
-    async ({ body, session }) => {
+    async ({ req, body, session }) => {
         const userId = session?.user?.id
         if (!userId) {
             // withRoute's auth gate already 401s a missing session; this
             // narrows the type and covers a malformed session object.
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+        }
+
+        if (body.source === 'checkout') {
+            const origin = req.headers.get('origin')
+            if (origin !== null && !isExtensionOrigin(req)) {
+                return NextResponse.json(
+                    { error: 'checkout-source-extension-only' },
+                    { status: 403 },
+                )
+            }
         }
 
         if (body.source === 'checkout' && !env.SHOPPER_CODE_CAPTURE_ENABLED) {
@@ -96,6 +118,12 @@ export const POST = withRoute(
             // The one expected failure: an anticipated, user-facing limit, not
             // an incident. Everything else propagates to withRoute's
             // handleRouteError (Sentry + 500).
+            if (error instanceof UnknownStoreError) {
+                return NextResponse.json(
+                    { error: 'not-a-store' },
+                    { status: 422 },
+                )
+            }
             if (error instanceof ShopperSubmissionLimitError) {
                 return NextResponse.json(
                     { error: 'daily-limit' },
@@ -110,6 +138,7 @@ export const POST = withRoute(
             // result ("worked") would be a lie, so the failure surfaces as a 500
             // and the extension retries/logs it. Re-stamping on a retry is
             // idempotent (an upsert of lastWorkedAt).
+            // TODO: checkout worked-stamps are client-asserted; weight/cap per user before trusting them for ranking.
             await recordWorked(result.couponId)
         }
 

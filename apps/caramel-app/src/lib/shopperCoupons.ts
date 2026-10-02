@@ -59,6 +59,20 @@ export function normalizeShopperCode(raw: string): string | null {
 }
 
 /**
+ * Thrown by submitShopperCoupon when the store is not one Caramel knows: no
+ * supplier-sourced coupon and no store_configs row for the base. Without this
+ * gate one shopper row would make /coupons/<any-registrable-domain> indexable
+ * and put it in the sitemap. The route maps it to 422 `{ error: 'not-a-store' }`.
+ * Carries no store name: the base is untrusted input and can reach Sentry.
+ */
+export class UnknownStoreError extends Error {
+    constructor() {
+        super('Shopper submission refused: the store is not a known store')
+        this.name = 'UnknownStoreError'
+    }
+}
+
+/**
  * Thrown by submitShopperCoupon when the shopper already added
  * SHOPPER_DAILY_SUBMISSION_CAP new codes in the last 24 hours. The route maps it
  * to 429 `{ error: 'daily-limit' }`. Carries the cap, never the user's id: it

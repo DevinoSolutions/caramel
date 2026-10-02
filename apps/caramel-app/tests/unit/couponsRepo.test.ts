@@ -5,6 +5,7 @@ import {
 import {
     expireCoupons,
     getCouponStats,
+    isKnownStore,
     listCoupons,
     listNeighbourStoreRows,
     listRecentlyWorkedCoupons,
@@ -17,6 +18,7 @@ import {
     SHOPPER_COUPON_DESCRIPTION,
     SHOPPER_DAILY_SUBMISSION_CAP,
     ShopperSubmissionLimitError,
+    UnknownStoreError,
 } from '@/lib/shopperCoupons'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -608,6 +610,7 @@ const isDedupe = (sql: string) => sql.includes('lower(code) = lower(')
 const isCap = (sql: string) => sql.includes('submitted_by_user_id = ')
 const isInsert = (sql: string) => sql.includes('INSERT INTO coupons')
 const isLock = (sql: string) => sql.includes('pg_advisory_xact_lock')
+const isKnownStoreProbe = (sql: string) => sql.includes('AS known')
 
 describe('submitShopperCoupon (THIRD sanctioned write: shopper-submitted codes)', () => {
     const INSERTED_ID = '900000000000000007'
@@ -621,6 +624,90 @@ describe('submitShopperCoupon (THIRD sanctioned write: shopper-submitted codes)'
     function queryIndex(match: (sql: string) => boolean) {
         return capturedQueries.findIndex(match)
     }
+
+    // Every test below assumes a KNOWN store unless it says otherwise.
+    beforeEach(() => {
+        mockRows(isKnownStoreProbe, [{ known: true }])
+    })
+
+    it('(g) known-store gate: probes supplier coupons (submitted_by_user_id IS NULL, no visibility rule) OR a store_configs row, with the lowercase base', async () => {
+        mockRows(isCap, [{ total: 0 }])
+        mockRows(isInsert, [{ id: INSERTED_ID }])
+
+        await submitShopperCoupon(ARGS)
+
+        const i = queryIndex(isKnownStoreProbe)
+        expect(i).toBeGreaterThanOrEqual(0)
+        const sql = capturedQueries[i] ?? ''
+        // Supplier-sourced coupons only: shopper rows must prove nothing.
+        expect(sql).toContain('FROM coupons')
+        expect(sql).toContain('(site = ? OR site LIKE ?)')
+        expect(sql).toContain('submitted_by_user_id IS NULL')
+        // No visibility requirement: an all-expired store is still a store.
+        expect(sql).not.toContain('status IN (')
+        expect(sql).not.toContain('expired = FALSE')
+        // The published apply-config table.
+        expect(sql).toContain('FROM store_configs')
+        expect(sql).toContain('store_name = ? OR store_name LIKE ?')
+        expect(capturedValues[i]).toEqual([
+            'ebay.com',
+            '%.ebay.com',
+            'ebay.com',
+            '%.ebay.com',
+        ])
+    })
+
+    it('(g) an UNKNOWN store throws UnknownStoreError after the locks and BEFORE the dedupe, the cap and the insert', async () => {
+        rules = []
+        mockRows(isKnownStoreProbe, [{ known: false }])
+
+        await expect(submitShopperCoupon(ARGS)).rejects.toBeInstanceOf(
+            UnknownStoreError,
+        )
+
+        expect(transactionCount).toBe(1)
+        expect(capturedQueries.filter(isLock)).toHaveLength(2)
+        expect(capturedQueries.some(isDedupe)).toBe(false)
+        expect(capturedQueries.some(isCap)).toBe(false)
+        expect(capturedQueries.some(isInsert)).toBe(false)
+    })
+
+    it('(g) the gate runs after both locks and before the dedupe', async () => {
+        mockRows(isCap, [{ total: 0 }])
+        mockRows(isInsert, [{ id: INSERTED_ID }])
+
+        await submitShopperCoupon(ARGS)
+
+        const lastLock = capturedQueries.reduce(
+            (last, sql, i) => (isLock(sql) ? i : last),
+            -1,
+        )
+        expect(lastLock).toBeGreaterThanOrEqual(0)
+        expect(lastLock).toBeLessThan(queryIndex(isKnownStoreProbe))
+        expect(queryIndex(isKnownStoreProbe)).toBeLessThan(queryIndex(isDedupe))
+    })
+
+    it('(g) a missing known-store row is a loud error, never "unknown" or "known"', async () => {
+        rules = []
+
+        await expect(submitShopperCoupon(ARGS)).rejects.toThrow(
+            /known-store query returned no row/,
+        )
+        expect(capturedQueries.some(isInsert)).toBe(false)
+    })
+
+    it('(g) isKnownStore alone reports the probe result, lowercases, and rejects a base that is not a clean hostname', async () => {
+        rules = []
+        mockRows(isKnownStoreProbe, [{ known: true }])
+        await expect(isKnownStore('EBAY.com')).resolves.toBe(true)
+        expect(capturedValues[0]?.[0]).toBe('ebay.com')
+
+        capturedQueries = []
+        await expect(isKnownStore('eb%y.com')).rejects.toThrow(
+            /invalid store base/,
+        )
+        expect(capturedQueries).toHaveLength(0)
+    })
 
     it('(a) dedupes case-insensitively on the code, with the store page predicate AND visibility rule', async () => {
         mockRows(isInsert, [{ id: INSERTED_ID }])

@@ -1,11 +1,16 @@
 import { IngestCatalogPayloadSchema } from '@/lib/catalog/ingestSchemas'
-import { listStoreCoupons, submitShopperCoupon } from '@/lib/couponsRepo'
+import {
+    isKnownStore,
+    listStoreCoupons,
+    submitShopperCoupon,
+} from '@/lib/couponsRepo'
 import prisma from '@/lib/prisma'
 import {
     SHOPPER_COUPON_DESCRIPTION,
     SHOPPER_COUPON_ID_FLOOR,
     SHOPPER_DAILY_SUBMISSION_CAP,
     ShopperSubmissionLimitError,
+    UnknownStoreError,
 } from '@/lib/shopperCoupons'
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest'
 
@@ -22,9 +27,28 @@ const BASE = 'shopper-itest.example'
 const USER_IDS = ['shopper-itest-user-a', 'shopper-itest-user-b'] as const
 const [USER_A, USER_B] = USER_IDS
 
+// The known-store gate (isKnownStore) refuses a base with no supplier coupon and
+// no store_configs row, so BASE is made a KNOWN store by a store_configs row
+// (the config-only shape: a supported store with no coupons yet). The two bases
+// below exercise the gate itself.
+const UNKNOWN_BASE = 'unknown-shopper-itest.example'
+const CONFIG_ONLY_BASE = 'config-only-shopper-itest.example'
+const ALL_STORE_NAMES = [BASE, UNKNOWN_BASE, CONFIG_ONLY_BASE]
+
 async function cleanup() {
     await prisma.coupon.deleteMany({
-        where: { site: { in: [BASE, `www.${BASE}`] } },
+        where: {
+            site: {
+                in: ALL_STORE_NAMES.flatMap(name => [name, `www.${name}`]),
+            },
+        },
+    })
+    await prisma.storeConfig.deleteMany({
+        where: {
+            storeName: {
+                in: ALL_STORE_NAMES.flatMap(name => [name, `www.${name}`]),
+            },
+        },
     })
     await prisma.coupon.deleteMany({
         where: { submittedByUserId: { in: [...USER_IDS] } },
@@ -34,6 +58,7 @@ async function cleanup() {
 
 beforeEach(async () => {
     await cleanup()
+    await prisma.storeConfig.create({ data: { storeName: BASE } })
     for (const id of USER_IDS) {
         await prisma.user.create({
             data: { id, email: `${id}@shopper-itest.example` },
@@ -44,6 +69,126 @@ afterEach(cleanup)
 afterAll(async () => {
     await cleanup()
     await prisma.$disconnect()
+})
+
+describe('known-store gate (real pg :58005)', () => {
+    it('an unknown domain throws UnknownStoreError and inserts NO row', async () => {
+        await expect(
+            submitShopperCoupon({
+                base: UNKNOWN_BASE,
+                code: 'SpamCode1',
+                source: 'manual',
+                userId: USER_A,
+            }),
+        ).rejects.toBeInstanceOf(UnknownStoreError)
+
+        expect(
+            await prisma.coupon.count({
+                where: { submittedByUserId: USER_A },
+            }),
+        ).toBe(0)
+        expect(
+            await prisma.coupon.count({
+                where: { site: { contains: UNKNOWN_BASE } },
+            }),
+        ).toBe(0)
+    })
+
+    it('a config-only store (store_configs row, no coupons at all) is accepted', async () => {
+        await prisma.storeConfig.create({
+            data: { storeName: CONFIG_ONLY_BASE },
+        })
+
+        const result = await submitShopperCoupon({
+            base: CONFIG_ONLY_BASE,
+            code: 'ConfigOnly1',
+            source: 'manual',
+            userId: USER_A,
+        })
+
+        expect(result.created).toBe(true)
+        expect(await isKnownStore(CONFIG_ONLY_BASE)).toBe(true)
+    })
+
+    it('a store_configs row for a SUBDOMAIN makes the registrable base known (store page predicate)', async () => {
+        await prisma.storeConfig.create({
+            data: { storeName: `www.${CONFIG_ONLY_BASE}` },
+        })
+
+        expect(await isKnownStore(CONFIG_ONLY_BASE)).toBe(true)
+    })
+
+    it('a supplier coupon with NO visibility (expired, invalid) still makes the store known', async () => {
+        await prisma.coupon.create({
+            data: {
+                id: '700080010',
+                code: 'OLDSUPPLIER',
+                site: `www.${UNKNOWN_BASE}`,
+                title: 'supplier row',
+                description: 'supplier row',
+                status: 'invalid',
+                expired: true,
+            },
+        })
+
+        expect(await isKnownStore(UNKNOWN_BASE)).toBe(true)
+        const result = await submitShopperCoupon({
+            base: UNKNOWN_BASE,
+            code: 'FreshCode1',
+            source: 'manual',
+            userId: USER_A,
+        })
+        expect(result.created).toBe(true)
+    })
+
+    it('a store known ONLY through shopper rows does NOT become known', async () => {
+        // A shopper-attributed row for a domain nobody supplied: exactly what
+        // an earlier (pre-gate) spam submission would have left behind.
+        await prisma.coupon.create({
+            data: {
+                id: '900000000099999991',
+                code: 'ShopperOnly1',
+                site: UNKNOWN_BASE,
+                title: '',
+                description: SHOPPER_COUPON_DESCRIPTION,
+                status: 'pending',
+                submittedByUserId: USER_B,
+                submissionSource: 'manual',
+            },
+        })
+
+        expect(await isKnownStore(UNKNOWN_BASE)).toBe(false)
+        await expect(
+            submitShopperCoupon({
+                base: UNKNOWN_BASE,
+                code: 'ShopperOnly2',
+                source: 'manual',
+                userId: USER_A,
+            }),
+        ).rejects.toBeInstanceOf(UnknownStoreError)
+        expect(
+            await prisma.coupon.count({ where: { site: UNKNOWN_BASE } }),
+        ).toBe(1)
+    })
+
+    it('an unknown store does not spend the shopper daily allowance or take a dedupe hit', async () => {
+        await expect(
+            submitShopperCoupon({
+                base: UNKNOWN_BASE,
+                code: 'NoSpend1',
+                source: 'manual',
+                userId: USER_A,
+            }),
+        ).rejects.toBeInstanceOf(UnknownStoreError)
+
+        const ok = await submitShopperCoupon({
+            base: BASE,
+            code: 'StillWorks1',
+            source: 'manual',
+            userId: USER_A,
+        })
+        expect(ok.created).toBe(true)
+    })
 })
 
 describe('submitShopperCoupon (real pg :58005)', () => {

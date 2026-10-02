@@ -45,6 +45,7 @@ import {
     CouponListRowSchema,
     type DiscountTypeRow,
     DiscountTypeRowSchema,
+    KnownStoreRowSchema,
     type RecentStoreRow,
     RecentStoreRowSchema,
     type RecentlyWorkedCouponRow,
@@ -73,6 +74,7 @@ import {
     SHOPPER_DAILY_SUBMISSION_CAP,
     ShopperSubmissionLimitError,
     type ShopperSubmissionSource,
+    UnknownStoreError,
     normalizeShopperCode,
 } from '@/lib/shopperCoupons'
 import { Prisma } from '@prisma/client'
@@ -806,6 +808,58 @@ const SHOPPER_CODE_LOCK_CLASS = 7102
 // A clean lowercase hostname: no LIKE wildcards (% _), no spaces, no slashes.
 const SHOPPER_STORE_BASE_PATTERN = /^[a-z0-9.-]+$/
 
+/**
+ * Is `base` a store Caramel actually knows? A store is known when EITHER
+ *   (1) a SUPPLIER-sourced coupon exists for it (`submitted_by_user_id IS NULL`),
+ *       with NO visibility requirement: an all-expired store is still a real
+ *       store, or
+ *   (2) the supplier published a `store_configs` row for it (the apply config of
+ *       a store Caramel supports, whether or not it has coupons yet).
+ * Shopper-submitted rows deliberately prove nothing: otherwise the first shopper
+ * row for `my-spam-site.xyz` would make that domain a "store" for the second,
+ * and for the indexability policy (a visible coupon makes /coupons/<base>
+ * indexable and sitemap-listed). resolveStoreDomain only proves the string is a
+ * registrable domain; THIS is what proves it is one of ours.
+ *
+ * `base` is matched with the store page's own predicate (siteBaseMatchSql:
+ * exact or any subdomain) on both tables, and is bound into a LIKE pattern, so
+ * it must be a clean lowercase hostname (throws a plain Error otherwise, like
+ * submitShopperCoupon). `client` lets submitShopperCoupon run the probe inside
+ * its own transaction.
+ */
+export async function isKnownStore(
+    base: string,
+    client: Pick<Prisma.TransactionClient, '$queryRaw'> = prisma,
+): Promise<boolean> {
+    const lowered = base.toLowerCase()
+    if (!SHOPPER_STORE_BASE_PATTERN.test(lowered)) {
+        throw new Error(
+            `isKnownStore: invalid store base "${base.slice(0, 64)}"`,
+        )
+    }
+    const [row] = parseCouponRows(
+        KnownStoreRowSchema,
+        await client.$queryRaw(Prisma.sql`
+            SELECT (
+                EXISTS (
+                    SELECT 1 FROM coupons
+                    WHERE ${siteBaseMatchSql(lowered)}
+                      AND submitted_by_user_id IS NULL
+                )
+                OR EXISTS (
+                    SELECT 1 FROM store_configs
+                    WHERE (store_name = ${lowered} OR store_name LIKE ${'%.' + lowered})
+                )
+            ) AS known
+        `),
+        'shopper-coupon.known-store',
+    )
+    if (!row) {
+        throw new Error('isKnownStore: known-store query returned no row')
+    }
+    return row.known
+}
+
 export type SubmitShopperCouponArgs = {
     /** Already-resolved store domain (resolveStoreDomain); lowercased here. */
     base: string
@@ -832,7 +886,8 @@ export type SubmitShopperCouponResult = {
  * shopper's (so their daily-cap count + insert serialise and concurrent
  * different-code submits cannot overshoot the cap), then store + lowercase code
  * (so two concurrent submits of one code serialise and the second sees the
- * first's row instead of inserting a duplicate); (2) the dedupe, using the
+ * first's row instead of inserting a duplicate); (1b) the known-store gate
+ * (isKnownStore; an unknown store throws UnknownStoreError); (2) the dedupe, using the
  * store page's own visibility rule (visibleCouponsWhere) and site predicate, so
  * a code only counts as "already listed" if the store page would actually show
  * it (a known-dead invalid/expired row does not: the shopper gets a fresh row
@@ -889,6 +944,10 @@ export async function submitShopperCoupon(
         await tx.$executeRaw(
             Prisma.sql`SELECT pg_advisory_xact_lock(${SHOPPER_CODE_LOCK_CLASS}::int, hashtext(${`${base}:${code.toLowerCase()}`}::text))`,
         )
+
+        // Known-store gate, before the dedupe and the cap: an unknown domain
+        // must neither match anything nor spend allowance.
+        if (!(await isKnownStore(base, tx))) throw new UnknownStoreError()
 
         const existing = parseCouponRows(
             CouponIdRowSchema,

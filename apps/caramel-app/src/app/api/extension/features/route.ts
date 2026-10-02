@@ -15,6 +15,10 @@ import { NextResponse } from 'next/server'
 // withRoute: public read like extension/supported-stores (rate-limited, no
 // auth/origin gate); cors 'extension' + the OPTIONS preflight mirror
 // extension/me, so a preflighted extension-origin fetch can read it.
+// The answer is an env flag read at request time: never let a build or CDN
+// freeze it (same reason api/version is dynamic).
+export const dynamic = 'force-dynamic'
+
 export const OPTIONS = preflight({
     cors: 'extension',
     methods: 'GET, OPTIONS',

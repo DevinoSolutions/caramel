@@ -1,4 +1,4 @@
-import { GET, OPTIONS } from '@/app/api/extension/features/route'
+import { GET, OPTIONS, dynamic } from '@/app/api/extension/features/route'
 import { NextRequest } from 'next/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -71,6 +71,10 @@ describe('GET /api/extension/features', () => {
             expect.anything(),
             'read',
         )
+    })
+
+    it('is force-dynamic: an env flag must never be frozen at build time or by a CDN', () => {
+        expect(dynamic).toBe('force-dynamic')
     })
 
     it('answers a preflight (OPTIONS) with 204', async () => {
