@@ -31,6 +31,13 @@ const BLURB_OVERRIDES: Readonly<Record<string, string>> = {
         'Tasks, daily check-ins and time tracking in one place, for you and your AI agents.',
 }
 
+// The growth-prompt card's headline. A question that names the audience
+// lands better than the brand line where one app serves one group (owner,
+// 2026-10-02: uNotes asks "Are you a student?"); the rest keep the brand line.
+const HEADLINE_OVERRIDES: Readonly<Record<string, string>> = {
+    unotes: 'Are you a student?',
+}
+
 export type CrossAppPromotion = {
     /** Manifest id — also the `target_app` value on `crossapp_click`. */
     id: string
@@ -38,6 +45,8 @@ export type CrossAppPromotion = {
     href: string
     /** Square PNG from devino.ca — the manifest's own icon. */
     icon: string
+    /** The `cross_app` prompt card's title. */
+    headline: string
     blurb: string
 }
 
@@ -55,6 +64,7 @@ export function buildCrossAppPromotions(
         name: app.name,
         href: app.url,
         icon: app.icon,
+        headline: HEADLINE_OVERRIDES[app.id] ?? `More from Devino: ${app.name}`,
         blurb: BLURB_OVERRIDES[app.id] ?? app.tagline,
     }))
 }
