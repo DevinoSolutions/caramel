@@ -75,8 +75,8 @@
         {
             "browser": "chrome",
             "path": "/version",
-            "reason": "1.4.1 -> 1.4.2 (package.json is the single version authority): the popup closes itself once a code is copied (#249) and Firefox for Android availability via gecko_android (#218). The goldens are frozen 1.3.1 snapshots relabelled 1.4.0 and cannot follow a release without being re-frozen",
-            "retiredBy": "golden-rebaseline(1.4.2)",
+            "reason": "1.4.2 -> 1.4.3 (package.json is the single version authority): the Chrome Web Store privacy resubmission (1.4.2 rejected 2026-09-22) with shopper code capture (#289, server flag off) and the unused activeTab permission dropped. The goldens are frozen 1.3.1 snapshots relabelled 1.4.0 and cannot follow a release without being re-frozen",
+            "retiredBy": "golden-rebaseline(1.4.3)",
             "added": "2026-09-19"
         },
         {
@@ -89,8 +89,8 @@
         {
             "browser": "firefox",
             "path": "/version",
-            "reason": "1.4.1 -> 1.4.2 (package.json is the single version authority): the popup closes itself once a code is copied (#249) and Firefox for Android availability via gecko_android (#218). The goldens are frozen 1.3.1 snapshots relabelled 1.4.0 and cannot follow a release without being re-frozen",
-            "retiredBy": "golden-rebaseline(1.4.2)",
+            "reason": "1.4.2 -> 1.4.3 (package.json is the single version authority): the Chrome Web Store privacy resubmission (1.4.2 rejected 2026-09-22) with shopper code capture (#289, server flag off) and the unused activeTab permission dropped. The goldens are frozen 1.3.1 snapshots relabelled 1.4.0 and cannot follow a release without being re-frozen",
+            "retiredBy": "golden-rebaseline(1.4.3)",
             "added": "2026-09-19"
         },
         {
@@ -112,6 +112,20 @@
             "reason": "the env stamp is BUNDLED into background.js instead of a separate manifest entry — the stamp-first guarantee moves from manifest order into the module graph (P1 pins it there)",
             "retiredBy": "golden-rebaseline(1.4.0)",
             "added": "2026-08-12"
+        },
+        {
+            "browser": "chrome",
+            "path": "/permissions",
+            "reason": "activeTab dropped in 1.4.3 (2026-10-02): no code path used it (tabs already exposes the tab URL; no scripting or capture call), and the Chrome Web Store Privacy tab needs a real justification for every requested permission",
+            "retiredBy": "golden-rebaseline(1.4.3)",
+            "added": "2026-10-02"
+        },
+        {
+            "browser": "firefox",
+            "path": "/permissions",
+            "reason": "activeTab dropped in 1.4.3 (2026-10-02): no code path used it (tabs already exposes the tab URL; no scripting or capture call), and the Chrome Web Store Privacy tab needs a real justification for every requested permission",
+            "retiredBy": "golden-rebaseline(1.4.3)",
+            "added": "2026-10-02"
         }
     ],
     "missingReferences": []

@@ -130,10 +130,14 @@ export default defineConfig({
         // `identity` (launchWebAuthFlow) exists on Chrome/Edge/Safari builds
         // only; its absence on Firefox is what routes popup sign-in through
         // the website flow. See popup.js popupOAuthSupported().
+        // `activeTab` was dropped in 1.4.3 (2026-10-02): nothing used it —
+        // `tabs` already exposes the tab URL and there is no scripting or
+        // capture call — and the Chrome Web Store asks every requested
+        // permission to carry a real justification on the Privacy tab.
         permissions:
             browser === 'firefox'
-                ? ['tabs', 'activeTab', 'storage', 'alarms']
-                : ['tabs', 'activeTab', 'storage', 'identity', 'alarms'],
+                ? ['tabs', 'storage', 'alarms']
+                : ['tabs', 'storage', 'identity', 'alarms'],
         host_permissions: ['https://*/*'],
         // Declared for EVERY browser (2026-08-19). `host_permissions` above is
         // what we ask for at install; this is what may be asked for AGAIN at
