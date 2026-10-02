@@ -630,7 +630,7 @@ describe('submitShopperCoupon (THIRD sanctioned write: shopper-submitted codes)'
         mockRows(isKnownStoreProbe, [{ known: true }])
     })
 
-    it('(g) known-store gate: probes supplier coupons (submitted_by_user_id IS NULL, no visibility rule) OR a store_configs row, with the lowercase base', async () => {
+    it('(g) known-store gate: probes supplier coupons (submission_source IS NULL, no visibility rule) OR a store_configs row, with the lowercase base', async () => {
         mockRows(isCap, [{ total: 0 }])
         mockRows(isInsert, [{ id: INSERTED_ID }])
 
@@ -642,7 +642,10 @@ describe('submitShopperCoupon (THIRD sanctioned write: shopper-submitted codes)'
         // Supplier-sourced coupons only: shopper rows must prove nothing.
         expect(sql).toContain('FROM coupons')
         expect(sql).toContain('(site = ? OR site LIKE ?)')
-        expect(sql).toContain('submitted_by_user_id IS NULL')
+        expect(sql).toContain('submission_source IS NULL')
+        // NOT the user column: ON DELETE SET NULL nulls it for a deleted
+        // shopper's rows, which would turn those orphans into 'supplier' rows.
+        expect(sql).not.toContain('submitted_by_user_id')
         // No visibility requirement: an all-expired store is still a store.
         expect(sql).not.toContain('status IN (')
         expect(sql).not.toContain('expired = FALSE')

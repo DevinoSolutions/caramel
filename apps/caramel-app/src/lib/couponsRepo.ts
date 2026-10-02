@@ -810,11 +810,16 @@ const SHOPPER_STORE_BASE_PATTERN = /^[a-z0-9.-]+$/
 
 /**
  * Is `base` a store Caramel actually knows? A store is known when EITHER
- *   (1) a SUPPLIER-sourced coupon exists for it (`submitted_by_user_id IS NULL`),
+ *   (1) a SUPPLIER-sourced coupon exists for it (`submission_source IS NULL`),
  *       with NO visibility requirement: an all-expired store is still a real
  *       store, or
  *   (2) the supplier published a `store_configs` row for it (the apply config of
  *       a store Caramel supports, whether or not it has coupons yet).
+ * `submission_source`, NOT `submitted_by_user_id`, is what marks a supplier row:
+ * the FK is ON DELETE SET NULL, so a deleted shopper's rows become
+ * `submitted_by_user_id IS NULL` while `submission_source` stays set, and those
+ * orphans must not start counting as supplier rows. Only the shopper write path
+ * sets `submission_source`; ingest never does.
  * Shopper-submitted rows deliberately prove nothing: otherwise the first shopper
  * row for `my-spam-site.xyz` would make that domain a "store" for the second,
  * and for the indexability policy (a visible coupon makes /coupons/<base>
@@ -844,7 +849,7 @@ export async function isKnownStore(
                 EXISTS (
                     SELECT 1 FROM coupons
                     WHERE ${siteBaseMatchSql(lowered)}
-                      AND submitted_by_user_id IS NULL
+                      AND submission_source IS NULL
                 )
                 OR EXISTS (
                     SELECT 1 FROM store_configs

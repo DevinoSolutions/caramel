@@ -171,6 +171,43 @@ describe('known-store gate (real pg :58005)', () => {
         ).toBe(1)
     })
 
+    it("a deleted shopper's ORPHANED rows (submitted_by_user_id SET NULL, submission_source kept) do NOT count as supplier rows", async () => {
+        // A shopper row on a store that is known only through its config...
+        await prisma.storeConfig.create({
+            data: { storeName: CONFIG_ONLY_BASE },
+        })
+        const { couponId } = await submitShopperCoupon({
+            base: CONFIG_ONLY_BASE,
+            code: 'OrphanMe1',
+            source: 'manual',
+            userId: USER_A,
+        })
+        expect(await isKnownStore(CONFIG_ONLY_BASE)).toBe(true)
+
+        // ...then the config goes away, and then the shopper is deleted: the FK
+        // (ON DELETE SET NULL) leaves the row with no user but a source.
+        await prisma.storeConfig.delete({
+            where: { storeName: CONFIG_ONLY_BASE },
+        })
+        await prisma.user.delete({ where: { id: USER_A } })
+        const orphan = await prisma.coupon.findUniqueOrThrow({
+            where: { id: couponId },
+        })
+        expect(orphan.submittedByUserId).toBeNull()
+        expect(orphan.submissionSource).toBe('manual')
+
+        // The orphan must not make the store known (nor let USER_B bootstrap it).
+        expect(await isKnownStore(CONFIG_ONLY_BASE)).toBe(false)
+        await expect(
+            submitShopperCoupon({
+                base: CONFIG_ONLY_BASE,
+                code: 'AfterOrphan1',
+                source: 'manual',
+                userId: USER_B,
+            }),
+        ).rejects.toBeInstanceOf(UnknownStoreError)
+    })
+
     it('an unknown store does not spend the shopper daily allowance or take a dedupe hit', async () => {
         await expect(
             submitShopperCoupon({
