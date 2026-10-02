@@ -38,8 +38,22 @@ vi.mock('@/components/coupons/coupons-section', () => ({
     default: () => null,
 }))
 
+// isKnownStore's single EXISTS probe (couponsRepo.ts) is the only query whose
+// SQL carries `AS known`. Every test defaults to a KNOWN store (so the page
+// renders its normal tree); the "Add a code" tests below override it.
+const KNOWN_STORE_SQL = (sql: string) => sql.includes('AS known')
+let knownStoreQueries = 0
 beforeEach(() => {
     rules = []
+    knownStoreQueries = 0
+    rules.push({
+        match: sql => {
+            const hit = KNOWN_STORE_SQL(sql)
+            if (hit) knownStoreQueries += 1
+            return hit
+        },
+        rows: [{ known: true }],
+    })
 })
 
 /** The store page's count row: the total plus the FAQ facts folded into the
@@ -273,6 +287,69 @@ describe('StoreCouponsPage — CouponListRow + TotalCountRow', () => {
         const proseJson = JSON.stringify(proseEl)
         expect(proseJson).toContain('has no active coupon codes')
         expect(proseJson).not.toContain('currently lists')
+    })
+})
+
+describe('StoreCouponsPage — "Add a code" form is offered for known stores only', () => {
+    function pageHasAddCodeForm(
+        mainEl: ReactElement<{ children: ReactElement[] }>,
+    ) {
+        return mainEl.props.children.some(
+            c =>
+                typeof (c as ReactElement)?.type === 'function' &&
+                (c as ReactElement<{ store?: string }>).props?.store ===
+                    'example.com',
+        )
+    }
+
+    it('renders the form for a known store, passing the normalized base domain', async () => {
+        mockRows(
+            sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
+            [couponFixture],
+        )
+        mockRows(
+            sql => sql.includes('COUNT(*)::int AS total'),
+            [storeAggregateRow(1)],
+        )
+
+        const mainEl = (await StoreCouponsPage({
+            params: { store: 'www.example.com' },
+        })) as ReactElement<{ children: ReactElement[] }>
+
+        expect(pageHasAddCodeForm(mainEl)).toBe(true)
+        expect(knownStoreQueries).toBe(1)
+    })
+
+    it('does NOT render the form when the store is unknown, even if the page lists coupons', async () => {
+        // A shopper-only domain can list rows (visibility counts them) yet is not
+        // a known store; the API would answer 422 not-a-store, so no form.
+        rules.unshift({
+            match: KNOWN_STORE_SQL,
+            rows: [{ known: false }],
+        })
+        mockRows(
+            sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
+            [couponFixture],
+        )
+        mockRows(
+            sql => sql.includes('COUNT(*)::int AS total'),
+            [storeAggregateRow(1)],
+        )
+
+        const mainEl = (await StoreCouponsPage({
+            params: { store: 'example.com' },
+        })) as ReactElement<{ children: ReactElement[] }>
+
+        expect(pageHasAddCodeForm(mainEl)).toBe(false)
+    })
+
+    it('does not render the form, or probe the catalog for known-ness, on a slug that names no store', async () => {
+        const mainEl = (await StoreCouponsPage({
+            params: { store: '!!!not-a-domain!!!' },
+        })) as ReactElement<{ children: ReactElement[] }>
+
+        expect(pageHasAddCodeForm(mainEl)).toBe(false)
+        expect(knownStoreQueries).toBe(0)
     })
 })
 

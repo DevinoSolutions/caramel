@@ -1,9 +1,14 @@
+import AddCodeForm from '@/components/coupons/AddCodeForm'
 import CouponsSection from '@/components/coupons/coupons-section'
 import PopularStores from '@/components/coupons/popular-stores'
 import StoreFavoriteStar from '@/components/coupons/store-favorite-star'
 import StoreNeighbours from '@/components/coupons/store-neighbours'
 import { attachSignals } from '@/lib/couponSignals'
-import { type StoreCouponFacts, listStoreCoupons } from '@/lib/couponsRepo'
+import {
+    type StoreCouponFacts,
+    isKnownStore,
+    listStoreCoupons,
+} from '@/lib/couponsRepo'
 import { BASE_URL } from '@/lib/env.client'
 import { faqPageJsonLd, jsonLdString } from '@/lib/jsonLd'
 import { buildStoreFaq } from '@/lib/seo/storeFaq'
@@ -209,7 +214,17 @@ export default async function StoreCouponsPage({
         notFound()
     }
 
-    const { coupons, total, facts, base } = await fetchStoreCoupons(storeParam)
+    // ONE catalog read plus the known-store EXISTS probe, in parallel. The probe
+    // gates the "Add a code" form: the API answers 422 'not-a-store' for a
+    // domain with no supplier coupon and no store_configs row, so the form must
+    // not be offered there. It cannot reuse `total`: that counts shopper rows
+    // too, which prove nothing about a store being real. Skipped when the slug
+    // resolves to no registrable domain (`base` is the raw slug then).
+    const resolvedBase = getBaseDomain(storeParam)
+    const [{ coupons, total, facts, base }, knownStore] = await Promise.all([
+        fetchStoreCoupons(storeParam),
+        resolvedBase ? isKnownStore(resolvedBase) : Promise.resolve(false),
+    ])
     // The body speaks the same vocabulary as the title (see generateMetadata):
     // Google rewrites titles from the h1, and "discount code" must appear in
     // the visible page for a UK store to be relevant to the search.
@@ -294,6 +309,9 @@ export default async function StoreCouponsPage({
                 heroTitle={`Best ${base} ${codeNoun} codes today`}
                 heroSubtitle={`Save at ${base} with Caramel—the privacy-first coupon finder that applies the top deals automatically at checkout.`}
             />
+            {/* Client-only (renders nothing until the session is known), so the
+                server HTML crawlers and the AEO prose below see is unchanged. */}
+            {knownStore && <AddCodeForm store={base} />}
             {/* AEO citable prose — server-rendered visible copy (AI engines
                 extract visible HTML, not JSON-LD). The count is the same
                 server-side `total` the list uses; the mechanics paragraph is

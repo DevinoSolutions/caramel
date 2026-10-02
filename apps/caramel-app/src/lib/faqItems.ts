@@ -40,7 +40,7 @@ export const faqItems: ReadonlyArray<{ question: string; answer: string }> = [
     },
     {
         question: 'What data does the Caramel extension collect?',
-        answer: "The extension never sells or shares your personal information, and it contains no ads and no third-party trackers. To do its job it talks to Caramel's own servers: as you browse, it asks whether Caramel has codes for the current site's domain so the toolbar badge can show a count; when you reach checkout on a supported store it fetches those codes, sends the page and cart context (page title and item names — never payment details) so the right category of codes is chosen, and reports whether a code worked (linked to your account only if you're signed in) so rankings stay accurate for everyone. Your settings and optional sign-in are kept in your browser's extension storage.",
+        answer: "The extension never sells or shares your personal information, and it contains no ads and no third-party trackers. To do its job it talks to Caramel's own servers: as you browse, it asks whether Caramel has codes for the current site's domain so the toolbar badge can show a count; when you reach checkout on a supported store it fetches those codes, sends the page and cart context (page title and item names — never payment details) so the right category of codes is chosen, and reports whether a code worked (linked to your account only if you're signed in) so rankings stay accurate for everyone; and if you're signed in and the “Share codes I enter at checkout” setting is on, it sends the code you typed and the store once the store accepts it. Your settings and optional sign-in are kept in your browser's extension storage.",
     },
     {
         question: 'Is Caramel the same as Honey?',
@@ -69,5 +69,9 @@ export const faqItems: ReadonlyArray<{ question: string; answer: string }> = [
     {
         question: 'Do I need an account to use Caramel?',
         answer: 'No. You can install Caramel and let it apply coupons at checkout without creating an account. Signing in is optional.',
+    },
+    {
+        question: 'Can I share a coupon code with Caramel?',
+        answer: "Yes. Sign in, open any store page and use Add a code — it shows to other shoppers as Unverified until someone uses it. With the extension, you can also turn on Share codes I enter at checkout: when you type your own code and the store accepts it, Caramel adds it for that store so other shoppers see it worked. Only the code and the store are shared — never your cart, order or payment details — and you can switch it off in the extension's settings.",
     },
 ]
