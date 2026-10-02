@@ -114,6 +114,20 @@ const serverObjectSchema = z.object({
     // must fail at boot with a named variable, never be read as "off" (a silent
     // downgrade) or as "on" (mail nobody asked for).
     SITE_SUGGESTIONS_AUTO_NOTIFY: z.enum(['true', 'false']).default('false'),
+    // Global kill switch for shopper-typed codes CAPTURED AT CHECKOUT by the
+    // extension (POST /api/coupons/submit with source 'checkout', and the
+    // extension's GET /api/extension/features read of it). OFF by default and
+    // OFF in prod until the owner approves the privacy-policy sentence that
+    // discloses the capture. It gates ONLY the automatic capture: the website's
+    // manual "Add a code" form (source 'manual') works with it off.
+    // A strict two-value enum, like SITE_SUGGESTIONS_AUTO_NOTIFY: a typo
+    // ('yes') fails boot with this variable's name rather than being read as
+    // off (capture silently never ships) or on (capture silently ships).
+    // Exposed to the app as a boolean.
+    SHOPPER_CODE_CAPTURE_ENABLED: z
+        .enum(['true', 'false'])
+        .default('false')
+        .transform(value => value === 'true'),
     OPENROUTER_API_KEY: z.string().optional(),
     OPENROUTER_MODEL: z.string().default('anthropic/claude-haiku-4.5'),
     API_ENCRYPTION_ENABLED: z.string().optional(),

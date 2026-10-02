@@ -100,6 +100,33 @@ describe('parseServerEnv', () => {
         ).not.toThrow()
     })
 
+    it('(h) SHOPPER_CODE_CAPTURE_ENABLED is a boolean: unset -> false, "true" -> true, "false" -> false', () => {
+        expect(
+            parseServerEnv(validServerFixture).SHOPPER_CODE_CAPTURE_ENABLED,
+        ).toBe(false)
+        expect(
+            parseServerEnv({
+                ...validServerFixture,
+                SHOPPER_CODE_CAPTURE_ENABLED: 'true',
+            }).SHOPPER_CODE_CAPTURE_ENABLED,
+        ).toBe(true)
+        expect(
+            parseServerEnv({
+                ...validServerFixture,
+                SHOPPER_CODE_CAPTURE_ENABLED: 'false',
+            }).SHOPPER_CODE_CAPTURE_ENABLED,
+        ).toBe(false)
+    })
+
+    it('(h) a typo in SHOPPER_CODE_CAPTURE_ENABLED fails boot, naming the variable (never read as off OR on)', () => {
+        expect(() =>
+            parseServerEnv({
+                ...validServerFixture,
+                SHOPPER_CODE_CAPTURE_ENABLED: 'yes',
+            }),
+        ).toThrow(/SHOPPER_CODE_CAPTURE_ENABLED/)
+    })
+
     it('(g) the Playwright/CI-only read key present in app env throws (key hygiene)', () => {
         expect(() =>
             parseServerEnv({

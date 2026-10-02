@@ -873,7 +873,9 @@ export async function submitShopperCoupon(
     // anything else outside a hostname) must never reach it.
     if (!SHOPPER_STORE_BASE_PATTERN.test(base)) {
         throw new Error(
-            `submitShopperCoupon: invalid store base "${args.base}"`,
+            // Untrusted input: bounded so a hostile base cannot bloat the
+            // error message (and the Sentry event that carries it).
+            `submitShopperCoupon: invalid store base "${args.base.slice(0, 64)}"`,
         )
     }
 

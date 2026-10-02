@@ -801,6 +801,21 @@ describe('submitShopperCoupon (THIRD sanctioned write: shopper-submitted codes)'
         },
     )
 
+    it('an invalid base is echoed into the error message truncated to 64 chars (it is untrusted input)', async () => {
+        const hostile = `${'x'.repeat(64)}${'LEAK'.repeat(500)}%`
+
+        const error = await submitShopperCoupon({
+            ...ARGS,
+            base: hostile,
+        }).catch((e: unknown) => e)
+
+        expect(error).toBeInstanceOf(Error)
+        const message = (error as Error).message
+        expect(message).toContain('x'.repeat(64))
+        expect(message).not.toContain('LEAK')
+        expect(message.length).toBeLessThan(150)
+    })
+
     it('a missing daily-count row is a loud error, never "zero submissions"', async () => {
         mockRows(isCap, [])
 
