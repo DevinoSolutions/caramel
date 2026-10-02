@@ -138,3 +138,44 @@ describe('applyCoupon verdict — success rule', () => {
         ])
     })
 })
+
+describe('caramelAwaitCouponVerdict — logging of the code', () => {
+    // The store's own furniture quotes the code before we submit anything, so
+    // the verdict helper logs AUTO_INSERT_ERROR_NOT_ATTRIBUTABLE.
+    async function runWith(opts) {
+        const logged = []
+        vi.resetModules()
+        vi.doMock('../caramel-base.js', async importOriginal => ({
+            ...(await importOriginal()),
+            log: (...args) => logged.push(args),
+        }))
+        const mod = await import('../coupon-apply.js')
+        const rec = { ...BASE, errorIndicator: '#err' }
+        setText(document.getElementById('err'), 'Code SAVE10 is invalid')
+        const snapshot = mod.caramelSnapshotCart(rec)
+        await mod.caramelAwaitCouponVerdict(rec, snapshot, {
+            code: 'SAVE10',
+            timeoutMs: 300,
+            ...opts,
+        })
+        vi.doUnmock('../caramel-base.js')
+        return logged.filter(
+            args => args[0] === 'AUTO_INSERT_ERROR_NOT_ATTRIBUTABLE',
+        )
+    }
+
+    it('the runner keeps its full diagnostics (code and text)', async () => {
+        const lines = await runWith({})
+
+        expect(lines).toHaveLength(1)
+        expect(JSON.stringify(lines[0])).toContain('SAVE10')
+    })
+
+    it('a redacted (shopper-code) verdict never logs the code or the page text', async () => {
+        const lines = await runWith({ redact: true })
+
+        expect(lines).toHaveLength(1)
+        expect(JSON.stringify(lines)).not.toContain('SAVE10')
+        expect(JSON.stringify(lines)).not.toContain('invalid')
+    })
+})

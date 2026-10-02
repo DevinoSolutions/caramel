@@ -422,7 +422,8 @@ export function caramelSnapshotCart(rec) {
 /* Waits for the store's answer to `opts.code`, then applies the success rules.
  * Resolves { success, priceDropped, newTotal, committed, errorMsg, errorIsNew }.
  * `opts.timeoutMs` bounds the wait for the FIRST observable signal (default
- * 10s). Callers must invoke this synchronously after the submission (or, for
+ * 10s). `opts.redact` keeps the code and page text out of this helper's log
+ * lines (used for shopper-typed codes). Callers must invoke this synchronously after the submission (or, for
  * the shopper's capture-phase click, synchronously with the snapshot) because
  * the waiter's own baselines are taken at call time. */
 // Called from code-capture.js (cross-file content-script call).
@@ -516,11 +517,19 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
     // _caramelCouponAreaText). Detection above is deliberately untouched.
     const errorIsNew = caramelQuoteIsAttributable(errorMsg, priorAreaText)
     if (errorMsg && !errorIsNew) {
-        log('AUTO_INSERT_ERROR_NOT_ATTRIBUTABLE', {
-            code,
-            text: String(errorMsg).slice(0, 140),
-            reason: 'this text was already on the page before we submitted — it is the store’s furniture, not its verdict',
-        })
+        // opts.redact: a SHOPPER-typed code (code-capture.js) never reaches a
+        // log line, and neither does the page text, which can quote it. The
+        // runner's own attempts keep their full diagnostics.
+        log(
+            'AUTO_INSERT_ERROR_NOT_ATTRIBUTABLE',
+            opts?.redact
+                ? { redacted: true }
+                : {
+                      code,
+                      text: String(errorMsg).slice(0, 140),
+                      reason: 'this text was already on the page before we submitted — it is the store’s furniture, not its verdict',
+                  },
+        )
     }
     let newTotal = NaN
     let priceDropped = false

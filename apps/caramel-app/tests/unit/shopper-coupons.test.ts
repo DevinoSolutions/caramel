@@ -4,6 +4,7 @@ import {
     SHOPPER_COUPON_ID_FLOOR,
     SHOPPER_DAILY_SUBMISSION_CAP,
     ShopperSubmissionLimitError,
+    looksLikeCardNumber,
     normalizeShopperCode,
 } from '@/lib/shopperCoupons'
 import { describe, expect, it } from 'vitest'
@@ -40,6 +41,39 @@ describe('normalizeShopperCode', () => {
         ['non-ASCII letters', 'SÄVE10'],
     ])('rejects %s', (_label, raw) => {
         expect(normalizeShopperCode(raw)).toBeNull()
+    })
+
+    // Gift-card / card numbers typed into a look-alike promo box must never be
+    // stored (and published on a store page).
+    it.each([
+        ['an 8-digit number', '12345678'],
+        ['a 16-digit card number', '4111111111111111'],
+        ['a hyphenated 16-digit card number', '4111-1111-1111-1111'],
+        ['a 16+ character string with 12 digits', 'AB12-3456-7890-1234'],
+    ])('rejects %s as card-shaped', (_label, raw) => {
+        expect(normalizeShopperCode(raw)).toBeNull()
+    })
+
+    it.each([
+        ['7 digits', '1234567'],
+        ['a normal code with digits', 'SAVE2024'],
+        ['a 16-character code with 11 digits', 'ABCDE-12345678901'],
+        ['a long word code', 'SUMMERSALEFOREVERYONE'],
+    ])('still accepts %s', (_label, raw) => {
+        expect(normalizeShopperCode(raw)).toBe(raw)
+    })
+})
+
+describe('looksLikeCardNumber', () => {
+    it('flags all-digit strings of 8 or more', () => {
+        expect(looksLikeCardNumber('1234567')).toBe(false)
+        expect(looksLikeCardNumber('12345678')).toBe(true)
+    })
+
+    it('flags 16+ characters holding 12+ digits, not 11', () => {
+        expect(looksLikeCardNumber('ABCD-123456789012')).toBe(true)
+        expect(looksLikeCardNumber('ABCDE-12345678901')).toBe(false)
+        expect(looksLikeCardNumber('A1-23456789012')).toBe(false) // 14 long
     })
 })
 

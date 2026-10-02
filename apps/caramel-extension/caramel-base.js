@@ -343,29 +343,53 @@ export function caramelClearSession(done) {
 // authority is users.savings_sync_enabled; this is the roaming cache of it.
 const CARAMEL_SETTINGS_KEY = 'caramel_settings'
 
+// Stored object -> settings with every default applied. The ONE place defaults
+// live: caramelGetSettings and caramelOnSettingsChanged both go through it.
+export function caramelNormalizeSettings(raw) {
+    const s = raw || {}
+    return {
+        autoApply: s.autoApply !== false,
+        disabledSites: Array.isArray(s.disabledSites) ? s.disabledSites : [],
+        syncSavings: s.syncSavings === true,
+        shareCheckoutCodes: s.shareCheckoutCodes !== false,
+    }
+}
+
 export function caramelGetSettings() {
     return new Promise(resolve => {
         try {
             currentBrowser.storage.sync.get([CARAMEL_SETTINGS_KEY], res => {
-                const s = (res && res[CARAMEL_SETTINGS_KEY]) || {}
-                resolve({
-                    autoApply: s.autoApply !== false,
-                    disabledSites: Array.isArray(s.disabledSites)
-                        ? s.disabledSites
-                        : [],
-                    syncSavings: s.syncSavings === true,
-                    shareCheckoutCodes: s.shareCheckoutCodes !== false,
-                })
+                resolve(
+                    caramelNormalizeSettings(res && res[CARAMEL_SETTINGS_KEY]),
+                )
             })
         } catch {
-            resolve({
-                autoApply: true,
-                disabledSites: [],
-                syncSavings: false,
-                shareCheckoutCodes: true,
-            })
+            resolve(caramelNormalizeSettings(null))
         }
     })
+}
+
+// Calls `onChange(settings)` with the normalized new settings every time the
+// stored object changes (any tab, the popup, another device via sync). Lets a
+// content script keep a synchronous in-memory copy instead of reading storage
+// on every page gesture. Throws when the runtime has no change events: the
+// caller must then fail closed rather than trust a copy that can go stale.
+export function caramelOnSettingsChanged(onChange) {
+    currentBrowser.storage.onChanged.addListener((changes, area) => {
+        if (area !== 'sync' || !changes[CARAMEL_SETTINGS_KEY]) return
+        onChange(
+            caramelNormalizeSettings(changes[CARAMEL_SETTINGS_KEY].newValue),
+        )
+    })
+}
+
+// Is this host on the user's pause list (exact or subdomain match)? Shared by
+// the checkout prompt and code capture so "paused" means one thing.
+export function caramelSiteIsPaused(disabledSites, host) {
+    const h = String(host || '')
+        .toLowerCase()
+        .replace(/^www\./, '')
+    return disabledSites.some(d => h === d || h.endsWith('.' + d))
 }
 
 export async function caramelSetSettings(patch) {
@@ -388,10 +412,7 @@ export async function caramelSetSettings(patch) {
 export async function caramelPromptAllowed(host) {
     const s = await caramelGetSettings()
     if (!s.autoApply) return false
-    const h = String(host || '')
-        .toLowerCase()
-        .replace(/^www\./, '')
-    return !s.disabledSites.some(d => h === d || h.endsWith('.' + d))
+    return !caramelSiteIsPaused(s.disabledSites, host)
 }
 
 /* --------------------------------------------------  savings history */

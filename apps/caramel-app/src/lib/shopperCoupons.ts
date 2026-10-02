@@ -14,7 +14,7 @@
 // agree on: change it in all three places or not at all.
 //
 // The extension's code-capture.js cannot import this file (no bundler), so it
-// mirrors SHOPPER_CODE_PATTERN; tests/unit/shopper-code-pattern-mirror.test.ts
+// mirrors SHOPPER_CODE_PATTERN and looksLikeCardNumber; tests/unit/shopper-code-pattern-mirror.test.ts
 // fails if the two ever differ.
 
 /**
@@ -46,13 +46,34 @@ export type ShopperSubmissionSource = 'checkout' | 'manual'
 export const SHOPPER_COUPON_DESCRIPTION = 'Shared by a Caramel shopper.'
 
 /**
+ * True when a string has the SHAPE of a payment-card or gift-card number rather
+ * than a coupon code: all digits and 8 or more long, or 16 or more characters
+ * holding 12 or more digits (a card number written with hyphens). The checkout
+ * capture reads a field the shopper typed into, and a gift-card or card number
+ * typed into a look-alike promo box must never be shared, so this is refused at
+ * the door of every path that stores a code. Real coupon codes with that many
+ * digits are rare enough that refusing them is the right trade.
+ *
+ * Self-contained on purpose: the extension's code-capture.js mirrors this body
+ * (no bundler), and tests/unit/shopper-code-pattern-mirror.test.ts runs both
+ * against the same inputs. Change both together.
+ */
+export function looksLikeCardNumber(code: string): boolean {
+    if (/^[0-9]{8,}$/.test(code)) return true
+    const digits = code.replace(/[^0-9]/g, '').length
+    return code.length >= 16 && digits >= 12
+}
+
+/**
  * Trim and validate a typed or captured code. Returns the code exactly as the
  * shopper typed it (case is NEVER changed: some stores treat codes as
- * case-sensitive), or null when it is not a plausible coupon code.
+ * case-sensitive), or null when it is not a plausible coupon code (wrong
+ * characters or length, or the shape of a card number).
  */
 export function normalizeShopperCode(raw: string): string | null {
     const code = raw.trim()
-    return SHOPPER_CODE_PATTERN.test(code) ? code : null
+    if (!SHOPPER_CODE_PATTERN.test(code)) return null
+    return looksLikeCardNumber(code) ? null : code
 }
 
 /**

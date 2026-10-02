@@ -89,6 +89,7 @@ beforeEach(async () => {
         fetchCalls.push({ url: String(url), opts })
         const next = responses.shift()
         if (next instanceof Error) throw next
+        if (typeof next === 'function') return next()
         if (!next) throw new Error(`unexpected fetch ${url}`)
         return next
     }
@@ -117,6 +118,76 @@ describe('submitShopperCode — gates', () => {
         expect(submitCalls()).toHaveLength(0)
         // Survives a worker restart via storage.session.
         expect(sessionData.caramel_features.shopperCodeCapture).toBe(false)
+    })
+
+    it('a cached "off" is only trusted for 30 minutes, a cached "on" for 6 hours', async () => {
+        const t0 = 1_800_000_000_000
+        const now = vi.spyOn(Date, 'now')
+        now.mockReturnValue(t0)
+        responses.push(features(false), features(true))
+
+        expect(await invoke(CAPTURE)).toEqual({ skipped: 'disabled' })
+        // 29 minutes on: still the cached "off".
+        now.mockReturnValue(t0 + 29 * 60 * 1000)
+        expect(await invoke(CAPTURE)).toEqual({ skipped: 'disabled' })
+        expect(featureCalls()).toHaveLength(1)
+
+        // 31 minutes on: the "off" has expired and the owner's flip is seen.
+        now.mockReturnValue(t0 + 31 * 60 * 1000)
+        responses.push(
+            ok({ couponId: '9', created: true, status: 'unverified' }),
+        )
+        expect((await invoke(CAPTURE)).couponId).toBe('9')
+        expect(featureCalls()).toHaveLength(2)
+
+        // The "on" survives well past 30 minutes (5h later: no refetch)...
+        now.mockReturnValue(t0 + 31 * 60 * 1000 + 5 * 60 * 60 * 1000)
+        responses.push(
+            ok({ couponId: '9', created: false, status: 'unverified' }),
+        )
+        await invoke(CAPTURE)
+        expect(featureCalls()).toHaveLength(2)
+
+        // ...but not past 6 hours.
+        now.mockReturnValue(t0 + 31 * 60 * 1000 + 7 * 60 * 60 * 1000)
+        responses.push(
+            features(true),
+            ok({ couponId: '9', created: false, status: 'unverified' }),
+        )
+        await invoke(CAPTURE)
+        expect(featureCalls()).toHaveLength(3)
+        now.mockRestore()
+    })
+
+    it('concurrent captures share ONE in-flight features fetch', async () => {
+        let release
+        responses.push(
+            () =>
+                new Promise(resolve => {
+                    release = () => resolve(features(false))
+                }),
+        )
+
+        const first = invoke(CAPTURE)
+        const second = invoke(CAPTURE)
+        const third = invoke(CAPTURE)
+        await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+        release()
+
+        expect(await Promise.all([first, second, third])).toEqual([
+            { skipped: 'disabled' },
+            { skipped: 'disabled' },
+            { skipped: 'disabled' },
+        ])
+        expect(featureCalls()).toHaveLength(1)
+    })
+
+    it('a failed shared fetch is retried by the next caller (not cached as a failure)', async () => {
+        responses.push(refused(500, null), features(false))
+
+        expect((await invoke(CAPTURE)).error).toMatch(/features HTTP 500/)
+        expect(await invoke(CAPTURE)).toEqual({ skipped: 'disabled' })
+        expect(featureCalls()).toHaveLength(2)
     })
 
     it('a flag fetch that fails is a real error, not a quiet skip', async () => {

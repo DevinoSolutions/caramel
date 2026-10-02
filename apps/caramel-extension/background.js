@@ -138,10 +138,10 @@ async function fetchCaramelApi(url, opts = {}, timeoutMs = FETCH_TIMEOUT_MS) {
  * code-capture.js (content script) hands us a code the shopper typed and the
  * store accepted. Whether it may leave the browser is decided HERE, not in the
  * page: signed in, and the server flag on. The flag is read from the public
- * features endpoint and cached for 6h (storage.session when the browser has it,
- * so a restarted worker does not refetch; memory otherwise). A cached `false`
- * is therefore honoured for up to 6h after the owner flips the flag on, which
- * is the intended trade: this is a rollout switch, not a live control.
+ * features endpoint and cached (storage.session when the browser has it, so a
+ * restarted worker does not refetch; memory otherwise): 6h for `true`, but only
+ * 30min for `false`, so an owner flipping the flag on is felt within half an
+ * hour. Concurrent callers share one in-flight fetch.
  *
  * Outcomes are returned to the content script as `{ skipped }` for every
  * expected refusal (signed out, flag off, store/code refused, rate limits) and
@@ -149,7 +149,9 @@ async function fetchCaramelApi(url, opts = {}, timeoutMs = FETCH_TIMEOUT_MS) {
  * is a real failure: 5xx, network, an unreadable body, the extension-only
  * origin guard. */
 const FEATURES_CACHE_KEY = 'caramel_features'
-const FEATURES_CACHE_TTL_MS = 6 * 60 * 60 * 1000
+const FEATURES_TTL_ON_MS = 6 * 60 * 60 * 1000
+const FEATURES_TTL_OFF_MS = 30 * 60 * 1000
+let _featuresInflight = null // Promise<boolean> while a fetch is running
 let _featuresMemo = null // { shopperCodeCapture, ts }
 
 function _readFeaturesSession() {
@@ -175,17 +177,13 @@ function _writeFeaturesSession(entry) {
     }
 }
 
-async function _shopperCaptureEnabled() {
-    const fresh = e =>
-        e &&
-        typeof e.shopperCodeCapture === 'boolean' &&
-        Date.now() - e.ts < FEATURES_CACHE_TTL_MS
-    if (fresh(_featuresMemo)) return _featuresMemo.shopperCodeCapture
-    const stored = await _readFeaturesSession()
-    if (fresh(stored)) {
-        _featuresMemo = stored
-        return stored.shopperCodeCapture
-    }
+function _featuresFresh(e) {
+    if (!e || typeof e.shopperCodeCapture !== 'boolean') return false
+    const ttl = e.shopperCodeCapture ? FEATURES_TTL_ON_MS : FEATURES_TTL_OFF_MS
+    return Date.now() - e.ts < ttl
+}
+
+async function _fetchFeatures() {
     // Public, anonymous: no bearer (nothing user-scoped in the answer).
     const r = await fetchWithTimeout(caramelUrl('api/extension/features'))
     if (!r.ok) throw new Error(`features HTTP ${r.status}`)
@@ -198,6 +196,26 @@ async function _shopperCaptureEnabled() {
     }
     _writeFeaturesSession(_featuresMemo)
     return json.shopperCodeCapture
+}
+
+function _shopperCaptureEnabled() {
+    if (_featuresFresh(_featuresMemo))
+        return Promise.resolve(_featuresMemo.shopperCodeCapture)
+    // One fetch for however many callers arrive while it is running; cleared
+    // when it settles so a failure is retried by the next caller.
+    if (!_featuresInflight) {
+        _featuresInflight = (async () => {
+            const stored = await _readFeaturesSession()
+            if (_featuresFresh(stored)) {
+                _featuresMemo = stored
+                return stored.shopperCodeCapture
+            }
+            return _fetchFeatures()
+        })().finally(() => {
+            _featuresInflight = null
+        })
+    }
+    return _featuresInflight
 }
 
 function _forgetFeatures() {
