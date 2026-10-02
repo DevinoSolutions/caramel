@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { normalizeShopperCode } from '../src/lib/shopperCoupons'
 import { seedVerifiedUser } from './support/seed-user'
 import { firstLinkedStoreDomain } from './support/stores'
 
@@ -74,7 +75,17 @@ test.describe('Add a code — signed in (real session, local DB)', () => {
     test('a signed-in shopper adds a code and it lists as Unverified', async ({
         page,
     }) => {
-        const code = `E2E${Date.now()}`
+        // Base-36, NOT decimal: `E2E${Date.now()}` is 16 characters holding 14
+        // digits, which looksLikeCardNumber (shopperCoupons.ts) refuses as the
+        // shape of a card number, so the form blocked the submit client-side
+        // and no POST ever fired (the CI timeout on PR #289). Unique per run.
+        const code = `E2E${Date.now().toString(36).toUpperCase()}`
+        // Fail HERE, naming the cause, if the generated code is ever one the
+        // form itself would refuse, instead of as a waitForResponse timeout.
+        expect(
+            normalizeShopperCode(code),
+            `the e2e code ${code} must be a code the form accepts`,
+        ).toBe(code)
         let couponId: string | null = null
         try {
             await page.goto('/login')
@@ -88,6 +99,13 @@ test.describe('Add a code — signed in (real session, local DB)', () => {
             await expect(page).toHaveURL(/\/$/, { timeout: 15000 })
 
             await page.goto(`/coupons/${STORE}`)
+            // The form is a known-store, signed-in-only render: assert it is
+            // there so a missing form fails as that, not as a missing POST.
+            await expect(
+                page.getByRole('heading', {
+                    name: `Know a code for ${STORE}?`,
+                }),
+            ).toBeVisible({ timeout: 15000 })
             await page.getByRole('textbox', { name: 'Coupon code' }).fill(code)
 
             const submitResponse = page.waitForResponse(
