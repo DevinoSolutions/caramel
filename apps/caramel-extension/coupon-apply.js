@@ -420,7 +420,8 @@ export function caramelSnapshotCart(rec) {
 }
 
 /* Waits for the store's answer to `opts.code`, then applies the success rules.
- * Resolves { success, priceDropped, newTotal, committed, errorMsg, errorIsNew }.
+ * Resolves { success, priceDropped, newTotal, committed, errorMsg, errorIsNew,
+ * appliedRowsText }.
  * `opts.timeoutMs` bounds the wait for the FIRST observable signal (default
  * 10s). `opts.redact` keeps the code and page text out of this helper's log
  * lines (used for shopper-typed codes). Callers must invoke this synchronously after the submission (or, for
@@ -575,7 +576,23 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
     //  4. otherwise                           → fail
     const success =
         priceDropped || (committed && stuck) || (committed && !errorMsg)
-    return { success, priceDropped, newTotal, committed, errorMsg, errorIsNew }
+    // What the applied rows SAY (only read when something committed): lets a
+    // caller tell a row that names the code from a generic "redeemed" row.
+    const appliedRowsText = committed
+        ? qAll(appliedSel)
+              .filter(el => !caramelRowReadsRejected(el))
+              .map(el => (el.innerText ?? el.textContent) || '')
+              .join(' ')
+        : ''
+    return {
+        success,
+        priceDropped,
+        newTotal,
+        committed,
+        errorMsg,
+        errorIsNew,
+        appliedRowsText,
+    }
 }
 
 /* --------------------------------------------------  coupon attempt */

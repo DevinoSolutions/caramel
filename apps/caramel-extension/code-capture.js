@@ -26,7 +26,8 @@
 //     gesture bumps a generation counter and a watcher whose generation is no
 //     longer current discards its answer.
 //   · Noise from our own runner or from the cart changing for other reasons: a
-//     capture needs a visibly APPLIED row, not a bare total change.
+//     capture needs a committed result AND either a real price drop or an applied
+//     row that names the typed code, and is refused when a fresh error appears.
 //
 // Known limit (documented, not hidden): a classic form-POST cart answers with a
 // full page load, which destroys this content script mid-attempt, so there is
@@ -109,13 +110,23 @@ export function caramelShopperCodeValid(raw) {
 }
 
 // The capture's acceptance rule. The runner's success rule also takes a bare
-// price drop, but a shopper's cart can move for reasons that are not the code
-// (quantity edits, shipping estimates, auto-discounts), and a share is
-// irreversible, so a capture additionally needs the store to have visibly
-// APPLIED something. The helpers do distinguish the two (`committed`).
+// price drop or any new row, but a shopper's cart can move or grow rows for
+// reasons that are not the code (quantity edits, shipping estimates,
+// auto-discounts, a generic "redeemed" banner), and a share is irreversible. So
+// a capture needs ALL of: the store visibly applied a row (`committed`); that
+// row is tied to THIS code, either by the total dropping or by the row's own
+// text naming the code (case-insensitive); and no NEW error text beside it.
 // Exported for tests.
-export function caramelCaptureAccepted(verdict) {
-    return !!verdict && verdict.success === true && verdict.committed === true
+export function caramelCaptureAccepted(verdict, code) {
+    if (!verdict || verdict.success !== true || verdict.committed !== true)
+        return false
+    if (verdict.errorMsg && verdict.errorIsNew) return false
+    const rowNamesCode =
+        !!code &&
+        String(verdict.appliedRowsText ?? '')
+            .toLowerCase()
+            .includes(String(code).toLowerCase())
+    return verdict.priceDropped === true || rowNamesCode
 }
 
 // Exported for tests: resolves when the first settings read has landed.
@@ -236,7 +247,7 @@ async function _judgeAndShare(rec, code, snapshot, generation) {
     // another code, our runner may have started, or sharing may have been
     // switched off.
     if (!_stillCurrent(rec, code, generation)) return
-    if (!caramelCaptureAccepted(verdict)) return
+    if (!caramelCaptureAccepted(verdict, code)) return
     if (_alreadyShared(code)) return
     _markShared(code)
     let resp
@@ -345,7 +356,6 @@ function _consider(rec, input, control) {
  * "sharing is on" is the one failure that cannot be allowed. */
 export function armCodeCapture(rec) {
     if (_armed || !rec || !rec.couponInput || !rec.couponSubmit) return false
-    _armed = true
     try {
         caramelOnSettingsChanged(settings => {
             _prefsFromEvent = true
@@ -361,5 +371,8 @@ export function armCodeCapture(rec) {
     document.addEventListener('input', _onInput, true)
     document.addEventListener('click', e => _onClick(e, rec), true)
     document.addEventListener('keydown', e => _onKeydown(e, rec), true)
+    // Only now: a setup that threw above leaves nothing attached AND leaves the
+    // next detection pass free to try again.
+    _armed = true
     return true
 }

@@ -113,7 +113,7 @@ function storeAnswers(accept, { after } = {}) {
             if (accept) {
                 const row = document.createElement('div')
                 row.id = 'applied-row'
-                setText(row, 'Discount applied')
+                setText(row, `${promo().value} applied`)
                 document.body.appendChild(row)
                 setText(document.getElementById('total'), '$90.00')
             } else {
@@ -232,7 +232,7 @@ describe('a shopper-typed code the store accepts', () => {
             setTimeout(() => {
                 const row = document.createElement('div')
                 row.id = 'applied-row'
-                setText(row, 'Discount applied')
+                setText(row, `${promo().value} applied`)
                 document.body.appendChild(row)
             }, 100)
         })
@@ -311,6 +311,52 @@ describe('what must never leave the page', () => {
         shopperTypes('SAVE10')
         shopperClicksApply()
         await settle(1500)
+
+        expect(sent).toEqual([])
+    })
+
+    it('nothing for a generic "redeemed" row that does not name the code, with no price drop', async () => {
+        await armed()
+        document.getElementById('apply').addEventListener('click', () => {
+            setTimeout(() => {
+                const row = document.createElement('div')
+                row.id = 'applied-row'
+                setText(row, 'Reward points redeemed')
+                document.body.appendChild(row)
+            }, 100)
+        })
+        shopperTypes('SAVE10')
+        shopperClicksApply()
+        await settle(1800)
+
+        expect(sent).toEqual([])
+    })
+
+    it('a row that names the code (any case) is enough without a price drop', async () => {
+        await armed()
+        document.getElementById('apply').addEventListener('click', () => {
+            setTimeout(() => {
+                const row = document.createElement('div')
+                row.id = 'applied-row'
+                setText(row, 'save10 - coupon applied')
+                document.body.appendChild(row)
+            }, 100)
+        })
+        shopperTypes('SAVE10')
+        shopperClicksApply()
+
+        await vi.waitFor(() => expect(sent).toHaveLength(1), LONG)
+    })
+
+    it('nothing when the store applies a row but ALSO prints a new error', async () => {
+        await armed()
+        storeAnswers(true, {
+            after: () =>
+                setText(document.getElementById('err'), 'This code is invalid'),
+        })
+        shopperTypes('SAVE10')
+        shopperClicksApply()
+        await settle(1800)
 
         expect(sent).toEqual([])
     })
@@ -422,6 +468,27 @@ describe('what must never leave the page', () => {
         await settle(600)
 
         expect(sent).toEqual([])
+    })
+
+    it('a setup that throws attaches nothing and leaves a later arm free to retry', async () => {
+        const spy = vi.spyOn(document, 'addEventListener')
+        const realAdd = globalThis.chrome.storage.onChanged.addListener
+        globalThis.chrome.storage.onChanged.addListener = () => {
+            throw new Error('no change events in this runtime')
+        }
+        expect(arm(REC)).toBe(false)
+        expect(spy).not.toHaveBeenCalled()
+
+        // The runtime recovers; the next detection pass arms for real.
+        globalThis.chrome.storage.onChanged.addListener = realAdd
+        await armed()
+        expect(spy).toHaveBeenCalled()
+        spy.mockRestore()
+
+        storeAnswers(true)
+        shopperTypes('SAVE10')
+        shopperClicksApply()
+        await vi.waitFor(() => expect(sent).toHaveLength(1), LONG)
     })
 
     it('attaches no listeners for a store with no coupon selectors', () => {
@@ -647,13 +714,55 @@ describe('caramelShopperCodeValid', () => {
 })
 
 describe('caramelCaptureAccepted', () => {
+    const OK = {
+        success: true,
+        committed: true,
+        priceDropped: true,
+        errorMsg: null,
+        errorIsNew: false,
+        appliedRowsText: '',
+    }
+
     it('needs the store to have visibly applied something', () => {
-        expect(accepted({ success: true, committed: true })).toBe(true)
+        expect(accepted(OK, 'SAVE10')).toBe(true)
         // The runner would take a bare price drop; a capture does not.
+        expect(accepted({ ...OK, committed: false }, 'SAVE10')).toBe(false)
+        expect(accepted({ ...OK, success: false }, 'SAVE10')).toBe(false)
+        expect(accepted(null, 'SAVE10')).toBe(false)
+    })
+
+    it('without a price drop, the applied row must name the code (any case)', () => {
+        const noDrop = { ...OK, priceDropped: false }
         expect(
-            accepted({ success: true, committed: false, priceDropped: true }),
+            accepted(
+                { ...noDrop, appliedRowsText: 'save10 applied' },
+                'SAVE10',
+            ),
+        ).toBe(true)
+        expect(
+            accepted(
+                { ...noDrop, appliedRowsText: 'Discount redeemed' },
+                'SAVE10',
+            ),
         ).toBe(false)
-        expect(accepted({ success: false, committed: true })).toBe(false)
-        expect(accepted(null)).toBe(false)
+        expect(accepted({ ...noDrop, appliedRowsText: '' }, 'SAVE10')).toBe(
+            false,
+        )
+    })
+
+    it('refuses a NEW error message even when a row committed', () => {
+        expect(
+            accepted(
+                { ...OK, errorMsg: 'Code invalid', errorIsNew: true },
+                'X1Y',
+            ),
+        ).toBe(false)
+        // Stale furniture that was already on the page is not the store's verdict.
+        expect(
+            accepted(
+                { ...OK, errorMsg: 'Code invalid', errorIsNew: false },
+                'X1Y',
+            ),
+        ).toBe(true)
     })
 })
