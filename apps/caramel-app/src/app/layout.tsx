@@ -38,11 +38,13 @@ export const metadata: Metadata = {
         url: '/',
         images: ['/caramel_banner.png'],
     },
-    // Full-bleed icons (orange to every edge): Google search crops the
-    // favicon to a circle on a white disc, so a padded rounded-square icon
-    // rendered as a small boxed tile there. Google wants a square multiple
-    // of 48px, hence the 192px PNG; iOS masks its own corners and paints
-    // transparency black, hence the opaque touch icon.
+    // Icons reach every edge with rounded corners: Google search crops the
+    // favicon to a circle on a white disc (padding there showed as a small
+    // boxed tile; corner rounding stays outside the circle), while browser
+    // tabs show the rounded tile like the other Devino apps. Google wants a
+    // square multiple of 48px, hence the 192px PNG; iOS masks its own
+    // corners and paints transparency black, hence the opaque touch icon.
+    // Rules pinned in tests/unit/favicon-full-bleed.test.ts.
     icons: {
         icon: [
             { url: '/favicon.ico', sizes: '48x48' },
