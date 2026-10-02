@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { seedVerifiedUser } from './support/seed-user'
+import { firstLinkedStoreDomain } from './support/stores'
 
 // The "Add a code" form on /coupons/[store] (shopper-submitted codes, owner
 // directed 2026-10-02). Two contexts, per CLAUDE.md's e2e rules:
@@ -9,10 +10,12 @@ import { seedVerifiedUser } from './support/seed-user'
 //   - the signed-in add WRITES a catalog row and needs a seedable user, so it is
 //     gated on DATABASE_URL and cleans its row up by id.
 //
-// STORE is amazon.com on purpose: it is in the hermetic synthetic seed AND a
-// real, long-lived store on the live catalog, and a store is "known" (the form
-// renders at all) only when a SUPPLIER coupon or a store_configs row exists, so
-// the form is guaranteed in both lanes. (A shopper-only domain would not show it.)
+// A store is "known" (the form renders at all) only when a SUPPLIER coupon or a
+// store_configs row exists; a shopper-only domain does not show it. The ungated
+// signed-out test therefore picks a store from the deployment's own
+// /supported-stores links (firstLinkedStoreDomain). STORE below is amazon.com for
+// the DB-gated tests only: those run hermetically, where it is in the synthetic
+// seed.
 const STORE = 'amazon.com'
 const SEEDABLE = !!process.env.DATABASE_URL
 const ADD_CODE_EMAIL = 'e2e-add-code@caramel.dev'
@@ -27,7 +30,10 @@ test.describe('Add a code — signed out', () => {
     test('a signed-out visitor is asked to sign in to share a code', async ({
         page,
     }) => {
-        await page.goto(`/coupons/${STORE}`)
+        // A store the CURRENT deployment itself links to, never a hard-coded
+        // one: dev's catalog may not have amazon.com as a known store.
+        const site = await firstLinkedStoreDomain(page)
+        await page.goto(`/coupons/${site}`)
         const prompt = page.getByRole('link', {
             name: 'Sign in to share a code',
         })

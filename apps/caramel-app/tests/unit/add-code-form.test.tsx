@@ -36,6 +36,16 @@ function jsonResponse(status: number, body: unknown) {
     }
 }
 
+/** A fetch response the test resolves by hand (the tsconfig lib predates
+ *  Promise.withResolvers). */
+function deferredResponse() {
+    let resolve: (value: unknown) => void = () => {}
+    const promise = new Promise<unknown>(res => {
+        resolve = res
+    })
+    return { promise, resolve }
+}
+
 function stubFetch(response: unknown) {
     const fetchMock = vi.fn().mockResolvedValue(response)
     vi.stubGlobal('fetch', fetchMock)
@@ -68,6 +78,7 @@ describe('AddCodeForm — signed out', () => {
             name: 'Sign in to share a code',
         })
         expect(link.getAttribute('href')).toBe('/login')
+        expect(link.getAttribute('rel')).toBe('nofollow')
         expect(screen.queryByLabelText('Coupon code')).toBeNull()
     })
 
@@ -90,7 +101,11 @@ describe('AddCodeForm — signed in', () => {
         render(<AddCodeForm store="example.com" />)
         await submit('  SAVE10 ')
 
-        expect(await screen.findByText(/Added as Unverified/)).toBeTruthy()
+        expect(
+            await screen.findByText(
+                'Thanks! Added as Unverified — reload to see it in the list.',
+            ),
+        ).toBeTruthy()
         expect(fetchMock).toHaveBeenCalledTimes(1)
         const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
         expect(url).toBe('/api/coupons/submit')
@@ -116,7 +131,99 @@ describe('AddCodeForm — signed in', () => {
         render(<AddCodeForm store="example.com" />)
         await submit('SAVE10')
 
-        expect(await screen.findByText(/already listed/)).toBeTruthy()
+        expect(
+            await screen.findByText(
+                'That code is already listed for this store. Thanks for checking!',
+            ),
+        ).toBeTruthy()
+        expect(screen.queryByText(/Added as Unverified/)).toBeNull()
+        expect(reportMock).not.toHaveBeenCalled()
+        expect(
+            (screen.getByLabelText('Coupon code') as HTMLInputElement).value,
+        ).toBe('')
+    })
+
+    it('reports a 200 with an unrecognised body instead of claiming success', async () => {
+        stubFetch(jsonResponse(200, { unexpected: true }))
+        render(<AddCodeForm store="example.com" />)
+        await submit('SAVE10')
+
+        expect(
+            await screen.findByText("Couldn't add that code. Try again."),
+        ).toBeTruthy()
+        expect(screen.queryByText(/Added as Unverified/)).toBeNull()
+        await waitFor(() => expect(reportMock).toHaveBeenCalledTimes(1))
+        const [arg] = reportMock.mock.calls[0] as unknown as [{ error: Error }]
+        expect(arg.error.message).toContain('unrecognised body')
+    })
+
+    it('ignores a second submit while the first is in flight (one POST)', async () => {
+        const pending = deferredResponse()
+        const resolveFetch = pending.resolve
+        const fetchMock = vi.fn().mockReturnValue(pending.promise)
+        vi.stubGlobal('fetch', fetchMock)
+        render(<AddCodeForm store="example.com" />)
+        fireEvent.change(await screen.findByLabelText('Coupon code'), {
+            target: { value: 'SAVE10' },
+        })
+        const button = screen.getByRole('button', { name: 'Add code' })
+        fireEvent.click(button)
+        fireEvent.click(button)
+
+        // Busy: still focusable (aria-disabled, not disabled), shows progress.
+        const busyButton = await screen.findByRole('button', {
+            name: 'Adding…',
+        })
+        expect(busyButton.getAttribute('aria-disabled')).toBe('true')
+        expect((busyButton as HTMLButtonElement).disabled).toBe(false)
+        expect(fetchMock).toHaveBeenCalledTimes(1)
+
+        resolveFetch(
+            jsonResponse(200, {
+                couponId: '1',
+                created: true,
+                status: 'unverified',
+            }),
+        )
+        expect(await screen.findByText(/Added as Unverified/)).toBeTruthy()
+        expect(
+            screen
+                .getByRole('button', { name: 'Add code' })
+                .getAttribute('aria-disabled'),
+        ).toBe('false')
+    })
+
+    it('keeps an always-present live region that the message is written into', async () => {
+        stubFetch(jsonResponse(422, { error: 'invalid-code' }))
+        render(<AddCodeForm store="example.com" />)
+        const input = await screen.findByLabelText('Coupon code')
+        const region = document.getElementById(
+            input.getAttribute('aria-describedby') ?? '',
+        )
+        expect(region).not.toBeNull()
+        expect(region!.getAttribute('role')).toBe('status')
+        expect(region!.textContent).toBe('')
+
+        fireEvent.change(input, { target: { value: 'SAVE10' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Add code' }))
+        await waitFor(() =>
+            expect(region!.textContent).toBe(
+                "That doesn't look like a coupon code.",
+            ),
+        )
+        // Same node, filled in place (not a freshly inserted element).
+        expect(
+            document.getElementById(input.getAttribute('aria-describedby')!),
+        ).toBe(region)
+    })
+
+    it('turns off auto-capitalisation on the code input', async () => {
+        render(<AddCodeForm store="example.com" />)
+        expect(
+            (await screen.findByLabelText('Coupon code')).getAttribute(
+                'autocapitalize',
+            ),
+        ).toBe('off')
     })
 
     it('refuses an implausible code client-side without calling the API', async () => {

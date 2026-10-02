@@ -21,9 +21,11 @@ describe('FAQ describes only live behaviour (checkout sharing deferred)', () => 
         const item = faqItems.find(
             i => i.question === 'Can I share a coupon code with Caramel?',
         )
-        expect(item?.answer).toBe(
-            "Yes. Sign in, open the store's page on Caramel and use Add a code — it shows to other shoppers as Unverified until someone reports it worked. Only the code and the store are shared, along with your account so we can limit abuse.",
-        )
+        // A pattern, not exact text, so copy edits don't break the test; the
+        // checkout-wording guard is test 1.
+        expect(item?.answer).toMatch(/sign in/i)
+        expect(item?.answer).toMatch(/Add a code/)
+        expect(item?.answer).toMatch(/Unverified/)
     })
 
     it('the data answer is unchanged from before shopper submissions', () => {

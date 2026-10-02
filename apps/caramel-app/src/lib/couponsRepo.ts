@@ -63,6 +63,7 @@ import {
     type StoreConfigRow,
     StoreConfigRowSchema,
     StoreCouponAggregateRowSchema,
+    StoreListRowSchema,
     TotalCountRowSchema,
     parseCouponRows,
 } from '@/lib/couponsDb'
@@ -270,7 +271,13 @@ export type StoreCouponFacts = {
     lastUpdated: Date | null
 }
 
-/** (marketing)/coupons/[store]/page.tsx — SSR store page, fixed PAGE_SIZE, no pagination/search/type/keyword. */
+/** (marketing)/coupons/[store]/page.tsx — SSR store page, fixed PAGE_SIZE, no pagination/search/type/keyword.
+ *
+ *  `hasSupplierRow`: at least one RETURNED row is a supplier row (not
+ *  shopper-submitted), which already proves the store is known, so the page can
+ *  skip isKnownStore's probe. False does not mean unknown: the supplier rows may
+ *  sit beyond `limit` or be invisible, or the store may be known only through a
+ *  store_configs row. */
 export async function listStoreCoupons(
     baseSite: string,
     limit: number,
@@ -278,6 +285,7 @@ export async function listStoreCoupons(
     coupons: CouponListRow[]
     total: number
     facts: StoreCouponFacts
+    hasSupplierRow: boolean
 }> {
     // Match /api/coupons: same visibility predicate, so SSR HTML and the
     // client fetch agree (no hydration flash) — see lib/coupons.ts's
@@ -293,7 +301,8 @@ export async function listStoreCoupons(
             SELECT id, code, site, title, description, rating,
                    discount_type, discount_amount, expiry, expired,
                    times_used AS "timesUsed",
-                   status, verification_message AS "verificationMessage"
+                   status, verification_message AS "verificationMessage",
+                   (submission_source IS NULL) AS "isSupplier"
             FROM coupons
             WHERE ${visible}
               AND ${siteBaseMatchSql(base)}
@@ -313,8 +322,15 @@ export async function listStoreCoupons(
               AND ${siteBaseMatchSql(base)}
         `),
     ])
+    const listRows = parseCouponRows(
+        StoreListRowSchema,
+        rawCoupons,
+        'store-page.coupons',
+    )
+    const hasSupplierRow = listRows.some(row => row.isSupplier)
+    // Strip the flag: it is read here and goes no further (StoreListRowSchema).
     const coupons = forShoppers(
-        parseCouponRows(CouponListRowSchema, rawCoupons, 'store-page.coupons'),
+        listRows.map(({ isSupplier: _isSupplier, ...row }) => row),
     )
     const [aggregate] = parseCouponRows(
         StoreCouponAggregateRowSchema,
@@ -331,6 +347,7 @@ export async function listStoreCoupons(
             fixedAmountCodes: aggregate?.fixed_amount_codes ?? 0,
             lastUpdated: aggregate?.last_updated ?? null,
         },
+        hasSupplierRow,
     }
 }
 

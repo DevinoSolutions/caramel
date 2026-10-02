@@ -7,7 +7,7 @@ import {
     normalizeShopperCode,
 } from '@/lib/shopperCoupons'
 import Link from 'next/link'
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 
 // The "Add a code" form on /coupons/[store]: a signed-in shopper shares a coupon
 // code they know, and it joins the catalog as UNVERIFIED (POST
@@ -46,7 +46,7 @@ const DAILY_LIMIT_MESSAGE = `You've shared ${SHOPPER_DAILY_SUBMISSION_CAP} codes
 const RATE_LIMITED_MESSAGE = 'Too many attempts. Wait a moment and try again.'
 
 const ADDED_MESSAGE =
-    "Thanks! Added as Unverified. It's now in this store's list for other shoppers."
+    'Thanks! Added as Unverified — reload to see it in the list.'
 const ALREADY_LISTED_MESSAGE =
     'That code is already listed for this store. Thanks for checking!'
 
@@ -150,6 +150,9 @@ export default function AddCodeForm({ store }: { store: string }) {
     const [mounted, setMounted] = useState(false)
     const [code, setCode] = useState('')
     const [busy, setBusy] = useState(false)
+    // Synchronous double-submit guard: `busy` state only updates on the next
+    // render, so two clicks in the same tick would both pass an `if (busy)`.
+    const inFlight = useRef(false)
     const [feedback, setFeedback] = useState<Feedback | null>(null)
     // The server said 401 although the client thought it had a session (an
     // expired cookie): fall back to the sign-in prompt.
@@ -177,6 +180,7 @@ export default function AddCodeForm({ store }: { store: string }) {
                 </h2>
                 <Link
                     href="/login"
+                    rel="nofollow"
                     className="font-semibold text-caramel underline underline-offset-2 hover:text-orange-600"
                 >
                     Sign in to share a code
@@ -187,16 +191,22 @@ export default function AddCodeForm({ store }: { store: string }) {
 
     const onSubmit = async (event: React.FormEvent) => {
         event.preventDefault()
-        if (busy) return
+        if (inFlight.current) return
         const normalized = normalizeShopperCode(code)
         if (normalized === null) {
             setFeedback({ kind: 'error', text: INVALID_CODE_MESSAGE })
             return
         }
+        inFlight.current = true
         setBusy(true)
         setFeedback(null)
-        const outcome = await submitCode(store, normalized)
-        setBusy(false)
+        let outcome: SubmitOutcome
+        try {
+            outcome = await submitCode(store, normalized)
+        } finally {
+            inFlight.current = false
+            setBusy(false)
+        }
 
         switch (outcome.kind) {
             case 'added':
@@ -257,30 +267,35 @@ export default function AddCodeForm({ store }: { store: string }) {
                         value={code}
                         onChange={e => setCode(e.target.value)}
                         autoComplete="off"
-                        autoCapitalize="characters"
+                        autoCapitalize="off"
                         spellCheck={false}
                         maxLength={64}
-                        aria-describedby={feedback ? feedbackId : undefined}
+                        aria-describedby={feedbackId}
                         className="w-full rounded-full border-2 border-caramel/30 bg-white px-6 py-3 placeholder-gray-400 shadow-sm outline-none transition-all focus:border-caramel dark:bg-darkSurface dark:text-white dark:placeholder-gray-500 dark:focus:border-orange-400"
                     />
                 </div>
                 <button
                     type="submit"
-                    disabled={busy}
-                    className="min-h-[44px] rounded-full bg-gradient-to-r from-caramel to-orange-600 px-8 py-3 font-semibold text-white shadow transition-all hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-70 dark:focus-visible:ring-offset-darkBg"
+                    // aria-disabled, not disabled: a disabled button drops
+                    // keyboard focus mid-submit. onSubmit's inFlight guard is
+                    // what actually blocks the second submit.
+                    aria-disabled={busy}
+                    className="min-h-[44px] rounded-full bg-gradient-to-r from-caramel to-orange-600 px-8 py-3 font-semibold text-white shadow transition-all hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 aria-disabled:cursor-not-allowed aria-disabled:opacity-70 dark:focus-visible:ring-offset-darkBg"
                 >
                     {busy ? 'Adding…' : 'Add code'}
                 </button>
             </form>
-            {feedback && (
-                <p
-                    id={feedbackId}
-                    role={feedback.kind === 'error' ? 'alert' : 'status'}
-                    className={`mt-3 text-sm font-medium ${FEEDBACK_CLS[feedback.kind]}`}
-                >
-                    {feedback.text}
-                </p>
-            )}
+            {/* Always present, filled with the message: a live region only
+                announces content changed INSIDE a region that already exists
+                when the screen reader scans the page. */}
+            <p
+                id={feedbackId}
+                role="status"
+                aria-live="polite"
+                className={`mt-3 min-h-5 text-sm font-medium ${feedback ? FEEDBACK_CLS[feedback.kind] : ''}`}
+            >
+                {feedback?.text}
+            </p>
         </section>
     )
 }

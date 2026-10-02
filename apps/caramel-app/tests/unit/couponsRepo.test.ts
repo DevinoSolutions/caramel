@@ -122,6 +122,12 @@ const couponFixture = {
     verificationMessage: null,
 }
 
+/** listStoreCoupons selects `isSupplier` on each list row; listCoupons does not
+ *  (its schema ignores the extra key), so the shared-row tests add it here. */
+function withSupplierFlag<T extends object>(row: T): T & { isSupplier: true } {
+    return { ...row, isSupplier: true }
+}
+
 describe('listCoupons', () => {
     it('parses a production-shaped fixture and derives total from the TotalCountRow', async () => {
         mockRows(
@@ -167,7 +173,7 @@ describe('listCoupons', () => {
         ]
         mockRows(
             sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
-            rows,
+            rows.map(withSupplierFlag),
         )
         mockRows(sql => sql.includes('COUNT(*)'), [storeAggregateRow(4)])
 
@@ -197,7 +203,7 @@ describe('listCoupons', () => {
         ]
         mockRows(
             sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
-            rows,
+            rows.map(withSupplierFlag),
         )
         mockRows(sql => sql.includes('COUNT(*)'), [storeAggregateRow(3)])
 
@@ -397,6 +403,73 @@ describe('listStoreSitemapEntries (app/sitemap.ts read)', () => {
         )
         await expect(listStoreSitemapEntries(10)).rejects.toThrow(
             /coupons-db schema drift \[sitemap\.stores\]/,
+        )
+    })
+})
+
+describe('listStoreCoupons — supplier-row flag (lets the store page skip the known-store probe)', () => {
+    function mockStoreList(rows: unknown[]) {
+        mockRows(
+            sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
+            rows,
+        )
+        mockRows(
+            sql => sql.includes('COUNT(*)::int AS total'),
+            [storeAggregateRow(rows.length)],
+        )
+    }
+
+    it('selects the supplier marker as submission_source IS NULL in the list query only', async () => {
+        mockStoreList([])
+
+        await listStoreCoupons('example.com', 5)
+
+        const listQuery = capturedQueries.find(q => q.includes('LIMIT'))
+        const countQuery = capturedQueries.find(q =>
+            q.includes('COUNT(*)::int AS total'),
+        )
+        expect(listQuery).toContain(
+            '(submission_source IS NULL) AS "isSupplier"',
+        )
+        expect(countQuery).not.toContain('submission_source')
+    })
+
+    it('hasSupplierRow is true when any returned row is a supplier row, false when all are shopper rows or none', async () => {
+        mockStoreList([
+            { ...couponFixture, id: 1, isSupplier: false },
+            { ...couponFixture, id: 2, isSupplier: true },
+        ])
+        expect((await listStoreCoupons('example.com', 5)).hasSupplierRow).toBe(
+            true,
+        )
+
+        rules = []
+        mockStoreList([{ ...couponFixture, id: 3, isSupplier: false }])
+        expect((await listStoreCoupons('example.com', 5)).hasSupplierRow).toBe(
+            false,
+        )
+
+        rules = []
+        mockStoreList([])
+        expect((await listStoreCoupons('example.com', 5)).hasSupplierRow).toBe(
+            false,
+        )
+    })
+
+    it('strips the flag from the returned coupons so it never reaches a prop or an API payload', async () => {
+        mockStoreList([{ ...couponFixture, isSupplier: true }])
+
+        const { coupons } = await listStoreCoupons('example.com', 5)
+
+        expect(coupons).toHaveLength(1)
+        expect(coupons[0]).not.toHaveProperty('isSupplier')
+    })
+
+    it('a list row without the flag is schema drift and throws (the parse stays strict)', async () => {
+        mockStoreList([couponFixture])
+
+        await expect(listStoreCoupons('example.com', 5)).rejects.toThrow(
+            /coupons-db schema drift \[store-page\.coupons\]/,
         )
     })
 })

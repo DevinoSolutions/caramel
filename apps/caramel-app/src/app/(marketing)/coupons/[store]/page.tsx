@@ -15,6 +15,7 @@ import { buildStoreFaq } from '@/lib/seo/storeFaq'
 import { evaluateStorePageIndexability } from '@/lib/seo/storeIndexability'
 import { isUkStoreDomain, resolveStoreDomain } from '@/lib/storeDomain'
 import type { Coupon } from '@/types/coupon'
+import * as Sentry from '@sentry/nextjs'
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { cache } from 'react'
@@ -65,6 +66,7 @@ const fetchStoreCoupons = cache(async (storeParam: string) => {
             total: 0,
             facts: NO_FACTS,
             base: storeParam,
+            hasSupplierRow: false,
         }
     }
 
@@ -80,12 +82,18 @@ const fetchStoreCoupons = cache(async (storeParam: string) => {
     // OUR Postgres) onto each row so the SSR HTML and the client fetch agree —
     // the store page must attach it too, or its server-rendered cards would
     // never show "worked Xh ago". Empty signals → lastWorkedAt:null (unshown).
-    const { coupons, total, facts } = await listStoreCoupons(
+    const { coupons, total, facts, hasSupplierRow } = await listStoreCoupons(
         base,
         STORE_PAGE_SIZE,
     )
     const couponsWithSignals = await attachSignals(coupons)
-    return { coupons: couponsWithSignals as Coupon[], total, facts, base }
+    return {
+        coupons: couponsWithSignals as Coupon[],
+        total,
+        facts,
+        base,
+        hasSupplierRow,
+    }
 })
 
 export async function generateMetadata({
@@ -214,17 +222,31 @@ export default async function StoreCouponsPage({
         notFound()
     }
 
-    // ONE catalog read plus the known-store EXISTS probe, in parallel. The probe
-    // gates the "Add a code" form: the API answers 422 'not-a-store' for a
-    // domain with no supplier coupon and no store_configs row, so the form must
-    // not be offered there. It cannot reuse `total`: that counts shopper rows
-    // too, which prove nothing about a store being real. Skipped when the slug
-    // resolves to no registrable domain (`base` is the raw slug then).
+    // ONE catalog read, plus the known-store EXISTS probe only when needed. The
+    // known-store check gates the "Add a code" form: the API answers 422
+    // 'not-a-store' for a domain with no supplier coupon and no store_configs
+    // row, so the form must not be offered there. It cannot reuse `total`: that
+    // counts shopper rows too, which prove nothing about a store being real. A
+    // supplier row among the rows already read DOES prove it (hasSupplierRow), so
+    // the probe, an extra table scan, runs only when the list does not. Skipped
+    // when the slug resolves to no registrable domain (`base` is the raw slug
+    // then).
+    const { coupons, total, facts, base, hasSupplierRow } =
+        await fetchStoreCoupons(storeParam)
     const resolvedBase = getBaseDomain(storeParam)
-    const [{ coupons, total, facts, base }, knownStore] = await Promise.all([
-        fetchStoreCoupons(storeParam),
-        resolvedBase ? isKnownStore(resolvedBase) : Promise.resolve(false),
-    ])
+    // The form is a nicety on a page that is otherwise fine: a failed probe
+    // degrades LOUDLY (Sentry) to "no form", it must never 500 the store page
+    // (same stance as attachSignals).
+    const knownStore =
+        hasSupplierRow ||
+        (resolvedBase
+            ? await isKnownStore(resolvedBase).catch((error: unknown) => {
+                  Sentry.captureException(error, {
+                      tags: { area: 'storePage.isKnownStore' },
+                  })
+                  return false
+              })
+            : false)
     // The body speaks the same vocabulary as the title (see generateMetadata):
     // Google rewrites titles from the h1, and "discount code" must appear in
     // the visible page for a UK store to be relevant to the search.

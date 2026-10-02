@@ -261,8 +261,12 @@ describe('submitShopperCoupon (real pg :58005)', () => {
             Math.abs(row.createdAt.getTime() - row.updatedAt.getTime()),
         ).toBe(0)
 
-        const { coupons } = await listStoreCoupons(BASE, 10)
+        const { coupons, hasSupplierRow } = await listStoreCoupons(BASE, 10)
+        // A shopper-only list proves nothing about the store being known, so the
+        // store page must still run its probe; and the flag is stripped from rows.
+        expect(hasSupplierRow).toBe(false)
         const listed = coupons.find(c => c.id === result.couponId)
+        expect(listed).not.toHaveProperty('isSupplier')
         expect(listed).toBeDefined()
         expect(listed?.code).toBe('ShopperCode1')
         expect(listed?.status).toBe('pending')
@@ -323,6 +327,30 @@ describe('submitShopperCoupon (real pg :58005)', () => {
         } finally {
             await prisma.coupon.delete({ where: { id: '700080001' } })
         }
+    })
+
+    it('a visible SUPPLIER row in the list sets hasSupplierRow (the store page then skips its probe); a shopper row beside it does not matter', async () => {
+        await prisma.coupon.create({
+            data: {
+                id: '700080003',
+                code: 'SupplierCode1',
+                site: BASE,
+                title: 'visible supplier row',
+                description: 'visible supplier row',
+                status: 'valid',
+            },
+        })
+        await submitShopperCoupon({
+            base: BASE,
+            code: 'ShopperCode9',
+            source: 'manual',
+            userId: USER_A,
+        })
+
+        const { coupons, hasSupplierRow } = await listStoreCoupons(BASE, 10)
+
+        expect(coupons).toHaveLength(2)
+        expect(hasSupplierRow).toBe(true)
     })
 
     it('a code the store page would NOT show (status invalid, expired=false) is not "already listed": a fresh, visible shopper row is created', async () => {
