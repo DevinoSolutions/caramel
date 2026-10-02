@@ -5,6 +5,23 @@
 -- columns record who and how (both NULL on every supplier row), and a reserved id
 -- sequence keeps shopper rows out of the supplier's id space.
 
+-- Guard: the reserved range must be EMPTY of supplier ids before it is claimed.
+-- If a supplier id already sits at or above the floor, shopper ids would collide
+-- with it (or ingest would start refusing a row it already holds), so fail the
+-- whole migration loudly instead of deploying a latent collision.
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM "public"."coupons"
+        -- Equal-length digit strings compare like the numbers they spell, so no
+        -- ::numeric cast (which Postgres may evaluate before the regex filter and
+        -- raise on a non-numeric id).
+        WHERE id ~ '^[0-9]{18}$' AND id >= '900000000000000000'
+    ) THEN
+        RAISE EXCEPTION 'shopper_coupon_submissions: supplier coupon ids already occupy the reserved shopper range (>= 9e17); pick a new floor before deploying';
+    END IF;
+END $$;
+
 -- AlterTable
 ALTER TABLE "public"."coupons" ADD COLUMN     "submission_source" TEXT,
 ADD COLUMN     "submitted_by_user_id" TEXT;

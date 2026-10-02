@@ -1,4 +1,7 @@
-import { RESTRICTED_COUPON_STATUSES } from '@/lib/coupons'
+import {
+    RESTRICTED_COUPON_STATUSES,
+    VISIBLE_COUPON_STATUSES,
+} from '@/lib/coupons'
 import {
     expireCoupons,
     getCouponStats,
@@ -619,7 +622,7 @@ describe('submitShopperCoupon (THIRD sanctioned write: shopper-submitted codes)'
         return capturedQueries.findIndex(match)
     }
 
-    it('(a) dedupes case-insensitively on the code, with the shared site-base predicate, excluding expired rows', async () => {
+    it('(a) dedupes case-insensitively on the code, with the store page predicate AND visibility rule', async () => {
         mockRows(isInsert, [{ id: INSERTED_ID }])
         mockRows(isCap, [{ total: 0 }])
 
@@ -631,9 +634,19 @@ describe('submitShopperCoupon (THIRD sanctioned write: shopper-submitted codes)'
         expect(sql).toContain('lower(code) = lower(')
         // The store page's own predicate (siteBaseMatchSql), not a re-written one.
         expect(sql).toContain('(site = ? OR site LIKE ?)')
+        // The store page's own visibility rule (visibleCouponsWhere): a code
+        // the page would NOT show (invalid/expired status) is not "already listed".
+        expect(sql).toContain('status IN (')
         expect(sql).toContain('expired = FALSE')
-        // Bound: the code as typed, then the LOWERCASE base twice (equality + suffix).
-        expect(capturedValues[i]).toEqual(['SaVe10', 'ebay.com', '%.ebay.com'])
+        // Bound: the code as typed, the LOWERCASE base twice (equality +
+        // suffix), then the visible-status list.
+        expect(capturedValues[i]).toEqual([
+            'SaVe10',
+            'ebay.com',
+            '%.ebay.com',
+            ...VISIBLE_COUPON_STATUSES,
+        ])
+        expect(capturedValues[i]).not.toContain('invalid')
     })
 
     it('(b) returns the existing row and inserts nothing when the code is already listed', async () => {
@@ -712,10 +725,89 @@ describe('submitShopperCoupon (THIRD sanctioned write: shopper-submitted codes)'
         expect(transactionCount).toBe(1)
         const lock = queryIndex(isLock)
         expect(lock).toBeGreaterThanOrEqual(0)
-        // Lock first, then check, then write: that order is what makes two
+        // Locks first, then check, then write: that order is what makes two
         // concurrent submits of one code produce one row.
         expect(lock).toBeLessThan(queryIndex(isDedupe))
-        expect(queryIndex(isDedupe)).toBeLessThan(queryIndex(isInsert))
+        expect(queryIndex(isDedupe)).toBeLessThan(queryIndex(isCap))
+        expect(queryIndex(isCap)).toBeLessThan(queryIndex(isInsert))
+    })
+
+    it('takes the per-user lock BEFORE the code lock (fixed order), each in its own two-int class', async () => {
+        mockRows(isCap, [{ total: 0 }])
+        mockRows(isInsert, [{ id: INSERTED_ID }])
+
+        await submitShopperCoupon(ARGS)
+
+        const locks = capturedQueries
+            .map((sql, i) => ({ sql, values: capturedValues[i] }))
+            .filter(q => isLock(q.sql))
+        expect(locks).toHaveLength(2)
+        for (const lock of locks) {
+            expect(lock.sql).toContain(
+                'pg_advisory_xact_lock(?::int, hashtext(',
+            )
+        }
+        // [class, key]: user lock first (key = user id), then the code lock
+        // (key = lowercase base + ':' + lowercase code, so case variants share it).
+        expect(locks[0]?.values).toEqual([7101, 'user-uuid-1'])
+        expect(locks[1]?.values).toEqual([7102, 'ebay.com:save10'])
+        // And both precede the daily-cap count they protect.
+        expect(queryIndex(isCap)).toBeGreaterThan(
+            capturedQueries.lastIndexOf(locks[1]?.sql ?? ''),
+        )
+    })
+
+    it.each([
+        ['empty', ''],
+        ['too short', 'ab'],
+        ['inner space', 'a b c'],
+        ['markup', '<script>'],
+        ['41 characters', 'a'.repeat(41)],
+    ])(
+        'rejects an invalid code (%s) with a plain Error before any SQL',
+        async (_label, code) => {
+            await expect(
+                submitShopperCoupon({ ...ARGS, code }),
+            ).rejects.toThrow('invalid shopper code')
+            expect(transactionCount).toBe(0)
+            expect(capturedQueries).toHaveLength(0)
+        },
+    )
+
+    it('trims the code before storing it (the repo normalizes, not just the caller)', async () => {
+        mockRows(isCap, [{ total: 0 }])
+        mockRows(isInsert, [{ id: INSERTED_ID }])
+
+        await submitShopperCoupon({ ...ARGS, code: '  SaVe10 ' })
+
+        expect(capturedValues[queryIndex(isInsert)]?.[0]).toBe('SaVe10')
+    })
+
+    it.each([
+        ['LIKE wildcard %', 'ebay%.com'],
+        ['LIKE wildcard _', 'eb_y.com'],
+        ['space', 'ebay .com'],
+        ['path', 'ebay.com/x'],
+        ['scheme', 'https://ebay.com'],
+        ['empty', ''],
+    ])(
+        'rejects a base that is not a clean hostname (%s) before any SQL',
+        async (_label, base) => {
+            await expect(
+                submitShopperCoupon({ ...ARGS, base }),
+            ).rejects.toThrow(/invalid store base/)
+            expect(transactionCount).toBe(0)
+            expect(capturedQueries).toHaveLength(0)
+        },
+    )
+
+    it('a missing daily-count row is a loud error, never "zero submissions"', async () => {
+        mockRows(isCap, [])
+
+        await expect(submitShopperCoupon(ARGS)).rejects.toThrow(
+            /daily-count query returned no row/,
+        )
+        expect(capturedQueries.some(isInsert)).toBe(false)
     })
 
     it('records a checkout capture with source=checkout', async () => {

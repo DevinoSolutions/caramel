@@ -23,7 +23,9 @@ const USER_IDS = ['shopper-itest-user-a', 'shopper-itest-user-b'] as const
 const [USER_A, USER_B] = USER_IDS
 
 async function cleanup() {
-    await prisma.coupon.deleteMany({ where: { site: BASE } })
+    await prisma.coupon.deleteMany({
+        where: { site: { in: [BASE, `www.${BASE}`] } },
+    })
     await prisma.coupon.deleteMany({
         where: { submittedByUserId: { in: [...USER_IDS] } },
     })
@@ -141,6 +143,35 @@ describe('submitShopperCoupon (real pg :58005)', () => {
         }
     })
 
+    it('a code the store page would NOT show (status invalid, expired=false) is not "already listed": a fresh, visible shopper row is created', async () => {
+        await prisma.coupon.create({
+            data: {
+                id: '700080002',
+                code: 'DeadCode1',
+                site: BASE,
+                title: 'dead supplier row',
+                description: 'dead supplier row',
+                status: 'invalid',
+                expired: false,
+            },
+        })
+
+        const result = await submitShopperCoupon({
+            base: BASE,
+            code: 'deadcode1',
+            source: 'manual',
+            userId: USER_A,
+        })
+
+        expect(result.created).toBe(true)
+        expect(result.couponId).not.toBe('700080002')
+        expect(BigInt(result.couponId)).toBeGreaterThanOrEqual(
+            SHOPPER_COUPON_ID_FLOOR,
+        )
+        const { coupons } = await listStoreCoupons(BASE, 10)
+        expect(coupons.map(c => c.id)).toEqual([result.couponId])
+    })
+
     it('an EXPIRED copy of the code does not block a fresh submission', async () => {
         const { couponId: expiredId } = await submitShopperCoupon({
             base: BASE,
@@ -220,6 +251,42 @@ describe('submitShopperCoupon (real pg :58005)', () => {
             userId: USER_B,
         })
         expect(other.created).toBe(true)
+    })
+
+    it('25 concurrent submits of DIFFERENT codes by one shopper create exactly 20 and limit 5 (per-user lock)', async () => {
+        const outcomes = await Promise.allSettled(
+            Array.from({ length: 25 }, (_, i) =>
+                submitShopperCoupon({
+                    base: BASE,
+                    code: `PAR-${i}`,
+                    source: 'manual',
+                    userId: USER_A,
+                }),
+            ),
+        )
+
+        const created = outcomes.filter(
+            o => o.status === 'fulfilled' && o.value.created,
+        )
+        const limited = outcomes.filter(
+            o =>
+                o.status === 'rejected' &&
+                o.reason instanceof ShopperSubmissionLimitError,
+        )
+        // Any OTHER rejection (a deadlock, a timeout) must fail loudly here.
+        const unexpected = outcomes.filter(
+            o =>
+                o.status === 'rejected' &&
+                !(o.reason instanceof ShopperSubmissionLimitError),
+        )
+        expect(unexpected).toEqual([])
+        expect(created).toHaveLength(SHOPPER_DAILY_SUBMISSION_CAP)
+        expect(limited).toHaveLength(25 - SHOPPER_DAILY_SUBMISSION_CAP)
+        expect(
+            await prisma.coupon.count({
+                where: { submittedByUserId: USER_A },
+            }),
+        ).toBe(SHOPPER_DAILY_SUBMISSION_CAP)
     })
 
     it('rows older than 24 hours no longer count toward the cap', async () => {

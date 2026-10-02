@@ -15,6 +15,10 @@
 //
 // The extension's code-capture.js cannot import this file (no bundler), so it
 // mirrors SHOPPER_CODE_PATTERN; tests/extension pins the two as equal.
+//
+// TODO: that mirror-equality test does NOT exist yet. It lands in Task 4
+// (extension code-capture), together with code-capture.js itself. Until then
+// nothing enforces that the two patterns stay equal.
 
 /**
  * First id of the reserved shopper range (inclusive). The sequence starts here.

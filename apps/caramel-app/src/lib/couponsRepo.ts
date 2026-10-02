@@ -73,6 +73,7 @@ import {
     SHOPPER_DAILY_SUBMISSION_CAP,
     ShopperSubmissionLimitError,
     type ShopperSubmissionSource,
+    normalizeShopperCode,
 } from '@/lib/shopperCoupons'
 import { Prisma } from '@prisma/client'
 import { randomUUID } from 'node:crypto'
@@ -799,6 +800,12 @@ export async function requestSource(website: string): Promise<void> {
     })
 }
 
+// Advisory-lock classes: the first int of pg_advisory_xact_lock(int, int).
+const SHOPPER_USER_LOCK_CLASS = 7101
+const SHOPPER_CODE_LOCK_CLASS = 7102
+// A clean lowercase hostname: no LIKE wildcards (% _), no spaces, no slashes.
+const SHOPPER_STORE_BASE_PATTERN = /^[a-z0-9.-]+$/
+
 export type SubmitShopperCouponArgs = {
     /** Already-resolved store domain (resolveStoreDomain); lowercased here. */
     base: string
@@ -821,11 +828,20 @@ export type SubmitShopperCouponResult = {
  * codes. Ids come from the reserved shopper sequence, which ingest refuses, so a
  * supplier push can never overwrite these rows.
  *
- * One transaction: (1) an advisory lock keyed on store + lowercase code, so two
- * concurrent submits of the same code serialise and the second one sees the
- * first one's row instead of inserting a duplicate; (2) the dedupe, using the
- * store page's own site predicate and ignoring expired rows; (3) the shopper's
- * rolling-24h new-row count against SHOPPER_DAILY_SUBMISSION_CAP; (4) the INSERT.
+ * One transaction: (1) two advisory locks, ALWAYS taken in this order: the
+ * shopper's (so their daily-cap count + insert serialise and concurrent
+ * different-code submits cannot overshoot the cap), then store + lowercase code
+ * (so two concurrent submits of one code serialise and the second sees the
+ * first's row instead of inserting a duplicate); (2) the dedupe, using the
+ * store page's own visibility rule (visibleCouponsWhere) and site predicate, so
+ * a code only counts as "already listed" if the store page would actually show
+ * it (a known-dead invalid/expired row does not: the shopper gets a fresh row
+ * they can see); (3) the shopper's rolling-24h new-row count against
+ * SHOPPER_DAILY_SUBMISSION_CAP; (4) the INSERT.
+ *
+ * Validates its own inputs (a repo write must not trust its caller): the code
+ * must pass normalizeShopperCode and the base must be a clean lowercase
+ * hostname with no LIKE wildcards; either failure throws a plain Error.
  *
  * Dedupe runs BEFORE the cap on purpose: re-submitting a code that is already
  * listed (the supplier's, or another shopper's) is a free hit, not a new
@@ -847,12 +863,29 @@ export type SubmitShopperCouponResult = {
 export async function submitShopperCoupon(
     args: SubmitShopperCouponArgs,
 ): Promise<SubmitShopperCouponResult> {
-    const { code, source, userId } = args
+    const { source, userId } = args
+    const code = normalizeShopperCode(args.code)
+    if (code === null) {
+        throw new Error('submitShopperCoupon: invalid shopper code')
+    }
     const base = args.base.toLowerCase()
+    // The base is bound into a LIKE pattern ('%.' + base), so '%' and '_' (and
+    // anything else outside a hostname) must never reach it.
+    if (!SHOPPER_STORE_BASE_PATTERN.test(base)) {
+        throw new Error(
+            `submitShopperCoupon: invalid store base "${args.base}"`,
+        )
+    }
 
     return prisma.$transaction(async tx => {
+        // Two-int advisory locks: the first int is a fixed class so these keys
+        // cannot collide with any other advisory-lock user in this database.
+        // Order matters (user, then code) and must never be reversed.
         await tx.$executeRaw(
-            Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`shopper-coupon:${base}:${code.toLowerCase()}`}::text))`,
+            Prisma.sql`SELECT pg_advisory_xact_lock(${SHOPPER_USER_LOCK_CLASS}::int, hashtext(${userId}::text))`,
+        )
+        await tx.$executeRaw(
+            Prisma.sql`SELECT pg_advisory_xact_lock(${SHOPPER_CODE_LOCK_CLASS}::int, hashtext(${`${base}:${code.toLowerCase()}`}::text))`,
         )
 
         const existing = parseCouponRows(
@@ -861,7 +894,7 @@ export async function submitShopperCoupon(
                 SELECT id FROM coupons
                 WHERE lower(code) = lower(${code})
                   AND ${siteBaseMatchSql(base)}
-                  AND expired = FALSE
+                  AND ${visibleCouponsWhere()}
                 ORDER BY created_at, id
                 LIMIT 1
             `),
@@ -878,7 +911,12 @@ export async function submitShopperCoupon(
             `),
             'shopper-coupon.daily-count',
         )
-        if ((recent?.total ?? 0) >= SHOPPER_DAILY_SUBMISSION_CAP) {
+        if (!recent) {
+            throw new Error(
+                'submitShopperCoupon: daily-count query returned no row',
+            )
+        }
+        if (recent.total >= SHOPPER_DAILY_SUBMISSION_CAP) {
             throw new ShopperSubmissionLimitError()
         }
 
