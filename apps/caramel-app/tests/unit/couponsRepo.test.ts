@@ -8,7 +8,13 @@ import {
     listStoreCoupons,
     listStoreSitemapEntries,
     requestSource,
+    submitShopperCoupon,
 } from '@/lib/couponsRepo'
+import {
+    SHOPPER_COUPON_DESCRIPTION,
+    SHOPPER_DAILY_SUBMISSION_CAP,
+    ShopperSubmissionLimitError,
+} from '@/lib/shopperCoupons'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 // Direct fn-level pins for couponsRepo.ts (coverage that doesn't route through
@@ -28,30 +34,40 @@ let rules: MockRule[] = []
 // Raw SQL text of every DB call, in order — lets a test assert on the
 // generated QUERY SHAPE itself.
 let capturedQueries: string[] = []
-// The bound parameter VALUES of every $queryRaw, in the same order — lets a
+// The bound parameter VALUES of every $queryRaw/$executeRaw, index-aligned with capturedQueries — lets a
 // test assert on what was actually bound (e.g. the lowercased store base).
 let capturedValues: unknown[][] = []
 // Affected-row count the mocked $executeRaw returns (expire).
 let executeRawResult = 0
 // Args every prisma.source.create() was called with (requestSource).
 let capturedSourceCreates: unknown[] = []
+// How many prisma.$transaction() calls were opened (submitShopperCoupon).
+let transactionCount = 0
 function mockRows(match: (sql: string) => boolean, rows: unknown[]) {
     rules.push({ match, rows })
 }
 
 // prisma.$queryRaw / $executeRaw receive a Prisma.Sql whose `.sql` getter is the
 // composed, flattened query text (nested fragments inlined, values as `?`).
-vi.mock('@/lib/prisma', () => ({
-    default: {
+vi.mock('@/lib/prisma', () => {
+    const client = {
         $queryRaw: (arg: { sql: string; values: unknown[] }) => {
             capturedQueries.push(arg.sql)
             capturedValues.push(arg.values)
             const rows = rules.find(r => r.match(arg.sql))?.rows ?? []
             return Promise.resolve(rows)
         },
-        $executeRaw: (arg: { sql: string }) => {
+        $executeRaw: (arg: { sql: string; values: unknown[] }) => {
             capturedQueries.push(arg.sql)
+            capturedValues.push(arg.values)
             return Promise.resolve(executeRawResult)
+        },
+        // submitShopperCoupon's interactive transaction: the callback gets this
+        // same recording client, and each opened transaction is counted so a
+        // test can assert "dedupe + insert run in ONE transaction".
+        $transaction: (fn: (tx: unknown) => Promise<unknown>) => {
+            transactionCount += 1
+            return fn(client)
         },
         couponSignal: { findMany: vi.fn(async () => []) },
         source: {
@@ -60,8 +76,9 @@ vi.mock('@/lib/prisma', () => ({
                 return Promise.resolve({})
             },
         },
-    },
-}))
+    }
+    return { default: client }
+})
 
 beforeEach(() => {
     rules = []
@@ -69,6 +86,7 @@ beforeEach(() => {
     capturedValues = []
     executeRawResult = 0
     capturedSourceCreates = []
+    transactionCount = 0
 })
 
 /** The store page's count row: the total plus the FAQ facts folded into the
@@ -578,6 +596,144 @@ describe('listRecentlyWorkedCoupons (landing "Codes that just worked" read)', ()
         )
         await expect(listRecentlyWorkedCoupons(8)).rejects.toThrow(
             /coupons-db schema drift \[coupons\.recently-worked\]/,
+        )
+    })
+})
+
+// Matchers over the composed SQL of each statement submitShopperCoupon issues.
+const isDedupe = (sql: string) => sql.includes('lower(code) = lower(')
+const isCap = (sql: string) => sql.includes('submitted_by_user_id = ')
+const isInsert = (sql: string) => sql.includes('INSERT INTO coupons')
+const isLock = (sql: string) => sql.includes('pg_advisory_xact_lock')
+
+describe('submitShopperCoupon (THIRD sanctioned write: shopper-submitted codes)', () => {
+    const INSERTED_ID = '900000000000000007'
+    const ARGS = {
+        base: 'Ebay.com',
+        code: 'SaVe10',
+        source: 'manual' as const,
+        userId: 'user-uuid-1',
+    }
+
+    function queryIndex(match: (sql: string) => boolean) {
+        return capturedQueries.findIndex(match)
+    }
+
+    it('(a) dedupes case-insensitively on the code, with the shared site-base predicate, excluding expired rows', async () => {
+        mockRows(isInsert, [{ id: INSERTED_ID }])
+        mockRows(isCap, [{ total: 0 }])
+
+        await submitShopperCoupon(ARGS)
+
+        const i = queryIndex(isDedupe)
+        expect(i).toBeGreaterThanOrEqual(0)
+        const sql = capturedQueries[i] ?? ''
+        expect(sql).toContain('lower(code) = lower(')
+        // The store page's own predicate (siteBaseMatchSql), not a re-written one.
+        expect(sql).toContain('(site = ? OR site LIKE ?)')
+        expect(sql).toContain('expired = FALSE')
+        // Bound: the code as typed, then the LOWERCASE base twice (equality + suffix).
+        expect(capturedValues[i]).toEqual(['SaVe10', 'ebay.com', '%.ebay.com'])
+    })
+
+    it('(b) returns the existing row and inserts nothing when the code is already listed', async () => {
+        mockRows(isDedupe, [{ id: '812345' }])
+
+        await expect(submitShopperCoupon(ARGS)).resolves.toEqual({
+            couponId: '812345',
+            created: false,
+        })
+        expect(capturedQueries.some(isInsert)).toBe(false)
+        // A duplicate is a hit, not a new submission: it must not burn the
+        // shopper's daily allowance, so the cap is never even counted.
+        expect(capturedQueries.some(isCap)).toBe(false)
+    })
+
+    it("(c) counts the shopper's submissions in the last 24h and throws ShopperSubmissionLimitError at the cap", async () => {
+        mockRows(isCap, [{ total: SHOPPER_DAILY_SUBMISSION_CAP }])
+
+        await expect(submitShopperCoupon(ARGS)).rejects.toBeInstanceOf(
+            ShopperSubmissionLimitError,
+        )
+        expect(capturedQueries.some(isInsert)).toBe(false)
+
+        const i = queryIndex(isCap)
+        const sql = capturedQueries[i] ?? ''
+        expect(sql).toContain('submitted_by_user_id = ?')
+        expect(sql).toContain("created_at > (NOW() AT TIME ZONE 'UTC')")
+        expect(sql).toContain("INTERVAL '24 hours'")
+        expect(capturedValues[i]).toEqual(['user-uuid-1'])
+    })
+
+    it('(c) one below the cap still inserts', async () => {
+        mockRows(isCap, [{ total: SHOPPER_DAILY_SUBMISSION_CAP - 1 }])
+        mockRows(isInsert, [{ id: INSERTED_ID }])
+
+        await expect(submitShopperCoupon(ARGS)).resolves.toEqual({
+            couponId: INSERTED_ID,
+            created: true,
+        })
+    })
+
+    it('(d) INSERTs a pending, unexpired row whose id comes from the reserved sequence', async () => {
+        mockRows(isCap, [{ total: 0 }])
+        mockRows(isInsert, [{ id: INSERTED_ID }])
+
+        const result = await submitShopperCoupon(ARGS)
+
+        expect(result).toEqual({ couponId: INSERTED_ID, created: true })
+        const i = queryIndex(isInsert)
+        const sql = capturedQueries[i] ?? ''
+        expect(sql).toContain("nextval('shopper_coupon_id_seq')::text")
+        expect(sql).toContain('RETURNING id')
+        // Fixed literals live in the SQL text, not in bound values.
+        expect(sql).toContain("'pending'")
+        expect(sql).toContain('FALSE')
+        expect(sql).toContain("(NOW() AT TIME ZONE 'UTC')")
+        // Bound values, in column order: code as typed (case preserved), the
+        // lowercase base, the empty title (shopperCouponTitle derives one at
+        // read time), the description, then the attribution pair.
+        expect(capturedValues[i]).toEqual([
+            'SaVe10',
+            'ebay.com',
+            '',
+            SHOPPER_COUPON_DESCRIPTION,
+            'user-uuid-1',
+            'manual',
+        ])
+    })
+
+    it('(e) runs the lock, dedupe and insert in ONE transaction, lock first', async () => {
+        mockRows(isCap, [{ total: 0 }])
+        mockRows(isInsert, [{ id: INSERTED_ID }])
+
+        await submitShopperCoupon(ARGS)
+
+        expect(transactionCount).toBe(1)
+        const lock = queryIndex(isLock)
+        expect(lock).toBeGreaterThanOrEqual(0)
+        // Lock first, then check, then write: that order is what makes two
+        // concurrent submits of one code produce one row.
+        expect(lock).toBeLessThan(queryIndex(isDedupe))
+        expect(queryIndex(isDedupe)).toBeLessThan(queryIndex(isInsert))
+    })
+
+    it('records a checkout capture with source=checkout', async () => {
+        mockRows(isCap, [{ total: 0 }])
+        mockRows(isInsert, [{ id: INSERTED_ID }])
+
+        await submitShopperCoupon({ ...ARGS, source: 'checkout' })
+
+        const values = capturedValues[queryIndex(isInsert)] ?? []
+        expect(values[values.length - 1]).toBe('checkout')
+    })
+
+    it('an INSERT that returns no row is a loud error, never a silent created:true', async () => {
+        mockRows(isCap, [{ total: 0 }])
+        mockRows(isInsert, [])
+
+        await expect(submitShopperCoupon(ARGS)).rejects.toThrow(
+            /submitShopperCoupon/,
         )
     })
 })

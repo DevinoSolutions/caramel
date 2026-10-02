@@ -135,6 +135,12 @@ export type RecentlyWorkedCouponRow = z.infer<
     typeof RecentlyWorkedCouponRowSchema
 >
 
+/** `SELECT id` / `... RETURNING id` — couponsRepo.submitShopperCoupon's dedupe
+ *  lookup and its INSERT's returned id. */
+export const CouponIdRowSchema = z.object({
+    id: couponIdSchema,
+})
+
 /** `SELECT COUNT(*)::int AS total` — coupons/route.ts + [store]/page.tsx. */
 export const TotalCountRowSchema = z.object({
     total: z.number(),

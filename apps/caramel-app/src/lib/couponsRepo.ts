@@ -27,6 +27,8 @@
 // (couponSignals.recordUsage): an `UPDATE coupons SET times_used…` would bump
 // the row's updated_at and freeze it under the ingest only-if-newer rule
 // (RULING C′). No write touches the external `caramel_coupons` DB anymore.
+// submitShopperCoupon (owner-directed 2026-10-02) is the THIRD app write: it
+// INSERTs shopper-submitted codes with ids from a reserved sequence.
 //
 // HTTP-only concerns stay OUT of this file by design: param parsing/caps,
 // `getBaseDomain`/domain-validation 400s, response envelopes, cache
@@ -38,6 +40,7 @@ import {
     WORKED_VERIFIED_WINDOW_HOURS,
 } from '@/lib/coupons'
 import {
+    CouponIdRowSchema,
     type CouponListRow,
     CouponListRowSchema,
     type DiscountTypeRow,
@@ -65,6 +68,12 @@ import {
 import { shopperCouponTitle } from '@/lib/couponTitleText'
 import { shopperVerificationText } from '@/lib/couponVerificationText'
 import prisma from '@/lib/prisma'
+import {
+    SHOPPER_COUPON_DESCRIPTION,
+    SHOPPER_DAILY_SUBMISSION_CAP,
+    ShopperSubmissionLimitError,
+    type ShopperSubmissionSource,
+} from '@/lib/shopperCoupons'
 import { Prisma } from '@prisma/client'
 import { randomUUID } from 'node:crypto'
 
@@ -85,6 +94,18 @@ import { randomUUID } from 'node:crypto'
  */
 const visibleCouponsWhere = () =>
     Prisma.sql`status IN (${Prisma.join([...VISIBLE_COUPON_STATUSES])}) AND expired = FALSE`
+
+/**
+ * "This coupon belongs to store `base`": the store page's own predicate — the
+ * exact domain, or any subdomain of it. `base` MUST already be lowercase: the
+ * `site` column is stored lowercase and this comparison is case-sensitive on
+ * purpose (plain equality keeps using coupons_site_idx), so every caller
+ * lowercases before binding. Shared by both listings AND by the shopper-
+ * submission dedupe, so a code is "already listed" under exactly the rule the
+ * store page uses to list it.
+ */
+const siteBaseMatchSql = (base: string) =>
+    Prisma.sql`(site = ${base} OR site LIKE ${'%.' + base})`
 
 /**
  * Shared ranking order — the list query and the marketing store page both sort
@@ -171,9 +192,7 @@ export async function listCoupons(
         // Lowercasing the bound value is the one-line guard that keeps a
         // mixed-case caller from matching nothing.
         const base = baseSite.toLowerCase()
-        conditions.push(
-            Prisma.sql`(site = ${base} OR site LIKE ${'%.' + base})`,
-        )
+        conditions.push(siteBaseMatchSql(base))
     }
 
     if (search) {
@@ -274,7 +293,7 @@ export async function listStoreCoupons(
                    status, verification_message AS "verificationMessage"
             FROM coupons
             WHERE ${visible}
-              AND (site = ${base} OR site LIKE ${'%.' + base})
+              AND ${siteBaseMatchSql(base)}
             ORDER BY ${rankingOrderSql()}
             LIMIT ${limit}
         `),
@@ -288,7 +307,7 @@ export async function listStoreCoupons(
                    MAX(updated_at) AS last_updated
             FROM coupons
             WHERE ${visible}
-              AND (site = ${base} OR site LIKE ${'%.' + base})
+              AND ${siteBaseMatchSql(base)}
         `),
     ])
     const coupons = forShoppers(
@@ -777,5 +796,115 @@ export async function requestSource(website: string): Promise<void> {
             websites: [],
             status: 'REQUESTED',
         },
+    })
+}
+
+export type SubmitShopperCouponArgs = {
+    /** Already-resolved store domain (resolveStoreDomain); lowercased here. */
+    base: string
+    /** Already-validated code (normalizeShopperCode), stored as typed. */
+    code: string
+    source: ShopperSubmissionSource
+    /** The signed-in shopper's `users.id`. */
+    userId: string
+}
+
+export type SubmitShopperCouponResult = {
+    /** The new row's id, or the existing row's id when the code was already listed. */
+    couponId: string
+    /** false = the code was already listed for this store; nothing was written. */
+    created: boolean
+}
+
+/**
+ * THIRD sanctioned app write (owner-directed 2026-10-02): shopper-submitted
+ * codes. Ids come from the reserved shopper sequence, which ingest refuses, so a
+ * supplier push can never overwrite these rows.
+ *
+ * One transaction: (1) an advisory lock keyed on store + lowercase code, so two
+ * concurrent submits of the same code serialise and the second one sees the
+ * first one's row instead of inserting a duplicate; (2) the dedupe, using the
+ * store page's own site predicate and ignoring expired rows; (3) the shopper's
+ * rolling-24h new-row count against SHOPPER_DAILY_SUBMISSION_CAP; (4) the INSERT.
+ *
+ * Dedupe runs BEFORE the cap on purpose: re-submitting a code that is already
+ * listed (the supplier's, or another shopper's) is a free hit, not a new
+ * submission, so it never burns the allowance and never trips the limit. The
+ * caller treats `created: false` as success (a checkout capture still records
+ * "worked" on the existing row).
+ *
+ * The row is `pending` (renders "Unverified"; a checkout capture's separate
+ * recordWorked is what promotes it to "Just worked"), with an EMPTY title:
+ * shopperCouponTitle derives "<site> promo code CODE" at read time, so the
+ * wording can change without a data migration. Timestamps are UTC wall-clock
+ * (`NOW() AT TIME ZONE 'UTC'`) because created_at/updated_at are `timestamp(3)`
+ * without a zone that Prisma always writes in UTC; bare NOW() would shift them
+ * on a non-UTC session and skew the 24h window.
+ *
+ * Throws ShopperSubmissionLimitError at the cap. Every other failure
+ * propagates as thrown; nothing is swallowed.
+ */
+export async function submitShopperCoupon(
+    args: SubmitShopperCouponArgs,
+): Promise<SubmitShopperCouponResult> {
+    const { code, source, userId } = args
+    const base = args.base.toLowerCase()
+
+    return prisma.$transaction(async tx => {
+        await tx.$executeRaw(
+            Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`shopper-coupon:${base}:${code.toLowerCase()}`}::text))`,
+        )
+
+        const existing = parseCouponRows(
+            CouponIdRowSchema,
+            await tx.$queryRaw(Prisma.sql`
+                SELECT id FROM coupons
+                WHERE lower(code) = lower(${code})
+                  AND ${siteBaseMatchSql(base)}
+                  AND expired = FALSE
+                ORDER BY created_at, id
+                LIMIT 1
+            `),
+            'shopper-coupon.dedupe',
+        )
+        if (existing[0]) return { couponId: existing[0].id, created: false }
+
+        const [recent] = parseCouponRows(
+            TotalCountRowSchema,
+            await tx.$queryRaw(Prisma.sql`
+                SELECT COUNT(*)::int AS total FROM coupons
+                WHERE submitted_by_user_id = ${userId}
+                  AND created_at > (NOW() AT TIME ZONE 'UTC') - INTERVAL '24 hours'
+            `),
+            'shopper-coupon.daily-count',
+        )
+        if ((recent?.total ?? 0) >= SHOPPER_DAILY_SUBMISSION_CAP) {
+            throw new ShopperSubmissionLimitError()
+        }
+
+        const inserted = parseCouponRows(
+            CouponIdRowSchema,
+            await tx.$queryRaw(Prisma.sql`
+                INSERT INTO coupons (
+                    id, code, site, title, description, status, expired,
+                    created_at, updated_at,
+                    submitted_by_user_id, submission_source
+                ) VALUES (
+                    nextval('shopper_coupon_id_seq')::text, ${code}, ${base},
+                    ${''}, ${SHOPPER_COUPON_DESCRIPTION}, 'pending', FALSE,
+                    (NOW() AT TIME ZONE 'UTC'), (NOW() AT TIME ZONE 'UTC'),
+                    ${userId}, ${source}
+                )
+                RETURNING id
+            `),
+            'shopper-coupon.insert',
+        )
+        const row = inserted[0]
+        if (!row) {
+            throw new Error(
+                `submitShopperCoupon: INSERT returned no row for store "${base}"`,
+            )
+        }
+        return { couponId: row.id, created: true }
     })
 }
