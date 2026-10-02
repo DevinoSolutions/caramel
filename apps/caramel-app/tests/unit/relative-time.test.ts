@@ -1,4 +1,4 @@
-import { formatWorkedAgo } from '@/lib/relativeTime'
+import { formatWorkedAgo, formatWorkedLabel } from '@/lib/relativeTime'
 import { describe, expect, it } from 'vitest'
 
 // Boundary pins for the trust-line formatter: "Just worked" under an hour
@@ -64,5 +64,24 @@ describe('formatWorkedAgo', () => {
         expect(formatWorkedAgo(new Date(NOW - 3 * HOUR), NOW)).toBe(
             'Worked 3h ago',
         )
+    })
+})
+
+describe('formatWorkedLabel (landing strip: never ages out)', () => {
+    it('uses the relative label while there is one', () => {
+        expect(formatWorkedLabel(ago(3 * HOUR), NOW)).toBe('Worked 3h ago')
+        expect(formatWorkedLabel(ago(7 * DAY), NOW)).toBe('Worked 7d ago')
+    })
+
+    it('falls back to the UTC date once the relative label stops', () => {
+        expect(formatWorkedLabel('2026-09-12T23:30:00.000Z', NOW)).toBe(
+            'Worked Sep 12',
+        )
+    })
+
+    it('stays null for absent, unparseable or future timestamps', () => {
+        expect(formatWorkedLabel(null, NOW)).toBeNull()
+        expect(formatWorkedLabel('not-a-date', NOW)).toBeNull()
+        expect(formatWorkedLabel(ago(-HOUR), NOW)).toBeNull()
     })
 })

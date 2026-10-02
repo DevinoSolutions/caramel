@@ -32,3 +32,27 @@ export function formatWorkedAgo(
     if (age < DAY_MS) return `Worked ${Math.floor(age / HOUR_MS)}h ago`
     return `Worked ${Math.floor(age / DAY_MS)}d ago`
 }
+
+// UTC + a fixed locale: the landing strip renders on the server and again in
+// the browser, so the date must not depend on either machine's zone/locale.
+const WORKED_ON_DATE = new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+})
+
+/**
+ * The landing "Codes that just worked" line, which (unlike a store-page card)
+ * lists the newest worked codes however old: formatWorkedAgo() while that has
+ * a label, then the date ("Worked Sep 12"). Null only for an absent,
+ * unparseable or future timestamp.
+ */
+export function formatWorkedLabel(
+    lastWorkedAt: string | Date | null | undefined,
+    now: number = Date.now(),
+): string | null {
+    const ago = formatWorkedAgo(lastWorkedAt, now)
+    if (ago) return ago
+    if (workedAgeMs(lastWorkedAt, now) === null || !lastWorkedAt) return null
+    return `Worked ${WORKED_ON_DATE.format(new Date(lastWorkedAt))}`
+}

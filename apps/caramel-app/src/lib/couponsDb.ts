@@ -129,7 +129,7 @@ export const StoreListRowSchema = CouponListRowSchema.extend({
  * the same column differently. `site` is non-null by the query's
  * `c.site IS NOT NULL` (a per-query guarantee, as with CouponListRow).
  * `lastWorkedAt` is `coupon_signals.last_worked_at`, non-null by the query's
- * window predicate; `z.coerce.date()` for the same driver tolerance
+ * `s.last_worked_at IS NOT NULL`; `z.coerce.date()` for the same driver tolerance
  * RecentStoreRowSchema documents.
  */
 export const RecentlyWorkedCouponRowSchema = CouponListRowSchema.pick({

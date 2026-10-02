@@ -1,31 +1,32 @@
 'use client'
 
 import CouponStatusBadge from '@/components/coupons/coupon-status-badge'
-import {
-    couponBadge,
-    discountBadgeText,
-    isRecentlyWorked,
-    WORKED_VERIFIED_WINDOW_HOURS,
-} from '@/lib/coupons'
+import { couponBadge, discountBadgeText, workedAgeMs } from '@/lib/coupons'
 import type { RecentlyWorkedCoupon } from '@/lib/recentlyWorkedCoupons'
-import { formatWorkedAgo } from '@/lib/relativeTime'
+import { formatWorkedLabel } from '@/lib/relativeTime'
+import { storeLogoUrl } from '@/lib/storeLogo'
+import Image from 'next/image'
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 
 // The landing page's "Codes that just worked" strip: the newest codes Caramel
-// shoppers applied successfully in the last 24 hours (coupon_signals), each
-// shown Verified — the proof-by-use rule in lib/coupons.ts.
+// shoppers applied successfully (coupon_signals), however long ago, so the
+// strip is never near-empty on a quiet day (owner, 2026-10-02). Each tile says
+// when it worked; only one inside the proof window (lib/coupons.ts) carries
+// the Verified badge.
 //
 // The rows arrive as props from the server (RecentlyWorkedSection.tsx), so the
 // tiles and their /coupons/<store> links are in the page's HTML. This client
 // half only exists for the clock: `/` is an ISR page, so the HTML can be up to
 // a revalidate window (plus the regeneration itself) old, and "Just worked"
-// must be judged against the visitor's time, not the render's.
+// and the Verified window must be judged against the visitor's time, not the
+// render's.
 
 /**
- * The strip itself — pure, so it is testable without a network. Re-applies the
- * 24h window against `now` (the page is ISR-cached, so a row can age out
- * between the read and the render) and renders nothing when no code is left.
+ * The strip itself — pure, so it is testable without a network. Drops only a
+ * row whose timestamp is unusable against `now` (unparseable, or further in
+ * the future than the clock-skew tolerance) and renders nothing, heading
+ * included, when no code is left.
  */
 export function RecentlyWorkedCouponsList({
     coupons,
@@ -34,8 +35,8 @@ export function RecentlyWorkedCouponsList({
     coupons: ReadonlyArray<RecentlyWorkedCoupon>
     now: number
 }) {
-    const fresh = coupons.filter(c => isRecentlyWorked(c.lastWorkedAt, now))
-    if (fresh.length === 0) return null
+    const shown = coupons.filter(c => workedAgeMs(c.lastWorkedAt, now) !== null)
+    if (shown.length === 0) return null
 
     return (
         <section
@@ -52,13 +53,12 @@ export function RecentlyWorkedCouponsList({
                         Codes that just worked
                     </h2>
                     <p className="mx-auto max-w-2xl text-lg leading-relaxed text-gray-600 dark:text-gray-300">
-                        Real checkouts: codes Caramel shoppers applied
-                        successfully in the last {WORKED_VERIFIED_WINDOW_HOURS}{' '}
-                        hours, newest first.
+                        Real checkouts: the latest codes Caramel shoppers
+                        applied successfully, newest first.
                     </p>
                 </div>
                 <ul className="grid grid-cols-4 gap-5 xl:grid-cols-3 lg:grid-cols-2 sm:grid-cols-1">
-                    {fresh.map(coupon => (
+                    {shown.map(coupon => (
                         <RecentlyWorkedTile
                             key={coupon.id}
                             coupon={coupon}
@@ -82,10 +82,10 @@ function RecentlyWorkedTile({
         coupon.discountType,
         coupon.discountAmount,
     )
-    const workedAgo = formatWorkedAgo(coupon.lastWorkedAt, now)
-    // Always the proven-by-use Verified badge here (every row is inside the
-    // window by construction), derived through the same rule the /coupons
-    // card uses rather than hard-coded, so the two can never disagree.
+    const workedAgo = formatWorkedLabel(coupon.lastWorkedAt, now)
+    // The proven-by-use Verified badge while the code is inside the proof
+    // window, nothing after: derived through the same rule the /coupons card
+    // uses rather than hard-coded, so the two can never disagree.
     const badge = couponBadge(null, coupon.lastWorkedAt, now)
 
     return (
@@ -99,8 +99,18 @@ function RecentlyWorkedTile({
                 className="group flex h-full flex-col rounded-3xl border border-orange-100 bg-gradient-to-br from-orange-50/50 via-white to-orange-50/40 p-5 shadow-md transition-all duration-200 hover:-translate-y-0.5 hover:border-orange-200 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel dark:border-orange-900/50 dark:from-darkSurface dark:via-darkSurface dark:to-darkSurface dark:hover:border-orange-800/70"
             >
                 <div className="mb-3 flex items-start justify-between gap-3">
-                    <span className="min-w-0 break-words text-sm font-semibold text-gray-500 dark:text-gray-400">
-                        {coupon.storeDomain}
+                    <span className="flex min-w-0 items-center gap-2.5">
+                        {/* Decorative: the domain beside it names the store. */}
+                        <Image
+                            src={storeLogoUrl(coupon.storeDomain)}
+                            alt=""
+                            width={32}
+                            height={32}
+                            className="h-8 w-8 shrink-0 rounded-lg bg-white p-0.5"
+                        />
+                        <span className="min-w-0 break-words text-sm font-semibold text-gray-500 dark:text-gray-400">
+                            {coupon.storeDomain}
+                        </span>
                     </span>
                     <span className="shrink-0 rounded-xl bg-gradient-to-br from-caramel to-orange-600 px-2.5 py-1 text-sm font-black text-white shadow-sm">
                         {discount ? `${discount} off` : 'DEAL'}

@@ -3,6 +3,7 @@
 import InstallSurfaceGate from '@/components/growth/InstallSurfaceGate'
 import Loader from '@/components/Loader'
 import { promptSupportOnFailure } from '@/lib/feedback/promptSupportOnFailure'
+import { storeLogoUrl } from '@/lib/storeLogo'
 import type { Coupon, CouponFilters } from '@/types/coupon'
 import { MagnifyingGlassIcon } from '@heroicons/react/24/outline'
 import { AnimatePresence, motion } from 'framer-motion'
@@ -84,11 +85,7 @@ export default function CouponsSection({
     const sentinelRef = useRef<HTMLDivElement | null>(null)
 
     const storeDomain = (defaultFilters?.site || filters.site || '').trim()
-    const storeLogo = storeDomain
-        ? `https://www.google.com/s2/favicons?sz=128&domain_url=${encodeURIComponent(
-              storeDomain,
-          )}`
-        : '/full-logo.png'
+    const storeLogo = storeDomain ? storeLogoUrl(storeDomain) : '/full-logo.png'
     const sidebarTitle = storeDomain || 'Caramel'
     const sidebarDescription = storeDomain
         ? `Save at ${storeDomain} with coupon codes. Caramel applies the best deals automatically at checkout.`

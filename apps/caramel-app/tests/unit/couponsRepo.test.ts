@@ -584,7 +584,7 @@ describe('listNeighbourStoreRows — the two raw-slug windows behind "More store
 })
 
 describe('listRecentlyWorkedCoupons (landing "Codes that just worked" read)', () => {
-    it('joins coupon_signals to VISIBLE sited coupons inside the 24h UTC window, newest apply first, LIMIT-bound — and only SELECTs', async () => {
+    it('joins coupon_signals to VISIBLE sited coupons, newest apply first however old, LIMIT-bound — and only SELECTs', async () => {
         mockRows(
             sql => sql.includes('FROM coupon_signals s'),
             [
@@ -640,14 +640,13 @@ describe('listRecentlyWorkedCoupons (landing "Codes that just worked" read)', ()
         expect(q).not.toMatch(/\b(UPDATE|INSERT|DELETE)\b/)
         expect(q).toContain('FROM coupon_signals s')
         expect(q).toContain('JOIN coupons c ON c.id = s.coupon_id')
-        // The window: coupons.ts's 24h constant, compared as UTC wall-clock
-        // time against the timestamp-without-time-zone column.
-        expect(q).toContain(
-            "s.last_worked_at >= (NOW() AT TIME ZONE 'UTC') - INTERVAL '24 hours'",
-        )
+        // No time window since 2026-10-02 (the newest worked codes, however
+        // old, so the landing strip is never near-empty on a quiet day).
+        expect(q).toContain('s.last_worked_at IS NOT NULL')
+        expect(q).not.toMatch(/INTERVAL/)
         // The shared visibility predicate (same fragment every listing inlines).
         expect(q).toMatch(/status IN \(\?(?:,\?)*\) AND expired = FALSE/)
-        // Restricted (amber) codes never feature: every tile renders Verified.
+        // Restricted (amber) codes never feature: a fresh tile renders Verified.
         expect(q).toMatch(/c\.status NOT IN \(\?(?:,\?)*\)/)
         for (const status of RESTRICTED_COUPON_STATUSES) {
             expect(capturedValues[0]).toContain(status)

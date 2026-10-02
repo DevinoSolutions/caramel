@@ -37,7 +37,6 @@
 import {
     RESTRICTED_COUPON_STATUSES,
     VISIBLE_COUPON_STATUSES,
-    WORKED_VERIFIED_WINDOW_HOURS,
 } from '@/lib/coupons'
 import {
     CouponIdRowSchema,
@@ -149,21 +148,6 @@ const percentOffSql = () =>
     Prisma.sql`UPPER(discount_type) = 'PERCENTAGE' AND discount_amount > 0 AND discount_amount < 100`
 const fixedAmountOffSql = () =>
     Prisma.sql`UPPER(discount_type) IS DISTINCT FROM 'PERCENTAGE' AND discount_amount > 0`
-
-/**
- * "A shopper's apply succeeded within the proof window" — coupons.ts's
- * isRecentlyWorked() expressed in SQL over the `coupon_signals s` alias.
- *
- * `last_worked_at` is a `timestamp(3)` WITHOUT time zone that Prisma always
- * writes in UTC, so the cutoff is computed as UTC wall-clock time
- * (`NOW() AT TIME ZONE 'UTC'`) — comparing it against bare `NOW()` would
- * reinterpret the column in the session's TimeZone and shift the window on
- * any non-UTC server. The window length is our own numeric constant (never
- * input), inlined as an interval literal via Prisma.raw so there is no
- * integer-vs-interval parameter typing to get wrong.
- */
-const recentlyWorkedSql = () =>
-    Prisma.sql`s.last_worked_at >= (NOW() AT TIME ZONE 'UTC') - ${Prisma.raw(`INTERVAL '${WORKED_VERIFIED_WINDOW_HOURS} hours'`)}`
 
 // ---------------------------------------------------------------------------
 // Reads
@@ -638,8 +622,10 @@ export async function listRecentlyAddedStores(
 /**
  * api/coupons/recently-worked GET (via recentlyWorkedCouponsCache.ts) — the
  * landing page's "Codes that just worked": the newest `limit` VISIBLE coupons a
- * shopper applied successfully within WORKED_VERIFIED_WINDOW_HOURS, newest
- * first. Read-only: it joins the app-owned `coupon_signals` (written only by
+ * shopper applied successfully, newest first, however long ago (owner,
+ * 2026-10-02: a 24h window left the section near-empty on quiet days; the
+ * tile shows the age, and Verified only inside WORKED_VERIFIED_WINDOW_HOURS).
+ * Read-only: it joins the app-owned `coupon_signals` (written only by
  * couponSignals.recordWorked) to the catalog and writes neither.
  *
  * A SQL join rather than attachSignals()'s app-side merge because the
@@ -648,16 +634,17 @@ export async function listRecentlyAddedStores(
  * the join can do without pulling every signal row into memory. Both tables
  * live in the app's own Postgres since the ownership inversion.
  *
- * Plan: the window predicate is a range scan on
- * `coupon_signals_last_worked_at_idx` (DESC) over at most a day of signals,
- * each probing `coupons_pkey` — no catalog scan. `visibleCouponsWhere()`'s
+ * Plan: ORDER BY last_worked_at DESC + LIMIT walks
+ * `coupon_signals_last_worked_at_idx` (DESC) newest-first, each row probing
+ * `coupons_pkey`, and stops once `limit` visible rows are found — no catalog
+ * scan. `visibleCouponsWhere()`'s
  * unqualified `status`/`expired` resolve to `coupons` (coupon_signals has
  * neither column). `s.coupon_id DESC` makes the order total so ties on the
  * same millisecond cannot reorder between cache rebuilds.
  */
-// Restriction-tagged codes are left out: the landing tile always renders the
-// proven-by-use Verified badge, and couponBadge() keeps restricted codes amber,
-// so featuring one would show a badge its store page contradicts.
+// Restriction-tagged codes are left out: a landing tile inside the proof window
+// renders the proven-by-use Verified badge, and couponBadge() keeps restricted
+// codes amber, so featuring one would show a badge its store page contradicts.
 export async function listRecentlyWorkedCoupons(
     limit: number,
 ): Promise<RecentlyWorkedCouponRow[]> {
@@ -667,7 +654,7 @@ export async function listRecentlyWorkedCoupons(
                s.last_worked_at AS "lastWorkedAt"
         FROM coupon_signals s
         JOIN coupons c ON c.id = s.coupon_id
-        WHERE ${recentlyWorkedSql()}
+        WHERE s.last_worked_at IS NOT NULL
           AND ${visibleCouponsWhere()}
           AND c.status NOT IN (${Prisma.join([...RESTRICTED_COUPON_STATUSES])})
           AND c.site IS NOT NULL

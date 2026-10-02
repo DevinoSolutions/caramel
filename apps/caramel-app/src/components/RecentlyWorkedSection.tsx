@@ -44,8 +44,8 @@ export default async function RecentlyWorkedSection() {
 }
 
 // The clock the ISR copy was rendered against: the strip first renders with
-// it (so hydration matches the server HTML), then re-judges the 24h window
-// against the visitor's clock.
+// it (so hydration matches the server HTML), then re-judges the "Worked ..."
+// labels and the Verified window against the visitor's clock.
 async function readWithTimestamp() {
     const coupons = await readRecentlyWorkedCoupons()
     return { coupons, readAt: Date.now() }

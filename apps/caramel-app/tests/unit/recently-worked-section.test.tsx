@@ -4,14 +4,16 @@ import RecentlyWorkedCouponsStrip, {
 } from '@/components/RecentlyWorkedCouponsStrip'
 import RecentlyWorkedSection from '@/components/RecentlyWorkedSection'
 import type { RecentlyWorkedCoupon } from '@/lib/recentlyWorkedCoupons'
+import { storeLogoUrl } from '@/lib/storeLogo'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { PHASE_PRODUCTION_BUILD } from 'next/constants'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-// The landing page's "Codes that just worked" strip. The case that matters
-// most is the EMPTY one: a "Codes that just worked" heading over an empty box
-// would be a freshness claim the page cannot back — so no rows (or only rows
-// that aged out of the 24h window) must render NOTHING, heading included.
+// The landing page's "Codes that just worked" strip: the newest worked codes
+// however old (since 2026-10-02), each dated, Verified only inside the proof
+// window. The EMPTY case still matters: a heading over an empty box would be a
+// claim the page cannot back, so no usable rows must render NOTHING, heading
+// included.
 
 const { sentryMock } = vi.hoisted(() => ({
     sentryMock: { captureException: vi.fn() },
@@ -109,12 +111,50 @@ describe('RecentlyWorkedCouponsList', () => {
         expect(container.innerHTML).toBe('')
     })
 
-    it('re-applies the 24h window: rows that aged out (edge-cached response) are dropped, and all-stale renders nothing', () => {
-        const { container } = render(
+    it('keeps codes older than the proof window: dated, but with no Verified badge', () => {
+        render(
             <RecentlyWorkedCouponsList
                 coupons={[
                     coupon({
+                        id: '1',
                         lastWorkedAt: new Date(NOW - 25 * HOUR).toISOString(),
+                    }),
+                    coupon({
+                        id: '2',
+                        code: 'OLD10',
+                        storeDomain: 'gap.com',
+                        lastWorkedAt: '2026-09-12T08:00:00.000Z',
+                    }),
+                ]}
+                now={NOW}
+            />,
+        )
+        expect(screen.getAllByRole('link')).toHaveLength(2)
+        expect(screen.getByText('Worked 1d ago')).toBeDefined()
+        expect(screen.getByText('Worked Sep 12')).toBeDefined()
+        expect(screen.queryByText('✓ Verified')).toBeNull()
+    })
+
+    it('shows each store logo beside its domain', () => {
+        const { container } = render(
+            <RecentlyWorkedCouponsList coupons={[coupon()]} now={NOW} />,
+        )
+        const logo = container.querySelector('img')
+        expect(logo?.getAttribute('src')).toContain(
+            encodeURIComponent(storeLogoUrl('codecademy.com')),
+        )
+        // Decorative: the domain text beside it already names the store.
+        expect(logo?.getAttribute('alt')).toBe('')
+    })
+
+    it('drops a row with an unusable timestamp, and renders nothing when none is left', () => {
+        const { container } = render(
+            <RecentlyWorkedCouponsList
+                coupons={[
+                    coupon({ lastWorkedAt: 'not-a-date' }),
+                    coupon({
+                        id: '2',
+                        lastWorkedAt: new Date(NOW + 2 * HOUR).toISOString(),
                     }),
                 ]}
                 now={NOW}
@@ -125,12 +165,12 @@ describe('RecentlyWorkedCouponsList', () => {
 })
 
 describe('RecentlyWorkedCouponsStrip (client clock)', () => {
-    it('hydrates with the render time, then re-judges against the visitor clock: a row that aged out while the ISR copy was cached disappears', async () => {
+    it('hydrates with the render time, then re-judges against the visitor clock: a code that left the proof window keeps its tile but loses Verified', async () => {
         // Rendered 23h after the apply; the visitor arrives 2h later.
         vi.useFakeTimers({ toFake: ['Date'] })
         vi.setSystemTime(NOW + 2 * HOUR)
 
-        const { container } = render(
+        render(
             <RecentlyWorkedCouponsStrip
                 coupons={[
                     coupon({
@@ -141,7 +181,11 @@ describe('RecentlyWorkedCouponsStrip (client clock)', () => {
             />,
         )
 
-        await waitFor(() => expect(container.innerHTML).toBe(''))
+        await waitFor(() =>
+            expect(screen.getByText('Worked 1d ago')).toBeDefined(),
+        )
+        expect(screen.queryByText('✓ Verified')).toBeNull()
+        expect(screen.getByRole('link')).toBeDefined()
     })
 
     it('relabels "Worked Xh ago" with the visitor clock', async () => {

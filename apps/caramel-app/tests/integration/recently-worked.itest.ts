@@ -4,9 +4,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 // listRecentlyWorkedCoupons (the landing page's "Codes that just worked"
 // read) run for REAL against a live migrated + seeded Postgres: the
-// coupon_signals ⋈ coupons join, the 24h UTC window compared against a
-// timestamp-WITHOUT-time-zone column that prisma writes as UTC, the shared
-// visibility predicate, and the zod row parse.
+// coupon_signals ⋈ coupons join (no time window since 2026-10-02: the newest
+// worked codes however old), the timestamp-WITHOUT-time-zone column that
+// prisma writes as UTC, the shared visibility predicate, and the zod row parse.
 //
 // The suite writes coupon_signals rows for a handful of SEEDED catalog ids
 // (plus one id with no catalog row). Any signal row those ids already had is
@@ -15,17 +15,18 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 const MINUTE = 60 * 1000
 const HOUR = 60 * MINUTE
+const DAY = 24 * HOUR
 
 const FRESH_VISIBLE = '900000017' // LEARN40, codecademy.com — worked 10 min ago
 const OLDER_VISIBLE = '900000001' // visible ebay.com code — worked 3h ago
-const STALE_VISIBLE = '900000002' // visible — worked 25h ago (outside window)
+const OLD_VISIBLE = '900000009' // PRIME5, valid — worked 10 days ago (still listed)
 const FRESH_INVALID = '900000008' // status invalid — worked 5 min ago (hidden)
 const NO_CATALOG_ROW = '999000099' // no coupons row — worked 1 min ago
 
 const SEEDED_SIGNALS: Array<[string, number]> = [
     [FRESH_VISIBLE, 10 * MINUTE],
     [OLDER_VISIBLE, 3 * HOUR],
-    [STALE_VISIBLE, 25 * HOUR],
+    [OLD_VISIBLE, 10 * DAY],
     [FRESH_INVALID, 5 * MINUTE],
     [NO_CATALOG_ROW, MINUTE],
 ]
@@ -60,13 +61,17 @@ afterAll(async () => {
 })
 
 describe('listRecentlyWorkedCoupons (real pg)', () => {
-    it('returns only VISIBLE catalog codes worked in the last 24h, newest first, with the parsed row shape', async () => {
+    it('returns VISIBLE catalog codes however long ago they worked, newest first, with the parsed row shape', async () => {
         // A roomy limit so unrelated local signal rows can't push ours off the
         // page; assertions are then scoped to the ids this suite seeded.
         const rows = await listRecentlyWorkedCoupons(200)
         const ours = rows.filter(r => TOUCHED_IDS.includes(r.id))
 
-        expect(ours.map(r => r.id)).toEqual([FRESH_VISIBLE, OLDER_VISIBLE])
+        expect(ours.map(r => r.id)).toEqual([
+            FRESH_VISIBLE,
+            OLDER_VISIBLE,
+            OLD_VISIBLE,
+        ])
 
         const learn40 = ours[0]!
         expect(learn40).toMatchObject({

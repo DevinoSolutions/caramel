@@ -11,6 +11,7 @@ import {
     tintedPanelClasses,
 } from '@/lib/profile/profileStyles'
 import type { FavoriteStoreSummary } from '@/lib/profile/types'
+import { storeLogoUrl } from '@/lib/storeLogo'
 import { canAdvertiseInstall } from '@/lib/surface/detectSurface'
 import { useSurface } from '@/lib/surface/SurfaceProvider'
 import Image from 'next/image'
@@ -32,12 +33,6 @@ import { toast } from 'sonner'
 // segment being the normalized registrable domain that favorite_stores.
 // store_name already holds — so the value read out of the overview drops
 // straight in with no re-normalizing.
-
-function faviconFor(domain: string): string {
-    return `https://www.google.com/s2/favicons?sz=128&domain_url=${encodeURIComponent(
-        domain,
-    )}`
-}
 
 export default function FavoriteStoresSection({
     favorites,
@@ -156,7 +151,7 @@ export default function FavoriteStoresSection({
                                 className={`flex min-w-0 flex-1 items-center gap-4 ${linkRowFocusClasses}`}
                             >
                                 <Image
-                                    src={faviconFor(store.domain)}
+                                    src={storeLogoUrl(store.domain)}
                                     alt=""
                                     width={40}
                                     height={40}

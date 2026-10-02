@@ -188,11 +188,11 @@ export function discountBadgeText(
 //   * red (invalid/expired) stays red — never surfaced in a listing anyway,
 //     and a conflicting report there is a question for the pipeline.
 //
-// The window + predicate below are the ONLY definition: the SQL read behind
-// the landing page's "Codes that just worked" section (couponsRepo.ts's
-// listRecentlyWorkedCoupons) inlines WORKED_VERIFIED_WINDOW_HOURS, and the
-// extension popup reads WORKED_VERIFIED_WINDOW_MS +
-// WORKED_AT_CLOCK_SKEW_TOLERANCE_MS from coupon-constants.generated.js.
+// The window + predicate below are the ONLY definition: the extension popup
+// reads WORKED_VERIFIED_WINDOW_MS + WORKED_AT_CLOCK_SKEW_TOLERANCE_MS from
+// coupon-constants.generated.js. (The landing page's "Codes that just worked"
+// read is NOT windowed since 2026-10-02: it lists the newest worked codes
+// however old, and only the tile's badge applies this window.)
 
 /** How recent a successful apply must be to count as proof (hours). */
 export const WORKED_VERIFIED_WINDOW_HOURS = 24

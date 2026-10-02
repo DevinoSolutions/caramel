@@ -123,8 +123,9 @@ model CouponSignal {
   updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at")
 
   // The landing page's "Codes that just worked" read
-  // (couponsRepo.listRecentlyWorkedCoupons) range-scans the last day of
-  // successful applies newest-first; without this it would scan every signal.
+  // (couponsRepo.listRecentlyWorkedCoupons) walks successful applies
+  // newest-first and stops at its LIMIT; without this it would scan and sort
+  // every signal.
   @@index([lastWorkedAt(sort: Desc)])
   @@map("coupon_signals")
 }
