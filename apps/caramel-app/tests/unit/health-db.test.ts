@@ -118,6 +118,13 @@ describe('GET /api/health/db — auth_db + catalog probe (F-001 / W4-D3)', () =>
         expect(aggregateMock).toHaveBeenCalledTimes(1)
     })
 
+    it('freshness/count aggregate covers supplier rows only (submissionSource null), so shopper submissions cannot mask a stalled feed', async () => {
+        await GET(makeRequest({ authorization: 'Bearer test-health-secret' }))
+        expect(aggregateMock).toHaveBeenCalledWith(
+            expect.objectContaining({ where: { submissionSource: null } }),
+        )
+    })
+
     it('catalog STALE but non-empty -> still 200: staleness is surfaced, never a hard failure', async () => {
         aggregateMock.mockImplementation(async () => ({
             _count: 30,
