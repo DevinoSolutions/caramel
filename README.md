@@ -141,14 +141,14 @@ The app serves its own coupon catalog from `DATABASE_URL`, so this is **unset in
 
 **Human-only — external provider dashboards, optional for a basic boot:**
 
-| Variable                                                         | Needed for                                                 |
-| ---------------------------------------------------------------- | ---------------------------------------------------------- |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`                      | Google sign-in                                             |
-| `APPLE_CLIENT_ID` / `APPLE_CLIENT_SECRET` / `APPLE_REDIRECT_URI` | Apple sign-in — see `docs/APPLE_OAUTH_LOCAL_TESTING.md`    |
-| `USESEND_API_KEY`                                                | Outgoing email (signup verification, etc.)                 |
-| `OPENROUTER_API_KEY`                                             | The cart classifier (`/api/classify-cart`) and `pnpm eval` |
-| `NEXT_PUBLIC_SENTRY_DSN`                                         | Error/APM reporting (no-op locally without it)             |
-| `NEXT_PUBLIC_GOOGLE_ANALYTICS_ID`                                | Analytics                                                  |
+| Variable                                                                                          | Needed for                                                                                                       |
+| ------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`                                                       | Google sign-in                                                                                                   |
+| `APPLE_CLIENT_ID` / `APPLE_TEAM_ID` / `APPLE_KEY_ID` / `APPLE_PRIVATE_KEY` / `APPLE_REDIRECT_URI` | Apple sign-in (the app signs its own client secret from the `.p8` key) — see `docs/APPLE_OAUTH_LOCAL_TESTING.md` |
+| `USESEND_API_KEY`                                                                                 | Outgoing email (signup verification, etc.)                                                                       |
+| `OPENROUTER_API_KEY`                                                                              | The cart classifier (`/api/classify-cart`) and `pnpm eval`                                                       |
+| `NEXT_PUBLIC_SENTRY_DSN`                                                                          | Error/APM reporting (no-op locally without it)                                                                   |
+| `NEXT_PUBLIC_GOOGLE_ANALYTICS_ID`                                                                 | Analytics                                                                                                        |
 
 ### Repo layout at a glance
 

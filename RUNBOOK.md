@@ -261,6 +261,20 @@ migrate deploy` (which also seeds) has not run.
   `tests/unit/health-db.test.ts`), not a bug, but it means the external
   uptime monitor silently can't authenticate if this secret drifts between
   the monitor's config and Dokploy's env.
+- **Apple sign-in fails / boot dies naming `APPLE_*`.** (2026-10-03) The old
+  static `APPLE_CLIENT_SECRET` env value was a pre-signed JWT that expired
+  2026-09-27 (Apple caps them at ~6 months); Apple sign-in was broken on prod +
+  dev from then until this change. The app now signs its own secret at runtime
+  (`src/lib/auth/appleClientSecret.ts`) from `APPLE_TEAM_ID`, `APPLE_KEY_ID`
+  and `APPLE_PRIVATE_KEY` (the `.p8` file; it lives ONLY in the Dokploy env).
+  When `APPLE_CLIENT_ID` is set all three are required — boot fails fast naming
+  the missing one, and a malformed key fails boot too (`instrumentation.ts`
+  signs once). **Deploy order: set the three vars in Dokploy BEFORE deploying.**
+  Dokploy stores env values unquoted on ONE line, so paste the PEM with literal
+  `\n` between lines (real newlines also work). Nothing to rotate on a schedule:
+  the JWT is re-minted automatically; only rotate if the `.p8` key itself is
+  revoked in the Apple developer portal (then update `APPLE_KEY_ID` +
+  `APPLE_PRIVATE_KEY` together and redeploy).
 - **Rate limiting is in-memory, per-instance.** `src/lib/rateLimit.ts`
   fails open if the limiter itself throws (never blocks legit traffic on
   an internal bug), but its budgets reset per process — if caramel-app
@@ -424,15 +438,16 @@ than that:
 with a named error instead of breaking deep inside a request handler). The
 operationally load-bearing ones:
 
-| Var                      | Used for                                                                                                      |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------- |
-| `DATABASE_URL`           | auth_db + the app-owned coupon catalog (Prisma) — required                                                    |
-| `COUPONS_DATABASE_URL`   | OPTIONAL, bridge-sync only — read-only external `caramel_coupons` connection string; unset in normal deploys  |
-| `INGEST_API_KEY`         | bearer for `POST /api/ingest/catalog` (the coupons pipeline supplier push) — server-to-server, never a client |
-| `COUPONS_ADMIN_SECRET`   | bearer for `POST /api/coupons/expire` + rate-limit trust exemption                                            |
-| `UPKUMA_HEALTH_SECRET`   | bearer for `GET /api/health/db`                                                                               |
-| `OPENROUTER_API_KEY`     | extension cart classifier (`/api/classify-cart`) — unset throws a named `OpenRouterError`, not a silent no-op |
-| `NEXT_PUBLIC_SENTRY_DSN` | Sentry init (client + server) — unset means Sentry never initializes, production or not                       |
+| Var                                                    | Used for                                                                                                                                                                               |
+| ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`                                         | auth_db + the app-owned coupon catalog (Prisma) — required                                                                                                                             |
+| `COUPONS_DATABASE_URL`                                 | OPTIONAL, bridge-sync only — read-only external `caramel_coupons` connection string; unset in normal deploys                                                                           |
+| `INGEST_API_KEY`                                       | bearer for `POST /api/ingest/catalog` (the coupons pipeline supplier push) — server-to-server, never a client                                                                          |
+| `COUPONS_ADMIN_SECRET`                                 | bearer for `POST /api/coupons/expire` + rate-limit trust exemption                                                                                                                     |
+| `UPKUMA_HEALTH_SECRET`                                 | bearer for `GET /api/health/db`                                                                                                                                                        |
+| `OPENROUTER_API_KEY`                                   | extension cart classifier (`/api/classify-cart`) — unset throws a named `OpenRouterError`, not a silent no-op                                                                          |
+| `NEXT_PUBLIC_SENTRY_DSN`                               | Sentry init (client + server) — unset means Sentry never initializes, production or not                                                                                                |
+| `APPLE_TEAM_ID` / `APPLE_KEY_ID` / `APPLE_PRIVATE_KEY` | Sign in with Apple: the app signs its own client-secret JWT from these (required when `APPLE_CLIENT_ID` is set; `.p8` as one line with literal `\n`) — see "Apple sign-in fails" above |
 
 TODO(human): record where these are actually set/rotated in Dokploy (env
 var UI vs. secret store) and the rotation procedure for

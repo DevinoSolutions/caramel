@@ -1,5 +1,6 @@
 import ResetPasswordTemplate from '@/emails/ResetPasswordTemplate'
 import VerificationRequestTemplate from '@/emails/VerificationRequestTemplate'
+import { getAppleClientSecret } from '@/lib/auth/appleClientSecret'
 import { sendEmail } from '@/lib/email'
 import { env } from '@/lib/env'
 import { BASE_URL, clientEnv } from '@/lib/env.client'
@@ -112,14 +113,38 @@ export const auth = betterAuth({
             clientSecret: env.GOOGLE_CLIENT_SECRET as string,
             prompt: 'select_account',
         },
-        apple: {
-            clientId: env.APPLE_CLIENT_ID as string,
-            clientSecret: env.APPLE_CLIENT_SECRET as string,
-            // Use production domain for Apple redirect URI (Apple doesn't accept localhost)
-            // The callback will be handled on production, then redirect back to localhost
-            redirectURI:
-                env.APPLE_REDIRECT_URI ||
-                'https://grabcaramel.com/api/auth/callback/apple',
+        // Async config so the client secret can be SIGNED at runtime (Apple's
+        // secret is an ES256 JWT capped at ~6 months; the old static
+        // APPLE_CLIENT_SECRET env value expired 2026-09-27 — see
+        // src/lib/auth/appleClientSecret.ts).
+        //
+        // better-auth 1.6.23 resolves this function ONCE, not per request:
+        // createAuthContext (dist/context/create-context.mjs) awaits
+        // `originalConfig()` while building the auth context, builds the Apple
+        // provider from that resolved object, and the provider closes over it
+        // for the life of the process (its token exchange reads
+        // `options.clientSecret` straight off that object). So the web
+        // sign-in path carries the secret signed at boot: valid 180 days,
+        // minus up to 30 if the cached one was reused. Every deploy restarts
+        // the process and re-signs; the one thing this does NOT cover is a
+        // single process living >~150 days without a redeploy. The extension
+        // route calls getAppleClientSecret() per request and re-signs by
+        // itself.
+        apple: async () => {
+            // Apple unset = disabled, exactly as before: the provider is still
+            // registered with no credentials and better-auth refuses to start a
+            // sign-in (CLIENT_ID_AND_SECRET_REQUIRED). The empty secret is
+            // falsy for that check, same as the old undefined was.
+            const clientId = env.APPLE_CLIENT_ID
+            return {
+                clientId: clientId as string,
+                clientSecret: clientId ? await getAppleClientSecret() : '',
+                // Use production domain for Apple redirect URI (Apple doesn't accept localhost)
+                // The callback will be handled on production, then redirect back to localhost
+                redirectURI:
+                    env.APPLE_REDIRECT_URI ||
+                    'https://grabcaramel.com/api/auth/callback/apple',
+            }
         },
     },
     user: {

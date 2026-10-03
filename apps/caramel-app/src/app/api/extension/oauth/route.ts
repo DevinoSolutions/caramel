@@ -1,5 +1,6 @@
 import { handleRouteError } from '@/lib/api/handleRouteError'
 import { preflight, withRoute } from '@/lib/api/withRoute'
+import { getAppleClientSecret } from '@/lib/auth/appleClientSecret'
 import {
     ExtensionOAuthEmailRequiredError,
     mintExtensionSession,
@@ -221,14 +222,17 @@ export const POST = withRoute(
             } else {
                 // Apple OAuth flow
                 const appleClientId = env.APPLE_CLIENT_ID
-                const appleClientSecret = env.APPLE_CLIENT_SECRET
 
-                if (!appleClientId || !appleClientSecret) {
+                if (!appleClientId) {
                     return NextResponse.json(
                         { error: 'Apple OAuth not configured' },
                         { status: 500 },
                     )
                 }
+
+                // Signed in-process (cached, re-signed before expiry). Throws
+                // loudly on a broken key; handleRouteError reports it to Sentry.
+                const appleClientSecret = await getAppleClientSecret()
 
                 // For Apple OAuth, we MUST use the intermediate redirect URI in the token exchange
                 // because that's what was used in the authorization request

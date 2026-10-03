@@ -44,8 +44,22 @@ const serverObjectSchema = z.object({
     CATALOG_MAX_AGE_HOURS: z.coerce.number().int().positive().default(48),
     GOOGLE_CLIENT_ID: z.string().optional(),
     GOOGLE_CLIENT_SECRET: z.string().optional(),
+    // Sign in with Apple. APPLE_CLIENT_ID is the Services ID; leaving it unset
+    // keeps Apple disabled. When it IS set, the next three are REQUIRED (the
+    // superRefine below fails the boot, naming each missing one): the app signs
+    // its own ES256 client-secret JWT from them at runtime
+    // (src/lib/auth/appleClientSecret.ts). There is deliberately NO
+    // APPLE_CLIENT_SECRET — the static pre-signed JWT that used to live there
+    // expired 2026-09-27 (Apple caps these at 6 months) and broke Apple sign-in.
     APPLE_CLIENT_ID: z.string().optional(),
-    APPLE_CLIENT_SECRET: z.string().optional(),
+    // Apple Developer team id (the `iss` of the signed secret).
+    APPLE_TEAM_ID: z.string().optional(),
+    // Id of the Sign in with Apple key (the JWT header `kid`).
+    APPLE_KEY_ID: z.string().optional(),
+    // Contents of that key's AuthKey_<KEY_ID>.p8 (PKCS#8 PEM). Either real
+    // newlines or literal `\n` sequences — Dokploy stores env values unquoted
+    // on ONE line, so the one-line form is the deployed shape.
+    APPLE_PRIVATE_KEY: z.string().optional(),
     APPLE_REDIRECT_URI: z.string().optional(),
     EXTENSION_OAUTH_STATE_SECRET: z.string().optional(),
     CHROME_EXTENSION_ORIGIN: z.string().optional(),
@@ -153,13 +167,31 @@ const serverObjectSchema = z.object({
     POSTHOG_PROJECT_UI_URL: z.string().optional(),
 })
 
-const serverSchema = serverObjectSchema.refine(
-    data => Boolean(data.BETTER_AUTH_SECRET || data.JWT_SECRET),
-    {
+const APPLE_SIGNING_KEYS = [
+    'APPLE_TEAM_ID',
+    'APPLE_KEY_ID',
+    'APPLE_PRIVATE_KEY',
+] as const
+
+const serverSchema = serverObjectSchema
+    .refine(data => Boolean(data.BETTER_AUTH_SECRET || data.JWT_SECRET), {
         error: 'At least one of BETTER_AUTH_SECRET or JWT_SECRET must be set',
         path: ['BETTER_AUTH_SECRET'],
-    },
-)
+    })
+    .superRefine((data, ctx) => {
+        // Truthiness, not `!== undefined`: .env.example ships APPLE_CLIENT_ID=
+        // empty, and an empty value means "Apple disabled" (as it always has).
+        if (!data.APPLE_CLIENT_ID) return
+        for (const key of APPLE_SIGNING_KEYS) {
+            if (!data[key]) {
+                ctx.addIssue({
+                    code: 'custom',
+                    path: [key],
+                    message: `${key} is required when APPLE_CLIENT_ID is set (the app signs its own Apple client secret)`,
+                })
+            }
+        }
+    })
 
 export type ServerEnv = z.infer<typeof serverObjectSchema>
 

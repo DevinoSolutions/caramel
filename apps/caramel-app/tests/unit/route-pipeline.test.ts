@@ -57,9 +57,6 @@ const { envMock, OAUTH_STATE_SECRET, KNOWN_ORIGIN } = vi.hoisted(() => {
                 | string
                 | undefined,
             APPLE_CLIENT_ID: 'test-apple-client-id' as string | undefined,
-            APPLE_CLIENT_SECRET: 'test-apple-client-secret' as
-                | string
-                | undefined,
             BETTER_AUTH_URL: 'http://localhost:58000',
             CHROME_EXTENSION_ORIGIN: KNOWN_ORIGIN as string | undefined,
             FIREFOX_EXTENSION_ORIGIN: undefined as string | undefined,
@@ -69,6 +66,23 @@ const { envMock, OAUTH_STATE_SECRET, KNOWN_ORIGIN } = vi.hoisted(() => {
     }
 })
 vi.mock('@/lib/env', () => ({ env: envMock }))
+
+// MOCK (announced): the real getAppleClientSecret signs an ES256 JWT from the
+// .p8 key (src/lib/auth/appleClientSecret.ts, fully covered by
+// apple-client-secret.test.ts with a throwaway key). The route's behavior under
+// test here is "forwards whatever the helper returns as client_secret".
+const { APPLE_CLIENT_SECRET_MOCK_VALUE, getAppleClientSecretMock } = vi.hoisted(
+    () => {
+        const mockSecret = 'mock-signed-apple-client-secret'
+        return {
+            APPLE_CLIENT_SECRET_MOCK_VALUE: mockSecret,
+            getAppleClientSecretMock: vi.fn(async () => mockSecret),
+        }
+    },
+)
+vi.mock('@/lib/auth/appleClientSecret', () => ({
+    getAppleClientSecret: getAppleClientSecretMock,
+}))
 
 vi.mock('node:crypto', async importOriginal => {
     const actual = await importOriginal<typeof import('node:crypto')>()
@@ -246,7 +260,7 @@ beforeEach(() => {
     envMock.GOOGLE_CLIENT_ID = 'test-google-client-id'
     envMock.GOOGLE_CLIENT_SECRET = 'test-google-client-secret'
     envMock.APPLE_CLIENT_ID = 'test-apple-client-id'
-    envMock.APPLE_CLIENT_SECRET = 'test-apple-client-secret'
+    getAppleClientSecretMock.mockClear()
     envMock.CHROME_EXTENSION_ORIGIN = KNOWN_ORIGIN
     envMock.FIREFOX_EXTENSION_ORIGIN = undefined
     envMock.SAFARI_EXTENSION_ORIGIN = undefined
@@ -349,6 +363,26 @@ describe('extension/oauth (exchange) — mint characterization (F-007 4a/4b/4c)'
         )
 
         expect(res.status).toBe(200)
+        // The token exchange sends the RUNTIME-SIGNED secret (never an env
+        // value) to Apple.
+        // (fetchMock is typed from defaultFetchImpl's one-arg signature; the
+        // route really calls fetch(url, init), so widen the call tuple.)
+        const fetchCalls = fetchMock.mock.calls as unknown as [
+            RequestInfo | URL,
+            RequestInit | undefined,
+        ][]
+        const appleTokenCall = fetchCalls.find(([input]) =>
+            String(input).includes('appleid.apple.com/auth/token'),
+        )
+        expect(appleTokenCall).toBeDefined()
+        const appleTokenBody = appleTokenCall?.[1]?.body
+        expect(appleTokenBody).toBeInstanceOf(URLSearchParams)
+        expect((appleTokenBody as URLSearchParams).get('client_secret')).toBe(
+            APPLE_CLIENT_SECRET_MOCK_VALUE,
+        )
+        expect((appleTokenBody as URLSearchParams).get('client_id')).toBe(
+            'test-apple-client-id',
+        )
         // username: user.username || user.name || user.email || null — for
         // a brand-new Apple user, username and name are both null (Apple's
         // ID token never carries a name), so this correctly falls through
