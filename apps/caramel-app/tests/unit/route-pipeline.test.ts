@@ -76,7 +76,7 @@ const { APPLE_CLIENT_SECRET_MOCK_VALUE, getAppleClientSecretMock } = vi.hoisted(
         const mockSecret = 'mock-signed-apple-client-secret'
         return {
             APPLE_CLIENT_SECRET_MOCK_VALUE: mockSecret,
-            getAppleClientSecretMock: vi.fn(async () => mockSecret),
+            getAppleClientSecretMock: vi.fn(() => mockSecret),
         }
     },
 )

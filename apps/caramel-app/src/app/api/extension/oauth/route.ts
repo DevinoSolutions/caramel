@@ -232,7 +232,7 @@ export const POST = withRoute(
 
                 // Signed in-process (cached, re-signed before expiry). Throws
                 // loudly on a broken key; handleRouteError reports it to Sentry.
-                const appleClientSecret = await getAppleClientSecret()
+                const appleClientSecret = getAppleClientSecret()
 
                 // For Apple OAuth, we MUST use the intermediate redirect URI in the token exchange
                 // because that's what was used in the authorization request

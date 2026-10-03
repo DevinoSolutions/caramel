@@ -272,7 +272,10 @@ migrate deploy` (which also seeds) has not run.
   signs once). **Deploy order: set the three vars in Dokploy BEFORE deploying.**
   Dokploy stores env values unquoted on ONE line, so paste the PEM with literal
   `\n` between lines (real newlines also work). Nothing to rotate on a schedule:
-  the JWT is re-minted automatically; only rotate if the `.p8` key itself is
+  the JWT is re-minted automatically (180-day tokens, re-signed when under 30
+  days remain) on BOTH the web sign-in path (better-auth reads the config's
+  `clientSecret` getter at every token exchange) and the extension route, with
+  no redeploy or restart needed; only rotate if the `.p8` key itself is
   revoked in the Apple developer portal (then update `APPLE_KEY_ID` +
   `APPLE_PRIVATE_KEY` together and redeploy).
 - **Rate limiting is in-memory, per-instance.** `src/lib/rateLimit.ts`

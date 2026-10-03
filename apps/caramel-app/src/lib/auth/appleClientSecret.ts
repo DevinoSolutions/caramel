@@ -7,19 +7,27 @@
 // from APPLE_TEAM_ID / APPLE_KEY_ID / APPLE_PRIVATE_KEY (see src/lib/env.ts).
 //
 // Two consumers share this ONE helper so they can never disagree:
-//   - src/lib/auth/auth.ts (better-auth's `socialProviders.apple`)
+//   - src/lib/auth/auth.ts (better-auth's `socialProviders.apple`, through
+//     `createAppleSocialProviderConfig`)
 //   - src/app/api/extension/oauth/route.ts (the extension's token exchange)
+//
+// SYNCHRONOUS ON PURPOSE (node:crypto, not an async JOSE library). better-auth
+// 1.6.23 resolves the `socialProviders.apple` config ONCE (create-context.mjs)
+// and its Apple provider keeps that same object, reading `options.clientSecret`
+// at every token exchange / refresh. A `get clientSecret()` on that object only
+// stays fresh if the secret can be produced synchronously at read time.
 import 'server-only'
 
+import { createPrivateKey, sign, type KeyObject } from 'node:crypto'
+
 import { env } from '@/lib/env'
-import { SignJWT, importPKCS8 } from 'jose'
 
 const APPLE_AUDIENCE = 'https://appleid.apple.com'
 const SECONDS_PER_DAY = 86_400
 // 180 days = 15,552,000 s, safely under Apple's 15,777,000 s cap.
 const SECRET_LIFETIME_SECONDS = 180 * SECONDS_PER_DAY
-// Re-sign once fewer than 30 days remain, so a long-lived container (the
-// extension route calls this per request) never hands Apple an expired token.
+// Re-sign once fewer than 30 days remain, so a long-lived container (both
+// consumers read the secret per request) never hands Apple an expired token.
 const RESIGN_WHEN_REMAINING_SECONDS = 30 * SECONDS_PER_DAY
 
 interface CachedSecret {
@@ -67,47 +75,102 @@ function readAppleSigningConfig(): AppleSigningConfig {
     return { clientId, teamId, keyId, privateKeyPem }
 }
 
-async function signAppleClientSecret(): Promise<CachedSecret> {
-    const { clientId, teamId, keyId, privateKeyPem } = readAppleSigningConfig()
+function base64UrlJson(value: Record<string, string | number>): string {
+    return Buffer.from(JSON.stringify(value), 'utf8').toString('base64url')
+}
 
-    let privateKey: Awaited<ReturnType<typeof importPKCS8>>
+function parseApplePrivateKey(privateKeyPem: string): KeyObject {
+    // Never echo the key (or any part of it) into the message or logs: only
+    // the reason is appended (OpenSSL describes the failure, not the input).
+    let privateKey: KeyObject
     try {
-        privateKey = await importPKCS8(privateKeyPem, 'ES256')
+        privateKey = createPrivateKey({ key: privateKeyPem, format: 'pem' })
     } catch (cause) {
-        // Never echo the key (or any part of it) into the message or logs: only
-        // jose's own reason is appended (it describes the failure, not the key).
         const reason = cause instanceof Error ? cause.message : String(cause)
         throw new Error(
             `APPLE_PRIVATE_KEY is not a valid PKCS#8 P-256 PEM (${reason}). Expected the full contents of the AuthKey_<KEY_ID>.p8 file from the Apple developer portal (-----BEGIN PRIVATE KEY----- ... -----END PRIVATE KEY-----), with newlines either real or written as literal \\n.`,
         )
     }
+    const curve = privateKey.asymmetricKeyDetails?.namedCurve
+    if (privateKey.asymmetricKeyType !== 'ec' || curve !== 'prime256v1') {
+        throw new Error(
+            `APPLE_PRIVATE_KEY parsed but is not a P-256 EC key (found ${privateKey.asymmetricKeyType ?? 'unknown'}${curve ? `/${curve}` : ''}); Sign in with Apple client secrets are ES256, which needs the .p8 key from the Apple developer portal.`,
+        )
+    }
+    return privateKey
+}
+
+function signAppleClientSecret(): CachedSecret {
+    const { clientId, teamId, keyId, privateKeyPem } = readAppleSigningConfig()
+    const privateKey = parseApplePrivateKey(privateKeyPem)
 
     const issuedAtSeconds = nowSeconds()
     const expiresAtSeconds = issuedAtSeconds + SECRET_LIFETIME_SECONDS
-    const token = await new SignJWT({})
-        .setProtectedHeader({ alg: 'ES256', kid: keyId })
-        .setIssuer(teamId)
-        .setSubject(clientId)
-        .setAudience(APPLE_AUDIENCE)
-        .setIssuedAt(issuedAtSeconds)
-        .setExpirationTime(expiresAtSeconds)
-        .sign(privateKey)
-
-    return { token, expiresAtSeconds }
+    const header = base64UrlJson({ alg: 'ES256', kid: keyId })
+    const payload = base64UrlJson({
+        iss: teamId,
+        iat: issuedAtSeconds,
+        exp: expiresAtSeconds,
+        aud: APPLE_AUDIENCE,
+        sub: clientId,
+    })
+    const signingInput = `${header}.${payload}`
+    // JWS ES256 wants the fixed-width raw r||s signature (RFC 7518 3.4), not
+    // the DER encoding node emits by default.
+    const signature = sign('sha256', Buffer.from(signingInput, 'utf8'), {
+        key: privateKey,
+        dsaEncoding: 'ieee-p1363',
+    })
+    return {
+        token: `${signingInput}.${signature.toString('base64url')}`,
+        expiresAtSeconds,
+    }
 }
 
 /**
  * The current Apple client-secret JWT, signed in-process and cached until
  * fewer than 30 days of validity remain. Throws (never returns a stale or
- * empty secret) when Apple's signing config is missing or the key is invalid.
+ * empty secret) when Apple's signing config is missing or the key is invalid;
+ * a failed sign leaves the cache untouched, so the next call retries.
  */
-export async function getAppleClientSecret(): Promise<string> {
+export function getAppleClientSecret(): string {
     if (
         cached &&
         cached.expiresAtSeconds - nowSeconds() > RESIGN_WHEN_REMAINING_SECONDS
     ) {
         return cached.token
     }
-    cached = await signAppleClientSecret()
+    cached = signAppleClientSecret()
     return cached.token
+}
+
+export interface AppleSocialProviderConfig {
+    clientId: string
+    /** Read at every token exchange/refresh by better-auth; always fresh. */
+    readonly clientSecret: string
+    redirectURI: string
+}
+
+/**
+ * The better-auth `socialProviders.apple` config. better-auth 1.6.23 resolves
+ * the config ONCE (create-context.mjs:97-102) and passes that very object,
+ * unspread, to the Apple provider, which reads `options.clientSecret` at each
+ * call (apple.mjs `createAuthorizationURL`, validate-authorization-code.mjs,
+ * refresh-access-token.mjs). `clientSecret` is therefore a GETTER: a process
+ * that outlives the secret it started with re-signs on the next read instead of
+ * sending Apple an expired JWT. Do not spread or clone the returned object.
+ *
+ * Apple unset = disabled: the empty secret is falsy, so better-auth refuses to
+ * start a sign-in (CLIENT_ID_AND_SECRET_REQUIRED) instead of signing anything.
+ */
+export function createAppleSocialProviderConfig(options: {
+    redirectURI: string
+}): AppleSocialProviderConfig {
+    return {
+        clientId: env.APPLE_CLIENT_ID as string,
+        get clientSecret(): string {
+            return env.APPLE_CLIENT_ID ? getAppleClientSecret() : ''
+        },
+        redirectURI: options.redirectURI,
+    }
 }

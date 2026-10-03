@@ -65,7 +65,7 @@ vi.mock('@/lib/env.client', () => ({ BASE_URL: BASE }))
 // MOCK (announced): the real signer needs an Apple .p8 key; it has its own
 // test (apple-client-secret.test.ts). Here the route only forwards its result.
 vi.mock('@/lib/auth/appleClientSecret', () => ({
-    getAppleClientSecret: vi.fn(async () => 'mock-signed-apple-client-secret'),
+    getAppleClientSecret: vi.fn(() => 'mock-signed-apple-client-secret'),
 }))
 
 // The shipped client polls once every 2s for up to 5 minutes; the real limiter

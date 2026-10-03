@@ -35,7 +35,7 @@ export async function register() {
         const { getAppleClientSecret } = await import(
             '@/lib/auth/appleClientSecret'
         )
-        await getAppleClientSecret()
+        getAppleClientSecret()
         console.log(
             '[boot] apple client secret signed from APPLE_PRIVATE_KEY (Sign in with Apple ENABLED)',
         )
