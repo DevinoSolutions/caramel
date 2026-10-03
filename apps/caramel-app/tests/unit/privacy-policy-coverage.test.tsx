@@ -28,6 +28,7 @@ describe('privacy policy coverage', () => {
         'Anthropic',
         'Google and Apple',
         'UseSend',
+        'Amazon SES',
         'Cloudflare',
         'Google Analytics',
         'PostHog',
@@ -47,5 +48,22 @@ describe('privacy policy coverage', () => {
             'Shared codes are shown publicly to other shoppers without your name.',
         )
         expect(text).toContain('including the Limited Use requirements')
+    })
+
+    it('pins the retention, deletion and scope claims the owner-approved review added', () => {
+        expect(text).toContain('kept for up to 90 days')
+        expect(text).toContain('within 30 days')
+        expect(text).toContain('http or https')
+        expect(text).toContain('without your sign-in token')
+        expect(text).toContain('your order number or order history')
+        expect(text).not.toContain('your full browsing history')
+        expect(text).toContain('store-request form')
+        expect(text).toContain(
+            'on every session where an error occurs (form fields are masked)',
+        )
+    })
+
+    it('does not describe checkout code capture as live (server flag is off)', () => {
+        expect(text).toContain('is not switched on yet')
     })
 })

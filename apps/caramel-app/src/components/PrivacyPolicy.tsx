@@ -61,15 +61,17 @@ const PrivacyPolicy = () => {
                     <Bullets
                         items={[
                             <>
-                                <strong>The website you are on.</strong> When
-                                you open or switch to a secure (https) page, the
-                                extension sends that page&apos;s hostname (for
-                                example, &quot;amazon.com&quot;) to our server
-                                to check whether we have coupons for it, show
-                                the number on the toolbar icon, and load the
-                                store&apos;s codes. Only the hostname is sent
-                                for this, never the full page address or the
-                                page&apos;s contents.
+                                <strong>The website you are on.</strong>{' '}
+                                Whenever you load a web page (http or https) or
+                                switch to a tab, the extension sends that
+                                page&apos;s hostname (for example,
+                                &quot;amazon.com&quot;) to our server to check
+                                whether we have coupons for it, show the number
+                                on the toolbar icon, and load the store&apos;s
+                                codes. Only the hostname is sent for this, never
+                                the full page address or the page&apos;s
+                                contents, and the toolbar-icon check is sent
+                                without your sign-in token.
                             </>,
                             <>
                                 <strong>Cart page details.</strong> When some of
@@ -80,8 +82,8 @@ const PrivacyPolicy = () => {
                                 page title and description, the store name, and
                                 the names of up to 6 items in your cart. It
                                 never sends payment card details, your address,
-                                your order details, or passwords you type into a
-                                store.
+                                your order number or order history, or passwords
+                                you type into a store.
                             </>,
                             <>
                                 <strong>Coupon results.</strong> Which codes
@@ -139,16 +141,20 @@ const PrivacyPolicy = () => {
                                     Coupon codes you choose to share.
                                 </strong>{' '}
                                 If you&apos;re signed in, you can add a code on
-                                a store page, and, if the extension&apos;s
-                                &quot;Share codes I enter at checkout&quot;
-                                setting is on, the extension sends a code you
-                                typed yourself once the store accepts it. We
-                                store only the code, the store, and your account
-                                (to limit abuse); never your cart, order or
-                                payment details. Shared codes are shown publicly
-                                to other shoppers without your name. You can
-                                turn checkout sharing off at any time in the
-                                extension&apos;s settings.
+                                a store page of our website. The extension also
+                                has a &quot;Share codes I enter at
+                                checkout&quot; setting; automatic capture at
+                                checkout is not switched on yet, so the
+                                extension sends no checkout codes today. When we
+                                switch it on, and only if that setting is on, it
+                                will send a code you typed yourself once the
+                                store accepts it. We store only the code, the
+                                store, and your account (to limit abuse); never
+                                your cart, order or payment details. Shared
+                                codes are shown publicly to other shoppers
+                                without your name. You can turn checkout sharing
+                                off at any time in the extension&apos;s
+                                settings.
                             </>,
                         ]}
                     />
@@ -157,6 +163,18 @@ const PrivacyPolicy = () => {
                         When you visit grabcaramel.com we collect usage
                         analytics and error reports as described under
                         &quot;Website Analytics &amp; Cookies&quot; below.
+                    </Para>
+                    <Para>
+                        If you use our store-request form we collect the store
+                        address you enter, your browser type, and your email if
+                        you give one (or your account email if you are signed
+                        in), and keep it so we can add the store and tell you
+                        when it is supported. If you contact support we collect
+                        your message, the page you were on and, if you want a
+                        reply, your email; it is emailed to our support inbox
+                        and logged in our self-hosted analytics. If you add a
+                        coupon code on a store page, we store the code and the
+                        store linked to your account, as described above.
                     </Para>
                 </>
             ),
@@ -199,7 +217,7 @@ const PrivacyPolicy = () => {
                     <Bullets
                         items={[
                             'Your settings, kept in your browser’s extension storage. If you use your browser’s sync feature, your browser syncs them to your other devices.',
-                            'Your sign-in session token, a short log of your recent savings, a cached list of supported stores, and recent diagnostic timings, kept in the extension’s local storage on this device.',
+                            'Your sign-in session token, your account name, email and profile picture (cached for the popup), a short log of your recent savings, a cached list of supported stores, and recent diagnostic timings, kept in the extension’s local storage on this device.',
                             'While Caramel tries codes on a store page, the codes tried and the result are kept in that tab’s session storage, which your browser clears when you close the tab.',
                             'Uninstalling the extension removes everything it stored in your browser.',
                         ]}
@@ -209,11 +227,11 @@ const PrivacyPolicy = () => {
                         items={[
                             'Caramel’s servers are operated by Devino. Data travels to them encrypted over HTTPS.',
                             'Account details, favorite stores, savings history and account-linked coupon results are kept until you delete them or ask us to delete your account.',
-                            'Sign-in sessions expire after 7 days; signing out ends the session immediately.',
+                            'Sign-in sessions expire after 7 days (website sessions are extended while you stay active); signing out ends the session and deletes its record immediately. Records of sessions that expire without signing out, including their IP address and browser type, are kept until you delete your account.',
                             'Cart page summaries are not stored in our database. They are processed to classify your cart, and the result is kept in temporary memory for up to 24 hours so the same cart is not processed twice.',
                             'Coupon results without an account are kept only as anonymous per-code totals (when a code last worked or failed, and the store’s last error message).',
                             'Shared codes stay published while they are valid; deleting your account removes the link between a shared code and you.',
-                            'Server logs, which can include IP addresses and browser type, are kept for a limited time for security and troubleshooting.',
+                            'Server logs, which can include IP addresses and browser type, are kept for up to 90 days for security and troubleshooting.',
                         ]}
                     />
                 </>
@@ -235,10 +253,13 @@ const PrivacyPolicy = () => {
                             <>
                                 <strong>OpenRouter</strong>, and the AI model
                                 provider it routes the request to (currently
-                                Anthropic): the cart page summary described
-                                above, to work out which codes fit your cart. It
-                                is sent without your name, email address or
-                                account.
+                                Anthropic&apos;s Claude model, which OpenRouter
+                                may serve through Anthropic or another hosting
+                                provider it uses): the store name and hostname,
+                                page title and description, and up to 6 cart
+                                item names, to work out which codes fit your
+                                cart. It is sent without your name, email
+                                address or account.
                             </>,
                             <>
                                 <strong>Google and Apple</strong>: only if you
@@ -246,9 +267,13 @@ const PrivacyPolicy = () => {
                                 &quot;Sign in with Apple&quot;, to sign you in.
                             </>,
                             <>
-                                <strong>UseSend</strong>: your email address, to
-                                deliver account emails such as sign-up
-                                verification and password resets.
+                                <strong>
+                                    UseSend (self-hosted by Devino) and Amazon
+                                    Web Services (Amazon SES)
+                                </strong>
+                                : your email address, to deliver account emails
+                                such as sign-up verification and password
+                                resets, and replies to messages you send us.
                             </>,
                             <>
                                 <strong>Cloudflare</strong>: our network
@@ -288,8 +313,8 @@ const PrivacyPolicy = () => {
                     items={[
                         'Sell or rent your personal information.',
                         'Use it for advertising, or for creditworthiness or lending decisions.',
-                        'Read or collect payment card details, your address, your order details, or passwords you type into stores.',
-                        'Send your full browsing history: the extension sends only the hostname of the page you are on.',
+                        'Read or collect payment card details, your address, your order number or order history, or passwords you type into stores.',
+                        'Send full page addresses or page contents of the sites you visit: for each page you load, the extension sends only its hostname (see above), and the cart summary only when described above.',
                         'Run code downloaded from the internet: everything the extension runs ships inside the extension package.',
                     ]}
                 />
@@ -308,7 +333,7 @@ const PrivacyPolicy = () => {
                         items={[
                             'Google Analytics: usage analytics.',
                             'PostHog (self-hosted): usage analytics, linked to your account when you are signed in, including session recordings with every form field masked.',
-                            'Sentry (self-hosted): error monitoring, which includes session replay on a sample of sessions.',
+                            'Sentry (self-hosted): error monitoring, which includes session replay on a sample of sessions and on every session where an error occurs (form fields are masked).',
                         ]}
                     />
                     <Para>
@@ -344,7 +369,7 @@ const PrivacyPolicy = () => {
                         'Pause Caramel on any site, or turn auto-apply off, from the extension.',
                         'Turn checkout sharing and savings sync on or off at any time in the extension’s settings.',
                         'Download your data, or delete your saved Caramel data (savings, favorite stores and coupon results), from Profile → Data & privacy on grabcaramel.com.',
-                        'Ask us to access, correct or delete your account and everything linked to it by emailing hello@devino.ca.',
+                        'Ask us to access, correct or delete your account and everything linked to it by emailing hello@devino.ca from the address on your account. We act on deletion requests within 30 days; deleting your account removes your login, sign-in sessions, favorite stores, savings history and coupon results, and unlinks you from codes you shared.',
                         'Uninstall the extension at any time; this stops all collection and removes what it stored in your browser.',
                     ]}
                 />

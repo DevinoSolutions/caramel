@@ -402,6 +402,13 @@ or the domain's verification (`GET /api/v1/domains` → `dkimStatus`/`spfDetails
 must be `SUCCESS`); a pile of stuck `QUEUED` means useSend accepted mail it is
 not draining.
 
+## Privacy-policy commitments (log retention, account deletion)
+
+The public privacy policy (`/privacy`) promises two operational things; keep them true.
+
+- **Server logs are kept up to 90 days.** Mechanisms: root `docker-compose.yml` sets `json-file` rotation (`max-size: 10m`, `max-file: 3`) on every service, and Dokploy's log-cleanup cron (`0 0 * * *`, check with `settings-getLogCleanupStatus`) truncates Traefik access logs daily. A new compose service MUST carry the same `logging:` block.
+- **Account deletion is manual, on request to hello@devino.ca within 30 days** (there is no account-deletion endpoint; the in-app "Delete my data" only removes data, not the login). Verify the requester writes from the account's address, delete the `users` row (the DB cascades sessions, accounts, savings_events, favorite_stores and coupon_reports; shared coupons are set to `submitted_by_user_id = NULL`), AND also scrub `site_suggestions.requester_email` (and `user_agent`) for that address by hand: it is NOT cascaded (`siteSuggestionIdentityWhere` in `src/lib/siteSuggestionIdentity.ts` is the matcher the in-app delete uses).
+
 ## Cross-hop trace correlation (coarse — known debt)
 
 Sentry APM tracing (`tracesSampleRate: 1`, production-only) covers

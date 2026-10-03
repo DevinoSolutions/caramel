@@ -131,8 +131,9 @@ ${comparisonSources}
 
 ## Privacy summary
 
-Caramel never sells or shares personal information and ships no ads and no
-third-party trackers. The extension talks only to Caramel's own servers: at
+Caramel never sells personal information and shares it only with the service
+providers named in its privacy policy, and ships no ads and no third-party
+trackers. The extension talks only to Caramel's own servers: at
 checkout on a supported store it fetches coupon codes for that store's domain,
 sends page and cart context (page title and item names — never payment
 details) so the right category of codes is chosen, and reports whether a code

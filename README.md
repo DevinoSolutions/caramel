@@ -125,7 +125,7 @@ The app serves its own coupon catalog from `DATABASE_URL`, so this is **unset in
 | `ALLOWED_ORIGINS`                          | blank (same-origin + extensions only)  |
 | `USESEND_BASE_URL`                         | `https://usesend.devino.ca`            |
 | `USESEND_FROM_EMAIL` / `USESEND_FROM_NAME` | `no_reply@grabcaramel.com` / `Caramel` |
-| `OPENROUTER_MODEL`                         | `openai/gpt-5-mini`                    |
+| `OPENROUTER_MODEL`                         | `anthropic/claude-haiku-4.5`           |
 
 (`NODE_ENV` is deliberately absent from `.env.example`: it is framework-managed — Next.js sets it per command and env files cannot override it.)
 
