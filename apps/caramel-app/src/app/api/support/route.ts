@@ -22,6 +22,7 @@ import { auth } from '@/lib/auth/auth'
 import { parseRecipientList, sendEmail } from '@/lib/email'
 import { env } from '@/lib/env'
 import { APP_VERSION } from '@/lib/env.client'
+import { sentryIssueSearchUrl } from '@/lib/sentryLinks'
 import { render } from '@react-email/render'
 import * as Sentry from '@sentry/nextjs'
 import { NextResponse } from 'next/server'
@@ -80,18 +81,6 @@ const SupportBodySchema = z
 
 type SupportBody = z.infer<typeof SupportBodySchema>
 
-/** The Sentry issue-search URL for an event id, or undefined when there is none.
- *
- * Org slug 'devino' is the real, known Sentry org (next.config.mjs). Shared by
- * both body parts so the text and the HTML can never link to different places.
- */
-function sentryIssueUrl(sentryEventId: string | undefined): string | undefined {
-    if (!sentryEventId) return undefined
-    return `https://devino.sentry.io/organizations/devino/issues/?query=${encodeURIComponent(
-        sentryEventId,
-    )}`
-}
-
 /** Plain-text support email body — every field an operator needs to triage. */
 function buildEmailText(input: {
     body: SupportBody
@@ -128,7 +117,7 @@ function buildEmailText(input: {
     if (posthogUrl) {
         lines.push(`PostHog event: ${posthogUrl}`)
     }
-    const sentryUrl = sentryIssueUrl(body.sentry_event_id)
+    const sentryUrl = sentryIssueSearchUrl(body.sentry_event_id)
     if (body.sentry_event_id && sentryUrl) {
         lines.push(`Sentry event id: ${body.sentry_event_id}`)
         lines.push(`Sentry: ${sentryUrl}`)
@@ -169,7 +158,7 @@ async function buildEmailHtml(input: {
                 env.POSTHOG_PROJECT_UI_URL,
             ),
             sentryEventId: body.sentry_event_id,
-            sentryUrl: sentryIssueUrl(body.sentry_event_id),
+            sentryUrl: sentryIssueSearchUrl(body.sentry_event_id),
         }),
     )
 }
