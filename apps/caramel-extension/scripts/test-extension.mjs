@@ -272,7 +272,12 @@ async function checkDailyActivePing(context, sw, extensionId) {
         `seed=${before.caramel_activity_seed ? 'present' : 'absent'}`,
     )
 
-    const mock = MOCK_PORT ? await startPosthogMock(MOCK_PORT, 2500) : null
+    // `next dev` compiles a route on its first request (measured 2026-10-05:
+    // ~5 s cold), which can outrun the worker's 8 s fetch budget and turn a
+    // successful capture into a "lost response" retry. A preflight compiles
+    // the same route module and captures nothing.
+    await fetch(`${API_BASE}/api/extension/activity`, { method: 'OPTIONS' })
+    const mock = MOCK_PORT ? await startPosthogMock(MOCK_PORT, 1000) : null
     try {
         // (b) Popup open as Google Chrome, closed mid-delivery.
         const popup = await openPopupAsGoogleChrome(context, extensionId)
