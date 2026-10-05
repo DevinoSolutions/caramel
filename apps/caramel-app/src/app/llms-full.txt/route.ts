@@ -139,7 +139,8 @@ ${honeyGuideFaq}
 - [Coupon extensions compared](${origin}${COMPARISON_PATH}): Caramel next to
   Honey, Capital One Shopping, SimplyCodes, Rakuten and Coupert.
 - [The Honey extension, explained](${origin}${HONEY_GUIDE_PATH}): what PayPal
-  Honey does, how it makes money, whether it is safe, and how Caramel differs.
+  Honey does, how it makes money, the controversy and lawsuit, and how Caramel
+  differs.
 - [Coupons](${origin}/coupons): browse the full coupon catalog.
 - [Store coupon pages](${origin}/coupons/amazon.com): per-store codes, one page
   per store domain, e.g. /coupons/amazon.com or /coupons/nike.com.

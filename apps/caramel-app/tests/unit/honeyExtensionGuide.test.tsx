@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
-import HoneyExtensionPage from '@/app/(marketing)/honey-extension/page'
+import HoneyExtensionPage, {
+    metadata,
+} from '@/app/(marketing)/honey-extension/page'
 import { GET as getLlmsFull } from '@/app/llms-full.txt/route'
 import { GET as getLlms } from '@/app/llms.txt/route'
+import SourceRefList from '@/components/seo/SourceRefs'
 import { faqPageJsonLd } from '@/lib/jsonLd'
 import {
     COMPARED_EXTENSIONS,
@@ -13,6 +16,7 @@ import {
     HONEY_GUIDE_FAQ,
     HONEY_GUIDE_PATH,
     HONEY_GUIDE_SUMMARY,
+    HONEY_GUIDE_SUMMARY_SOURCES,
     HONEY_ROW,
     HONEY_VS_CARAMEL,
     honeyGuideSourceOrder,
@@ -81,11 +85,17 @@ describe('honeyExtensionGuide data', () => {
     })
 
     it('a question it shares with the comparison page has the same answer', () => {
-        for (const item of HONEY_GUIDE_FAQ) {
-            const shared = COMPARISON_FAQ.find(
+        const shared = HONEY_GUIDE_FAQ.flatMap(item => {
+            const match = COMPARISON_FAQ.find(
                 candidate => candidate.question === item.question,
             )
-            if (shared) expect(item.answer).toBe(shared.answer)
+            return match ? [{ item, match }] : []
+        })
+        expect(shared.map(({ item }) => item.question)).toContain(
+            'Is Honey still available in 2026?',
+        )
+        for (const { item, match } of shared) {
+            expect(item.answer).toBe(match.answer)
         }
     })
 
@@ -93,6 +103,40 @@ describe('honeyExtensionGuide data', () => {
         for (const item of HONEY_GUIDE_FAQ) {
             expect(item.question.toLowerCase()).not.toContain('alternative')
         }
+    })
+
+    it('makes no safety or wrongdoing verdict of its own (only quoted source titles may)', () => {
+        const verdict = /\b(safe|unsafe|scam|illegal|steal|stole)\b/i
+        const ownWords = [
+            String(metadata.title),
+            String(metadata.description),
+            HONEY_GUIDE_SUMMARY,
+            ...HONEY_GUIDE_FAQ.flatMap(item => [item.question, item.answer]),
+        ]
+        for (const text of ownWords) expect(text).not.toMatch(verdict)
+    })
+
+    it('footnotes the summary to listed sources', () => {
+        expect(HONEY_GUIDE_SUMMARY_SOURCES.length).toBeGreaterThan(0)
+        for (const id of HONEY_GUIDE_SUMMARY_SOURCES) {
+            expect(COMPARISON_SOURCES, id).toHaveProperty(id)
+        }
+    })
+})
+
+describe('/honey-extension metadata', () => {
+    it('pins the title (no "alternative", no safety verdict)', () => {
+        expect(metadata.title).toBe(
+            'Honey Extension in 2026: What Changed and the Controversy Explained | Caramel',
+        )
+    })
+})
+
+describe('SourceRefList', () => {
+    it('throws when a cited source is missing from the page order', () => {
+        expect(() =>
+            render(<SourceRefList ids={['fortune']} order={['honeyChrome']} />),
+        ).toThrow(/"fortune" is cited but missing/)
     })
 })
 
@@ -102,7 +146,9 @@ describe('/honey-extension page', () => {
         const h1s = container.querySelectorAll('h1')
         expect(h1s).toHaveLength(1)
         expect(h1s[0].textContent?.toLowerCase()).not.toContain('alternative')
-        expect(screen.getByText(HONEY_GUIDE_SUMMARY)).toBeTruthy()
+        expect(container.querySelector('header')?.textContent).toContain(
+            HONEY_GUIDE_SUMMARY,
+        )
 
         const order = honeyGuideSourceOrder()
         const items = container.querySelectorAll('li[id^="source-"]')

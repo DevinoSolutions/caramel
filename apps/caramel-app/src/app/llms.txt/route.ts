@@ -48,8 +48,8 @@ const LLMS_TXT = `# Caramel
   One Shopping, SimplyCodes, Rakuten, Coupert and Caramel side by side (price,
   how each makes money, rewards, accounts, browsers), every claim sourced.
 - [The Honey extension, explained](${origin}${HONEY_GUIDE_PATH}): what PayPal
-  Honey does, how it makes money, whether it is safe, the affiliate-link
-  controversy and lawsuit, and how Caramel differs, every claim sourced.
+  Honey does, how it makes money, the affiliate-link controversy and
+  lawsuit, and how Caramel differs, every claim sourced.
 - [Agent setup](${origin}/agent-setup): onboard an AI coding agent; the
   machine-readable instructions are at ${origin}/agent-setup/prompt.md.
 - [Coupon API](${origin}/api/coupons): public, read-only JSON; query with

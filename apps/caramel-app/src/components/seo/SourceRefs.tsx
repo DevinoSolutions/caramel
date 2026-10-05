@@ -7,7 +7,7 @@ import {
 // `order` is that page's own first-citation order, so the same source can
 // carry a different number on /compare/coupon-extensions and /honey-extension;
 // the list it points at is rendered from the same order (#source-<n>).
-export default function SourceRefs({
+export default function SourceRefList({
     ids,
     order,
 }: {
@@ -17,7 +17,13 @@ export default function SourceRefs({
     return (
         <span>
             {ids.map(id => {
-                const n = order.indexOf(id) + 1
+                const index = order.indexOf(id)
+                if (index === -1) {
+                    throw new Error(
+                        `SourceRefList: "${id}" is cited but missing from this page's source order`,
+                    )
+                }
+                const n = index + 1
                 return (
                     <a
                         key={id}

@@ -58,7 +58,7 @@ export const metadata: Metadata = {
 
 const sourceOrder = comparisonSourceOrder()
 
-function SourceRefs({ ids }: { ids: ReadonlyArray<ComparisonSourceId> }) {
+function PageSourceRefs({ ids }: { ids: ReadonlyArray<ComparisonSourceId> }) {
     return <SourceRefList ids={ids} order={sourceOrder} />
 }
 
@@ -176,7 +176,7 @@ export default function CompareCouponExtensionsPage() {
                                             {row.sourceCode}
                                         </td>
                                         <td className="px-4 py-3">
-                                            <SourceRefs ids={row.sources} />
+                                            <PageSourceRefs ids={row.sources} />
                                         </td>
                                     </tr>
                                 ))}
@@ -229,14 +229,14 @@ export default function CompareCouponExtensionsPage() {
                                 </time>
                                 <p className={bodyText}>
                                     {event.text}
-                                    <SourceRefs ids={event.sources} />
+                                    <PageSourceRefs ids={event.sources} />
                                 </p>
                             </li>
                         ))}
                     </ol>
                     <p className={`${bodyText} mt-6`}>
-                        What Honey does, how it makes money and whether it is
-                        safe are answered in{' '}
+                        What Honey does, how it makes money, and the controversy
+                        and lawsuit are explained in{' '}
                         <Link
                             href={HONEY_GUIDE_PATH}
                             className="font-semibold text-caramel hover:underline"

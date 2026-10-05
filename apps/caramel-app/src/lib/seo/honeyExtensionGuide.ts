@@ -44,7 +44,16 @@ export const CARAMEL_ROW = /*#__PURE__*/ compared('Caramel')
 
 /** The opening answer: what an answer engine should be able to quote alone. */
 export const HONEY_GUIDE_SUMMARY =
-    "Honey is a free browser extension from PayPal that looks for coupon codes at checkout and applies them for you. It is still available in 2026. It says merchants may pay it affiliate commissions when you use it, and it gives PayPal Rewards points. Since December 2024 it has faced allegations that it replaced creators' affiliate links with its own, and a proposed class action brought by creators over that is going forward in a U.S. federal court."
+    "Honey is a free browser extension from PayPal that looks for coupon codes at checkout and applies them for you. It is still available in 2026. It says merchants may pay it affiliate commissions when you use it, and it gives PayPal Rewards points. Since December 2024 it has faced allegations that it replaced creators' affiliate links with its own, and a proposed class action brought by creators over Honey is going forward in a U.S. federal court."
+
+/** The sources behind HONEY_GUIDE_SUMMARY, footnoted right after it. */
+export const HONEY_GUIDE_SUMMARY_SOURCES: ReadonlyArray<ComparisonSourceId> = [
+    'honeyHelpWhat',
+    'honeyChrome',
+    'honeyHelpMoney',
+    'fortune',
+    'courtOrder2026',
+]
 
 /** Rows of the "Honey and Caramel side by side" table, read from the
  *  comparison rows so the two pages state the same thing. */
@@ -110,39 +119,40 @@ export const HONEY_GUIDE_FAQ: ReadonlyArray<HoneyGuideFaqItem> = [
         sources: ['honeyHelpMoney', 'honeyDisclosure', 'honeyChrome'],
     },
     {
-        question: 'Is the Honey extension safe to use?',
-        answer: "Honey is a PayPal product distributed through the official browser stores. The concerns raised about it since December 2024 are about money rather than your device: a YouTube investigation alleged that Honey replaced creators' affiliate links with its own and showed shoppers limited coupon options at partner stores. PayPal said Honey follows industry rules, including last-click attribution. A proposed class action brought by creators over this survived a motion to dismiss on June 22, 2026; that is a ruling on the pleadings, not a finding that PayPal did anything wrong.",
-        sources: ['honeyChrome', 'usaToday', 'fortune', 'courtOrder2026'],
+        question: 'What are the concerns about the Honey extension?',
+        answer: "In December 2024 a YouTuber alleged that Honey replaced creators' affiliate links with its own and showed shoppers limited coupon options at partner stores. PayPal said Honey follows industry rules, including last-click attribution. A proposed class action brought by creators over this survived a motion to dismiss on June 22, 2026; that is a ruling on the pleadings, not a finding that PayPal did anything wrong.",
+        sources: ['usaToday', 'fortune', 'courtOrder2026'],
     },
     {
         question: 'Is Honey still available in 2026?',
         answer: /*#__PURE__*/ comparisonAnswer(
             'Is Honey still available in 2026?',
         ),
-        sources: ['honeyChrome', 'honeyFirefox'],
+        sources: ['honeyChrome', 'honeyFirefox', 'honeyHelpWhat'],
     },
     {
         question: 'Do you need an account to use Honey?',
         answer: "Signing up is the first step in Honey's own help guide for getting the extension. Caramel, by comparison, needs no account at all.",
-        sources: ['honeyHelpWhat'],
+        sources: ['honeyHelpWhat', 'caramelSource'],
     },
     {
-        question: 'Does Honey work on Firefox?',
+        question: 'Is Honey available for Firefox?',
         answer: 'Honey has a Firefox add-on, but its listing on Firefox Add-ons was last updated in February 2021, while its Chrome Web Store listing was updated on September 8, 2026. Caramel ships the same extension for Firefox as for Chrome, Edge and Safari.',
-        sources: ['honeyFirefox', 'honeyChrome'],
+        sources: ['honeyFirefox', 'honeyChrome', 'caramelSource'],
     },
     {
         question: 'How is Caramel different from Honey?',
         answer: 'Both find and apply coupon codes at checkout. Caramel contains no affiliate code, so it never adds or replaces a referral link or cookie; it has no rewards program, needs no account, and publishes its source code under the AGPL-3.0 license so anyone can check what it does. It runs on Chrome, Firefox, Edge and Safari.',
-        sources: ['caramelSource'],
+        sources: ['caramelSource', 'honeyHelpWhat'],
     },
 ]
 
-/** Every source this page cites, in first-citation order (side-by-side rows,
- *  then the timeline, then the FAQ): the page numbers its footnotes by it. */
+/** Every source this page cites, in first-citation order (summary, side-by-side
+ *  rows, then the timeline, then the FAQ): the page numbers its footnotes by it. */
 export function honeyGuideSourceOrder(): ComparisonSourceId[] {
     const order: ComparisonSourceId[] = []
     for (const cited of [
+        HONEY_GUIDE_SUMMARY_SOURCES,
         HONEY_ROW.sources,
         CARAMEL_ROW.sources,
         ...HONEY_TIMELINE.map(event => event.sources),

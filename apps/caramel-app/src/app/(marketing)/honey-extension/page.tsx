@@ -14,6 +14,7 @@ import {
     HONEY_GUIDE_FAQ,
     HONEY_GUIDE_PATH,
     HONEY_GUIDE_SUMMARY,
+    HONEY_GUIDE_SUMMARY_SOURCES,
     HONEY_ROW,
     HONEY_VS_CARAMEL,
     honeyGuideSourceOrder,
@@ -32,7 +33,7 @@ const canonical = `${origin}${HONEY_GUIDE_PATH}`
 const checkedOn = formatComparisonDate(COMPARISON_CHECKED_ON)
 const year = COMPARISON_CHECKED_ON.getUTCFullYear()
 
-const title = `Honey Extension in ${year}: Is It Safe? What Changed | Caramel`
+const title = `Honey Extension in ${year}: What Changed and the Controversy Explained | Caramel`
 const description = `What PayPal's Honey extension does, how it makes money, the affiliate-link controversy and lawsuit, and how Caramel differs. Every claim sourced.`
 const banner = `${origin}/caramel_banner.png`
 
@@ -61,7 +62,7 @@ export const metadata: Metadata = {
 
 const sourceOrder = honeyGuideSourceOrder()
 
-function SourceRefs({ ids }: { ids: ReadonlyArray<ComparisonSourceId> }) {
+function PageSourceRefs({ ids }: { ids: ReadonlyArray<ComparisonSourceId> }) {
     return <SourceRefList ids={ids} order={sourceOrder} />
 }
 
@@ -94,6 +95,7 @@ export default function HoneyExtensionPage() {
                     </h1>
                     <p className={`${bodyText} text-lg`}>
                         {HONEY_GUIDE_SUMMARY}
+                        <PageSourceRefs ids={HONEY_GUIDE_SUMMARY_SOURCES} />
                     </p>
                     <p className="mt-4 text-sm text-gray-600 dark:text-gray-400">
                         Checked on{' '}
@@ -101,10 +103,11 @@ export default function HoneyExtensionPage() {
                             {checkedOn}
                         </time>
                         . Every statement about Honey comes from PayPal&apos;s
-                        own help center, its browser store listings, a court
-                        order or a named news outlet, numbered in the sources
-                        below. Caramel is our extension, so check those sources
-                        rather than taking our word for it.
+                        own help center, its browser store listings, the browser
+                        stores&apos; own policies, court orders or named news
+                        outlets, numbered in the sources below. Caramel is our
+                        extension, so check those sources rather than taking our
+                        word for it.
                     </p>
                 </header>
 
@@ -134,11 +137,15 @@ export default function HoneyExtensionPage() {
                                     </th>
                                     <th scope="col" className="px-4 py-3">
                                         Honey
-                                        <SourceRefs ids={HONEY_ROW.sources} />
+                                        <PageSourceRefs
+                                            ids={HONEY_ROW.sources}
+                                        />
                                     </th>
                                     <th scope="col" className="px-4 py-3">
                                         Caramel
-                                        <SourceRefs ids={CARAMEL_ROW.sources} />
+                                        <PageSourceRefs
+                                            ids={CARAMEL_ROW.sources}
+                                        />
                                     </th>
                                 </tr>
                             </thead>
@@ -189,7 +196,7 @@ export default function HoneyExtensionPage() {
                                 </time>
                                 <p className={bodyText}>
                                     {event.text}
-                                    <SourceRefs ids={event.sources} />
+                                    <PageSourceRefs ids={event.sources} />
                                 </p>
                             </li>
                         ))}
@@ -209,7 +216,7 @@ export default function HoneyExtensionPage() {
                                 <p className={bodyText}>{item.answer}</p>
                                 <p className="text-xs text-gray-500 dark:text-gray-400">
                                     Sources
-                                    <SourceRefs ids={item.sources} />
+                                    <PageSourceRefs ids={item.sources} />
                                 </p>
                             </div>
                         ))}
