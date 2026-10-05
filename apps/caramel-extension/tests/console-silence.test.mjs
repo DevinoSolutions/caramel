@@ -40,6 +40,7 @@ const SHIPPED_TO_STRANGERS = [
     'UI-helpers.js',
     'inject.js',
     'background.js',
+    'extension-activity.js',
 ]
 
 function ungatedConsoleLines(file) {

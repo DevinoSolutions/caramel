@@ -86,7 +86,9 @@ export const GROUPS = {
         ...(await tsSourcesUnder('entrypoints/popup')),
         ...(await tsSourcesUnder('../../packages/caramel-ui/src')),
     ],
-    background: ['background.js'],
+    // extension-activity.js is the worker's daily-active recorder (the popup
+    // imports only its pure Chrome check), so it is weighed with the worker.
+    background: ['background.js', 'extension-activity.js'],
 }
 
 /** Minified bytes of one group, written as a single file for size-limit. */

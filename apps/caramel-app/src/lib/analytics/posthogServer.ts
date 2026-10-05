@@ -52,6 +52,16 @@ function getActiveClient(): ActiveClient | null {
 }
 
 /**
+ * True when this deploy's server dataset routes captures somewhere
+ * (production or e2e with a complete pair). Lets a caller tell "analytics is
+ * off here" apart from a capture that FAILED — `captureServerEvent` returns
+ * `false` for both.
+ */
+export function isServerCaptureConfigured(): boolean {
+    return resolveServerTarget() !== null
+}
+
+/**
  * Capture one server-side event. Contract:
  *  - no-ops returning `false` when the dataset is disabled/unconfigured;
  *  - stamps app_id / app_version / environment / platform on every event;
@@ -64,6 +74,9 @@ export async function captureServerEvent(args: {
     event: string
     distinctId: string
     properties?: Record<string, unknown>
+    /** Deterministic event id, for a caller that may re-send the same
+     * logical event after a lost response. Omitted → the SDK generates one. */
+    uuid?: string
 }): Promise<boolean> {
     try {
         const active = getActiveClient()
@@ -71,6 +84,7 @@ export async function captureServerEvent(args: {
         await active.client.captureImmediate({
             distinctId: args.distinctId,
             event: args.event,
+            ...(args.uuid ? { uuid: args.uuid } : {}),
             properties: {
                 app_id: APP_ID,
                 app_version: APP_VERSION,

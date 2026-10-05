@@ -93,7 +93,13 @@ module.exports = [
         // features cache (storage.session, memory fallback) and the mapping of
         // the submit route's answers onto skipped-vs-error. Measured 8.4 kB
         // (was 6.41 kB): one new message route, not prose.
-        limit: '9.2 KB',
+        // 2026-10-05, raised 9.2 -> 12 kB: extension-activity.js joined
+        // this group (the Google Chrome daily-active ping's worker half —
+        // seed + SHA-256 daily id, the once-per-UTC-day state, the bounded
+        // disabled/failure cooldowns, the serialized in-flight attempt) plus
+        // the popup-only recordExtensionActivity route in background.js.
+        // Measured 10.91 kB (was 8.55 kB): one new feature, not prose.
+        limit: '12 KB',
         brotli: false,
     },
 ]

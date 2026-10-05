@@ -79,7 +79,10 @@ export default defineConfig({
                 //
                 // Evidence-based mapping (full outbound audit 2026-08-13; the
                 // ONLY server origin is the build-time baseUrl — no Sentry,
-                // no analytics, nothing third-party):
+                // nothing third-party). The daily-active ping
+                // (extension-activity.js, 2026-10-05) is Google-Chrome-only and
+                // gated on import.meta.env.BROWSER === 'chrome', so the Firefox
+                // build never sends it and nothing below changes for it:
                 //   required.browsingActivity — the toolbar badge sends every
                 //     visited https domain to /api/coupons on tab switch,
                 //     guests included, no off switch.

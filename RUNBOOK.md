@@ -412,6 +412,35 @@ The public privacy policy (`/privacy`) promises two operational things; keep the
 - **Server logs are kept up to 90 days.** Mechanisms: root `docker-compose.yml` sets `json-file` rotation (`max-size: 10m`, `max-file: 3`) on every service, and Dokploy's log-cleanup cron (`0 0 * * *`, check with `settings-getLogCleanupStatus`) truncates Traefik access logs daily. A new compose service MUST carry the same `logging:` block.
 - **Account deletion is manual, on request to hello@devino.ca within 30 days** (there is no account-deletion endpoint; the in-app "Delete my data" only removes data, not the login). Verify the requester writes from the account's address, delete the `users` row (the DB cascades sessions, accounts, savings_events, favorite_stores and coupon_reports; shared coupons are set to `submitted_by_user_id = NULL`), AND also scrub `site_suggestions.requester_email` (and `user_agent`) for that address by hand: it is NOT cascaded (`siteSuggestionIdentityWhere` in `src/lib/siteSuggestionIdentity.ts` is the matcher the in-app delete uses).
 
+## Extension DAU telemetry (Google Chrome daily active installations)
+
+What it is: opening the extension popup in Google Chrome sends at most one successful `POST /api/extension/activity` per installation per UTC day; the route captures PostHog `extension_active` with `distinct_id` = a daily-rotating SHA-256 id, properties `day`, `extension_version`, `browser: "chrome"`, server-derived `signed_in`, `platform: "extension"`, `activity_trigger: "popup_open"`, `$process_person_profile: false`. Contract + privacy model: `apps/caramel-app/src/lib/extensionActivity.ts`; extension half: `apps/caramel-extension/extension-activity.js`; decision: DESIGN.md §2(q).
+
+**Switch:** `EXTENSION_DAU_TELEMETRY_ENABLED` (server env, default `false`). Off → the route answers `{status:"disabled"}` and captures nothing in PostHog, but the extension's requests (dailyId, day, version, browser, and the bearer when signed in) still reach the first-party server — off stops capture, not the request; the extension then waits 6 h (bounded, per UTC day) before asking again. The capture also honours `POSTHOG_DATASET` (`disabled` → `{status:"disabled"}`; `e2e` → the e2e project). Shipped extension builds send the request whether or not the switch is on, so the privacy policy must describe it before the extension release that carries it.
+
+**Before turning it on in production (maintainer, in this order):**
+
+1. Deploy the website build whose `/privacy` contains the "Daily usage count (Google Chrome only)" paragraph, and update the policy's Effective Date line in `PrivacyPolicy.tsx` to the date it goes live.
+2. Chrome Web Store dashboard → the item → **Privacy practices** tab: review the data-usage categories against the ping (it records "this installation's popup was opened today" plus version/browser/signed-in yes-no; no web history, no website content). The closest category is **User activity** — decide and tick it if you read it as covering a popup-open count, keep the Limited Use certifications checked, and add the anonymous once-a-day usage count to the data-use justification text. Re-read the store listing description for any "no analytics" claim and fix it. Privacy-tab edits go out with the next submission for review.
+3. Ship the extension release containing `extension-activity.js` to the Chrome Web Store (the Edge listing reuses the Chrome zip and the Safari app is converted from it — both are excluded at runtime and need no disclosure change; Firefox's `data_collection_permissions` are deliberately unchanged because the Firefox build never sends it).
+4. Set `EXTENSION_DAU_TELEMETRY_ENABLED=true` on the production app env (Dokploy) and redeploy. Optional check: open the popup on a Chrome profile pointed at prod and look for one `extension_active` event.
+
+**DAU query** (PostHog → SQL/HogQL; DAU = unique daily ids per UTC day, never raw event count):
+
+```sql
+SELECT properties.day AS day,
+       count(DISTINCT distinct_id) AS dau,
+       countIf(DISTINCT distinct_id, properties.signed_in = true) AS dau_signed_in
+FROM events
+WHERE event = 'extension_active'
+  AND properties.environment = 'production'
+  AND timestamp >= now() - INTERVAL 30 DAY
+GROUP BY day
+ORDER BY day
+```
+
+**Limits (do not over-read the numbers):** ids rotate daily by design, so this cannot measure retention or WAU/MAU as unique installs (summing DAU over a week is not WAU); one person with two installs/profiles counts twice; a fork that spoofs the "Google Chrome" UA-CH brand is counted and a Chrome without `navigator.userAgentData` is not; a response lost after a successful capture makes the extension resend on a later popup open — the resend reuses the same deterministic event `uuid`, but PostHog only collapses exact duplicates in some ingestion paths, so treat event count as ≥ DAU and always count distinct ids; client clocks more than a day off are refused (422).
+
 ## Cross-hop trace correlation (coarse — known debt)
 
 Sentry APM tracing (`tracesSampleRate: 1`, production-only) covers

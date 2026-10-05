@@ -16,12 +16,16 @@
 // registration. What is left at module scope is inert declarations, so WXT can
 // import this file in Node at build time to read the entrypoint's options.
 import { CARAMEL_BASE_URL, CARAMEL_ENV } from './caramel-env.js'
+import { createActivityRecorder } from './extension-activity.js'
 
 // Assigned by initBackground() instead of at module evaluation: the IIFE throws
 // when neither global exists, which is exactly the case in the Node import
 // above. Every reader below sits in a function body that runs after init, so
 // the value each one sees is unchanged.
 let currentBrowser
+// The daily-active ping recorder (extension-activity.js), built by
+// initBackground() once currentBrowser exists.
+let recordActivity
 
 const caramelUrl = path => new URL(path, `${CARAMEL_BASE_URL}/`).toString()
 
@@ -406,6 +410,15 @@ export function initBackground() {
 
     keepAlive()
 
+    recordActivity = createActivityRecorder({
+        storageLocal: currentBrowser.storage.local,
+        lastError: () => currentBrowser.runtime.lastError,
+        fetchApi: fetchCaramelApi,
+        apiUrl: caramelUrl,
+        version: currentBrowser.runtime.getManifest?.()?.version,
+        logError,
+    })
+
     try {
         currentBrowser.action.setBadgeBackgroundColor({ color: '#ea6925' })
         if (currentBrowser.action.setBadgeTextColor)
@@ -693,6 +706,26 @@ export function initBackground() {
                     .catch(err => {
                         logError('fetchSupportedStores', err)
                         sendResponse({ supported: [], error: String(err) })
+                    })
+
+                return true
+            } else if (message.action === 'recordExtensionActivity') {
+                // The daily-active ping. Sent ONLY by the popup page on open
+                // (popup-core.js recordPopupActivity, which also decided this
+                // is Google Chrome); refused from anywhere else — a content
+                // script or the apply flow must never count as a use. Done
+                // here, not in the popup, so closing the popup does not cancel
+                // the request mid-flight.
+                const popupUrl = currentBrowser.runtime.getURL('popup.html')
+                if (!sender?.url?.startsWith(popupUrl)) {
+                    sendResponse({ error: 'not_popup' })
+                    return
+                }
+                recordActivity()
+                    .then(resp => sendResponse(resp))
+                    .catch(err => {
+                        logError('recordExtensionActivity', err)
+                        sendResponse({ error: String(err) })
                     })
 
                 return true
