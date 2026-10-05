@@ -23,7 +23,10 @@ export type GrowthEventName =
     | 'crossapp_click'
 
 /** Which page an in-content install CTA sat on (`install_cta_click`). */
-export type InstallCtaPlacement = 'supported_stores' | 'compare_extensions'
+export type InstallCtaPlacement =
+    | 'supported_stores'
+    | 'compare_extensions'
+    | 'honey_extension'
 
 export type GrowthEventProperties = {
     prompt_id?: string

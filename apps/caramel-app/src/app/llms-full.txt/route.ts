@@ -19,6 +19,11 @@ import {
     comparisonSourceOrder,
     formatComparisonDate,
 } from '@/lib/seo/extensionComparison'
+import {
+    HONEY_GUIDE_FAQ,
+    HONEY_GUIDE_PATH,
+    HONEY_GUIDE_SUMMARY,
+} from '@/lib/seo/honeyExtensionGuide'
 
 // The long-form companion of /llms.txt (same family as robots.ts and
 // sitemap.ts: a static public text asset, deliberately NOT a `withRoute`
@@ -46,6 +51,13 @@ const honeyTimeline = HONEY_TIMELINE.map(
 ).join('\n')
 
 const comparisonFaq = COMPARISON_FAQ.map(
+    item => `### ${item.question}\n\n${item.answer}`,
+).join('\n\n')
+
+// Every source the Honey answers cite is already in the comparison's source
+// list above (honeyExtensionGuide.ts states nothing extensionComparison.ts
+// does not), so this section adds no second list.
+const honeyGuideFaq = HONEY_GUIDE_FAQ.map(
     item => `### ${item.question}\n\n${item.answer}`,
 ).join('\n\n')
 
@@ -112,12 +124,22 @@ ${comparisonFaq}
 
 ${comparisonSources}
 
+## The Honey extension, explained
+
+The page, with numbered sources: ${origin}${HONEY_GUIDE_PATH}
+
+${HONEY_GUIDE_SUMMARY}
+
+${honeyGuideFaq}
+
 ## Key pages
 
 - [Home](${origin}/): what Caramel is and how it works.
 - [Pricing](${origin}/pricing): the plan structure — Caramel is free.
 - [Coupon extensions compared](${origin}${COMPARISON_PATH}): Caramel next to
   Honey, Capital One Shopping, SimplyCodes, Rakuten and Coupert.
+- [The Honey extension, explained](${origin}${HONEY_GUIDE_PATH}): what PayPal
+  Honey does, how it makes money, whether it is safe, and how Caramel differs.
 - [Coupons](${origin}/coupons): browse the full coupon catalog.
 - [Store coupon pages](${origin}/coupons/amazon.com): per-store codes, one page
   per store domain, e.g. /coupons/amazon.com or /coupons/nike.com.
