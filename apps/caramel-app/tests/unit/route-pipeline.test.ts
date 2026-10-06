@@ -166,6 +166,17 @@ const { prismaMock, prismaState } = vi.hoisted(() => {
     return { prismaMock, prismaState }
 })
 vi.mock('@/lib/prisma', () => ({ default: prismaMock }))
+// TEST DOUBLE: the mint records a new extension signup (analytics + the
+// users.acquisition write) through recordSignup. Its behaviour is pinned in
+// signup-capture.test.ts and extensionOAuthSession.test.ts; this file is about
+// the HTTP pipeline, so the step is stubbed out.
+vi.mock('@/lib/auth/signupCapture', () => ({
+    recordSignup: vi.fn(async () => ({
+        acquisitionSaved: true,
+        eventCaptured: true,
+        aliased: false,
+    })),
+}))
 
 function signState(payload: {
     provider: 'google' | 'apple'

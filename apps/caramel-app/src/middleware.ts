@@ -1,4 +1,4 @@
-// Canonical-origin redirects, owned by the app since the 2026-08-08 compose
+// Canonical-URL redirects, owned by the app since the 2026-08-08 compose
 // cutover (compose-type Dokploy services carry no proxy redirects, and
 // host/scheme matching is impossible in next.config redirects()).
 //
@@ -13,8 +13,15 @@
 //    `x-forwarded-proto`: Next synthesises it and Traefik rewrites it to the
 //    origin-side scheme, so an x-forwarded-proto fallback redirect-loops behind
 //    the proxy. No cf-visitor header (direct-to-origin, local, CI) = serve.
+// 3. `/foo/` -> `/foo` (308), query preserved, for every path except `/` and
+//    the first-party PostHog prefix. next.config.mjs turns Next's own
+//    trailing-slash redirect OFF (`skipTrailingSlashRedirect`) because
+//    posthog-js POSTs to trailing-slash endpoints under that prefix; this is
+//    the replacement for everything else, so no page is served at two URLs.
+//    The logic is src/lib/trailingSlash.ts (pure, unit-tested).
 //
-// A www + http request redirects ONCE, straight to the https apex.
+// Any combination redirects ONCE, straight to the final URL.
+import { trailingSlashRedirectPath } from '@/lib/trailingSlash'
 import { NextResponse, type NextRequest } from 'next/server'
 
 // Cloudflare's documented shape is exactly `{"scheme":"http"}`; matched with
@@ -28,18 +35,28 @@ export function middleware(request: NextRequest) {
     const isPlainHttp = CF_VISITOR_PLAIN_HTTP.test(
         request.headers.get('cf-visitor') ?? '',
     )
-    if (!isWww && !isPlainHttp) {
+    const strippedPath = trailingSlashRedirectPath(request.nextUrl.pathname)
+    if (!isWww && !isPlainHttp && strippedPath === null) {
         return NextResponse.next()
     }
-    const url = request.nextUrl.clone()
-    url.host = isWww ? host.slice('www.'.length) : host
-    url.protocol = 'https'
-    url.port = ''
+    // A plain URL, not `request.nextUrl.clone()`: NextURL remembers that the
+    // ORIGINAL pathname ended in "/" and re-appends it on serialization, which
+    // would turn `/foo/` into a redirect to `/foo/` (a loop).
+    const url = new URL(request.url)
+    if (isWww || isPlainHttp) {
+        url.host = isWww ? host.slice('www.'.length) : host
+        url.protocol = 'https'
+        url.port = ''
+    }
+    if (strippedPath !== null) url.pathname = strippedPath
     return NextResponse.redirect(url, 308)
 }
 
 export const config = {
     // Skip Next internals and static assets; everything else (pages + API)
-    // must redirect so no client ever operates on the www or http origin.
+    // must redirect so no client ever operates on the www or http origin, or
+    // on a trailing-slash twin of a page. (The matcher must stay a static
+    // literal — Next parses it at build time — so the telemetry exemption
+    // lives in trailingSlashRedirectPath, not here.)
     matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
 }

@@ -1,6 +1,7 @@
 import ResetPasswordTemplate from '@/emails/ResetPasswordTemplate'
 import VerificationRequestTemplate from '@/emails/VerificationRequestTemplate'
 import { createAppleSocialProviderConfig } from '@/lib/auth/appleClientSecret'
+import { handleUserCreated } from '@/lib/auth/signupHook'
 import { sendEmail } from '@/lib/email'
 import { env } from '@/lib/env'
 import { BASE_URL, clientEnv } from '@/lib/env.client'
@@ -207,6 +208,20 @@ export const auth = betterAuth({
         // Only use None when Secure is true (spec requirement); fall back to Lax for HTTP dev.
         defaultCookieAttributes: {
             sameSite: useSecure ? 'none' : 'lax',
+        },
+    },
+    // Every account created THROUGH better-auth (email sign-up, Google, Apple)
+    // is recorded once: `users.acquisition` + the `signup_completed` event.
+    // The extension's own OAuth mint creates users with raw Prisma (this hook
+    // never fires for it) and calls the same recorder itself, see
+    // extensionOAuthSession.ts. The handler never throws (signupHook.ts).
+    databaseHooks: {
+        user: {
+            create: {
+                after: async (user, context) => {
+                    await handleUserCreated(user, context)
+                },
+            },
         },
     },
     plugins: [bearer()],

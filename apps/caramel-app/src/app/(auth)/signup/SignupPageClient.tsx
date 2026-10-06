@@ -10,6 +10,7 @@ import {
 } from '@/components/auth/authStyles'
 import PasswordField from '@/components/auth/PasswordField'
 import SocialSignIn from '@/components/auth/SocialSignIn'
+import { trackGrowthEvent } from '@/lib/analytics/growthEvents'
 import { signUp } from '@/lib/auth/client'
 import { firstPasswordFailure } from '@/lib/passwordRules'
 import { useFormik } from 'formik'
@@ -70,6 +71,9 @@ export default function SignupPageClient() {
         onSubmit: async ({ username, email, password }) => {
             setLoading(true)
             setError('')
+            // Validation passed and the visitor submitted: the funnel step
+            // before signup_completed (recorded server-side).
+            trackGrowthEvent('signup_started', { method: 'email' })
             try {
                 const result = await signUp.email({
                     name: username.trim().toLowerCase(),

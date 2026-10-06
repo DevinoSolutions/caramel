@@ -25,6 +25,26 @@ let currentBrowser
 
 const caramelUrl = path => new URL(path, `${CARAMEL_BASE_URL}/`).toString()
 
+// Which store channel this build is running from, for install attribution.
+// The runtime URL scheme separates Firefox and Safari; Edge installs the same
+// Chromium build as Chrome, so only its user agent tells them apart. The four
+// values mirror EXTENSION_STORES in apps/caramel-app/src/lib/extensionInstall.ts
+// (pinned by tests/install-welcome.test.mjs).
+export const detectStoreChannel = (runtimeUrl, userAgent) => {
+    if (runtimeUrl.startsWith('moz-extension://')) return 'firefox'
+    if (runtimeUrl.startsWith('safari-web-extension://')) return 'safari'
+    return /\bEdg(e|A|iOS)?\//.test(userAgent) ? 'edge' : 'chrome'
+}
+
+// The one-time post-install page (apps/caramel-app/src/app/welcome). `iid` is
+// minted per install and becomes the PostHog event uuid there, so reloading or
+// re-opening the page can never count the install twice.
+export const welcomeUrl = (store, version, iid) =>
+    caramelUrl(
+        'welcome?' +
+            new URLSearchParams({ src: 'ext', store, v: version, iid }),
+    )
+
 // Same policy as `logError` in caramel-base.js, which the service worker
 // cannot share (separate context, no content-script files loaded here): a
 // shipped build prints nothing anywhere, and the failure is still recorded
@@ -445,6 +465,31 @@ export function initBackground() {
             }
         })
     }
+
+    // First install only: an update (reason 'update'), a browser update and a
+    // shared-module update all pass through here too and must open nothing.
+    currentBrowser.runtime.onInstalled.addListener(details => {
+        if (details?.reason !== 'install') return
+        try {
+            const url = welcomeUrl(
+                detectStoreChannel(
+                    currentBrowser.runtime.getURL(''),
+                    navigator.userAgent,
+                ),
+                currentBrowser.runtime.getManifest().version,
+                crypto.randomUUID(),
+            )
+            currentBrowser.tabs.create({ url }, () => {
+                if (currentBrowser.runtime.lastError)
+                    logError(
+                        'onInstalledWelcome',
+                        currentBrowser.runtime.lastError,
+                    )
+            })
+        } catch (err) {
+            logError('onInstalledWelcome', err)
+        }
+    })
 
     currentBrowser.runtime.onMessage.addListener(
         (message, sender, sendResponse) => {
