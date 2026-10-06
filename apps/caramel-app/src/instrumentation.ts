@@ -25,6 +25,26 @@ export async function register() {
         )
     }
 
+    // Sign in with Apple: prove the .p8 key really signs BEFORE serving. env.ts
+    // already guarantees the vars are present; only signing proves the key is
+    // a valid P-256 PKCS#8 PEM. Without this a malformed APPLE_PRIVATE_KEY
+    // would surface when better-auth builds its context (rejecting ALL auth,
+    // not just Apple) or at the first Apple sign-in. Throws -> the boot fails
+    // loudly and the deploy never goes healthy. Never logs the key.
+    if (env.APPLE_CLIENT_ID) {
+        const { getAppleClientSecret } = await import(
+            '@/lib/auth/appleClientSecret'
+        )
+        getAppleClientSecret()
+        console.log(
+            '[boot] apple client secret signed from APPLE_PRIVATE_KEY (Sign in with Apple ENABLED)',
+        )
+    } else {
+        console.log(
+            '[boot] Sign in with Apple DISABLED (APPLE_CLIENT_ID unset)',
+        )
+    }
+
     // Observability foundation: emit one server-lifecycle event per boot. This
     // is the first (and, until the feedback flow lands, only) server-side
     // PostHog capture. Dynamically imported so posthog-node never loads in the

@@ -54,6 +54,8 @@ export const GET = withRoute(
                         username: true,
                         createdAt: true,
                         emailVerified: true,
+                        // Where the account came from (written once at signup).
+                        acquisition: true,
                     },
                 }),
                 prisma.favoriteStore.findMany({

@@ -26,9 +26,9 @@ as the permanent before/after record.
 
 ## What's here
 
-- `fixtures/cart-cases.ts` — 40 labeled `CartSignals` cases in the real
+- `fixtures/cart-cases.ts` — 41 labeled `CartSignals` cases in the real
   wire shape (`apps/caramel-extension/cart-signals.js`'s
-  `collectCartSignals()` payload): 16 clear per-category exemplars, 10
+  `collectCartSignals()` payload): 16 clear per-category exemplars, 11
   realistic multi-item carts, 8 ambiguous/adversarial cases (including two
   prompt-injection attempts the model must resist), 6 junk/non-commerce
   pages.
@@ -53,8 +53,8 @@ calls, runs on every normal `pnpm test`).
 
 ## Why 0.85
 
-Primary-match rate ≥ 0.85 over the 40-case dataset. The dataset isn't
-uniformly easy: 8 of the 40 cases (20%) are deliberately ambiguous or
+Primary-match rate ≥ 0.85 over the 41-case dataset. The dataset isn't
+uniformly easy: 8 of the 41 cases (~20%) are deliberately ambiguous or
 adversarial, where even a well-behaved model may reasonably land on either
 of two accepted categories, or where resisting a prompt-injection attempt
 is the actual thing under test. 0.85 leaves room for that designed-in
@@ -73,7 +73,7 @@ Reads `OPENROUTER_API_KEY` (and `OPENROUTER_MODEL`, if you want to
 override the code default) from this package's own `.env` —
 `vitest.eval.config.ts` loads it via Node's built-in
 `process.loadEnvFile()` (no dotenv-cli, no new dependency; see
-`PLAN-F-012.md`'s CR-9). Costs real OpenRouter spend: ~40 short
+`PLAN-F-012.md`'s CR-9). Costs real OpenRouter spend: ~41 short
 completions at `temperature: 0`, well under $0.20 per full run.
 
 ## Red-proof

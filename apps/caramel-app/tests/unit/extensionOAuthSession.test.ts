@@ -71,7 +71,21 @@ const { prismaMock, prismaState } = vi.hoisted(() => {
 })
 vi.mock('@/lib/prisma', () => ({ default: prismaMock }))
 
+// TEST DOUBLE for the signup analytics step (its own behaviour is pinned in
+// signup-capture.test.ts). Here we only assert the mint CALLS it for a brand
+// new user — the mint bypasses better-auth's user.create hook, so this call is
+// the only thing that records an extension signup.
+const { recordSignupMock } = vi.hoisted(() => ({
+    recordSignupMock: vi.fn(async () => ({
+        acquisitionSaved: true,
+        eventCaptured: true,
+        aliased: false,
+    })),
+}))
+vi.mock('@/lib/auth/signupCapture', () => ({ recordSignup: recordSignupMock }))
+
 beforeEach(() => {
+    recordSignupMock.mockClear()
     prismaState.existingUser = null
     prismaState.existingAccount = null
     for (const fn of [
@@ -148,6 +162,16 @@ describe('mintExtensionSession — google and apple produce the SAME shape (the 
             expect(prismaMock.session.create.mock.calls[0][0].data.userId).toBe(
                 'new-user-id',
             )
+
+            // A brand-new account is a signup: recorded once, as an extension
+            // signup via this provider, with no request headers to read.
+            expect(recordSignupMock).toHaveBeenCalledTimes(1)
+            expect(recordSignupMock).toHaveBeenCalledWith({
+                user: expect.objectContaining({ id: 'new-user-id' }),
+                headers: null,
+                method: provider,
+                surface: 'extension',
+            })
         },
     )
 

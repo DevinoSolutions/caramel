@@ -88,7 +88,12 @@ module.exports = [
         // to the popup (measured 7.3 kB). Raised rather than left at 2.7%
         // headroom, which is close enough to the ceiling to red the next
         // honest edit — see the headroom note above.
-        limit: '7.8 KB',
+        // 2026-10-02, raised 7.8 -> 9.2 kB: the submitShopperCode handler for
+        // shopper code capture — the sign-in + server-flag gate, the 6h
+        // features cache (storage.session, memory fallback) and the mapping of
+        // the submit route's answers onto skipped-vs-error. Measured 8.4 kB
+        // (was 6.41 kB): one new message route, not prose.
+        limit: '9.2 KB',
         brotli: false,
     },
 ]

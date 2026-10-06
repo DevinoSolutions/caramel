@@ -26,6 +26,8 @@ import {
     RESTRICTED_COUPON_STATUSES,
     STATUS_META,
     VISIBLE_COUPON_STATUSES,
+    WORKED_AT_CLOCK_SKEW_TOLERANCE_MS,
+    WORKED_VERIFIED_WINDOW_MS,
 } from '../src/lib/coupons'
 
 const OUTPUT_PATH = path.resolve(
@@ -53,6 +55,11 @@ export async function renderCouponConstants(): Promise<string> {
         VISIBLE_STATUSES: [...VISIBLE_COUPON_STATUSES],
         RESTRICTED_STATUSES: [...RESTRICTED_COUPON_STATUSES],
         STATUS_META,
+        // The proof-by-use rule's timing (coupons.ts couponBadge /
+        // workedAgeMs): the popup upgrades an Unverified badge to Verified on
+        // the SAME window the app uses, and tolerates the same clock skew.
+        WORKED_VERIFIED_WINDOW_MS,
+        WORKED_AT_CLOCK_SKEW_TOLERANCE_MS,
     }
 
     const raw = `// GENERATED FILE — DO NOT EDIT BY HAND.

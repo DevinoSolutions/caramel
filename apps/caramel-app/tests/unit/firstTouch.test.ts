@@ -100,6 +100,8 @@ describe('extractFirstTouch', () => {
 describe('captureFirstTouch', () => {
     beforeEach(() => {
         window.localStorage.clear()
+        // The cm_ft cookie outlives a test the way it outlives a visit.
+        document.cookie = 'cm_ft=; Max-Age=0; Path=/'
         // Fresh module per test: the capture memoises per page load, which is
         // exactly the behaviour under test and must not leak between cases.
         vi.resetModules()

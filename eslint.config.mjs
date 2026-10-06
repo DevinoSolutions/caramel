@@ -60,11 +60,12 @@ export default [
         // path) for the same dual-invocation-base reason as the global-error
         // block above (root husky cwd vs apps/caramel-app cwd).
         //
-        // Exempt by SELECTOR: `process.env.NODE_ENV` / `NEXT_RUNTIME` —
-        // framework-managed runtime discriminators neither env module owns
-        // (env.ts is `server-only`, so client files like providers.tsx/gtag.ts
-        // cannot import it regardless), so there is no env-door home to route
-        // them through.
+        // Exempt by SELECTOR: `process.env.NODE_ENV` / `NEXT_RUNTIME` /
+        // `NEXT_PHASE` — framework-managed runtime discriminators neither env
+        // module owns (env.ts is `server-only`, so client files like
+        // providers.tsx/gtag.ts cannot import it regardless), so there is no
+        // env-door home to route them through. NEXT_PHASE (added 2026-09-30)
+        // is how RecentlyWorkedSection skips its DB read during `next build`.
         files: ['**/src/**/*.{ts,tsx}'],
         ignores: [
             // The env door itself — the one legitimate home for env reads.
@@ -95,9 +96,9 @@ export default [
                 'error',
                 {
                     selector:
-                        "MemberExpression[object.object.name='process'][object.property.name='env']:not([property.name=/^(NODE_ENV|NEXT_RUNTIME)$/])",
+                        "MemberExpression[object.object.name='process'][object.property.name='env']:not([property.name=/^(NODE_ENV|NEXT_RUNTIME|NEXT_PHASE)$/])",
                     message:
-                        'Read env only through src/lib/env.ts (server) or src/lib/env.client.ts (client) — the zod-validated env door (DESIGN.md §1). process.env.NODE_ENV / NEXT_RUNTIME (framework flags) are exempt.',
+                        'Read env only through src/lib/env.ts (server) or src/lib/env.client.ts (client) — the zod-validated env door (DESIGN.md §1). process.env.NODE_ENV / NEXT_RUNTIME / NEXT_PHASE (framework flags) are exempt.',
                 },
             ],
         },

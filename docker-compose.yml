@@ -11,6 +11,15 @@ services:
   postgres:
     image: postgres:18.4
     restart: unless-stopped
+    # Bounds container logs (3 x 10 MB per service) so the privacy policy's
+    # "server logs are kept up to 90 days" statement is true for the container
+    # side; Traefik access logs are truncated daily by Dokploy's log-cleanup
+    # cron (0 0 * * *). See RUNBOOK.md "Log retention".
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-caramel}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-caramel_password}
@@ -63,6 +72,15 @@ services:
     # from transient boot races and survives host reboots; `unless-stopped`
     # respects a manual stop (the retire/revert path).
     restart: unless-stopped
+    # Bounds container logs (3 x 10 MB per service) so the privacy policy's
+    # "server logs are kept up to 90 days" statement is true for the container
+    # side; Traefik access logs are truncated daily by Dokploy's log-cleanup
+    # cron (0 0 * * *). See RUNBOOK.md "Log retention".
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
     # App secrets (auth, email, OpenRouter, extension OAuth, …) come from the
     # env files below — later file wins on collision, so a local app .env
     # overrides a stray root one. Both optional so a clean checkout / CI can

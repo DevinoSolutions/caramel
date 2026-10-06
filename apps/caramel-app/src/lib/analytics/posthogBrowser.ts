@@ -86,17 +86,23 @@ export function startPosthogLoad(
 /**
  * `posthog.capture` stamped with the time of the CALL, not of the flush: an
  * event queued while posthog-js loads keeps the moment it happened. `onError`
- * reports a throwing capture; nothing here throws to the caller.
+ * reports a throwing capture; nothing here throws to the caller. `uuid` is the
+ * cross-source idempotency key (posthog-js CaptureOptions.uuid): pass the same
+ * value from the server for the same business event (extension_installed).
  */
 export function capturePosthog(
     event: string,
     properties: Properties,
     onError: (error: unknown) => void,
+    options: { uuid?: string } = {},
 ): void {
     const timestamp = new Date()
     withPosthog(posthog => {
         try {
-            posthog.capture(event, properties, { timestamp })
+            posthog.capture(event, properties, {
+                timestamp,
+                ...(options.uuid ? { uuid: options.uuid } : {}),
+            })
         } catch (error) {
             onError(error)
         }

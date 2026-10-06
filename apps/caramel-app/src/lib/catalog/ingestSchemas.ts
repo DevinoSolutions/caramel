@@ -19,6 +19,7 @@
 // snake_case keys throughout: they are the payload wire format and map 1:1 to
 // the SQL column names applyCatalogRows.ts writes, so there is no silent
 // rename layer between the producer and the INSERT.
+import { SHOPPER_COUPON_ID_FLOOR } from '@/lib/shopperCoupons'
 import { z } from 'zod'
 
 // Coupon ids are pipeline bigints; every id-taking route in this app
@@ -34,6 +35,16 @@ const ingestCouponIdSchema = z
         z
             .string()
             .regex(/^\d{1,18}$/, { error: 'coupon id must be 1-18 digits' }),
+    )
+    // A SECOND pipe stage, so it only ever sees an id the regex accepted (BigInt
+    // throws on a non-numeric string). Ids from SHOPPER_COUPON_ID_FLOOR up are
+    // minted by the app's shopper_coupon_id_seq (submitShopperCoupon); a supplier
+    // row in that range could be upserted over a shopper's row, so refuse it
+    // here, at the write boundary, before any SQL runs.
+    .pipe(
+        z.string().refine(id => BigInt(id) < SHOPPER_COUPON_ID_FLOOR, {
+            error: 'coupon id is in the reserved shopper range',
+        }),
     )
 
 // One coupon row = the `coupons` table columns. `updated_at` is the ONLY

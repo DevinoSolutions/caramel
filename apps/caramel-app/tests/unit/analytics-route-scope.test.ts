@@ -89,6 +89,10 @@ describe('PostHog: deferred on the landing route only', () => {
             expect(posthog.init).toHaveBeenCalledTimes(1)
             expect(posthog.init.mock.calls[0][1]).toMatchObject({
                 disable_session_recording: false,
+                // Production: events go through our own origin; the real host
+                // is only the UI host (toolbar / links).
+                api_host: '/_t/k3v',
+                ui_host: 'https://ph.example',
             })
             expect(scheduled.onFirstActivity).toHaveLength(0)
         },

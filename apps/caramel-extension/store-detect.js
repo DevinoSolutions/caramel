@@ -27,6 +27,7 @@ import {
     sleep,
 } from './caramel-base.js'
 import { CARAMEL_ENV } from './caramel-env.js'
+import { armCodeCapture } from './code-capture.js'
 import {
     _getTriedCodes,
     caramelPostNavigationVerdict,
@@ -761,8 +762,12 @@ export async function startCheckoutDetection() {
     // happened, which is precisely what the user saw before.
     if (await _resumePendingSubmit()) return
     await tryInitialize()
-    if (window.__caramel_checkout_observer) return
     const rec = await getDomainRecord(location.hostname)
+    // Shopper-typed code capture (idempotent; needs the store's own selectors,
+    // so an unsupported store has nothing to watch). Armed BEFORE the observer
+    // guard below: that guard returns early on every later detection pass.
+    if (rec) armCodeCapture(rec)
+    if (window.__caramel_checkout_observer) return
     if (!rec) return // not a supported store — don't observe at all
     let scheduled = false
     const recheck = () => {

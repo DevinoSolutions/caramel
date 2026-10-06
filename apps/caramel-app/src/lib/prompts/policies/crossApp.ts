@@ -67,7 +67,7 @@ export const CROSS_APP_PROMPT: GrowthPromptDefinition = {
         // decide() has already guaranteed at least one promotion.
         const app = CROSS_APP_PROMOTIONS[0]
         return {
-            title: `More from Devino: ${app.name}`,
+            title: app.headline,
             body: app.blurb,
             acceptLabel: `Open ${app.name}`,
             acceptHref: app.href,

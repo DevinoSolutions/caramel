@@ -68,6 +68,48 @@ describe('parseServerEnv', () => {
         expect(parsed.GOOGLE_CLIENT_ID).toBeUndefined()
     })
 
+    it('(i) Apple stays disabled when APPLE_CLIENT_ID is unset or empty — the signing vars are not required', () => {
+        expect(() => parseServerEnv(validServerFixture)).not.toThrow()
+        expect(() =>
+            parseServerEnv({ ...validServerFixture, APPLE_CLIENT_ID: '' }),
+        ).not.toThrow()
+    })
+
+    it('(i) APPLE_CLIENT_ID set without the signing vars fails boot, naming each missing one', () => {
+        const attempt = () =>
+            parseServerEnv({
+                ...validServerFixture,
+                APPLE_CLIENT_ID: 'com.example.signin',
+            })
+        expect(attempt).toThrow(/APPLE_TEAM_ID/)
+        expect(attempt).toThrow(/APPLE_KEY_ID/)
+        expect(attempt).toThrow(/APPLE_PRIVATE_KEY/)
+
+        expect(() =>
+            parseServerEnv({
+                ...validServerFixture,
+                APPLE_CLIENT_ID: 'com.example.signin',
+                APPLE_TEAM_ID: 'TEAM123456',
+                APPLE_KEY_ID: 'KEYID12345',
+            }),
+        ).toThrow(/APPLE_PRIVATE_KEY/)
+    })
+
+    it('(i) APPLE_CLIENT_ID plus all three signing vars parses; the retired APPLE_CLIENT_SECRET is not part of the schema', () => {
+        const parsed = parseServerEnv({
+            ...validServerFixture,
+            APPLE_CLIENT_ID: 'com.example.signin',
+            APPLE_TEAM_ID: 'TEAM123456',
+            APPLE_KEY_ID: 'KEYID12345',
+            APPLE_PRIVATE_KEY:
+                '-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----',
+            APPLE_CLIENT_SECRET: 'stale-static-secret',
+        })
+        expect(parsed.APPLE_KEY_ID).toBe('KEYID12345')
+        expect(parsed).not.toHaveProperty('APPLE_CLIENT_SECRET')
+        expect(SERVER_ENV_KEYS).not.toContain('APPLE_CLIENT_SECRET')
+    })
+
     it('(g) POSTHOG_DATASET defaults to disabled and accepts the enum', () => {
         expect(parseServerEnv(validServerFixture).POSTHOG_DATASET).toBe(
             'disabled',
@@ -98,6 +140,33 @@ describe('parseServerEnv', () => {
                 NEXT_PUBLIC_POSTHOG_DATASET: 'e2e',
             }),
         ).not.toThrow()
+    })
+
+    it('(h) SHOPPER_CODE_CAPTURE_ENABLED is a boolean: unset -> false, "true" -> true, "false" -> false', () => {
+        expect(
+            parseServerEnv(validServerFixture).SHOPPER_CODE_CAPTURE_ENABLED,
+        ).toBe(false)
+        expect(
+            parseServerEnv({
+                ...validServerFixture,
+                SHOPPER_CODE_CAPTURE_ENABLED: 'true',
+            }).SHOPPER_CODE_CAPTURE_ENABLED,
+        ).toBe(true)
+        expect(
+            parseServerEnv({
+                ...validServerFixture,
+                SHOPPER_CODE_CAPTURE_ENABLED: 'false',
+            }).SHOPPER_CODE_CAPTURE_ENABLED,
+        ).toBe(false)
+    })
+
+    it('(h) a typo in SHOPPER_CODE_CAPTURE_ENABLED fails boot, naming the variable (never read as off OR on)', () => {
+        expect(() =>
+            parseServerEnv({
+                ...validServerFixture,
+                SHOPPER_CODE_CAPTURE_ENABLED: 'yes',
+            }),
+        ).toThrow(/SHOPPER_CODE_CAPTURE_ENABLED/)
     })
 
     it('(g) the Playwright/CI-only read key present in app env throws (key hygiene)', () => {

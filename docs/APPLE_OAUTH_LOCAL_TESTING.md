@@ -160,6 +160,15 @@ Your local app should use the tunnel URL. Set it in `apps/caramel-app/.env`:
 # For ngrok/Cloudflare tunnel
 BETTER_AUTH_URL=https://your-tunnel-domain.com
 NEXT_PUBLIC_BASE_URL=https://your-tunnel-domain.com
+
+# Apple credentials. There is NO static client secret (2026-10-03): the app signs
+# its own ES256 client-secret JWT at runtime from the .p8 key, so all three of
+# these are required whenever APPLE_CLIENT_ID is set.
+APPLE_CLIENT_ID=com.your.services.id
+APPLE_TEAM_ID=YOURTEAMID
+APPLE_KEY_ID=YOURKEYID
+# Contents of AuthKey_<KEY_ID>.p8, one line with literal \n (real newlines work too)
+APPLE_PRIVATE_KEY=-----BEGIN PRIVATE KEY-----\nMIGT...\n-----END PRIVATE KEY-----
 ```
 
 Apple OAuth must reach your machine through the tunnel, so run the host-side dev

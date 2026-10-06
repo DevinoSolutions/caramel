@@ -21,6 +21,7 @@ import {
     tintedPanelClasses,
 } from '@/lib/profile/profileStyles'
 import type { ProfileOverview } from '@/lib/profile/types'
+import { storeLogoUrl } from '@/lib/storeLogo'
 import Image from 'next/image'
 import Link from 'next/link'
 import { useState } from 'react'
@@ -42,15 +43,7 @@ import { toast } from 'sonner'
 // a switch showing "on" while the account says "off" is the exact drift that
 // authority exists to prevent.
 
-const FAVICON_SIZE = 128
 const INITIAL_ROWS = 5
-
-function faviconFor(domain: string): string {
-    // Built exactly as site-card.tsx does — same source, same size param.
-    return `https://www.google.com/s2/favicons?sz=${FAVICON_SIZE}&domain_url=${encodeURIComponent(
-        domain,
-    )}`
-}
 
 export default function SavingsSection({
     savings,
@@ -195,7 +188,9 @@ export default function SavingsSection({
                                         className={listRowClasses}
                                     >
                                         <Image
-                                            src={faviconFor(event.storeDomain)}
+                                            src={storeLogoUrl(
+                                                event.storeDomain,
+                                            )}
                                             alt=""
                                             width={40}
                                             height={40}

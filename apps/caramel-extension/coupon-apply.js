@@ -382,6 +382,219 @@ export function caramelPostNavigationVerdict(rec, code) {
     return null
 }
 
+/* --------------------------------------------------  cart snapshot + verdict
+ * The before-picture and the after-reading of one coupon submission, shared by
+ * two callers that differ only in WHO pressed the button: applyCoupon (we typed
+ * and clicked) and code-capture.js (the shopper did). Extracted from
+ * applyCoupon unchanged (2026-10-02) so a shopper-typed code is judged by the
+ * exact rule our own attempts are — a second, drifting copy of "did the store
+ * accept it?" would be a defect. */
+
+/* Everything the verdict is compared against, read BEFORE the submission.
+ * Synchronous on purpose: capture-phase listeners must snapshot before the
+ * store's own handler reacts to the shopper's click. */
+// Called from code-capture.js (cross-file content-script call).
+export function caramelSnapshotCart(rec) {
+    const hasPriceCfg = !!rec.priceContainer
+    const original = hasPriceCfg
+        ? getPrice(rec.priceContainer, { returnLargest: true })
+        : NaN
+    // EVERY number the container held before we touched it — the post-apply
+    // read needs to know which prices are new (see its comment).
+    const originalPrices = hasPriceCfg ? _caramelLastPrices.slice() : []
+
+    // Snapshot DOM signals BEFORE we apply, so we can compare after.
+    const appliedSel = findAppliedSelector(rec)
+    const beforeAppliedNodes = caramelAcceptedRowCount(appliedSel)
+    const errorBaseline = snapshotErrorState(rec)
+    const priorAreaText = _caramelCouponAreaText(rec)
+    return {
+        hasPriceCfg,
+        original,
+        originalPrices,
+        appliedSel,
+        beforeAppliedNodes,
+        errorBaseline,
+        priorAreaText,
+    }
+}
+
+/* Waits for the store's answer to `opts.code`, then applies the success rules.
+ * Resolves { success, priceDropped, newTotal, committed, errorMsg, errorIsNew,
+ * appliedRowsText }.
+ * `opts.timeoutMs` bounds the wait for the FIRST observable signal (default
+ * 10s). `opts.redact` keeps the code and page text out of this helper's log
+ * lines (used for shopper-typed codes). Callers must invoke this synchronously after the submission (or, for
+ * the shopper's capture-phase click, synchronously with the snapshot) because
+ * the waiter's own baselines are taken at call time. */
+// Called from code-capture.js (cross-file content-script call).
+export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
+    const code = opts?.code
+    // Polaris (Shopify) checkouts often respond in 5-8s for the apply
+    // round-trip — 4s was clipping valid codes. Bumped to 10s; the loop
+    // still races so a faster site exits as soon as a signal lands.
+    const APPLY_WAIT_MS = opts?.timeoutMs ?? 10000
+    const {
+        hasPriceCfg,
+        original,
+        originalPrices,
+        appliedSel,
+        beforeAppliedNodes,
+        errorBaseline,
+        priorAreaText,
+    } = snapshot
+
+    /* 4] wait for result — smart waiter: poll DOM up to APPLY_WAIT_MS for the
+         FIRST observable signal (success row appears OR error region
+         gains text). Many sites (logos.com, hybris-style carts) need
+         1.5-3s to render their applied row; fixed 1.2s sleeps cause
+         the next attempt to mis-attribute the prior code's row. */
+    async function waitForCartSignal(maxMs) {
+        const baseSuccess = qAll(appliedSel).length
+        // Use _firstVisibleErrorEl so multi-error-container sites
+        // (paragonsports-class — empty placeholder + real error) aren't
+        // permanently latched to the empty placeholder's "" baseline.
+        const baseErrEl = _firstVisibleErrorEl(rec)
+        const baseErr = baseErrEl ? (baseErrEl.innerText || '').trim() : ''
+        const startedAt = performance.now()
+        while (performance.now() - startedAt < maxMs) {
+            const nowSuccess = qAll(appliedSel).length
+            if (nowSuccess > baseSuccess) return 'committed'
+            const errEl = _firstVisibleErrorEl(rec)
+            if (errEl && _isVisible(errEl)) {
+                const t = (errEl.innerText || '').trim()
+                if (t.length && t !== baseErr) return 'errored'
+            }
+            await sleep(200)
+        }
+        return 'timeout-' + maxMs + 'ms'
+    }
+    let priceEl = null
+    if (hasPriceCfg) {
+        priceEl =
+            qOne(rec.priceContainer) ||
+            document.getElementById(
+                rec.priceContainer.match(/\[id=['"]([^'"]+)['"]\]/)?.[1] || '',
+            )
+    }
+    const waiters = [waitForCartSignal(APPLY_WAIT_MS)]
+    // A price-watch timeout means "the total didn't change" — that's a
+    // no-signal outcome, NOT a coupon error. Let it RESOLVE (swallow the
+    // reject) so a failed apply falls through to the real committed / error-
+    // text detection below, instead of aborting into the catch with a
+    // synthetic "waitForTextChange timeout" errorMsg. That synthetic error
+    // was being misread by the loop as a cart "signal" (sawSignal=true),
+    // defeating the no-signal early-exit and making dead checkouts churn all
+    // 8 codes (~80-100s) instead of bailing after ~2 (~20s).
+    if (priceEl)
+        waiters.push(
+            waitForTextChange(priceEl, APPLY_WAIT_MS).catch(
+                () => 'price-nochange',
+            ),
+        )
+
+    const via = await Promise.race(waiters)
+    log('Wait finished via', via)
+
+    // 5] Determine outcome:
+    //   - committed = something visibly applied (DOM mutation)
+    //   - stuck     = the row was still there 1.2s later (site didn't
+    //                 auto-revert it). On no-priceContainer sites this
+    //                 is the real "did it apply?" signal — sites like
+    //                 logos.com keep an aria-live error region with
+    //                 stale text that defeats errorMsg-based detection.
+    //   - errorMsg  = error text appeared near input
+    //   - savings   = price actually dropped
+    const afterAppliedNodes = caramelAcceptedRowCount(appliedSel)
+    const committed = afterAppliedNodes > beforeAppliedNodes
+    let stuck = false
+    if (committed) {
+        await sleep(1200)
+        const stuckCount = caramelAcceptedRowCount(appliedSel)
+        stuck = stuckCount > beforeAppliedNodes
+    }
+    const errorMsg = detectCouponError(rec, errorBaseline, code)
+    // Quotable only if the store said it BECAUSE of us (see
+    // _caramelCouponAreaText). Detection above is deliberately untouched.
+    const errorIsNew = caramelQuoteIsAttributable(errorMsg, priorAreaText)
+    if (errorMsg && !errorIsNew) {
+        // opts.redact: a SHOPPER-typed code (code-capture.js) never reaches a
+        // log line, and neither does the page text, which can quote it. The
+        // runner's own attempts keep their full diagnostics.
+        log(
+            'AUTO_INSERT_ERROR_NOT_ATTRIBUTABLE',
+            opts?.redact
+                ? { redacted: true }
+                : {
+                      code,
+                      text: String(errorMsg).slice(0, 140),
+                      reason: 'this text was already on the page before we submitted — it is the store’s furniture, not its verdict',
+                  },
+        )
+    }
+    let newTotal = NaN
+    let priceDropped = false
+    if (hasPriceCfg) {
+        const afterLargest = getPrice(rec.priceContainer, {
+            returnLargest: true,
+        })
+        const afterPrices = _caramelLastPrices.slice()
+        /* The post-apply total is the number that actually MOVED, not the
+         * biggest number in the box. `returnLargest` answers a different
+         * question, and it is the wrong one the moment the price container
+         * also holds an MSRP strikethrough or a "$500 off" banner: that
+         * number never changes, so it wins `returnLargest` both before and
+         * after, `priceDropped` reads false, and the discount measures as
+         * exactly zero. The user is then told their total "hasn't changed
+         * yet — it may need a minimum spend" while the cart on screen went
+         * from $120.00 to $108.00, and the $12 is never banked. Proved in a
+         * real browser on naturepedic's live config (tests/…-multi-price).
+         *
+         * caramelBaselineFor already stops a stray big number from
+         * OVERstating a saving; this is the mirror defect — the same stray
+         * number silently UNDERstating one to zero.
+         *
+         * A candidate must be BOTH below the pre-apply reading AND absent
+         * from the pre-apply set: a static second line (shipping, a fee)
+         * that was always there is not a discounted total, and treating it
+         * as one would declare success on a code that did nothing. The
+         * largest qualifying candidate is taken — the most conservative
+         * one, since a higher total yields a smaller claimed saving. */
+        const moved = afterPrices.filter(
+            p => !isNaN(p) && p < original && !originalPrices.includes(p),
+        )
+        newTotal = moved.length ? Math.max(...moved) : afterLargest
+        priceDropped = !isNaN(newTotal) && newTotal < original
+    }
+    // Success rules (in priority order):
+    //  1. price dropped                       → real win
+    //  2. committed AND row stuck             → site accepted it (no
+    //                                            need to trust the
+    //                                            often-noisy error region)
+    //  3. committed AND no errorMsg           → fallback for sites that
+    //                                            don't keep their list mounted
+    //  4. otherwise                           → fail
+    const success =
+        priceDropped || (committed && stuck) || (committed && !errorMsg)
+    // What the applied rows SAY (only read when something committed): lets a
+    // caller tell a row that names the code from a generic "redeemed" row.
+    const appliedRowsText = committed
+        ? qAll(appliedSel)
+              .filter(el => !caramelRowReadsRejected(el))
+              .map(el => (el.innerText ?? el.textContent) || '')
+              .join(' ')
+        : ''
+    return {
+        success,
+        priceDropped,
+        newTotal,
+        committed,
+        errorMsg,
+        errorIsNew,
+        appliedRowsText,
+    }
+}
+
 /* --------------------------------------------------  coupon attempt */
 // Called from other split content-script files (cross-file content-script
 // call — oxlint's per-file analysis can't see it) and from
@@ -476,19 +689,9 @@ export async function applyCoupon(code, rec) {
             return { success: false, applied: false }
         }
 
-        const hasPriceCfg = !!rec.priceContainer
-        const original = hasPriceCfg
-            ? getPrice(rec.priceContainer, { returnLargest: true })
-            : NaN
-        // EVERY number the container held before we touched it — the post-apply
-        // read below needs to know which prices are new (see its comment).
-        const originalPrices = hasPriceCfg ? _caramelLastPrices.slice() : []
-
-        // Snapshot DOM signals BEFORE we apply, so we can compare after.
-        const appliedSel = findAppliedSelector(rec)
-        const beforeAppliedNodes = caramelAcceptedRowCount(appliedSel)
-        const errorBaseline = snapshotErrorState(rec)
-        const priorAreaText = _caramelCouponAreaText(rec)
+        // Everything the verdict will be compared against, captured BEFORE we
+        // touch the page (see caramelSnapshotCart).
+        const snapshot = caramelSnapshotCart(rec)
 
         /* 3] fill & apply — choose method dynamically:
              a) if applyBtn === input → auto-validate on input event
@@ -560,135 +763,10 @@ export async function applyCoupon(code, rec) {
             )
         }
 
-        /* 4] wait for result — smart waiter: poll DOM up to 4s for the
-             FIRST observable signal (success row appears OR error region
-             gains text). Many sites (logos.com, hybris-style carts) need
-             1.5-3s to render their applied row; fixed 1.2s sleeps cause
-             the next attempt to mis-attribute the prior code's row. */
-        async function waitForCartSignal(maxMs) {
-            const baseSuccess = qAll(appliedSel).length
-            // Use _firstVisibleErrorEl so multi-error-container sites
-            // (paragonsports-class — empty placeholder + real error) aren't
-            // permanently latched to the empty placeholder's "" baseline.
-            const baseErrEl = _firstVisibleErrorEl(rec)
-            const baseErr = baseErrEl ? (baseErrEl.innerText || '').trim() : ''
-            const startedAt = performance.now()
-            while (performance.now() - startedAt < maxMs) {
-                const nowSuccess = qAll(appliedSel).length
-                if (nowSuccess > baseSuccess) return 'committed'
-                const errEl = _firstVisibleErrorEl(rec)
-                if (errEl && _isVisible(errEl)) {
-                    const t = (errEl.innerText || '').trim()
-                    if (t.length && t !== baseErr) return 'errored'
-                }
-                await sleep(200)
-            }
-            return 'timeout-' + maxMs + 'ms'
-        }
-        let priceEl = null
-        if (hasPriceCfg) {
-            priceEl =
-                qOne(rec.priceContainer) ||
-                document.getElementById(
-                    rec.priceContainer.match(/\[id=['"]([^'"]+)['"]\]/)?.[1] ||
-                        '',
-                )
-        }
-        // Polaris (Shopify) checkouts often respond in 5-8s for the apply
-        // round-trip — 4s was clipping valid codes. Bumped to 10s; the loop
-        // still races so a faster site exits as soon as a signal lands.
-        const APPLY_WAIT_MS = 10000
-        const waiters = [waitForCartSignal(APPLY_WAIT_MS)]
-        // A price-watch timeout means "the total didn't change" — that's a
-        // no-signal outcome, NOT a coupon error. Let it RESOLVE (swallow the
-        // reject) so a failed apply falls through to the real committed / error-
-        // text detection below, instead of aborting into the catch with a
-        // synthetic "waitForTextChange timeout" errorMsg. That synthetic error
-        // was being misread by the loop as a cart "signal" (sawSignal=true),
-        // defeating the no-signal early-exit and making dead checkouts churn all
-        // 8 codes (~80-100s) instead of bailing after ~2 (~20s).
-        if (priceEl)
-            waiters.push(
-                waitForTextChange(priceEl, APPLY_WAIT_MS).catch(
-                    () => 'price-nochange',
-                ),
-            )
-
-        const via = await Promise.race(waiters)
-        log('Wait finished via', via)
-
-        // 5] Determine outcome:
-        //   - committed = something visibly applied (DOM mutation)
-        //   - stuck     = the row was still there 1.2s later (site didn't
-        //                 auto-revert it). On no-priceContainer sites this
-        //                 is the real "did it apply?" signal — sites like
-        //                 logos.com keep an aria-live error region with
-        //                 stale text that defeats errorMsg-based detection.
-        //   - errorMsg  = error text appeared near input
-        //   - savings   = price actually dropped
-        const afterAppliedNodes = caramelAcceptedRowCount(appliedSel)
-        const committed = afterAppliedNodes > beforeAppliedNodes
-        let stuck = false
-        if (committed) {
-            await sleep(1200)
-            const stuckCount = caramelAcceptedRowCount(appliedSel)
-            stuck = stuckCount > beforeAppliedNodes
-        }
-        const errorMsg = detectCouponError(rec, errorBaseline, code)
-        // Quotable only if the store said it BECAUSE of us (see
-        // _caramelCouponAreaText). Detection above is deliberately untouched.
-        const errorIsNew = caramelQuoteIsAttributable(errorMsg, priorAreaText)
-        if (errorMsg && !errorIsNew) {
-            log('AUTO_INSERT_ERROR_NOT_ATTRIBUTABLE', {
-                code,
-                text: String(errorMsg).slice(0, 140),
-                reason: 'this text was already on the page before we submitted — it is the store’s furniture, not its verdict',
-            })
-        }
-        let newTotal = NaN
-        let priceDropped = false
-        if (hasPriceCfg) {
-            const afterLargest = getPrice(rec.priceContainer, {
-                returnLargest: true,
-            })
-            const afterPrices = _caramelLastPrices.slice()
-            /* The post-apply total is the number that actually MOVED, not the
-             * biggest number in the box. `returnLargest` answers a different
-             * question, and it is the wrong one the moment the price container
-             * also holds an MSRP strikethrough or a "$500 off" banner: that
-             * number never changes, so it wins `returnLargest` both before and
-             * after, `priceDropped` reads false, and the discount measures as
-             * exactly zero. The user is then told their total "hasn't changed
-             * yet — it may need a minimum spend" while the cart on screen went
-             * from $120.00 to $108.00, and the $12 is never banked. Proved in a
-             * real browser on naturepedic's live config (tests/…-multi-price).
-             *
-             * caramelBaselineFor already stops a stray big number from
-             * OVERstating a saving; this is the mirror defect — the same stray
-             * number silently UNDERstating one to zero.
-             *
-             * A candidate must be BOTH below the pre-apply reading AND absent
-             * from the pre-apply set: a static second line (shipping, a fee)
-             * that was always there is not a discounted total, and treating it
-             * as one would declare success on a code that did nothing. The
-             * largest qualifying candidate is taken — the most conservative
-             * one, since a higher total yields a smaller claimed saving. */
-            const moved = afterPrices.filter(
-                p => !isNaN(p) && p < original && !originalPrices.includes(p),
-            )
-            newTotal = moved.length ? Math.max(...moved) : afterLargest
-            priceDropped = !isNaN(newTotal) && newTotal < original
-        }
-        // Success rules (in priority order):
-        //  1. price dropped                       → real win
-        //  2. committed AND row stuck             → site accepted it (no
-        //                                            need to trust the
-        //                                            often-noisy error region)
-        //  3. committed AND no errorMsg           → fallback for sites that
-        //                                            don't keep their list mounted
-        //  4. otherwise                           → fail
-        const success =
-            priceDropped || (committed && stuck) || (committed && !errorMsg)
+        /* 4] wait for result and read the verdict — see
+             caramelAwaitCouponVerdict for the race and the success rules. */
+        const { success, newTotal, committed, errorMsg, errorIsNew } =
+            await caramelAwaitCouponVerdict(rec, snapshot, { code })
         const elapsed = performance.now() - attemptStart
         log('AUTO_INSERT_ATTEMPT_END', code, {
             success,

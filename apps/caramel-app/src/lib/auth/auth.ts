@@ -1,5 +1,7 @@
 import ResetPasswordTemplate from '@/emails/ResetPasswordTemplate'
 import VerificationRequestTemplate from '@/emails/VerificationRequestTemplate'
+import { createAppleSocialProviderConfig } from '@/lib/auth/appleClientSecret'
+import { handleUserCreated } from '@/lib/auth/signupHook'
 import { sendEmail } from '@/lib/email'
 import { env } from '@/lib/env'
 import { BASE_URL, clientEnv } from '@/lib/env.client'
@@ -112,15 +114,29 @@ export const auth = betterAuth({
             clientSecret: env.GOOGLE_CLIENT_SECRET as string,
             prompt: 'select_account',
         },
-        apple: {
-            clientId: env.APPLE_CLIENT_ID as string,
-            clientSecret: env.APPLE_CLIENT_SECRET as string,
+        // Apple's client secret is an ES256 JWT we SIGN at runtime (capped at
+        // ~6 months; the old static APPLE_CLIENT_SECRET env value expired
+        // 2026-09-27 — see src/lib/auth/appleClientSecret.ts).
+        //
+        // better-auth 1.6.23 resolves the Apple config ONCE (createAuthContext,
+        // dist/context/create-context.mjs:97-102) and hands that same object,
+        // unspread, to its Apple provider, which reads `options.clientSecret`
+        // at every token exchange. So the config exposes `clientSecret` as a
+        // getter that re-signs (synchronously) when under 30 days remain: the
+        // web path stays fresh for the life of the process, like the extension
+        // route that calls getAppleClientSecret() per request. Do not spread
+        // or clone this object (a copy would freeze the secret).
+        //
+        // Apple unset = disabled: the provider is still registered with no
+        // credentials and better-auth refuses to start a sign-in
+        // (CLIENT_ID_AND_SECRET_REQUIRED) because the empty secret is falsy.
+        apple: createAppleSocialProviderConfig({
             // Use production domain for Apple redirect URI (Apple doesn't accept localhost)
             // The callback will be handled on production, then redirect back to localhost
             redirectURI:
                 env.APPLE_REDIRECT_URI ||
                 'https://grabcaramel.com/api/auth/callback/apple',
-        },
+        }),
     },
     user: {
         additionalFields: {
@@ -192,6 +208,20 @@ export const auth = betterAuth({
         // Only use None when Secure is true (spec requirement); fall back to Lax for HTTP dev.
         defaultCookieAttributes: {
             sameSite: useSecure ? 'none' : 'lax',
+        },
+    },
+    // Every account created THROUGH better-auth (email sign-up, Google, Apple)
+    // is recorded once: `users.acquisition` + the `signup_completed` event.
+    // The extension's own OAuth mint creates users with raw Prisma (this hook
+    // never fires for it) and calls the same recorder itself, see
+    // extensionOAuthSession.ts. The handler never throws (signupHook.ts).
+    databaseHooks: {
+        user: {
+            create: {
+                after: async (user, context) => {
+                    await handleUserCreated(user, context)
+                },
+            },
         },
     },
     plugins: [bearer()],

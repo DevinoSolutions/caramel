@@ -3,6 +3,7 @@
 import InstallSurfaceGate from '@/components/growth/InstallSurfaceGate'
 import Loader from '@/components/Loader'
 import { promptSupportOnFailure } from '@/lib/feedback/promptSupportOnFailure'
+import { storeLogoUrl } from '@/lib/storeLogo'
 import type { Coupon, CouponFilters } from '@/types/coupon'
 import { MagnifyingGlassIcon } from '@heroicons/react/24/outline'
 import { AnimatePresence, motion } from 'framer-motion'
@@ -32,9 +33,15 @@ interface CouponsSectionProps {
      * baseline) passes no slot and its DOM is byte-identical to before. Only
      * /coupons/[store], which has no baseline, fills it. */
     heroAction?: React.ReactNode
+    /** Codes per page: the server-rendered first page and every "load more"
+     *  fetch. MUST equal the number of `initialCoupons` the server rendered,
+     *  or page 2's offset re-lists or skips rows. /coupons keeps the default
+     *  (a visual-regression baseline); the store page renders more (see
+     *  STORE_PAGE_SIZE there). */
+    pageSize?: number
 }
 
-const ITEMS_PER_PAGE = 5
+const DEFAULT_PAGE_SIZE = 5
 
 export default function CouponsSection({
     defaultFilters,
@@ -44,7 +51,9 @@ export default function CouponsSection({
     heroTitle = 'All Coupons',
     heroSubtitle = 'Browse coupon codes, promo codes, and offers.',
     heroAction,
+    pageSize = DEFAULT_PAGE_SIZE,
 }: CouponsSectionProps) {
+    const ITEMS_PER_PAGE = pageSize
     const MIN_LOADING_DELAY_MS = 350
 
     const initialFiltersState: CouponFilters = {
@@ -76,11 +85,7 @@ export default function CouponsSection({
     const sentinelRef = useRef<HTMLDivElement | null>(null)
 
     const storeDomain = (defaultFilters?.site || filters.site || '').trim()
-    const storeLogo = storeDomain
-        ? `https://www.google.com/s2/favicons?sz=128&domain_url=${encodeURIComponent(
-              storeDomain,
-          )}`
-        : '/full-logo.png'
+    const storeLogo = storeDomain ? storeLogoUrl(storeDomain) : '/full-logo.png'
     const sidebarTitle = storeDomain || 'Caramel'
     const sidebarDescription = storeDomain
         ? `Save at ${storeDomain} with coupon codes. Caramel applies the best deals automatically at checkout.`
@@ -198,7 +203,7 @@ export default function CouponsSection({
                 }
             }
         },
-        [filters],
+        [filters, ITEMS_PER_PAGE],
     )
 
     // Trigger fetch when filters change. Keyed on the last-FETCHED filter

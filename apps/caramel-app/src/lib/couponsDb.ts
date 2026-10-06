@@ -110,6 +110,53 @@ export const CouponListRowSchema = z.object({
 })
 export type CouponListRow = z.infer<typeof CouponListRowSchema>
 
+/**
+ * couponsRepo.listStoreCoupons's list rows: CouponListRow plus `isSupplier`
+ * (`submission_source IS NULL`, i.e. NOT a shopper-submitted row). Only the
+ * store page's list read selects it, so CouponListRowSchema itself stays strict
+ * for every other read; listStoreCoupons strips the flag after reading it, so it
+ * never reaches a component prop or an API payload.
+ */
+export const StoreListRowSchema = CouponListRowSchema.extend({
+    isSupplier: z.boolean(),
+})
+
+/**
+ * couponsRepo.ts listRecentlyWorkedCoupons — the landing page's "Codes that
+ * just worked": a visible coupon joined to its app-owned coupon_signals row.
+ * The coupon fields reuse CouponListRowSchema's own definitions (same id
+ * normalization, same tolerant discount_type) so the two reads cannot parse
+ * the same column differently. `site` is non-null by the query's
+ * `c.site IS NOT NULL` (a per-query guarantee, as with CouponListRow).
+ * `lastWorkedAt` is `coupon_signals.last_worked_at`, non-null by the query's
+ * `s.last_worked_at IS NOT NULL`; `z.coerce.date()` for the same driver tolerance
+ * RecentStoreRowSchema documents.
+ */
+export const RecentlyWorkedCouponRowSchema = CouponListRowSchema.pick({
+    id: true,
+    code: true,
+    site: true,
+    title: true,
+    discount_type: true,
+    discount_amount: true,
+}).extend({
+    lastWorkedAt: z.coerce.date(),
+})
+export type RecentlyWorkedCouponRow = z.infer<
+    typeof RecentlyWorkedCouponRowSchema
+>
+
+/** `SELECT id` / `... RETURNING id` — couponsRepo.submitShopperCoupon's dedupe
+ *  lookup and its INSERT's returned id. */
+export const CouponIdRowSchema = z.object({
+    id: couponIdSchema,
+})
+
+/** `SELECT (EXISTS(...) OR EXISTS(...)) AS known` — couponsRepo.isKnownStore. */
+export const KnownStoreRowSchema = z.object({
+    known: z.boolean(),
+})
+
 /** `SELECT COUNT(*)::int AS total` — coupons/route.ts + [store]/page.tsx. */
 export const TotalCountRowSchema = z.object({
     total: z.number(),

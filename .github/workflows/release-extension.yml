@@ -152,12 +152,22 @@ jobs:
             fi
           done
 
-          curl -sS --fail-with-body -o /tmp/cws-token.json \
+          # The token response goes to a file, so a failure has to print
+          # Google's reason itself: a bare "curl: (22) ... 400" hid whether
+          # the refresh token was revoked (invalid_grant) or the client was
+          # wrong (invalid_client) on the v1.4.3 run. Only `error` and
+          # `error_description` are printed; neither carries a secret.
+          http=$(curl -sS -o /tmp/cws-token.json -w '%{http_code}' \
             -X POST https://oauth2.googleapis.com/token \
             --data-urlencode "client_id=${CHROME_CLIENT_ID}" \
             --data-urlencode "client_secret=${CHROME_CLIENT_SECRET}" \
             --data-urlencode "refresh_token=${CHROME_REFRESH_TOKEN}" \
-            --data-urlencode "grant_type=refresh_token"
+            --data-urlencode "grant_type=refresh_token")
+          if [ "$http" != "200" ]; then
+            reason=$(jq -r '"\(.error // "unknown"): \(.error_description // "no description")"' /tmp/cws-token.json 2>/dev/null || echo "unparseable response")
+            echo "::error::Google OAuth token exchange returned HTTP $http ($reason). invalid_grant means CHROME_REFRESH_TOKEN is expired or revoked and must be re-minted; invalid_client means CHROME_CLIENT_ID/CHROME_CLIENT_SECRET are wrong."
+            exit 1
+          fi
           access_token=$(jq -er '.access_token' /tmp/cws-token.json)
 
           http=$(curl -sS -o /tmp/cws-item.json -w '%{http_code}' \

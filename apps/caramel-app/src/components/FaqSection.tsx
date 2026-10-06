@@ -1,6 +1,7 @@
 import { faqItems } from '@/lib/faqItems'
 import { faqPageJsonLd, jsonLdString } from '@/lib/jsonLd'
 import { COMPARISON_PATH } from '@/lib/seo/extensionComparison'
+import { HONEY_GUIDE_PATH } from '@/lib/seo/honeyExtensionGuide'
 import Link from 'next/link'
 import { FaChevronDown } from 'react-icons/fa'
 
@@ -67,6 +68,13 @@ export default function FaqSection(): React.JSX.Element {
                             className="font-semibold text-caramel hover:underline"
                         >
                             See the coupon extensions compared
+                        </Link>
+                        , or read{' '}
+                        <Link
+                            href={HONEY_GUIDE_PATH}
+                            className="font-semibold text-caramel hover:underline"
+                        >
+                            what changed with the Honey extension
                         </Link>
                         .
                     </p>

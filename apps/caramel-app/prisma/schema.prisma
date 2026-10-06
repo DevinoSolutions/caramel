@@ -91,12 +91,22 @@ model User {
   // user signs in on must agree, and a localStorage flag cannot travel.
   growthPromptsEnabled Boolean      @default(true) @map("growth_prompts_enabled")
 
+  // Where this user came from — the first-touch record (utm_*, ad click ids,
+  // referrer domain, landing path) the browser put in the `cm_ft` cookie, plus
+  // a derived `source` and the `signup_surface` (web | extension). WRITE-ONCE
+  // at signup by src/lib/auth/signupCapture.ts (an UPDATE guarded on "still
+  // NULL", so a retry or a second hook can never rewrite history). NULL = a
+  // user created before this column existed. It is the copy that survives an
+  // ad blocker: PostHog may never have seen the visit, our database did.
+  acquisition Json?
+
   accounts          Account[]
   sessions          Session[]
   couponReports     CouponReport[]
   favoriteStores    FavoriteStore[]
   savingsEvents     SavingsEvent[]
   siteSuggestions   SiteSuggestion[]
+  submittedCoupons  Coupon[]
 
   @@map("users")
 }
@@ -121,6 +131,11 @@ model CouponSignal {
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at")
 
+  // The landing page's "Codes that just worked" read
+  // (couponsRepo.listRecentlyWorkedCoupons) walks successful applies
+  // newest-first and stops at its LIMIT; without this it would scan and sort
+  // every signal.
+  @@index([lastWorkedAt(sort: Desc)])
   @@map("coupon_signals")
 }
 
@@ -177,6 +192,19 @@ model Coupon {
   // omits it: seed rows + insert safety), never rewritten on update.
   updatedAt           DateTime  @default(now()) @map("updated_at")
 
+  // Shopper-submitted codes (owner-directed 2026-10-02, submitShopperCoupon in
+  // couponsRepo.ts). BOTH are NULL on every supplier row; both are set together
+  // on a shopper row, whose id comes from the `shopper_coupon_id_seq` sequence
+  // (>= SHOPPER_COUPON_ID_FLOOR, hand-written in the shopper_coupon_submissions
+  // migration because Prisma cannot model a sequence). Ingest refuses ids in
+  // that range, so a supplier push never overwrites these rows.
+  // `submissionSource` is an OPEN string ('checkout' | 'manual'), declared once
+  // in shopperCoupons.ts. The FK is SET NULL: deleting an account drops the
+  // attribution, not the code.
+  submittedByUserId String?  @map("submitted_by_user_id")
+  submittedBy       User?    @relation(fields: [submittedByUserId], references: [id], onDelete: SetNull)
+  submissionSource  String?  @map("submission_source")
+
   // Back-relations for the login-features tables below. Relation fields are
   // Prisma-side only — they add no column to `coupons` and leave the ingest
   // write path untouched.
@@ -185,6 +213,8 @@ model Coupon {
 
   @@index([site])
   @@index([status, expired])
+  // The per-shopper daily-cap count (submitShopperCoupon).
+  @@index([submittedByUserId, createdAt])
   @@map("coupons")
 }
 

@@ -19,6 +19,7 @@ const DISALLOWED_PATHS = [
     '/login',
     '/signup',
     '/verify',
+    '/welcome',
     '/profile',
     '/monitoring',
 ]

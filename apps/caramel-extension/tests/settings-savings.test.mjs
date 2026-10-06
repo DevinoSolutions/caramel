@@ -67,6 +67,7 @@ describe('caramel-base.js settings helpers', () => {
             autoApply: true,
             disabledSites: [],
             syncSavings: false,
+            shareCheckoutCodes: true,
         })
         expect(await helpers.caramelPromptAllowed('shop.example.com')).toBe(
             true,
@@ -100,6 +101,7 @@ describe('caramel-base.js settings helpers', () => {
             autoApply: false,
             disabledSites: ['a.com'],
             syncSavings: false,
+            shareCheckoutCodes: true,
         })
     })
 })

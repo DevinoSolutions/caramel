@@ -7,6 +7,7 @@ import {
 } from '@/lib/brandLinks'
 import { BASE_URL } from '@/lib/env.client'
 import { COMPARISON_PATH } from '@/lib/seo/extensionComparison'
+import { HONEY_GUIDE_PATH } from '@/lib/seo/honeyExtensionGuide'
 
 // Deliberately NOT a `withRoute` handler: withRoute owns the /api surface
 // (CORS, rate limits, origin gates, zod bodies). This is a static public text
@@ -46,6 +47,9 @@ const LLMS_TXT = `# Caramel
 - [Coupon extensions compared](${origin}${COMPARISON_PATH}): Honey, Capital
   One Shopping, SimplyCodes, Rakuten, Coupert and Caramel side by side (price,
   how each makes money, rewards, accounts, browsers), every claim sourced.
+- [The Honey extension, explained](${origin}${HONEY_GUIDE_PATH}): what PayPal
+  Honey does, how it makes money, the affiliate-link controversy and
+  lawsuit, and how Caramel differs, every claim sourced.
 - [Agent setup](${origin}/agent-setup): onboard an AI coding agent; the
   machine-readable instructions are at ${origin}/agent-setup/prompt.md.
 - [Coupon API](${origin}/api/coupons): public, read-only JSON; query with

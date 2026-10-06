@@ -1,20 +1,32 @@
+import AddCodeForm from '@/components/coupons/AddCodeForm'
 import CouponsSection from '@/components/coupons/coupons-section'
 import PopularStores from '@/components/coupons/popular-stores'
 import StoreFavoriteStar from '@/components/coupons/store-favorite-star'
 import StoreNeighbours from '@/components/coupons/store-neighbours'
 import { attachSignals } from '@/lib/couponSignals'
-import { type StoreCouponFacts, listStoreCoupons } from '@/lib/couponsRepo'
+import {
+    type StoreCouponFacts,
+    isKnownStore,
+    listStoreCoupons,
+} from '@/lib/couponsRepo'
 import { BASE_URL } from '@/lib/env.client'
 import { faqPageJsonLd, jsonLdString } from '@/lib/jsonLd'
 import { buildStoreFaq } from '@/lib/seo/storeFaq'
 import { evaluateStorePageIndexability } from '@/lib/seo/storeIndexability'
 import { isUkStoreDomain, resolveStoreDomain } from '@/lib/storeDomain'
 import type { Coupon } from '@/types/coupon'
+import * as Sentry from '@sentry/nextjs'
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { cache } from 'react'
 
-const PAGE_SIZE = 5
+// Codes server-rendered on a store page, and CouponsSection's page size for
+// "load more" (the two must match: see its `pageSize` prop). Was 5, the
+// /coupons listing's page size: the pages that outrank Caramel for "<store>
+// promo code" (SimplyCodes, CouponFollow, Knoji, WeThrift) list 20-30 codes
+// in their HTML, and five codes was a thin page. 20 rows is one LIMIT on the
+// store's index plus one signals lookup, the same two reads as before.
+const STORE_PAGE_SIZE = 20
 const baseUrl = BASE_URL
 
 function safeDecode(value: string): string {
@@ -54,6 +66,7 @@ const fetchStoreCoupons = cache(async (storeParam: string) => {
             total: 0,
             facts: NO_FACTS,
             base: storeParam,
+            hasSupplierRow: false,
         }
     }
 
@@ -69,9 +82,18 @@ const fetchStoreCoupons = cache(async (storeParam: string) => {
     // OUR Postgres) onto each row so the SSR HTML and the client fetch agree —
     // the store page must attach it too, or its server-rendered cards would
     // never show "worked Xh ago". Empty signals → lastWorkedAt:null (unshown).
-    const { coupons, total, facts } = await listStoreCoupons(base, PAGE_SIZE)
+    const { coupons, total, facts, hasSupplierRow } = await listStoreCoupons(
+        base,
+        STORE_PAGE_SIZE,
+    )
     const couponsWithSignals = await attachSignals(coupons)
-    return { coupons: couponsWithSignals as Coupon[], total, facts, base }
+    return {
+        coupons: couponsWithSignals as Coupon[],
+        total,
+        facts,
+        base,
+        hasSupplierRow,
+    }
 })
 
 export async function generateMetadata({
@@ -200,7 +222,31 @@ export default async function StoreCouponsPage({
         notFound()
     }
 
-    const { coupons, total, facts, base } = await fetchStoreCoupons(storeParam)
+    // ONE catalog read, plus the known-store EXISTS probe only when needed. The
+    // known-store check gates the "Add a code" form: the API answers 422
+    // 'not-a-store' for a domain with no supplier coupon and no store_configs
+    // row, so the form must not be offered there. It cannot reuse `total`: that
+    // counts shopper rows too, which prove nothing about a store being real. A
+    // supplier row among the rows already read DOES prove it (hasSupplierRow), so
+    // the probe, an extra table scan, runs only when the list does not. Skipped
+    // when the slug resolves to no registrable domain (`base` is the raw slug
+    // then).
+    const { coupons, total, facts, base, hasSupplierRow } =
+        await fetchStoreCoupons(storeParam)
+    const resolvedBase = getBaseDomain(storeParam)
+    // The form is a nicety on a page that is otherwise fine: a failed probe
+    // degrades LOUDLY (Sentry) to "no form", it must never 500 the store page
+    // (same stance as attachSignals).
+    const knownStore =
+        hasSupplierRow ||
+        (resolvedBase
+            ? await isKnownStore(resolvedBase).catch((error: unknown) => {
+                  Sentry.captureException(error, {
+                      tags: { area: 'storePage.isKnownStore' },
+                  })
+                  return false
+              })
+            : false)
     // The body speaks the same vocabulary as the title (see generateMetadata):
     // Google rewrites titles from the h1, and "discount code" must appear in
     // the visible page for a UK store to be relevant to the search.
@@ -214,7 +260,9 @@ export default async function StoreCouponsPage({
               base,
               total,
               facts,
-              topCouponTitle: coupons[0]?.title ?? null,
+              topCoupon: coupons[0]
+                  ? { title: coupons[0].title, code: coupons[0].code }
+                  : null,
               uk,
           })
         : []
@@ -264,6 +312,7 @@ export default async function StoreCouponsPage({
                 initialCoupons={coupons}
                 initialTotal={total}
                 disableInitialFetch
+                pageSize={STORE_PAGE_SIZE}
                 // `base` — not the raw slug — because that is the normalized
                 // store key favorites are filed under (the same value the
                 // canonical URL uses), so /coupons/www.nike.com and
@@ -282,6 +331,9 @@ export default async function StoreCouponsPage({
                 heroTitle={`Best ${base} ${codeNoun} codes today`}
                 heroSubtitle={`Save at ${base} with Caramel—the privacy-first coupon finder that applies the top deals automatically at checkout.`}
             />
+            {/* Client-only (renders nothing until the session is known), so the
+                server HTML crawlers and the AEO prose below see is unchanged. */}
+            {knownStore && <AddCodeForm store={base} />}
             {/* AEO citable prose — server-rendered visible copy (AI engines
                 extract visible HTML, not JSON-LD). The count is the same
                 server-side `total` the list uses; the mechanics paragraph is

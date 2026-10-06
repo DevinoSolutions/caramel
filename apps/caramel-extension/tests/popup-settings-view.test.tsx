@@ -160,6 +160,38 @@ describe('popup settings view', () => {
         )
     })
 
+    it('offers the checkout-code sharing switch, ON by default, and persists it', async () => {
+        renderSettings('www.example.com')
+
+        const share = await screen.findByRole('checkbox', {
+            name: /Share codes I enter at checkout/,
+        })
+        // The hint is the privacy promise: only the code and store, only when
+        // the store accepts it, and it needs a sign-in.
+        expect(
+            screen.getByText(
+                'Only the code and store, when the store accepts it. Requires sign-in.',
+            ),
+        ).toBeInTheDocument()
+        expect(share).toBeChecked()
+        await userEvent.click(share)
+        await waitFor(() =>
+            expect(syncData.caramel_settings.shareCheckoutCodes).toBe(false),
+        )
+        expect(share).not.toBeChecked()
+    })
+
+    it('reads a stored opt-out back as off', async () => {
+        syncData.caramel_settings = { shareCheckoutCodes: false }
+        renderSettings('www.example.com')
+
+        expect(
+            await screen.findByRole('checkbox', {
+                name: /Share codes I enter at checkout/,
+            }),
+        ).not.toBeChecked()
+    })
+
     it('offers no site toggle for a dot-less host', async () => {
         // The popup opened as its own tab/window reports a chrome-extension
         // host, which no store owns — a "Pause on <that>" row would be a

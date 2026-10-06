@@ -25,8 +25,9 @@ export type StoreFaqInput = {
     /** Active (visible) codes for the store: the count the title states. */
     total: number
     facts: StoreCouponFacts
-    /** Title of the coupon the page lists first (its ranking order). */
-    topCouponTitle: string | null
+    /** The coupon the page lists first (its ranking order): its shopper-facing
+     *  title (couponTitleText.ts) and its code. */
+    topCoupon: { title: string; code: string } | null
     /** UK store: "discount code" vocabulary and a UK date format. */
     uk: boolean
 }
@@ -43,7 +44,7 @@ function formatPercent(amount: number): string {
 /** The FAQ for a store page. Empty for a store with no active codes: that
  *  page is noindexed and must not answer questions about codes it lacks. */
 export function buildStoreFaq(input: StoreFaqInput): StoreFaqItem[] {
-    const { base, total, facts, topCouponTitle, uk } = input
+    const { base, total, facts, topCoupon, uk } = input
     if (total <= 0) return []
 
     const noun = uk ? 'discount code' : 'coupon code'
@@ -54,7 +55,10 @@ export function buildStoreFaq(input: StoreFaqInput): StoreFaqItem[] {
 
     // 1. The best code. The biggest percent-off amount is the one number a
     // shopper can compare across sites; the first-listed title is the row
-    // the page ranks first.
+    // the page ranks first, named with its code: "what is the best <store>
+    // promo code" is answered by a code, and answer engines quote this line.
+    // (The code is no secret: the page's own payload carries it for the copy
+    // button.)
     const bestParts: string[] = []
     if (facts.bestPercentOff !== null) {
         bestParts.push(
@@ -70,10 +74,12 @@ export function buildStoreFaq(input: StoreFaqInput): StoreFaqItem[] {
             `Caramel lists ${plural(total, `active ${base} ${noun}`, `active ${base} ${nouns}`)}; none of them states a usable discount amount up front.`,
         )
     }
-    if (topCouponTitle) {
-        bestParts.push(
-            `The one Caramel ranks first is "${topCouponTitle.trim()}".`,
-        )
+    if (topCoupon) {
+        const title = topCoupon.title.trim()
+        const code = topCoupon.code.trim()
+        // A title built from the code (couponTitleText.ts) already names it.
+        const withCode = code && !title.includes(code) ? ` (code ${code})` : ''
+        bestParts.push(`The one Caramel ranks first is "${title}"${withCode}.`)
     }
     bestParts.push(
         'Codes can stop working without notice, so the Caramel extension tries them at checkout and keeps the one that gives the biggest discount.',

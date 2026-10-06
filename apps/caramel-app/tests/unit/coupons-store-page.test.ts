@@ -18,7 +18,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 // is a rule-based resolver keyed on the composed `.sql`, and couponSignal is
 // stubbed for attachSignals (no signals → lastWorkedAt:null).
 
-type MockRule = { match: (sql: string) => boolean; rows: unknown[] }
+// An Error in `rows` makes the matching query REJECT (a failing probe).
+type MockRule = { match: (sql: string) => boolean; rows: unknown[] | Error }
 let rules: MockRule[] = []
 function mockRows(match: (sql: string) => boolean, rows: unknown[]) {
     rules.push({ match, rows })
@@ -28,18 +29,38 @@ vi.mock('@/lib/prisma', () => ({
     default: {
         $queryRaw: (arg: { sql: string }) => {
             const rows = rules.find(r => r.match(arg.sql))?.rows ?? []
-            return Promise.resolve(rows)
+            return rows instanceof Error
+                ? Promise.reject(rows)
+                : Promise.resolve(rows)
         },
         couponSignal: { findMany: vi.fn(async () => []) },
     },
 }))
 
+const captureException = vi.hoisted(() => vi.fn())
+vi.mock('@sentry/nextjs', () => ({ captureException }))
+
 vi.mock('@/components/coupons/coupons-section', () => ({
     default: () => null,
 }))
 
+// isKnownStore's single EXISTS probe (couponsRepo.ts) is the only query whose
+// SQL carries `AS known`. Every test defaults to a KNOWN store (so the page
+// renders its normal tree); the "Add a code" tests below override it.
+const KNOWN_STORE_SQL = (sql: string) => sql.includes('AS known')
+let knownStoreQueries = 0
 beforeEach(() => {
     rules = []
+    captureException.mockClear()
+    knownStoreQueries = 0
+    rules.push({
+        match: sql => {
+            const hit = KNOWN_STORE_SQL(sql)
+            if (hit) knownStoreQueries += 1
+            return hit
+        },
+        rows: [{ known: true }],
+    })
 })
 
 /** The store page's count row: the total plus the FAQ facts folded into the
@@ -70,11 +91,17 @@ const couponFixture = {
     verificationMessage: null,
 }
 
+// listStoreCoupons's list rows carry `isSupplier` (submission_source IS NULL).
+// A supplier row proves the store is known (the page skips the probe); a
+// shopper-only row does not (the page probes).
+const supplierRow = { ...couponFixture, isSupplier: true }
+const shopperRow = { ...couponFixture, isSupplier: false }
+
 describe('StoreCouponsPage — CouponListRow + TotalCountRow', () => {
     it('parses production-shaped rows into both the CouponsSection props and the structured-data script', async () => {
         mockRows(
             sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
-            [couponFixture],
+            [supplierRow],
         )
         mockRows(
             sql => sql.includes('COUNT(*)::int AS total'),
@@ -170,7 +197,7 @@ describe('StoreCouponsPage — CouponListRow + TotalCountRow', () => {
     it('renders BreadcrumbList and FAQPage scripts alongside the ItemList', async () => {
         mockRows(
             sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
-            [couponFixture],
+            [supplierRow],
         )
         mockRows(
             sql => sql.includes('COUNT(*)::int AS total'),
@@ -233,7 +260,7 @@ describe('StoreCouponsPage — CouponListRow + TotalCountRow', () => {
     it('a UK store page body uses the same discount-code wording as its title', async () => {
         mockRows(
             sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
-            [couponFixture],
+            [supplierRow],
         )
         mockRows(
             sql => sql.includes('COUNT(*)::int AS total'),
@@ -276,11 +303,133 @@ describe('StoreCouponsPage — CouponListRow + TotalCountRow', () => {
     })
 })
 
+describe('StoreCouponsPage — "Add a code" form is offered for known stores only', () => {
+    function pageHasAddCodeForm(
+        mainEl: ReactElement<{ children: ReactElement[] }>,
+    ) {
+        return mainEl.props.children.some(
+            c =>
+                typeof (c as ReactElement)?.type === 'function' &&
+                (c as ReactElement<{ store?: string }>).props?.store ===
+                    'example.com',
+        )
+    }
+
+    it('skips the known-store probe when a returned row is a supplier row, and still renders the form', async () => {
+        mockRows(
+            sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
+            [shopperRow, supplierRow],
+        )
+        mockRows(
+            sql => sql.includes('COUNT(*)::int AS total'),
+            [storeAggregateRow(2)],
+        )
+
+        const mainEl = (await StoreCouponsPage({
+            params: { store: 'example.com' },
+        })) as ReactElement<{ children: ReactElement[] }>
+
+        expect(pageHasAddCodeForm(mainEl)).toBe(true)
+        expect(knownStoreQueries).toBe(0)
+    })
+
+    it('does not leak isSupplier into the CouponsSection props', async () => {
+        mockRows(
+            sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
+            [supplierRow],
+        )
+        mockRows(
+            sql => sql.includes('COUNT(*)::int AS total'),
+            [storeAggregateRow(1)],
+        )
+
+        const mainEl = (await StoreCouponsPage({
+            params: { store: 'example.com' },
+        })) as ReactElement<{ children: ReactElement[] }>
+
+        expect(JSON.stringify(mainEl)).not.toContain('isSupplier')
+    })
+
+    it('a failing known-store probe does not take the page down: no form, Sentry told', async () => {
+        const probeError = new Error('known-store probe exploded')
+        rules.unshift({ match: KNOWN_STORE_SQL, rows: probeError })
+        mockRows(
+            sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
+            [shopperRow],
+        )
+        mockRows(
+            sql => sql.includes('COUNT(*)::int AS total'),
+            [storeAggregateRow(1)],
+        )
+
+        const mainEl = (await StoreCouponsPage({
+            params: { store: 'example.com' },
+        })) as ReactElement<{ children: ReactElement[] }>
+
+        expect(pageHasAddCodeForm(mainEl)).toBe(false)
+        // The rest of the page still rendered.
+        expect(JSON.stringify(mainEl)).toContain('How Caramel finds ')
+        expect(captureException).toHaveBeenCalledWith(probeError, {
+            tags: { area: 'storePage.isKnownStore' },
+        })
+    })
+
+    it('renders the form for a known store, passing the normalized base domain', async () => {
+        mockRows(
+            sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
+            [shopperRow],
+        )
+        mockRows(
+            sql => sql.includes('COUNT(*)::int AS total'),
+            [storeAggregateRow(1)],
+        )
+
+        const mainEl = (await StoreCouponsPage({
+            params: { store: 'www.example.com' },
+        })) as ReactElement<{ children: ReactElement[] }>
+
+        expect(pageHasAddCodeForm(mainEl)).toBe(true)
+        expect(knownStoreQueries).toBe(1)
+    })
+
+    it('does NOT render the form when the store is unknown, even if the page lists coupons', async () => {
+        // A shopper-only domain can list rows (visibility counts them) yet is not
+        // a known store; the API would answer 422 not-a-store, so no form.
+        rules.unshift({
+            match: KNOWN_STORE_SQL,
+            rows: [{ known: false }],
+        })
+        mockRows(
+            sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
+            [shopperRow],
+        )
+        mockRows(
+            sql => sql.includes('COUNT(*)::int AS total'),
+            [storeAggregateRow(1)],
+        )
+
+        const mainEl = (await StoreCouponsPage({
+            params: { store: 'example.com' },
+        })) as ReactElement<{ children: ReactElement[] }>
+
+        expect(pageHasAddCodeForm(mainEl)).toBe(false)
+    })
+
+    it('does not render the form, or probe the catalog for known-ness, on a slug that names no store', async () => {
+        const mainEl = (await StoreCouponsPage({
+            params: { store: '!!!not-a-domain!!!' },
+        })) as ReactElement<{ children: ReactElement[] }>
+
+        expect(pageHasAddCodeForm(mainEl)).toBe(false)
+        expect(knownStoreQueries).toBe(0)
+    })
+})
+
 describe('StoreCouponsPage generateMetadata — canonical normalization + thin-page noindex', () => {
     it('canonicalizes every slug variant to the base-domain URL (www.example.com → example.com)', async () => {
         mockRows(
             sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
-            [couponFixture],
+            [supplierRow],
         )
         mockRows(
             sql => sql.includes('COUNT(*)::int AS total'),
@@ -313,7 +462,7 @@ describe('StoreCouponsPage generateMetadata — canonical normalization + thin-p
         // US "coupons & promo codes" wording matched almost none of it.
         mockRows(
             sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
-            [couponFixture],
+            [supplierRow],
         )
         mockRows(
             sql => sql.includes('COUNT(*)::int AS total'),

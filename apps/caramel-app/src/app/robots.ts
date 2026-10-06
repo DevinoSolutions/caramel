@@ -22,6 +22,8 @@ const DISALLOWED_PATHS = [
     '/login',
     '/signup',
     '/verify',
+    // One-time post-install screen the extension opens (noindex in its page).
+    '/welcome',
     '/profile',
     '/monitoring',
 ]
