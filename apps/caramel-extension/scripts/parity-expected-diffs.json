@@ -75,9 +75,9 @@
         {
             "browser": "chrome",
             "path": "/version",
-            "reason": "1.4.2 -> 1.4.3 (package.json is the single version authority): the Chrome Web Store privacy resubmission (1.4.2 rejected 2026-09-22) with shopper code capture (#289, server flag off) and the unused activeTab permission dropped. The goldens are frozen 1.3.1 snapshots relabelled 1.4.0 and cannot follow a release without being re-frozen",
-            "retiredBy": "golden-rebaseline(1.4.3)",
-            "added": "2026-09-19"
+            "reason": "1.4.3 -> 1.4.4 (package.json is the single version authority): the Chrome Web Store listing pass (title and short description from scripts/store-listing.mjs, full-bleed icons with 48 and 128 added). The goldens are frozen 1.3.1 snapshots relabelled 1.4.0 and cannot follow a release without being re-frozen",
+            "retiredBy": "golden-rebaseline(1.4.4)",
+            "added": "2026-10-05"
         },
         {
             "browser": "chrome",
@@ -89,9 +89,9 @@
         {
             "browser": "firefox",
             "path": "/version",
-            "reason": "1.4.2 -> 1.4.3 (package.json is the single version authority): the Chrome Web Store privacy resubmission (1.4.2 rejected 2026-09-22) with shopper code capture (#289, server flag off) and the unused activeTab permission dropped. The goldens are frozen 1.3.1 snapshots relabelled 1.4.0 and cannot follow a release without being re-frozen",
-            "retiredBy": "golden-rebaseline(1.4.3)",
-            "added": "2026-09-19"
+            "reason": "1.4.3 -> 1.4.4 (package.json is the single version authority): the Chrome Web Store listing pass (title and short description from scripts/store-listing.mjs, full-bleed icons with 48 and 128 added). The goldens are frozen 1.3.1 snapshots relabelled 1.4.0 and cannot follow a release without being re-frozen",
+            "retiredBy": "golden-rebaseline(1.4.4)",
+            "added": "2026-10-05"
         },
         {
             "browser": "firefox",
@@ -126,6 +126,90 @@
             "reason": "activeTab dropped in 1.4.3 (2026-10-02): no code path used it (tabs already exposes the tab URL; no scripting or capture call), and the Chrome Web Store Privacy tab needs a real justification for every requested permission",
             "retiredBy": "golden-rebaseline(1.4.3)",
             "added": "2026-10-02"
+        },
+        {
+            "browser": "chrome",
+            "path": "/name",
+            "reason": "store title from scripts/store-listing.mjs (2026-10-05 Chrome Web Store pass); the Chrome Web Store title, max 75 characters",
+            "retiredBy": "golden-rebaseline(1.4.4)",
+            "added": "2026-10-05"
+        },
+        {
+            "browser": "chrome",
+            "path": "/description",
+            "reason": "store short description from scripts/store-listing.mjs (2026-10-05 Chrome Web Store pass)",
+            "retiredBy": "golden-rebaseline(1.4.4)",
+            "added": "2026-10-05"
+        },
+        {
+            "browser": "chrome",
+            "path": "/icons/48",
+            "reason": "48 and 128 px icons added 2026-10-05 (extensions-page and store-tile sizes) with the full-bleed redraw of every size",
+            "retiredBy": "golden-rebaseline(1.4.4)",
+            "added": "2026-10-05"
+        },
+        {
+            "browser": "chrome",
+            "path": "/icons/128",
+            "reason": "48 and 128 px icons added 2026-10-05 (extensions-page and store-tile sizes) with the full-bleed redraw of every size",
+            "retiredBy": "golden-rebaseline(1.4.4)",
+            "added": "2026-10-05"
+        },
+        {
+            "browser": "chrome",
+            "path": "/action/default_icon/48",
+            "reason": "48 and 128 px icons added 2026-10-05 (extensions-page and store-tile sizes) with the full-bleed redraw of every size",
+            "retiredBy": "golden-rebaseline(1.4.4)",
+            "added": "2026-10-05"
+        },
+        {
+            "browser": "chrome",
+            "path": "/action/default_icon/128",
+            "reason": "48 and 128 px icons added 2026-10-05 (extensions-page and store-tile sizes) with the full-bleed redraw of every size",
+            "retiredBy": "golden-rebaseline(1.4.4)",
+            "added": "2026-10-05"
+        },
+        {
+            "browser": "firefox",
+            "path": "/name",
+            "reason": "store title from scripts/store-listing.mjs (2026-10-05 Chrome Web Store pass); AMO caps names at 50 characters, so Firefox carries FIREFOX_NAME",
+            "retiredBy": "golden-rebaseline(1.4.4)",
+            "added": "2026-10-05"
+        },
+        {
+            "browser": "firefox",
+            "path": "/description",
+            "reason": "store short description from scripts/store-listing.mjs (2026-10-05 Chrome Web Store pass)",
+            "retiredBy": "golden-rebaseline(1.4.4)",
+            "added": "2026-10-05"
+        },
+        {
+            "browser": "firefox",
+            "path": "/icons/48",
+            "reason": "48 and 128 px icons added 2026-10-05 (extensions-page and store-tile sizes) with the full-bleed redraw of every size",
+            "retiredBy": "golden-rebaseline(1.4.4)",
+            "added": "2026-10-05"
+        },
+        {
+            "browser": "firefox",
+            "path": "/icons/128",
+            "reason": "48 and 128 px icons added 2026-10-05 (extensions-page and store-tile sizes) with the full-bleed redraw of every size",
+            "retiredBy": "golden-rebaseline(1.4.4)",
+            "added": "2026-10-05"
+        },
+        {
+            "browser": "firefox",
+            "path": "/action/default_icon/48",
+            "reason": "48 and 128 px icons added 2026-10-05 (extensions-page and store-tile sizes) with the full-bleed redraw of every size",
+            "retiredBy": "golden-rebaseline(1.4.4)",
+            "added": "2026-10-05"
+        },
+        {
+            "browser": "firefox",
+            "path": "/action/default_icon/128",
+            "reason": "48 and 128 px icons added 2026-10-05 (extensions-page and store-tile sizes) with the full-bleed redraw of every size",
+            "retiredBy": "golden-rebaseline(1.4.4)",
+            "added": "2026-10-05"
         }
     ],
     "missingReferences": []

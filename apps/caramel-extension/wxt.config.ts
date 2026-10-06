@@ -18,17 +18,23 @@
 import { defineConfig } from 'wxt'
 
 import { ENVIRONMENTS, stampFor } from './scripts/environments.mjs'
+import { FIREFOX_NAME, NAME, SUMMARY } from './scripts/store-listing.mjs'
 
 // React is POPUP-ONLY by doctrine (content scripts stay React-free — the
 // module only affects entrypoints that actually import React).
 
 type EnvironmentName = keyof typeof ENVIRONMENTS
 
+// Full-bleed brand square with the white c at ~70% (2026-10-05 Chrome Web
+// Store pass); 48 and 128 are the sizes the extensions page and the store
+// tile ask for.
 const ICONS = {
     16: '/icons/16.png',
     19: '/icons/19.png',
     32: '/icons/32.png',
     38: '/icons/38.png',
+    48: '/icons/48.png',
+    128: '/icons/128.png',
     192: '/icons/192.png',
     512: '/icons/512.png',
 }
@@ -56,9 +62,11 @@ export default defineConfig({
         excludeSources: ['dist/**', 'dist-*/**', '.venv/**'],
     },
     manifest: ({ browser }) => ({
-        name: 'Caramel - Trusted Honey Alternative',
-        description:
-            'Open‑source coupon extension that auto‑applies deals without selling data or hijacking commissions.',
+        // The store listing title and short description come from the
+        // manifest; scripts/store-listing.mjs owns the wording (AMO caps
+        // names at 50 characters, hence the shorter Firefox name).
+        name: browser === 'firefox' ? FIREFOX_NAME : NAME,
+        description: SUMMARY,
         // Explicit, root-absolute icon paths — byte-identical to the shipped
         // 1.3.1 manifests. WXT's auto-discovery from public/icons/N.png emits
         // the same files without the leading slash; explicit wins so the
