@@ -63,7 +63,11 @@ describe('privacy policy coverage', () => {
         )
     })
 
-    it('does not describe checkout code capture as live (server flag is off)', () => {
-        expect(text).toContain('is not switched on yet')
+    it('carries the owner-approved checkout code sharing sentence verbatim (approved 2026-10-06)', () => {
+        const normalized = text.replace(/&quot;/g, '"').replace(/\s+/g, ' ')
+        expect(normalized).toContain(
+            "Coupon codes you choose to share. If you're signed in, you can add a code on a store page, and, if the extension's \"Share codes I enter at checkout\" setting is on, the extension sends a code you typed yourself once the store accepts it. We store only the code, the store, and your account (to limit abuse); never your cart, order or payment details. Shared codes are shown publicly to other shoppers without your name. You can turn checkout sharing off at any time in the extension's settings.",
+        )
+        expect(normalized).not.toContain('is not switched on yet')
     })
 })

@@ -141,20 +141,16 @@ const PrivacyPolicy = () => {
                                     Coupon codes you choose to share.
                                 </strong>{' '}
                                 If you&apos;re signed in, you can add a code on
-                                a store page of our website. The extension also
-                                has a &quot;Share codes I enter at
-                                checkout&quot; setting; automatic capture at
-                                checkout is not switched on yet, so the
-                                extension sends no checkout codes today. When we
-                                switch it on, and only if that setting is on, it
-                                will send a code you typed yourself once the
-                                store accepts it. We store only the code, the
-                                store, and your account (to limit abuse); never
-                                your cart, order or payment details. Shared
-                                codes are shown publicly to other shoppers
-                                without your name. You can turn checkout sharing
-                                off at any time in the extension&apos;s
-                                settings.
+                                a store page, and, if the extension&apos;s
+                                &quot;Share codes I enter at checkout&quot;
+                                setting is on, the extension sends a code you
+                                typed yourself once the store accepts it. We
+                                store only the code, the store, and your account
+                                (to limit abuse); never your cart, order or
+                                payment details. Shared codes are shown publicly
+                                to other shoppers without your name. You can
+                                turn checkout sharing off at any time in the
+                                extension&apos;s settings.
                             </>,
                         ]}
                     />
@@ -388,7 +384,7 @@ const PrivacyPolicy = () => {
             >
                 <div className="mb-6 inline-flex items-center gap-3 rounded-full bg-caramel/10 px-6 py-3 text-sm font-semibold text-caramel">
                     <FaShieldAlt className="h-4 w-4" />
-                    Effective Date: October 2, 2026
+                    Effective Date: October 6, 2026
                 </div>
                 <p className="mx-auto max-w-4xl text-lg leading-relaxed text-gray-600 dark:text-gray-300">
                     Welcome to{' '}

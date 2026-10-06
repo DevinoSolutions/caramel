@@ -8,9 +8,9 @@ import { NextResponse } from 'next/server'
 //
 // shopperCodeCapture: does the server accept codes the shopper typed at
 // checkout (POST /api/coupons/submit with source 'checkout')? Mirrors
-// SHOPPER_CODE_CAPTURE_ENABLED, which is OFF in prod until the owner approves
-// the privacy-policy sentence; the extension must not even send a capture while
-// this is false.
+// SHOPPER_CODE_CAPTURE_ENABLED, which defaults to false in code and is set true
+// in prod (owner approved the privacy-policy sentence 2026-10-06); the
+// extension must not even send a capture while this is false.
 //
 // withRoute: public read like extension/supported-stores (rate-limited, no
 // auth/origin gate); cors 'extension' + the OPTIONS preflight mirror

@@ -130,9 +130,9 @@ const serverObjectSchema = z.object({
     SITE_SUGGESTIONS_AUTO_NOTIFY: z.enum(['true', 'false']).default('false'),
     // Global kill switch for shopper-typed codes CAPTURED AT CHECKOUT by the
     // extension (POST /api/coupons/submit with source 'checkout', and the
-    // extension's GET /api/extension/features read of it). OFF by default and
-    // OFF in prod until the owner approves the privacy-policy sentence that
-    // discloses the capture. It gates ONLY the automatic capture: the website's
+    // extension's GET /api/extension/features read of it). OFF by default in code;
+    // prod sets it true (the owner approved the privacy-policy sentence that
+    // discloses the capture on 2026-10-06). It gates ONLY the automatic capture: the website's
     // manual "Add a code" form (source 'manual') works with it off.
     // A strict two-value enum, like SITE_SUGGESTIONS_AUTO_NOTIFY: a typo
     // ('yes') fails boot with this variable's name rather than being read as
