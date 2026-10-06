@@ -25,9 +25,10 @@ import { FIREFOX_NAME, NAME, SUMMARY } from './scripts/store-listing.mjs'
 
 type EnvironmentName = keyof typeof ENVIRONMENTS
 
-// Full-bleed brand square with the white c at ~70% (2026-10-05 Chrome Web
-// Store pass); 48 and 128 are the sizes the extensions page and the store
-// tile ask for.
+// The site header's wordmark (apps/caramel-app/public/full-logo.png), unaltered,
+// scaled so its width fills the square canvas (owner direction 2026-10-05: the
+// icon is the header mark, never a redrawn one); 48 and 128 are the sizes the
+// extensions page and the store tile ask for.
 const ICONS = {
     16: '/icons/16.png',
     19: '/icons/19.png',
