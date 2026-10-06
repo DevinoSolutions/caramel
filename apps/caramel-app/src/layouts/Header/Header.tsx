@@ -1,8 +1,8 @@
 import ThemeToggle from '@/components/ThemeToggle'
 import { useScrollDirection } from '@/hooks/useScrollDirection'
 import { useWindowSize } from '@/hooks/useWindowSize'
-import { resetPosthogIdentity } from '@/lib/analytics/identity'
-import { signOut, useSession } from '@/lib/auth/client'
+import { useSession } from '@/lib/auth/client'
+import { endClientSession } from '@/lib/auth/endClientSession'
 import { canAdvertiseInstall } from '@/lib/surface/detectSurface'
 import { useSurface } from '@/lib/surface/SurfaceProvider'
 import { userInitial } from '@/lib/userInitial'
@@ -72,10 +72,9 @@ export default function Header({ scrollRef }: HeaderProps) {
     }, [])
 
     const handleSignOut = async () => {
-        // Clear the PostHog identity BEFORE the session goes away so the reset
-        // isn't attributed to the logged-in person.
-        resetPosthogIdentity()
-        await signOut()
+        // A failed sign-out is reported inside endClientSession; the visitor
+        // is sent home either way.
+        await endClientSession()
         window.location.href = '/'
     }
 
