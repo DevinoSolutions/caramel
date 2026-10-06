@@ -104,6 +104,31 @@ describe('users.acquisition (real Postgres)', () => {
         })
     })
 
+    it('is write-once against real Postgres: a second recordSignup keeps the first record (Prisma.DbNull guard)', async () => {
+        const id = await createUser(`signup-acq-itest-d-${UNIQUE}@example.com`)
+        const first = await recordSignup({
+            user: { id },
+            headers: null,
+            method: 'email',
+            surface: 'web',
+        })
+        const second = await recordSignup({
+            user: { id },
+            headers: null,
+            method: 'google',
+            surface: 'extension',
+        })
+
+        expect(first.acquisitionSaved).toBe(true)
+        expect(second.acquisitionSaved).toBe(false)
+        const row = await prisma.user.findUniqueOrThrow({ where: { id } })
+        expect(row.acquisition).toEqual({
+            source: 'unknown',
+            signup_surface: 'web',
+            signup_method: 'email',
+        })
+    })
+
     it('reports acquisitionSaved:false (and does not throw) for a user id that does not exist', async () => {
         const outcome = await recordSignup({
             user: { id: 'no-such-user-id' },

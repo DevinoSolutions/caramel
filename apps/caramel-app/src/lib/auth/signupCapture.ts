@@ -36,6 +36,7 @@ import type {
     SignupSurface,
 } from '@/lib/analytics/signupVocabulary'
 import prisma from '@/lib/prisma'
+import { Prisma } from '@prisma/client'
 import * as Sentry from '@sentry/nextjs'
 import 'server-only'
 
@@ -59,7 +60,10 @@ export type UserAcquisition = Partial<FirstTouchRecord> & {
 }
 
 export interface SignupOutcome {
-    /** `users.acquisition` was written. */
+    /**
+     * THIS call wrote `users.acquisition`. false = it was already set (write-once:
+     * the first record wins, not an error) or the update failed (in Sentry).
+     */
     acquisitionSaved: boolean
     /** PostHog accepted `signup_completed`. */
     eventCaptured: boolean
@@ -154,11 +158,24 @@ export async function recordSignup(args: {
         const firstTouchProperties = buildFirstTouchProperties(firstTouch)
 
         try {
-            await prisma.user.update({
-                where: { id: user.id },
+            // WRITE-ONCE: only a row whose acquisition is still database NULL
+            // is touched (Prisma.DbNull = SQL NULL, not a JSON null), so a
+            // second call can never overwrite the first record. count 0 means
+            // it was already set: reported as such, not as an error.
+            const { count } = await prisma.user.updateMany({
+                where: { id: user.id, acquisition: { equals: Prisma.DbNull } },
                 data: { acquisition },
             })
-            outcome.acquisitionSaved = true
+            outcome.acquisitionSaved = count === 1
+            if (count === 0) {
+                Sentry.addBreadcrumb({
+                    category: 'analytics',
+                    level: 'info',
+                    message:
+                        'users.acquisition already set; kept the first record',
+                    data: { userId: user.id },
+                })
+            }
         } catch (error) {
             console.error('[signup] saving users.acquisition failed', error)
             Sentry.captureException(error, {

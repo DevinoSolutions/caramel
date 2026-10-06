@@ -13,6 +13,7 @@ import {
     classifySignupSurface,
     handleUserCreated,
 } from '@/lib/auth/signupHook'
+import { Prisma } from '@prisma/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // The better-auth `databaseHooks.user.create.after` path. Every collaborator
@@ -22,7 +23,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 // tests/integration/signup-acquisition.itest.ts.
 
 const { prismaMock } = vi.hoisted(() => ({
-    prismaMock: { user: { update: vi.fn() } },
+    prismaMock: { user: { updateMany: vi.fn() } },
 }))
 vi.mock('@/lib/prisma', () => ({ default: prismaMock }))
 
@@ -76,7 +77,7 @@ function cookieHeaders(
 }
 
 beforeEach(() => {
-    prismaMock.user.update.mockReset().mockResolvedValue({})
+    prismaMock.user.updateMany.mockReset().mockResolvedValue({ count: 1 })
     posthogServerMock.captureServerEvent.mockReset().mockResolvedValue(true)
     posthogServerMock.aliasServerDistinctId.mockReset().mockResolvedValue(true)
     posthogServerMock.getServerPosthogProjectToken
@@ -146,8 +147,9 @@ describe('recordSignup', () => {
             eventCaptured: true,
             aliased: true,
         })
-        expect(prismaMock.user.update).toHaveBeenCalledWith({
-            where: { id: 'user_1' },
+        expect(prismaMock.user.updateMany).toHaveBeenCalledWith({
+            // Write-once guard: only a row whose acquisition is still SQL NULL.
+            where: { id: 'user_1', acquisition: { equals: Prisma.DbNull } },
             data: {
                 acquisition: {
                     ...firstTouch,
@@ -191,7 +193,7 @@ describe('recordSignup', () => {
         expect(outcome.acquisitionSaved).toBe(true)
         expect(outcome.eventCaptured).toBe(true)
         expect(outcome.aliased).toBe(false)
-        expect(prismaMock.user.update.mock.calls[0]![0].data).toEqual({
+        expect(prismaMock.user.updateMany.mock.calls[0]![0].data).toEqual({
             acquisition: {
                 source: 'unknown',
                 signup_surface: 'extension',
@@ -218,7 +220,8 @@ describe('recordSignup', () => {
 
         expect(outcome.acquisitionSaved).toBe(true)
         expect(
-            prismaMock.user.update.mock.calls[0]![0].data.acquisition.source,
+            prismaMock.user.updateMany.mock.calls[0]![0].data.acquisition
+                .source,
         ).toBe('unknown')
         // Reported by the reader (firstTouchServer), not swallowed.
         expect(sentryMock.captureMessage).toHaveBeenCalledWith(
@@ -263,9 +266,37 @@ describe('recordSignup', () => {
         )
     })
 
+    it('is write-once: when acquisition is already set (count 0) it keeps the first record, is not an error, and still sends the event', async () => {
+        prismaMock.user.updateMany.mockResolvedValue({ count: 0 })
+
+        const outcome = await recordSignup({
+            user: USER,
+            headers: cookieHeaders({ firstTouch }),
+            method: 'google',
+            surface: 'web',
+        })
+
+        expect(outcome).toMatchObject({
+            acquisitionSaved: false,
+            eventCaptured: true,
+        })
+        // Never an overwrite: a single guarded updateMany, no plain update.
+        expect(prismaMock.user.updateMany).toHaveBeenCalledTimes(1)
+        expect(prismaMock.user.updateMany.mock.calls[0]![0].where).toEqual({
+            id: 'user_1',
+            acquisition: { equals: Prisma.DbNull },
+        })
+        expect(sentryMock.captureException).not.toHaveBeenCalled()
+        expect(sentryMock.addBreadcrumb).toHaveBeenCalledWith(
+            expect.objectContaining({
+                message: expect.stringMatching(/already set/),
+            }),
+        )
+    })
+
     it('a failed DB write is reported and does NOT stop the PostHog event, and never throws', async () => {
         const dbError = new Error('connection reset')
-        prismaMock.user.update.mockRejectedValue(dbError)
+        prismaMock.user.updateMany.mockRejectedValue(dbError)
 
         const outcome = await recordSignup({
             user: USER,
@@ -404,7 +435,7 @@ describe('handleUserCreated (the hook better-auth calls)', () => {
             aliased: false,
         })
         expect(
-            prismaMock.user.update.mock.calls[0]![0].data.acquisition,
+            prismaMock.user.updateMany.mock.calls[0]![0].data.acquisition,
         ).toMatchObject({
             source: 'reddit',
             signup_method: 'google',
@@ -418,14 +449,14 @@ describe('handleUserCreated (the hook better-auth calls)', () => {
             headers: cookieHeaders({}, { origin: 'chrome-extension://abc' }),
         })
         expect(
-            prismaMock.user.update.mock.calls[0]![0].data.acquisition,
+            prismaMock.user.updateMany.mock.calls[0]![0].data.acquisition,
         ).toMatchObject({ signup_surface: 'extension', signup_method: 'email' })
     })
 
     it('with no request context (null) still writes {source:"unknown"} and warns about the unclassified path', async () => {
         await handleUserCreated(USER, null)
         expect(
-            prismaMock.user.update.mock.calls[0]![0].data.acquisition,
+            prismaMock.user.updateMany.mock.calls[0]![0].data.acquisition,
         ).toEqual({
             source: 'unknown',
             signup_surface: 'web',
@@ -438,7 +469,7 @@ describe('handleUserCreated (the hook better-auth calls)', () => {
     })
 
     it('analytics failure never reaches better-auth (the signup response is not failed)', async () => {
-        prismaMock.user.update.mockRejectedValue(new Error('db down'))
+        prismaMock.user.updateMany.mockRejectedValue(new Error('db down'))
         posthogServerMock.captureServerEvent.mockRejectedValue(
             new Error('posthog down'),
         )
