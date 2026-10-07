@@ -1,5 +1,6 @@
 'use client'
 
+import { storeLogoUrl } from '@/lib/storeLogo'
 import { motion } from 'framer-motion'
 import Image from 'next/image'
 import Link from 'next/link'
@@ -18,9 +19,7 @@ export default function SiteCard({
      */
     subtitle?: string
 }) {
-    const icon = `https://www.google.com/s2/favicons?sz=128&domain_url=${encodeURIComponent(
-        site,
-    )}`
+    const icon = storeLogoUrl(site)
     const href = `/coupons/${encodeURIComponent(site)}`
 
     return (

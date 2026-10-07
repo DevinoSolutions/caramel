@@ -1,4 +1,5 @@
 import { chat, OpenRouterError } from '@/lib/openrouter'
+import * as Sentry from '@sentry/nextjs'
 import crypto from 'node:crypto'
 import { z } from 'zod'
 
@@ -115,7 +116,9 @@ function buildMessages(s: CartSignals) {
 // The .transform() body is a byte-exact port of the hand-rolled validation
 // it replaces (see PLAN-F-012.md — verified via a characterization-test
 // pin, tests/unit/cartClassifier.parse.test.ts, that stayed green across
-// the refactor): an unrecognized primary is the ONLY hard failure; unknown
+// the refactor): a missing/blank primary is the ONLY hard failure (a
+// non-blank label outside the vocabulary is degraded by parseResponse, see
+// CARAMEL-T below); unknown
 // secondary / secondary===primary / out-of-range|non-numeric|missing
 // confidence all self-heal (drop / coerce to 0.5) exactly as before,
 // because prod is designed to degrade gracefully on those two fields.
@@ -146,7 +149,19 @@ export const classificationSchema = z
         }
         const primary = (obj.primary || '').trim()
         if (!(CATEGORY_ENUM as readonly string[]).includes(primary)) {
-            ctx.addIssue(`unknown primary category: ${primary}`)
+            // A NON-EMPTY label outside the vocabulary is model drift
+            // (CARAMEL-T: "furniture"); parseResponse degrades it to the
+            // fallback category. It is told apart from a missing/blank
+            // primary (a malformed reply, still a hard failure) by the
+            // `outOfVocabularyPrimary` param, so no caller matches on the
+            // message text. The schema itself stays strict: the eval
+            // harness's scoreSchemaValid relies on it rejecting a result
+            // whose primary is not a real category.
+            ctx.addIssue({
+                code: 'custom',
+                message: `unknown primary category: ${primary}`,
+                params: primary ? { outOfVocabularyPrimary: primary } : {},
+            })
             return z.NEVER
         }
         const secondary = obj.secondary
@@ -224,7 +239,47 @@ function firstJsonObject(raw: string): unknown {
     throw new Error('llm returned non-json')
 }
 
-function parseResponse(raw: string): Omit<Classification, 'cached'> {
+// CARAMEL-T (2026-10-06) — the model answered with a category outside
+// CATEGORY_ENUM ("furniture") and the whole request failed with a 500, so the
+// shopper's cart got no coupon filtering at all. The prompt is eval-gated and
+// stays as is; the RESPONSE handling degrades instead: the vocabulary's own
+// fallback ('other') at a confidence low enough that no consumer mistakes it
+// for a real classification. Never silent: every occurrence is a Sentry
+// warning carrying the raw label, so drift in the model's vocabulary (and
+// therefore a missing category or prompt gap) stays visible.
+const FALLBACK_CATEGORY: Category = 'other'
+const OUT_OF_VOCABULARY_CONFIDENCE = 0.2
+const RAW_LABEL_LOG_MAX = 80
+
+function degradeOutOfVocabularyPrimary(
+    rawPrimary: string,
+    domain: string,
+): Omit<Classification, 'cached'> {
+    Sentry.captureMessage(
+        'classify-cart: model returned a primary category outside the vocabulary; degraded to fallback',
+        {
+            level: 'warning',
+            tags: { surface: 'classify-cart', operation: 'unknown_primary' },
+            // One issue for the whole drift class; the raw label is context.
+            fingerprint: ['classify-cart', 'unknown-primary-category'],
+            extra: {
+                rawPrimary: rawPrimary.slice(0, RAW_LABEL_LOG_MAX),
+                fallback: FALLBACK_CATEGORY,
+                domain,
+            },
+        },
+    )
+    return {
+        primary: FALLBACK_CATEGORY,
+        secondary: undefined,
+        confidence: OUT_OF_VOCABULARY_CONFIDENCE,
+    }
+}
+
+function parseResponse(
+    raw: string,
+    domain: string,
+): Omit<Classification, 'cached'> {
     let parsed: unknown
     try {
         parsed = JSON.parse(raw)
@@ -233,6 +288,15 @@ function parseResponse(raw: string): Omit<Classification, 'cached'> {
     }
     const result = classificationSchema.safeParse(parsed)
     if (!result.success) {
+        for (const issue of result.error.issues) {
+            const label =
+                issue.code === 'custom'
+                    ? issue.params?.outOfVocabularyPrimary
+                    : undefined
+            if (typeof label === 'string') {
+                return degradeOutOfVocabularyPrimary(label, domain)
+            }
+        }
         throw new Error(
             result.error.issues[0]?.message ??
                 'invalid classification response',
@@ -274,7 +338,7 @@ export async function classifyCart(
         if (e instanceof OpenRouterError) throw e
         throw new OpenRouterError(`classify failed: ${(e as Error).message}`)
     }
-    const value = parseResponse(raw)
+    const value = parseResponse(raw, signals.domain)
     cacheSet(key, value)
     return { ...value, cached: false }
 }

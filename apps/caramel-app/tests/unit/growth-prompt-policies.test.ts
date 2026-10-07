@@ -170,11 +170,17 @@ describe('cross_app policy', () => {
     it('promotes the first manifest-derived sibling app, with its canonical URL', () => {
         const card = CROSS_APP_PROMPT.content(context({ visits: 5 }))
         expect(CROSS_APP_PROMOTIONS.length).toBeGreaterThan(0)
-        expect(card.title).toBe(
-            `More from Devino: ${CROSS_APP_PROMOTIONS[0].name}`,
-        )
+        expect(card.title).toBe(CROSS_APP_PROMOTIONS[0].headline)
         expect(card.acceptHref).toBe(CROSS_APP_PROMOTIONS[0].href)
         expect(card.body).toBe(CROSS_APP_PROMOTIONS[0].blurb)
+    })
+
+    it('asks students directly for uNotes; other apps keep the brand line', () => {
+        const unotes = CROSS_APP_PROMOTIONS.find(p => p.id === 'unotes')
+        expect(unotes?.headline).toBe('Are you a student?')
+        for (const p of CROSS_APP_PROMOTIONS.filter(p => p.id !== 'unotes')) {
+            expect(p.headline).toBe(`More from Devino: ${p.name}`)
+        }
     })
 })
 

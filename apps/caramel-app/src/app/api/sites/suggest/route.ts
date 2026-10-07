@@ -97,7 +97,14 @@ export const POST = withRoute(
         } catch (error) {
             // The suggestion IS saved; only the notification failed. Loud
             // (Sentry, with the id so the row can be found) but not a 500.
+            // Also logged: the Sentry send can fail for the same reason the
+            // mail did, and the first suggestion after the 2026-09-26 01:10Z
+            // deploy failed with no Sentry event and no log line at all.
             notified = false
+            console.error(
+                `[sites/suggest] ops email failed for suggestion ${id} (${domain}):`,
+                error,
+            )
             Sentry.captureException(error, {
                 tags: {
                     operation: 'site_suggestion_email',

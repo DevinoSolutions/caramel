@@ -76,6 +76,8 @@ export const CaramelCoupons = {
             tier: 'red',
         },
     },
+    WORKED_VERIFIED_WINDOW_MS: 86400000,
+    WORKED_AT_CLOCK_SKEW_TOLERANCE_MS: 300000,
 }
 
 export function initCouponConstants() {

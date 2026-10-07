@@ -2,7 +2,7 @@
 
 import InstallSurfaceGate from '@/components/growth/InstallSurfaceGate'
 import { useReducedMotion } from '@/lib/reducedMotion'
-import { motion } from 'framer-motion'
+import { m } from 'framer-motion'
 import Image from 'next/image'
 import { useState } from 'react'
 import {
@@ -55,7 +55,7 @@ const problemsWithHoney = [
 // Paired row-for-row with problemsWithHoney in the comparison grid below.
 // "No Data Selling" is deliberately NOT "zero data collection": the extension
 // does send cart/page context to Caramel's own API to classify the cart, and
-// the website runs standard analytics (GA, Hotjar, Sentry — disclosed in the
+// the website runs standard analytics (GA, PostHog, Sentry — disclosed in the
 // privacy policy) — the honest, verifiable claim is that personal information
 // is never sold or shared with advertisers (claim-verify ruling 2026-07-28,
 // "shared" scoped to advertisers 2026-09-11).
@@ -89,7 +89,7 @@ export default function WhyNotHoneySection() {
                 <div className="absolute left-0 top-0 h-px w-full bg-gradient-to-r from-transparent via-red-500/20 to-transparent"></div>
                 <div className="absolute bottom-0 left-0 h-px w-full bg-gradient-to-r from-transparent via-caramel/20 to-transparent"></div>
                 {/* Floating warning elements */}
-                <motion.div
+                <m.div
                     className="left-1/6 absolute top-1/4 h-24 w-24 rounded-full bg-red-500/5 blur-xl"
                     animate={
                         reduceMotion
@@ -105,7 +105,7 @@ export default function WhyNotHoneySection() {
                         ease: 'easeInOut',
                     }}
                 />
-                <motion.div
+                <m.div
                     className="right-1/6 absolute top-3/4 h-20 w-20 rounded-full bg-orange-500/5 blur-lg"
                     animate={
                         reduceMotion
@@ -126,7 +126,7 @@ export default function WhyNotHoneySection() {
 
             <div className="relative z-10 mx-auto max-w-7xl px-6 lg:px-8">
                 {/* Header Section */}
-                <motion.div
+                <m.div
                     initial={{ opacity: 0, y: 30 }}
                     whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true }}
@@ -150,7 +150,7 @@ export default function WhyNotHoneySection() {
                     </p>
 
                     {/* Video Section */}
-                    <motion.div
+                    <m.div
                         initial={{ opacity: 0, scale: 0.95 }}
                         whileInView={{ opacity: 1, scale: 1 }}
                         viewport={{ once: true }}
@@ -164,7 +164,7 @@ export default function WhyNotHoneySection() {
                                 // visitor asks for the video. The whole poster
                                 // is the button so the hit area matches what it
                                 // looks like.
-                                <motion.button
+                                <m.button
                                     type="button"
                                     onClick={() => setVideoLoaded(true)}
                                     aria-label={`Play video: ${VIDEO_TITLE}`}
@@ -184,7 +184,7 @@ export default function WhyNotHoneySection() {
                                         className="absolute inset-0 bg-darkerBg/55"
                                     />
                                     <span className="absolute inset-0 flex items-center justify-center">
-                                        <motion.span
+                                        <m.span
                                             variants={{
                                                 hover: { scale: 1.08 },
                                                 tap: { scale: 0.95 },
@@ -195,12 +195,12 @@ export default function WhyNotHoneySection() {
                                                 aria-hidden="true"
                                                 className="ml-1 text-2xl text-white sm:text-xl"
                                             />
-                                        </motion.span>
+                                        </m.span>
                                     </span>
                                     <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-darkerBg/85 to-transparent px-6 pb-4 pt-10 text-left text-sm font-semibold text-white sm:px-4 sm:text-xs">
                                         {VIDEO_TITLE}
                                     </span>
-                                </motion.button>
+                                </m.button>
                             )}
                             {videoLoaded && (
                                 <iframe
@@ -212,7 +212,7 @@ export default function WhyNotHoneySection() {
                                 />
                             )}
                         </div>
-                        <motion.a
+                        <m.a
                             href={`https://www.youtube.com/watch?v=${VIDEO_ID}`}
                             target="_blank"
                             rel="noopener noreferrer"
@@ -221,16 +221,16 @@ export default function WhyNotHoneySection() {
                         >
                             <FaExternalLinkAlt aria-hidden="true" />
                             Watch on YouTube
-                        </motion.a>
-                    </motion.div>
-                </motion.div>
+                        </m.a>
+                    </m.div>
+                </m.div>
 
                 {/* Honey vs Caramel — the NAMED comparison. Same table
                     treatment as FeaturesSection's "Caramel vs Others" (classes
                     copied, not refactored — that file is owned by a parallel
                     branch): one header row, muted losing column, tinted+ringed
                     winning column. */}
-                <motion.div
+                <m.div
                     initial={{ opacity: 0, y: 20 }}
                     whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true }}
@@ -263,7 +263,7 @@ export default function WhyNotHoneySection() {
                             {problemsWithHoney.map((problem, index) => {
                                 const solution = caramelSolutions[index]
                                 return (
-                                    <motion.div
+                                    <m.div
                                         key={problem.title}
                                         initial={
                                             reduceMotion
@@ -323,15 +323,15 @@ export default function WhyNotHoneySection() {
                                                 </div>
                                             </div>
                                         </div>
-                                    </motion.div>
+                                    </m.div>
                                 )
                             })}
                         </div>
                     </div>
-                </motion.div>
+                </m.div>
 
                 {/* Call to Action */}
-                <motion.div
+                <m.div
                     initial={{ opacity: 0, y: 30 }}
                     whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true }}
@@ -349,7 +349,7 @@ export default function WhyNotHoneySection() {
                     </p>
                     <div className="flex justify-center gap-6 lg:flex-col lg:items-center lg:gap-4">
                         <InstallSurfaceGate className="contents">
-                            <motion.a
+                            <m.a
                                 href="#install-extension"
                                 className="inline-flex items-center rounded-full bg-white px-8 py-4 font-semibold text-caramel shadow-md transition-all duration-200 hover:bg-orange-50 hover:shadow-xl"
                                 whileHover={{
@@ -359,9 +359,9 @@ export default function WhyNotHoneySection() {
                                 whileTap={{ scale: 0.95 }}
                             >
                                 Install Caramel Now
-                            </motion.a>
+                            </m.a>
                         </InstallSurfaceGate>
-                        <motion.a
+                        <m.a
                             href="#features"
                             className="inline-flex items-center rounded-full border-2 border-white bg-transparent px-8 py-4 font-semibold text-white transition-all duration-200 hover:bg-white hover:text-caramel"
                             whileHover={{
@@ -371,9 +371,9 @@ export default function WhyNotHoneySection() {
                             whileTap={{ scale: 0.95 }}
                         >
                             Learn More About Caramel
-                        </motion.a>
+                        </m.a>
                     </div>
-                </motion.div>
+                </m.div>
             </div>
         </section>
     )

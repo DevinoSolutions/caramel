@@ -2,27 +2,39 @@
 
 import { listingForBrowser } from '@/app/(marketing)/apps/storeListings'
 import InstallSurfaceGate from '@/components/growth/InstallSurfaceGate'
-import { trackGrowthEvent } from '@/lib/analytics/growthEvents'
+import {
+    type InstallCtaPlacement,
+    trackGrowthEvent,
+} from '@/lib/analytics/growthEvents'
 import { canInstallExtension } from '@/lib/surface/detectPlatform'
 import { useSurface } from '@/lib/surface/SurfaceProvider'
 import Link from 'next/link'
 
-// The install step for /supported-stores, directly under the search box.
+// An install step placed inside a page's content, at the point where the
+// visitor has just got their answer. Each placement reports its own
+// `install_cta_click` so PostHog can tell the pages apart.
 //
-// PostHog, 30 days to 2026-09-25: /supported-stores was the second-biggest
-// landing page (175 landing sessions; 213 sessions typed a store into the
-// search), yet the page carried no browser-store link (only the header's
-// generic "Get Caramel") — 5 of those 175
-// landing sessions ever clicked through to a browser store, against 621 of
-// 1,310 for the homepage. A shopper who has just confirmed their store is
-// supported had no next step on the page that answered them.
+// First placed on /supported-stores. PostHog, 30 days to 2026-09-25:
+// /supported-stores was the second-biggest landing page (175 landing
+// sessions; 213 sessions typed a store into the search), yet the page carried
+// no browser-store link (only the header's generic "Get Caramel") — 5 of
+// those 175 landing sessions ever clicked through to a browser store, against
+// 621 of 1,310 for the homepage. A shopper who has just confirmed their store
+// is supported had no next step on the page that answered them.
 //
 // Desktop only gets a store link (canInstallExtension — the same rule the
 // install prompt uses); phones, and the render before hydration when the
 // browser is not known yet, link to /apps, which shows every build.
-const PLACEMENT = 'supported_stores'
-
-export default function InstallCallout() {
+export default function InstallCallout({
+    placement,
+    lead,
+    body,
+}: {
+    placement: InstallCtaPlacement
+    /** The bold opening words, e.g. "Found your store?". */
+    lead: string
+    body: string
+}) {
     const { surface, platform, browser } = useSurface()
     const listing = canInstallExtension(platform)
         ? listingForBrowser(browser)
@@ -38,10 +50,9 @@ export default function InstallCallout() {
             >
                 <p className="text-sm text-gray-700 dark:text-gray-300">
                     <span className="font-semibold text-gray-900 dark:text-white">
-                        Found your store?
+                        {lead}
                     </span>{' '}
-                    Caramel applies the best code for you at checkout. Free and
-                    open source.
+                    {body}
                 </p>
                 {listing ? (
                     // canonicalHref, not href: `href` carries the /apps
@@ -56,7 +67,7 @@ export default function InstallCallout() {
                             trackGrowthEvent('install_cta_click', {
                                 store: listing.platform,
                                 browser,
-                                placement: PLACEMENT,
+                                placement,
                             })
                         }
                         className="shrink-0 rounded-full bg-gradient-to-r from-caramel to-orange-600 px-5 py-2.5 text-sm font-semibold text-white shadow-md transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 dark:focus-visible:ring-offset-darkSurface"
@@ -70,7 +81,7 @@ export default function InstallCallout() {
                             trackGrowthEvent('install_cta_click', {
                                 platform,
                                 browser,
-                                placement: PLACEMENT,
+                                placement,
                             })
                         }
                         className="shrink-0 rounded-full bg-gradient-to-r from-caramel to-orange-600 px-5 py-2.5 text-sm font-semibold text-white shadow-md transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 dark:focus-visible:ring-offset-darkSurface"

@@ -52,7 +52,6 @@ const { envMock, KNOWN_ORIGIN, BASE } = vi.hoisted(() => {
             GOOGLE_CLIENT_ID: 'test-google-client-id',
             GOOGLE_CLIENT_SECRET: 'test-google-client-secret',
             APPLE_CLIENT_ID: 'test-apple-client-id',
-            APPLE_CLIENT_SECRET: 'test-apple-client-secret',
             BETTER_AUTH_URL: BASE,
             CHROME_EXTENSION_ORIGIN: 'chrome-extension://known-chrome-id',
             FIREFOX_EXTENSION_ORIGIN: undefined as string | undefined,
@@ -63,6 +62,11 @@ const { envMock, KNOWN_ORIGIN, BASE } = vi.hoisted(() => {
 })
 vi.mock('@/lib/env', () => ({ env: envMock }))
 vi.mock('@/lib/env.client', () => ({ BASE_URL: BASE }))
+// MOCK (announced): the real signer needs an Apple .p8 key; it has its own
+// test (apple-client-secret.test.ts). Here the route only forwards its result.
+vi.mock('@/lib/auth/appleClientSecret', () => ({
+    getAppleClientSecret: vi.fn(() => 'mock-signed-apple-client-secret'),
+}))
 
 // The shipped client polls once every 2s for up to 5 minutes; the real limiter
 // would make that a test-ordering variable. Its own behavior is pinned in

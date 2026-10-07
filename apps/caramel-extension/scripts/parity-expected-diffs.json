@@ -75,9 +75,9 @@
         {
             "browser": "chrome",
             "path": "/version",
-            "reason": "1.4.1 -> 1.4.2 (package.json is the single version authority): the popup closes itself once a code is copied (#249) and Firefox for Android availability via gecko_android (#218). The goldens are frozen 1.3.1 snapshots relabelled 1.4.0 and cannot follow a release without being re-frozen",
-            "retiredBy": "golden-rebaseline(1.4.2)",
-            "added": "2026-09-19"
+            "reason": "1.4.5 -> 1.4.7 (package.json is the single version authority): first-install welcome page (background.js runtime.onInstalled opens /welcome on reason install) for install attribution (1.4.6), and every toolbar and store icon is the site favicon mark again, the white italic C on the orange rounded square, replacing the 1.4.5 header wordmark that was unreadable at icon size (1.4.7). The goldens are frozen 1.3.1 snapshots relabelled 1.4.0 and cannot follow a release without being re-frozen",
+            "retiredBy": "golden-rebaseline(1.4.7)",
+            "added": "2026-10-06"
         },
         {
             "browser": "chrome",
@@ -89,9 +89,9 @@
         {
             "browser": "firefox",
             "path": "/version",
-            "reason": "1.4.1 -> 1.4.2 (package.json is the single version authority): the popup closes itself once a code is copied (#249) and Firefox for Android availability via gecko_android (#218). The goldens are frozen 1.3.1 snapshots relabelled 1.4.0 and cannot follow a release without being re-frozen",
-            "retiredBy": "golden-rebaseline(1.4.2)",
-            "added": "2026-09-19"
+            "reason": "1.4.5 -> 1.4.7 (package.json is the single version authority): first-install welcome page (background.js runtime.onInstalled opens /welcome on reason install) for install attribution (1.4.6), and every toolbar and store icon is the site favicon mark again, the white italic C on the orange rounded square, replacing the 1.4.5 header wordmark that was unreadable at icon size (1.4.7). The goldens are frozen 1.3.1 snapshots relabelled 1.4.0 and cannot follow a release without being re-frozen",
+            "retiredBy": "golden-rebaseline(1.4.7)",
+            "added": "2026-10-06"
         },
         {
             "browser": "firefox",
@@ -112,6 +112,104 @@
             "reason": "the env stamp is BUNDLED into background.js instead of a separate manifest entry — the stamp-first guarantee moves from manifest order into the module graph (P1 pins it there)",
             "retiredBy": "golden-rebaseline(1.4.0)",
             "added": "2026-08-12"
+        },
+        {
+            "browser": "chrome",
+            "path": "/permissions",
+            "reason": "activeTab dropped in 1.4.3 (2026-10-02): no code path used it (tabs already exposes the tab URL; no scripting or capture call), and the Chrome Web Store Privacy tab needs a real justification for every requested permission",
+            "retiredBy": "golden-rebaseline(1.4.3)",
+            "added": "2026-10-02"
+        },
+        {
+            "browser": "firefox",
+            "path": "/permissions",
+            "reason": "activeTab dropped in 1.4.3 (2026-10-02): no code path used it (tabs already exposes the tab URL; no scripting or capture call), and the Chrome Web Store Privacy tab needs a real justification for every requested permission",
+            "retiredBy": "golden-rebaseline(1.4.3)",
+            "added": "2026-10-02"
+        },
+        {
+            "browser": "chrome",
+            "path": "/name",
+            "reason": "store title from scripts/store-listing.mjs (2026-10-05 Chrome Web Store pass); the Chrome Web Store title, max 75 characters",
+            "retiredBy": "golden-rebaseline(1.4.5)",
+            "added": "2026-10-05"
+        },
+        {
+            "browser": "chrome",
+            "path": "/description",
+            "reason": "store short description from scripts/store-listing.mjs (2026-10-05 Chrome Web Store pass)",
+            "retiredBy": "golden-rebaseline(1.4.5)",
+            "added": "2026-10-05"
+        },
+        {
+            "browser": "chrome",
+            "path": "/icons/48",
+            "reason": "48 and 128 px icons added 2026-10-05 (extensions-page and store-tile sizes); every size is the site favicon mark (white C on the orange rounded square) filling the canvas (1.4.7)",
+            "retiredBy": "golden-rebaseline(1.4.7)",
+            "added": "2026-10-05"
+        },
+        {
+            "browser": "chrome",
+            "path": "/icons/128",
+            "reason": "48 and 128 px icons added 2026-10-05 (extensions-page and store-tile sizes); every size is the site favicon mark (white C on the orange rounded square) filling the canvas (1.4.7)",
+            "retiredBy": "golden-rebaseline(1.4.7)",
+            "added": "2026-10-05"
+        },
+        {
+            "browser": "chrome",
+            "path": "/action/default_icon/48",
+            "reason": "48 and 128 px icons added 2026-10-05 (extensions-page and store-tile sizes); every size is the site favicon mark (white C on the orange rounded square) filling the canvas (1.4.7)",
+            "retiredBy": "golden-rebaseline(1.4.7)",
+            "added": "2026-10-05"
+        },
+        {
+            "browser": "chrome",
+            "path": "/action/default_icon/128",
+            "reason": "48 and 128 px icons added 2026-10-05 (extensions-page and store-tile sizes); every size is the site favicon mark (white C on the orange rounded square) filling the canvas (1.4.7)",
+            "retiredBy": "golden-rebaseline(1.4.7)",
+            "added": "2026-10-05"
+        },
+        {
+            "browser": "firefox",
+            "path": "/name",
+            "reason": "store title from scripts/store-listing.mjs (2026-10-05 Chrome Web Store pass); AMO caps names at 50 characters, so Firefox carries FIREFOX_NAME",
+            "retiredBy": "golden-rebaseline(1.4.5)",
+            "added": "2026-10-05"
+        },
+        {
+            "browser": "firefox",
+            "path": "/description",
+            "reason": "store short description from scripts/store-listing.mjs (2026-10-05 Chrome Web Store pass)",
+            "retiredBy": "golden-rebaseline(1.4.5)",
+            "added": "2026-10-05"
+        },
+        {
+            "browser": "firefox",
+            "path": "/icons/48",
+            "reason": "48 and 128 px icons added 2026-10-05 (extensions-page and store-tile sizes); every size is the site favicon mark (white C on the orange rounded square) filling the canvas (1.4.7)",
+            "retiredBy": "golden-rebaseline(1.4.7)",
+            "added": "2026-10-05"
+        },
+        {
+            "browser": "firefox",
+            "path": "/icons/128",
+            "reason": "48 and 128 px icons added 2026-10-05 (extensions-page and store-tile sizes); every size is the site favicon mark (white C on the orange rounded square) filling the canvas (1.4.7)",
+            "retiredBy": "golden-rebaseline(1.4.7)",
+            "added": "2026-10-05"
+        },
+        {
+            "browser": "firefox",
+            "path": "/action/default_icon/48",
+            "reason": "48 and 128 px icons added 2026-10-05 (extensions-page and store-tile sizes); every size is the site favicon mark (white C on the orange rounded square) filling the canvas (1.4.7)",
+            "retiredBy": "golden-rebaseline(1.4.7)",
+            "added": "2026-10-05"
+        },
+        {
+            "browser": "firefox",
+            "path": "/action/default_icon/128",
+            "reason": "48 and 128 px icons added 2026-10-05 (extensions-page and store-tile sizes); every size is the site favicon mark (white C on the orange rounded square) filling the canvas (1.4.7)",
+            "retiredBy": "golden-rebaseline(1.4.7)",
+            "added": "2026-10-05"
         }
     ],
     "missingReferences": []

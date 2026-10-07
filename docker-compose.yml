@@ -11,6 +11,15 @@ services:
   postgres:
     image: postgres:18.4
     restart: unless-stopped
+    # Bounds container logs (3 x 10 MB per service) so the privacy policy's
+    # "server logs are kept up to 90 days" statement is true for the container
+    # side; Traefik access logs are truncated daily by Dokploy's log-cleanup
+    # cron (0 0 * * *). See RUNBOOK.md "Log retention".
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-caramel}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-caramel_password}
@@ -63,6 +72,15 @@ services:
     # from transient boot races and survives host reboots; `unless-stopped`
     # respects a manual stop (the retire/revert path).
     restart: unless-stopped
+    # Bounds container logs (3 x 10 MB per service) so the privacy policy's
+    # "server logs are kept up to 90 days" statement is true for the container
+    # side; Traefik access logs are truncated daily by Dokploy's log-cleanup
+    # cron (0 0 * * *). See RUNBOOK.md "Log retention".
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
     # App secrets (auth, email, OpenRouter, extension OAuth, …) come from the
     # env files below — later file wins on collision, so a local app .env
     # overrides a stray root one. Both optional so a clean checkout / CI can
@@ -126,6 +144,13 @@ services:
       timeout: 15s
       retries: 8
       start_period: 90s
+      # Probe every 2s until the first healthy result, then every 30s. Traefik
+      # routes only to a healthy container, so on a deploy the FIRST probe
+      # decides when grabcaramel.com comes back. Docker's default start
+      # interval is 5s (first probe measured at +5.3s on the host, +2.2s with
+      # this), and until then another app's router answers the extension.
+      # Needs Docker Engine 25+; the host runs 28.5.
+      start_interval: 2s
 
 volumes:
   caramel-auth-db-data:

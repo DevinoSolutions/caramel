@@ -34,6 +34,7 @@ const SHIPPED_TO_STRANGERS = [
     'dom-utils.js',
     'store-detect.js',
     'coupon-apply.js',
+    'code-capture.js',
     'coupon-fetch.js',
     'coupon-runner.js',
     'UI-helpers.js',

@@ -22,6 +22,7 @@ import {
     log,
 } from './caramel-base.js'
 import { CARAMEL_ENV } from './caramel-env.js'
+import { CaramelCoupons } from './coupon-constants.generated.js'
 import { fetchCouponsPage } from './coupon-fetch.js'
 import { resolvePermissionState } from './permission-state.js'
 
@@ -40,24 +41,60 @@ export { isSafariExtensionRuntime }
 export const caramelUrl = path =>
     new URL(path, `${CARAMEL_ENV.baseUrl}/`).toString()
 
-// Twin of the app's src/lib/relativeTime.ts formatWorkedAgo() — the app-owned
-// "worked Xh ago" trust signal (W1). The two live across the app/extension
-// runtime boundary and can't share a module, so this small formatter is a
-// deliberate duplicate kept in step with its app-side twin by hand. Returns
-// "worked Xh ago" / "worked Xd ago" for a recent lastWorkedAt ISO string
-// (whole hours under a day, whole days otherwise), or '' when it's absent,
-// unparseable, in the future, or older than 7 days (render nothing).
-export const formatWorkedAgo = iso => {
-    if (!iso) return ''
+// Twins of the app's proof-by-use rule — src/lib/coupons.ts (workedAgeMs,
+// couponBadge) and src/lib/relativeTime.ts (formatWorkedAgo). The app and the
+// extension are separate packages and can't share a module, so the LOGIC is a
+// deliberate small duplicate kept in step by hand, while the TIMING (the 24h
+// proof window, the clock-skew tolerance) and the badge labels come from
+// coupon-constants.generated.js, so those cannot drift.
+
+const HOUR_MS = 60 * 60 * 1000
+const DAY_MS = 24 * HOUR_MS
+const WORKED_AGO_CEILING_MS = 7 * DAY_MS
+
+/** ms since lastWorkedAt (clamped to 0 within the clock-skew tolerance), or
+ *  null when absent, unparseable, or too far in the future. */
+const workedAgeMs = (iso, now) => {
+    if (!iso) return null
     const then = Date.parse(iso)
-    if (Number.isNaN(then)) return ''
-    const HOUR_MS = 60 * 60 * 1000
-    const DAY_MS = 24 * HOUR_MS
-    const diffMs = Date.now() - then
-    if (diffMs < 0 || diffMs > 7 * DAY_MS) return ''
-    return diffMs < DAY_MS
-        ? `worked ${Math.floor(diffMs / HOUR_MS)}h ago`
-        : `worked ${Math.floor(diffMs / DAY_MS)}d ago`
+    if (Number.isNaN(then)) return null
+    const age = now - then
+    if (age < -CaramelCoupons.WORKED_AT_CLOCK_SKEW_TOLERANCE_MS) return null
+    return Math.max(0, age)
+}
+
+/**
+ * The trust line for a lastWorkedAt ISO string: "Just worked" under an hour
+ * (never "worked 0h ago"), "Worked Xh ago" under a day, "Worked Xd ago" up to
+ * 7 days — or '' (render nothing) when absent, unparseable, too far in the
+ * future, or older than 7 days.
+ */
+export const formatWorkedAgo = (iso, now = Date.now()) => {
+    const age = workedAgeMs(iso, now)
+    if (age === null || age > WORKED_AGO_CEILING_MS) return ''
+    if (age < HOUR_MS) return 'Just worked'
+    if (age < DAY_MS) return `Worked ${Math.floor(age / HOUR_MS)}h ago`
+    return `Worked ${Math.floor(age / DAY_MS)}d ago`
+}
+
+/**
+ * The badge {label, tier} to show for a coupon: its catalog status's
+ * STATUS_META entry, upgraded to the Verified badge when the status is
+ * unverified (grey tier) or absent AND a shopper's apply succeeded within
+ * WORKED_VERIFIED_WINDOW_MS. Amber (restricted) and red (dead) are never
+ * upgraded — see the app's coupons.ts for why. undefined = no badge.
+ */
+export const couponBadgeMeta = (status, lastWorkedAt, now = Date.now()) => {
+    const meta = Object.hasOwn(CaramelCoupons.STATUS_META, status ?? '')
+        ? CaramelCoupons.STATUS_META[status]
+        : undefined
+    const age = workedAgeMs(lastWorkedAt, now)
+    const recentlyWorked =
+        age !== null && age <= CaramelCoupons.WORKED_VERIFIED_WINDOW_MS
+    if (recentlyWorked && (!meta || meta.tier === 'grey')) {
+        return CaramelCoupons.STATUS_META.valid
+    }
+    return meta
 }
 
 /* ------------------------------------------------------------ */

@@ -23,6 +23,7 @@ interface Settings {
     autoApply: boolean
     disabledSites: string[]
     syncSavings: boolean
+    shareCheckoutCodes: boolean
 }
 
 export function SettingsView({
@@ -77,6 +78,14 @@ export function SettingsView({
     const toggleAutoApply = (checked: boolean) => {
         setSettings({ ...settings, autoApply: checked })
         void caramelSetSettings({ autoApply: checked })
+    }
+
+    // Per-user switch for code-capture.js. Stored like the checkout prompt
+    // (storage.sync roams it with the profile); the sign-in gate and the
+    // server flag are enforced in background.js, so this only records consent.
+    const toggleShareCheckoutCodes = (checked: boolean) => {
+        setSettings({ ...settings, shareCheckoutCodes: checked })
+        void caramelSetSettings({ shareCheckoutCodes: checked })
     }
 
     const toggleSite = async (checked: boolean) => {
@@ -161,6 +170,23 @@ export function SettingsView({
                     />
                 </label>
             )}
+
+            <label className="settings-row">
+                <span className="settings-copy">
+                    <span>Share codes I enter at checkout</span>
+                    <small>
+                        Only the code and store, when the store accepts it.
+                        Requires sign-in.
+                    </small>
+                </span>
+                <input
+                    type="checkbox"
+                    id="shareCheckoutCodesToggle"
+                    className="settings-switch"
+                    checked={settings.shareCheckoutCodes}
+                    onChange={e => toggleShareCheckoutCodes(e.target.checked)}
+                />
+            </label>
 
             {/* Savings sync needs an account to sync TO, so the row is
                 signed-in only — the gate #accountLink already uses. A guest

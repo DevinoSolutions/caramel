@@ -44,7 +44,7 @@ describe('coupon-constants.generated.js (F-006 app<->extension sync)', () => {
         expect(committed).toBe(await renderCouponConstants())
     })
 
-    it('exports CaramelCoupons with the 4 expected keys (sanity: the generator did not silently emit an empty/malformed payload)', async () => {
+    it('exports CaramelCoupons with the 6 expected keys (sanity: the generator did not silently emit an empty/malformed payload)', async () => {
         const rendered = await renderCouponConstants()
         // ESM shape since the WXT P1 port: a named export consumers import,
         // plus the init that keeps the legacy window seam alive.
@@ -57,5 +57,9 @@ describe('coupon-constants.generated.js (F-006 app<->extension sync)', () => {
         expect(rendered).toContain('VISIBLE_STATUSES: [')
         expect(rendered).toContain('RESTRICTED_STATUSES: [')
         expect(rendered).toContain('STATUS_META: {')
+        // The proof-by-use timing the popup's "Just worked" → Verified twin
+        // reads (coupons.ts WORKED_VERIFIED_WINDOW_MS / clock-skew tolerance).
+        expect(rendered).toContain('WORKED_VERIFIED_WINDOW_MS: 86400000')
+        expect(rendered).toContain('WORKED_AT_CLOCK_SKEW_TOLERANCE_MS: 300000')
     })
 })

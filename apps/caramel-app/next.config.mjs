@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { resolveBuildSha } from './scripts/build-sha.mjs'
+import { buildTelemetryRewrites } from './src/lib/analytics/telemetryProxy.mjs'
 
 const packageRoot = fileURLToPath(new URL('.', import.meta.url))
 const workspaceRoot = path.resolve(packageRoot, '..', '..')
@@ -82,6 +83,14 @@ const nextConfig = {
         inlineCss: true,
     },
     outputFileTracingRoot: workspaceRoot,
+    // posthog-js POSTs to trailing-slash endpoints (/i/v0/e/, /flags/, /s/) on
+    // the first-party telemetry path below. Next's default 308 trailing-slash
+    // normalisation would redirect those POSTs and drop the capture, so the
+    // global redirect is OFF — which also turns off the SEO normalisation
+    // (`/foo/` -> `/foo`) for every page. src/middleware.ts re-implements that
+    // redirect for every path EXCEPT the telemetry prefix (see
+    // src/lib/trailingSlash.ts); the two changes only make sense together.
+    skipTrailingSlashRedirect: true,
     // The visual-regression job screenshots a `next dev` server, and dev mode
     // paints Next's on-screen dev indicator (a dark "N" badge, position:fixed
     // bottom-left) INTO every full-page capture. It shows or hides depending on
@@ -137,6 +146,16 @@ const nextConfig = {
                 permanent: false,
             },
         ]
+    },
+    // First-party PostHog path (src/lib/analytics/telemetryProxy.mjs): ad
+    // blockers key on posthog.devino.ca and on /ingest-style paths, so the
+    // browser sends events to <our origin>/_t/k3v and Next forwards them. Empty
+    // when the dataset is not `production` or no host is baked into the build.
+    async rewrites() {
+        return buildTelemetryRewrites({
+            dataset: process.env.NEXT_PUBLIC_POSTHOG_DATASET,
+            host: process.env.NEXT_PUBLIC_POSTHOG_HOST,
+        })
     },
     async headers() {
         const headers = [{ source: '/:path*', headers: SECURITY_HEADERS }]

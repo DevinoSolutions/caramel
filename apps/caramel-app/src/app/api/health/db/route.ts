@@ -45,6 +45,8 @@ async function checkCatalog(): Promise<CatalogCheck> {
     const start = Date.now()
     try {
         const { _count, _max } = await prisma.coupon.aggregate({
+            // Supplier rows only: shopper submissions stamp updated_at = NOW(), so counting them would make a stalled supplier feed look fresh.
+            where: { submissionSource: null },
             _count: true,
             _max: { updatedAt: true },
         })

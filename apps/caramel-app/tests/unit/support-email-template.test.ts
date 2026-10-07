@@ -82,14 +82,14 @@ describe('support notification template', () => {
         const withSentry = await renderTemplate({
             sentryEventId: 'abc123',
             sentryUrl:
-                'https://devino.sentry.io/organizations/devino/issues/?query=abc123',
+                'https://sentry.devino.ca/organizations/devino/issues/?query=abc123',
         })
         expect(withSentry).toContain(
-            'https://devino.sentry.io/organizations/devino/issues/?query=abc123',
+            'https://sentry.devino.ca/organizations/devino/issues/?query=abc123',
         )
 
         const without = await renderTemplate()
-        expect(without).not.toContain('sentry.io')
+        expect(without).not.toContain('sentry.devino.ca')
     })
 
     it('tells the operator that replying reaches the customer, only when they asked for a reply', async () => {

@@ -4,6 +4,7 @@ import { expect, test } from '@playwright/test'
 // and deployed, no generated prisma client) and this module is pure — no
 // `@/` alias, no prisma, no env.
 import { resolveStoreDomain } from '../src/lib/storeDomain'
+import { firstLinkedStoreDomain } from './support/stores'
 
 test.describe('SEO & Accessibility Basics', () => {
     test('home page has correct title', async ({ page }) => {
@@ -152,6 +153,105 @@ test.describe('Coupon pages — crawler-visible SEO', () => {
         // Server-rendered internal links to other store pages (orphan-page
         // fix) — the popular-stores block must be in the raw HTML.
         expect(html).toContain('Popular coupon stores')
+    })
+
+    test('a store page answers its FAQ in the server HTML, and the FAQPage markup matches the visible questions', async ({
+        page,
+    }) => {
+        // Deployment-safe: the store comes from the site's own links
+        // (listTopSites, so it has codes) and every expectation is read off
+        // the page itself, never a catalog value named here.
+        const site = await firstLinkedStoreDomain(page)
+        // ONE navigation: the raw HTML and the rendered DOM below come from
+        // the same response, so a catalog push between two requests (the
+        // deployed lanes serve live data) can't make them disagree.
+        const res = await page.goto(`/coupons/${site}`)
+        expect(res?.status()).toBe(200)
+        const html = await res!.text()
+
+        // Server-rendered, not client-only: answer engines read raw HTML.
+        expect(html).toContain('id="store-faq-heading"')
+        const jsonLd = extractJsonLd(html)
+        const faq = jsonLd.find(d => d['@type'] === 'FAQPage') as
+            | {
+                  mainEntity: Array<{
+                      name: string
+                      acceptedAnswer: { text: string }
+                  }>
+              }
+            | undefined
+        expect(faq, 'FAQPage JSON-LD').toBeTruthy()
+        const itemList = jsonLd.find(d => d['@type'] === 'ItemList')
+        const total = Number(itemList!.numberOfItems)
+        expect(total).toBeGreaterThan(0)
+
+        // The count the FAQ states is the count the page lists.
+        const howMany = faq!.mainEntity.find(q => q.name.startsWith('How many'))
+        expect(howMany!.acceptedAnswer.text).toContain(
+            `lists ${total.toLocaleString('en-US')} active `,
+        )
+
+        // What a shopper sees is what the markup claims, question by question.
+        const section = page.locator(
+            'section[aria-labelledby="store-faq-heading"]',
+        )
+        await expect(section.locator('h3')).toHaveText(
+            faq!.mainEntity.map(q => q.name),
+        )
+        await expect(section.locator('p')).toHaveText(
+            faq!.mainEntity.map(q => q.acceptedAnswer.text),
+        )
+    })
+
+    test('the coupon extension comparison answers in the server HTML, its FAQPage markup matches the visible questions, and the home page links to it', async ({
+        page,
+    }) => {
+        // No catalog read on this page, so nothing here depends on the
+        // context's data. ONE navigation: raw HTML and DOM from one response.
+        const res = await page.goto('/compare/coupon-extensions')
+        expect(res?.status()).toBe(200)
+        const html = await res!.text()
+
+        // The table and the sources are server-rendered, not client-only.
+        expect(html).toContain('id="compare-table-heading"')
+        expect(html).toContain('id="source-1"')
+        const rows = page.locator('tbody th[scope="row"]')
+        await expect(rows).toContainText(['Caramel', 'Honey', 'SimplyCodes'])
+
+        const faq = extractJsonLd(html).find(d => d['@type'] === 'FAQPage') as
+            | {
+                  mainEntity: Array<{
+                      name: string
+                      acceptedAnswer: { text: string }
+                  }>
+              }
+            | undefined
+        expect(faq, 'FAQPage JSON-LD').toBeTruthy()
+        const section = page.locator(
+            'section[aria-labelledby="compare-faq-heading"]',
+        )
+        await expect(section.locator('h3')).toHaveText(
+            faq!.mainEntity.map(q => q.name),
+        )
+        await expect(section.locator('h3 + p')).toHaveText(
+            faq!.mainEntity.map(q => q.acceptedAnswer.text),
+        )
+
+        // Every footnote points at a listed source.
+        const refs = await page
+            .locator('a[href^="#source-"]')
+            .evaluateAll(links => links.map(a => a.getAttribute('href')))
+        expect(refs.length).toBeGreaterThan(0)
+        for (const ref of Array.from(new Set(refs))) {
+            await expect(page.locator(ref!)).toHaveCount(1)
+        }
+
+        // Internal links: the home page's FAQ and the footer both point here.
+        const home = await page.request.get('/')
+        const homeHtml = await home.text()
+        expect(
+            homeHtml.split('href="/compare/coupon-extensions"').length - 1,
+        ).toBeGreaterThanOrEqual(2)
     })
 
     test('sitemap.xml and robots.txt are served', async ({ page }) => {

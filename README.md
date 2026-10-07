@@ -11,6 +11,16 @@ It automatically tests codes at checkout, never sells your data, and never overw
   <img width="300" height="180" alt="caramel-banner" src="https://grabcaramel.com/caramel_banner.png" />
 </a>
 
+## See it work: about 10% off a real Corsair order
+
+A live checkout on corsair.com for a niche part, the Corsair Type-4 Debossed PATA power cable. Caramel pops up at checkout, tries the store's codes one by one and keeps the best: **LOCHVANESS** takes the item from **$99.95 to $90.00** (CA$9.95 saved, about 10%). The shopper's personal details are blurred.
+
+<a href="docs/media/corsair-demo.mp4">
+  <img width="960" alt="Caramel finding and applying the code LOCHVANESS on a Corsair checkout, taking the item from $99.95 to $90.00" src="docs/media/corsair-demo.gif" />
+</a>
+
+[Watch the full-quality video (MP4)](docs/media/corsair-demo.mp4)
+
 ## Why choose Caramel?
 
 - **100% open source** – every release is on GitHub for public audit
@@ -115,7 +125,7 @@ The app serves its own coupon catalog from `DATABASE_URL`, so this is **unset in
 | `ALLOWED_ORIGINS`                          | blank (same-origin + extensions only)  |
 | `USESEND_BASE_URL`                         | `https://usesend.devino.ca`            |
 | `USESEND_FROM_EMAIL` / `USESEND_FROM_NAME` | `no_reply@grabcaramel.com` / `Caramel` |
-| `OPENROUTER_MODEL`                         | `openai/gpt-5-mini`                    |
+| `OPENROUTER_MODEL`                         | `anthropic/claude-haiku-4.5`           |
 
 (`NODE_ENV` is deliberately absent from `.env.example`: it is framework-managed — Next.js sets it per command and env files cannot override it.)
 
@@ -131,14 +141,14 @@ The app serves its own coupon catalog from `DATABASE_URL`, so this is **unset in
 
 **Human-only — external provider dashboards, optional for a basic boot:**
 
-| Variable                                                         | Needed for                                                 |
-| ---------------------------------------------------------------- | ---------------------------------------------------------- |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`                      | Google sign-in                                             |
-| `APPLE_CLIENT_ID` / `APPLE_CLIENT_SECRET` / `APPLE_REDIRECT_URI` | Apple sign-in — see `docs/APPLE_OAUTH_LOCAL_TESTING.md`    |
-| `USESEND_API_KEY`                                                | Outgoing email (signup verification, etc.)                 |
-| `OPENROUTER_API_KEY`                                             | The cart classifier (`/api/classify-cart`) and `pnpm eval` |
-| `NEXT_PUBLIC_SENTRY_DSN`                                         | Error/APM reporting (no-op locally without it)             |
-| `NEXT_PUBLIC_GOOGLE_ANALYTICS_ID`                                | Analytics                                                  |
+| Variable                                                                                          | Needed for                                                                                                       |
+| ------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`                                                       | Google sign-in                                                                                                   |
+| `APPLE_CLIENT_ID` / `APPLE_TEAM_ID` / `APPLE_KEY_ID` / `APPLE_PRIVATE_KEY` / `APPLE_REDIRECT_URI` | Apple sign-in (the app signs its own client secret from the `.p8` key) — see `docs/APPLE_OAUTH_LOCAL_TESTING.md` |
+| `USESEND_API_KEY`                                                                                 | Outgoing email (signup verification, etc.)                                                                       |
+| `OPENROUTER_API_KEY`                                                                              | The cart classifier (`/api/classify-cart`) and `pnpm eval`                                                       |
+| `NEXT_PUBLIC_SENTRY_DSN`                                                                          | Error/APM reporting (no-op locally without it)                                                                   |
+| `NEXT_PUBLIC_GOOGLE_ANALYTICS_ID`                                                                 | Analytics                                                                                                        |
 
 ### Repo layout at a glance
 

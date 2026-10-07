@@ -1,5 +1,6 @@
 import { POST } from '@/app/api/ingest/catalog/route'
 import { applyCatalogRows } from '@/lib/catalog/applyCatalogRows'
+import { IngestCatalogPayloadSchema } from '@/lib/catalog/ingestSchemas'
 import { isIngestAuthorized } from '@/lib/rateLimit'
 import { NextRequest } from 'next/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -141,6 +142,54 @@ describe('POST /api/ingest/catalog — body validation + gate mapping', () => {
         const json = await res.json()
         expect(json.gate).toEqual(gate)
         expect(json.error).toContain('force:true')
+    })
+})
+
+describe('POST /api/ingest/catalog — reserved shopper id range', () => {
+    // Ids from 900000000000000000 up come from shopper_coupon_id_seq
+    // (submitShopperCoupon). A supplier row in that range could overwrite a
+    // shopper's row under the only-if-newer upsert, so the schema refuses it.
+    it('id at the floor (900000000000000000) → 422 naming the reserved range, applyCatalogRows not called', async () => {
+        const res = await POST(
+            authed({
+                coupons: [{ ...VALID_COUPON, id: '900000000000000000' }],
+            }),
+        )
+        expect(res.status).toBe(422)
+        expect(applyCatalogRows).not.toHaveBeenCalled()
+    })
+
+    it('the schema names the reserved range in its issue (the route hides issue text from the client)', () => {
+        const parsed = IngestCatalogPayloadSchema.safeParse({
+            coupons: [{ ...VALID_COUPON, id: '900000000000000000' }],
+        })
+        expect(parsed.success).toBe(false)
+        expect(JSON.stringify(parsed.error?.issues)).toContain(
+            'reserved shopper range',
+        )
+        expect(
+            IngestCatalogPayloadSchema.safeParse({
+                coupons: [{ ...VALID_COUPON, id: '899999999999999999' }],
+            }).success,
+        ).toBe(true)
+    })
+
+    it('numeric id above the floor → 422 as well (the union accepts numbers)', async () => {
+        const res = await POST(
+            authed({ coupons: [{ ...VALID_COUPON, id: 950000000000000000 }] }),
+        )
+        expect(res.status).toBe(422)
+        expect(applyCatalogRows).not.toHaveBeenCalled()
+    })
+
+    it('id just below the floor (899999999999999999) → accepted', async () => {
+        const res = await POST(
+            authed({
+                coupons: [{ ...VALID_COUPON, id: '899999999999999999' }],
+            }),
+        )
+        expect(res.status).toBe(200)
+        expect(applyCatalogRows).toHaveBeenCalledOnce()
     })
 })
 

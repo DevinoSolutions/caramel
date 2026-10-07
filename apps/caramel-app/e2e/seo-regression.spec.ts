@@ -30,6 +30,9 @@ import { INDEXNOW_KEY, INDEXNOW_KEY_PATH } from '../src/lib/seo/indexnow'
 //   /sources            499 /  499   -> min  350
 //   /privacy           2780 / 2784   -> min 1900
 //   /support            547 (prod, 2026-09-11)   -> min 380
+//   /compare/coupon-extensions 8111 (page body alone, renderToStaticMarkup,
+//                       2026-09-26; header+footer only add)  -> min 5600
+//   /honey-extension   7316 (local dev server, full page, 2026-10-05) -> min 5100
 // (/coupons is thin on purpose: the card grid is a client fetch; its server
 // HTML carries the shell copy + sidebar. If a route legitimately gains or
 // loses big copy, re-measure with the snippet in the PR that added this file
@@ -45,6 +48,8 @@ const ROUTES: ReadonlyArray<{ path: string; minVisibleChars: number }> = [
     { path: '/sources', minVisibleChars: 350 },
     { path: '/privacy', minVisibleChars: 1900 },
     { path: '/support', minVisibleChars: 380 },
+    { path: '/compare/coupon-extensions', minVisibleChars: 5600 },
+    { path: '/honey-extension', minVisibleChars: 5100 },
 ]
 
 // Same production-origin set as src/app/robots.ts (and next.config.mjs's

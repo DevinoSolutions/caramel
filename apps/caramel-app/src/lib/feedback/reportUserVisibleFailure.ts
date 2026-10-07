@@ -8,11 +8,10 @@
 // captures a `user_visible_operation_failed` PostHog event carrying the Sentry
 // event id for cross-linking. Rate-limited per fingerprint per session so a
 // caller knows whether to surface a feedback prompt. Never throws.
-import { isPosthogActive } from '@/lib/analytics/identity'
+import { capturePosthog } from '@/lib/analytics/posthogBrowser'
 import { APP_ID } from '@/lib/analytics/posthogDataset'
 import { APP_VERSION } from '@/lib/env.client'
 import * as Sentry from '@sentry/nextjs'
-import posthog from 'posthog-js'
 
 const SESSION_KEY_PREFIX = 'caramel:uvf:'
 
@@ -52,20 +51,24 @@ export function reportUserVisibleFailure(input: {
 
     if (!rateLimited) {
         markReported(fingerprint)
-        if (isPosthogActive()) {
-            posthog.capture('user_visible_operation_failed', {
-                sentry_event_id: sentryEventId,
-                operation: input.operation,
-                error_code: input.errorCode ?? null,
-                app_id: APP_ID,
-                app_version: APP_VERSION,
-                route:
-                    typeof window !== 'undefined'
-                        ? window.location.pathname
-                        : null,
-                ...input.extra,
-            })
+        // Properties (the route especially) and the timestamp are taken NOW:
+        // the capture may be replayed a moment later, once posthog-js loads.
+        const properties = {
+            sentry_event_id: sentryEventId,
+            operation: input.operation,
+            error_code: input.errorCode ?? null,
+            app_id: APP_ID,
+            app_version: APP_VERSION,
+            route:
+                typeof window !== 'undefined' ? window.location.pathname : null,
+            ...input.extra,
         }
+        capturePosthog('user_visible_operation_failed', properties, error =>
+            console.error(
+                '[feedback] user_visible_operation_failed capture failed',
+                error,
+            ),
+        )
     }
 
     return { sentryEventId, rateLimited }

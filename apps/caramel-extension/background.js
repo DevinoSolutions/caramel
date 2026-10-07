@@ -25,6 +25,26 @@ let currentBrowser
 
 const caramelUrl = path => new URL(path, `${CARAMEL_BASE_URL}/`).toString()
 
+// Which store channel this build is running from, for install attribution.
+// The runtime URL scheme separates Firefox and Safari; Edge installs the same
+// Chromium build as Chrome, so only its user agent tells them apart. The four
+// values mirror EXTENSION_STORES in apps/caramel-app/src/lib/extensionInstall.ts
+// (pinned by tests/install-welcome.test.mjs).
+export const detectStoreChannel = (runtimeUrl, userAgent) => {
+    if (runtimeUrl.startsWith('moz-extension://')) return 'firefox'
+    if (runtimeUrl.startsWith('safari-web-extension://')) return 'safari'
+    return /\bEdg(e|A|iOS)?\//.test(userAgent) ? 'edge' : 'chrome'
+}
+
+// The one-time post-install page (apps/caramel-app/src/app/welcome). `iid` is
+// minted per install and becomes the PostHog event uuid there, so reloading or
+// re-opening the page can never count the install twice.
+export const welcomeUrl = (store, version, iid) =>
+    caramelUrl(
+        'welcome?' +
+            new URLSearchParams({ src: 'ext', store, v: version, iid }),
+    )
+
 // Same policy as `logError` in caramel-base.js, which the service worker
 // cannot share (separate context, no content-script files loaded here): a
 // shipped build prints nothing anywhere, and the failure is still recorded
@@ -131,6 +151,149 @@ async function fetchCaramelApi(url, opts = {}, timeoutMs = FETCH_TIMEOUT_MS) {
             headers: { ...opts.headers, Authorization: `Bearer ${token}` },
         },
         timeoutMs,
+    )
+}
+
+/* --------------------------------------------------  shopper code sharing
+ * code-capture.js (content script) hands us a code the shopper typed and the
+ * store accepted. Whether it may leave the browser is decided HERE, not in the
+ * page: signed in, and the server flag on. The flag is read from the public
+ * features endpoint and cached (storage.session when the browser has it, so a
+ * restarted worker does not refetch; memory otherwise): 6h for `true`, but only
+ * 30min for `false`, so an owner flipping the flag on is felt within half an
+ * hour. Concurrent callers share one in-flight fetch.
+ *
+ * Outcomes are returned to the content script as `{ skipped }` for every
+ * expected refusal (signed out, flag off, store/code refused, rate limits) and
+ * as a THROW (logged by the caller, answered as `{ error }`) for anything that
+ * is a real failure: 5xx, network, an unreadable body, the extension-only
+ * origin guard. */
+const FEATURES_CACHE_KEY = 'caramel_features'
+const FEATURES_TTL_ON_MS = 6 * 60 * 60 * 1000
+const FEATURES_TTL_OFF_MS = 30 * 60 * 1000
+let _featuresInflight = null // Promise<boolean> while a fetch is running
+let _featuresMemo = null // { shopperCodeCapture, ts }
+
+function _readFeaturesSession() {
+    return new Promise(resolve => {
+        const area = currentBrowser.storage?.session
+        if (!area) return resolve(null)
+        try {
+            area.get([FEATURES_CACHE_KEY], res =>
+                resolve(res?.[FEATURES_CACHE_KEY] ?? null),
+            )
+        } catch {
+            // session storage unavailable in this runtime: memory-only cache.
+            resolve(null)
+        }
+    })
+}
+
+function _writeFeaturesSession(entry) {
+    try {
+        currentBrowser.storage?.session?.set({ [FEATURES_CACHE_KEY]: entry })
+    } catch {
+        // session storage unavailable in this runtime: memory-only cache.
+    }
+}
+
+function _featuresFresh(e) {
+    if (!e || typeof e.shopperCodeCapture !== 'boolean') return false
+    const ttl = e.shopperCodeCapture ? FEATURES_TTL_ON_MS : FEATURES_TTL_OFF_MS
+    return Date.now() - e.ts < ttl
+}
+
+async function _fetchFeatures() {
+    // Public, anonymous: no bearer (nothing user-scoped in the answer).
+    const r = await fetchWithTimeout(caramelUrl('api/extension/features'))
+    if (!r.ok) throw new Error(`features HTTP ${r.status}`)
+    const json = await r.json()
+    if (typeof json?.shopperCodeCapture !== 'boolean')
+        throw new Error('features: shopperCodeCapture is not a boolean')
+    _featuresMemo = {
+        shopperCodeCapture: json.shopperCodeCapture,
+        ts: Date.now(),
+    }
+    _writeFeaturesSession(_featuresMemo)
+    return json.shopperCodeCapture
+}
+
+function _shopperCaptureEnabled() {
+    if (_featuresFresh(_featuresMemo))
+        return Promise.resolve(_featuresMemo.shopperCodeCapture)
+    // One fetch for however many callers arrive while it is running; cleared
+    // when it settles so a failure is retried by the next caller.
+    if (!_featuresInflight) {
+        _featuresInflight = (async () => {
+            const stored = await _readFeaturesSession()
+            if (_featuresFresh(stored)) {
+                _featuresMemo = stored
+                return stored.shopperCodeCapture
+            }
+            return _fetchFeatures()
+        })().finally(() => {
+            _featuresInflight = null
+        })
+    }
+    return _featuresInflight
+}
+
+function _forgetFeatures() {
+    _featuresMemo = null
+    try {
+        currentBrowser.storage?.session?.remove?.([FEATURES_CACHE_KEY])
+    } catch {
+        // session storage unavailable in this runtime: memory-only cache.
+    }
+}
+
+// Exported for tests/background-shopper-code.test.mjs.
+export async function submitShopperCode(message) {
+    const { site, code } = message
+    if (typeof site !== 'string' || typeof code !== 'string')
+        throw new Error('submitShopperCode: site and code must be strings')
+    if (!(await getStoredToken())) return { skipped: 'signed-out' }
+    if (!(await _shopperCaptureEnabled())) return { skipped: 'disabled' }
+
+    const r = await fetchCaramelApi(caramelUrl('api/coupons/submit'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ site, code, source: 'checkout' }),
+    })
+    // On a refusal the body is only used to NAME it; one we cannot read just
+    // falls back to the generic reason below.
+    const body = r.ok ? await r.json() : await r.json().catch(() => null)
+
+    if (r.ok) {
+        if (typeof body?.couponId !== 'string')
+            throw new Error('submit: response has no couponId')
+        return {
+            couponId: body.couponId,
+            created: body.created === true,
+            status: body.status,
+        }
+    }
+    if (r.status === 401) return { skipped: 'signed-out' }
+    if (r.status === 403 && body?.error === 'capture-disabled') {
+        // The server disagrees with our cached flag: refresh it next time.
+        _forgetFeatures()
+        return { skipped: 'disabled' }
+    }
+    if (r.status === 422) {
+        // Expected refusals (not a store we know, not a plausible code).
+        if (CARAMEL_ENV.verbose)
+            console.debug('Caramel: shopper code refused', body?.error)
+        return { skipped: body?.error || 'refused' }
+    }
+    if (r.status === 429)
+        return {
+            skipped:
+                body?.error === 'daily-limit' ? 'daily-limit' : 'rate-limited',
+        }
+    // 5xx, and the extension-only origin guard (a 403 we should never see from
+    // our own worker): real failures, loud.
+    throw new Error(
+        `submit HTTP ${r.status}${body?.error ? ` ${body.error}` : ''}`,
     )
 }
 
@@ -303,6 +466,31 @@ export function initBackground() {
         })
     }
 
+    // First install only: an update (reason 'update'), a browser update and a
+    // shared-module update all pass through here too and must open nothing.
+    currentBrowser.runtime.onInstalled.addListener(details => {
+        if (details?.reason !== 'install') return
+        try {
+            const url = welcomeUrl(
+                detectStoreChannel(
+                    currentBrowser.runtime.getURL(''),
+                    navigator.userAgent,
+                ),
+                currentBrowser.runtime.getManifest().version,
+                crypto.randomUUID(),
+            )
+            currentBrowser.tabs.create({ url }, () => {
+                if (currentBrowser.runtime.lastError)
+                    logError(
+                        'onInstalledWelcome',
+                        currentBrowser.runtime.lastError,
+                    )
+            })
+        } catch (err) {
+            logError('onInstalledWelcome', err)
+        }
+    })
+
     currentBrowser.runtime.onMessage.addListener(
         (message, sender, sendResponse) => {
             if (!message || typeof message.action !== 'string') return
@@ -418,6 +606,15 @@ export function initBackground() {
                     }).catch(err => logError('increment', err))
                 }
                 sendResponse({ success: true })
+                return true
+            } else if (message.action === 'submitShopperCode') {
+                submitShopperCode(message)
+                    .then(resp => sendResponse(resp))
+                    .catch(err => {
+                        logError('submitShopperCode', err)
+                        sendResponse({ error: String(err) })
+                    })
+
                 return true
             } else if (message.action === 'getFavoriteStores') {
                 // The stores this account follows. fetchCaramelApi so the stored

@@ -36,7 +36,7 @@ import {
 import { useReducedMotion } from '@/lib/reducedMotion'
 import { ticketNotchMask } from '@/lib/ticketMask'
 import { detectWebGL } from '@/lib/webglSupport'
-import { motion } from 'framer-motion'
+import { m } from 'framer-motion'
 import dynamic from 'next/dynamic'
 import Image from 'next/image'
 import React, { useContext, useEffect, useRef, useState } from 'react'
@@ -173,7 +173,7 @@ function PosterCoupon({
                 transform: `translate(-50%, -50%) rotate(${spot.rotate}deg)`,
             }}
         >
-            <motion.div
+            <m.div
                 initial={
                     reduce ? { opacity: 0 } : { opacity: 0, y: 24, scale: 0.9 }
                 }
@@ -201,7 +201,7 @@ function PosterCoupon({
                     gets its own duration + delay, so no two ever bob in sync
                     (the DOM cousin of the scene's per-coupon
                     frequencies/phases). */}
-                <motion.div
+                <m.div
                     animate={reduce ? undefined : { y: [0, -9, 0] }}
                     transition={
                         reduce
@@ -259,8 +259,8 @@ function PosterCoupon({
                     >
                         {stat.label}
                     </div>
-                </motion.div>
-            </motion.div>
+                </m.div>
+            </m.div>
         </div>
     )
 }
@@ -320,7 +320,7 @@ function StatCard({
 }): React.JSX.Element {
     const n = useCountUp(stat.value, start, reduce)
     return (
-        <motion.div
+        <m.div
             initial={
                 reduce ? { opacity: 0 } : { opacity: 0, y: 18, scale: 0.9 }
             }
@@ -340,7 +340,7 @@ function StatCard({
             <div className="mt-1.5 text-[0.7rem] font-medium uppercase tracking-wide text-white/85">
                 {stat.label}
             </div>
-        </motion.div>
+        </m.div>
     )
 }
 
@@ -440,7 +440,7 @@ export default function HeroSection() {
                 aria-hidden="true"
                 className="pointer-events-none absolute inset-0 overflow-hidden"
             >
-                <motion.div
+                <m.div
                     className="bg-caramel/8 absolute left-1/4 top-1/4 h-32 w-32 rounded-full blur-xl"
                     animate={
                         reduceMotion
@@ -456,7 +456,7 @@ export default function HeroSection() {
                         ease: 'easeInOut',
                     }}
                 />
-                <motion.div
+                <m.div
                     className="bg-orange-300/8 absolute right-1/4 top-3/4 h-24 w-24 rounded-full blur-xl"
                     animate={
                         reduceMotion
@@ -473,7 +473,7 @@ export default function HeroSection() {
                         delay: 2,
                     }}
                 />
-                <motion.div
+                <m.div
                     className="bg-caramel/6 absolute right-1/3 top-1/2 h-20 w-20 rounded-full blur-lg"
                     animate={
                         reduceMotion
@@ -505,12 +505,22 @@ export default function HeroSection() {
                         easing as before, transform-only (see globals.css for
                         why the fade had to go); reduced motion is honoured by
                         the stylesheet. framer stays for hover/tap/loops. */}
-                    <h1 className="hero-enter mb-6 flex flex-col items-start text-5xl font-bold tracking-tight lg:items-center lg:text-4xl md:text-3xl">
+                    {/* lg:w-full on the h1 and on the wordmark's wrapper
+                        (2026-09-26): below lg the wordmark is `w-full`, and
+                        both of its ancestors were shrink-to-fit, so until the
+                        PNG had downloaded that 100% had nothing to resolve
+                        against and the image laid out at 0×0. When it arrived
+                        the heading grew ~92px and the vertically centred hero
+                        block jumped: PageSpeed's whole mobile CLS (0.098).
+                        Full-width ancestors give it its final size from the
+                        first frame; every loaded position is unchanged, since
+                        both boxes centre their content on the same axis. */}
+                    <h1 className="hero-enter mb-6 flex flex-col items-start text-5xl font-bold tracking-tight lg:w-full lg:items-center lg:text-4xl md:text-3xl">
                         <div className="mb-4 text-gray-700 dark:text-white">
                             Welcome to
                         </div>
-                        <motion.div
-                            className="hero-enter-scale relative"
+                        <m.div
+                            className="hero-enter-scale relative lg:w-full"
                             style={{ animationDelay: '0.3s' }}
                             whileHover={
                                 reduceMotion ? undefined : { scale: 1.02 }
@@ -538,8 +548,12 @@ export default function HeroSection() {
                                 inside an h1) read "Welcome to Caramel — the
                                 open-source coupon extension" instead of a bare
                                 "Welcome to". Alt text is not rendered. */}
+                            {/* full-logo.webp is full-logo.png re-encoded as
+                                LOSSLESS WebP: pixel-identical, 16 KB instead of
+                                40 KB, so the LCP image finishes sooner on a
+                                slow link it shares with the page's scripts. */}
                             <Image
-                                src="/full-logo.png"
+                                src="/full-logo.webp"
                                 alt="Caramel — the open-source coupon extension"
                                 height={467}
                                 width={1830}
@@ -548,7 +562,7 @@ export default function HeroSection() {
                                 fetchPriority="high"
                                 unoptimized
                             />
-                        </motion.div>
+                        </m.div>
                     </h1>
 
                     <p
@@ -556,7 +570,7 @@ export default function HeroSection() {
                         style={{ animationDelay: '0.4s' }}
                     >
                         The{' '}
-                        <motion.a
+                        <m.a
                             href="https://github.com/DevinoSolutions/caramel"
                             target="_blank"
                             rel="noopener noreferrer"
@@ -567,9 +581,9 @@ export default function HeroSection() {
                             }}
                         >
                             open-source
-                        </motion.a>{' '}
+                        </m.a>{' '}
                         and{' '}
-                        <motion.a
+                        <m.a
                             href="#why-not"
                             className="cursor-pointer rounded px-1 font-semibold text-caramel transition-all duration-300 hover:bg-orange-500/10"
                             whileHover={{
@@ -578,10 +592,10 @@ export default function HeroSection() {
                             }}
                         >
                             privacy-first
-                        </motion.a>{' '}
+                        </m.a>{' '}
                         alternative to Honey. Automatically finds and applies
                         the best coupon codes at checkout —
-                        <motion.a
+                        <m.a
                             href="#why-not"
                             className="cursor-pointer rounded px-1 font-semibold text-caramel transition-all duration-300 hover:bg-orange-500/10"
                             whileHover={{
@@ -591,9 +605,9 @@ export default function HeroSection() {
                         >
                             {' '}
                             without selling your data
-                        </motion.a>{' '}
+                        </m.a>{' '}
                         or{' '}
-                        <motion.a
+                        <m.a
                             href="#why-not"
                             className="cursor-pointer rounded px-1 font-semibold text-caramel transition-all duration-300 hover:bg-orange-500/10"
                             whileHover={{
@@ -602,7 +616,7 @@ export default function HeroSection() {
                             }}
                         >
                             hijacking creatorsʼ commissions
-                        </motion.a>
+                        </m.a>
                         .
                     </p>
 
@@ -614,7 +628,7 @@ export default function HeroSection() {
                         style={{ animationDelay: '0.8s' }}
                     >
                         <InstallSurfaceGate className="contents">
-                            <motion.a
+                            <m.a
                                 href="#install-extension"
                                 className="rounded-full bg-gradient-to-r from-caramel to-orange-600 px-6 py-3 text-sm font-semibold text-black shadow-lg transition-all duration-300 hover:from-orange-600 hover:to-caramel hover:shadow-xl md:w-full md:text-center"
                                 initial={{
@@ -648,9 +662,9 @@ export default function HeroSection() {
                                 whileTap={{ scale: 0.95 }}
                             >
                                 Install Extension
-                            </motion.a>
+                            </m.a>
                         </InstallSurfaceGate>
-                        <motion.a
+                        <m.a
                             href="https://github.com/DevinoSolutions/caramel"
                             target="_blank"
                             rel="noopener noreferrer"
@@ -660,8 +674,8 @@ export default function HeroSection() {
                         >
                             <FaGithub className="h-4 w-4 transition-transform duration-300 group-hover:rotate-12" />
                             View Source Code
-                        </motion.a>
-                        <motion.a
+                        </m.a>
+                        <m.a
                             href="#features"
                             className="rounded-full border-2 border-gray-300/60 bg-transparent px-6 py-3 text-sm font-semibold text-gray-700 backdrop-blur-sm transition-all duration-300 hover:border-caramel hover:text-caramel dark:border-gray-600/60 dark:text-gray-300 md:w-full md:text-center"
                             whileHover={{
@@ -671,7 +685,7 @@ export default function HeroSection() {
                             whileTap={{ scale: 0.95 }}
                         >
                             Why Choose Caramel?
-                        </motion.a>
+                        </m.a>
                     </div>
                     <div
                         className="hero-enter mt-4 flex justify-start lg:justify-center"

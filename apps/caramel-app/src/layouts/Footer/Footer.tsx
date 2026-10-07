@@ -5,9 +5,11 @@ import {
     GITHUB_REPO_URL,
     INSTAGRAM_URL,
 } from '@/lib/brandLinks'
+import { COMPARISON_PATH } from '@/lib/seo/extensionComparison'
+import { HONEY_GUIDE_PATH } from '@/lib/seo/honeyExtensionGuide'
 import { canAdvertiseInstall } from '@/lib/surface/detectSurface'
 import { useSurface } from '@/lib/surface/SurfaceProvider'
-import { motion } from 'framer-motion'
+import { m } from 'framer-motion'
 import Image from 'next/image'
 import Link from 'next/link'
 import { FaDiscord, FaGithub } from 'react-icons/fa'
@@ -27,6 +29,8 @@ const productLinks = [
     { name: 'Store directory', url: '/coupons/stores' },
     { name: 'Sources', url: '/sources' },
     { name: 'FAQ', url: '/faq' },
+    { name: 'Compare extensions', url: COMPARISON_PATH },
+    { name: 'Honey extension, explained', url: HONEY_GUIDE_PATH },
     { name: 'For AI agents', url: '/agent-setup' },
 ]
 
@@ -71,7 +75,7 @@ export default function Footer() {
         // where gray-300 links hit 11.8:1 (hover white 17.4:1) — both pass.
         <footer className="border-t-2 border-dashed border-white/40 bg-gradient-to-br from-[#c14e14] to-[#a63f10] text-white dark:border-caramel/40 dark:bg-darkSurface dark:bg-none">
             <div className="container mx-auto px-6 pt-12">
-                <motion.div
+                <m.div
                     initial={{ opacity: 0, y: 20 }}
                     whileInView={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.3 }}
@@ -169,12 +173,12 @@ export default function Footer() {
                             </li>
                         </ul>
                     </nav>
-                </motion.div>
+                </m.div>
             </div>
 
             {/* Copyright and Powered By */}
             <div className="container mx-auto px-6 py-6">
-                <motion.div
+                <m.div
                     initial={{ opacity: 0, y: 20 }}
                     whileInView={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.3 }}
@@ -196,7 +200,7 @@ export default function Footer() {
                             className="inline-block"
                         />
                     </div>
-                </motion.div>
+                </m.div>
             </div>
         </footer>
     )

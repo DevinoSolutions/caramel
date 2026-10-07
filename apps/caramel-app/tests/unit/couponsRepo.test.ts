@@ -1,12 +1,25 @@
 import {
+    RESTRICTED_COUPON_STATUSES,
+    VISIBLE_COUPON_STATUSES,
+} from '@/lib/coupons'
+import {
     expireCoupons,
     getCouponStats,
+    isKnownStore,
     listCoupons,
     listNeighbourStoreRows,
+    listRecentlyWorkedCoupons,
     listStoreCoupons,
     listStoreSitemapEntries,
     requestSource,
+    submitShopperCoupon,
 } from '@/lib/couponsRepo'
+import {
+    SHOPPER_COUPON_DESCRIPTION,
+    SHOPPER_DAILY_SUBMISSION_CAP,
+    ShopperSubmissionLimitError,
+    UnknownStoreError,
+} from '@/lib/shopperCoupons'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 // Direct fn-level pins for couponsRepo.ts (coverage that doesn't route through
@@ -26,30 +39,40 @@ let rules: MockRule[] = []
 // Raw SQL text of every DB call, in order — lets a test assert on the
 // generated QUERY SHAPE itself.
 let capturedQueries: string[] = []
-// The bound parameter VALUES of every $queryRaw, in the same order — lets a
+// The bound parameter VALUES of every $queryRaw/$executeRaw, index-aligned with capturedQueries — lets a
 // test assert on what was actually bound (e.g. the lowercased store base).
 let capturedValues: unknown[][] = []
 // Affected-row count the mocked $executeRaw returns (expire).
 let executeRawResult = 0
 // Args every prisma.source.create() was called with (requestSource).
 let capturedSourceCreates: unknown[] = []
+// How many prisma.$transaction() calls were opened (submitShopperCoupon).
+let transactionCount = 0
 function mockRows(match: (sql: string) => boolean, rows: unknown[]) {
     rules.push({ match, rows })
 }
 
 // prisma.$queryRaw / $executeRaw receive a Prisma.Sql whose `.sql` getter is the
 // composed, flattened query text (nested fragments inlined, values as `?`).
-vi.mock('@/lib/prisma', () => ({
-    default: {
+vi.mock('@/lib/prisma', () => {
+    const client = {
         $queryRaw: (arg: { sql: string; values: unknown[] }) => {
             capturedQueries.push(arg.sql)
             capturedValues.push(arg.values)
             const rows = rules.find(r => r.match(arg.sql))?.rows ?? []
             return Promise.resolve(rows)
         },
-        $executeRaw: (arg: { sql: string }) => {
+        $executeRaw: (arg: { sql: string; values: unknown[] }) => {
             capturedQueries.push(arg.sql)
+            capturedValues.push(arg.values)
             return Promise.resolve(executeRawResult)
+        },
+        // submitShopperCoupon's interactive transaction: the callback gets this
+        // same recording client, and each opened transaction is counted so a
+        // test can assert "dedupe + insert run in ONE transaction".
+        $transaction: (fn: (tx: unknown) => Promise<unknown>) => {
+            transactionCount += 1
+            return fn(client)
         },
         couponSignal: { findMany: vi.fn(async () => []) },
         source: {
@@ -58,8 +81,9 @@ vi.mock('@/lib/prisma', () => ({
                 return Promise.resolve({})
             },
         },
-    },
-}))
+    }
+    return { default: client }
+})
 
 beforeEach(() => {
     rules = []
@@ -67,7 +91,20 @@ beforeEach(() => {
     capturedValues = []
     executeRawResult = 0
     capturedSourceCreates = []
+    transactionCount = 0
 })
+
+/** The store page's count row: the total plus the FAQ facts folded into the
+ *  same aggregate (couponsDb.ts StoreCouponAggregateRowSchema). */
+function storeAggregateRow(total: number) {
+    return {
+        total,
+        percent_off_codes: total,
+        best_percent_off: total > 0 ? 10 : null,
+        fixed_amount_codes: 0,
+        last_updated: total > 0 ? new Date('2026-09-24T12:00:00Z') : null,
+    }
+}
 
 const couponFixture = {
     id: 42,
@@ -85,6 +122,12 @@ const couponFixture = {
     verificationMessage: null,
 }
 
+/** listStoreCoupons selects `isSupplier` on each list row; listCoupons does not
+ *  (its schema ignores the extra key), so the shared-row tests add it here. */
+function withSupplierFlag<T extends object>(row: T): T & { isSupplier: true } {
+    return { ...row, isSupplier: true }
+}
+
 describe('listCoupons', () => {
     it('parses a production-shaped fixture and derives total from the TotalCountRow', async () => {
         mockRows(
@@ -98,6 +141,83 @@ describe('listCoupons', () => {
             { ...couponFixture, id: '42', rating: 4.5, discount_amount: 10 },
         ])
         expect(result.total).toBe(1)
+    })
+
+    it('both listing reads hand shoppers the store sentence of a restricted coupon and never the verifier log', async () => {
+        const rows = [
+            {
+                ...couponFixture,
+                id: 1,
+                status: 'valid',
+                verificationMessage:
+                    'Discount code accepted (Shopify cart.json; cart 1 item / 45.00 USD)',
+            },
+            {
+                ...couponFixture,
+                id: 2,
+                status: 'retry',
+                verificationMessage: 'Verification timed out after 120s',
+            },
+            {
+                ...couponFixture,
+                id: 3,
+                status: 'product_restriction',
+                verificationMessage: 'basket.error.bagNotFound',
+            },
+            {
+                ...couponFixture,
+                id: 4,
+                status: 'product_restriction',
+                verificationMessage: 'Your cart contains ineligible products.',
+            },
+        ]
+        mockRows(
+            sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
+            rows.map(withSupplierFlag),
+        )
+        mockRows(sql => sql.includes('COUNT(*)'), [storeAggregateRow(4)])
+
+        for (const read of [
+            () => listCoupons({ limit: 10, skip: 0 }),
+            () => listStoreCoupons('example.com', 10),
+        ]) {
+            const { coupons } = await read()
+            expect(coupons.map(c => [c.id, c.verificationMessage])).toEqual([
+                ['1', null],
+                ['2', null],
+                ['3', null],
+                ['4', 'Your cart contains ineligible products.'],
+            ])
+        }
+    })
+
+    it('both listing reads replace a placeholder or scraped-chrome title with one built from the row (couponTitleText.ts)', async () => {
+        const rows = [
+            { ...couponFixture, id: 1, title: 'CODE', discount_amount: null },
+            {
+                ...couponFixture,
+                id: 2,
+                title: "10% off • 154 Competitor Deals • Last Checked: Just now Top codes Activity Saving hacks FAQ Today's Coursera promo codes & verif",
+            },
+            { ...couponFixture, id: 3 },
+        ]
+        mockRows(
+            sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
+            rows.map(withSupplierFlag),
+        )
+        mockRows(sql => sql.includes('COUNT(*)'), [storeAggregateRow(3)])
+
+        for (const read of [
+            () => listCoupons({ limit: 10, skip: 0 }),
+            () => listStoreCoupons('example.com', 10),
+        ]) {
+            const { coupons } = await read()
+            expect(coupons.map(c => c.title)).toEqual([
+                'example.com promo code SAVE10',
+                '10% off at example.com',
+                'Save 10% at Example',
+            ])
+        }
     })
 
     it('an empty total row falls back to 0 (no coupons is legitimate, not drift)', async () => {
@@ -287,13 +407,83 @@ describe('listStoreSitemapEntries (app/sitemap.ts read)', () => {
     })
 })
 
+describe('listStoreCoupons — supplier-row flag (lets the store page skip the known-store probe)', () => {
+    function mockStoreList(rows: unknown[]) {
+        mockRows(
+            sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
+            rows,
+        )
+        mockRows(
+            sql => sql.includes('COUNT(*)::int AS total'),
+            [storeAggregateRow(rows.length)],
+        )
+    }
+
+    it('selects the supplier marker as submission_source IS NULL in the list query only', async () => {
+        mockStoreList([])
+
+        await listStoreCoupons('example.com', 5)
+
+        const listQuery = capturedQueries.find(q => q.includes('LIMIT'))
+        const countQuery = capturedQueries.find(q =>
+            q.includes('COUNT(*)::int AS total'),
+        )
+        expect(listQuery).toContain(
+            '(submission_source IS NULL) AS "isSupplier"',
+        )
+        expect(countQuery).not.toContain('submission_source')
+    })
+
+    it('hasSupplierRow is true when any returned row is a supplier row, false when all are shopper rows or none', async () => {
+        mockStoreList([
+            { ...couponFixture, id: 1, isSupplier: false },
+            { ...couponFixture, id: 2, isSupplier: true },
+        ])
+        expect((await listStoreCoupons('example.com', 5)).hasSupplierRow).toBe(
+            true,
+        )
+
+        rules = []
+        mockStoreList([{ ...couponFixture, id: 3, isSupplier: false }])
+        expect((await listStoreCoupons('example.com', 5)).hasSupplierRow).toBe(
+            false,
+        )
+
+        rules = []
+        mockStoreList([])
+        expect((await listStoreCoupons('example.com', 5)).hasSupplierRow).toBe(
+            false,
+        )
+    })
+
+    it('strips the flag from the returned coupons so it never reaches a prop or an API payload', async () => {
+        mockStoreList([{ ...couponFixture, isSupplier: true }])
+
+        const { coupons } = await listStoreCoupons('example.com', 5)
+
+        expect(coupons).toHaveLength(1)
+        expect(coupons[0]).not.toHaveProperty('isSupplier')
+    })
+
+    it('a list row without the flag is schema drift and throws (the parse stays strict)', async () => {
+        mockStoreList([couponFixture])
+
+        await expect(listStoreCoupons('example.com', 5)).rejects.toThrow(
+            /coupons-db schema drift \[store-page\.coupons\]/,
+        )
+    })
+})
+
 describe('store-matching reads bind the LOWERCASE base (site column is stored lowercase)', () => {
     it('listStoreCoupons("eNasco.com") binds enasco.com / %.enasco.com in BOTH the list and the count query', async () => {
         mockRows(
             sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
             [],
         )
-        mockRows(sql => sql.includes('COUNT(*)::int AS total'), [{ total: 0 }])
+        mockRows(
+            sql => sql.includes('COUNT(*)::int AS total'),
+            [storeAggregateRow(0)],
+        )
 
         await listStoreCoupons('eNasco.com', 5)
 
@@ -390,5 +580,429 @@ describe('listNeighbourStoreRows — the two raw-slug windows behind "More store
         const result = await listNeighbourStoreRows('a.com', 15)
         expect(result.before).toEqual([])
         expect(result.after.map(r => r.site)).toEqual(['b.com'])
+    })
+})
+
+describe('listRecentlyWorkedCoupons (landing "Codes that just worked" read)', () => {
+    it('joins coupon_signals to VISIBLE sited coupons, newest apply first however old, LIMIT-bound — and only SELECTs', async () => {
+        mockRows(
+            sql => sql.includes('FROM coupon_signals s'),
+            [
+                {
+                    id: 900000017,
+                    code: 'LEARN40',
+                    site: 'codecademy.com',
+                    title: '40% off Pro annual',
+                    discount_type: 'percentage',
+                    discount_amount: 40,
+                    lastWorkedAt: new Date('2026-09-30T11:50:00.000Z'),
+                },
+                {
+                    id: '900000001',
+                    code: 'EBAY5',
+                    site: 'ebay.com',
+                    title: '$5 off',
+                    discount_type: null,
+                    discount_amount: null,
+                    // Driver tolerance: an ISO string normalizes to a Date.
+                    lastWorkedAt: '2026-09-30T02:00:00.000Z',
+                },
+            ],
+        )
+
+        const rows = await listRecentlyWorkedCoupons(8)
+
+        expect(rows).toEqual([
+            {
+                id: '900000017',
+                code: 'LEARN40',
+                site: 'codecademy.com',
+                title: '40% off Pro annual',
+                discount_type: 'PERCENTAGE',
+                discount_amount: 40,
+                lastWorkedAt: new Date('2026-09-30T11:50:00.000Z'),
+            },
+            {
+                id: '900000001',
+                code: 'EBAY5',
+                site: 'ebay.com',
+                title: '$5 off',
+                discount_type: null,
+                discount_amount: null,
+                lastWorkedAt: new Date('2026-09-30T02:00:00.000Z'),
+            },
+        ])
+
+        expect(capturedQueries).toHaveLength(1)
+        const q = capturedQueries[0]!
+        // Read-only: a SELECT over the join, never a write to either table.
+        expect(q.trim().startsWith('SELECT')).toBe(true)
+        expect(q).not.toMatch(/\b(UPDATE|INSERT|DELETE)\b/)
+        expect(q).toContain('FROM coupon_signals s')
+        expect(q).toContain('JOIN coupons c ON c.id = s.coupon_id')
+        // No time window since 2026-10-02 (the newest worked codes, however
+        // old, so the landing strip is never near-empty on a quiet day).
+        expect(q).toContain('s.last_worked_at IS NOT NULL')
+        expect(q).not.toMatch(/INTERVAL/)
+        // The shared visibility predicate (same fragment every listing inlines).
+        expect(q).toMatch(/status IN \(\?(?:,\?)*\) AND expired = FALSE/)
+        // Restricted (amber) codes never feature: a fresh tile renders Verified.
+        expect(q).toMatch(/c\.status NOT IN \(\?(?:,\?)*\)/)
+        for (const status of RESTRICTED_COUPON_STATUSES) {
+            expect(capturedValues[0]).toContain(status)
+        }
+        expect(q).toContain('c.site IS NOT NULL')
+        expect(q).toContain('ORDER BY s.last_worked_at DESC, s.coupon_id DESC')
+        expect(q).toContain('LIMIT ?')
+        expect(capturedValues[0]).toContain(8)
+    })
+
+    it('a row missing lastWorkedAt fails the zod boundary loudly (drift, not a silent undated tile)', async () => {
+        mockRows(
+            sql => sql.includes('FROM coupon_signals s'),
+            [
+                {
+                    id: '1',
+                    code: 'X',
+                    site: 'example.com',
+                    title: 'X',
+                    discount_type: null,
+                    discount_amount: null,
+                },
+            ],
+        )
+        await expect(listRecentlyWorkedCoupons(8)).rejects.toThrow(
+            /coupons-db schema drift \[coupons\.recently-worked\]/,
+        )
+    })
+})
+
+// Matchers over the composed SQL of each statement submitShopperCoupon issues.
+const isDedupe = (sql: string) => sql.includes('lower(code) = lower(')
+const isCap = (sql: string) => sql.includes('submitted_by_user_id = ')
+const isInsert = (sql: string) => sql.includes('INSERT INTO coupons')
+const isLock = (sql: string) => sql.includes('pg_advisory_xact_lock')
+const isKnownStoreProbe = (sql: string) => sql.includes('AS known')
+
+describe('submitShopperCoupon (THIRD sanctioned write: shopper-submitted codes)', () => {
+    const INSERTED_ID = '900000000000000007'
+    const ARGS = {
+        base: 'Ebay.com',
+        code: 'SaVe10',
+        source: 'manual' as const,
+        userId: 'user-uuid-1',
+    }
+
+    function queryIndex(match: (sql: string) => boolean) {
+        return capturedQueries.findIndex(match)
+    }
+
+    // Every test below assumes a KNOWN store unless it says otherwise.
+    beforeEach(() => {
+        mockRows(isKnownStoreProbe, [{ known: true }])
+    })
+
+    it('(g) known-store gate: probes supplier coupons (submission_source IS NULL, no visibility rule) OR a store_configs row, with the lowercase base', async () => {
+        mockRows(isCap, [{ total: 0 }])
+        mockRows(isInsert, [{ id: INSERTED_ID }])
+
+        await submitShopperCoupon(ARGS)
+
+        const i = queryIndex(isKnownStoreProbe)
+        expect(i).toBeGreaterThanOrEqual(0)
+        const sql = capturedQueries[i] ?? ''
+        // Supplier-sourced coupons only: shopper rows must prove nothing.
+        expect(sql).toContain('FROM coupons')
+        expect(sql).toContain('(site = ? OR site LIKE ?)')
+        expect(sql).toContain('submission_source IS NULL')
+        // NOT the user column: ON DELETE SET NULL nulls it for a deleted
+        // shopper's rows, which would turn those orphans into 'supplier' rows.
+        expect(sql).not.toContain('submitted_by_user_id')
+        // No visibility requirement: an all-expired store is still a store.
+        expect(sql).not.toContain('status IN (')
+        expect(sql).not.toContain('expired = FALSE')
+        // The published apply-config table.
+        expect(sql).toContain('FROM store_configs')
+        expect(sql).toContain('store_name = ? OR store_name LIKE ?')
+        expect(capturedValues[i]).toEqual([
+            'ebay.com',
+            '%.ebay.com',
+            'ebay.com',
+            '%.ebay.com',
+        ])
+    })
+
+    it('(g) an UNKNOWN store throws UnknownStoreError after the locks and BEFORE the dedupe, the cap and the insert', async () => {
+        rules = []
+        mockRows(isKnownStoreProbe, [{ known: false }])
+
+        await expect(submitShopperCoupon(ARGS)).rejects.toBeInstanceOf(
+            UnknownStoreError,
+        )
+
+        expect(transactionCount).toBe(1)
+        expect(capturedQueries.filter(isLock)).toHaveLength(2)
+        expect(capturedQueries.some(isDedupe)).toBe(false)
+        expect(capturedQueries.some(isCap)).toBe(false)
+        expect(capturedQueries.some(isInsert)).toBe(false)
+    })
+
+    it('(g) the gate runs after both locks and before the dedupe', async () => {
+        mockRows(isCap, [{ total: 0 }])
+        mockRows(isInsert, [{ id: INSERTED_ID }])
+
+        await submitShopperCoupon(ARGS)
+
+        const lastLock = capturedQueries.reduce(
+            (last, sql, i) => (isLock(sql) ? i : last),
+            -1,
+        )
+        expect(lastLock).toBeGreaterThanOrEqual(0)
+        expect(lastLock).toBeLessThan(queryIndex(isKnownStoreProbe))
+        expect(queryIndex(isKnownStoreProbe)).toBeLessThan(queryIndex(isDedupe))
+    })
+
+    it('(g) a missing known-store row is a loud error, never "unknown" or "known"', async () => {
+        rules = []
+
+        await expect(submitShopperCoupon(ARGS)).rejects.toThrow(
+            /known-store query returned no row/,
+        )
+        expect(capturedQueries.some(isInsert)).toBe(false)
+    })
+
+    it('(g) isKnownStore alone reports the probe result, lowercases, and rejects a base that is not a clean hostname', async () => {
+        rules = []
+        mockRows(isKnownStoreProbe, [{ known: true }])
+        await expect(isKnownStore('EBAY.com')).resolves.toBe(true)
+        expect(capturedValues[0]?.[0]).toBe('ebay.com')
+
+        capturedQueries = []
+        await expect(isKnownStore('eb%y.com')).rejects.toThrow(
+            /invalid store base/,
+        )
+        expect(capturedQueries).toHaveLength(0)
+    })
+
+    it('(a) dedupes case-insensitively on the code, with the store page predicate AND visibility rule', async () => {
+        mockRows(isInsert, [{ id: INSERTED_ID }])
+        mockRows(isCap, [{ total: 0 }])
+
+        await submitShopperCoupon(ARGS)
+
+        const i = queryIndex(isDedupe)
+        expect(i).toBeGreaterThanOrEqual(0)
+        const sql = capturedQueries[i] ?? ''
+        expect(sql).toContain('lower(code) = lower(')
+        // The store page's own predicate (siteBaseMatchSql), not a re-written one.
+        expect(sql).toContain('(site = ? OR site LIKE ?)')
+        // The store page's own visibility rule (visibleCouponsWhere): a code
+        // the page would NOT show (invalid/expired status) is not "already listed".
+        expect(sql).toContain('status IN (')
+        expect(sql).toContain('expired = FALSE')
+        // Bound: the code as typed, the LOWERCASE base twice (equality +
+        // suffix), then the visible-status list.
+        expect(capturedValues[i]).toEqual([
+            'SaVe10',
+            'ebay.com',
+            '%.ebay.com',
+            ...VISIBLE_COUPON_STATUSES,
+        ])
+        expect(capturedValues[i]).not.toContain('invalid')
+    })
+
+    it('(b) returns the existing row and inserts nothing when the code is already listed', async () => {
+        mockRows(isDedupe, [{ id: '812345' }])
+
+        await expect(submitShopperCoupon(ARGS)).resolves.toEqual({
+            couponId: '812345',
+            created: false,
+        })
+        expect(capturedQueries.some(isInsert)).toBe(false)
+        // A duplicate is a hit, not a new submission: it must not burn the
+        // shopper's daily allowance, so the cap is never even counted.
+        expect(capturedQueries.some(isCap)).toBe(false)
+    })
+
+    it("(c) counts the shopper's submissions in the last 24h and throws ShopperSubmissionLimitError at the cap", async () => {
+        mockRows(isCap, [{ total: SHOPPER_DAILY_SUBMISSION_CAP }])
+
+        await expect(submitShopperCoupon(ARGS)).rejects.toBeInstanceOf(
+            ShopperSubmissionLimitError,
+        )
+        expect(capturedQueries.some(isInsert)).toBe(false)
+
+        const i = queryIndex(isCap)
+        const sql = capturedQueries[i] ?? ''
+        expect(sql).toContain('submitted_by_user_id = ?')
+        expect(sql).toContain("created_at > (NOW() AT TIME ZONE 'UTC')")
+        expect(sql).toContain("INTERVAL '24 hours'")
+        expect(capturedValues[i]).toEqual(['user-uuid-1'])
+    })
+
+    it('(c) one below the cap still inserts', async () => {
+        mockRows(isCap, [{ total: SHOPPER_DAILY_SUBMISSION_CAP - 1 }])
+        mockRows(isInsert, [{ id: INSERTED_ID }])
+
+        await expect(submitShopperCoupon(ARGS)).resolves.toEqual({
+            couponId: INSERTED_ID,
+            created: true,
+        })
+    })
+
+    it('(d) INSERTs a pending, unexpired row whose id comes from the reserved sequence', async () => {
+        mockRows(isCap, [{ total: 0 }])
+        mockRows(isInsert, [{ id: INSERTED_ID }])
+
+        const result = await submitShopperCoupon(ARGS)
+
+        expect(result).toEqual({ couponId: INSERTED_ID, created: true })
+        const i = queryIndex(isInsert)
+        const sql = capturedQueries[i] ?? ''
+        expect(sql).toContain("nextval('shopper_coupon_id_seq')::text")
+        expect(sql).toContain('RETURNING id')
+        // Fixed literals live in the SQL text, not in bound values.
+        expect(sql).toContain("'pending'")
+        expect(sql).toContain('FALSE')
+        expect(sql).toContain("(NOW() AT TIME ZONE 'UTC')")
+        // Bound values, in column order: code as typed (case preserved), the
+        // lowercase base, the empty title (shopperCouponTitle derives one at
+        // read time), the description, then the attribution pair.
+        expect(capturedValues[i]).toEqual([
+            'SaVe10',
+            'ebay.com',
+            '',
+            SHOPPER_COUPON_DESCRIPTION,
+            'user-uuid-1',
+            'manual',
+        ])
+    })
+
+    it('(e) runs the lock, dedupe and insert in ONE transaction, lock first', async () => {
+        mockRows(isCap, [{ total: 0 }])
+        mockRows(isInsert, [{ id: INSERTED_ID }])
+
+        await submitShopperCoupon(ARGS)
+
+        expect(transactionCount).toBe(1)
+        const lock = queryIndex(isLock)
+        expect(lock).toBeGreaterThanOrEqual(0)
+        // Locks first, then check, then write: that order is what makes two
+        // concurrent submits of one code produce one row.
+        expect(lock).toBeLessThan(queryIndex(isDedupe))
+        expect(queryIndex(isDedupe)).toBeLessThan(queryIndex(isCap))
+        expect(queryIndex(isCap)).toBeLessThan(queryIndex(isInsert))
+    })
+
+    it('takes the per-user lock BEFORE the code lock (fixed order), each in its own two-int class', async () => {
+        mockRows(isCap, [{ total: 0 }])
+        mockRows(isInsert, [{ id: INSERTED_ID }])
+
+        await submitShopperCoupon(ARGS)
+
+        const locks = capturedQueries
+            .map((sql, i) => ({ sql, values: capturedValues[i] }))
+            .filter(q => isLock(q.sql))
+        expect(locks).toHaveLength(2)
+        for (const lock of locks) {
+            expect(lock.sql).toContain(
+                'pg_advisory_xact_lock(?::int, hashtext(',
+            )
+        }
+        // [class, key]: user lock first (key = user id), then the code lock
+        // (key = lowercase base + ':' + lowercase code, so case variants share it).
+        expect(locks[0]?.values).toEqual([7101, 'user-uuid-1'])
+        expect(locks[1]?.values).toEqual([7102, 'ebay.com:save10'])
+        // And both precede the daily-cap count they protect.
+        expect(queryIndex(isCap)).toBeGreaterThan(
+            capturedQueries.lastIndexOf(locks[1]?.sql ?? ''),
+        )
+    })
+
+    it.each([
+        ['empty', ''],
+        ['too short', 'ab'],
+        ['inner space', 'a b c'],
+        ['markup', '<script>'],
+        ['41 characters', 'a'.repeat(41)],
+    ])(
+        'rejects an invalid code (%s) with a plain Error before any SQL',
+        async (_label, code) => {
+            await expect(
+                submitShopperCoupon({ ...ARGS, code }),
+            ).rejects.toThrow('invalid shopper code')
+            expect(transactionCount).toBe(0)
+            expect(capturedQueries).toHaveLength(0)
+        },
+    )
+
+    it('trims the code before storing it (the repo normalizes, not just the caller)', async () => {
+        mockRows(isCap, [{ total: 0 }])
+        mockRows(isInsert, [{ id: INSERTED_ID }])
+
+        await submitShopperCoupon({ ...ARGS, code: '  SaVe10 ' })
+
+        expect(capturedValues[queryIndex(isInsert)]?.[0]).toBe('SaVe10')
+    })
+
+    it.each([
+        ['LIKE wildcard %', 'ebay%.com'],
+        ['LIKE wildcard _', 'eb_y.com'],
+        ['space', 'ebay .com'],
+        ['path', 'ebay.com/x'],
+        ['scheme', 'https://ebay.com'],
+        ['empty', ''],
+    ])(
+        'rejects a base that is not a clean hostname (%s) before any SQL',
+        async (_label, base) => {
+            await expect(
+                submitShopperCoupon({ ...ARGS, base }),
+            ).rejects.toThrow(/invalid store base/)
+            expect(transactionCount).toBe(0)
+            expect(capturedQueries).toHaveLength(0)
+        },
+    )
+
+    it('an invalid base is echoed into the error message truncated to 64 chars (it is untrusted input)', async () => {
+        const hostile = `${'x'.repeat(64)}${'LEAK'.repeat(500)}%`
+
+        const error = await submitShopperCoupon({
+            ...ARGS,
+            base: hostile,
+        }).catch((e: unknown) => e)
+
+        expect(error).toBeInstanceOf(Error)
+        const message = (error as Error).message
+        expect(message).toContain('x'.repeat(64))
+        expect(message).not.toContain('LEAK')
+        expect(message.length).toBeLessThan(150)
+    })
+
+    it('a missing daily-count row is a loud error, never "zero submissions"', async () => {
+        mockRows(isCap, [])
+
+        await expect(submitShopperCoupon(ARGS)).rejects.toThrow(
+            /daily-count query returned no row/,
+        )
+        expect(capturedQueries.some(isInsert)).toBe(false)
+    })
+
+    it('records a checkout capture with source=checkout', async () => {
+        mockRows(isCap, [{ total: 0 }])
+        mockRows(isInsert, [{ id: INSERTED_ID }])
+
+        await submitShopperCoupon({ ...ARGS, source: 'checkout' })
+
+        const values = capturedValues[queryIndex(isInsert)] ?? []
+        expect(values[values.length - 1]).toBe('checkout')
+    })
+
+    it('an INSERT that returns no row is a loud error, never a silent created:true', async () => {
+        mockRows(isCap, [{ total: 0 }])
+        mockRows(isInsert, [])
+
+        await expect(submitShopperCoupon(ARGS)).rejects.toThrow(
+            /submitShopperCoupon/,
+        )
     })
 })

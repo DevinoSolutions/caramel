@@ -28,7 +28,7 @@ const baseCoupon: Coupon = {
 afterEach(cleanup)
 
 describe('CouponCard — worked-ago trust line (W1)', () => {
-    it('shows "worked Xh ago" when lastWorkedAt is recent', () => {
+    it('shows "Worked Xh ago" when lastWorkedAt is recent', () => {
         const twoHoursAgo = new Date(
             Date.now() - 2 * 60 * 60 * 1000,
         ).toISOString()
@@ -40,13 +40,13 @@ describe('CouponCard — worked-ago trust line (W1)', () => {
             />,
         )
 
-        expect(screen.getByText('worked 2h ago')).toBeTruthy()
+        expect(screen.getByText('Worked 2h ago')).toBeTruthy()
     })
 
     it('renders no worked-ago line when lastWorkedAt is absent (the normal W1 state)', () => {
         render(<CouponCard coupon={baseCoupon} index={0} />)
 
-        expect(screen.queryByText(/worked \d/)).toBeNull()
+        expect(screen.queryByText(/worked/i)).toBeNull()
     })
 
     it('renders no worked-ago line when lastWorkedAt is older than 7 days', () => {
@@ -61,7 +61,7 @@ describe('CouponCard — worked-ago trust line (W1)', () => {
             />,
         )
 
-        expect(screen.queryByText(/worked \d/)).toBeNull()
+        expect(screen.queryByText(/worked/i)).toBeNull()
     })
 })
 
@@ -84,5 +84,52 @@ describe('CouponCard — discount badge claim integrity', () => {
         expect(screen.getByText('DEAL')).toBeTruthy()
         expect(screen.queryByText('20%')).toBeNull()
         expect(screen.queryByText('off')).toBeNull()
+    })
+})
+
+describe('CouponCard — "Just worked" is Verified, never beside "Unverified"', () => {
+    const pending: Coupon = { ...baseCoupon, status: 'pending' }
+
+    it('an Unverified code applied successfully minutes ago says "Just worked" and wears the Verified check badge', () => {
+        const tenMinutesAgo = new Date(
+            Date.now() - 10 * 60 * 1000,
+        ).toISOString()
+
+        render(
+            <CouponCard
+                coupon={{ ...pending, lastWorkedAt: tenMinutesAgo }}
+                index={0}
+            />,
+        )
+
+        expect(screen.getByText('Just worked')).toBeTruthy()
+        expect(screen.queryByText(/worked 0h ago/i)).toBeNull()
+        const badge = screen.getByText('✓ Verified')
+        expect(badge.getAttribute('data-tier')).toBe('green')
+        expect(badge.getAttribute('title')).toMatch(/last 24 hours/)
+        expect(screen.queryByText('Unverified')).toBeNull()
+    })
+
+    it('the same code with no recent apply stays Unverified', () => {
+        render(<CouponCard coupon={pending} index={0} />)
+
+        expect(screen.getByText('Unverified')).toBeTruthy()
+        expect(screen.queryByText('✓ Verified')).toBeNull()
+    })
+
+    it('an apply older than 24h keeps the trust line but not the Verified upgrade', () => {
+        const twoDaysAgo = new Date(
+            Date.now() - 2 * 24 * 60 * 60 * 1000,
+        ).toISOString()
+
+        render(
+            <CouponCard
+                coupon={{ ...pending, lastWorkedAt: twoDaysAgo }}
+                index={0}
+            />,
+        )
+
+        expect(screen.getByText('Worked 2d ago')).toBeTruthy()
+        expect(screen.getByText('Unverified')).toBeTruthy()
     })
 })

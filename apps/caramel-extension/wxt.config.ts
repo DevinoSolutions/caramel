@@ -18,17 +18,27 @@
 import { defineConfig } from 'wxt'
 
 import { ENVIRONMENTS, stampFor } from './scripts/environments.mjs'
+import { FIREFOX_NAME, NAME, SUMMARY } from './scripts/store-listing.mjs'
 
 // React is POPUP-ONLY by doctrine (content scripts stay React-free — the
 // module only affects entrypoints that actually import React).
 
 type EnvironmentName = keyof typeof ENVIRONMENTS
 
+// The site's favicon mark, the white italic C on the orange rounded square
+// (apps/caramel-app/public/icons/caramel-icon-192.png, same as favicon.ico),
+// unaltered and filling the canvas. Rendered from its 600 px master
+// (public/square_caramel_logo.png) with the favicon's corner radius scaled;
+// 192 is the favicon file itself. Owner direction 2026-10-06: the 1.4.5 header
+// wordmark was unreadable at icon size; never redesign the mark. 48 and 128
+// are the sizes the extensions page and the store tile ask for.
 const ICONS = {
     16: '/icons/16.png',
     19: '/icons/19.png',
     32: '/icons/32.png',
     38: '/icons/38.png',
+    48: '/icons/48.png',
+    128: '/icons/128.png',
     192: '/icons/192.png',
     512: '/icons/512.png',
 }
@@ -56,9 +66,11 @@ export default defineConfig({
         excludeSources: ['dist/**', 'dist-*/**', '.venv/**'],
     },
     manifest: ({ browser }) => ({
-        name: 'Caramel - Trusted Honey Alternative',
-        description:
-            'Open‑source coupon extension that auto‑applies deals without selling data or hijacking commissions.',
+        // The store listing title and short description come from the
+        // manifest; scripts/store-listing.mjs owns the wording (AMO caps
+        // names at 50 characters, hence the shorter Firefox name).
+        name: browser === 'firefox' ? FIREFOX_NAME : NAME,
+        description: SUMMARY,
         // Explicit, root-absolute icon paths — byte-identical to the shipped
         // 1.3.1 manifests. WXT's auto-discovery from public/icons/N.png emits
         // the same files without the leading slash; explicit wins so the
@@ -130,10 +142,14 @@ export default defineConfig({
         // `identity` (launchWebAuthFlow) exists on Chrome/Edge/Safari builds
         // only; its absence on Firefox is what routes popup sign-in through
         // the website flow. See popup.js popupOAuthSupported().
+        // `activeTab` was dropped in 1.4.3 (2026-10-02): nothing used it —
+        // `tabs` already exposes the tab URL and there is no scripting or
+        // capture call — and the Chrome Web Store asks every requested
+        // permission to carry a real justification on the Privacy tab.
         permissions:
             browser === 'firefox'
-                ? ['tabs', 'activeTab', 'storage', 'alarms']
-                : ['tabs', 'activeTab', 'storage', 'identity', 'alarms'],
+                ? ['tabs', 'storage', 'alarms']
+                : ['tabs', 'storage', 'identity', 'alarms'],
         host_permissions: ['https://*/*'],
         // Declared for EVERY browser (2026-08-19). `host_permissions` above is
         // what we ask for at install; this is what may be asked for AGAIN at

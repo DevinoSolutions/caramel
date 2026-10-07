@@ -36,7 +36,6 @@
     },
     "dependencies": {
         "@heroicons/react": "2.2.0",
-        "@hotjar/browser": "1.0.9",
         "@prisma/client": "6.14.0",
         "@react-email/render": "1.2.1",
         "@react-three/drei": "10.7.4",
@@ -49,7 +48,7 @@
         "framer-motion": "12.23.12",
         "gsap": "3.13.0",
         "lodash.debounce": "4.0.8",
-        "next": "16.3.3",
+        "next": "16.3.8",
         "postgres": "3.4.9",
         "posthog-js": "1.405.3",
         "posthog-node": "5.46.0",

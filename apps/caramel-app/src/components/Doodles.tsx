@@ -1,7 +1,7 @@
 'use client'
 
 import { useReducedMotion } from '@/lib/reducedMotion'
-import { motion } from 'framer-motion'
+import { m } from 'framer-motion'
 
 const Doodles = () => {
     const reduceMotion = useReducedMotion()
@@ -12,7 +12,7 @@ const Doodles = () => {
             className="pointer-events-none fixed z-[1] h-full w-full"
         >
             {/* Top Right Circle */}
-            <motion.svg
+            <m.svg
                 className="absolute -right-48 top-0 h-[40vw] max-h-[500px] w-[40vw] max-w-[500px] -translate-y-1/2 lg:-right-16 lg:top-12"
                 viewBox="0 0 200 200"
                 fill="none"
@@ -20,7 +20,7 @@ const Doodles = () => {
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ duration: 1.2, ease: 'easeOut' }}
             >
-                <motion.path
+                <m.path
                     d="M190,100 C190,160 140,190 100,190 C60,190 10,160 10,100 C10,40 60,10 100,10 C140,10 190,40 190,100Z"
                     stroke="#ea6925"
                     strokeWidth="6"
@@ -42,7 +42,7 @@ const Doodles = () => {
                         times: [0, 0.3, 0.8, 1], // Path draws first 30%, rotates 30%-80%, pauses 80%-100%
                     }}
                 />
-                <motion.circle
+                <m.circle
                     cx="100"
                     cy="100"
                     r="5"
@@ -62,10 +62,10 @@ const Doodles = () => {
                         times: [0, 0.4, 0.7, 1],
                     }}
                 />
-            </motion.svg>
+            </m.svg>
 
             {/* Bottom Left Circle */}
-            <motion.svg
+            <m.svg
                 className="absolute -left-32 top-[75vh] h-[32vw] max-h-[400px] w-[32vw] max-w-[400px] -translate-y-1/2 lg:-left-8"
                 viewBox="0 0 200 200"
                 fill="none"
@@ -73,7 +73,7 @@ const Doodles = () => {
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ duration: 1.2, ease: 'easeOut', delay: 0.6 }}
             >
-                <motion.path
+                <m.path
                     d="M190,100 C190,160 140,190 100,190 C60,190 10,160 10,100 C10,40 60,10 100,10 C140,10 190,40 190,100Z"
                     stroke="#da7f52"
                     strokeWidth="6"
@@ -96,7 +96,7 @@ const Doodles = () => {
                         delay: 2, // Start after a delay
                     }}
                 />
-                <motion.circle
+                <m.circle
                     cx="100"
                     cy="100"
                     r="5"
@@ -117,10 +117,10 @@ const Doodles = () => {
                         delay: 2,
                     }}
                 />
-            </motion.svg>
+            </m.svg>
 
             {/* Floating Triangle */}
-            <motion.div
+            <m.div
                 className="absolute left-[15vw] top-[15vh] h-6 w-6 border-2 border-[#ea6925]/20"
                 style={{ clipPath: 'polygon(50% 0%, 0% 100%, 100% 100%)' }}
                 animate={
@@ -142,7 +142,7 @@ const Doodles = () => {
             />
 
             {/* Floating Hexagon */}
-            <motion.div
+            <m.div
                 className="absolute right-[20vw] top-[55vh] h-5 w-5 bg-[#da7f52]/15"
                 style={{
                     clipPath:
@@ -168,7 +168,7 @@ const Doodles = () => {
             />
 
             {/* Rotating Rectangle */}
-            <motion.div
+            <m.div
                 className="absolute left-[25vw] top-[35vh] h-10 w-3 rounded-full bg-[#ea6925]/10"
                 animate={
                     reduceMotion
@@ -188,7 +188,7 @@ const Doodles = () => {
             />
 
             {/* Pulsing Ring */}
-            <motion.div
+            <m.div
                 className="absolute right-[30vw] top-[75vh] h-8 w-8 rounded-full border-2 border-[#da7f52]/25"
                 animate={
                     reduceMotion
@@ -210,7 +210,7 @@ const Doodles = () => {
             />
 
             {/* Star SVG */}
-            <motion.svg
+            <m.svg
                 className="absolute right-[35vw] top-[25vh] h-10 w-10 opacity-15"
                 viewBox="0 0 24 24"
                 fill="none"
@@ -236,10 +236,10 @@ const Doodles = () => {
                     fill="#ea6925"
                     fillOpacity="0.15"
                 />
-            </motion.svg>
+            </m.svg>
 
             {/* Checkmark SVG */}
-            <motion.svg
+            <m.svg
                 className="absolute left-[30vw] top-[65vh] h-9 w-9 opacity-20"
                 viewBox="0 0 24 24"
                 fill="none"
@@ -265,10 +265,10 @@ const Doodles = () => {
                     fill="#da7f52"
                     fillOpacity="0.25"
                 />
-            </motion.svg>
+            </m.svg>
 
             {/* Floating Dot Cluster */}
-            <motion.div
+            <m.div
                 className="absolute right-[10vw] top-[45vh] h-4 w-4 rounded-full bg-[#ea6925]/20"
                 animate={
                     reduceMotion
@@ -287,7 +287,7 @@ const Doodles = () => {
                     times: [0, 0.4, 0.75, 1],
                 }}
             />
-            <motion.div
+            <m.div
                 className="absolute right-[12vw] top-[47vh] h-2 w-2 rounded-full bg-[#da7f52]/20"
                 animate={
                     reduceMotion

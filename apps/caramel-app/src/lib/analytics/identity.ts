@@ -4,18 +4,39 @@
 // Browser-only PostHog lifecycle: init, identify, reset, and the
 // PostHog<->Sentry correlation. Centralises every posthog-js call so the
 // provider AND non-provider call sites (e.g. the Header logout) share one
-// guarded implementation. Server code must NOT import this (it pulls
+// guarded implementation. Server code must NOT import this (it loads
 // posthog-js) — server captures go through posthogServer.ts.
+//
+// posthog-js itself is a dynamic import (see initPosthogBrowser and
+// posthogBrowser.ts); every call below goes through `withPosthog`, which
+// queues until the SDK is live.
+import {
+    afterPageLoad,
+    defersAnalytics,
+    onFirstActivity,
+} from '@/lib/afterPageLoad'
 import { APP_VERSION, clientEnv } from '@/lib/env.client'
 import * as Sentry from '@sentry/nextjs'
-import posthog from 'posthog-js'
+import type { PostHog } from 'posthog-js'
 import { captureFirstTouch } from './firstTouch'
 import {
     buildIdentityPayload,
     identityPayloadSignature,
     type IdentityUser,
 } from './identityProperties'
-import { APP_ID, resolveClientPosthogTarget } from './posthogDataset'
+import {
+    isPosthogActive,
+    startPosthogLoad,
+    withPosthog,
+} from './posthogBrowser'
+import {
+    APP_ID,
+    resolveClientPosthogTarget,
+    type PosthogTarget,
+} from './posthogDataset'
+import { resolveBrowserPosthogHosts } from './posthogHosts'
+
+export { isPosthogActive }
 
 // Shape Playwright injects via addInitScript in the shared e2e project.
 export interface CaramelE2EHandshake {
@@ -30,9 +51,6 @@ declare global {
     }
 }
 
-// One-time init guard — React StrictMode / re-renders must not re-init.
-let initialized = false
-
 // The environment of the target we actually initialised against, so identify
 // can stamp it on the person without re-resolving the env every call.
 let activeEnvironment: string | undefined
@@ -46,11 +64,6 @@ let lastIdentitySignature: string | null = null
 // for a user whose account-creation date we don't have. Captured once so the
 // payload fingerprint above stays stable across calls.
 const SESSION_STARTED_AT = new Date().toISOString()
-
-/** True once posthog-js has been initialised against a live capture target. */
-export function isPosthogActive(): boolean {
-    return initialized
-}
 
 /**
  * Report an analytics failure loudly (console + Sentry) and swallow it. Every
@@ -83,8 +96,7 @@ function browserIdentityContext(): { locale?: string; timezone?: string } {
 }
 
 /** Push the current PostHog identity/session into Sentry for cross-linking. */
-function syncSentryPosthogContext(): void {
-    if (!initialized) return
+function syncSentryPosthogContext(posthog: PostHog): void {
     Sentry.setTag('app_id', APP_ID)
     // High-cardinality IDs go in context, NOT tags.
     Sentry.setContext('posthog', {
@@ -116,10 +128,24 @@ export function setSentryUser(userId: string | null): void {
  * Enables SPA pageviews + pageleave and privacy-preserving session recording,
  * registers the shared super properties, and (in the e2e dataset) accepts
  * synthetic Playwright traffic + registers the test handshake. Returns whether
- * PostHog is now active.
+ * PostHog is now active (loading or live).
+ *
+ * On the marketing landing route(s) (defersAnalytics), the SDK download and
+ * `init` wait for the page's load event plus an idle moment (afterPageLoad):
+ * posthog-js and its session recorder were ~130 KB gzip and ~1.5 s of mobile
+ * main-thread work inside the landing page's first load. Trade-off there: the
+ * session recording starts at the visitor's first activity (or 10 s after
+ * load), so a visit that never scrolls, taps or types in its first seconds is
+ * recorded from that point on. Every other route (app, auth, OAuth, consent)
+ * starts the import at mount and records from init, as before.
+ *
+ * Either way the import is async, so everything that happens meanwhile
+ * (identify, captures from other modules) is queued by posthogBrowser.ts
+ * (bounded, each capture keeping its own timestamp) and replayed in order
+ * after init.
  */
 export function initPosthogBrowser(): boolean {
-    if (initialized) return true
+    if (isPosthogActive()) return true
     if (typeof window === 'undefined') return false
 
     // Record where this visitor came from BEFORE anything else can navigate:
@@ -134,20 +160,63 @@ export function initPosthogBrowser(): boolean {
 
     const dataset = clientEnv.NEXT_PUBLIC_POSTHOG_DATASET
     const isE2E = dataset === 'e2e'
+    activeEnvironment = target.environment
+    const deferred = defersAnalytics(window.location.pathname)
 
+    startPosthogLoad(
+        () =>
+            new Promise<PostHog>((resolve, reject) => {
+                const load = () => {
+                    import('posthog-js')
+                        .then(({ default: posthog }) => {
+                            initPosthogInstance(posthog, target, {
+                                isE2E,
+                                deferRecording: deferred,
+                            })
+                            resolve(posthog)
+                        })
+                        .catch(reject)
+                }
+                if (deferred) afterPageLoad(load)
+                else load()
+            }),
+        error => reportIdentityFailure('posthog_load', error),
+    )
+    return true
+}
+
+function initPosthogInstance(
+    posthog: PostHog,
+    target: PosthogTarget,
+    { isE2E, deferRecording }: { isE2E: boolean; deferRecording: boolean },
+): void {
+    const hosts = resolveBrowserPosthogHosts(target)
     posthog.init(target.token, {
-        api_host: target.host,
+        // Production: our own origin (/_t/k3v, proxied by next.config.mjs) so a
+        // content blocker keyed on the PostHog hostname cannot hide the visit;
+        // ui_host stays the real host for toolbar links. e2e: direct, as before.
+        api_host: hosts.apiHost,
+        ...(hosts.uiHost ? { ui_host: hosts.uiHost } : {}),
         capture_pageview: 'history_change',
         capture_pageleave: true,
         // Session recording ON, masked to match the Sentry Replay privacy
-        // config in instrumentation.client.ts (passwords/emails/card + any
-        // element explicitly flagged for masking).
-        disable_session_recording: false,
+        // config in instrumentation-client.ts (every input, card + any
+        // element explicitly flagged for masking). On the landing route it
+        // starts at the visitor's first activity (or 10 s after load) via
+        // startSessionRecording below, not at init: the recorder's full-DOM
+        // snapshot was ~1.3 s of mobile main-thread work landing inside the
+        // page's own load. Everywhere else it starts at init.
+        disable_session_recording: deferRecording,
         session_recording: {
             maskAllInputs: true,
             maskTextSelector: '[data-sentry-mask], [data-ph-mask]',
             blockSelector: '#card-element',
         },
+        // The Caramel project has no surveys (checked 2026-09-26), so don't
+        // fetch the surveys bundle (30 KB, 102 KB to parse, measured on prod)
+        // on every page.
+        // TODO: remove when the first survey is created, or it will never show.
+        disable_surveys: true,
         // PostHog drops headless/synthetic UAs by default. Accept them ONLY in
         // the shared e2e project so Playwright runs actually land.
         opt_out_useragent_filter: isE2E,
@@ -163,9 +232,6 @@ export function initPosthogBrowser(): boolean {
         platform: 'web',
     })
 
-    initialized = true
-    activeEnvironment = target.environment
-
     if (isE2E) {
         const handshake = window.__CARAMEL_E2E__
         if (handshake) {
@@ -179,8 +245,18 @@ export function initPosthogBrowser(): boolean {
         }
     }
 
-    syncSentryPosthogContext()
-    return true
+    syncSentryPosthogContext(posthog)
+
+    if (!deferRecording) return
+    // Honours the project's remote recording settings (enabled, sampling,
+    // triggers) exactly as init would have.
+    onFirstActivity(() => {
+        try {
+            posthog.startSessionRecording()
+        } catch (error) {
+            reportIdentityFailure('posthog_start_recording', error)
+        }
+    })
 }
 
 /**
@@ -195,7 +271,7 @@ export function initPosthogBrowser(): boolean {
  * payloads are skipped, and no failure here can reach the caller.
  */
 export function identifyUser(user: IdentityUser): void {
-    if (!initialized) return
+    if (!isPosthogActive()) return
     // Sentry USER field on the same UUID (main 21cf763). Ahead of the dedupe
     // check on purpose: an identical re-identify is skipped below, and Sentry
     // must still know who this is.
@@ -217,11 +293,17 @@ export function identifyUser(user: IdentityUser): void {
         const signature = identityPayloadSignature(user.id, payload)
         if (signature === lastIdentitySignature) return
 
-        // NEVER email as distinct_id — the stable UUID is the identity; email
-        // is a person property only.
-        posthog.identify(user.id, payload.set, payload.setOnce)
         lastIdentitySignature = signature
-        syncSentryPosthogContext()
+        withPosthog(posthog => {
+            try {
+                // NEVER email as distinct_id — the stable UUID is the
+                // identity; email is a person property only.
+                posthog.identify(user.id, payload.set, payload.setOnce)
+                syncSentryPosthogContext(posthog)
+            } catch (error) {
+                reportIdentityFailure('posthog_identify', error)
+            }
+        })
     } catch (error) {
         reportIdentityFailure('posthog_identify', error)
     }
@@ -229,13 +311,19 @@ export function identifyUser(user: IdentityUser): void {
 
 /** Clear identity on logout (fresh anonymous id + reset Sentry correlation). */
 export function resetPosthogIdentity(): void {
-    if (!initialized) return
+    if (!isPosthogActive()) return
     // Drop the dedupe fingerprint too: after a reset the next identify — even
     // for the same person — must actually re-send the profile.
     lastIdentitySignature = null
-    posthog.reset()
     // Clear Sentry's user too, or the next anonymous visitor on this device
     // keeps reporting errors as the account that just logged out.
     setSentryUser(null)
-    syncSentryPosthogContext()
+    withPosthog(posthog => {
+        try {
+            posthog.reset()
+            syncSentryPosthogContext(posthog)
+        } catch (error) {
+            reportIdentityFailure('posthog_reset', error)
+        }
+    })
 }

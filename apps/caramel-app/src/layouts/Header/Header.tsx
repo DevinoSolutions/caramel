@@ -1,12 +1,12 @@
 import ThemeToggle from '@/components/ThemeToggle'
 import { useScrollDirection } from '@/hooks/useScrollDirection'
 import { useWindowSize } from '@/hooks/useWindowSize'
-import { resetPosthogIdentity } from '@/lib/analytics/identity'
-import { signOut, useSession } from '@/lib/auth/client'
+import { useSession } from '@/lib/auth/client'
+import { endClientSession } from '@/lib/auth/endClientSession'
 import { canAdvertiseInstall } from '@/lib/surface/detectSurface'
 import { useSurface } from '@/lib/surface/SurfaceProvider'
 import { userInitial } from '@/lib/userInitial'
-import { AnimatePresence, motion } from 'framer-motion'
+import { AnimatePresence, m } from 'framer-motion'
 import Image from 'next/image'
 import L from 'next/link'
 import { usePathname } from 'next/navigation'
@@ -39,7 +39,7 @@ const links: NavLink[] = [
     { name: 'Support', url: '/support' },
 ]
 
-const Link = motion.create(L)
+const Link = m.create(L)
 
 export default function Header({ scrollRef }: HeaderProps) {
     const [isInView, setIsInView] = useState(true)
@@ -72,10 +72,9 @@ export default function Header({ scrollRef }: HeaderProps) {
     }, [])
 
     const handleSignOut = async () => {
-        // Clear the PostHog identity BEFORE the session goes away so the reset
-        // isn't attributed to the logged-in person.
-        resetPosthogIdentity()
-        await signOut()
+        // A failed sign-out is reported inside endClientSession; the visitor
+        // is sent home either way.
+        await endClientSession()
         window.location.href = '/'
     }
 
@@ -91,7 +90,7 @@ export default function Header({ scrollRef }: HeaderProps) {
     }, [isScrollingDown, isScrollingUp])
 
     return (
-        <motion.header
+        <m.header
             initial={{ y: 0, opacity: 1, scale: 1 }}
             animate={{
                 y: isInView ? 0 : '-200%',
@@ -124,7 +123,7 @@ export default function Header({ scrollRef }: HeaderProps) {
                 one row between a fixed 237px logo gutter and a 32px right pad.
                 Everything is nowrap, so the gap/padding scale steps down at the
                 narrower desktop widths instead of breaking onto a second line. */}
-            <motion.div
+            <m.div
                 className={`mx-auto flex w-full items-center justify-center gap-5 rounded-[28px] bg-white py-[15px] shadow dark:bg-darkerBg 2xl:gap-4 xl:gap-2 lg:hidden`}
                 style={{
                     paddingLeft: 'calc(185px + 1.25rem + 32px)',
@@ -162,7 +161,7 @@ export default function Header({ scrollRef }: HeaderProps) {
                         </button>
                         <AnimatePresence>
                             {isUserMenuOpen && (
-                                <motion.div
+                                <m.div
                                     initial={{ opacity: 0, y: -10 }}
                                     animate={{ opacity: 1, y: 0 }}
                                     exit={{ opacity: 0, y: -10 }}
@@ -184,7 +183,7 @@ export default function Header({ scrollRef }: HeaderProps) {
                                     >
                                         Sign out
                                     </button>
-                                </motion.div>
+                                </m.div>
                             )}
                         </AnimatePresence>
                     </div>
@@ -205,7 +204,7 @@ export default function Header({ scrollRef }: HeaderProps) {
                     </div>
                 )}
                 <ThemeToggle className="shrink-0" />
-            </motion.div>
+            </m.div>
             {/* Mobile-only companion to the in-pill toggle above: the pill is
                 hidden at <=1023px, so the toggle and the menu button live here. */}
             <div className="hidden items-center gap-2 lg:ml-6 lg:flex">
@@ -221,7 +220,7 @@ export default function Header({ scrollRef }: HeaderProps) {
             </div>
             <AnimatePresence>
                 {isMenuOpen && (
-                    <motion.div
+                    <m.div
                         initial={{ y: -50, opacity: 0 }}
                         animate={{ y: 0, opacity: 1 }}
                         exit={{ y: -50, opacity: 0 }}
@@ -283,9 +282,9 @@ export default function Header({ scrollRef }: HeaderProps) {
                             </>
                         )}
                         <div className="h-full" />
-                    </motion.div>
+                    </m.div>
                 )}
             </AnimatePresence>
-        </motion.header>
+        </m.header>
     )
 }
