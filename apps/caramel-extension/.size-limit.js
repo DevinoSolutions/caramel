@@ -38,7 +38,11 @@ module.exports = [
         path: '.size-cache/content-scripts.min.js',
         // 2026-08-10 — measured 70.68 kB minified, from 268.33 kB of source
         // (73.7% of the old budget was formatting and prose).
-        limit: '76 KB',
+        // 2026-10-06, raised 76 -> 80 kB: checkout code sharing became opt-in
+        // (owner rule 2026-10-06) — the consent card (UI-helpers.js
+        // showCodeSharingPrompt) and the consent record module
+        // (code-sharing-consent.js). Measured 76.66 kB: one new UI surface.
+        limit: '80 KB',
         brotli: false,
     },
     {
@@ -93,7 +97,11 @@ module.exports = [
         // features cache (storage.session, memory fallback) and the mapping of
         // the submit route's answers onto skipped-vs-error. Measured 8.4 kB
         // (was 6.41 kB): one new message route, not prose.
-        limit: '9.2 KB',
+        // 2026-10-06, raised 9.2 -> 10 kB: submitShopperCode also reads the
+        // checkoutCodeSharingConsent record (code-sharing-consent.js) and
+        // answers no-consent, so nothing is sent before an explicit yes.
+        // Measured 9.29 kB.
+        limit: '10 KB',
         brotli: false,
     },
 ]

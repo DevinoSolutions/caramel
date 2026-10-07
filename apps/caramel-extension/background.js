@@ -16,6 +16,10 @@
 // registration. What is left at module scope is inert declarations, so WXT can
 // import this file in Node at build time to read the entrypoint's options.
 import { CARAMEL_BASE_URL, CARAMEL_ENV } from './caramel-env.js'
+import {
+    codeSharingAccepted,
+    readCodeSharingConsent,
+} from './code-sharing-consent.js'
 
 // Assigned by initBackground() instead of at module evaluation: the IIFE throws
 // when neither global exists, which is exactly the case in the Node import
@@ -157,7 +161,12 @@ async function fetchCaramelApi(url, opts = {}, timeoutMs = FETCH_TIMEOUT_MS) {
 /* --------------------------------------------------  shopper code sharing
  * code-capture.js (content script) hands us a code the shopper typed and the
  * store accepted. Whether it may leave the browser is decided HERE, not in the
- * page: signed in, and the server flag on. The flag is read from the public
+ * page: signed in, the server flag on, and the shopper's explicit consent
+ * (checkoutCodeSharingConsent === accepted, see code-sharing-consent.js; absent,
+ * declined or malformed all refuse). The gates run in that order, so
+ * `no-consent` is only ever answered to a signed-in shopper while the flag is
+ * on: that answer is the content script's cue to show the consent prompt, which
+ * is therefore never shown when sharing could not happen anyway. The flag is read from the public
  * features endpoint and cached (storage.session when the browser has it, so a
  * restarted worker does not refetch; memory otherwise): 6h for `true`, but only
  * 30min for `false`, so an owner flipping the flag on is felt within half an
@@ -254,6 +263,10 @@ export async function submitShopperCode(message) {
         throw new Error('submitShopperCode: site and code must be strings')
     if (!(await getStoredToken())) return { skipped: 'signed-out' }
     if (!(await _shopperCaptureEnabled())) return { skipped: 'disabled' }
+    // A failed storage read rejects (loud, answered as `{ error }`): refusing
+    // to send is the safe side, and it must not look like a plain "no".
+    if (!codeSharingAccepted(await readCodeSharingConsent(currentBrowser)))
+        return { skipped: 'no-consent' }
 
     const r = await fetchCaramelApi(caramelUrl('api/coupons/submit'), {
         method: 'POST',

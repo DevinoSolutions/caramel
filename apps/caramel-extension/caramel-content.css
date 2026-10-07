@@ -32,6 +32,17 @@
     outline: none;
 }
 
+/* ---- Consent card host (checkout code sharing) ---- */
+#caramel-share-prompt {
+    /* Same :empty exposure as the prompt host above. */
+    display: block !important;
+    position: fixed;
+    bottom: max(20px, env(safe-area-inset-bottom));
+    right: max(20px, env(safe-area-inset-right));
+    z-index: 2147483646;
+    width: min(92vw, 360px);
+}
+
 /* ---- Overlay hosts (testing + final modals) ---- */
 #caramel-testing-overlay,
 #caramel-final-overlay {

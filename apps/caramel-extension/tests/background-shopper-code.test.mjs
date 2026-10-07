@@ -13,6 +13,14 @@ let fetchCalls
 let responses // queue of fetch results, consumed in order
 let localData
 let sessionData
+let syncData
+
+const CONSENT_KEY = 'checkoutCodeSharingConsent'
+const consent = choice => ({
+    choice,
+    at: '2026-10-06T12:00:00.000Z',
+    promptVersion: 1,
+})
 
 function installWorkerRealm() {
     const cache = new WeakMap()
@@ -44,7 +52,7 @@ function installWorkerRealm() {
         },
     })
     stub.storage.local = area(() => localData)
-    stub.storage.sync = area(() => ({}))
+    stub.storage.sync = area(() => syncData)
     stub.storage.session = area(() => sessionData)
     stub.runtime.lastError = undefined
     const listeners = []
@@ -85,6 +93,9 @@ beforeEach(async () => {
     responses = []
     localData = { token: 'tok-123' }
     sessionData = {}
+    // Consent is accepted unless a test says otherwise: the gates below are the
+    // subject of the consent describe, everything else assumes a yes.
+    syncData = { [CONSENT_KEY]: consent('accepted') }
     globalThis.fetch = async (url, opts) => {
         fetchCalls.push({ url: String(url), opts })
         const next = responses.shift()
@@ -199,6 +210,78 @@ describe('submitShopperCode — gates', () => {
         expect(localData.caramel_bg_errors?.[0]?.where).toBe(
             'submitShopperCode',
         )
+    })
+})
+
+describe('submitShopperCode — consent gate (owner rule 2026-10-06)', () => {
+    it.each([
+        ['no record', undefined],
+        ['declined', consent('declined')],
+        ['an unknown choice', { ...consent('accepted'), choice: 'maybe' }],
+        [
+            'another prompt version',
+            { ...consent('accepted'), promptVersion: 2 },
+        ],
+        ['a malformed date', { ...consent('accepted'), at: 'soon' }],
+        ['a bare true', true],
+    ])(
+        '%s: skipped as no-consent, and NOTHING is submitted',
+        async (_label, record) => {
+            if (record === undefined) delete syncData[CONSENT_KEY]
+            else syncData[CONSENT_KEY] = record
+            // A stale legacy opt-in must not count as consent.
+            syncData.caramel_settings = { shareCheckoutCodes: true }
+            responses.push(features(true))
+
+            expect(await invoke(CAPTURE)).toEqual({ skipped: 'no-consent' })
+
+            expect(submitCalls()).toHaveLength(0)
+        },
+    )
+
+    it('accepted: submitted', async () => {
+        responses.push(
+            features(true),
+            ok({ couponId: '9', created: true, status: 'unverified' }),
+        )
+
+        expect((await invoke(CAPTURE)).couponId).toBe('9')
+        expect(submitCalls()).toHaveLength(1)
+    })
+
+    it('the consent gate runs AFTER sign-in and the flag, so the prompt is only asked when sharing could happen', async () => {
+        delete syncData[CONSENT_KEY]
+
+        // Signed out: answered before consent is even considered.
+        localData = {}
+        expect(await invoke(CAPTURE)).toEqual({ skipped: 'signed-out' })
+        // Flag off: same.
+        localData = { token: 'tok-123' }
+        responses.push(features(false))
+        expect(await invoke(CAPTURE)).toEqual({ skipped: 'disabled' })
+    })
+
+    it('a consent record that cannot be read is a real error (loud), never a send', async () => {
+        responses.push(features(true))
+        // Like Chrome: lastError is set only inside the failing call's own
+        // callback, so the sign-in and flag reads before it still succeed.
+        const realSyncGet = globalThis.chrome.storage.sync.get
+        globalThis.chrome.storage.sync.get = (_keys, cb) => {
+            globalThis.chrome.runtime.lastError = {
+                message: 'sync unavailable',
+            }
+            try {
+                cb({})
+            } finally {
+                globalThis.chrome.runtime.lastError = undefined
+            }
+        }
+
+        const resp = await invoke(CAPTURE)
+
+        globalThis.chrome.storage.sync.get = realSyncGet
+        expect(resp.error).toMatch(/consent read failed: sync unavailable/)
+        expect(submitCalls()).toHaveLength(0)
     })
 })
 

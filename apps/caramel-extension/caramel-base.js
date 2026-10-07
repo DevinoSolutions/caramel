@@ -25,6 +25,12 @@
 // table in scripts/environments.mjs.
 
 import { CARAMEL_ENV } from './caramel-env.js'
+import {
+    CODE_SHARING_CONSENT_KEY,
+    parseCodeSharingConsent,
+    readCodeSharingConsent,
+    writeCodeSharingConsent,
+} from './code-sharing-consent.js'
 
 /********************************************************************
  * Caramel core logic – 2025-06-29  (speed-tuned)
@@ -326,15 +332,14 @@ export function caramelClearSession(done) {
 
 /* --------------------------------------------------  user settings */
 // One storage.sync object so preferences roam with the browser profile.
-// Shape: { autoApply: boolean, disabledSites: string[], syncSavings: boolean,
-// shareCheckoutCodes: boolean } — read through this helper only, so defaults
-// live in exactly one place.
+// Shape: { autoApply: boolean, disabledSites: string[], syncSavings: boolean }
+// — read through this helper only, so defaults live in exactly one place.
 //
-// `shareCheckoutCodes` DEFAULTS TRUE (written `!== false`, like autoApply): it
-// is the user-level switch for code-capture.js, which shares a code the
-// shopper typed ONLY after the store accepted it, and only for signed-in users
-// while the server flag is on (background.js gates both). Turning it off is the
-// per-user opt-out the privacy copy promises.
+// Checkout code sharing is NOT a setting in this object. Its consent is the
+// separate `checkoutCodeSharingConsent` record (code-sharing-consent.js, helpers
+// below): the old `shareCheckoutCodes` key defaulted ON and was written without
+// any prompt, so it is retired and never read. Because every write goes through
+// the normalized object, the next settings save drops a stale copy for free.
 //
 // `syncSavings` DEFAULTS FALSE, and unlike `autoApply` it is written as
 // `=== true` rather than `!== false`: an absent key must read as "has not
@@ -351,7 +356,6 @@ export function caramelNormalizeSettings(raw) {
         autoApply: s.autoApply !== false,
         disabledSites: Array.isArray(s.disabledSites) ? s.disabledSites : [],
         syncSavings: s.syncSavings === true,
-        shareCheckoutCodes: s.shareCheckoutCodes !== false,
     }
 }
 
@@ -413,6 +417,35 @@ export async function caramelPromptAllowed(host) {
     const s = await caramelGetSettings()
     if (!s.autoApply) return false
     return !caramelSiteIsPaused(s.disabledSites, host)
+}
+
+/* --------------------------------------------------  code-sharing consent */
+// The shopper's answer to "share the codes I enter at checkout?" — see
+// code-sharing-consent.js for the record and why it is separate from settings.
+// These three are the content script's and popup's ONLY access to it.
+
+// Resolves the record, or null when there is none / it is malformed (= NOT
+// allowed). Rejects if storage itself fails; callers report it and fail closed.
+export function caramelGetCodeSharingConsent() {
+    return readCodeSharingConsent(currentBrowser)
+}
+
+// Persists 'accepted' | 'declined'. Rejects when the write did not land.
+export function caramelSetCodeSharingConsent(choice) {
+    return writeCodeSharingConsent(currentBrowser, choice)
+}
+
+// Calls `onChange(record | null)` whenever the stored record changes (any tab,
+// the popup, another device via sync). Throws when the runtime has no change
+// events: the caller must then fail closed, same contract as
+// caramelOnSettingsChanged.
+export function caramelOnCodeSharingConsentChanged(onChange) {
+    currentBrowser.storage.onChanged.addListener((changes, area) => {
+        if (area !== 'sync' || !changes[CODE_SHARING_CONSENT_KEY]) return
+        onChange(
+            parseCodeSharingConsent(changes[CODE_SHARING_CONSENT_KEY].newValue),
+        )
+    })
 }
 
 /* --------------------------------------------------  savings history */

@@ -537,8 +537,108 @@ button:focus {
     border-radius: 2px;
 }
 
+/* ---- Code-sharing consent card ----
+ * The HOST (#caramel-share-prompt) owns position/size/z-index (bottom-right,
+ * non-modal). The two answer buttons are ONE rule on purpose: identical size,
+ * weight and colour, so "No thanks" is exactly as easy to hit as "Share codes"
+ * — a consent prompt must not lean on the shopper. */
+.caramel-share-card {
+    position: relative;
+    box-sizing: border-box;
+    width: 100%;
+    background: var(--cm-surface);
+    padding: 18px 18px 16px;
+    border-radius: var(--cm-radius-lg);
+    border: 1px solid var(--cm-border);
+    box-shadow: var(--cm-shadow-raised);
+    color: var(--cm-text-primary);
+    font-family: var(--cm-font-sans);
+    text-align: left;
+    animation: caramelFadeIn var(--cm-dur-slow) var(--cm-ease-out) both;
+}
+#caramel-share-close {
+    top: 8px;
+    right: 8px;
+    background: transparent;
+    box-shadow: none;
+    color: var(--cm-text-secondary);
+}
+#caramel-share-close:hover {
+    background: var(--cm-brand-soft-3);
+    color: var(--cm-brand);
+}
+.caramel-share-title {
+    margin: 0 28px 8px 0;
+    font-size: var(--cm-text-md);
+    font-weight: 700;
+    line-height: 1.3;
+    color: var(--cm-text-primary);
+}
+.caramel-share-code {
+    margin: 0 0 10px;
+    font-size: var(--cm-text-sm);
+    color: var(--cm-text-secondary);
+    overflow-wrap: anywhere;
+}
+.caramel-share-code #caramel-share-code-text {
+    display: inline-block;
+    max-width: 100%;
+    box-sizing: border-box;
+    padding: 3px 8px;
+    color: var(--cm-brand);
+    background: var(--cm-brand-soft-2);
+    border: 1px dashed var(--cm-border-dashed);
+    border-radius: var(--cm-radius-sm);
+    font-family: var(--cm-font-mono);
+    font-size: var(--cm-text-base);
+    font-weight: 700;
+    letter-spacing: 0.04em;
+}
+.caramel-share-body {
+    margin: 0 0 8px;
+    font-size: var(--cm-text-sm);
+    line-height: 1.45;
+    color: var(--cm-text-secondary);
+}
+.caramel-share-privacy {
+    display: inline-block;
+    margin: 0 0 12px;
+    font-size: var(--cm-text-sm);
+    color: var(--cm-brand);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+.caramel-share-privacy:focus-visible {
+    outline: 2px solid var(--cm-brand);
+    outline-offset: 2px;
+    border-radius: 2px;
+}
+.caramel-share-actions {
+    display: flex;
+    gap: 10px;
+}
+.caramel-share-btn {
+    flex: 1 1 0;
+    padding: 10px 12px;
+    border: 1.5px solid var(--cm-brand);
+    border-radius: var(--cm-radius-sm);
+    background: var(--cm-surface);
+    color: var(--cm-brand);
+    font-size: var(--cm-text-base);
+    font-weight: 600;
+    transition: background var(--cm-dur-fast) var(--cm-ease);
+}
+.caramel-share-btn:hover {
+    background: var(--cm-brand-soft-3);
+}
+.caramel-share-btn:focus-visible {
+    outline: 3px solid var(--cm-brand);
+    outline-offset: 2px;
+}
+
 @media (prefers-reduced-motion: reduce) {
     .cm-prompt,
+    .caramel-share-card,
     #caramel-testing-modal,
     .caramel-final-modal,
     #caramel-progress-bar,

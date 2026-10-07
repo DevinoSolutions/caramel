@@ -15,8 +15,11 @@
 //   sign-in token lives in browser extension storage (popup.js/coupon-runner.js).
 //   Checkout sharing (owner-approved 2026-10-06, same facts as PrivacyPolicy.tsx):
 //   code-capture.js sends only {site, code} a signed-in shopper typed, after the
-//   store accepted it, gated by the "Share codes I enter at checkout" setting
-//   (SettingsView.tsx), which DEFAULTS ON — so never call it "opt-in".
+//   store accepted it, and ONLY with the shopper's explicit consent: it is OFF
+//   by default and turns on when they accept the in-extension prompt or switch
+//   on the "Share codes I enter at checkout" setting (SettingsView.tsx), both of
+//   which write the checkoutCodeSharingConsent record (extension 1.4.8). Say
+//   "off by default", never that it is on unless you turn it off.
 // - browsers: the four live store listings in src/lib/brandLinks.ts.
 // - Safari answer: the App Store listing (SAFARI_APP_STORE_URL) fetched
 //   2026-09-12 states iPhone "Requires iOS 16.4 or later", iPad, Mac
@@ -44,7 +47,7 @@ export const faqItems: ReadonlyArray<{ question: string; answer: string }> = [
     },
     {
         question: 'What data does the Caramel extension collect?',
-        answer: "The extension never sells your personal information and shares it only with the service providers named in our privacy policy, and it contains no ads and no third-party trackers. To do its job it talks to Caramel's own servers: as you browse, it asks whether Caramel has codes for the current site's domain so the toolbar badge can show a count; when you reach checkout on a supported store it fetches those codes, sends the page and cart context (page title and item names — never payment details) so the right category of codes is chosen, and reports whether a code worked (linked to your account only if you're signed in) so rankings stay accurate for everyone. If you're signed in and the extension setting \"Share codes I enter at checkout\" is on, it also sends a code you typed yourself once the store accepts it, with the store and your account, and never your cart, order or payment details; shared codes appear to other shoppers without your name, and you can turn the setting off at any time. Your settings and optional sign-in are kept in your browser's extension storage.",
+        answer: "The extension never sells your personal information and shares it only with the service providers named in our privacy policy, and it contains no ads and no third-party trackers. To do its job it talks to Caramel's own servers: as you browse, it asks whether Caramel has codes for the current site's domain so the toolbar badge can show a count; when you reach checkout on a supported store it fetches those codes, sends the page and cart context (page title and item names — never payment details) so the right category of codes is chosen, and reports whether a code worked (linked to your account only if you're signed in) so rankings stay accurate for everyone. If you're signed in and you agree to the extension's own prompt, or switch on the extension setting \"Share codes I enter at checkout\" (it is off by default), it also sends a code you typed yourself once the store accepts it, with the store and your account, and never your cart, order or payment details; shared codes appear to other shoppers without your name, and you can turn the setting off at any time. Your settings and optional sign-in are kept in your browser's extension storage.",
     },
     {
         question: 'Is Caramel the same as Honey?',
@@ -76,6 +79,6 @@ export const faqItems: ReadonlyArray<{ question: string; answer: string }> = [
     },
     {
         question: 'Can I share a coupon code with Caramel?',
-        answer: 'Yes. Sign in, open the store\'s page on Caramel and use Add a code — it shows to other shoppers as Unverified until someone reports it worked. The extension can also share a code for you: if the extension setting "Share codes I enter at checkout" is on, it sends a code you typed yourself once the store accepts it, and you can turn that off at any time in the extension\'s settings. Either way we store only the code, the store, and your account (to limit abuse), never your cart, order or payment details, and shared codes appear to other shoppers without your name.',
+        answer: "Yes. Sign in, open the store's page on Caramel and use Add a code — it shows to other shoppers as Unverified until someone reports it worked. The extension can also share a code for you, but only if you agree: this is off by default, and it turns on only when you accept the extension's own prompt or switch on the extension setting \"Share codes I enter at checkout\". Once it is on, it sends a code you typed yourself once the store accepts it, and you can turn that off at any time in the extension's settings. Either way we store only the code, the store, and your account (to limit abuse), never your cart, order or payment details, and shared codes appear to other shoppers without your name.",
     },
 ]

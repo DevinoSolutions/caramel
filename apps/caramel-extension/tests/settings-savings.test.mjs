@@ -67,7 +67,6 @@ describe('caramel-base.js settings helpers', () => {
             autoApply: true,
             disabledSites: [],
             syncSavings: false,
-            shareCheckoutCodes: true,
         })
         expect(await helpers.caramelPromptAllowed('shop.example.com')).toBe(
             true,
@@ -101,8 +100,62 @@ describe('caramel-base.js settings helpers', () => {
             autoApply: false,
             disabledSites: ['a.com'],
             syncSavings: false,
-            shareCheckoutCodes: true,
         })
+    })
+})
+
+describe('caramel-base.js checkout-code-sharing consent (owner rule 2026-10-06)', () => {
+    it('defaults to NO consent: absent record reads as null (not allowed)', async () => {
+        expect(await helpers.caramelGetCodeSharingConsent()).toBeNull()
+    })
+
+    it('a stale legacy shareCheckoutCodes:true is neither read back nor consent', async () => {
+        syncData.caramel_settings = { shareCheckoutCodes: true }
+
+        expect(await helpers.caramelGetCodeSharingConsent()).toBeNull()
+        // The retired key is gone from the settings vocabulary...
+        expect(await helpers.caramelGetSettings()).not.toHaveProperty(
+            'shareCheckoutCodes',
+        )
+        // ...and the next settings save drops the stale copy for free.
+        await helpers.caramelSetSettings({ autoApply: false })
+        expect(syncData.caramel_settings).not.toHaveProperty(
+            'shareCheckoutCodes',
+        )
+    })
+
+    it('persists the choice as { choice, at, promptVersion } under its own key', async () => {
+        const written = await helpers.caramelSetCodeSharingConsent('accepted')
+
+        expect(syncData.checkoutCodeSharingConsent).toEqual(written)
+        expect(written.choice).toBe('accepted')
+        expect(written.promptVersion).toBe(1)
+        expect(Number.isNaN(Date.parse(written.at))).toBe(false)
+        expect(await helpers.caramelGetCodeSharingConsent()).toEqual(written)
+        // Settings are untouched: the consent never lives in caramel_settings.
+        expect(syncData.caramel_settings).toBeUndefined()
+    })
+
+    it('a decline overwrites an acceptance (and vice versa)', async () => {
+        await helpers.caramelSetCodeSharingConsent('accepted')
+        await helpers.caramelSetCodeSharingConsent('declined')
+
+        expect((await helpers.caramelGetCodeSharingConsent()).choice).toBe(
+            'declined',
+        )
+    })
+
+    it('refuses an unknown choice loudly', async () => {
+        await expect(
+            helpers.caramelSetCodeSharingConsent('sure'),
+        ).rejects.toThrow(/unknown choice/)
+        expect(syncData.checkoutCodeSharingConsent).toBeUndefined()
+    })
+
+    it('a malformed stored record reads as no consent', async () => {
+        syncData.checkoutCodeSharingConsent = { choice: 'accepted' }
+
+        expect(await helpers.caramelGetCodeSharingConsent()).toBeNull()
     })
 })
 

@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
     afterEach,
     beforeAll,
@@ -7,16 +10,30 @@ import {
     it,
     vi,
 } from 'vitest'
+import {
+    CODE_SHARING_CONSENT_KEY,
+    codeSharingAccepted,
+    parseCodeSharingConsent,
+} from '../code-sharing-consent.js'
 
 /**
  * code-capture.js — a code the SHOPPER types is shared with Caramel only when
- * the store visibly accepts it.
+ * the store visibly accepts it AND the shopper has explicitly consented.
  *
  * These drive the real module against a real (jsdom) checkout. The "store"
  * answers shortly after the shopper's Apply click: it either shows an applied
  * row and drops the total (accepted) or prints an error (rejected). The
- * background worker is a stub that records every message it is sent, because
- * the contract under test is exactly "which messages leave the page".
+ * background worker is a stub that applies the REAL consent gate
+ * (code-sharing-consent.js) and records what it would have let reach the
+ * network in `sent`, because the contract under test is exactly "which codes
+ * leave the page". Every message the page addressed to it, refused or not, is
+ * in `attempts`. (The worker's own gates are pinned against the real
+ * background.js in background-shopper-code.test.mjs.)
+ *
+ * Consent is seeded as ACCEPTED by default — the state the pre-existing
+ * behaviour tests describe — and the `consent` describe block below drives the
+ * states that matter: no record, a stale legacy `shareCheckoutCodes: true`,
+ * declined, dismissed, malformed.
  *
  * jsdom marks every script-dispatched event isTrusted=false, which is the very
  * property the module keys on. `trusted()` flips the flag on the event's
@@ -28,8 +45,35 @@ let ready
 let valid
 let accepted
 let sent
+let attempts
+let workerGate // 'open' | 'signed-out' | 'disabled' — what the worker says first
 let syncData
 let changeListeners
+
+const EXT_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
+const accepted_ = () => ({
+    choice: 'accepted',
+    at: '2026-10-06T12:00:00.000Z',
+    promptVersion: 1,
+})
+const declined_ = () => ({
+    choice: 'declined',
+    at: '2026-10-06T12:00:00.000Z',
+    promptVersion: 1,
+})
+
+/** The worker's gate order (background.js submitShopperCode): signed in, flag
+ *  on, THEN consent. Only a code that passes all three counts as `sent`. */
+function workerAnswer(message) {
+    if (workerGate !== 'open') return { skipped: workerGate }
+    const record = parseCodeSharingConsent(syncData[CODE_SHARING_CONSENT_KEY])
+    if (!codeSharingAccepted(record)) return { skipped: 'no-consent' }
+    sent.push(message)
+    return { couponId: '1', created: true, status: 'unverified' }
+}
+
+const shareCard = () => document.getElementById('caramel-share-prompt')
+const cardButton = id => shareCard().shadowRoot.querySelector(`#${id}`)
 
 const REC = {
     domain: 'example.com',
@@ -84,8 +128,8 @@ function installChromeStub() {
             lastError: undefined,
             onMessage: { addListener: () => {} },
             sendMessage: (message, cb) => {
-                sent.push(message)
-                cb({ ok: true })
+                attempts.push(message)
+                cb(workerAnswer(message))
             },
             getURL: p => p,
         },
@@ -97,11 +141,11 @@ function installChromeStub() {
     }
 }
 
-/** The user changes a setting in the popup: storage fires onChanged. */
-function settingsChangeTo(next) {
-    syncData.caramel_settings = next
+/** The popup (or another tab) writes the consent record: onChanged fires. */
+function consentChangeTo(next) {
+    syncData[CODE_SHARING_CONSENT_KEY] = next
     for (const fn of changeListeners)
-        fn({ caramel_settings: { newValue: next } }, 'sync')
+        fn({ [CODE_SHARING_CONSENT_KEY]: { newValue: next } }, 'sync')
 }
 
 /** The store reacts to the shopper's Apply: `accept` shows an applied row and
@@ -170,6 +214,13 @@ beforeAll(() => {
     installTrustedShim()
     const { Element } = globalThis.window ?? globalThis
     Element.prototype.checkVisibility = () => true
+    // The consent card fetches the packaged stylesheets (packaged under public/
+    // in the repo, assets/ in the build); serve them from disk.
+    globalThis.fetch = async relPath => ({
+        ok: true,
+        text: async () =>
+            readFileSync(join(EXT_ROOT, 'public', relPath), 'utf8'),
+    })
 })
 
 // Every test re-imports the module (fresh state) but `document` outlives it, so
@@ -197,13 +248,17 @@ beforeEach(async () => {
     setText(document.getElementById('total'), '$100.00')
     sessionStorage.clear()
     sent = []
-    syncData = {}
+    attempts = []
+    workerGate = 'open'
+    syncData = { [CODE_SHARING_CONSENT_KEY]: accepted_() }
     vi.resetModules()
     installChromeStub()
     window.currentBrowser = undefined
     const base = await import('../caramel-base.js')
     base.initCaramelBase()
     const mod = await import('../code-capture.js')
+    const ui = await import('../UI-helpers.js')
+    mod.initCodeCapture({ askConsent: ui.showCodeSharingPrompt })
     arm = mod.armCodeCapture
     ready = mod.caramelCodeCaptureReady
     valid = mod.caramelShopperCodeValid
@@ -399,8 +454,8 @@ describe('what must never leave the page', () => {
         expect(sent).toEqual([])
     })
 
-    it('nothing when the shopper switched sharing off', async () => {
-        syncData.caramel_settings = { shareCheckoutCodes: false }
+    it('nothing when the shopper declined sharing', async () => {
+        syncData[CODE_SHARING_CONSENT_KEY] = declined_()
         await armed()
         storeAnswers(true)
         shopperTypes('SAVE10')
@@ -410,8 +465,8 @@ describe('what must never leave the page', () => {
         expect(sent).toEqual([])
     })
 
-    it('with sharing off a gesture does no work at all (no selector queries)', async () => {
-        syncData.caramel_settings = { shareCheckoutCodes: false }
+    it('with sharing declined a gesture does no work at all (no selector queries)', async () => {
+        syncData[CODE_SHARING_CONSENT_KEY] = declined_()
         await armed()
         const query = vi.spyOn(document, 'querySelectorAll')
         const evaluate = vi.spyOn(document, 'evaluate')
@@ -432,16 +487,17 @@ describe('what must never leave the page', () => {
         shopperTypes('SAVE10')
         shopperClicksApply()
         await settle(30)
-        settingsChangeTo({ shareCheckoutCodes: false })
+        consentChangeTo(declined_())
         await settle(2200)
 
         expect(sent).toEqual([])
+        expect(attempts).toEqual([])
     })
 
-    it('a setting switched back on is honoured for the next gesture', async () => {
-        syncData.caramel_settings = { shareCheckoutCodes: false }
+    it('sharing switched back on in the popup is honoured for the next gesture', async () => {
+        syncData[CODE_SHARING_CONSENT_KEY] = declined_()
         await armed()
-        settingsChangeTo({ shareCheckoutCodes: true })
+        consentChangeTo(accepted_())
         storeAnswers(true)
         shopperTypes('SAVE10')
         shopperClicksApply()
@@ -668,24 +724,351 @@ describe('one verdict, one code', () => {
 
 describe('what happens after the worker answers', () => {
     it('a skipped answer (e.g. signed out) un-marks the code so it can be resent', async () => {
-        const original = globalThis.chrome.runtime.sendMessage
-        let answer = { skipped: 'signed-out' }
-        globalThis.chrome.runtime.sendMessage = (message, cb) => {
-            sent.push(message)
-            cb(answer)
-        }
+        workerGate = 'signed-out'
         await armed()
         storeAnswers(true)
         shopperTypes('SAVE10')
         shopperClicksApply()
-        await vi.waitFor(() => expect(sent).toHaveLength(1), LONG)
+        await vi.waitFor(() => expect(attempts).toHaveLength(1), LONG)
         await settle(100)
+        expect(sent).toEqual([])
 
         // After sign-in the shopper applies it again: it goes out again.
-        answer = { couponId: '1', created: true, status: 'unverified' }
+        workerGate = 'open'
         shopperClicksApply()
+        await vi.waitFor(() => expect(sent).toHaveLength(1), LONG)
+    })
+})
+
+// The owner rule (2026-10-06): a shopper's code is shared ONLY after an
+// explicit, in-extension opt-in. These are the behaviours that make it so.
+describe('consent: nothing is sent before the shopper says yes', () => {
+    /** The shopper types a code the store accepts. */
+    async function shopperAppliesAcceptedCode(code = 'SAVE10') {
+        await armed()
+        storeAnswers(true)
+        shopperTypes(code)
+        shopperClicksApply()
+    }
+    const waitForCard = () =>
+        vi.waitFor(() => expect(shareCard()).not.toBeNull(), LONG)
+
+    it('no consent record: the code is NOT sent, and the consent card appears instead', async () => {
+        delete syncData[CODE_SHARING_CONSENT_KEY]
+        await shopperAppliesAcceptedCode()
+
+        await waitForCard()
+        await settle(300)
+        expect(sent).toEqual([])
+        // The page asked the worker once (which refused: no-consent), nothing more.
+        expect(attempts).toHaveLength(1)
+    })
+
+    it('a stale legacy shareCheckoutCodes:true is NOT consent: no send, a prompt instead', async () => {
+        delete syncData[CODE_SHARING_CONSENT_KEY]
+        syncData.caramel_settings = { shareCheckoutCodes: true }
+        await shopperAppliesAcceptedCode()
+
+        await waitForCard()
+        expect(sent).toEqual([])
+    })
+
+    it.each([
+        ['an unknown choice', { choice: 'maybe', at: '2026-10-06T12:00:00Z' }],
+        [
+            'a record from another prompt version',
+            { ...accepted_(), promptVersion: 2 },
+        ],
+        ['an unparsable date', { ...accepted_(), at: 'yesterday' }],
+        ['a bare boolean', true],
+        ['a string', 'accepted'],
+    ])('%s counts as no record (never as consent)', async (_label, bad) => {
+        syncData[CODE_SHARING_CONSENT_KEY] = bad
+        await shopperAppliesAcceptedCode()
+
+        await waitForCard()
+        expect(sent).toEqual([])
+    })
+
+    it('"Share codes" records acceptance and sends the code the card named, once', async () => {
+        delete syncData[CODE_SHARING_CONSENT_KEY]
+        await shopperAppliesAcceptedCode('SAVE10')
+        await waitForCard()
+        expect(sent).toEqual([])
+
+        cardButton('caramel-share-yes').click()
+
+        await vi.waitFor(() => expect(sent).toHaveLength(1), LONG)
+        expect(sent[0]).toEqual({
+            action: 'submitShopperCode',
+            site: location.hostname,
+            code: 'SAVE10',
+        })
+        expect(syncData[CODE_SHARING_CONSENT_KEY]).toMatchObject({
+            choice: 'accepted',
+            promptVersion: 1,
+        })
+        expect(
+            Number.isNaN(Date.parse(syncData[CODE_SHARING_CONSENT_KEY].at)),
+        ).toBe(false)
+        expect(shareCard()).toBeNull()
+    })
+
+    it('after acceptance the next code is sent with no second prompt', async () => {
+        delete syncData[CODE_SHARING_CONSENT_KEY]
+        await shopperAppliesAcceptedCode('SAVE10')
+        await waitForCard()
+        cardButton('caramel-share-yes').click()
+        await vi.waitFor(() => expect(sent).toHaveLength(1), LONG)
+
+        // A different code, in a fresh answer round.
+        shopperTypes('SECOND20')
+        shopperClicksApply()
+
         await vi.waitFor(() => expect(sent).toHaveLength(2), LONG)
-        globalThis.chrome.runtime.sendMessage = original
+        expect(sent[1].code).toBe('SECOND20')
+        expect(shareCard()).toBeNull()
+    })
+
+    it('"No thanks" records the decline, sends nothing, and never prompts again', async () => {
+        delete syncData[CODE_SHARING_CONSENT_KEY]
+        await shopperAppliesAcceptedCode('SAVE10')
+        await waitForCard()
+
+        cardButton('caramel-share-no').click()
+
+        await vi.waitFor(
+            () =>
+                expect(syncData[CODE_SHARING_CONSENT_KEY]?.choice).toBe(
+                    'declined',
+                ),
+            LONG,
+        )
+        expect(shareCard()).toBeNull()
+        expect(sent).toEqual([])
+
+        // The shopper keeps applying codes: no card, and the page does not even
+        // bother the worker.
+        const askedSoFar = attempts.length
+        shopperTypes('SECOND20')
+        shopperClicksApply()
+        await settle(1800)
+        expect(shareCard()).toBeNull()
+        expect(attempts).toHaveLength(askedSoFar)
+        expect(sent).toEqual([])
+    })
+
+    it('dismissing with the close button records NOTHING and asks again next time', async () => {
+        delete syncData[CODE_SHARING_CONSENT_KEY]
+        await shopperAppliesAcceptedCode('SAVE10')
+        await waitForCard()
+
+        cardButton('caramel-share-close').click()
+
+        await vi.waitFor(() => expect(shareCard()).toBeNull(), LONG)
+        expect(CODE_SHARING_CONSENT_KEY in syncData).toBe(false)
+        expect(sent).toEqual([])
+
+        // The next code the store accepts brings the question back. (Not the
+        // same code again: it is already on the cart, so re-applying it moves
+        // nothing and is not a new acceptance.)
+        shopperTypes('SECOND20')
+        shopperClicksApply()
+        await waitForCard()
+        expect(sent).toEqual([])
+        // Two full capture rounds (each waits out the store's verdict), so it
+        // needs more than the 5s default.
+    }, 15000)
+
+    it('Escape also dismisses without recording anything', async () => {
+        delete syncData[CODE_SHARING_CONSENT_KEY]
+        await shopperAppliesAcceptedCode('SAVE10')
+        await waitForCard()
+
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+
+        await vi.waitFor(() => expect(shareCard()).toBeNull(), LONG)
+        expect(CODE_SHARING_CONSENT_KEY in syncData).toBe(false)
+        expect(sent).toEqual([])
+    })
+
+    it('a page navigation (the content script just goes away) leaves no record', async () => {
+        delete syncData[CODE_SHARING_CONSENT_KEY]
+        await shopperAppliesAcceptedCode('SAVE10')
+        await waitForCard()
+
+        // Nothing but the card's own buttons ever write the record, so a card
+        // abandoned by navigation has written nothing.
+        expect(CODE_SHARING_CONSENT_KEY in syncData).toBe(false)
+        expect(sent).toEqual([])
+    })
+
+    it('server flag off: no prompt (there is nothing to share)', async () => {
+        delete syncData[CODE_SHARING_CONSENT_KEY]
+        workerGate = 'disabled'
+        await shopperAppliesAcceptedCode()
+
+        await vi.waitFor(() => expect(attempts).toHaveLength(1), LONG)
+        await settle(300)
+        expect(shareCard()).toBeNull()
+        expect(sent).toEqual([])
+    })
+
+    it('signed out: no prompt (capture needs an account)', async () => {
+        delete syncData[CODE_SHARING_CONSENT_KEY]
+        workerGate = 'signed-out'
+        await shopperAppliesAcceptedCode()
+
+        await vi.waitFor(() => expect(attempts).toHaveLength(1), LONG)
+        await settle(300)
+        expect(shareCard()).toBeNull()
+        expect(sent).toEqual([])
+    })
+
+    it('no prompt for a code the store rejected', async () => {
+        delete syncData[CODE_SHARING_CONSENT_KEY]
+        await armed()
+        storeAnswers(false)
+        shopperTypes('NOPE123')
+        shopperClicksApply()
+        await settle(1800)
+
+        expect(shareCard()).toBeNull()
+        expect(attempts).toEqual([])
+    })
+
+    it('no prompt on a site the shopper paused', async () => {
+        delete syncData[CODE_SHARING_CONSENT_KEY]
+        syncData.caramel_settings = { disabledSites: [location.hostname] }
+        await shopperAppliesAcceptedCode()
+        await settle(1800)
+
+        expect(shareCard()).toBeNull()
+        expect(attempts).toEqual([])
+    })
+
+    it('a "yes" that could not be saved sends nothing', async () => {
+        delete syncData[CODE_SHARING_CONSENT_KEY]
+        await shopperAppliesAcceptedCode('SAVE10')
+        await waitForCard()
+        const realSet = globalThis.chrome.storage.sync.set
+        globalThis.chrome.storage.sync.set = (_items, cb) => {
+            globalThis.chrome.runtime.lastError = { message: 'quota exceeded' }
+            cb()
+            globalThis.chrome.runtime.lastError = undefined
+        }
+
+        cardButton('caramel-share-yes').click()
+        await settle(600)
+
+        expect(sent).toEqual([])
+        expect(CODE_SHARING_CONSENT_KEY in syncData).toBe(false)
+        globalThis.chrome.storage.sync.set = realSet
+    })
+
+    describe('the card itself', () => {
+        async function openCard() {
+            delete syncData[CODE_SHARING_CONSENT_KEY]
+            await shopperAppliesAcceptedCode('SAVE10')
+            await waitForCard()
+            return shareCard().shadowRoot
+        }
+
+        it('lives in a shadow root and says what is shared, plainly', async () => {
+            const root = await openCard()
+            const text = root.textContent
+            expect(text).toContain(
+                'Share this code with other Caramel shoppers?',
+            )
+            expect(text).toContain('SAVE10')
+            expect(text).toContain(
+                'Caramel would send only the code and the store, linked to your account to prevent abuse',
+            )
+            expect(text).toContain('never your cart, order or payment details')
+            expect(text).toContain(
+                'Shared codes are shown publicly without your name',
+            )
+            expect(text).toContain(
+                'You can change this anytime in Caramel’s settings',
+            )
+            // Nothing leaked into the page's own DOM.
+            expect(shareCard().children.length).toBe(0)
+        })
+
+        it('links to the privacy policy', async () => {
+            const root = await openCard()
+            const link = root.querySelector('#caramel-share-privacy')
+            expect(link.getAttribute('href')).toBe(
+                'https://grabcaramel.com/privacy',
+            )
+            expect(link.getAttribute('rel')).toContain('noopener')
+        })
+
+        it('"Share codes" and "No thanks" are equals: one class, none pre-selected or focused', async () => {
+            const root = await openCard()
+            const yes = root.querySelector('#caramel-share-yes')
+            const no = root.querySelector('#caramel-share-no')
+            expect(yes.textContent).toBe('Share codes')
+            expect(no.textContent).toBe('No thanks')
+            expect(yes.className).toBe(no.className)
+            expect(yes.hasAttribute('autofocus')).toBe(false)
+            expect(no.hasAttribute('autofocus')).toBe(false)
+            expect(root.activeElement).toBeNull()
+            // No per-button override anywhere in the sheet: the two buttons are
+            // styled by the shared class alone.
+            const css = readFileSync(
+                join(EXT_ROOT, 'public/assets/content-ui.css'),
+                'utf8',
+            )
+            expect(css).not.toMatch(/#caramel-share-(yes|no)\b/)
+        })
+
+        it('the code is written as text, never parsed as markup', async () => {
+            delete syncData[CODE_SHARING_CONSENT_KEY]
+            await armed()
+            storeAnswers(true)
+            // Passes the code pattern (letters/digits/_/-) but proves the path
+            // uses textContent: nothing element-like can exist in the card.
+            shopperTypes('Img-onerror_1')
+            shopperClicksApply()
+            await waitForCard()
+            const root = shareCard().shadowRoot
+            expect(
+                root.querySelector('#caramel-share-code-text').textContent,
+            ).toBe('Img-onerror_1')
+            expect(root.querySelectorAll('img').length).toBe(0)
+        })
+    })
+})
+
+describe('code-sharing-consent record', () => {
+    it('parses exactly the documented shape', () => {
+        expect(parseCodeSharingConsent(accepted_())).toEqual(accepted_())
+        expect(parseCodeSharingConsent(declined_())).toEqual(declined_())
+    })
+
+    it('absent or malformed is not consent', () => {
+        for (const bad of [
+            undefined,
+            null,
+            {},
+            { choice: 'accepted' },
+            { ...accepted_(), choice: 'ACCEPTED' },
+            { ...accepted_(), at: 123 },
+            { ...accepted_(), promptVersion: '1' },
+        ])
+            expect(codeSharingAccepted(parseCodeSharingConsent(bad))).toBe(
+                false,
+            )
+    })
+
+    it('only an accepted record allows sharing', () => {
+        expect(codeSharingAccepted(parseCodeSharingConsent(accepted_()))).toBe(
+            true,
+        )
+        expect(codeSharingAccepted(parseCodeSharingConsent(declined_()))).toBe(
+            false,
+        )
     })
 })
 

@@ -160,29 +160,62 @@ describe('popup settings view', () => {
         )
     })
 
-    it('offers the checkout-code sharing switch, ON by default, and persists it', async () => {
+    it('offers the checkout-code sharing switch, OFF by default, and turning it on records an explicit acceptance', async () => {
         renderSettings('www.example.com')
 
         const share = await screen.findByRole('checkbox', {
             name: /Share codes I enter at checkout/,
         })
-        // The hint is the privacy promise: only the code and store, only when
-        // the store accepts it, and it needs a sign-in.
+        // The hint says it is off unless the shopper turns it on, and keeps the
+        // privacy promise: only the code and store, only when the store accepts
+        // it, and it needs a sign-in.
         expect(
             screen.getByText(
-                'Only the code and store, when the store accepts it. Requires sign-in.',
+                'Off unless you turn it on. Shares only the code and store, when the store accepts it. Requires sign-in.',
             ),
         ).toBeInTheDocument()
+        expect(share).not.toBeChecked()
+        expect(syncData.checkoutCodeSharingConsent).toBeUndefined()
+
+        await userEvent.click(share)
+
+        await waitFor(() =>
+            expect(syncData.checkoutCodeSharingConsent).toMatchObject({
+                choice: 'accepted',
+                promptVersion: 1,
+            }),
+        )
+        expect(share).toBeChecked()
+        // Never written to the retired settings key.
+        expect(syncData.caramel_settings?.shareCheckoutCodes).toBeUndefined()
+    })
+
+    it('turning it off records a decline (so the consent card does not return)', async () => {
+        syncData.checkoutCodeSharingConsent = {
+            choice: 'accepted',
+            at: '2026-10-06T12:00:00.000Z',
+            promptVersion: 1,
+        }
+        renderSettings('www.example.com')
+
+        const share = await screen.findByRole('checkbox', {
+            name: /Share codes I enter at checkout/,
+        })
         expect(share).toBeChecked()
         await userEvent.click(share)
+
         await waitFor(() =>
-            expect(syncData.caramel_settings.shareCheckoutCodes).toBe(false),
+            expect(syncData.checkoutCodeSharingConsent.choice).toBe('declined'),
         )
         expect(share).not.toBeChecked()
     })
 
-    it('reads a stored opt-out back as off', async () => {
-        syncData.caramel_settings = { shareCheckoutCodes: false }
+    it('reads a declined record back as off', async () => {
+        syncData.checkoutCodeSharingConsent = {
+            choice: 'declined',
+            at: '2026-10-06T12:00:00.000Z',
+            promptVersion: 1,
+        }
         renderSettings('www.example.com')
 
         expect(
@@ -190,6 +223,55 @@ describe('popup settings view', () => {
                 name: /Share codes I enter at checkout/,
             }),
         ).not.toBeChecked()
+    })
+
+    it('a stale legacy shareCheckoutCodes:true does NOT show as on (it was never consent)', async () => {
+        syncData.caramel_settings = { shareCheckoutCodes: true }
+        renderSettings('www.example.com')
+
+        expect(
+            await screen.findByRole('checkbox', {
+                name: /Share codes I enter at checkout/,
+            }),
+        ).not.toBeChecked()
+    })
+
+    it('a malformed record shows as off', async () => {
+        syncData.checkoutCodeSharingConsent = { choice: 'accepted' }
+        renderSettings('www.example.com')
+
+        expect(
+            await screen.findByRole('checkbox', {
+                name: /Share codes I enter at checkout/,
+            }),
+        ).not.toBeChecked()
+    })
+
+    it('when the choice cannot be saved the switch goes back and the shopper is told', async () => {
+        renderSettings('www.example.com')
+        const share = await screen.findByRole('checkbox', {
+            name: /Share codes I enter at checkout/,
+        })
+        const realSet = (globalThis as any).chrome.storage.sync.set
+        ;(globalThis as any).chrome.storage.sync.set = (
+            _items: unknown,
+            cb: any,
+        ) => {
+            ;(globalThis as any).chrome.runtime.lastError = {
+                message: 'quota exceeded',
+            }
+            cb()
+            ;(globalThis as any).chrome.runtime.lastError = undefined
+        }
+
+        await userEvent.click(share)
+
+        expect(
+            await screen.findByText(/Couldn’t change that setting/),
+        ).toBeInTheDocument()
+        expect(share).not.toBeChecked()
+        expect(syncData.checkoutCodeSharingConsent).toBeUndefined()
+        ;(globalThis as any).chrome.storage.sync.set = realSet
     })
 
     it('offers no site toggle for a dot-less host', async () => {
