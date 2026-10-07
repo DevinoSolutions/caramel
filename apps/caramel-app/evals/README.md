@@ -170,5 +170,6 @@ the `OPENROUTER_API_KEY` secret must then hold a proxy key.
 > addresses them.
 
 The canonical copy of this rule lives in the repo root `CLAUDE.md`
-(§Conventions in force → eval gate); this section stays as the local
-how-to. If the two ever disagree, `CLAUDE.md` wins.
+(§Conventions in force; full text in
+`docs/agent/conventions-and-checks.md`, eval gate); this section stays
+as the local how-to. If the two ever disagree, `CLAUDE.md` wins.
