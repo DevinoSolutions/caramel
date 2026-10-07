@@ -12,8 +12,8 @@
 //   - `store_configs.store_name` (the published apply-config; its seed rows are
 //     'ebay.com', 'amazon.com', 'codecademy.com') — joins on equality;
 //   - the catalog's `coupons.site`, which listStoreCoupons() matches with
-//     `site = <key> OR site LIKE '%.' || <key>` (a store's coupons are filed
-//     under any of its hostnames);
+//     couponsRepo's onStoreSql(): `site = <key>`, or `site` ends in
+//     `'.' || <key>` (a store's coupons are filed under any of its hostnames);
 //   - the `/coupons/[store]` URL, whose canonical is exactly this key.
 //
 // So a favorite joins cleanly against catalog data without a second

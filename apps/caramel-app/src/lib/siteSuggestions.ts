@@ -10,6 +10,7 @@
 // NOT the coupon catalog (couponsRepo.ts owns that, with its own write rules).
 import { env } from '@/lib/env'
 import prisma from '@/lib/prisma'
+import { foldRequesterEmail } from '@/lib/siteSuggestionIdentity'
 import {
     sendStoreSupportedNotice,
     sendSupportedOpsNotice,
@@ -147,7 +148,13 @@ export async function recordSiteSuggestion(
             domain: input.domain,
             rawUrl: input.rawUrl,
             userId: input.userId,
-            requesterEmail: input.requesterEmail,
+            // Folded, never stored as typed: the account's delete/overview
+            // match is EXACT (siteSuggestionIdentity.ts), and the database
+            // refuses an unfolded address.
+            requesterEmail:
+                input.requesterEmail === null
+                    ? null
+                    : foldRequesterEmail(input.requesterEmail),
             source: input.source,
             userAgent: input.userAgent,
         },

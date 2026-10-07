@@ -54,7 +54,9 @@ vi.mock('@/lib/rateLimit', async importOriginal => {
 
 const USER_ID = 'user-under-test'
 // The account's OWN spelling of the address. A suggestion made while signed out
-// records what the visitor TYPED, which is why the match is case-insensitive.
+// is stored FOLDED whatever the visitor typed, so the match is exact on the
+// folded address — never Prisma's `mode: 'insensitive'`, whose ILIKE turns an
+// `_` or `%` in the email into a wildcard (siteSuggestionIdentity.ts).
 const USER_EMAIL = 'shopper@example.com'
 const OTHER_USER_ID = 'someone-else'
 const MEMBER_SINCE = new Date('2026-03-14T10:00:00.000Z')
@@ -140,14 +142,22 @@ describe('GET /api/account/overview — the zero-data user (the DEFAULT)', () =>
         // and a signed-OUT one found only by the email typed into the form.
         expect(prismaMock.siteSuggestion.count).toHaveBeenCalledWith({
             where: {
+                OR: [{ userId: USER_ID }, { requesterEmail: USER_EMAIL }],
+            },
+        })
+    })
+
+    it("the email branch is the account's address FOLDED and matched exactly, so an unusual spelling or an `_` can never become a pattern", async () => {
+        getSessionMock.mockResolvedValue({
+            user: { id: USER_ID, email: 'J_hn@Example.COM' },
+        })
+        await GET(overviewRequest())
+
+        expect(prismaMock.siteSuggestion.count).toHaveBeenCalledWith({
+            where: {
                 OR: [
                     { userId: USER_ID },
-                    {
-                        requesterEmail: {
-                            equals: USER_EMAIL,
-                            mode: 'insensitive',
-                        },
-                    },
+                    { requesterEmail: 'j_hn@example.com' },
                 ],
             },
         })

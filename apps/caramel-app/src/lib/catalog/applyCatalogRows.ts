@@ -105,8 +105,8 @@ class TombstoneGateError extends Error {
 /**
  * The ONE write-side normalization in this engine: `site` is stored lowercase.
  * Domains are case-insensitive, but every store read matches
- * `site = $base OR site LIKE '%.' || $base` case-SENSITIVELY (plain equality
- * keeps `coupons_site_idx` usable) against a base resolveStoreDomain has
+ * `site = $base OR right(site, …) = '.' || $base` (couponsRepo's onStoreSql)
+ * case-SENSITIVELY (plain equality keeps `coupons_site_idx` usable) against a base resolveStoreDomain has
  * lowercased — so a mixed-case producer value was unreachable from its own
  * canonical page (prod 2026-09-11: `eNasco.com`, `Brooklinen.com`). The
  * `lowercase_coupon_sites` migration backfilled existing rows; this keeps new

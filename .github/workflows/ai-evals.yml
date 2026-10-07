@@ -81,6 +81,31 @@ jobs:
             exit 1
           fi
 
+      # Optional repo VARIABLES (not secrets) that move this gate to another
+      # OpenAI-compatible base, e.g. the Devino proxy
+      # (OPENROUTER_API_URL=https://proxyai.devino.ca/v1 plus a proxy pin in
+      # OPENROUTER_MODEL and a proxy key in the OPENROUTER_API_KEY secret).
+      # Exported only when set: an unset variable expands to "", and the eval
+      # must then fall back to src/lib/env.ts's own defaults, not an empty
+      # model id.
+      - name: Apply optional OPENROUTER_API_URL / OPENROUTER_MODEL repo variables
+        env:
+          VAR_OPENROUTER_API_URL: ${{ vars.OPENROUTER_API_URL }}
+          VAR_OPENROUTER_MODEL: ${{ vars.OPENROUTER_MODEL }}
+        run: |
+          if [ -n "$VAR_OPENROUTER_API_URL" ]; then
+            echo "OPENROUTER_API_URL=$VAR_OPENROUTER_API_URL" >> "$GITHUB_ENV"
+            echo "Eval base: $VAR_OPENROUTER_API_URL (repo variable)"
+          else
+            echo "Eval base: env.ts default (OpenRouter)"
+          fi
+          if [ -n "$VAR_OPENROUTER_MODEL" ]; then
+            echo "OPENROUTER_MODEL=$VAR_OPENROUTER_MODEL" >> "$GITHUB_ENV"
+            echo "Eval model: $VAR_OPENROUTER_MODEL (repo variable)"
+          else
+            echo "Eval model: env.ts default"
+          fi
+
       - name: Run cart-classifier evals
         working-directory: ./apps/caramel-app
         shell: bash
@@ -89,11 +114,13 @@ jobs:
         # Raw vitest invocation, NOT the `eval` package.json script — that
         # script's env-loading targets a local .env file, which CI never
         # has; OPENROUTER_API_KEY above is real process env already.
-        # OPENROUTER_MODEL is deliberately NOT set here — leaving it unset
-        # means src/lib/env.ts's own zod default ('openai/gpt-5-mini') is
-        # the single source of truth for which model gets tested, so this
-        # workflow can never itself become a second, silently-drifting
-        # pin (exactly the failure mode F-012 exists to catch).
+        # OPENROUTER_MODEL is deliberately NOT hardcoded here — with the
+        # repo variable unset, src/lib/env.ts's own zod default is the single
+        # source of truth for which model gets tested, so this workflow can
+        # never itself become a second, silently-drifting pin (exactly the
+        # failure mode F-012 exists to catch). The optional repo variable
+        # above exists only so CI can follow a deploy that pins its model by
+        # env (the Devino proxy switch); set it to the same pin as prod.
         run: pnpm exec vitest run --config vitest.eval.config.ts | tee eval-report.txt
 
       - name: Upload eval report
