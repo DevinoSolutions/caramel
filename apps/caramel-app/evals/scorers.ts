@@ -49,6 +49,8 @@ export interface CaseScoreSummary {
     /** True only when every scorer passed (PLAN-F-012.md: "Case-pass = ALL scorers pass"). */
     pass: boolean
     scorers: ScorerResult[]
+    /** Present only when classifyCart threw — the raw error message (no latency suffix). */
+    thrownMessage?: string
 }
 
 export function scorePrimaryExact(
@@ -157,10 +159,12 @@ export function scoreThrown(
     error: unknown,
     latencyMs: number,
 ): CaseScoreSummary {
-    const detail = `classifyCart threw: ${error instanceof Error ? error.message : String(error)} (after ${latencyMs.toFixed(0)}ms)`
+    const thrownMessage = error instanceof Error ? error.message : String(error)
+    const detail = `classifyCart threw: ${thrownMessage} (after ${latencyMs.toFixed(0)}ms)`
     return {
         caseName: caseDef.name,
         pass: false,
+        thrownMessage,
         scorers: ALL_SCORER_NAMES.map(name => ({ name, pass: false, detail })),
     }
 }
@@ -213,6 +217,65 @@ export async function runEvalSuite(
         schemaValidRate: rateOf(summaries, 'schema-valid'),
         latenciesMs,
     }
+}
+
+const THROWN_MESSAGE_MAX_CHARS = 300
+const REDACTED = '[redacted]'
+
+/**
+ * Strips credentials from an error message before it reaches a CI log. The
+ * eval workflow also uploads the log as an artifact, which GitHub does NOT
+ * mask. `knownSecrets` are matched literally so the live key is removed even
+ * when it has none of the shapes below; the patterns catch what an upstream
+ * error body or a fetch error could echo back: an Authorization header value,
+ * an `sk-...` key (OpenAI-compatible relays echo a masked copy in "Incorrect
+ * API key provided: sk-abc***xyz"), URL userinfo, and secret-looking query
+ * params. Redaction runs BEFORE truncation so the length cap can never cut a
+ * secret in half and leave a recognizable prefix.
+ */
+export function redactSecrets(
+    message: string,
+    knownSecrets: readonly (string | undefined)[] = [],
+): string {
+    let out = message
+    for (const secret of knownSecrets) {
+        if (secret) out = out.split(secret).join(REDACTED)
+    }
+    return out
+        .replace(/\bBearer\s+[^\s"',;]+/gi, `Bearer ${REDACTED}`)
+        .replace(/\bsk-[A-Za-z0-9_*.-]{3,}/g, REDACTED)
+        .replace(/(?<=\/\/)[^\s/@]+@/g, `${REDACTED}@`)
+        .replace(
+            /([?&](?:key|api[_-]?key|token|access_token|secret)=)[^\s&"']+/gi,
+            `$1${REDACTED}`,
+        )
+}
+
+/**
+ * Distinct classifyCart error messages with how many cases threw each, or ''
+ * when nothing threw. Without this the CI log shows only failing case names
+ * and a dead key / no credits / unavailable model is indistinguishable.
+ * Messages come from OpenRouterError (status + response-body excerpt) and
+ * `classify failed: <network error>`; request headers are never part of
+ * them, but every message still passes through redactSecrets (defense in
+ * depth: an upstream body or a fetch error could echo a credential).
+ */
+export function formatThrownErrors(
+    suite: EvalSuiteResult,
+    knownSecrets: readonly (string | undefined)[] = [],
+): string {
+    const counts = new Map<string, number>()
+    for (const { thrownMessage } of suite.summaries) {
+        if (thrownMessage === undefined) continue
+        const key = redactSecrets(thrownMessage, knownSecrets).slice(
+            0,
+            THROWN_MESSAGE_MAX_CHARS,
+        )
+        counts.set(key, (counts.get(key) ?? 0) + 1)
+    }
+    return Array.from(counts)
+        .map(([message, count]) => `${count}x "${message}"`)
+        .join('; ')
 }
 
 function percentile(sortedAsc: number[], p: number): number {

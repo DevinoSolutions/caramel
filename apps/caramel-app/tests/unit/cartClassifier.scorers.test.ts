@@ -2,6 +2,8 @@ import type { Classification } from '@/lib/cartClassifier'
 import { describe, expect, it } from 'vitest'
 import {
     LATENCY_BUDGET_MS,
+    formatThrownErrors,
+    redactSecrets,
     scoreCase,
     scoreConfidenceBounds,
     scoreLatencyBudget,
@@ -11,6 +13,7 @@ import {
     scoreThrown,
     type CartCase,
     type CaseExpectation,
+    type EvalSuiteResult,
 } from '../../evals/scorers'
 
 // F-012 — pure unit tests for the deterministic scorers (evals/scorers.ts),
@@ -241,5 +244,101 @@ describe('scoreThrown', () => {
         }
         const summary = scoreThrown(caseDef, 'a plain string rejection', 1)
         expect(summary.scorers[0]?.detail).toContain('a plain string rejection')
+    })
+
+    it('keeps the raw message (no latency suffix) for formatThrownErrors', () => {
+        const caseDef: CartCase = {
+            name: 'throws-raw',
+            signals: { domain: 'scorer-throw-test-3.example' },
+            expect: {
+                primary: ['apparel'],
+                secondary: null,
+                confidence: [0, 1],
+            },
+        }
+        expect(scoreThrown(caseDef, new Error('boom'), 42).thrownMessage).toBe(
+            'boom',
+        )
+    })
+})
+
+describe('formatThrownErrors', () => {
+    const caseDef: CartCase = {
+        name: 'c',
+        signals: { domain: 'thrown-errors-test.example' },
+        expect: { primary: ['apparel'], secondary: null, confidence: [0, 1] },
+    }
+    // null = the case passed (classify returned); anything else = it threw.
+    function suiteOf(errors: unknown[]): EvalSuiteResult {
+        return {
+            summaries: errors.map(e =>
+                e === null
+                    ? scoreCase(caseDef, classification(), 10)
+                    : scoreThrown(caseDef, e, 20),
+            ),
+            primaryMatchRate: 0,
+            schemaValidRate: 0,
+            latenciesMs: [],
+        }
+    }
+
+    it('returns an empty string when nothing threw', () => {
+        expect(formatThrownErrors(suiteOf([null, null]))).toBe('')
+    })
+
+    it('dedupes identical messages with a count, ignoring the latency suffix', () => {
+        const out = formatThrownErrors(
+            suiteOf([
+                new Error('openrouter 402: no credits'),
+                null,
+                new Error('openrouter 402: no credits'),
+                new Error('empty response'),
+            ]),
+        )
+        expect(out).toBe('2x "openrouter 402: no credits"; 1x "empty response"')
+    })
+
+    it('caps each message at 300 characters', () => {
+        const out = formatThrownErrors(suiteOf([new Error('x'.repeat(1000))]))
+        expect(out).toBe(`1x "${'x'.repeat(300)}"`)
+    })
+
+    it('redacts the known key, bearer tokens, sk- keys, URL userinfo and key query params', () => {
+        const out = formatThrownErrors(
+            suiteOf([
+                new Error(
+                    'classify failed: bad Authorization: Bearer abc123 for MYSECRETVALUE; Incorrect API key provided: sk-or-v1-abcdef***wxyz; Failed to parse URL from https://user:pw@host.example/v1?api_key=hunter2&x=1',
+                ),
+            ]),
+            ['MYSECRETVALUE'],
+        )
+        for (const leaked of [
+            'abc123',
+            'MYSECRETVALUE',
+            'abcdef',
+            'user:pw',
+            'hunter2',
+        ]) {
+            expect(out).not.toContain(leaked)
+        }
+        expect(out).toContain('x=1')
+    })
+
+    it('redacts before truncating so the cap cannot leave half a key behind', () => {
+        const key = 'KEY' + 'z'.repeat(40)
+        const out = formatThrownErrors(
+            suiteOf([new Error('a'.repeat(290) + key)]),
+            [key],
+        )
+        expect(out).not.toContain('KEY')
+        expect(out).not.toContain('zzz')
+    })
+})
+
+describe('redactSecrets', () => {
+    it('ignores undefined known secrets and leaves clean messages alone', () => {
+        expect(redactSecrets('openrouter 429: rate limited', [undefined])).toBe(
+            'openrouter 429: rate limited',
+        )
     })
 })
