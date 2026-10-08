@@ -49,6 +49,8 @@ export interface CaseScoreSummary {
     /** True only when every scorer passed (PLAN-F-012.md: "Case-pass = ALL scorers pass"). */
     pass: boolean
     scorers: ScorerResult[]
+    /** Present only when classifyCart threw — the raw error message (no latency suffix). */
+    thrownMessage?: string
 }
 
 export function scorePrimaryExact(
@@ -157,10 +159,12 @@ export function scoreThrown(
     error: unknown,
     latencyMs: number,
 ): CaseScoreSummary {
-    const detail = `classifyCart threw: ${error instanceof Error ? error.message : String(error)} (after ${latencyMs.toFixed(0)}ms)`
+    const thrownMessage = error instanceof Error ? error.message : String(error)
+    const detail = `classifyCart threw: ${thrownMessage} (after ${latencyMs.toFixed(0)}ms)`
     return {
         caseName: caseDef.name,
         pass: false,
+        thrownMessage,
         scorers: ALL_SCORER_NAMES.map(name => ({ name, pass: false, detail })),
     }
 }
@@ -213,6 +217,27 @@ export async function runEvalSuite(
         schemaValidRate: rateOf(summaries, 'schema-valid'),
         latenciesMs,
     }
+}
+
+const THROWN_MESSAGE_MAX_CHARS = 300
+
+/**
+ * Distinct classifyCart error messages with how many cases threw each, or ''
+ * when nothing threw. Without this the CI log shows only failing case names
+ * and a dead key / no credits / unavailable model is indistinguishable.
+ * Messages come from OpenRouterError (status + response-body excerpt) — the
+ * request headers, incl. the API key, are never part of them.
+ */
+export function formatThrownErrors(suite: EvalSuiteResult): string {
+    const counts = new Map<string, number>()
+    for (const { thrownMessage } of suite.summaries) {
+        if (thrownMessage === undefined) continue
+        const key = thrownMessage.slice(0, THROWN_MESSAGE_MAX_CHARS)
+        counts.set(key, (counts.get(key) ?? 0) + 1)
+    }
+    return Array.from(counts)
+        .map(([message, count]) => `${count}x "${message}"`)
+        .join('; ')
 }
 
 function percentile(sortedAsc: number[], p: number): number {

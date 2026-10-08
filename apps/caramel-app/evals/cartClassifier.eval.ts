@@ -14,6 +14,7 @@ import { beforeAll, expect, it } from 'vitest'
 import { cartCases } from './fixtures/cart-cases'
 import {
     formatScoreboardRow,
+    formatThrownErrors,
     runEvalSuite,
     type CartCase,
     type EvalSuiteResult,
@@ -59,6 +60,12 @@ beforeAll(async () => {
             SCRAMBLE ? ' [SCRAMBLE_EVAL smoke]' : ''
         }`,
     )
+    const thrownErrors = formatThrownErrors(suite)
+    if (thrownErrors) {
+        console.log(
+            `[cart-classifier-eval] classifyCart threw: ${thrownErrors}`,
+        )
+    }
 })
 
 it(
@@ -69,10 +76,15 @@ it(
         const failingCaseNames = suite.summaries
             .filter(s => !s.pass)
             .map(s => s.caseName)
+        const thrownErrors = formatThrownErrors(suite)
         expect(
             suite.primaryMatchRate,
             failingCaseNames.length
-                ? `primary_match_rate=${(suite.primaryMatchRate * 100).toFixed(1)}% (${suite.summaries.length} cases) — failing: ${failingCaseNames.join(', ')}`
+                ? `primary_match_rate=${(suite.primaryMatchRate * 100).toFixed(1)}% (${suite.summaries.length} cases) — failing: ${failingCaseNames.join(', ')}${
+                      thrownErrors
+                          ? ` — classifyCart threw: ${thrownErrors}`
+                          : ''
+                  }`
                 : undefined,
         ).toBeGreaterThanOrEqual(PRIMARY_MATCH_THRESHOLD)
     },
