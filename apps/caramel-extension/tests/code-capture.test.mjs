@@ -738,6 +738,23 @@ describe('what happens after the worker answers', () => {
         shopperClicksApply()
         await vi.waitFor(() => expect(sent).toHaveLength(1), LONG)
     })
+
+    it('a server-side consent refusal for a shopper who already accepted does NOT reopen the consent card', async () => {
+        // background.js answers `consent-rejected` (not `no-consent`) when the
+        // server's consent gate refuses the proof; `no-consent` is the page's
+        // cue to ask, and a recorded "yes" must not be asked about again.
+        syncData[CODE_SHARING_CONSENT_KEY] = accepted_()
+        workerGate = 'consent-rejected'
+        await armed()
+        storeAnswers(true)
+        shopperTypes('SAVE10')
+        shopperClicksApply()
+        await vi.waitFor(() => expect(attempts).toHaveLength(1), LONG)
+        await settle(300)
+
+        expect(shareCard()).toBeNull()
+        expect(sent).toEqual([])
+    })
 })
 
 // The owner rule (2026-10-06): a shopper's code is shared ONLY after an

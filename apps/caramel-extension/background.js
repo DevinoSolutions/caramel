@@ -304,11 +304,13 @@ export async function submitShopperCode(message) {
         _forgetFeatures()
         return { skipped: 'disabled' }
     }
-    // The server's own consent gate saw no usable proof (e.g. the prompt
-    // version is below its floor). Same quiet outcome as the local no-consent
-    // above; nothing was stored.
+    // The server's own consent gate refused the proof we just sent (e.g. its
+    // prompt-version floor moved above ours). Quiet, nothing was stored. NOT
+    // `no-consent`: that answer is the page's cue to show the consent card
+    // (code-capture.js _submitWithConsent), and a shopper who already said yes
+    // must not be asked again because the server disagrees with the record.
     if (r.status === 403 && body?.error === 'consent-required')
-        return { skipped: 'no-consent' }
+        return { skipped: 'consent-rejected' }
     if (r.status === 422) {
         // Expected refusals (not a store we know, not a plausible code).
         if (CARAMEL_ENV.verbose)

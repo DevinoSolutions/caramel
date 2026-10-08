@@ -47,7 +47,8 @@ export type ShopperSubmissionSource = 'checkout' | 'manual'
  * 'accepted', or carries a smaller version. Raise it ONLY when the prompt's
  * meaning changes (the extension then re-asks every shopper at the same time).
  * The extension package cannot be imported here, so this mirrors its
- * CODE_SHARING_PROMPT_VERSION by hand.
+ * CODE_SHARING_PROMPT_VERSION by hand; checkout-consent-version-mirror.test.ts
+ * fails if this floor ever exceeds the version the extension sends.
  */
 export const MIN_CHECKOUT_CONSENT_PROMPT_VERSION = 1
 

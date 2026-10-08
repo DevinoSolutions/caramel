@@ -322,13 +322,13 @@ describe('submitShopperCode — the submit and its answers', () => {
         expect(featureCalls()[0].opts?.headers?.Authorization).toBeUndefined()
     })
 
-    it('403 consent-required (the server refused our consent proof): a quiet no-consent skip, not an error', async () => {
+    it('403 consent-required (the server refused our consent proof): a quiet skip that is NOT no-consent (that one re-opens the consent card), not an error', async () => {
         responses.push(
             features(true),
             refused(403, { error: 'consent-required' }),
         )
 
-        expect(await invoke(CAPTURE)).toEqual({ skipped: 'no-consent' })
+        expect(await invoke(CAPTURE)).toEqual({ skipped: 'consent-rejected' })
         expect(localData.caramel_bg_errors).toBeUndefined()
     })
 
