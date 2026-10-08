@@ -286,7 +286,7 @@ describe('submitShopperCode — consent gate (owner rule 2026-10-06)', () => {
 })
 
 describe('submitShopperCode — the submit and its answers', () => {
-    it('flag on: POSTs {site, code, source:"checkout"} with the bearer', async () => {
+    it('flag on: POSTs {site, code, source:"checkout", consent} with the bearer', async () => {
         responses.push(
             features(true),
             ok({
@@ -310,9 +310,34 @@ describe('submitShopperCode — the submit and its answers', () => {
             site: 'ebay.com',
             code: 'SAVE10',
             source: 'checkout',
+            // The server's consent gate reads exactly this proof, taken from
+            // the stored record the local gate just accepted.
+            consent: {
+                choice: 'accepted',
+                promptVersion: 1,
+                at: '2026-10-06T12:00:00.000Z',
+            },
         })
         // The flag fetch is anonymous: nothing user-scoped in the answer.
         expect(featureCalls()[0].opts?.headers?.Authorization).toBeUndefined()
+    })
+
+    it('403 consent-required (the server refused our consent proof): a quiet no-consent skip, not an error', async () => {
+        responses.push(
+            features(true),
+            refused(403, { error: 'consent-required' }),
+        )
+
+        expect(await invoke(CAPTURE)).toEqual({ skipped: 'no-consent' })
+        expect(localData.caramel_bg_errors).toBeUndefined()
+    })
+
+    it('the consent proof is never sent for a non-accepted record (nothing is submitted at all)', async () => {
+        syncData[CONSENT_KEY] = consent('declined')
+        responses.push(features(true))
+
+        expect(await invoke(CAPTURE)).toEqual({ skipped: 'no-consent' })
+        expect(submitCalls()).toHaveLength(0)
     })
 
     it('403 capture-disabled: skipped, and the cached flag is dropped', async () => {

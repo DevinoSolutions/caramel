@@ -75,8 +75,8 @@
         {
             "browser": "chrome",
             "path": "/version",
-            "reason": "1.4.5 -> 1.4.8 (package.json is the single version authority): first-install welcome page (background.js runtime.onInstalled opens /welcome on reason install) for install attribution (1.4.6), every toolbar and store icon is the site favicon mark again, the white italic C on the orange rounded square, replacing the 1.4.5 header wordmark that was unreadable at icon size (1.4.7), and checkout code sharing is opt-in behind an explicit in-extension consent prompt (1.4.8). The goldens are frozen 1.3.1 snapshots relabelled 1.4.0 and cannot follow a release without being re-frozen",
-            "retiredBy": "golden-rebaseline(1.4.8)",
+            "reason": "1.4.5 -> 1.4.9 (package.json is the single version authority): first-install welcome page (background.js runtime.onInstalled opens /welcome on reason install) for install attribution (1.4.6), every toolbar and store icon is the site favicon mark again, the white italic C on the orange rounded square, replacing the 1.4.5 header wordmark that was unreadable at icon size (1.4.7), and checkout code sharing is opt-in behind an explicit in-extension consent prompt (1.4.8), and the checkout submission carries that consent as proof for the server gate (1.4.9). The goldens are frozen 1.3.1 snapshots relabelled 1.4.0 and cannot follow a release without being re-frozen",
+            "retiredBy": "golden-rebaseline(1.4.9)",
             "added": "2026-10-06"
         },
         {
@@ -89,8 +89,8 @@
         {
             "browser": "firefox",
             "path": "/version",
-            "reason": "1.4.5 -> 1.4.8 (package.json is the single version authority): first-install welcome page (background.js runtime.onInstalled opens /welcome on reason install) for install attribution (1.4.6), every toolbar and store icon is the site favicon mark again, the white italic C on the orange rounded square, replacing the 1.4.5 header wordmark that was unreadable at icon size (1.4.7), and checkout code sharing is opt-in behind an explicit in-extension consent prompt (1.4.8). The goldens are frozen 1.3.1 snapshots relabelled 1.4.0 and cannot follow a release without being re-frozen",
-            "retiredBy": "golden-rebaseline(1.4.8)",
+            "reason": "1.4.5 -> 1.4.9 (package.json is the single version authority): first-install welcome page (background.js runtime.onInstalled opens /welcome on reason install) for install attribution (1.4.6), every toolbar and store icon is the site favicon mark again, the white italic C on the orange rounded square, replacing the 1.4.5 header wordmark that was unreadable at icon size (1.4.7), and checkout code sharing is opt-in behind an explicit in-extension consent prompt (1.4.8), and the checkout submission carries that consent as proof for the server gate (1.4.9). The goldens are frozen 1.3.1 snapshots relabelled 1.4.0 and cannot follow a release without being re-frozen",
+            "retiredBy": "golden-rebaseline(1.4.9)",
             "added": "2026-10-06"
         },
         {

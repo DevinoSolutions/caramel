@@ -39,6 +39,19 @@ export const SHOPPER_DAILY_SUBMISSION_CAP = 20
 export type ShopperSubmissionSource = 'checkout' | 'manual'
 
 /**
+ * The lowest extension consent-prompt version whose "yes" the server accepts as
+ * proof for a `source: 'checkout'` submission. The extension records
+ * `{ choice, at, promptVersion }` locally (code-sharing-consent.js) and sends it
+ * with every checkout capture; POST /api/coupons/submit refuses (403
+ * `consent-required`) a checkout submission whose proof is missing, is not
+ * 'accepted', or carries a smaller version. Raise it ONLY when the prompt's
+ * meaning changes (the extension then re-asks every shopper at the same time).
+ * The extension package cannot be imported here, so this mirrors its
+ * CODE_SHARING_PROMPT_VERSION by hand.
+ */
+export const MIN_CHECKOUT_CONSENT_PROMPT_VERSION = 1
+
+/**
  * The `description` every shopper row carries. The `title` is stored empty on
  * purpose: shopperCouponTitle (couponTitleText.ts) derives "<site> promo code
  * CODE" at read time, so the wording can improve without a data migration.

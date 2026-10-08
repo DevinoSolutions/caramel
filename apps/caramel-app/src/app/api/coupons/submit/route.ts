@@ -4,6 +4,7 @@ import { submitShopperCoupon } from '@/lib/couponsRepo'
 import { env } from '@/lib/env'
 import { isExtensionOrigin } from '@/lib/rateLimit'
 import {
+    MIN_CHECKOUT_CONSENT_PROMPT_VERSION,
     ShopperSubmissionLimitError,
     UnknownStoreError,
     normalizeShopperCode,
@@ -47,6 +48,27 @@ import { z } from 'zod'
 // authentication: Origin is trivially forged by a non-browser client (see the
 // recordWorked TODO below).
 //
+// Consent proof (owner rule 2026-10-06: a shopper's code may be captured ONLY
+// after an explicit in-extension opt-in). SHOPPER_CODE_CAPTURE_ENABLED is
+// GLOBAL, so on its own it would let extension builds 1.4.3-1.4.7 (no prompt,
+// capture on by default) capture the moment it is switched on. Hence the
+// request itself must carry the proof: a checkout submission needs
+// consent = { choice: 'accepted', promptVersion >= MIN_CHECKOUT_CONSENT_PROMPT_VERSION, at },
+// exactly the record the extension (1.4.9+) stored when the shopper said yes.
+// Missing or invalid proof → 403 'consent-required' and nothing is written.
+// Honest limit: this is a
+// client-asserted claim, not cryptographic proof (like Origin above): it
+// reliably refuses every build that does not know about consent, and it moves
+// the "did the shopper opt in" question into the request so it is auditable.
+// The 'manual' website form needs no consent and its body is not looked at for it.
+//
+// Check order: origin + session (401) + rate limit + body schema (422), all in
+// withRoute → checkout from a non-extension Origin (403) → capture flag off
+// (403 'capture-disabled', as before) → consent proof (403 'consent-required')
+// → code/site checks (422) → write. The flag is checked
+// first so an OFF server answers exactly what it always did; with the flag ON,
+// an old build is refused here.
+//
 // "A real store" is two checks. resolveStoreDomain (the store page's own
 // canonicalizer; null means 'not-a-store') proves the string is a registrable
 // domain, which any spam domain is. submitShopperCoupon then proves it is a
@@ -59,6 +81,24 @@ const SubmitBodySchema = z.object({
     site: z.string().trim().min(1).max(253),
     code: z.string(),
     source: z.enum(['checkout', 'manual']),
+    // Deliberately `unknown` here: a malformed or absent proof on a checkout
+    // submission must answer 403 'consent-required' (below), not the generic
+    // 422 body-schema error, and a manual submission never reads it.
+    consent: z.unknown().optional(),
+})
+
+// What the extension sends (background.js submitShopperCode): the stored
+// checkoutCodeSharingConsent record, accepted only. `at` is the ISO-8601 string
+// the extension stores; strict, so an unknown key is refused rather than ignored.
+const CheckoutConsentProofSchema = z.strictObject({
+    choice: z.literal('accepted'),
+    promptVersion: z.number().int().min(MIN_CHECKOUT_CONSENT_PROMPT_VERSION),
+    at: z
+        .string()
+        .max(64)
+        .refine(value => !Number.isNaN(Date.parse(value)), {
+            message: 'at must be a parseable date',
+        }),
 })
 
 export const POST = withRoute(
@@ -91,6 +131,19 @@ export const POST = withRoute(
         if (body.source === 'checkout' && !env.SHOPPER_CODE_CAPTURE_ENABLED) {
             return NextResponse.json(
                 { error: 'capture-disabled' },
+                { status: 403 },
+            )
+        }
+
+        if (
+            body.source === 'checkout' &&
+            !CheckoutConsentProofSchema.safeParse(body.consent).success
+        ) {
+            // An anticipated refusal (every pre-1.4.9 build lands here once the
+            // flag is on), not an incident: no Sentry noise, and nothing about
+            // the code or the rejected payload is logged.
+            return NextResponse.json(
+                { error: 'consent-required' },
                 { status: 403 },
             )
         }

@@ -131,11 +131,14 @@ const serverObjectSchema = z.object({
     // Global kill switch for shopper-typed codes CAPTURED AT CHECKOUT by the
     // extension (POST /api/coupons/submit with source 'checkout', and the
     // extension's GET /api/extension/features read of it). OFF by default in code;
-    // prod stays OFF until the extension build with the in-extension consent
-    // prompt (1.4.8) is live in the stores: capture is opt-in per shopper
-    // (owner rule 2026-10-06), so this flag is only the server's half and never
-    // consent by itself. It gates ONLY the automatic capture: the website's
-    // manual "Add a code" form (source 'manual') works with it off.
+    // prod stays OFF until a consent-carrying extension build (1.4.9+) is the
+    // LIVE version in every store that ships Caramel: capture is opt-in per
+    // shopper (owner rule 2026-10-06) and builds 1.4.3-1.4.7 would capture by
+    // default with no prompt. This flag is GLOBAL and only the server's half,
+    // never consent by itself: the submit route additionally refuses (403
+    // consent-required) a checkout submission without the extension's consent
+    // proof. It gates ONLY the automatic capture: the website's manual "Add a
+    // code" form (source 'manual') works with it off.
     // A strict two-value enum, like SITE_SUGGESTIONS_AUTO_NOTIFY: a typo
     // ('yes') fails boot with this variable's name rather than being read as
     // off (capture silently never ships) or on (capture silently ships).

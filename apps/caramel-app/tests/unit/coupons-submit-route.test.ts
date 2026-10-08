@@ -1,5 +1,6 @@
 import { POST } from '@/app/api/coupons/submit/route'
 import {
+    MIN_CHECKOUT_CONSENT_PROMPT_VERSION,
     ShopperSubmissionLimitError,
     UnknownStoreError,
 } from '@/lib/shopperCoupons'
@@ -62,6 +63,14 @@ vi.mock('@/lib/rateLimit', async importOriginal => {
     const actual = await importOriginal<typeof import('@/lib/rateLimit')>()
     return { ...actual, checkRateLimit: checkRateLimitMock }
 })
+
+// What extension 1.4.9+ sends for a shopper who accepted the prompt: the stored
+// checkoutCodeSharingConsent record (code-sharing-consent.js).
+const VALID_CONSENT = {
+    choice: 'accepted',
+    promptVersion: MIN_CHECKOUT_CONSENT_PROMPT_VERSION,
+    at: '2026-10-06T12:00:00.000Z',
+}
 
 function submitRequest(
     body: unknown,
@@ -347,6 +356,7 @@ describe('POST /api/coupons/submit — checkout source', () => {
                 site: 'ebay.com',
                 code: 'SAVE10',
                 source: 'checkout',
+                consent: VALID_CONSENT,
             }),
         )
 
@@ -364,6 +374,7 @@ describe('POST /api/coupons/submit — checkout source', () => {
                 site: 'checkout.ebay.com',
                 code: 'SAVE10',
                 source: 'checkout',
+                consent: VALID_CONSENT,
             }),
         )
 
@@ -395,7 +406,12 @@ describe('POST /api/coupons/submit — checkout source', () => {
 
         const res = await POST(
             submitRequest(
-                { site: 'ebay.com', code: 'SAVE10', source: 'checkout' },
+                {
+                    site: 'ebay.com',
+                    code: 'SAVE10',
+                    source: 'checkout',
+                    consent: VALID_CONSENT,
+                },
                 { origin: 'http://localhost', host: 'localhost' },
             ),
         )
@@ -417,7 +433,12 @@ describe('POST /api/coupons/submit — checkout source', () => {
 
             const res = await POST(
                 submitRequest(
-                    { site: 'ebay.com', code: 'SAVE10', source: 'checkout' },
+                    {
+                        site: 'ebay.com',
+                        code: 'SAVE10',
+                        source: 'checkout',
+                        consent: VALID_CONSENT,
+                    },
                     { origin, host: 'localhost' },
                 ),
             )
@@ -439,7 +460,12 @@ describe('POST /api/coupons/submit — checkout source', () => {
 
             const res = await POST(
                 submitRequest(
-                    { site: 'ebay.com', code: 'SAVE10', source: 'checkout' },
+                    {
+                        site: 'ebay.com',
+                        code: 'SAVE10',
+                        source: 'checkout',
+                        consent: VALID_CONSENT,
+                    },
                     { origin },
                 ),
             )
@@ -457,6 +483,7 @@ describe('POST /api/coupons/submit — checkout source', () => {
                 site: 'ebay.com',
                 code: 'SAVE10',
                 source: 'checkout',
+                consent: VALID_CONSENT,
             }),
         )
 
@@ -486,6 +513,7 @@ describe('POST /api/coupons/submit — checkout source', () => {
                 site: 'ebay.com',
                 code: 'SAVE10',
                 source: 'checkout',
+                consent: VALID_CONSENT,
             }),
         )
 
@@ -510,11 +538,181 @@ describe('POST /api/coupons/submit — checkout source', () => {
                 site: 'ebay.com',
                 code: 'SAVE10',
                 source: 'checkout',
+                consent: VALID_CONSENT,
             }),
         )
 
         expect(res.status).toBe(500)
         errorSpy.mockRestore()
+    })
+})
+
+describe('POST /api/coupons/submit — checkout consent gate', () => {
+    beforeEach(() => signedInAs('user-1'))
+
+    const checkout = { site: 'ebay.com', code: 'SAVE10', source: 'checkout' }
+
+    // The headline case: the server flag is global, so with it ON an extension
+    // build that predates the consent prompt (1.4.3-1.4.7, which capture by
+    // default and send no consent field) must be refused, and nothing written.
+    it('OLD BUILD: flag ON, checkout with NO consent field → 403 consent-required, nothing written or stamped', async () => {
+        envMock.SHOPPER_CODE_CAPTURE_ENABLED = true
+
+        const res = await POST(submitRequest(checkout))
+
+        expect(res.status).toBe(403)
+        expect(await res.json()).toEqual({ error: 'consent-required' })
+        expect(submitShopperCouponMock).not.toHaveBeenCalled()
+        expect(recordWorkedMock).not.toHaveBeenCalled()
+    })
+
+    it('OLD BUILD from an extension Origin, flag ON → the same 403 consent-required', async () => {
+        envMock.SHOPPER_CODE_CAPTURE_ENABLED = true
+
+        const res = await POST(
+            submitRequest(checkout, {
+                origin: 'chrome-extension://abcdefghijklmnop',
+            }),
+        )
+
+        expect(res.status).toBe(403)
+        expect(await res.json()).toEqual({ error: 'consent-required' })
+        expect(submitShopperCouponMock).not.toHaveBeenCalled()
+    })
+
+    it.each([
+        ['declined', { ...VALID_CONSENT, choice: 'declined' }],
+        ['an unknown choice', { ...VALID_CONSENT, choice: 'maybe' }],
+        [
+            'a promptVersion below the server floor',
+            {
+                ...VALID_CONSENT,
+                promptVersion: MIN_CHECKOUT_CONSENT_PROMPT_VERSION - 1,
+            },
+        ],
+        [
+            'a non-integer promptVersion',
+            { ...VALID_CONSENT, promptVersion: 1.5 },
+        ],
+        ['a string promptVersion', { ...VALID_CONSENT, promptVersion: '1' }],
+        ['a missing choice', { promptVersion: 1, at: VALID_CONSENT.at }],
+        ['a missing at', { choice: 'accepted', promptVersion: 1 }],
+        ['an unparseable at', { ...VALID_CONSENT, at: 'soon' }],
+        ['a numeric at', { ...VALID_CONSENT, at: 1_800_000_000_000 }],
+        ['an unknown extra key', { ...VALID_CONSENT, extra: true }],
+        ['an empty object', {}],
+        ['null', null],
+        ['a bare true', true],
+        ['the string "accepted"', 'accepted'],
+        ['an array', [VALID_CONSENT]],
+    ])(
+        'flag ON, consent that is %s → 403 consent-required, nothing written',
+        async (_label, consent) => {
+            envMock.SHOPPER_CODE_CAPTURE_ENABLED = true
+
+            const res = await POST(submitRequest({ ...checkout, consent }))
+
+            expect(res.status).toBe(403)
+            expect(await res.json()).toEqual({ error: 'consent-required' })
+            expect(submitShopperCouponMock).not.toHaveBeenCalled()
+            expect(recordWorkedMock).not.toHaveBeenCalled()
+        },
+    )
+
+    it('flag ON, valid accepted consent → reaches the write and stamps worked', async () => {
+        envMock.SHOPPER_CODE_CAPTURE_ENABLED = true
+
+        const res = await POST(
+            submitRequest({ ...checkout, consent: VALID_CONSENT }),
+        )
+
+        expect(res.status).toBe(200)
+        expect(submitShopperCouponMock).toHaveBeenCalledTimes(1)
+        expect(recordWorkedMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('a NEWER promptVersion than the floor is accepted', async () => {
+        envMock.SHOPPER_CODE_CAPTURE_ENABLED = true
+
+        const res = await POST(
+            submitRequest({
+                ...checkout,
+                consent: {
+                    ...VALID_CONSENT,
+                    promptVersion: MIN_CHECKOUT_CONSENT_PROMPT_VERSION + 1,
+                },
+            }),
+        )
+
+        expect(res.status).toBe(200)
+    })
+
+    // Order: the flag check comes first, so an OFF server answers what it always
+    // did (and 1.4.9 clients clear their cached flag on it) whether or not the
+    // request carries consent.
+    it('flag OFF, old build (no consent) → 403 capture-disabled, as before', async () => {
+        envMock.SHOPPER_CODE_CAPTURE_ENABLED = false
+
+        const res = await POST(submitRequest(checkout))
+
+        expect(res.status).toBe(403)
+        expect(await res.json()).toEqual({ error: 'capture-disabled' })
+        expect(submitShopperCouponMock).not.toHaveBeenCalled()
+    })
+
+    it('flag OFF, valid consent → still 403 capture-disabled (consent never overrides the flag)', async () => {
+        envMock.SHOPPER_CODE_CAPTURE_ENABLED = false
+
+        const res = await POST(
+            submitRequest({ ...checkout, consent: VALID_CONSENT }),
+        )
+
+        expect(res.status).toBe(403)
+        expect(await res.json()).toEqual({ error: 'capture-disabled' })
+        expect(submitShopperCouponMock).not.toHaveBeenCalled()
+    })
+
+    it('no session is still 401 before any consent is considered', async () => {
+        getSessionMock.mockImplementation(async () => null)
+        envMock.SHOPPER_CODE_CAPTURE_ENABLED = true
+
+        const res = await POST(submitRequest(checkout))
+
+        expect(res.status).toBe(401)
+        expect(submitShopperCouponMock).not.toHaveBeenCalled()
+    })
+
+    it('MANUAL needs no consent: the website form (no consent field) still works, flag ON or OFF', async () => {
+        for (const flag of [true, false]) {
+            envMock.SHOPPER_CODE_CAPTURE_ENABLED = flag
+            submitShopperCouponMock.mockClear()
+
+            const res = await POST(
+                submitRequest({
+                    site: 'ebay.com',
+                    code: 'SAVE10',
+                    source: 'manual',
+                }),
+            )
+
+            expect(res.status).toBe(200)
+            expect(submitShopperCouponMock).toHaveBeenCalledTimes(1)
+        }
+    })
+
+    it('MANUAL ignores a garbage consent field entirely (never 403 consent-required)', async () => {
+        const res = await POST(
+            submitRequest({
+                site: 'ebay.com',
+                code: 'SAVE10',
+                source: 'manual',
+                consent: { choice: 'declined', junk: 1 },
+            }),
+        )
+
+        expect(res.status).toBe(200)
+        expect(submitShopperCouponMock).toHaveBeenCalledTimes(1)
+        expect(recordWorkedMock).not.toHaveBeenCalled()
     })
 })
 
@@ -554,6 +752,7 @@ describe('POST /api/coupons/submit — failures', () => {
                 site: 'my-spam-site.xyz',
                 code: 'SAVE10',
                 source: 'checkout',
+                consent: VALID_CONSENT,
             }),
         )
 
