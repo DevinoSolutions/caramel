@@ -60,7 +60,7 @@ beforeAll(async () => {
             SCRAMBLE ? ' [SCRAMBLE_EVAL smoke]' : ''
         }`,
     )
-    const thrownErrors = formatThrownErrors(suite)
+    const thrownErrors = formatThrownErrors(suite, [env.OPENROUTER_API_KEY])
     if (thrownErrors) {
         console.log(
             `[cart-classifier-eval] classifyCart threw: ${thrownErrors}`,
@@ -76,7 +76,7 @@ it(
         const failingCaseNames = suite.summaries
             .filter(s => !s.pass)
             .map(s => s.caseName)
-        const thrownErrors = formatThrownErrors(suite)
+        const thrownErrors = formatThrownErrors(suite, [env.OPENROUTER_API_KEY])
         expect(
             suite.primaryMatchRate,
             failingCaseNames.length

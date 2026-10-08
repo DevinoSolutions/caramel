@@ -220,19 +220,57 @@ export async function runEvalSuite(
 }
 
 const THROWN_MESSAGE_MAX_CHARS = 300
+const REDACTED = '[redacted]'
+
+/**
+ * Strips credentials from an error message before it reaches a CI log. The
+ * eval workflow also uploads the log as an artifact, which GitHub does NOT
+ * mask. `knownSecrets` are matched literally so the live key is removed even
+ * when it has none of the shapes below; the patterns catch what an upstream
+ * error body or a fetch error could echo back: an Authorization header value,
+ * an `sk-...` key (OpenAI-compatible relays echo a masked copy in "Incorrect
+ * API key provided: sk-abc***xyz"), URL userinfo, and secret-looking query
+ * params. Redaction runs BEFORE truncation so the length cap can never cut a
+ * secret in half and leave a recognizable prefix.
+ */
+export function redactSecrets(
+    message: string,
+    knownSecrets: readonly (string | undefined)[] = [],
+): string {
+    let out = message
+    for (const secret of knownSecrets) {
+        if (secret) out = out.split(secret).join(REDACTED)
+    }
+    return out
+        .replace(/\bBearer\s+[^\s"',;]+/gi, `Bearer ${REDACTED}`)
+        .replace(/\bsk-[A-Za-z0-9_*.-]{3,}/g, REDACTED)
+        .replace(/(?<=\/\/)[^\s/@]+@/g, `${REDACTED}@`)
+        .replace(
+            /([?&](?:key|api[_-]?key|token|access_token|secret)=)[^\s&"']+/gi,
+            `$1${REDACTED}`,
+        )
+}
 
 /**
  * Distinct classifyCart error messages with how many cases threw each, or ''
  * when nothing threw. Without this the CI log shows only failing case names
  * and a dead key / no credits / unavailable model is indistinguishable.
- * Messages come from OpenRouterError (status + response-body excerpt) — the
- * request headers, incl. the API key, are never part of them.
+ * Messages come from OpenRouterError (status + response-body excerpt) and
+ * `classify failed: <network error>`; request headers are never part of
+ * them, but every message still passes through redactSecrets (defense in
+ * depth: an upstream body or a fetch error could echo a credential).
  */
-export function formatThrownErrors(suite: EvalSuiteResult): string {
+export function formatThrownErrors(
+    suite: EvalSuiteResult,
+    knownSecrets: readonly (string | undefined)[] = [],
+): string {
     const counts = new Map<string, number>()
     for (const { thrownMessage } of suite.summaries) {
         if (thrownMessage === undefined) continue
-        const key = thrownMessage.slice(0, THROWN_MESSAGE_MAX_CHARS)
+        const key = redactSecrets(thrownMessage, knownSecrets).slice(
+            0,
+            THROWN_MESSAGE_MAX_CHARS,
+        )
         counts.set(key, (counts.get(key) ?? 0) + 1)
     }
     return Array.from(counts)
