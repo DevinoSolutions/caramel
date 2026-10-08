@@ -1,5 +1,10 @@
 'use client'
 
+import {
+    DISCORD_INVITE_URL,
+    GITHUB_REPO_URL,
+    INSTAGRAM_URL,
+} from '@/lib/brandLinks'
 import { useReducedMotion } from '@/lib/reducedMotion'
 import { m } from 'framer-motion'
 import {
@@ -20,21 +25,21 @@ import { RiInstagramFill } from 'react-icons/ri'
 const platforms = [
     {
         name: 'GitHub',
-        href: 'https://github.com/DevinoSolutions/caramel',
+        href: GITHUB_REPO_URL,
         desc: 'Explore our open-source code & contribute',
         icon: <FaGithub />,
         color: 'from-gray-600 to-gray-800',
     },
     {
         name: 'Discord',
-        href: 'https://discord.com/invite/2vVVrQ5CEB',
+        href: DISCORD_INVITE_URL,
         desc: 'Join our developer community',
         icon: <FaDiscord />,
         color: 'from-indigo-500 to-purple-600',
     },
     {
         name: 'Instagram',
-        href: 'https://www.instagram.com/grab.caramel/',
+        href: INSTAGRAM_URL,
         desc: 'Follow us for updates & tips',
         icon: <RiInstagramFill />,
         color: 'from-pink-500 to-rose-500',
@@ -453,7 +458,7 @@ export default function OpenSourceSection() {
                     </p>
                     <div className="flex justify-center gap-6 lg:flex-col lg:items-center lg:gap-4">
                         <m.a
-                            href="https://github.com/DevinoSolutions/caramel"
+                            href={GITHUB_REPO_URL}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="inline-flex items-center rounded-full bg-white px-8 py-4 font-semibold text-caramel shadow-md transition-all duration-200 hover:bg-orange-50 hover:shadow-xl"
@@ -466,7 +471,7 @@ export default function OpenSourceSection() {
                             View on GitHub
                         </m.a>
                         <m.a
-                            href="https://discord.com/invite/2vVVrQ5CEB"
+                            href={DISCORD_INVITE_URL}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="inline-flex items-center rounded-full border-2 border-white bg-transparent px-8 py-4 font-semibold text-white transition-all duration-200 hover:bg-white hover:text-caramel"

@@ -1,9 +1,10 @@
+import { DISCORD_INVITE_URL } from '@/lib/brandLinks'
 import { faqItems } from '@/lib/faqItems'
 import { faqPageJsonLd, jsonLdString } from '@/lib/jsonLd'
 import { COMPARISON_PATH } from '@/lib/seo/extensionComparison'
 import { HONEY_GUIDE_PATH } from '@/lib/seo/honeyExtensionGuide'
 import Link from 'next/link'
-import { FaChevronDown } from 'react-icons/fa'
+import { FaChevronDown, FaDiscord } from 'react-icons/fa'
 
 // Deliberately a SERVER component (no 'use client'): AI answer engines and
 // crawlers extract VISIBLE HTML at retrieval time, so every answer below must
@@ -75,6 +76,29 @@ export default function FaqSection(): React.JSX.Element {
                             className="font-semibold text-caramel hover:underline"
                         >
                             what changed with the Honey extension
+                        </Link>
+                        .
+                    </p>
+                    <p className="text-center text-base text-gray-600 dark:text-gray-400">
+                        Still have a question?{' '}
+                        <a
+                            href={DISCORD_INVITE_URL}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="font-semibold text-caramel hover:underline"
+                        >
+                            <FaDiscord
+                                aria-hidden="true"
+                                className="mr-1.5 inline align-[-0.125em]"
+                            />
+                            Ask on our Discord
+                        </a>{' '}
+                        or{' '}
+                        <Link
+                            href="/support"
+                            className="font-semibold text-caramel hover:underline"
+                        >
+                            contact support
                         </Link>
                         .
                     </p>

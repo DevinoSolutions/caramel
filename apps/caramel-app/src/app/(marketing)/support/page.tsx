@@ -1,8 +1,10 @@
 import SupportForm from '@/components/support/support-form'
 import { auth } from '@/lib/auth/auth'
+import { DISCORD_INVITE_URL } from '@/lib/brandLinks'
 import { BASE_URL } from '@/lib/env.client'
 import type { Metadata } from 'next'
 import { headers } from 'next/headers'
+import { FaDiscord } from 'react-icons/fa'
 
 const title = 'Support — Caramel'
 const description =
@@ -61,6 +63,27 @@ export default async function SupportPage() {
                     </p>
                 </div>
                 <SupportForm accountEmail={accountEmail} />
+                <a
+                    href={DISCORD_INVITE_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    data-testid="support-community-discord"
+                    className="mt-6 flex items-center gap-4 rounded-2xl border border-caramel/20 bg-white p-4 shadow-sm transition hover:border-caramel/50 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/60 dark:border-caramel/30 dark:bg-darkerBg"
+                >
+                    <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#5865F2] text-xl text-white">
+                        <FaDiscord aria-hidden="true" />
+                    </span>
+                    <span className="flex-1">
+                        <span className="block font-semibold text-gray-900 dark:text-white">
+                            Join our Discord
+                        </span>
+                        <span className="block text-sm text-gray-600 dark:text-gray-300">
+                            Ask other Caramel shoppers, share store requests and
+                            follow updates. For anything about your account, use
+                            the form above.
+                        </span>
+                    </span>
+                </a>
             </div>
         </main>
     )
