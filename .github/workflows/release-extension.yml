@@ -378,14 +378,28 @@ jobs:
           path: ${{ env.WORKING_DIRECTORY }}/.output/caramel-extension-${{ needs.guard.outputs.version }}-chrome.zip
           if-no-files-found: error
 
-      # An unpacked directory, not the zip: safari-web-extension-converter takes
-      # a directory of extension files, so shipping the zip would only mean
-      # unzipping it again in publish_safari.
-      - name: Upload unpacked Chrome build for the Safari converter
+      # Safari has no WXT target, so its package is the Chrome build with only
+      # the manifest `name` swapped: App Store Connect rejects names over 40
+      # characters (error 90849, v1.4.9). SAFARI_NAME lives in store-listing.mjs
+      # beside NAME / FIREFOX_NAME; tests/store-listing.test.mjs pins its cap.
+      - name: Derive the Safari build (Chrome build with the Safari manifest name)
+        run: |
+          set -euo pipefail
+          name=$(node --input-type=module -e "import { SAFARI_NAME } from './scripts/store-listing.mjs'; process.stdout.write(SAFARI_NAME)")
+          if [ "${#name}" -gt 40 ]; then
+            echo "::error::SAFARI_NAME '${name}' is ${#name} characters; App Store Connect allows 40."
+            exit 1
+          fi
+          rm -rf .output/safari-mv3
+          cp -r .output/chrome-mv3 .output/safari-mv3
+          jq --arg name "$name" '.name = $name' .output/chrome-mv3/manifest.json > .output/safari-mv3/manifest.json
+          echo "Safari manifest name: $(jq -er '.name' .output/safari-mv3/manifest.json)"
+
+      - name: Upload unpacked Safari build for the Safari converter
         uses: DevinoSolutions/artifact/upload@v1
         with:
-          name: extension-chrome-unpacked
-          path: ${{ env.WORKING_DIRECTORY }}/.output/chrome-mv3
+          name: extension-safari-unpacked
+          path: ${{ env.WORKING_DIRECTORY }}/.output/safari-mv3
           if-no-files-found: error
 
       # Also a directory: `web-ext sign` takes --source-dir and builds the xpi
@@ -907,14 +921,15 @@ jobs:
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: latest-stable
-      # The unpacked Chrome build, restored to the path it had in the package
-      # job — safari-web-extension-converter reads a directory of extension
-      # files, so nothing is unzipped here.
-      - name: Download unpacked Chrome build
+      # The unpacked Safari build (Chrome build, Safari-length manifest name),
+      # restored to the path it had in the package job —
+      # safari-web-extension-converter reads a directory of extension files,
+      # so nothing is unzipped here.
+      - name: Download unpacked Safari build
         uses: DevinoSolutions/artifact/download@v1
         with:
-          name: extension-chrome-unpacked
-          path: ${{ env.WORKING_DIRECTORY }}/.output/chrome-mv3
+          name: extension-safari-unpacked
+          path: ${{ env.WORKING_DIRECTORY }}/.output/safari-mv3
       - name: Install ImageMagick and jq
         run: |
           if ! command -v convert >/dev/null 2>&1; then brew install imagemagick; fi
@@ -1038,7 +1053,7 @@ jobs:
 
       - name: Convert to Safari app (macOS & iOS)
         run: |
-          xcrun safari-web-extension-converter .output/chrome-mv3 \
+          xcrun safari-web-extension-converter .output/safari-mv3 \
             --project-location SafariExtProject \
             --app-name "${{ env.APP_NAME }}" \
             --bundle-identifier "${SAFARI_BUNDLE_ID}" \

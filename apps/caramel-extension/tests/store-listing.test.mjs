@@ -11,16 +11,30 @@
  *     code" / "every store" promises, no silent auto-apply without the tap.
  */
 
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+
 import { describe, expect, it } from 'vitest'
+
+import { EXT_ROOT } from './_entry-modules.mjs'
 
 import {
     DESCRIPTION,
     FIREFOX_NAME,
     NAME,
+    SAFARI_NAME,
     SUMMARY,
 } from '../scripts/store-listing.mjs'
 
-const ALL = [NAME, FIREFOX_NAME, SUMMARY, DESCRIPTION]
+const ALL = [NAME, FIREFOX_NAME, SAFARI_NAME, SUMMARY, DESCRIPTION]
+
+/** Manifest `name` shipped to each store, with that store's hard cap. */
+const MANIFEST_NAME_CAPS = [
+    { store: 'Chrome / Edge (chrome zip)', name: NAME, cap: 75 },
+    { store: 'Firefox AMO', name: FIREFOX_NAME, cap: 50 },
+    // App Store Connect error 90849 (v1.4.9 release): "name ... 40 or fewer"
+    { store: 'Safari App Store Connect', name: SAFARI_NAME, cap: 40 },
+]
 
 describe('store listing copy', () => {
     it('fits each store limit', () => {
@@ -32,9 +46,29 @@ describe('store listing copy', () => {
         expect(DESCRIPTION.length).toBeLessThanOrEqual(10000)
     })
 
-    it('leads both names with the brand', () => {
+    it.each(MANIFEST_NAME_CAPS)(
+        'manifest name for $store fits its $cap-character cap',
+        ({ name, cap }) => {
+            expect(name.length).toBeLessThanOrEqual(cap)
+        },
+    )
+
+    it('leads every name with the brand', () => {
         expect(NAME.startsWith('Caramel: ')).toBe(true)
         expect(FIREFOX_NAME.startsWith('Caramel: ')).toBe(true)
+        expect(SAFARI_NAME.startsWith('Caramel: ')).toBe(true)
+    })
+
+    it('stamps SAFARI_NAME into the Safari build in the release workflow', () => {
+        // Safari has no WXT target; the workflow patches the Chrome build copy.
+        const workflow = readFileSync(
+            join(EXT_ROOT, '../../.github/workflows/release-extension.yml'),
+            'utf8',
+        )
+        expect(workflow).toContain('SAFARI_NAME')
+        expect(workflow).toContain(
+            'safari-web-extension-converter .output/safari-mv3',
+        )
     })
 
     it('never says AI', () => {

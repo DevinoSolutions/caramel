@@ -3,7 +3,8 @@
  * source for the extension's public name, summary and detailed description:
  *
  *   - wxt.config.ts stamps NAME / FIREFOX_NAME and SUMMARY into the generated
- *     manifests (the Chrome Web Store, AMO and Edge all read the listing title
+ *     manifests (SAFARI_NAME is stamped by the release workflow, see below;
+ *     the Chrome Web Store, AMO and Edge all read the listing title
  *     and short description FROM the manifest, read-only on their dashboards),
  *   - DESCRIPTION is pasted into each store's "Detailed description" field by
  *     hand at submission time (no store reads it from the package),
@@ -32,6 +33,15 @@ export const NAME =
  * own build whose manifest carries FIREFOX_NAME (it fits 45).
  */
 export const FIREFOX_NAME = 'Caramel: Coupon Finder & Honey Alternative'
+
+/**
+ * App Store Connect rejects a Safari web extension whose manifest `name` is
+ * over 40 characters (error 90849, release run 37791659540, v1.4.9). Safari
+ * has no WXT target: release-extension.yml copies the unpacked Chrome build,
+ * stamps this name into the copy's manifest.json and feeds THAT to
+ * safari-web-extension-converter.
+ */
+export const SAFARI_NAME = 'Caramel: Coupon Finder & Promo Codes'
 
 /** Manifest `description` = the store short description (CWS max 132). */
 export const SUMMARY =
