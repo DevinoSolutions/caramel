@@ -440,6 +440,22 @@ describe('the record the apply flow runs on', () => {
         ).toBeNull()
     })
 
+    it("watches for the store's answer just outside the box's own row too", async () => {
+        document.body.innerHTML =
+            '<aside><div class="sec"><div class="row">' +
+            '<input id="dc" name="discount_code" type="text"><button id="ap" type="button">Apply</button>' +
+            '</div></div><p id="msg"></p></aside>' +
+            TOTAL
+
+        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+
+        expect(
+            document
+                .querySelector(rec.caramelAnswer)
+                ?.contains(document.getElementById('msg')),
+        ).toBe(true)
+    })
+
     it('carries none of the stale config fields it did not find', async () => {
         document.body.innerHTML = PROMO_BOX + TOTAL
 

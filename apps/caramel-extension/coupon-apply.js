@@ -297,6 +297,31 @@ const ERROR_WORDS_RE =
 // beside its button) contributes its own words only, so a button relabelled
 // "Applying…" never reads as the store answering.
 const _CARAMEL_CONTROLS = 'button, input, select, textarea, a, [role="button"]'
+// The words a store refuses a code in, for a box the finder picked: the
+// vocabulary the client-side discovery lab proved across hundreds of stores and
+// several languages ("not an active offer", "does not exist", "Der Gutschein
+// ist abgelaufen"). A config's box keeps its own errorIndicator and the
+// narrower GENERIC_ERROR_TEXT_RE. These words decide only when the wait for an
+// answer ends and which sentence is quoted: a finder verdict is money only.
+const _CARAMEL_FINDER_NO_RE = new RegExp(
+    GENERIC_ERROR_TEXT_RE.source +
+        '|' +
+        String.raw`(gib|geben sie) einen g[üu]ltigen (rabattcode|gutschein)|(saisissez|entrez|veuillez saisir) un code (de r[ée]duction |promo )?valide|(introduce|ingresa|introduzca|ingrese) un c[oó]digo (de descuento |promocional )?v[aá]lido|inserisci un codice (sconto |promozionale )?valido|voer een geldige (kortingscode|actiecode)|(insira|introduza|digite) um c[oó]digo (de desconto )?v[aá]lido|ange en giltig rabattkod|(angiv|indtast|oppgi|skriv inn) en gyldig rabatt?kode|wprowad[źz] prawid[łl]owy kod|(gutschein(code)?|rabattcode|aktionscode|promocode)\b[^.!]{0,80}\b(nicht (eingelöst|gültig|anwendbar|einlösbar)|ungültig|abgelaufen)|(code promo(tionnel)?|code de réduction|bon de réduction|coupon)\b[^.!]{0,60}\b(invalide|n.est pas valide|n.est plus valide|expiré|non valide)|(c[oó]digo (promocional|de descuento)|cup[oó]n)\b[^.!]{0,60}\b(no es v[aá]lido|no v[aá]lido|inv[aá]lido|caducado|ha expirado)|(kortingscode|actiecode|waardebon|cadeaubon)\b[^.!]{0,60}\b(ongeldig|niet geldig|verlopen)|(codice (sconto|promozionale|promo|coupon)|buono( sconto)?|coupon)\b[^.!]{0,80}\b(non (è|e'|e) valid[oa]|non valid[oa]|scadut[oa]|non applicabile|non esiste)|(c[oó]digo (promocional|de desconto)|cupom|cup[aã]o)\b[^.!]{0,60}\b(inv[aá]lido|n[aã]o (é )?v[aá]lido|expirado)|(kod (rabatowy|promocyjny)|kupon)\b[^.!]{0,60}\b(nieprawid[łl]owy|niewa[żz]ny|wygas[łl])|(rabattkod(en)?|kampanjkod(en)?|rabatkode(n)?|rabattkode(n)?)\b[^.!]{0,60}\b(ogiltig|inte giltig|ugyldig|er ikke gyldig|udl[øo]bet|utl[øo]pt)|not applied|wasn.t applied|isn.t applied|could not be applied|invalid|not valid|isn.t valid|is not a valid|not an? valid (discount |promo(tion(al)?)? |coupon |voucher |gift ?card |offer )?(code|coupon|voucher)|(code|coupon|discount|promo(tion)?|voucher|offer|gift ?card|reduction)\b[^.!]{0,60}\b(unable|couldn.t|could not|cannot|can not|can.t be)|\b(unable|couldn.t|could not|cannot|can not|can.t)\b[^.!]{0,60}\b(code|coupon|discount|promo|voucher|offer|gift ?card)|not an? (active|current) (offer|code|promo(tion)?|coupon|voucher)|not found|(code|coupon|promo|voucher)\b[^.!]{0,40}\bnot present\b|doesn.t exist|does not exist|not recogni[sz]ed|expired|enter a valid|not applicable|not eligible|(code|coupon|promo(tion)?|discount|voucher|offer)\b[^.!;,\u2013\u2014]{0,40}\b(is|was|are|were) (now )?ineligible|no longer (valid|active|available)|(code|coupon|promo|voucher)\b[^.!]{0,40}\b(incorrect|no longer|did(n.t| not) work)|incorrect (code|coupon|promo|voucher)|make sure (that )?(you have |you've |you )?(entered|typed) (the |a |your )?(correct|valid|right) (coupon |promo |discount |voucher )?code|(?<!\bno )minimum|does not apply|doesn.t apply|ung[üu]ltig|no es v[aá]lido|n.est pas valide|usage limit|reached its (usage )?limit|limit (has been |was )?reached|already (been )?(used|redeemed|applied to (an|another) order)|has been redeemed|one.time use`,
+    'i',
+)
+// A form's own field error ("Enter a valid email address") is not the store's
+// answer about a code, unless it also speaks about one.
+const _CARAMEL_FIELD_RE =
+    /\b(e-?mail|password|phone|zip|post ?code|postal|address|card number|cvv)\b/i
+const _CARAMEL_COUPON_WORD_RE =
+    /(?<!\b(zip|post(al)?|area|country|security|verification|sort|sms|access)\s?)\bcodes?\b|coupon|promo|discount|voucher|\boffers?\b|gift ?card/i
+function _caramelFinderSaysNo(text) {
+    const t = text || ''
+    return (
+        _CARAMEL_FINDER_NO_RE.test(t) &&
+        !(_CARAMEL_FIELD_RE.test(t) && !_CARAMEL_COUPON_WORD_RE.test(t))
+    )
+}
 function _caramelRejectionSentences(scope) {
     const tidy = t => (t || '').trim().replace(/\s+/g, ' ')
     // The shown text of el without its controls ("Code <b>X</b> is not
@@ -319,16 +344,16 @@ function _caramelRejectionSentences(scope) {
             el.querySelector(_CARAMEL_CONTROLS) ? shownWords(el) : el.innerText,
         )
     // One read in the common case: nothing here says no.
-    if (!GENERIC_ERROR_TEXT_RE.test(scope.innerText || '')) return []
+    if (!_CARAMEL_FINDER_NO_RE.test(scope.innerText || '')) return []
     const says = el =>
         !el.closest('script, style, noscript, template') &&
         _isVisible(el) &&
-        GENERIC_ERROR_TEXT_RE.test(el.innerText || '')
+        _CARAMEL_FINDER_NO_RE.test(el.innerText || '')
     // The scope itself counts: a bare message element has no children.
     return [scope, ...scope.querySelectorAll('*')]
         .filter(el => says(el) && ![...el.children].some(says))
         .map(words)
-        .filter(t => GENERIC_ERROR_TEXT_RE.test(t))
+        .filter(_caramelFinderSaysNo)
 }
 
 // The store's message itself: an innermost element under scope whose text
@@ -382,9 +407,12 @@ function detectCouponError(rec, baseline, code, priorText) {
     const input = pickBestMatch(rec.couponInput)
     if (!input) return null
     let scope = input.parentElement
+    const saysNo = rec.caramelFound
+        ? _caramelFinderSaysNo
+        : t => GENERIC_ERROR_TEXT_RE.test(t)
     for (let d = 0; d < 5 && scope; d++) {
         const text = (scope.innerText || '').trim()
-        if (text && GENERIC_ERROR_TEXT_RE.test(text)) {
+        if (text && saysNo(text)) {
             // A finder-picked box (coupon-box-discovery.js): quote the element
             // that says it, not a window around it. The window would carry
             // the field's own label and button ("Promo code Apply Sorry, …"),
@@ -393,7 +421,14 @@ function detectCouponError(rec, baseline, code, priorText) {
                 const said = _caramelSmallestSaying(scope, priorText)
                 if (said) return said
             }
-            const idx = text.search(GENERIC_ERROR_TEXT_RE)
+            const idx = Math.max(
+                0,
+                text.search(
+                    rec.caramelFound
+                        ? _CARAMEL_FINDER_NO_RE
+                        : GENERIC_ERROR_TEXT_RE,
+                ),
+            )
             return text
                 .slice(Math.max(0, idx - 40), idx + 120)
                 .replace(/\s+/g, ' ')

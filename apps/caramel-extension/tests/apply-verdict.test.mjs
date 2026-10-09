@@ -398,6 +398,53 @@ describe('applyCoupon verdict — success rule', () => {
         })
     }, 15000)
 
+    it('a finder-picked box: a refusal in words the generic list lacks still ends the wait', async () => {
+        // A live store's own words: "not an active offer" is a refusal the
+        // narrow config vocabulary does not know.
+        document.body.innerHTML =
+            '<div class="promo"><input id="promo" /><button id="apply">Apply</button>' +
+            '<p id="msg"></p></div>' +
+            '<div id="total">$100.00</div>'
+        await withInnerText(async () => {
+            respond(() => {
+                document.getElementById('msg').textContent =
+                    'The discount code you entered is not an active offer.'
+            })
+
+            const started = performance.now()
+            const res = await applyCoupon('LOUNGE', FINDER_REC)
+
+            expect(res.success).toBe(false)
+            expect(res.errorMsg).toBe(
+                'The discount code you entered is not an active offer.',
+            )
+            expect(performance.now() - started).toBeLessThan(4000)
+        })
+    }, 15000)
+
+    it("a finder-picked box: a form field's own error is not the store answering", async () => {
+        document.body.innerHTML =
+            '<div class="promo"><input id="promo" /><button id="apply">Apply</button>' +
+            '<p id="msg"></p></div>' +
+            '<div id="total">$100.00</div>'
+        await withInnerText(async () => {
+            document.getElementById('apply').addEventListener('click', () => {
+                setTimeout(() => {
+                    document.getElementById('msg').textContent =
+                        'Enter a valid email address'
+                }, 50)
+                setTimeout(() => {
+                    document.getElementById('total').textContent = '$90.00'
+                }, 2500)
+            })
+
+            const res = await applyCoupon('SAVE10', FINDER_REC)
+
+            expect(res.success).toBe(true)
+            expect(res.newTotal).toBe(90)
+        })
+    }, 15000)
+
     it('a finder-picked box: a $0.00 placeholder caught mid-render is not a saving', async () => {
         document.body.innerHTML =
             '<div class="promo"><input id="promo" /><button id="apply">Apply</button>' +

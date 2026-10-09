@@ -580,14 +580,24 @@ export async function tryInitialize() {
  *   · there has to be a code we have not already tried, or the next hop is a
  *     guaranteed no-op that still costs a reload.
  */
-async function _caramelContinueRun(rec) {
-    if (!rec) return false
-    const box = pickBestMatch(rec.couponInput)
-    const toggle = rec.showInput ? pickBestMatch(rec.showInput) : null
-    if (!box && !toggle) return false
+async function _caramelContinueRun(rec, finder = false) {
+    // A finder run picked its box itself, and the reload threw that pick away.
+    // It goes on only where the finder sees a box on THIS page (the run below
+    // finds it again); a store with no config row runs on the stand-in record
+    // the first click ran on.
+    const runRec =
+        rec ?? (finder ? caramelConfiglessRecord(location.hostname) : null)
+    if (!runRec) return false
+    if (finder) {
+        if (!(await _finderSeesBox())) return false
+    } else {
+        const box = pickBestMatch(rec.couponInput)
+        const toggle = rec.showInput ? pickBestMatch(rec.showInput) : null
+        if (!box && !toggle) return false
+    }
     let codes = []
     try {
-        codes = await getCachedCodes(rec)
+        codes = await getCachedCodes(runRec)
     } catch {
         return false
     }
@@ -602,7 +612,7 @@ async function _caramelContinueRun(rec) {
         untried: untried.length,
     })
     try {
-        await startApplyingCoupons(rec, { resumed: true })
+        await startApplyingCoupons(runRec, { resumed: true })
     } catch (e) {
         // A throw here would leave the shopper behind an "Applying…" overlay
         // with nothing coming. Take the overlay down and report false, so the
@@ -660,7 +670,12 @@ async function _resumePendingSubmit() {
     // holds the same line — only the store's own rejection words count.
     let others = []
     try {
-        if (rec) others = await getCachedCodes(rec)
+        // A finder run on a store with no config row ran on the stand-in
+        // record; its codes are still worth handing over.
+        const codesRec =
+            rec ??
+            (pending.finder ? caramelConfiglessRecord(location.hostname) : null)
+        if (codesRec) others = await getCachedCodes(codesRec)
     } catch {
         /* no code list to offer — the message below still stands on its own */
     }
@@ -678,9 +693,7 @@ async function _resumePendingSubmit() {
 
     // That code didn't win, and on this kind of cart every code costs a page
     // load. Carry the run on rather than making the shopper click per code.
-    // A finder run is not continued: its picks did not survive the reload,
-    // and the config record would drive whatever stale box it still names.
-    if (!pending.finder && (await _caramelContinueRun(rec))) return true
+    if (await _caramelContinueRun(rec, !!pending.finder)) return true
     caramelEndRun()
 
     if (Number.isFinite(now)) {

@@ -1095,15 +1095,24 @@ export async function caramelDiscoveredRecord(rec, doc = document) {
     }
 }
 
-// The smallest ancestor holding both the box and its button, if it is still
-// a small region (a whole sidebar is not where one answer appears).
+// Where the store answers: the smallest ancestor holding both the box and its
+// button (if it is still a small region; a whole sidebar is not where one
+// answer appears), widened by up to three levels while it stays small. Stores
+// print the answer just outside the box's own row as often as inside it.
 function answerArea(input, button) {
     let p = input.parentElement
-    for (let i = 0; i < 5 && p; i++, p = p.parentElement) {
-        if (!p.contains(button)) continue
-        return norm(textOf(p)).length <= 400 ? p : null
+    for (let i = 0; i < 5 && p && !p.contains(button); i++) p = p.parentElement
+    if (!p || !p.contains(button) || norm(textOf(p)).length > 400) return null
+    let area = p
+    for (
+        let up = 0, q = p.parentElement;
+        up < 3 && q && q !== q.ownerDocument.body;
+        up++, q = q.parentElement
+    ) {
+        if (norm(textOf(q)).length > 600) break
+        area = q
     }
-    return null
+    return area
 }
 
 /* The order total on a page the store just loaded after a finder submit.
