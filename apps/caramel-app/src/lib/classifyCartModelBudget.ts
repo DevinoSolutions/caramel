@@ -18,12 +18,14 @@
 //   * global: a fixed ceiling for the whole process, the bound that holds no
 //     matter how many addresses a sender controls.
 //
-// Sizing (2026-10-09): Sentry shows 339 sampled classify-cart transactions in
-// the previous 30 days — single-digit requests per hour even before the
-// per-domain cache. The global ceiling is two orders of magnitude above that,
-// so it never trips for real shoppers, while capping the worst case at roughly
-// 600 gpt-5-mini calls/hour. Raise it here if organic traffic approaches it —
-// the Sentry event below is the signal that it has.
+// Sizing (2026-10-09): Sentry holds ~330 classify-cart transactions for the
+// previous 30 days at the server's 5% trace sample rate (sentry.common.config
+// .ts) — so ~6,600-6,800 real requests, ~10/hour on average, and that count
+// includes cache hits, which never reach this budget. The global ceiling of
+// 600 PAID calls/hour is ~60x that average, so it should never trip for real
+// shoppers, while capping the worst case at 600 gpt-5-mini calls/hour. Raise
+// it here if organic traffic approaches it — the Sentry event below is the
+// signal that it has.
 //
 // In-memory, like rateLimit.ts and the classifier cache: correct for the ONE
 // web instance the root compose runs. TODO: move to a shared store if the app
