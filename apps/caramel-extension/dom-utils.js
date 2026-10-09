@@ -600,7 +600,7 @@ export function caramelMarkPendingSubmit(code, id, prices, finder = false) {
                     p => typeof p === 'number' && !isNaN(p),
                 ),
                 t: Date.now(),
-                finder: _caramelFinderKind(finder?.kind ?? finder),
+                finder: _caramelFinderKind(finder),
                 finderRow: _caramelFinderRow(finder),
             }),
         )
@@ -609,6 +609,10 @@ export function caramelMarkPendingSubmit(code, id, prices, finder = false) {
     }
 }
 function _caramelFinderKind(v) {
+    // A finder record ({ kind, label, rows }) is a finder attempt even when
+    // it names no kind: reading the config's total instead would compare it
+    // against prices the finder captured.
+    if (v && typeof v === 'object') v = v.kind || 'total'
     if (v === 'subtotal') return 'subtotal'
     return v === 'total' || v === true ? 'total' : false
 }

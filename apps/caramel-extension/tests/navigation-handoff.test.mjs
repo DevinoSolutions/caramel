@@ -413,6 +413,15 @@ describe('store-detect.js — the page after the navigation', () => {
         expect(recordedSavings).toHaveLength(0)
     })
 
+    it('a finder record that names no row kind is still read as a finder total', async () => {
+        caramelMarkPendingSubmit('THEO20', 'c1', [100], {
+            label: 'order total',
+            rows: 1,
+        })
+
+        expect(caramelTakePendingSubmit()?.finder).toBe('total')
+    })
+
     it('a finder attempt reads the same total row after the reload', async () => {
         caramelMarkPendingSubmit('THEO20', 'c1', [100], {
             kind: 'total',

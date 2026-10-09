@@ -917,6 +917,9 @@ function findTotalRow(doc, kind) {
  * rows than the baseline saw means the summary is mid-render (a skeleton):
  * a line item's own "Total $19.99" may be all that is left, so nothing is
  * read. Otherwise the last row with the SAME label, shown rows first. */
+// Known limits, both of which cost a win and never invent one: a store that
+// renames the row after the apply ("Estimated total" to "Order total") or
+// unmounts a hidden copy of it (a mobile drawer) reads as no change.
 function findSameTotalRow(doc, was) {
     if (!was || typeof was.label !== 'string' || !(was.rows > 0)) return null
     const kind = was.kind === 'subtotal' ? 'subtotal' : 'total'
