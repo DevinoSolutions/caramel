@@ -318,6 +318,86 @@ describe('applyCoupon verdict — success rule', () => {
         })
     }, 15000)
 
+    it('a finder-picked box: a total row that becomes two (a sticky bar appears) is still read', async () => {
+        document.body.innerHTML =
+            '<div class="promo"><input id="promo" /><button id="apply">Apply</button></div>' +
+            '<div id="sum"><div data-caramel-found="total"><span>Order total</span> <span>$100.00</span></div></div>'
+        await withInnerText(async () => {
+            respond(() => {
+                document.getElementById('sum').innerHTML =
+                    '<div><span>Order total</span> <span>$90.00</span></div>' +
+                    '<div class="sticky"><span>Order total</span> <span>$90.00</span></div>'
+            })
+            const rec = {
+                ...FINDER_REC,
+                priceContainer: '[data-caramel-found="total"]',
+                caramelTotalKind: 'total',
+                caramelTotalLabel: 'order total',
+                caramelTotalRows: 1,
+            }
+
+            const res = await applyCoupon('SAVE10', rec)
+
+            expect(res.success).toBe(true)
+            expect(res.newTotal).toBe(90)
+        })
+    }, 15000)
+
+    it('a finder-picked box: a summary that hides its old row and shows a new one is read on the new one', async () => {
+        document.body.innerHTML =
+            '<div class="promo"><input id="promo" /><button id="apply">Apply</button></div>' +
+            '<div id="old" data-caramel-found="total"><span>Order total</span> <span>$100.00</span></div>'
+        const prior = Element.prototype.checkVisibility
+        Element.prototype.checkVisibility = function () {
+            return !this.closest('[hidden]')
+        }
+        try {
+            await withInnerText(async () => {
+                respond(() => {
+                    document.getElementById('old').hidden = true
+                    document.body.insertAdjacentHTML(
+                        'beforeend',
+                        '<div><span>Order total</span> <span>$90.00</span></div>',
+                    )
+                })
+                const rec = {
+                    ...FINDER_REC,
+                    priceContainer: '[data-caramel-found="total"]',
+                    caramelTotalKind: 'total',
+                    caramelTotalLabel: 'order total',
+                    caramelTotalRows: 1,
+                }
+
+                const res = await applyCoupon('SAVE10', rec)
+
+                expect(res.success).toBe(true)
+                expect(res.newTotal).toBe(90)
+            })
+        } finally {
+            Element.prototype.checkVisibility = prior
+        }
+    }, 15000)
+
+    it('a finder-picked box: a refusal split across bold text beside a link is still read', async () => {
+        document.body.innerHTML =
+            '<div class="promo"><input id="promo" /><button id="apply">Apply</button>' +
+            '<p id="msg"></p></div>' +
+            '<div id="total">$100.00</div>'
+        await withInnerText(async () => {
+            respond(() => {
+                document.getElementById('msg').innerHTML =
+                    'Code <b>NOPE</b> is not <i>valid</i>. <a href="#">Learn more</a>'
+            })
+
+            const started = performance.now()
+            const res = await applyCoupon('NOPE', FINDER_REC)
+
+            expect(res.success).toBe(false)
+            expect(res.errorMsg).toBe('Code NOPE is not valid.')
+            expect(performance.now() - started).toBeLessThan(4000)
+        })
+    }, 15000)
+
     it('a finder-picked box: a $0.00 placeholder caught mid-render is not a saving', async () => {
         document.body.innerHTML =
             '<div class="promo"><input id="promo" /><button id="apply">Apply</button>' +

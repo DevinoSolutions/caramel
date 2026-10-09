@@ -299,15 +299,25 @@ const ERROR_WORDS_RE =
 const _CARAMEL_CONTROLS = 'button, input, select, textarea, a, [role="button"]'
 function _caramelRejectionSentences(scope) {
     const tidy = t => (t || '').trim().replace(/\s+/g, ' ')
+    // The shown text of el without its controls ("Code <b>X</b> is not
+    // valid. <a>Learn more</a>" reads "Code X is not valid.").
+    const shownWords = node =>
+        [...node.childNodes]
+            .map(n =>
+                n.nodeType === 3
+                    ? n.textContent
+                    : n.nodeType === 1 &&
+                        !n.matches(_CARAMEL_CONTROLS) &&
+                        !n.matches('script, style, noscript, template') &&
+                        _isVisible(n)
+                      ? shownWords(n)
+                      : '',
+            )
+            .join('')
     const words = el =>
-        el.querySelector(_CARAMEL_CONTROLS)
-            ? tidy(
-                  [...el.childNodes]
-                      .filter(n => n.nodeType === 3)
-                      .map(n => n.textContent)
-                      .join(' '),
-              )
-            : tidy(el.innerText)
+        tidy(
+            el.querySelector(_CARAMEL_CONTROLS) ? shownWords(el) : el.innerText,
+        )
     // One read in the common case: nothing here says no.
     if (!GENERIC_ERROR_TEXT_RE.test(scope.innerText || '')) return []
     const says = el =>
@@ -637,10 +647,15 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
     let newTotal = NaN
     let priceDropped = false
     if (hasPriceCfg) {
-        const afterLargest = getPrice(rec.priceContainer, {
-            returnLargest: true,
-        })
-        const afterPrices = _caramelLastPrices.slice()
+        // A finder record reads through the same guards as its waiters: the
+        // same row, a positive amount. A refused read leaves no prices.
+        const afterLargest = rec.caramelFound
+            ? caramelFinderTotalNow(rec)
+            : getPrice(rec.priceContainer, { returnLargest: true })
+        const afterPrices =
+            rec.caramelFound && isNaN(afterLargest)
+                ? []
+                : _caramelLastPrices.slice()
         /* The post-apply total is the number that actually MOVED, not the
          * biggest number in the box. `returnLargest` answers a different
          * question, and it is the wrong one the moment the price container

@@ -414,6 +414,18 @@ describe('the record the apply flow runs on', () => {
         expect(rec.caramelTotalRows).toBe(1)
     })
 
+    it('asking whether the finder sees a box never moves the total marker', () => {
+        document.body.innerHTML =
+            PROMO_BOX +
+            TOTAL +
+            '<div id="marked" data-caramel-found="total">$5.00</div>'
+
+        expect(caramelFinderSeesBox()).toBe(true)
+        expect(document.querySelector('[data-caramel-found="total"]')?.id).toBe(
+            'marked',
+        )
+    })
+
     it('a total the price reader cannot parse gives no record', async () => {
         // "100.00" with no currency mark looks like an amount but reads NaN:
         // no code could ever be measured against it.

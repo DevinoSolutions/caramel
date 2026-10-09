@@ -622,7 +622,7 @@ async function _resumePendingSubmit() {
     // A finder attempt's baseline came from the finder's total row; reading a
     // config's priceContainer here would compare two different numbers.
     const now = pending.finder
-        ? caramelFinderReadTotal(document, pending.finder)
+        ? caramelFinderReadTotal(document, pending.finder, pending.finderRow)
         : rec && rec.priceContainer
           ? getPrice(rec.priceContainer, { returnLargest: true })
           : NaN

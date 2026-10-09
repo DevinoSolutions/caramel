@@ -196,6 +196,7 @@ describe('dom-utils.js — the pending-submit record', () => {
             id: 'c1',
             prices: [73.9, 59.12],
             finder: false,
+            finderRow: null,
         })
     })
 
@@ -373,6 +374,62 @@ describe('store-detect.js — the page after the navigation', () => {
 
         expect(recordedSavings).toHaveLength(1)
         expect(recordedSavings[0].amount).toBeCloseTo(11, 2)
+    })
+
+    /** A summary row whose innerText jsdom cannot compute on its own. */
+    function addRow(html, text) {
+        const row = document.createElement('div')
+        row.innerHTML = html
+        Object.defineProperty(row, 'innerText', {
+            value: text,
+            configurable: true,
+        })
+        document.body.appendChild(row)
+    }
+
+    it('a finder attempt never banks a $0.00 total the reloaded page shows first', async () => {
+        caramelMarkPendingSubmit('THEO20', 'c1', [100], 'total')
+        addRow(
+            '<span>Order total</span> <span>$0.00</span>',
+            'Order total $0.00',
+        )
+
+        await startCheckoutDetection()
+
+        expect(recordedSavings).toHaveLength(0)
+    })
+
+    it("a finder attempt never reads a line item's own total while the reloaded summary is still loading", async () => {
+        // The attempt measured "Order total" with two total rows on the page.
+        caramelMarkPendingSubmit('THEO20', 'c1', [100], {
+            kind: 'total',
+            label: 'order total',
+            rows: 2,
+        })
+        addRow('<span>Total</span> <span>$19.99</span>', 'Total $19.99')
+
+        await startCheckoutDetection()
+
+        expect(recordedSavings).toHaveLength(0)
+    })
+
+    it('a finder attempt reads the same total row after the reload', async () => {
+        caramelMarkPendingSubmit('THEO20', 'c1', [100], {
+            kind: 'total',
+            label: 'order total',
+            rows: 2,
+        })
+        addRow('<span>Total</span> <span>$19.99</span>', 'Total $19.99')
+        addRow(
+            '<span>Order total</span> <span>$90.00</span>',
+            'Order total $90.00',
+        )
+        addRow('<span>Total</span> <span>$5.00</span>', 'Total $5.00')
+
+        await startCheckoutDetection()
+
+        expect(recordedSavings).toHaveLength(1)
+        expect(recordedSavings[0].amount).toBeCloseTo(10, 2)
     })
 
     it('claims nothing when the total did not move', async () => {

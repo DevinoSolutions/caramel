@@ -600,7 +600,8 @@ export function caramelMarkPendingSubmit(code, id, prices, finder = false) {
                     p => typeof p === 'number' && !isNaN(p),
                 ),
                 t: Date.now(),
-                finder: _caramelFinderKind(finder),
+                finder: _caramelFinderKind(finder?.kind ?? finder),
+                finderRow: _caramelFinderRow(finder),
             }),
         )
     } catch {
@@ -610,6 +611,13 @@ export function caramelMarkPendingSubmit(code, id, prices, finder = false) {
 function _caramelFinderKind(v) {
     if (v === 'subtotal') return 'subtotal'
     return v === 'total' || v === true ? 'total' : false
+}
+// The total row a finder attempt measured ({ label, rows }), so the page the
+// submit loads reads that row and not whichever "Total" renders first.
+function _caramelFinderRow(v) {
+    return v && typeof v.label === 'string' && v.rows > 0
+        ? { label: v.label, rows: v.rows }
+        : null
 }
 // Consumed by coupon-runner.js (cross-file content-script call).
 export function caramelClearPendingSubmit() {
@@ -647,6 +655,7 @@ export function caramelTakePendingSubmit(maxAgeMs = 120000) {
         id: st.id ?? null,
         prices: Array.isArray(st.prices) ? st.prices : [],
         finder: _caramelFinderKind(st.finder),
+        finderRow: _caramelFinderRow(st.finderRow),
     }
 }
 

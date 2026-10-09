@@ -31,7 +31,12 @@
 //     out of reach, because the apply flow finds what we picked through a
 //     document query (the data-caramel-found marker below).
 import { caramelSendMessage, log, sleep } from './caramel-base.js'
-import { _isVisible, caramelIsForbiddenControl, getPrice } from './dom-utils.js'
+import {
+    _isVisible,
+    caramelFindMoney,
+    caramelIsForbiddenControl,
+    getPrice,
+} from './dom-utils.js'
 
 /* ------------------------------------------------------------ vocabulary */
 // Words a store uses for the coupon box. Scored on the input's own attributes
@@ -869,6 +874,8 @@ function scanTotalRows(doc, LABEL, NOT) {
             if (/^\W*(calculated|to be calculated|tbd)\b/.test(after)) break
             if (MONEY_RE.test(after)) {
                 // A whole table body is a column of line totals, not one row.
+                // A two-row summary table (label row, amount row) is refused
+                // with it: that costs a page, never invents a total.
                 if (/^(TBODY|THEAD|TFOOT|TABLE)$/.test(p.tagName)) break
                 hits.push({
                     el: p,
@@ -900,7 +907,35 @@ function findTotalRow(doc, kind) {
     const pool = shown.length ? shown : hits
     if (!pool.length) return null
     const hit = pool[pool.length - 1]
-    return { el: hit.el, kind: found, label: hit.label, rows: pool.length }
+    // rows counts every total row, shown or not, so a row that merely becomes
+    // visible (a sticky mobile bar, an expanded summary) does not change it.
+    return { el: hit.el, kind: found, label: hit.label, rows: hits.length }
+}
+
+/* The row a baseline measured, found again after the store re-rendered its
+ * summary. `was` is { kind, label, rows } from that baseline. Fewer total
+ * rows than the baseline saw means the summary is mid-render (a skeleton):
+ * a line item's own "Total $19.99" may be all that is left, so nothing is
+ * read. Otherwise the last row with the SAME label, shown rows first. */
+function findSameTotalRow(doc, was) {
+    if (!was || typeof was.label !== 'string' || !(was.rows > 0)) return null
+    const kind = was.kind === 'subtotal' ? 'subtotal' : 'total'
+    const hits =
+        kind === 'subtotal'
+            ? scanTotalRows(doc, SUB_LABEL, SUB_NOT)
+            : scanTotalRows(doc, TOTAL_LABEL, TOTAL_NOT)
+    if (hits.length < was.rows) return null
+    const same = hits.filter(h => h.label === was.label)
+    const shown = same.filter(h => h.visible)
+    const pool = shown.length ? shown : same
+    return pool.length ? pool[pool.length - 1].el : null
+}
+
+// A total is only worth reading when it is a positive amount: zero is a
+// placeholder caught mid-render (or an emptied cart), never a discounted total.
+function positiveTotal(selector) {
+    const now = getPrice(selector, { returnLargest: true })
+    return now > 0 ? now : NaN
 }
 
 // Exported for tests/coupon-box-discovery.test.mjs.
@@ -1070,13 +1105,17 @@ function answerArea(input, button) {
 
 /* The order total on a page the store just loaded after a finder submit.
  * The same reader as before the submit (a config's priceContainer on this
- * store described some other number), and the same row kind: a subtotal read
- * against a total baseline would invent a saving. NaN when there is no row. */
+ * store described some other number), the same row kind (a subtotal read
+ * against a total baseline would invent a saving) and, when the attempt
+ * recorded it, the same row (see findSameTotalRow). NaN when there is no
+ * such row, or its amount is not a positive total. */
 // Called from store-detect.js.
-export function caramelFinderReadTotal(doc = document, kind = 'total') {
-    const row = findTotalRow(doc, kind === 'subtotal' ? 'subtotal' : 'total')
-    if (!row) return NaN
-    return getPrice(mark(row.el, 'total'), { returnLargest: true })
+export function caramelFinderReadTotal(doc = document, kind = 'total', was) {
+    const el = was
+        ? findSameTotalRow(doc, { ...was, kind })
+        : findTotalRow(doc, kind === 'subtotal' ? 'subtotal' : 'total')?.el
+    if (!el) return NaN
+    return positiveTotal(mark(el, 'total'))
 }
 
 /* The finder's total, read now. NaN whenever it cannot be read honestly.
@@ -1092,21 +1131,20 @@ export function caramelFinderReadTotal(doc = document, kind = 'total') {
 export function caramelFinderTotalNow(rec, doc = document) {
     const el = doc.querySelector(rec.priceContainer)
     if (!el || !el.isConnected || !_isVisible(el)) {
-        const row = findTotalRow(doc, rec.caramelTotalKind || 'total')
-        if (
-            !row ||
-            row.label !== rec.caramelTotalLabel ||
-            row.rows !== rec.caramelTotalRows
-        )
-            return NaN
-        mark(row.el, 'total')
+        const row = findSameTotalRow(doc, {
+            kind: rec.caramelTotalKind,
+            label: rec.caramelTotalLabel,
+            rows: rec.caramelTotalRows,
+        })
+        if (!row) return NaN
+        mark(row, 'total')
     }
-    const now = getPrice(rec.priceContainer, { returnLargest: true })
-    return now > 0 ? now : NaN
+    return positiveTotal(rec.priceContainer)
 }
 
+// Read-only: detection must not move the marker or the last-read prices.
 function readableTotal(el) {
-    return Number.isFinite(getPrice(mark(el, 'total'), { returnLargest: true }))
+    return caramelFindMoney(el.innerText || '').length > 0
 }
 
 /* Is the finder switched on? The background answers from its cached features
