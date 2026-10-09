@@ -271,6 +271,8 @@ describe('applyCoupon verdict — success rule', () => {
                 ...FINDER_REC,
                 priceContainer: '[data-caramel-found="total"]',
                 caramelTotalKind: 'total',
+                caramelTotalLabel: 'order total',
+                caramelTotalRows: 1,
             }
 
             const res = await applyCoupon('SAVE10', rec)
@@ -278,6 +280,123 @@ describe('applyCoupon verdict — success rule', () => {
             expect(res.success).toBe(true)
             expect(res.newTotal).toBe(90)
         })
+    }, 15000)
+
+    it("a finder-picked box: a line item's own total is never read while the summary is mid-render", async () => {
+        // The baseline saw two total rows: the line item's and the order's.
+        // While the store re-renders its summary (a skeleton), the line
+        // item's "Total $19.99" is the only one left on the page.
+        document.body.innerHTML =
+            '<div class="promo"><input id="promo" /><button id="apply">Apply</button>' +
+            '<div id="msg"></div></div>' +
+            '<div class="line"><span>Total</span> <span>$19.99</span></div>' +
+            '<div id="sum"><div data-caramel-found="total"><span>Order total</span> <span>$100.00</span></div></div>'
+        await withInnerText(async () => {
+            document.getElementById('apply').addEventListener('click', () => {
+                setTimeout(() => {
+                    document.getElementById('sum').innerHTML =
+                        '<div class="skeleton"></div>'
+                }, 50)
+                setTimeout(() => {
+                    document.getElementById('sum').innerHTML =
+                        '<div><span>Order total</span> <span>$100.00</span></div>'
+                    document.getElementById('msg').textContent =
+                        'Sorry, the code NOPE is not valid.'
+                }, 1500)
+            })
+            const rec = {
+                ...FINDER_REC,
+                priceContainer: '[data-caramel-found="total"]',
+                caramelTotalKind: 'total',
+                caramelTotalLabel: 'order total',
+                caramelTotalRows: 2,
+            }
+
+            const res = await applyCoupon('NOPE', rec)
+
+            expect(res.success).toBe(false)
+        })
+    }, 15000)
+
+    it('a finder-picked box: a $0.00 placeholder caught mid-render is not a saving', async () => {
+        document.body.innerHTML =
+            '<div class="promo"><input id="promo" /><button id="apply">Apply</button>' +
+            '<div id="msg"></div></div>' +
+            '<div id="total">$100.00</div>'
+        await withInnerText(async () => {
+            document.getElementById('apply').addEventListener('click', () => {
+                setTimeout(() => {
+                    document.getElementById('total').textContent = '$0.00'
+                }, 50)
+                setTimeout(() => {
+                    document.getElementById('total').textContent = '$100.00'
+                    document.getElementById('msg').textContent =
+                        'Sorry, the code NOPE is not valid.'
+                }, 1500)
+            })
+
+            const res = await applyCoupon('NOPE', FINDER_REC)
+
+            expect(res.success).toBe(false)
+        })
+    }, 15000)
+
+    it('a finder-picked box: a hint written beside the button is not an answer when the button relabels', async () => {
+        // "Enter a valid code" sits as bare text in the same box as the
+        // button, so the box's own text changes when the button does.
+        document.body.innerHTML =
+            '<div class="promo">Enter a valid code <input id="promo" />' +
+            '<button id="apply">Apply</button></div>' +
+            '<div id="total">$100.00</div>'
+        await withInnerText(async () => {
+            document.getElementById('apply').addEventListener('click', () => {
+                setTimeout(() => {
+                    document.getElementById('apply').textContent = 'Applying…'
+                }, 50)
+                setTimeout(() => {
+                    document.getElementById('total').textContent = '$90.00'
+                }, 2500)
+            })
+
+            const res = await applyCoupon('SAVE10', FINDER_REC)
+
+            expect(res.success).toBe(true)
+            expect(res.newTotal).toBe(90)
+        })
+    }, 15000)
+
+    it('a finder-picked box: text the shopper cannot see is not the store answering', async () => {
+        document.body.innerHTML =
+            '<div class="promo"><input id="promo" /><button id="apply">Apply</button>' +
+            '<div id="tpl" hidden>The code is not valid.</div></div>' +
+            '<div id="total">$100.00</div>'
+        const prior = Element.prototype.checkVisibility
+        Element.prototype.checkVisibility = function () {
+            return !this.closest('[hidden]')
+        }
+        try {
+            await withInnerText(async () => {
+                document
+                    .getElementById('apply')
+                    .addEventListener('click', () => {
+                        setTimeout(() => {
+                            document.getElementById('tpl').textContent =
+                                'The code SAVE10 is not valid.'
+                        }, 50)
+                        setTimeout(() => {
+                            document.getElementById('total').textContent =
+                                '$90.00'
+                        }, 2500)
+                    })
+
+                const res = await applyCoupon('SAVE10', FINDER_REC)
+
+                expect(res.success).toBe(true)
+                expect(res.newTotal).toBe(90)
+            })
+        } finally {
+            Element.prototype.checkVisibility = prior
+        }
     }, 15000)
 
     it('returns exactly the documented verdict keys', async () => {

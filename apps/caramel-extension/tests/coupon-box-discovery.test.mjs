@@ -314,6 +314,14 @@ describe('the total reader reads one row, or nothing', () => {
         expect(caramelFindOrderTotal()?.id).toBe('t')
     })
 
+    it('a whole table body of line totals is not the order total', () => {
+        document.body.innerHTML =
+            '<table><tbody><tr><td>Total</td></tr>' +
+            '<tr><td>$30.00</td></tr></tbody></table>'
+
+        expect(caramelFindOrderTotal()?.tagName).not.toBe('TBODY')
+    })
+
     it('a total weight is not a total', () => {
         document.body.innerHTML =
             '<div><span>Total weight</span><span>2.50 kg</span></div>'
@@ -395,6 +403,29 @@ describe('the record the apply flow runs on', () => {
         expect(document.querySelector(rec.caramelAnswer)?.className).toBe(
             'promo',
         )
+    })
+
+    it('remembers the total row it measured, so a re-render finds only that row', async () => {
+        document.body.innerHTML = PROMO_BOX + TOTAL
+
+        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+
+        expect(rec.caramelTotalLabel).toBe('total')
+        expect(rec.caramelTotalRows).toBe(1)
+    })
+
+    it('a total the price reader cannot parse gives no record', async () => {
+        // "100.00" with no currency mark looks like an amount but reads NaN:
+        // no code could ever be measured against it.
+        document.body.innerHTML =
+            PROMO_BOX +
+            '<div class="row"><span>Total</span><span>100.00</span></div>'
+
+        expect(caramelFindOrderTotal()).not.toBeNull()
+        expect(caramelFinderSeesBox()).toBe(false)
+        expect(
+            await caramelDiscoveredRecord({ domain: 'shop.test' }),
+        ).toBeNull()
     })
 
     it('carries none of the stale config fields it did not find', async () => {

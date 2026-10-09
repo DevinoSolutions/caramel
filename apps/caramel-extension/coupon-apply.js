@@ -291,14 +291,34 @@ export function caramelQuoteIsAttributable(quote, priorText) {
 const ERROR_WORDS_RE =
     /\b(invalid|expired|not valid|doesn'?t apply|cannot be applied|cannot apply|already used|no longer|reached the limit|minimum|coupon code is required|wrong code)\b/i
 
-// The text of every innermost element under scope that carries a rejection
-// phrase: the store's sentences, without the label or button around them.
+// The text of every innermost SHOWN element under scope that carries a
+// rejection phrase: the store's sentences, without the label or button around
+// them. An element that also holds a control (a box whose own text is a hint
+// beside its button) contributes its own words only, so a button relabelled
+// "Applying…" never reads as the store answering.
+const _CARAMEL_CONTROLS = 'button, input, select, textarea, a, [role="button"]'
 function _caramelRejectionSentences(scope) {
-    const says = el => GENERIC_ERROR_TEXT_RE.test((el.innerText || '').trim())
+    const tidy = t => (t || '').trim().replace(/\s+/g, ' ')
+    const words = el =>
+        el.querySelector(_CARAMEL_CONTROLS)
+            ? tidy(
+                  [...el.childNodes]
+                      .filter(n => n.nodeType === 3)
+                      .map(n => n.textContent)
+                      .join(' '),
+              )
+            : tidy(el.innerText)
+    // One read in the common case: nothing here says no.
+    if (!GENERIC_ERROR_TEXT_RE.test(scope.innerText || '')) return []
+    const says = el =>
+        !el.closest('script, style, noscript, template') &&
+        _isVisible(el) &&
+        GENERIC_ERROR_TEXT_RE.test(el.innerText || '')
     // The scope itself counts: a bare message element has no children.
     return [scope, ...scope.querySelectorAll('*')]
         .filter(el => says(el) && ![...el.children].some(says))
-        .map(el => (el.innerText || '').trim().replace(/\s+/g, ' '))
+        .map(words)
+        .filter(t => GENERIC_ERROR_TEXT_RE.test(t))
 }
 
 // The store's message itself: an innermost element under scope whose text
@@ -647,6 +667,9 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
         )
         newTotal = moved.length ? Math.max(...moved) : afterLargest
         priceDropped = !isNaN(newTotal) && newTotal < original
+        // A finder-read total of zero or less is a placeholder caught mid-
+        // render (see caramelFinderTotalNow), never a measured saving.
+        if (rec.caramelFound && !(newTotal > 0)) priceDropped = false
     }
     // Success rules (in priority order):
     //  1. price dropped                       → real win

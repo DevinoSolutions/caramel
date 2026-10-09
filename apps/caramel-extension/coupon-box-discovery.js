@@ -844,7 +844,7 @@ function scanTotalRows(doc, LABEL, NOT) {
         let p = el
         for (
             let i = 0, prev = null;
-            i < 3 && p;
+            i < 4 && p;
             i++, prev = p, p = p.parentElement
         ) {
             const t = norm(textOf(p))
@@ -856,7 +856,11 @@ function scanTotalRows(doc, LABEL, NOT) {
                     AMOUNT_ONLY.test(st) &&
                     moneyCount(st) === 1
                 )
-                    hits.push({ el: sib, visible: visible(sib) })
+                    hits.push({
+                        el: sib,
+                        visible: visible(sib),
+                        label: bare.toLowerCase(),
+                    })
                 break
             }
             const after = t.slice(t.indexOf(own) + own.length)
@@ -864,7 +868,13 @@ function scanTotalRows(doc, LABEL, NOT) {
             // found further up belongs to some other line.
             if (/^\W*(calculated|to be calculated|tbd)\b/.test(after)) break
             if (MONEY_RE.test(after)) {
-                hits.push({ el: p, visible: visible(p) })
+                // A whole table body is a column of line totals, not one row.
+                if (/^(TBODY|THEAD|TFOOT|TABLE)$/.test(p.tagName)) break
+                hits.push({
+                    el: p,
+                    visible: visible(p),
+                    label: bare.toLowerCase(),
+                })
                 break
             }
         }
@@ -872,8 +882,12 @@ function scanTotalRows(doc, LABEL, NOT) {
     return hits
 }
 
-// The row and which kind it is. kind ('total' | 'subtotal') reads that kind
-// only: a later read must measure the same row kind as the baseline did.
+// The row, which kind it is, its label, and how many such rows the page
+// shows. kind ('total' | 'subtotal') reads that kind only: a later read must
+// measure the same row kind as the baseline did.
+// Known limit: a cart measured on its subtotal (no total row) shows a code
+// that discounts only shipping or tax as no saving at all. That costs a win,
+// never invents one.
 function findTotalRow(doc, kind) {
     let found = 'total'
     let hits =
@@ -884,7 +898,9 @@ function findTotalRow(doc, kind) {
     }
     const shown = hits.filter(h => h.visible)
     const pool = shown.length ? shown : hits
-    return pool.length ? { el: pool[pool.length - 1].el, kind: found } : null
+    if (!pool.length) return null
+    const hit = pool[pool.length - 1]
+    return { el: hit.el, kind: found, label: hit.label, rows: pool.length }
 }
 
 // Exported for tests/coupon-box-discovery.test.mjs.
@@ -960,7 +976,8 @@ function toggleRefused(el) {
  * reveal toggle, plus a readable total. */
 // Called from store-detect.js.
 export function caramelFinderSeesBox(doc = document) {
-    if (!caramelFindOrderTotal(doc)) return false
+    const total = caramelFindOrderTotal(doc)
+    if (!total || !readableTotal(total)) return false
     const found = caramelDiscoverCouponBox(doc)
     if (found.inputVisible && confident(found)) {
         log('FINDER_SEES_BOX', { reasons: found.reasons })
@@ -985,7 +1002,9 @@ export function caramelFinderSeesBox(doc = document) {
 export async function caramelDiscoveredRecord(rec, doc = document) {
     const totalRow = findTotalRow(doc)
     const total = totalRow?.el
-    if (!total) {
+    // A row whose amount the price reader cannot parse ("12.00" with no
+    // currency mark) gives no baseline: no code could ever be measured.
+    if (!total || !readableTotal(total)) {
         log('FINDER_NO_TOTAL', {})
         return null
     }
@@ -1017,6 +1036,10 @@ export async function caramelDiscoveredRecord(rec, doc = document) {
         priceContainer: mark(total, 'total'),
         // Which row kind the baseline came from; every later read uses it.
         caramelTotalKind: totalRow.kind,
+        // What the row looked like, so a re-rendered summary is found again
+        // only as itself (see caramelFinderTotalNow).
+        caramelTotalLabel: totalRow.label,
+        caramelTotalRows: totalRow.rows,
         // Where the store answers: the box's own small container. Watching it
         // (coupon-apply.js caramelAwaitCouponVerdict) lets a refused code end
         // its wait the moment the store says something, instead of sitting out
@@ -1056,18 +1079,34 @@ export function caramelFinderReadTotal(doc = document, kind = 'total') {
     return getPrice(mark(row.el, 'total'), { returnLargest: true })
 }
 
-/* The finder's total, read now. A cart that re-renders its summary replaces
- * the row we marked, so a marker that no longer points at a live row is put
- * back on the same kind of row first. NaN when there is none. */
+/* The finder's total, read now. NaN whenever it cannot be read honestly.
+ *
+ * A cart that re-renders its summary replaces the row we marked, so a marker
+ * that no longer points at a shown row is put back, but only on the SAME row:
+ * same kind, same label, and the page showing the same number of such rows as
+ * when the baseline was read. While the summary is mid-render (a skeleton), a
+ * line item's own "Total $19.99" can be the only total row on the page;
+ * marking it would read a saving that never happened. A zero or negative total
+ * is a placeholder caught mid-render, never an answer. */
 // Called from coupon-apply.js.
 export function caramelFinderTotalNow(rec, doc = document) {
     const el = doc.querySelector(rec.priceContainer)
-    if (!el || !el.isConnected) {
+    if (!el || !el.isConnected || !_isVisible(el)) {
         const row = findTotalRow(doc, rec.caramelTotalKind || 'total')
-        if (!row) return NaN
+        if (
+            !row ||
+            row.label !== rec.caramelTotalLabel ||
+            row.rows !== rec.caramelTotalRows
+        )
+            return NaN
         mark(row.el, 'total')
     }
-    return getPrice(rec.priceContainer, { returnLargest: true })
+    const now = getPrice(rec.priceContainer, { returnLargest: true })
+    return now > 0 ? now : NaN
+}
+
+function readableTotal(el) {
+    return Number.isFinite(getPrice(mark(el, 'total'), { returnLargest: true }))
 }
 
 /* Is the finder switched on? The background answers from its cached features
