@@ -1,4 +1,5 @@
 import { withRoute } from '@/lib/api/withRoute'
+import { isAllowedExtensionRedirectUri } from '@/lib/auth/extensionOAuthRedirect'
 import { env } from '@/lib/env'
 import { BASE_URL } from '@/lib/env.client'
 import { isValidNonce, setNonceResult } from '@/lib/extension-oauth-nonce'
@@ -274,8 +275,15 @@ async function handleRedirect(req: NextRequest) {
     if (safari) return safari
 
     if (error) {
-        // If there's an error, redirect to extension with error
-        if (extensionRedirectUri) {
+        // Hand the provider's error back to the extension so it can render it
+        // — but ONLY to one of our extensions. This branch used to redirect to
+        // whatever `extension_redirect` said before any destination check ran,
+        // which made grabcaramel.com an open redirect for phishing links
+        // (security report 2026-10). A foreign destination gets the JSON 400.
+        if (
+            extensionRedirectUri &&
+            isAllowedExtensionRedirectUri(extensionRedirectUri)
+        ) {
             const errorUrl = new URL(extensionRedirectUri)
             errorUrl.searchParams.set('error', error)
             if (originalState) errorUrl.searchParams.set('state', originalState)
@@ -298,30 +306,22 @@ async function handleRedirect(req: NextRequest) {
         )
     }
 
-    // Redirect to extension's redirect URI with the code
-    // Use originalState (which may be the decoded state from Apple's response)
-    let redirectUrl: URL
-    try {
-        redirectUrl = new URL(extensionRedirectUri)
-    } catch {
-        return NextResponse.json(
-            { error: 'Invalid extension redirect URI' },
-            { status: 400 },
-        )
-    }
-
-    const isChromeExtension = redirectUrl.protocol === 'chrome-extension:'
-    const isChromiumAppOrigin =
-        redirectUrl.protocol === 'https:' &&
-        redirectUrl.hostname.endsWith('.chromiumapp.org')
-
-    if (!isChromeExtension && !isChromiumAppOrigin) {
+    // Only OUR extensions may receive the code. A shape check (any
+    // chromiumapp.org host) let a third-party extension receive a Caramel
+    // user's Apple code and exchange it for a session — see
+    // extensionOAuthRedirect.ts. The destination comes from the UNSIGNED
+    // outer `r` of the Apple envelope, so it is checked here even though
+    // authorize also refuses foreign destinations: an attacker can rewrite
+    // `r` in a legitimately-issued authorize URL.
+    if (!isAllowedExtensionRedirectUri(extensionRedirectUri)) {
         return NextResponse.json(
             { error: 'Disallowed extension redirect origin' },
             { status: 400 },
         )
     }
 
+    // Use originalState (which may be the decoded state from Apple's response)
+    const redirectUrl = new URL(extensionRedirectUri)
     redirectUrl.searchParams.set('code', code)
     if (originalState) redirectUrl.searchParams.set('state', originalState)
 

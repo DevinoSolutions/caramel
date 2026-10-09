@@ -3,7 +3,7 @@ import {
     POST as redirectPOST,
 } from '@/app/api/extension/oauth/redirect/route'
 import { NextRequest } from 'next/server'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 // /api/extension/oauth/redirect is the intermediate hop that ONLY the Apple
 // leg uses: Apple cannot form_post to chromiumapp.org, so it posts here and
@@ -19,10 +19,13 @@ import { describe, expect, it, vi } from 'vitest'
 // The guard was verified against the LIVE dev deployment on 2026-08-05 with
 // these exact shapes; this suite is that proof frozen so it cannot regress.
 // Codes below are fake strings — nothing is exchanged.
-vi.mock('@/lib/env', () => ({ env: {} }))
+const { envMock } = vi.hoisted(() => ({
+    envMock: { CHROME_EXTENSION_ORIGIN: undefined as string | undefined },
+}))
+vi.mock('@/lib/env', () => ({ env: envMock }))
 vi.mock('@/lib/env.client', () => ({ BASE_URL: 'https://localhost:58000' }))
 
-const EXT = 'https://bncdbnjkcbemlmoaflgnpoghogadlgce.chromiumapp.org/'
+const EXT = 'https://gaimofgglbackoimfjopicmbmnlccfoe.chromiumapp.org/'
 const ROUTE = 'https://localhost:58000/api/extension/oauth/redirect'
 
 /** The base64 {r,s} envelope the Apple leg actually sends as `state`. */
@@ -112,14 +115,110 @@ describe('extension OAuth redirect — where the code is allowed to go', () => {
             expect(loc.searchParams.get('state')).toBe('the-signed-state')
         })
 
-        it('allows a chrome-extension:// destination', async () => {
+        it('allows a chrome-extension:// destination of our own extension', async () => {
             const res = await get({
-                extension_redirect: 'chrome-extension://abcdef/callback',
+                extension_redirect:
+                    'chrome-extension://gaimofgglbackoimfjopicmbmnlccfoe/callback',
                 code: 'FAKE_CODE',
                 state: 's',
             })
             expect(res.status).toBeGreaterThanOrEqual(300)
             expect(res.status).toBeLessThan(400)
+        })
+    })
+
+    // Security report 2026-10, verified live on prod before the fix: the
+    // guard used to accept ANY chromiumapp.org host / chrome-extension:// ID,
+    // and the error branch redirected before any guard ran at all.
+    describe('only OUR extensions — not any extension', () => {
+        const FOREIGN =
+            'https://aaaabbbbccccddddeeeeffffgggghhhh.chromiumapp.org/'
+        const EDGE = 'https://leodahchedhnenmiengkfpmmcdendnof.chromiumapp.org/'
+
+        afterEach(() => {
+            envMock.CHROME_EXTENSION_ORIGIN = undefined
+        })
+
+        it.each([
+            ['a foreign chromiumapp.org extension', FOREIGN],
+            [
+                'a foreign chrome-extension:// ID',
+                'chrome-extension://aaaabbbbccccddddeeeeffffgggghhhh/cb',
+            ],
+            [
+                'our ID one label too deep',
+                'https://x.gaimofgglbackoimfjopicmbmnlccfoe.chromiumapp.org/',
+            ],
+            [
+                'our host with a port',
+                'https://gaimofgglbackoimfjopicmbmnlccfoe.chromiumapp.org:8443/',
+            ],
+            [
+                'our host with userinfo',
+                'https://u:p@gaimofgglbackoimfjopicmbmnlccfoe.chromiumapp.org/',
+            ],
+        ])('refuses to forward the code to %s', async (_label, target) => {
+            const res = await get({
+                extension_redirect: target,
+                code: 'FAKE_CODE',
+                state: 's',
+            })
+            expect(res.status).toBe(400)
+            expect(res.headers.get('location')).toBeNull()
+        })
+
+        it('refuses a foreign extension swapped into the UNSIGNED envelope `r` of a legit Apple state', async () => {
+            // The envelope `r` is not covered by the HMAC — an attacker can
+            // take a genuinely-issued authorize URL and rewrite it.
+            const form = new FormData()
+            form.append('code', 'FAKE_CODE')
+            form.append('state', envelope(FOREIGN, 'legit-signed-state'))
+            const res = await redirectPOST(
+                new NextRequest(ROUTE, { method: 'POST', body: form }),
+            )
+            expect(res.status).toBe(400)
+            expect(res.headers.get('location')).toBeNull()
+        })
+
+        it('error path: is NOT an open redirect to a website', async () => {
+            const res = await get({
+                error: 'access_denied',
+                extension_redirect: 'https://example.com/phish',
+            })
+            expect(res.status).toBe(400)
+            expect(res.headers.get('location')).toBeNull()
+            expect((await body(res)).error).toBe('access_denied')
+        })
+
+        it('error path: does not hand the error to a foreign extension either', async () => {
+            const res = await get({
+                error: 'access_denied',
+                state: envelope(FOREIGN, 'signed'),
+            })
+            expect(res.status).toBe(400)
+            expect(res.headers.get('location')).toBeNull()
+        })
+
+        it('forwards to the Edge Add-ons build', async () => {
+            const res = await get({
+                extension_redirect: EDGE,
+                code: 'FAKE_CODE',
+                state: 's',
+            })
+            const loc = new URL(res.headers.get('location') ?? '')
+            expect(loc.origin + loc.pathname).toBe(EDGE)
+        })
+
+        it("forwards to the deployment's own CHROME_EXTENSION_ORIGIN (unpacked dev build)", async () => {
+            envMock.CHROME_EXTENSION_ORIGIN =
+                'chrome-extension://aaaabbbbccccddddeeeeffffgggghhhh'
+            const res = await get({
+                extension_redirect: FOREIGN,
+                code: 'FAKE_CODE',
+                state: 's',
+            })
+            const loc = new URL(res.headers.get('location') ?? '')
+            expect(loc.origin + loc.pathname).toBe(FOREIGN)
         })
     })
 
