@@ -449,4 +449,25 @@ describe('couponBoxDiscoveryEnabled — the promo-box finder switch', () => {
         expect(featureCalls()).toHaveLength(1)
         expect(sessionData.caramel_features.couponBoxDiscovery).toBe(true)
     })
+
+    it('while the finder is on, the cache lives 30 minutes even with capture on (the kill switch)', async () => {
+        const t0 = 1_800_000_000_000
+        const now = vi.spyOn(Date, 'now')
+        now.mockReturnValue(t0)
+        responses.push(
+            ok({ shopperCodeCapture: true, couponBoxDiscovery: true }),
+            ok({ shopperCodeCapture: true, couponBoxDiscovery: false }),
+        )
+
+        expect(await invoke(ASK)).toEqual({ enabled: true })
+        now.mockReturnValue(t0 + 29 * 60 * 1000)
+        expect(await invoke(ASK)).toEqual({ enabled: true })
+        expect(featureCalls()).toHaveLength(1)
+
+        // 31 minutes on: the owner switched it off, and the extension sees it.
+        now.mockReturnValue(t0 + 31 * 60 * 1000)
+        expect(await invoke(ASK)).toEqual({ enabled: false })
+        expect(featureCalls()).toHaveLength(2)
+        now.mockRestore()
+    })
 })

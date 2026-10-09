@@ -234,6 +234,15 @@ describe('what the finder must never pick', () => {
         expect(caramelDiscoverCouponBox().input).toBeNull()
     })
 
+    it('an add-to-cart button beside the box is never its apply button', () => {
+        document.body.innerHTML =
+            '<div><input id="pc" name="discount_code" type="text">' +
+            '<button id="atc">Add to cart</button></div>' +
+            TOTAL
+
+        expect(caramelDiscoverCouponBox().button).toBeNull()
+    })
+
     it('an order button beside the box is never its apply button', () => {
         document.body.innerHTML =
             '<div><input id="pc" name="promo_code" type="text">' +
@@ -244,6 +253,76 @@ describe('what the finder must never pick', () => {
 
         expect(found.input?.id).toBe('pc')
         expect(found.button).toBeNull()
+    })
+})
+
+describe('the total reader reads one row, or nothing', () => {
+    it('a column heading named Total is not the total row', () => {
+        document.body.innerHTML =
+            '<table><thead><tr><th>Item</th><th>Total</th></tr></thead>' +
+            '<tbody><tr><td>Mug</td><td><s>$200.00</s> $100.00</td></tr></tbody></table>'
+
+        expect(caramelFindOrderTotal()).toBeNull()
+    })
+
+    it('a summary list: the total value, not the block with the shipping promise in it', () => {
+        document.body.innerHTML =
+            '<dl><dt>Subtotal</dt><dd>$100.00</dd>' +
+            '<dt>Shipping</dt><dd>Free shipping over $150</dd>' +
+            '<dt>Total</dt><dd id="t">$110.00</dd></dl>'
+
+        expect(caramelFindOrderTotal()?.id).toBe('t')
+    })
+
+    it('a row holding two amounts is not read', () => {
+        document.body.innerHTML =
+            '<div><span>Total</span><span><s>$120.00</s> $100.00</span></div>'
+
+        expect(caramelFindOrderTotal()).toBeNull()
+    })
+
+    it('a total weight is not a total', () => {
+        document.body.innerHTML =
+            '<div><span>Total weight</span><span>2.50 kg</span></div>'
+
+        expect(caramelFindOrderTotal()).toBeNull()
+    })
+})
+
+describe('the reveal toggle is never a checkout submit', () => {
+    const FORM_TOGGLE =
+        '<form><button id="tg" aria-expanded="false">Have a promo code?</button>' +
+        '<div id="panel" style="display:none">' +
+        '<input id="pc" name="promo_code" type="text"><button type="button" id="pa">Apply</button></div>' +
+        '<button type="submit">Pay now</button></form>' +
+        TOTAL
+
+    it('is not offered to the shopper and is never clicked', async () => {
+        document.body.innerHTML = FORM_TOGGLE
+        let clicks = 0
+        document.getElementById('tg').addEventListener('click', e => {
+            clicks++
+            e.preventDefault()
+        })
+
+        expect(caramelFinderSeesBox()).toBe(false)
+        expect(
+            await caramelDiscoveredRecord({ domain: 'shop.test' }),
+        ).toBeNull()
+        expect(clicks).toBe(0)
+    })
+
+    it('a type="button" toggle in the same form is still used', async () => {
+        document.body.innerHTML = FORM_TOGGLE
+        const tg = document.getElementById('tg')
+        tg.type = 'button'
+        tg.addEventListener('click', () => {
+            document.getElementById('panel').style.display = ''
+        })
+
+        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+
+        expect(document.querySelector(rec.couponInput)?.id).toBe('pc')
     })
 })
 
@@ -259,6 +338,32 @@ describe('the record the apply flow runs on', () => {
         expect(
             document.querySelector(rec.priceContainer)?.textContent,
         ).toContain('$100.00')
+        // The box's own small container is watched for the store's answer.
+        expect(document.querySelector(rec.caramelAnswer)?.className).toBe(
+            'promo',
+        )
+    })
+
+    it('carries none of the stale config fields it did not find', async () => {
+        document.body.innerHTML = PROMO_BOX + TOTAL
+
+        const rec = await caramelDiscoveredRecord({
+            domain: 'shop.test',
+            couponRemove: '.remove',
+            dismissButton: '.close',
+            successIndicator: '.ok',
+            errorIndicator: '.err',
+            showInput: '.show',
+        })
+
+        for (const k of [
+            'couponRemove',
+            'dismissButton',
+            'successIndicator',
+            'errorIndicator',
+            'showInput',
+        ])
+            expect(rec[k]).toBeNull()
     })
 
     it('no readable total, no record: there would be nothing honest to measure', async () => {

@@ -585,7 +585,10 @@ export function caramelDisclosureFor(el) {
  */
 const CARAMEL_PENDING_KEY = 'caramel_pending_submit'
 // Consumed by coupon-runner.js (cross-file content-script call).
-export function caramelMarkPendingSubmit(code, id, prices) {
+// finder: the attempt ran on a box the promo-box finder picked
+// (coupon-box-discovery.js), so the page after the reload is read by the
+// finder's own total reader, never by a config selector.
+export function caramelMarkPendingSubmit(code, id, prices, finder = false) {
     try {
         sessionStorage.setItem(
             CARAMEL_PENDING_KEY,
@@ -596,6 +599,7 @@ export function caramelMarkPendingSubmit(code, id, prices) {
                     p => typeof p === 'number' && !isNaN(p),
                 ),
                 t: Date.now(),
+                finder: finder === true,
             }),
         )
     } catch {
@@ -637,6 +641,7 @@ export function caramelTakePendingSubmit(maxAgeMs = 120000) {
         code: st.code,
         id: st.id ?? null,
         prices: Array.isArray(st.prices) ? st.prices : [],
+        finder: st.finder === true,
     }
 }
 

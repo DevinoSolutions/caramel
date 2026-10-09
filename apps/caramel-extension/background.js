@@ -208,7 +208,12 @@ function _writeFeaturesSession(entry) {
 
 function _featuresFresh(e) {
     if (!e || typeof e.shopperCodeCapture !== 'boolean') return false
-    const ttl = e.shopperCodeCapture ? FEATURES_TTL_ON_MS : FEATURES_TTL_OFF_MS
+    // While the promo-box finder is on, the short lifetime: turning it OFF is
+    // the kill switch, and it must reach extensions within 30 minutes.
+    const ttl =
+        e.shopperCodeCapture && e.couponBoxDiscovery !== true
+            ? FEATURES_TTL_ON_MS
+            : FEATURES_TTL_OFF_MS
     return Date.now() - e.ts < ttl
 }
 
@@ -230,9 +235,9 @@ async function _fetchFeatures() {
     return _featuresMemo
 }
 
-/* The cached features entry. The cache lifetime still follows the capture flag
- * alone (see _featuresFresh), so a couponBoxDiscovery flip is felt within the
- * same window: 30 minutes while capture is off, 6 hours while it is on. */
+/* The cached features entry. Lifetime (see _featuresFresh): 6 hours only while
+ * capture is on and the finder is off, 30 minutes otherwise, so switching the
+ * finder off reaches every extension within 30 minutes. */
 function _features() {
     if (_featuresFresh(_featuresMemo)) return Promise.resolve(_featuresMemo)
     // One fetch for however many callers arrive while it is running; cleared

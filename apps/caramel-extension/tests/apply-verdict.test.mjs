@@ -150,6 +150,63 @@ describe('applyCoupon verdict — success rule', () => {
         expect(res.newTotal).toBe(90)
     })
 
+    it('a finder-picked box: the store answering in the box ends the wait early', async () => {
+        document.body.insertAdjacentHTML('beforeend', '<div id="ans"></div>')
+        const rec = {
+            ...BASE,
+            priceContainer: '#total',
+            caramelFound: true,
+            caramelAnswer: '#ans',
+        }
+        respond(() =>
+            setText(document.getElementById('ans'), 'Sorry, NOPE is not valid'),
+        )
+
+        const started = performance.now()
+        const res = await applyCoupon('NOPE', rec)
+
+        expect(res.success).toBe(false)
+        // The answer window is 10s; the store answered after 150ms.
+        expect(performance.now() - started).toBeLessThan(4000)
+    })
+
+    it("a finder-picked box: the store's own sentence is quoted, not the field's label with it", async () => {
+        document.body.innerHTML =
+            '<div class="promo"><label for="promo">Promo code</label>' +
+            '<input id="promo" /><button id="apply">Apply</button>' +
+            '<div id="msg"></div></div><div id="total"></div>'
+        setText(document.getElementById('total'), '$100.00')
+        // jsdom has no innerText; the generic reader walks ancestors by it.
+        const proto = globalThis.HTMLElement.prototype
+        const prior = Object.getOwnPropertyDescriptor(proto, 'innerText')
+        Object.defineProperty(proto, 'innerText', {
+            configurable: true,
+            get() {
+                return this.textContent
+            },
+        })
+        try {
+            respond(() => {
+                document.getElementById('msg').textContent =
+                    'Sorry, the code NOPE is not valid.'
+            })
+            const rec = {
+                ...BASE,
+                priceContainer: '#total',
+                caramelFound: true,
+                caramelAnswer: '.promo',
+            }
+
+            const res = await applyCoupon('NOPE', rec)
+
+            expect(res.success).toBe(false)
+            expect(res.errorMsg).toBe('Sorry, the code NOPE is not valid.')
+        } finally {
+            if (prior) Object.defineProperty(proto, 'innerText', prior)
+            else delete proto.innerText
+        }
+    })
+
     it('returns exactly the documented verdict keys', async () => {
         const rec = { ...BASE, successIndicator: '#applied-row' }
         respond(mountAppliedRow)

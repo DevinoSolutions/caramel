@@ -195,6 +195,7 @@ describe('dom-utils.js — the pending-submit record', () => {
             code: 'THEO20',
             id: 'c1',
             prices: [73.9, 59.12],
+            finder: false,
         })
     })
 
@@ -318,6 +319,44 @@ describe('store-detect.js — the page after the navigation', () => {
         await startCheckoutDetection()
 
         expect(document.getElementById('caramel-small-prompt')).toBeNull()
+    })
+
+    // A run on a box the promo-box finder picked took its baseline from the
+    // finder's own total row. The store's config (stale, which is why the
+    // finder ran) may still name another number, here a $100 subtotal under a
+    // $110 total; reading it after the reload would invent a $10 saving.
+    function mountFinderTotal(text) {
+        const row = document.createElement('div')
+        row.innerHTML = '<span>Order total</span> <span></span>'
+        row.lastChild.textContent = text
+        Object.defineProperty(row, 'innerText', {
+            value: 'Order total ' + text,
+            configurable: true,
+        })
+        document.body.appendChild(row)
+    }
+
+    it('a finder attempt is read by the finder total, never the stale config number', async () => {
+        caramelMarkPendingSubmit('THEO20', 'c1', [110], true)
+        setTotalText('$100.00')
+        mountFinderTotal('$110.00')
+
+        await startCheckoutDetection()
+
+        expect(recordedSavings).toHaveLength(0)
+        expect(reportedOutcomes).toEqual([])
+        expect(finalModalCalls[0][0]).toBe(0)
+    })
+
+    it('a finder attempt whose total row dropped is a measured win', async () => {
+        caramelMarkPendingSubmit('THEO20', 'c1', [110], true)
+        setTotalText('$100.00')
+        mountFinderTotal('$99.00')
+
+        await startCheckoutDetection()
+
+        expect(recordedSavings).toHaveLength(1)
+        expect(recordedSavings[0].amount).toBeCloseTo(11, 2)
     })
 
     it('claims nothing when the total did not move', async () => {

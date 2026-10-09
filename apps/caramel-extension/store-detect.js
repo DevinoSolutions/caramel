@@ -36,6 +36,7 @@ import {
 } from './coupon-apply.js'
 import {
     caramelCouponBoxDiscoveryOn,
+    caramelFinderReadTotal,
     caramelFinderSeesBox,
 } from './coupon-box-discovery.js'
 import { fetchCoupons } from './coupon-fetch.js'
@@ -618,10 +619,13 @@ async function _resumePendingSubmit() {
     const pending = caramelTakePendingSubmit()
     if (!pending) return false
     const rec = await getDomainRecord(location.hostname)
-    const now =
-        rec && rec.priceContainer
-            ? getPrice(rec.priceContainer, { returnLargest: true })
-            : NaN
+    // A finder attempt's baseline came from the finder's total row; reading a
+    // config's priceContainer here would compare two different numbers.
+    const now = pending.finder
+        ? caramelFinderReadTotal()
+        : rec && rec.priceContainer
+          ? getPrice(rec.priceContainer, { returnLargest: true })
+          : NaN
     // Same tightest-defensible-baseline rule the in-page path uses, against the
     // prices captured before the submit — it can never overstate a saving.
     const baseline = caramelBaselineFor(now, pending.prices)
@@ -674,7 +678,9 @@ async function _resumePendingSubmit() {
 
     // That code didn't win, and on this kind of cart every code costs a page
     // load. Carry the run on rather than making the shopper click per code.
-    if (await _caramelContinueRun(rec)) return true
+    // A finder run is not continued: its picks did not survive the reload,
+    // and the config record would drive whatever stale box it still names.
+    if (!pending.finder && (await _caramelContinueRun(rec))) return true
     caramelEndRun()
 
     if (Number.isFinite(now)) {

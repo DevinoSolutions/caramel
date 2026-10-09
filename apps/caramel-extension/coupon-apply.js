@@ -290,6 +290,19 @@ export function caramelQuoteIsAttributable(quote, priorText) {
 const ERROR_WORDS_RE =
     /\b(invalid|expired|not valid|doesn'?t apply|cannot be applied|cannot apply|already used|no longer|reached the limit|minimum|coupon code is required|wrong code)\b/i
 
+// The innermost element under scope whose text carries the rejection phrase:
+// the store's message itself. null when it is not one short element.
+function _caramelSmallestSaying(scope) {
+    let best = null
+    for (const el of scope.querySelectorAll('*')) {
+        const t = (el.innerText || '').trim()
+        if (t && GENERIC_ERROR_TEXT_RE.test(t)) best = t
+    }
+    // Document order puts a parent before its children, so the last hit is
+    // the innermost one.
+    return best && best.length <= 200 ? best.replace(/\s+/g, ' ') : null
+}
+
 function detectCouponError(rec, baseline, code) {
     // baseline is what snapshotErrorState() returned BEFORE the apply.
     // code is the coupon string we just tried.
@@ -333,6 +346,14 @@ function detectCouponError(rec, baseline, code) {
     for (let d = 0; d < 5 && scope; d++) {
         const text = (scope.innerText || '').trim()
         if (text && GENERIC_ERROR_TEXT_RE.test(text)) {
+            // A finder-picked box (coupon-box-discovery.js): quote the element
+            // that says it, not a window around it. The window would carry
+            // the field's own label and button ("Promo code Apply Sorry, …"),
+            // and the quote goes to the shopper and into the report.
+            if (rec.caramelFound) {
+                const said = _caramelSmallestSaying(scope)
+                if (said) return said
+            }
             const idx = text.search(GENERIC_ERROR_TEXT_RE)
             return text
                 .slice(Math.max(0, idx - 40), idx + 120)
@@ -478,6 +499,24 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
             )
     }
     const waiters = [waitForCartSignal(APPLY_WAIT_MS)]
+    // A box the finder picked has no error selector of its own; its small
+    // container (rec.caramelAnswer) changing text is the store answering, so
+    // the wait ends there instead of at the timeout.
+    const answerEl = rec.caramelAnswer ? qOne(rec.caramelAnswer) : null
+    if (answerEl) {
+        const said = () => (answerEl.innerText || '').trim()
+        const before = said()
+        waiters.push(
+            (async () => {
+                const startedAt = performance.now()
+                while (performance.now() - startedAt < APPLY_WAIT_MS) {
+                    if (said() !== before) return 'answered'
+                    await sleep(200)
+                }
+                return 'answer-timeout'
+            })(),
+        )
+    }
     // A price-watch timeout means "the total didn't change" — that's a
     // no-signal outcome, NOT a coupon error. Let it RESOLVE (swallow the
     // reject) so a failed apply falls through to the real committed / error-
@@ -495,6 +534,16 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
 
     const via = await Promise.race(waiters)
     log('Wait finished via', via)
+    // The store's words can land a beat before its total re-renders. For a
+    // finder-picked box the total is the whole verdict, so give it a short
+    // settle before reading it.
+    if (rec.caramelFound && priceEl && via === 'answered') {
+        for (let t = 0; t < 6; t++) {
+            const now = getPrice(rec.priceContainer, { returnLargest: true })
+            if (!isNaN(now) && now < original) break
+            await sleep(250)
+        }
+    }
 
     // 5] Determine outcome:
     //   - committed = something visibly applied (DOM mutation)

@@ -22,11 +22,21 @@
 //     total alone (coupon-apply.js caramelAwaitCouponVerdict): the code worked
 //     only if the total went down. Without a readable total there is nothing
 //     honest to say, so the old copy-the-codes answer stands.
+//   · one code per page load on a cart whose apply button reloads the page.
+//     The picks are markers on the page, so they do not survive the reload:
+//     the code we submitted is judged on the page the store sends back (by
+//     the same total reader, caramelFinderReadTotal), and the run ends there
+//     rather than guessing at a box on a page it has not read.
 //   · only the page's own document. A box inside a shadow root or a frame is
 //     out of reach, because the apply flow finds what we picked through a
 //     document query (the data-caramel-found marker below).
 import { caramelSendMessage, log, sleep } from './caramel-base.js'
-import { _isVisible, caramelIsForbiddenControl } from './dom-utils.js'
+import {
+    _isVisible,
+    caramelFormSubmitIsUnsafe,
+    caramelIsForbiddenControl,
+    getPrice,
+} from './dom-utils.js'
 
 /* ------------------------------------------------------------ vocabulary */
 // Words a store uses for the coupon box. Scored on the input's own attributes
@@ -168,6 +178,12 @@ const DANGER = [
     'remove',
     'delete',
     'search',
+    // Beside a promo box on a product-heavy cart: it changes the cart, never
+    // applies a code.
+    'add to cart',
+    'add to bag',
+    'add to basket',
+    'wishlist',
 ]
 // "gift" only as a code: card/certificate/voucher. "Add a free gift message"
 // opens a message drawer, not a promo box.
@@ -737,6 +753,8 @@ function findToggle(doc) {
     )) {
         // Leaf-ish only: a div wrapping the whole sidebar also "says" promo.
         if (el.children.length > 3) continue
+        // Cheap first (no layout): innerText below forces one per element.
+        if (norm(el.textContent).length > 200) continue
         const t = norm(textOf(el))
         if (!t || t.length > 60) continue
         if (!visible(el)) continue
@@ -762,7 +780,7 @@ function findToggle(doc) {
 const TOTAL_LABEL =
     /^(order |estimated |grand |cart |basket |bag |your )?total( due| to pay| \(.*\))?:?$|^total\b|^(est\.?|estimated) (order )?total|^order total|^amount due|^total à payer|^gesamt|^summe|^totale/i
 const TOTAL_NOT =
-    /sub[- ]?total|sav(e|ed|ing|ings)\b|discount|items? total|total items|shipping|tax|points/i
+    /sub[- ]?total|sav(e|ed|ing|ings)\b|discount|items? total|total items|shipping|tax|points|weight|qty|quantity/i
 const SUB_LABEL =
     /^(order |cart |merchandise |product |est\.? |estimated )?sub[- ]?total( \(.*\))?:?$|^product total:?$/i
 const SUB_NOT = /sav(e|ed|ing|ings)\b|discount|shipping|tax|points/i
@@ -770,6 +788,12 @@ const SUB_NOT = /sav(e|ed|ing|ings)\b|discount|shipping|tax|points/i
 const MONEY_RE =
     /(?:[$£€¥₹₩₺₱₪₫฿₦]|R\$|\b(?:USD|CAD|AUD|NZD|EUR|GBP|CHF|SEK|NOK|DKK|PLN|AED|SAR|INR|JPY|HKD|SGD|MXN|ZAR|kr)\b)\s?-?\d[\d.,]*|\d[\d.,]*\s?(?:[$£€¥₹₩₺₱₪₫฿₦]|\b(?:USD|EUR|GBP|CHF|kr)\b|zł)|\d[\d,]*[.,]\d{2}\b/i
 const AMOUNT_ONLY = /^[^\w$£€¥₹₩₺₱₪₫฿₦]{0,3}\S{0,4}\s?-?\d[\d.,\s]*\S{0,4}$/
+const moneyCount = t =>
+    (t.match(new RegExp(MONEY_RE.source, 'gi')) || []).length
+// One row: short, and holding exactly one amount. A block with two amounts
+// (a struck-through price, a "free shipping over $150" line) is not a total
+// we can read honestly, because its largest number need not be the total.
+const ROW_MAX = 90
 
 function scanTotalRows(doc, LABEL, NOT) {
     const hits = []
@@ -784,6 +808,9 @@ function scanTotalRows(doc, LABEL, NOT) {
         if (n.parentElement) labels.add(n.parentElement)
     for (const el of labels) {
         if (el.closest('script,style,noscript')) continue
+        // A column heading labels every row under it, not one total.
+        if (el.closest('thead, [role="columnheader"], th[scope="col"]'))
+            continue
         const own = norm(
             [...el.childNodes]
                 .filter(n => n.nodeType === 3)
@@ -813,13 +840,13 @@ function scanTotalRows(doc, LABEL, NOT) {
             i++, prev = p, p = p.parentElement
         ) {
             const t = norm(textOf(p))
-            if (t.length > 160) {
+            if (t.length > ROW_MAX || moneyCount(t) > 1) {
                 const sib = (prev || el).nextElementSibling
                 const st = sib ? norm(textOf(sib)) : ''
                 if (
                     st.length <= 40 &&
                     AMOUNT_ONLY.test(st) &&
-                    MONEY_RE.test(st)
+                    moneyCount(st) === 1
                 )
                     hits.push({ el: sib, visible: visible(sib) })
                 break
@@ -835,9 +862,12 @@ function scanTotalRows(doc, LABEL, NOT) {
 }
 
 // Exported for tests/coupon-box-discovery.test.mjs.
-export function caramelFindOrderTotal(doc = document) {
+// opts.totalOnly: no subtotal fallback (the after-reload read, see
+// caramelFinderReadTotal).
+export function caramelFindOrderTotal(doc = document, opts) {
     let hits = scanTotalRows(doc, TOTAL_LABEL, TOTAL_NOT)
-    if (!hits.length) hits = scanTotalRows(doc, SUB_LABEL, SUB_NOT)
+    if (!hits.length && !opts?.totalOnly)
+        hits = scanTotalRows(doc, SUB_LABEL, SUB_NOT)
     const shown = hits.filter(h => h.visible)
     const pool = shown.length ? shown : hits
     return pool.length ? pool[pool.length - 1].el : null
@@ -893,6 +923,19 @@ function mark(el, kind) {
     return sel(kind)
 }
 
+/* Never click as a reveal toggle: an order-completing control, or a control
+ * that would SUBMIT a form holding one (a <button> with no type is a submit
+ * button). Its label can be innocent ("Have a promo code?") while the click
+ * places the order. */
+function toggleRefused(el) {
+    if (caramelIsForbiddenControl(el)) return true
+    const submits =
+        !!el.form &&
+        ((el.tagName === 'BUTTON' && el.type === 'submit') ||
+            (el.tagName === 'INPUT' && /^(submit|image)$/i.test(el.type)))
+    return submits && caramelFormSubmitIsUnsafe(el)
+}
+
 /* Can the finder see a promo box on this page, without touching it?
  * Used by checkout detection, so it never clicks: a visible confident box, or a
  * reveal toggle, plus a readable total. */
@@ -904,7 +947,7 @@ export function caramelFinderSeesBox(doc = document) {
         log('FINDER_SEES_BOX', { reasons: found.reasons })
         return true
     }
-    if (found.toggle && !caramelIsForbiddenControl(found.toggle)) {
+    if (found.toggle && !toggleRefused(found.toggle)) {
         log('FINDER_SEES_TOGGLE', { reasons: found.reasons.toggle })
         return true
     }
@@ -928,9 +971,9 @@ export async function caramelDiscoveredRecord(rec, doc = document) {
     }
     let found = caramelDiscoverCouponBox(doc)
     if (!found.inputVisible && found.toggle) {
-        if (caramelIsForbiddenControl(found.toggle)) {
+        if (toggleRefused(found.toggle)) {
             log('AUTO_INSERT_REFUSED_CONTROL', {
-                reason: 'the finder picked an order-completing control as the promo toggle',
+                reason: 'the finder picked an order-completing control, or the submit button of a checkout form, as the promo toggle',
             })
             return null
         }
@@ -946,16 +989,49 @@ export async function caramelDiscoveredRecord(rec, doc = document) {
         return null
     }
     log('FINDER_PICKED', { reasons: found.reasons })
+    const answer = answerArea(found.input, found.button)
     return {
         ...rec,
         couponInput: mark(found.input, 'input'),
         couponSubmit: mark(found.button, 'submit'),
         priceContainer: mark(total, 'total'),
-        // The config's own reveal toggle, if any, belongs to a box we no
-        // longer use; the box is open by now.
+        // Where the store answers: the box's own small container. Watching it
+        // (coupon-apply.js caramelAwaitCouponVerdict) lets a refused code end
+        // its wait the moment the store says something, instead of sitting out
+        // the whole answer window. It never decides a success (the money rule
+        // does) and is never quoted: it holds the field's own label too.
+        caramelAnswer: answer ? mark(answer, 'answer') : null,
+        // Everything else a config row says describes a page that is not this
+        // one (that is why we are here): never click or read it.
         showInput: null,
+        errorIndicator: null,
+        dismissButton: null,
+        successIndicator: null,
+        couponRemove: null,
         caramelFound: true,
     }
+}
+
+// The smallest ancestor holding both the box and its button, if it is still
+// a small region (a whole sidebar is not where one answer appears).
+function answerArea(input, button) {
+    let p = input.parentElement
+    for (let i = 0; i < 5 && p; i++, p = p.parentElement) {
+        if (!p.contains(button)) continue
+        return norm(textOf(p)).length <= 400 ? p : null
+    }
+    return null
+}
+
+/* The order total on a page the store just loaded after a finder submit.
+ * The same reader as before the submit (a config's priceContainer on this
+ * store described some other number), the total row only: a subtotal read
+ * against a total baseline would invent a saving. NaN when there is no row. */
+// Called from store-detect.js.
+export function caramelFinderReadTotal(doc = document) {
+    const total = caramelFindOrderTotal(doc, { totalOnly: true })
+    if (!total) return NaN
+    return getPrice(mark(total, 'total'), { returnLargest: true })
 }
 
 /* Is the finder switched on? The background answers from its cached features

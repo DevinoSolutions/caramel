@@ -952,7 +952,12 @@ export async function startApplyingCoupons(rec, options) {
         // Written BEFORE the submit, because a submit that navigates never
         // comes back here (see caramelMarkPendingSubmit). Cleared immediately
         // after, so a normal attempt leaves nothing for the next page to read.
-        caramelMarkPendingSubmit(code, coupons[i].id, originalPrices)
+        caramelMarkPendingSubmit(
+            code,
+            coupons[i].id,
+            originalPrices,
+            rec.caramelFound === true,
+        )
         const res = await applyCoupon(code, rec)
         caramelClearPendingSubmit()
 
