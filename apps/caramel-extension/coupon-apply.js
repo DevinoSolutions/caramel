@@ -574,8 +574,15 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
     //  3. committed AND no errorMsg           → fallback for sites that
     //                                            don't keep their list mounted
     //  4. otherwise                           → fail
-    const success =
-        priceDropped || (committed && stuck) || (committed && !errorMsg)
+    //
+    // A promo box the finder picked (coupon-box-discovery.js, rec.caramelFound)
+    // has no store-written success or error selector behind it: "something
+    // committed" there is the generic applied-row guess, which a store's own
+    // "code not valid" row can satisfy. So the money rule alone decides it:
+    // the code worked only if the total went down.
+    const success = rec.caramelFound
+        ? priceDropped
+        : priceDropped || (committed && stuck) || (committed && !errorMsg)
     // What the applied rows SAY (only read when something committed): lets a
     // caller tell a row that names the code from a generic "redeemed" row.
     const appliedRowsText = committed

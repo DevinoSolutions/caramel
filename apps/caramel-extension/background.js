@@ -180,8 +180,8 @@ async function fetchCaramelApi(url, opts = {}, timeoutMs = FETCH_TIMEOUT_MS) {
 const FEATURES_CACHE_KEY = 'caramel_features'
 const FEATURES_TTL_ON_MS = 6 * 60 * 60 * 1000
 const FEATURES_TTL_OFF_MS = 30 * 60 * 1000
-let _featuresInflight = null // Promise<boolean> while a fetch is running
-let _featuresMemo = null // { shopperCodeCapture, ts }
+let _featuresInflight = null // Promise<entry> while a fetch is running
+let _featuresMemo = null // { shopperCodeCapture, couponBoxDiscovery, ts }
 
 function _readFeaturesSession() {
     return new Promise(resolve => {
@@ -221,15 +221,20 @@ async function _fetchFeatures() {
         throw new Error('features: shopperCodeCapture is not a boolean')
     _featuresMemo = {
         shopperCodeCapture: json.shopperCodeCapture,
+        // Anything but a literal true is off: an app that predates the flag
+        // omits it, and the finder must never switch itself on.
+        couponBoxDiscovery: json.couponBoxDiscovery === true,
         ts: Date.now(),
     }
     _writeFeaturesSession(_featuresMemo)
-    return json.shopperCodeCapture
+    return _featuresMemo
 }
 
-function _shopperCaptureEnabled() {
-    if (_featuresFresh(_featuresMemo))
-        return Promise.resolve(_featuresMemo.shopperCodeCapture)
+/* The cached features entry. The cache lifetime still follows the capture flag
+ * alone (see _featuresFresh), so a couponBoxDiscovery flip is felt within the
+ * same window: 30 minutes while capture is off, 6 hours while it is on. */
+function _features() {
+    if (_featuresFresh(_featuresMemo)) return Promise.resolve(_featuresMemo)
     // One fetch for however many callers arrive while it is running; cleared
     // when it settles so a failure is retried by the next caller.
     if (!_featuresInflight) {
@@ -237,7 +242,7 @@ function _shopperCaptureEnabled() {
             const stored = await _readFeaturesSession()
             if (_featuresFresh(stored)) {
                 _featuresMemo = stored
-                return stored.shopperCodeCapture
+                return stored
             }
             return _fetchFeatures()
         })().finally(() => {
@@ -245,6 +250,22 @@ function _shopperCaptureEnabled() {
         })
     }
     return _featuresInflight
+}
+
+function _shopperCaptureEnabled() {
+    return _features().then(e => e.shopperCodeCapture)
+}
+
+// Answers the content script's couponBoxDiscoveryEnabled message. Any failure
+// to read the flag is answered as off: the finder is an addition, never a
+// requirement.
+async function couponBoxDiscoveryEnabled() {
+    try {
+        return (await _features()).couponBoxDiscovery === true
+    } catch (err) {
+        logError('features', err)
+        return false
+    }
 }
 
 function _forgetFeatures() {
@@ -647,6 +668,11 @@ export function initBackground() {
                         sendResponse({ error: String(err) })
                     })
 
+                return true
+            } else if (message.action === 'couponBoxDiscoveryEnabled') {
+                couponBoxDiscoveryEnabled().then(enabled =>
+                    sendResponse({ enabled }),
+                )
                 return true
             } else if (message.action === 'getFavoriteStores') {
                 // The stores this account follows. fetchCaramelApi so the stored

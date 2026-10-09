@@ -123,6 +123,33 @@ describe('applyCoupon verdict — success rule', () => {
         expect(res.success).toBe(true)
     })
 
+    // A box the finder picked (coupon-box-discovery.js) has no store-written
+    // success selector behind it, so the money rule alone decides.
+    it('a finder-picked box: an applied row that stays is NOT a success without a price drop', async () => {
+        const rec = {
+            ...BASE,
+            successIndicator: '#applied-row',
+            priceContainer: '#total',
+            caramelFound: true,
+        }
+        respond(mountAppliedRow)
+
+        const res = await applyCoupon('SAVE10', rec)
+
+        expect(res.committed).toBe(true)
+        expect(res.success).toBe(false)
+    })
+
+    it('a finder-picked box: a price drop is a success', async () => {
+        const rec = { ...BASE, priceContainer: '#total', caramelFound: true }
+        respond(() => setText(document.getElementById('total'), '$90.00'))
+
+        const res = await applyCoupon('SAVE10', rec)
+
+        expect(res.success).toBe(true)
+        expect(res.newTotal).toBe(90)
+    })
+
     it('returns exactly the documented verdict keys', async () => {
         const rec = { ...BASE, successIndicator: '#applied-row' }
         respond(mountAppliedRow)

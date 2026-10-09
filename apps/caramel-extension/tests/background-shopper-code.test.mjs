@@ -406,3 +406,47 @@ describe('submitShopperCode — the submit and its answers', () => {
         expect(resp.error).toMatch(/must be strings/)
     })
 })
+
+describe('couponBoxDiscoveryEnabled — the promo-box finder switch', () => {
+    const ASK = { action: 'couponBoxDiscoveryEnabled' }
+
+    it('an app that predates the flag (no key) answers off', async () => {
+        responses.push(features(true))
+
+        expect(await invoke(ASK)).toEqual({ enabled: false })
+    })
+
+    it('the flag on answers on', async () => {
+        responses.push(
+            ok({ shopperCodeCapture: false, couponBoxDiscovery: true }),
+        )
+
+        expect(await invoke(ASK)).toEqual({ enabled: true })
+    })
+
+    it('anything but a literal true is off ("true" the string included)', async () => {
+        responses.push(
+            ok({ shopperCodeCapture: false, couponBoxDiscovery: 'true' }),
+        )
+
+        expect(await invoke(ASK)).toEqual({ enabled: false })
+    })
+
+    it('a failed features read answers off instead of an error', async () => {
+        responses.push(refused(500, null))
+
+        expect(await invoke(ASK)).toEqual({ enabled: false })
+    })
+
+    it('shares the one cached features read with shopper capture', async () => {
+        responses.push(
+            ok({ shopperCodeCapture: true, couponBoxDiscovery: true }),
+            ok({ couponId: 'c1', created: true, status: 'active' }),
+        )
+
+        expect(await invoke(ASK)).toEqual({ enabled: true })
+        await invoke(CAPTURE)
+        expect(featureCalls()).toHaveLength(1)
+        expect(sessionData.caramel_features.couponBoxDiscovery).toBe(true)
+    })
+})

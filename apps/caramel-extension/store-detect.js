@@ -34,6 +34,10 @@ import {
     caramelSinkTriedCodes,
     probeCartJson,
 } from './coupon-apply.js'
+import {
+    caramelCouponBoxDiscoveryOn,
+    caramelFinderSeesBox,
+} from './coupon-box-discovery.js'
 import { fetchCoupons } from './coupon-fetch.js'
 import { reportOutcome, startApplyingCoupons } from './coupon-runner.js'
 import {
@@ -433,7 +437,7 @@ export async function isCheckout() {
      * Still a high bar to appear: a cart-shaped URL, a readable cart with
      * something in it, and codes for the domain (tryInitialize). A store with
      * no codes, or a product page, is exactly as quiet as before. */
-    if (!rec) return await _platformCartUsable()
+    if (!rec) return (await _platformCartUsable()) || (await _finderSeesBox())
     // VISIBLE, not merely present: themes ship hidden coupon markup on
     // non-checkout pages, and some configs point showInput at site-wide
     // controls — the prompt belongs only where the user can actually see a
@@ -471,7 +475,25 @@ export async function isCheckout() {
         })
         return true
     }
-    return await _platformCartUsable()
+    return (await _platformCartUsable()) || (await _finderSeesBox())
+}
+
+/* No config describes a promo box here, but a shopper could still see one.
+ *
+ * The finder (coupon-box-discovery.js) reads the page the way a shopper does.
+ * It is asked only on a cart-shaped URL, the same bar _platformCartUsable sets,
+ * and only while the server's couponBoxDiscovery flag is on; tryInitialize then
+ * still requires codes for the domain before the prompt appears. Detection
+ * never clicks anything: opening a folded box waits for the shopper's tap. */
+async function _finderSeesBox() {
+    if (!_caramelCartIntentSignal()) return false
+    if (!(await caramelCouponBoxDiscoveryOn())) return false
+    try {
+        return caramelFinderSeesBox()
+    } catch (e) {
+        log('FINDER_FAILED', { error: String(e) })
+        return false
+    }
 }
 
 /* Coupon-availability cache — fetched once when a checkout is detected so we
