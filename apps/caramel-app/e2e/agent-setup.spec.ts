@@ -153,6 +153,22 @@ test.describe('Agent setup index', () => {
         expect(clipboard).toMatch(COPY_SENTENCE)
     })
 
+    test("every pill chip draws its agent's brand mark", async ({ page }) => {
+        await page.goto('/agent-setup')
+        const chips = page
+            .locator('[data-agent-setup-pill="agent-setup"]')
+            .getByRole('link', { name: /setup guide$/ })
+        await expect(chips).toHaveCount(5)
+        for (let i = 0; i < 5; i++) {
+            const chip = chips.nth(i)
+            // An inline Lobe Icons mark (24x24, currentColor), not a monogram.
+            const mark = chip.locator('svg[data-agent-icon]')
+            await expect(mark).toBeVisible()
+            await expect(mark).toHaveAttribute('viewBox', '0 0 24 24')
+            await expect(chip).toHaveText('')
+        }
+    })
+
     test('the verify URL and prompt.md answer for real', async ({ page }) => {
         await page.goto('/agent-setup')
         const command = await page
