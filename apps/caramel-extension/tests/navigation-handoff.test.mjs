@@ -359,6 +359,22 @@ describe('store-detect.js — the page after the navigation', () => {
         expect(recordedSavings[0].amount).toBeCloseTo(11, 2)
     })
 
+    it('a finder attempt measured on a subtotal is read on the subtotal after the reload', async () => {
+        caramelMarkPendingSubmit('THEO20', 'c1', [110], 'subtotal')
+        const row = document.createElement('div')
+        row.innerHTML = '<span>Subtotal</span> <span>$99.00</span>'
+        Object.defineProperty(row, 'innerText', {
+            value: 'Subtotal $99.00',
+            configurable: true,
+        })
+        document.body.appendChild(row)
+
+        await startCheckoutDetection()
+
+        expect(recordedSavings).toHaveLength(1)
+        expect(recordedSavings[0].amount).toBeCloseTo(11, 2)
+    })
+
     it('claims nothing when the total did not move', async () => {
         caramelMarkPendingSubmit('THEO20', 'c1', [73.9])
         setTotalText('Order Total $73.90')

@@ -31,12 +31,7 @@
 //     out of reach, because the apply flow finds what we picked through a
 //     document query (the data-caramel-found marker below).
 import { caramelSendMessage, log, sleep } from './caramel-base.js'
-import {
-    _isVisible,
-    caramelFormSubmitIsUnsafe,
-    caramelIsForbiddenControl,
-    getPrice,
-} from './dom-utils.js'
+import { _isVisible, caramelIsForbiddenControl, getPrice } from './dom-utils.js'
 
 /* ------------------------------------------------------------ vocabulary */
 // Words a store uses for the coupon box. Scored on the input's own attributes
@@ -184,6 +179,13 @@ const DANGER = [
     'add to bag',
     'add to basket',
     'wishlist',
+    'warenkorb',
+    'panier',
+    'carrito',
+    'carrello',
+    'winkelwagen',
+    'koszyk',
+    'cesta',
 ]
 // "gift" only as a code: card/certificate/voucher. "Add a free gift message"
 // opens a message drawer, not a promo box.
@@ -780,7 +782,7 @@ function findToggle(doc) {
 const TOTAL_LABEL =
     /^(order |estimated |grand |cart |basket |bag |your )?total( due| to pay| \(.*\))?:?$|^total\b|^(est\.?|estimated) (order )?total|^order total|^amount due|^total à payer|^gesamt|^summe|^totale/i
 const TOTAL_NOT =
-    /sub[- ]?total|sav(e|ed|ing|ings)\b|discount|items? total|total items|shipping|tax|points|weight|qty|quantity/i
+    /sub[- ]?total|sav(e|ed|ing|ings)\b|discount|items? total|total items|shipping|tax|points|weight|qty|quantity|calculated/i
 const SUB_LABEL =
     /^(order |cart |merchandise |product |est\.? |estimated )?sub[- ]?total( \(.*\))?:?$|^product total:?$/i
 const SUB_NOT = /sav(e|ed|ing|ings)\b|discount|shipping|tax|points/i
@@ -788,8 +790,11 @@ const SUB_NOT = /sav(e|ed|ing|ings)\b|discount|shipping|tax|points/i
 const MONEY_RE =
     /(?:[$£€¥₹₩₺₱₪₫฿₦]|R\$|\b(?:USD|CAD|AUD|NZD|EUR|GBP|CHF|SEK|NOK|DKK|PLN|AED|SAR|INR|JPY|HKD|SGD|MXN|ZAR|kr)\b)\s?-?\d[\d.,]*|\d[\d.,]*\s?(?:[$£€¥₹₩₺₱₪₫฿₦]|\b(?:USD|EUR|GBP|CHF|kr)\b|zł)|\d[\d,]*[.,]\d{2}\b/i
 const AMOUNT_ONLY = /^[^\w$£€¥₹₩₺₱₪₫฿₦]{0,3}\S{0,4}\s?-?\d[\d.,\s]*\S{0,4}$/
+// A parenthetical ("incl. 15,17 € VAT") is commentary on the amount, not a
+// second total.
 const moneyCount = t =>
-    (t.match(new RegExp(MONEY_RE.source, 'gi')) || []).length
+    (t.replace(/\(.*?\)/g, ' ').match(new RegExp(MONEY_RE.source, 'gi')) || [])
+        .length
 // One row: short, and holding exactly one amount. A block with two amounts
 // (a struck-through price, a "free shipping over $150" line) is not a total
 // we can read honestly, because its largest number need not be the total.
@@ -808,9 +813,12 @@ function scanTotalRows(doc, LABEL, NOT) {
         if (n.parentElement) labels.add(n.parentElement)
     for (const el of labels) {
         if (el.closest('script,style,noscript')) continue
-        // A column heading labels every row under it, not one total.
+        // A column heading labels every row under it, not one total. A header
+        // row need not sit in <thead>: a <th> whose row holds no <td> is one.
         if (el.closest('thead, [role="columnheader"], th[scope="col"]'))
             continue
+        const th = el.closest('th')
+        if (th && !th.closest('tr')?.querySelector('td')) continue
         const own = norm(
             [...el.childNodes]
                 .filter(n => n.nodeType === 3)
@@ -836,7 +844,7 @@ function scanTotalRows(doc, LABEL, NOT) {
         let p = el
         for (
             let i = 0, prev = null;
-            i < 4 && p;
+            i < 3 && p;
             i++, prev = p, p = p.parentElement
         ) {
             const t = norm(textOf(p))
@@ -852,6 +860,9 @@ function scanTotalRows(doc, LABEL, NOT) {
                 break
             }
             const after = t.slice(t.indexOf(own) + own.length)
+            // "Total: calculated at the next step" has no amount yet; a number
+            // found further up belongs to some other line.
+            if (/^\W*(calculated|to be calculated|tbd)\b/.test(after)) break
             if (MONEY_RE.test(after)) {
                 hits.push({ el: p, visible: visible(p) })
                 break
@@ -861,16 +872,24 @@ function scanTotalRows(doc, LABEL, NOT) {
     return hits
 }
 
-// Exported for tests/coupon-box-discovery.test.mjs.
-// opts.totalOnly: no subtotal fallback (the after-reload read, see
-// caramelFinderReadTotal).
-export function caramelFindOrderTotal(doc = document, opts) {
-    let hits = scanTotalRows(doc, TOTAL_LABEL, TOTAL_NOT)
-    if (!hits.length && !opts?.totalOnly)
+// The row and which kind it is. kind ('total' | 'subtotal') reads that kind
+// only: a later read must measure the same row kind as the baseline did.
+function findTotalRow(doc, kind) {
+    let found = 'total'
+    let hits =
+        kind === 'subtotal' ? [] : scanTotalRows(doc, TOTAL_LABEL, TOTAL_NOT)
+    if (!hits.length && kind !== 'total') {
         hits = scanTotalRows(doc, SUB_LABEL, SUB_NOT)
+        found = 'subtotal'
+    }
     const shown = hits.filter(h => h.visible)
     const pool = shown.length ? shown : hits
-    return pool.length ? pool[pool.length - 1].el : null
+    return pool.length ? { el: pool[pool.length - 1].el, kind: found } : null
+}
+
+// Exported for tests/coupon-box-discovery.test.mjs.
+export function caramelFindOrderTotal(doc = document) {
+    return findTotalRow(doc)?.el || null
 }
 
 /* ---------------------------------------------------------------- decide */
@@ -923,17 +942,17 @@ function mark(el, kind) {
     return sel(kind)
 }
 
-/* Never click as a reveal toggle: an order-completing control, or a control
- * that would SUBMIT a form holding one (a <button> with no type is a submit
- * button). Its label can be innocent ("Have a promo code?") while the click
- * places the order. */
+/* Never click as a reveal toggle: an order-completing control, or any control
+ * that would SUBMIT its form (a <button> with no type is a submit button). A
+ * reveal never needs to submit; a submit posts the cart or, in a checkout
+ * form, places the order behind an innocent label ("Have a promo code?"). */
 function toggleRefused(el) {
     if (caramelIsForbiddenControl(el)) return true
-    const submits =
+    return (
         !!el.form &&
         ((el.tagName === 'BUTTON' && el.type === 'submit') ||
             (el.tagName === 'INPUT' && /^(submit|image)$/i.test(el.type)))
-    return submits && caramelFormSubmitIsUnsafe(el)
+    )
 }
 
 /* Can the finder see a promo box on this page, without touching it?
@@ -964,7 +983,8 @@ export function caramelFinderSeesBox(doc = document) {
  * caller then keeps its own copy-the-codes answer. */
 // Called from coupon-runner.js.
 export async function caramelDiscoveredRecord(rec, doc = document) {
-    const total = caramelFindOrderTotal(doc)
+    const totalRow = findTotalRow(doc)
+    const total = totalRow?.el
     if (!total) {
         log('FINDER_NO_TOTAL', {})
         return null
@@ -995,6 +1015,8 @@ export async function caramelDiscoveredRecord(rec, doc = document) {
         couponInput: mark(found.input, 'input'),
         couponSubmit: mark(found.button, 'submit'),
         priceContainer: mark(total, 'total'),
+        // Which row kind the baseline came from; every later read uses it.
+        caramelTotalKind: totalRow.kind,
         // Where the store answers: the box's own small container. Watching it
         // (coupon-apply.js caramelAwaitCouponVerdict) lets a refused code end
         // its wait the moment the store says something, instead of sitting out
@@ -1025,13 +1047,27 @@ function answerArea(input, button) {
 
 /* The order total on a page the store just loaded after a finder submit.
  * The same reader as before the submit (a config's priceContainer on this
- * store described some other number), the total row only: a subtotal read
+ * store described some other number), and the same row kind: a subtotal read
  * against a total baseline would invent a saving. NaN when there is no row. */
 // Called from store-detect.js.
-export function caramelFinderReadTotal(doc = document) {
-    const total = caramelFindOrderTotal(doc, { totalOnly: true })
-    if (!total) return NaN
-    return getPrice(mark(total, 'total'), { returnLargest: true })
+export function caramelFinderReadTotal(doc = document, kind = 'total') {
+    const row = findTotalRow(doc, kind === 'subtotal' ? 'subtotal' : 'total')
+    if (!row) return NaN
+    return getPrice(mark(row.el, 'total'), { returnLargest: true })
+}
+
+/* The finder's total, read now. A cart that re-renders its summary replaces
+ * the row we marked, so a marker that no longer points at a live row is put
+ * back on the same kind of row first. NaN when there is none. */
+// Called from coupon-apply.js.
+export function caramelFinderTotalNow(rec, doc = document) {
+    const el = doc.querySelector(rec.priceContainer)
+    if (!el || !el.isConnected) {
+        const row = findTotalRow(doc, rec.caramelTotalKind || 'total')
+        if (!row) return NaN
+        mark(row.el, 'total')
+    }
+    return getPrice(rec.priceContainer, { returnLargest: true })
 }
 
 /* Is the finder switched on? The background answers from its cached features

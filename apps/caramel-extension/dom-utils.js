@@ -585,9 +585,10 @@ export function caramelDisclosureFor(el) {
  */
 const CARAMEL_PENDING_KEY = 'caramel_pending_submit'
 // Consumed by coupon-runner.js (cross-file content-script call).
-// finder: the attempt ran on a box the promo-box finder picked
-// (coupon-box-discovery.js), so the page after the reload is read by the
-// finder's own total reader, never by a config selector.
+// finder: false, or the row kind ('total' | 'subtotal') the baseline was read
+// from when the attempt ran on a box the promo-box finder picked
+// (coupon-box-discovery.js). The page after the reload is then read by the
+// finder's own reader on the same row kind, never by a config selector.
 export function caramelMarkPendingSubmit(code, id, prices, finder = false) {
     try {
         sessionStorage.setItem(
@@ -599,12 +600,16 @@ export function caramelMarkPendingSubmit(code, id, prices, finder = false) {
                     p => typeof p === 'number' && !isNaN(p),
                 ),
                 t: Date.now(),
-                finder: finder === true,
+                finder: _caramelFinderKind(finder),
             }),
         )
     } catch {
         /* storage blocked — we lose only the post-navigation report */
     }
+}
+function _caramelFinderKind(v) {
+    if (v === 'subtotal') return 'subtotal'
+    return v === 'total' || v === true ? 'total' : false
 }
 // Consumed by coupon-runner.js (cross-file content-script call).
 export function caramelClearPendingSubmit() {
@@ -641,7 +646,7 @@ export function caramelTakePendingSubmit(maxAgeMs = 120000) {
         code: st.code,
         id: st.id ?? null,
         prices: Array.isArray(st.prices) ? st.prices : [],
-        finder: st.finder === true,
+        finder: _caramelFinderKind(st.finder),
     }
 }
 

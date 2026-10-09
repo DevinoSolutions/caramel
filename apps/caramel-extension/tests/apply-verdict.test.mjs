@@ -170,13 +170,8 @@ describe('applyCoupon verdict — success rule', () => {
         expect(performance.now() - started).toBeLessThan(4000)
     })
 
-    it("a finder-picked box: the store's own sentence is quoted, not the field's label with it", async () => {
-        document.body.innerHTML =
-            '<div class="promo"><label for="promo">Promo code</label>' +
-            '<input id="promo" /><button id="apply">Apply</button>' +
-            '<div id="msg"></div></div><div id="total"></div>'
-        setText(document.getElementById('total'), '$100.00')
-        // jsdom has no innerText; the generic reader walks ancestors by it.
+    /** jsdom has no innerText; the finder's readers walk containers by it. */
+    async function withInnerText(fn) {
         const proto = globalThis.HTMLElement.prototype
         const prior = Object.getOwnPropertyDescriptor(proto, 'innerText')
         Object.defineProperty(proto, 'innerText', {
@@ -186,26 +181,104 @@ describe('applyCoupon verdict — success rule', () => {
             },
         })
         try {
-            respond(() => {
-                document.getElementById('msg').textContent =
-                    'Sorry, the code NOPE is not valid.'
-            })
-            const rec = {
-                ...BASE,
-                priceContainer: '#total',
-                caramelFound: true,
-                caramelAnswer: '.promo',
-            }
-
-            const res = await applyCoupon('NOPE', rec)
-
-            expect(res.success).toBe(false)
-            expect(res.errorMsg).toBe('Sorry, the code NOPE is not valid.')
+            await fn()
         } finally {
             if (prior) Object.defineProperty(proto, 'innerText', prior)
             else delete proto.innerText
         }
+    }
+    const FINDER_REC = {
+        ...BASE,
+        priceContainer: '#total',
+        caramelFound: true,
+        caramelAnswer: '.promo',
+    }
+
+    it("a finder-picked box: the store's own sentence is quoted, not the field's label or a static hint", async () => {
+        document.body.innerHTML =
+            '<div class="promo"><label for="promo">Promo code</label>' +
+            '<input id="promo" /><button id="apply">Apply</button>' +
+            '<div id="msg"></div>' +
+            '<p class="hint">Enter a valid promo code to see your savings</p></div>' +
+            '<div id="total">$100.00</div>'
+        await withInnerText(async () => {
+            respond(() => {
+                document.getElementById('msg').textContent =
+                    'Sorry, the code NOPE is not valid.'
+            })
+
+            const res = await applyCoupon('NOPE', FINDER_REC)
+
+            expect(res.success).toBe(false)
+            expect(res.errorMsg).toBe('Sorry, the code NOPE is not valid.')
+            expect(res.errorIsNew).toBe(true)
+        })
     })
+
+    it('a finder-picked box: a second refusal that only changes the code named still ends the wait', async () => {
+        document.body.innerHTML =
+            '<div class="promo"><input id="promo" /><button id="apply">Apply</button>' +
+            '<div id="msg">Sorry, the code FIRST is not valid.</div></div>' +
+            '<div id="total">$100.00</div>'
+        await withInnerText(async () => {
+            respond(() => {
+                document.getElementById('msg').textContent =
+                    'Sorry, the code SECOND is not valid.'
+            })
+
+            const started = performance.now()
+            const res = await applyCoupon('SECOND', FINDER_REC)
+
+            expect(res.success).toBe(false)
+            expect(performance.now() - started).toBeLessThan(4000)
+        })
+    }, 15000)
+
+    it('a finder-picked box: the button reading "Applying…" is not the store answering', async () => {
+        // A slow cart: the button changes at once, the total 2.5s later.
+        document.body.innerHTML =
+            '<div class="promo"><label for="promo">Promo code</label>' +
+            '<input id="promo" /><button id="apply">Apply</button></div>' +
+            '<div id="total">$100.00</div>'
+        await withInnerText(async () => {
+            document.getElementById('apply').addEventListener('click', () => {
+                setTimeout(() => {
+                    document.getElementById('apply').textContent = 'Applying…'
+                }, 50)
+                setTimeout(() => {
+                    document.getElementById('total').textContent = '$90.00'
+                }, 2500)
+            })
+
+            const res = await applyCoupon('SAVE10', FINDER_REC)
+
+            expect(res.success).toBe(true)
+            expect(res.newTotal).toBe(90)
+        })
+    }, 15000)
+
+    it('a finder-picked box: a summary that re-renders its total row is still read', async () => {
+        document.body.innerHTML =
+            '<div class="promo"><input id="promo" name="promo_code" />' +
+            '<button id="apply">Apply</button></div>' +
+            '<div id="sum"><div data-caramel-found="total"><span>Order total</span> <span>$100.00</span></div></div>'
+        await withInnerText(async () => {
+            respond(() => {
+                document.getElementById('sum').innerHTML =
+                    '<div><span>Order total</span> <span>$90.00</span></div>'
+            })
+            const rec = {
+                ...FINDER_REC,
+                priceContainer: '[data-caramel-found="total"]',
+                caramelTotalKind: 'total',
+            }
+
+            const res = await applyCoupon('SAVE10', rec)
+
+            expect(res.success).toBe(true)
+            expect(res.newTotal).toBe(90)
+        })
+    }, 15000)
 
     it('returns exactly the documented verdict keys', async () => {
         const rec = { ...BASE, successIndicator: '#applied-row' }

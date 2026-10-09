@@ -956,7 +956,7 @@ export async function startApplyingCoupons(rec, options) {
             code,
             coupons[i].id,
             originalPrices,
-            rec.caramelFound === true,
+            rec.caramelFound === true ? rec.caramelTotalKind || 'total' : false,
         )
         const res = await applyCoupon(code, rec)
         caramelClearPendingSubmit()

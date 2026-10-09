@@ -234,6 +234,15 @@ describe('what the finder must never pick', () => {
         expect(caramelDiscoverCouponBox().input).toBeNull()
     })
 
+    it('a translated add-to-cart button beside the box is never its apply button', () => {
+        document.body.innerHTML =
+            '<div><input id="pc" name="gutscheincode" type="text">' +
+            '<button id="atc">In den Warenkorb</button></div>' +
+            TOTAL
+
+        expect(caramelDiscoverCouponBox().button).toBeNull()
+    })
+
     it('an add-to-cart button beside the box is never its apply button', () => {
         document.body.innerHTML =
             '<div><input id="pc" name="discount_code" type="text">' +
@@ -281,6 +290,30 @@ describe('the total reader reads one row, or nothing', () => {
         expect(caramelFindOrderTotal()).toBeNull()
     })
 
+    it('a header row outside <thead> is not the total row', () => {
+        document.body.innerHTML =
+            '<div id="t"><span>Order total</span><span>$110.00</span></div>' +
+            '<table><tr><th>Item</th><th>Total</th></tr>' +
+            '<tr><td>Mug</td><td>$30.00</td></tr></table>'
+
+        expect(caramelFindOrderTotal()?.id).toBe('t')
+    })
+
+    it('"calculated at the next step" is not a total, whatever sits near it', () => {
+        document.body.innerHTML =
+            '<div><div><span>Total:</span> <span>Calculated at next step</span></div>' +
+            '<p>Free shipping on orders over $150</p></div>'
+
+        expect(caramelFindOrderTotal()).toBeNull()
+    })
+
+    it('a total with its tax in parentheses is read', () => {
+        document.body.innerHTML =
+            '<div id="t"><span>Gesamt</span><span>95,00 € (inkl. 15,17 € MwSt.)</span></div>'
+
+        expect(caramelFindOrderTotal()?.id).toBe('t')
+    })
+
     it('a total weight is not a total', () => {
         document.body.innerHTML =
             '<div><span>Total weight</span><span>2.50 kg</span></div>'
@@ -310,6 +343,26 @@ describe('the reveal toggle is never a checkout submit', () => {
             await caramelDiscoveredRecord({ domain: 'shop.test' }),
         ).toBeNull()
         expect(clicks).toBe(0)
+    })
+
+    it('a submit-type toggle in a plain cart form is not clicked either (it would post the cart)', async () => {
+        document.body.innerHTML =
+            '<form action="/cart" method="post"><button id="tg" aria-expanded="false">Have a discount code?</button>' +
+            '<div id="panel" style="display:none">' +
+            '<input id="pc" name="discount" type="text"><button type="button" id="pa">Apply</button></div>' +
+            '<button type="submit" name="checkout">Check out</button></form>' +
+            TOTAL
+        let submits = 0
+        document.querySelector('form').addEventListener('submit', e => {
+            submits++
+            e.preventDefault()
+        })
+
+        expect(caramelFinderSeesBox()).toBe(false)
+        expect(
+            await caramelDiscoveredRecord({ domain: 'shop.test' }),
+        ).toBeNull()
+        expect(submits).toBe(0)
     })
 
     it('a type="button" toggle in the same form is still used', async () => {
