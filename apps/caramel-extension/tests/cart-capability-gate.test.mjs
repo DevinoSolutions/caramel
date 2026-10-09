@@ -246,10 +246,22 @@ describe('isCheckout — cart intent the path does not spell out', () => {
     })
 
     it('does not read a product SLUG as a cart', async () => {
-        setPath('/products/cart-organizer')
-
-        expect(await isCheckout()).toBe(false)
+        for (const url of [
+            '/products/cart-organizer',
+            '/products/cart-2-pack',
+            '/products/basket-12x12',
+        ]) {
+            setPath(url)
+            expect(await isCheckout(), url).toBe(false)
+        }
         expect(probeCalls).toBe(0)
+    })
+
+    it('opens on a cart whose page slug carries a number (WordPress /cart-2/)', async () => {
+        for (const url of ['/cart-2/', '/basket-3', '/cart-2/?coupon=1']) {
+            setPath(url)
+            expect(await isCheckout(), url).toBe(true)
+        }
     })
 
     describe('the store bounced the shopper off its own cart URL', () => {

@@ -153,6 +153,21 @@ describe('a finder run on a cart that reloads per code', () => {
         expect(finalModalCalls[0][4].map(c => c.code)).toEqual(['SAVE10'])
     })
 
+    it('stops where it cannot read the total, which may be hiding a win', async () => {
+        // The store renamed the row on the new page: the code may well have
+        // worked, and the next code submitted onto this cart could replace it.
+        document.body.innerHTML =
+            BOX +
+            '<div class="row"><span>Estimated total</span> <span>$90.00</span></div>'
+        caramelBeginRun()
+        caramelMarkPendingSubmit('DEAD5', 'c1', [100], ROW)
+
+        await startCheckoutDetection()
+
+        expect(applyCalls).toEqual([])
+        expect(finalModalCalls).toHaveLength(1)
+    })
+
     it('ends on a win instead of going on', async () => {
         document.body.innerHTML =
             BOX +

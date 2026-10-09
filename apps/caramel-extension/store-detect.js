@@ -258,9 +258,14 @@ export function _hostMatchesDomain(host, domain) {
  * with the word — /products/cart-organizer is a product, and it used to be read
  * as a checkout, prompt and cart probe and all. Trading /cart-page away is the
  * price, and it is the cheap side of that trade: a missed probe costs nothing,
- * a prompt on the wrong page is the defect this whole file guards against. */
+ * a prompt on the wrong page is the defect this whole file guards against.
+ *
+ * One continuation is allowed: a bare number (/cart-2/). That is how WordPress
+ * names a page whose slug was taken, and WooCommerce carts live there; measured
+ * on a live store whose cart is /cart-2/ and which was never offered a code. A
+ * product slug does not stop at a number (/products/cart-2-pack stays out). */
 const CARAMEL_CART_PATH_RE =
-    /(?:^|[/\-_])(cart|carts|basket|checkout|checkouts)(?:[/?#]|$)/i
+    /(?:^|[/\-_])(cart|carts|basket|checkout|checkouts)(?:-\d+)?(?:[/?#]|$)/i
 
 /* A query key that means "the cart drawer is open".
  *
@@ -693,7 +698,14 @@ async function _resumePendingSubmit() {
 
     // That code didn't win, and on this kind of cart every code costs a page
     // load. Carry the run on rather than making the shopper click per code.
-    if (await _caramelContinueRun(rec, !!pending.finder)) return true
+    // A finder run goes on only when it could read the total and it did not
+    // move: an unreadable total may be hiding a win (the store renamed the
+    // row), and submitting the next code onto that cart could replace it.
+    if (
+        (!pending.finder || Number.isFinite(now)) &&
+        (await _caramelContinueRun(rec, !!pending.finder))
+    )
+        return true
     caramelEndRun()
 
     if (Number.isFinite(now)) {

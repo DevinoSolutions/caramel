@@ -1095,6 +1095,27 @@ export async function caramelDiscoveredRecord(rec, doc = document) {
     }
 }
 
+/* Mark the box again after the store re-drew it. Some carts replace the whole
+ * promo section to show their answer, and the marks went with the old nodes:
+ * the answer was never seen and the next code had no box to go into. Clicks
+ * nothing. true when the box (and, if asked, its answer area) is marked. */
+// Called from coupon-apply.js.
+export function caramelRemarkFoundBox(answerToo, doc = document) {
+    if (
+        doc.querySelector(sel('input')) &&
+        (!answerToo || doc.querySelector(sel('answer')))
+    )
+        return true
+    const found = caramelDiscoverCouponBox(doc)
+    if (!found.inputVisible || !confident(found)) return false
+    log('FINDER_REMARKED', { reasons: found.reasons })
+    mark(found.input, 'input')
+    mark(found.button, 'submit')
+    const answer = answerArea(found.input, found.button)
+    if (answer) mark(answer, 'answer')
+    return !answerToo || !!answer
+}
+
 // Where the store answers: the smallest ancestor holding both the box and its
 // button (if it is still a small region; a whole sidebar is not where one
 // answer appears), widened by up to three levels while it stays small. Stores

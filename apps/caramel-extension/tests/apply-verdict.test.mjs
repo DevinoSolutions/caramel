@@ -1,4 +1,12 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+    afterEach,
+    beforeAll,
+    beforeEach,
+    describe,
+    expect,
+    it,
+    vi,
+} from 'vitest'
 
 /**
  * Characterization of applyCoupon()'s snapshot -> verdict path.
@@ -423,18 +431,25 @@ describe('applyCoupon verdict — success rule', () => {
     }, 15000)
 
     it("a finder-picked box: a form field's own error is not the store answering", async () => {
+        // The box's own "Promo code" label sits in the same container, so the
+        // container as a whole names a coupon word: the field error must
+        // still not be quoted as the store's answer.
         document.body.innerHTML =
-            '<div class="promo"><input id="promo" /><button id="apply">Apply</button>' +
+            '<div class="promo"><label for="promo">Promo code</label>' +
+            '<input id="promo" /><button id="apply">Apply</button>' +
             '<p id="msg"></p></div>' +
             '<div id="total">$100.00</div>'
         await withInnerText(async () => {
+            // Write to the elements of THIS test's page: a timer left over
+            // from a failed run must not land in the next test's page.
+            const msg = document.getElementById('msg')
+            const total = document.getElementById('total')
             document.getElementById('apply').addEventListener('click', () => {
                 setTimeout(() => {
-                    document.getElementById('msg').textContent =
-                        'Enter a valid email address'
+                    msg.textContent = 'Enter a valid email address'
                 }, 50)
                 setTimeout(() => {
-                    document.getElementById('total').textContent = '$90.00'
+                    total.textContent = '$90.00'
                 }, 2500)
             })
 
@@ -442,6 +457,83 @@ describe('applyCoupon verdict — success rule', () => {
 
             expect(res.success).toBe(true)
             expect(res.newTotal).toBe(90)
+            expect(res.errorMsg).toBeNull()
+        })
+    }, 15000)
+
+    it('a finder-picked box: an acceptance with a caveat is not a refusal', async () => {
+        // "Cannot be combined with other offers" is refusal-shaped on its
+        // own; beside "applied" it is a caveat, and the total moves later.
+        document.body.innerHTML =
+            '<div class="promo"><input id="promo" /><button id="apply">Apply</button>' +
+            '<p id="msg"></p></div>' +
+            '<div id="total">$100.00</div>'
+        await withInnerText(async () => {
+            // Write to the elements of THIS test's page: a timer left over
+            // from a failed run must not land in the next test's page.
+            const msg = document.getElementById('msg')
+            const total = document.getElementById('total')
+            document.getElementById('apply').addEventListener('click', () => {
+                setTimeout(() => {
+                    msg.textContent =
+                        'Promo code applied. Cannot be combined with other offers.'
+                }, 50)
+                setTimeout(() => {
+                    total.textContent = '$90.00'
+                }, 2200)
+            })
+
+            const res = await applyCoupon('SAVE10', FINDER_REC)
+
+            expect(res.success).toBe(true)
+            expect(res.newTotal).toBe(90)
+        })
+    }, 15000)
+
+    it('a finder-picked box: a refusal-shaped caveat just before the total moves still wins', async () => {
+        document.body.innerHTML =
+            '<div class="promo"><input id="promo" /><button id="apply">Apply</button>' +
+            '<p id="msg"></p></div>' +
+            '<div id="total">$100.00</div>'
+        await withInnerText(async () => {
+            // Write to the elements of THIS test's page: a timer left over
+            // from a failed run must not land in the next test's page.
+            const msg = document.getElementById('msg')
+            const total = document.getElementById('total')
+            document.getElementById('apply').addEventListener('click', () => {
+                setTimeout(() => {
+                    msg.textContent =
+                        'This code cannot be combined with other offers.'
+                }, 50)
+                setTimeout(() => {
+                    total.textContent = '$90.00'
+                }, 900)
+            })
+
+            const res = await applyCoupon('SAVE10', FINDER_REC)
+
+            expect(res.success).toBe(true)
+            expect(res.newTotal).toBe(90)
+        })
+    }, 15000)
+
+    it('a finder-picked box: "could not be applied" is still a refusal', async () => {
+        document.body.innerHTML =
+            '<div class="promo"><input id="promo" /><button id="apply">Apply</button>' +
+            '<p id="msg"></p></div>' +
+            '<div id="total">$100.00</div>'
+        await withInnerText(async () => {
+            respond(() => {
+                document.getElementById('msg').textContent =
+                    'Coupon NOPE could not be applied.'
+            })
+
+            const started = performance.now()
+            const res = await applyCoupon('NOPE', FINDER_REC)
+
+            expect(res.success).toBe(false)
+            expect(res.errorMsg).toBe('Coupon NOPE could not be applied.')
+            expect(performance.now() - started).toBeLessThan(4000)
         })
     }, 15000)
 
@@ -540,6 +632,169 @@ describe('applyCoupon verdict — success rule', () => {
             'success',
         ])
     })
+})
+
+// Measured on a live store: it answered a refused code by re-drawing its whole
+// promo section (message, a new input holding the code, a new button). The
+// finder's marks went with the old nodes, so the answer was never seen (the
+// full 10 s wait, no quote) and the next code found no box at all.
+describe('a finder-picked box the store re-draws to answer', () => {
+    const SECTION = msg =>
+        '<div class="promo">' +
+        (msg ? `<p class="err">${msg}</p>` : '') +
+        '<input name="promo_code" type="text" />' +
+        '<button type="button" class="ap">Apply</button></div>'
+    let finderRecord
+    let restore
+
+    beforeEach(async () => {
+        const proto = globalThis.HTMLElement.prototype
+        const prior = Object.getOwnPropertyDescriptor(proto, 'innerText')
+        Object.defineProperty(proto, 'innerText', {
+            configurable: true,
+            get() {
+                return this.textContent
+            },
+        })
+        const rect = Element.prototype.getBoundingClientRect
+        Element.prototype.getBoundingClientRect = () => ({
+            left: 0,
+            top: 0,
+            right: 120,
+            bottom: 30,
+            width: 120,
+            height: 30,
+        })
+        restore = () => {
+            if (prior) Object.defineProperty(proto, 'innerText', prior)
+            else delete proto.innerText
+            Element.prototype.getBoundingClientRect = rect
+        }
+        ;({ caramelDiscoveredRecord: finderRecord } = await import(
+            '../coupon-box-discovery.js'
+        ))
+        document.body.innerHTML =
+            `<aside class="sec">${SECTION('')}</aside>` +
+            '<div class="row"><span>Order total</span> <span>$100.00</span></div>'
+    })
+
+    // Every click re-draws the section, as the store does: its contents, or
+    // (whole) the section element itself.
+    let clicks
+    function redrawOnClick(msgFor, whole = false) {
+        clicks = e => {
+            if (!e.target.matches?.('.ap')) return
+            const code = document.querySelector('[name=promo_code]').value
+            const sec = document.querySelector('.sec')
+            setTimeout(() => {
+                if (whole) {
+                    sec.outerHTML = `<aside class="sec">${SECTION(msgFor(code))}</aside>`
+                } else sec.innerHTML = SECTION(msgFor(code))
+                document.querySelector('[name=promo_code]').value = code
+            }, 150)
+        }
+        document.addEventListener('click', clicks)
+    }
+    afterEach(() => document.removeEventListener('click', clicks))
+
+    it('finds the box again when the store re-draws it between codes', async () => {
+        try {
+            const rec = await finderRecord({ domain: 'shop.test' })
+            // A cart refresh after our read: the section the next code goes
+            // into is not the one the last code went into.
+            document.querySelector('.sec').innerHTML = SECTION('')
+
+            await applyCoupon('SECOND', rec)
+
+            expect(document.querySelector('[name=promo_code]').value).toBe(
+                'SECOND',
+            )
+        } finally {
+            restore()
+        }
+    }, 15000)
+
+    it('measures the next code against a total the store re-drew', async () => {
+        // Measured live: the cart re-drew its summary after the first code,
+        // the next code was judged at 0.7 s with no baseline, and the 5% it
+        // took off a moment later was never counted.
+        try {
+            const rec = await finderRecord({ domain: 'shop.test' })
+            // Fresh markup, as the store's re-render brings: none of our marks.
+            const sum = document.querySelector('.row')
+            sum.insertAdjacentHTML(
+                'afterend',
+                '<div class="row"><span>Order total</span> <span>$100.00</span></div>',
+            )
+            const fresh = sum.nextElementSibling
+            sum.remove()
+            document.addEventListener(
+                'click',
+                (clicks = e => {
+                    if (!e.target.matches?.('.ap')) return
+                    setTimeout(() => {
+                        fresh.lastElementChild.textContent = '$95.00'
+                    }, 900)
+                }),
+            )
+
+            const res = await applyCoupon('SAVE5', rec)
+
+            expect(res.success).toBe(true)
+            expect(res.newTotal).toBe(95)
+        } finally {
+            restore()
+        }
+    }, 15000)
+
+    it('sees the answer in a section that replaced the one it watched', async () => {
+        try {
+            redrawOnClick(c => `Sorry, code "${c}" isn't valid.`, true)
+            const rec = await finderRecord({ domain: 'shop.test' })
+
+            const started = performance.now()
+            const res = await applyCoupon('NOPE', rec)
+
+            expect(res.success).toBe(false)
+            expect(res.errorMsg).toBe('Sorry, code "NOPE" isn\'t valid.')
+            expect(performance.now() - started).toBeLessThan(4000)
+        } finally {
+            restore()
+        }
+    }, 15000)
+
+    it("reads the store's answer in the section it drew", async () => {
+        try {
+            redrawOnClick(c => `Sorry, code "${c}" isn't valid.`)
+            const rec = await finderRecord({ domain: 'shop.test' })
+
+            const started = performance.now()
+            const res = await applyCoupon('NOPE', rec)
+
+            expect(res.success).toBe(false)
+            expect(res.errorMsg).toBe('Sorry, code "NOPE" isn\'t valid.')
+            expect(performance.now() - started).toBeLessThan(4000)
+        } finally {
+            restore()
+        }
+    }, 15000)
+
+    it('puts the next code into the box the store drew', async () => {
+        try {
+            redrawOnClick(c => `Sorry, code "${c}" isn't valid.`)
+            const rec = await finderRecord({ domain: 'shop.test' })
+            await applyCoupon('NOPE', rec)
+
+            const res = await applyCoupon('SECOND', rec)
+
+            expect(document.querySelector('[name=promo_code]').value).toBe(
+                'SECOND',
+            )
+            expect(res.errorMsg).toBe('Sorry, code "SECOND" isn\'t valid.')
+        } finally {
+            restore()
+        }
+    }, 30000)
 })
 
 describe('caramelAwaitCouponVerdict — logging of the code', () => {
