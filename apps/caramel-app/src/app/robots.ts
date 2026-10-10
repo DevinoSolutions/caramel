@@ -26,6 +26,14 @@ const DISALLOWED_PATHS = [
     '/welcome',
     '/profile',
     '/monitoring',
+    // Next.js RSC payload fetches (`<Link>` prefetch from Googlebot's
+    // renderer). Crawl stats 2026-10-10: 55% of 11.4K Googlebot requests in 90
+    // days were `?_rsc=` payloads, starving discovery of store pages and A-Z
+    // hubs. Safe: the RSC payload of the initial render is inlined in the
+    // HTML, so indexing never needs these fetches. `_rsc` is appended to the
+    // existing query string, so it can be first (`?_rsc=`) or later (`&_rsc=`).
+    '/*?_rsc=',
+    '/*&_rsc=',
 ]
 
 export default function robots(): MetadataRoute.Robots {

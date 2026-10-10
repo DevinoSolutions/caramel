@@ -22,6 +22,8 @@ const DISALLOWED_PATHS = [
     '/welcome',
     '/profile',
     '/monitoring',
+    '/*?_rsc=',
+    '/*&_rsc=',
 ]
 
 // The fleet's AI-crawler allow-list, spelled out here ON PURPOSE (not
@@ -117,6 +119,24 @@ describe('robots.ts env-aware indexing contract', () => {
         expect(aiGroup.allow).toEqual(['/', '/api/coupons'])
         // Private paths stay private for answer engines too.
         expect(aiGroup.disallow).toEqual(DISALLOWED_PATHS)
+    })
+
+    it('every production rule group, Googlebot included, disallows RSC payload URLs', async () => {
+        const result = await robotsFor('https://grabcaramel.com')
+        const rules = rulesOf(result)
+        for (const rule of rules) {
+            expect(rule.disallow).toEqual(
+                expect.arrayContaining(['/*?_rsc=', '/*&_rsc=']),
+            )
+        }
+        const googlebotGroup = rules.find(
+            rule =>
+                Array.isArray(rule.userAgent) &&
+                rule.userAgent.includes('Googlebot'),
+        )
+        expect(googlebotGroup?.disallow).toEqual(
+            expect.arrayContaining(['/*?_rsc=', '/*&_rsc=']),
+        )
     })
 
     it('a trailing slash on BASE_URL still resolves the production branch', async () => {
