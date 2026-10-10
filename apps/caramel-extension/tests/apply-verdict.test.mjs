@@ -763,6 +763,44 @@ describe('a finder-picked box the store re-draws to answer', () => {
         }
     }, 15000)
 
+    it("never takes the re-drawn section's standing words for its answer", async () => {
+        // The section found after the re-draw is wider than the one watched,
+        // and holds a hint the page showed all along. The code worked; the
+        // total moves a few seconds later, as a summary re-render does.
+        try {
+            const DEEP =
+                '<div class="wrap"><p class="hint">Enter a valid promo code to get free shipping.</p>' +
+                `<div><div><aside class="sec">${SECTION('')}</aside></div></div></div>`
+            document.body.innerHTML =
+                DEEP +
+                '<div class="row"><span>Order total</span> <span>$100.00</span></div>'
+            clicks = e => {
+                if (!e.target.matches?.('.ap')) return
+                const code = document.querySelector('[name=promo_code]').value
+                setTimeout(() => {
+                    document.querySelector('.wrap').innerHTML =
+                        '<p class="hint">Enter a valid promo code to get free shipping.</p>' +
+                        SECTION('')
+                    document.querySelector('[name=promo_code]').value = code
+                }, 150)
+                setTimeout(() => {
+                    document.querySelector(
+                        '.row',
+                    ).lastElementChild.textContent = '$90.00'
+                }, 4500)
+            }
+            document.addEventListener('click', clicks)
+            const rec = await finderRecord({ domain: 'shop.test' })
+
+            const res = await applyCoupon('SAVE10', rec)
+
+            expect(res.success).toBe(true)
+            expect(res.newTotal).toBe(90)
+        } finally {
+            restore()
+        }
+    }, 20000)
+
     it('keeps looking for the section while the store shows a spinner first', async () => {
         try {
             clicks = e => {

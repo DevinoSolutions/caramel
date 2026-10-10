@@ -617,11 +617,61 @@ function navigatesAway(el) {
     }
 }
 
+// The checkbox this element is, labels, or wraps. null for anything else.
+function checkboxOf(el) {
+    const c =
+        el.tagName === 'LABEL'
+            ? el.control
+            : el.tagName === 'INPUT'
+              ? el
+              : el.querySelector('input[type="checkbox"], input[type="radio"]')
+    return c?.tagName === 'INPUT' && /^(checkbox|radio)$/i.test(c.type)
+        ? c
+        : null
+}
+
+// Does this control fold away THE box that holds `input`? It names the box's
+// region in aria-controls, or the smallest ancestor holding both is one small
+// panel rather than the whole cart.
+function ownsBox(el, input) {
+    if (!el || !input) return false
+    for (const id of (el.getAttribute('aria-controls') || '').split(/\s+/)) {
+        const region = id && el.ownerDocument.getElementById(id)
+        if (region && region.contains(input)) return true
+    }
+    const doc = el.ownerDocument
+    let p = el.parentElement
+    for (let i = 0; i < 5 && p; i++, p = p.parentElement)
+        if (p.contains(input))
+            return (
+                p !== doc.body &&
+                p !== doc.documentElement &&
+                norm(p.textContent).length <= 400
+            )
+    return false
+}
+
+// A promo box's own words, which a checkbox must say to be its fold.
+const PROMO_WORDS_RE = /\b(promo|coupon|discount|voucher)|\bcodes?\b/i
+
+// What a toggle says. A checkbox says it in its accessible name.
+function toggleText(el) {
+    return el.tagName === 'INPUT'
+        ? norm(el.getAttribute('aria-label') || labelText(el))
+        : norm(textOf(el))
+}
+
 function scoreToggle(el, t) {
     const reasons = []
     let s = 0
     const tag = el.tagName
-    if (TOGGLE_RE.test(t) || TOGGLE_OBJ_RE.test(t)) {
+    if (tag === 'INPUT') {
+        // A CSS-only fold (a transparent checkbox over "Have a discount
+        // code?"). findToggle lets one through only when it holds the box.
+        if (!PROMO_WORDS_RE.test(t)) return null
+        s += 50
+        reasons.push('owned-checkbox')
+    } else if (TOGGLE_RE.test(t) || TOGGLE_OBJ_RE.test(t)) {
         s += 50
         reasons.push('phrase')
     } else if (TOGGLE_TAIL_RE.test(t) && pointer(el)) {
@@ -752,17 +802,24 @@ function scoreToggle(el, t) {
     return { s, reasons }
 }
 
-function findToggle(doc) {
+// `input` is the hidden promo field, when there is one.
+function findToggle(doc, input) {
     let best = null
     // Headings too: an accordion's trigger is often its <h3>.
     for (const el of doc.querySelectorAll(
-        'button, a, summary, [role="button"], [aria-expanded], label, span, div, p, h2, h3, h4, header',
+        'button, a, summary, [role="button"], [aria-expanded], label, span, div, p, h2, h3, h4, header, input[type="checkbox"]',
     )) {
         // Leaf-ish only: a div wrapping the whole sidebar also "says" promo.
         if (el.children.length > 3) continue
         // Cheap first (no layout): innerText below forces one per element.
         if (norm(el.textContent).length > 200) continue
-        const t = norm(textOf(el))
+        // A click on a checkbox CHANGES the order ("Use my gift card
+        // balance"). One is a toggle only when it folds the promo box itself
+        // and says so.
+        const check = checkboxOf(el)
+        if (check && !ownsBox(el, input)) continue
+        const t = toggleText(el)
+        if (check && !PROMO_WORDS_RE.test(t)) continue
         if (!t || t.length > 60) continue
         if (!visible(el)) continue
         const r = scoreToggle(el, t)
@@ -857,8 +914,10 @@ function scanTotalRows(doc, LABEL, NOT) {
             // the row's own words are. Measured live: the Total row read as
             // "$150.00" alone, the subtotal was measured, and a cart coupon
             // that took $6 off the total never counted.
+            // Only the hidden LABEL is put back: the row's other hidden text
+            // (a compare-at price, a screen-reader amount) stays out.
             let t = norm(textOf(p))
-            if (!t.includes(own)) t = norm(p.textContent)
+            if (!t.includes(own)) t = norm(own + ' ' + t)
             if (t.length > ROW_MAX || moneyCount(t) > 1) {
                 const sib = (prev || el).nextElementSibling
                 const st = sib ? norm(textOf(sib)) : ''
@@ -958,7 +1017,7 @@ export function caramelDiscoverCouponBox(doc = document) {
     const candidates = scoreInputs(doc)
     const top = candidates[0] || null
     const button = top ? findButton(top.el) : null
-    const toggle = !top || !top.visible ? findToggle(doc) : null
+    const toggle = !top || !top.visible ? findToggle(doc, top?.el) : null
     return {
         input: top?.el || null,
         inputScore: top?.score || 0,
@@ -1098,6 +1157,8 @@ export async function caramelDiscoveredRecord(rec, doc = document) {
         // folded again (WooCommerce, after every answer) gets it opened again
         // before the next code, the way a config's toggle is.
         showInput: opened?.isConnected ? mark(opened, 'toggle') : sel('toggle'),
+        // Its words, so the toggle of a re-drawn box is known as the same one.
+        caramelToggleSig: opened ? toggleText(opened) || null : null,
         // Everything else a config row says describes a page that is not this
         // one (that is why we are here): never click or read it.
         errorIndicator: null,
@@ -1108,31 +1169,44 @@ export async function caramelDiscoveredRecord(rec, doc = document) {
     }
 }
 
-// What a box IS: its own words, not its place on the page. The id goes in
-// only when nothing else names the field.
+// What a box IS, by its most stable name: the field name the server reads,
+// then its id, then the words it carries. Only that one name is compared, so
+// a label that gains the store's error, or a placeholder rewritten after an
+// answer, does not make the same box a stranger. '' when nothing names it: a
+// wordless box cannot be told from another wordless box (a gift-card field
+// beside it), so it is never found again.
+const SIG_KEYS = [
+    ['n', el => el.getAttribute('name')],
+    ['i', el => el.id],
+    ['a', el => el.getAttribute('aria-label')],
+    ['p', el => el.getAttribute('placeholder')],
+    ['l', el => labelText(el)],
+]
 function inputSig(el) {
-    const s = norm(
-        [
-            el.getAttribute('name'),
-            el.getAttribute('placeholder'),
-            el.getAttribute('aria-label'),
-            labelText(el),
-        ].join('|'),
-    )
-    return s.replace(/\|/g, '') ? s : norm(el.id)
+    for (const [key, get] of SIG_KEYS) {
+        const v = norm(get(el))
+        if (v) return key + ':' + v
+    }
+    return ''
+}
+function sameBox(el, sig) {
+    const get = SIG_KEYS.find(([key]) => sig.startsWith(key + ':'))?.[1]
+    return !!get && sig.slice(2) !== '' && norm(get(el)) === sig.slice(2)
 }
 
 /* Mark the box again after the store re-drew it. Some carts replace the whole
  * promo section to show their answer, and the marks went with the old nodes:
  * the answer was never seen and the next code had no box to go into.
  *
- * Only the SAME box (sig, from caramelInputSig): while ours is disabled for the
+ * Only the SAME box (rec.caramelInputSig): while ours is disabled for the
  * request, a gift-card field beside it scores higher, and every later code
  * would be typed there. A box re-drawn folded is marked with its toggle, which
- * the apply flow opens (showInput). Clicks nothing. true when the box (and, if
- * asked, its answer area) is marked. */
+ * the apply flow opens (showInput), and only a toggle of THIS box: the one that
+ * opened it before, or one in its own small panel. A page-wide pick could be
+ * "Have a gift card?", and the next code would click it. Clicks nothing. true
+ * when the box (and, if asked, its answer area) is marked. */
 // Called from coupon-apply.js.
-export function caramelRemarkFoundBox(answerToo, sig, doc = document) {
+export function caramelRemarkFoundBox(answerToo, rec, doc = document) {
     const marked = doc.querySelector(sel('input'))
     if (
         marked &&
@@ -1141,9 +1215,9 @@ export function caramelRemarkFoundBox(answerToo, sig, doc = document) {
         (!answerToo || doc.querySelector(sel('answer')))
     )
         return true
-    const top = scoreInputs(doc).find(
-        c => sig == null || inputSig(c.el) === sig,
-    )
+    const sig = rec?.caramelInputSig
+    if (!sig) return false
+    const top = scoreInputs(doc).find(c => sameBox(c.el, sig))
     const button = top && findButton(top.el)
     const found = {
         input: top?.el,
@@ -1151,8 +1225,21 @@ export function caramelRemarkFoundBox(answerToo, sig, doc = document) {
         reasons: { input: top?.reasons || [], button: button?.reasons || [] },
     }
     if (!confident(found)) return false
-    const toggle = top.visible ? null : findToggle(doc)?.el
-    if (!top.visible && (!toggle || toggleRefused(toggle))) return false
+    let toggle = null
+    if (!top.visible) {
+        const t = findToggle(doc, top.el)?.el
+        if (
+            !t ||
+            toggleRefused(t) ||
+            !(
+                (rec.caramelToggleSig &&
+                    toggleText(t) === rec.caramelToggleSig) ||
+                ownsBox(t, top.el)
+            )
+        )
+            return false
+        toggle = t
+    }
     log('FINDER_REMARKED', { reasons: found.reasons, folded: !!toggle })
     mark(found.input, 'input')
     mark(found.button, 'submit')

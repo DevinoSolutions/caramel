@@ -624,15 +624,27 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
         // Looked for again at most every 500ms for the whole window: a section
         // that shows a spinner first has no box to find yet.
         let remarkedAt = 0
+        let remarked = false
+        // The page as it read before this code, so the area found after a
+        // re-draw (often a wider one) does not count its standing words ("Enter
+        // a valid code") as the store's answer to us.
+        const pageBefore = document.body?.innerText || ''
         const rejections = () => {
             if (
                 !answerEl.isConnected &&
                 performance.now() - remarkedAt > 500 &&
                 ((remarkedAt = performance.now()),
-                caramelRemarkFoundBox(true, rec.caramelInputSig))
-            )
+                caramelRemarkFoundBox(true, rec))
+            ) {
                 answerEl = qOne(rec.caramelAnswer) || answerEl
-            return _caramelRejectionSentences(answerEl).join(' ¶ ')
+                remarked = true
+            }
+            const said = _caramelRejectionSentences(answerEl)
+            return remarked
+                ? said
+                      .filter(s => caramelQuoteIsAttributable(s, pageBefore))
+                      .join(' ¶ ')
+                : said.join(' ¶ ')
         }
         const before = rejections()
         const shownBefore = answerEl.innerText || ''
@@ -729,7 +741,7 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
         stuck = stuckCount > beforeAppliedNodes
     }
     // The store's answer is read around the box: the one it drew, if it did.
-    if (rec.caramelFound) caramelRemarkFoundBox(false, rec.caramelInputSig)
+    if (rec.caramelFound) caramelRemarkFoundBox(false, rec)
     const errorMsg = detectCouponError(rec, errorBaseline, code, priorAreaText)
     // Quotable only if the store said it BECAUSE of us (see
     // _caramelCouponAreaText). Detection above is deliberately untouched.
@@ -859,8 +871,7 @@ export async function applyCoupon(code, rec) {
              toggle, the identical sequence fires the real couponPost). So:
              if the input is missing OR hidden, click showInput and wait for
              the input to become VISIBLE, not merely attached. */
-        if (rec.caramelFound)
-            caramelRemarkFoundBox(!!rec.caramelAnswer, rec.caramelInputSig)
+        if (rec.caramelFound) caramelRemarkFoundBox(!!rec.caramelAnswer, rec)
         let input = pickBestMatch(rec.couponInput)
         if ((!input || !_isVisible(input)) && rec.showInput) {
             const showBtn = pickBestMatch(rec.showInput, input)

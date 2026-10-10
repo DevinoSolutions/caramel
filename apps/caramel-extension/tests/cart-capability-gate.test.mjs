@@ -255,11 +255,36 @@ describe('isCheckout — cart intent the path does not spell out', () => {
             '/collections/gift-basket-50',
             '/products/wicker-basket-2',
             '/blog/checkout-2024',
+            // Magento names its product pages .html.
+            '/products/golf-cart.html',
+            '/collections/cart-accessories.html',
+            '/minecart',
+            '/mycart-tips',
+            '/cartography.html',
         ]) {
             setPath(url)
             expect(await isCheckout(), url).toBe(false)
         }
         expect(probeCalls).toBe(0)
+    })
+
+    // Measured: six stores the live runs left silent had a promo box and a
+    // total in plain view on exactly these pages.
+    it('opens on a cart page spelled the way older platforms spell it', async () => {
+        for (const url of [
+            '/cart.php',
+            '/cart.php?action=view',
+            '/my_cart.aspx',
+            '/mycart',
+            '/ShoppingCart.asp',
+            '/shopping-cart.php',
+            '/viewcart',
+            '/en/cart.html',
+            '/checkout.php',
+        ]) {
+            setPath(url)
+            expect(await isCheckout(), url).toBe(true)
+        }
     })
 
     it('opens on a cart whose page slug carries a number (WordPress /cart-2/)', async () => {

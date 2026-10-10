@@ -555,11 +555,11 @@ describe('finding the same box again after the store re-draws it', () => {
             'type="text" disabled',
         )
 
-        expect(caramelRemarkFoundBox(false, rec.caramelInputSig)).toBe(false)
+        expect(caramelRemarkFoundBox(false, rec)).toBe(false)
         expect(document.querySelector(rec.couponInput)).toBeNull()
 
         document.getElementById('dc').disabled = false
-        expect(caramelRemarkFoundBox(false, rec.caramelInputSig)).toBe(true)
+        expect(caramelRemarkFoundBox(false, rec)).toBe(true)
         expect(document.querySelector(rec.couponInput)?.id).toBe('dc')
     })
 
@@ -573,7 +573,7 @@ describe('finding the same box again after the store re-draws it', () => {
             PROMO_BOX.replace(/"(dc|ap)"/g, '"$1-2"'),
         )
 
-        expect(caramelRemarkFoundBox(false, rec.caramelInputSig)).toBe(true)
+        expect(caramelRemarkFoundBox(false, rec)).toBe(true)
         expect(document.querySelector(rec.couponInput)?.id).toBe('dc-2')
         expect(document.querySelector(rec.couponSubmit)?.id).toBe('ap-2')
     })
@@ -588,9 +588,99 @@ describe('finding the same box again after the store re-draws it', () => {
         // WooCommerce: every answer re-draws the cart, the promo panel folded.
         document.querySelector('.cpn').outerHTML = FOLDED(false)
 
-        expect(caramelRemarkFoundBox(false, rec.caramelInputSig)).toBe(true)
+        expect(caramelRemarkFoundBox(false, rec)).toBe(true)
         expect(document.querySelector(rec.couponInput)?.id).toBe('pc')
         expect(document.querySelector(rec.showInput)?.id).toBe('tg')
+    })
+
+    it('never re-finds a box nothing names: one wordless box looks like another', async () => {
+        // React stores name a field by class alone. Ours is disabled while the
+        // store answers; a voucher box beside it is just as wordless.
+        const BOX = (cls, extra = '') =>
+            `<div class="${cls}"><input class="${cls}-input" type="text"${extra}>` +
+            '<button type="button">Apply</button></div>'
+        document.body.innerHTML = BOX('promo') + TOTAL
+        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+        expect(rec).not.toBeNull()
+        document.querySelector('.promo').outerHTML = BOX('promo', ' disabled')
+        document.body.insertAdjacentHTML('beforeend', BOX('voucher'))
+
+        expect(caramelRemarkFoundBox(false, rec)).toBe(false)
+        expect(
+            document.querySelector('.voucher-input').dataset.caramelFound,
+        ).toBe(undefined)
+    })
+
+    it('knows its own box after the store writes its answer into the label', async () => {
+        document.body.innerHTML = PROMO_BOX + TOTAL
+        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+        document.querySelector('.promo').outerHTML = PROMO_BOX.replace(
+            'Discount code</label>',
+            'Discount code <span>Invalid code</span></label>',
+        ).replace('placeholder="Enter code"', 'placeholder="Try another code"')
+
+        expect(caramelRemarkFoundBox(false, rec)).toBe(true)
+        expect(document.querySelector(rec.couponInput)?.id).toBe('dc')
+    })
+
+    it('never opens the re-drawn box with a toggle that is not its own', async () => {
+        document.body.innerHTML = PROMO_BOX + TOTAL
+        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+        // The store hides our box; a gift-card fold sits elsewhere on the page.
+        document.querySelector('.promo').style.display = 'none'
+        document.body.insertAdjacentHTML(
+            'afterbegin',
+            '<section class="gc"><button id="gt" type="button" aria-expanded="false">Have a gift card?</button>' +
+                '<div style="display:none"><input name="gift_card_number"></div></section>',
+        )
+
+        expect(caramelRemarkFoundBox(false, rec)).toBe(false)
+        expect(
+            document.querySelector('[data-caramel-found="toggle"]'),
+        ).toBeNull()
+    })
+})
+
+describe('a promo box folded behind a checkbox', () => {
+    // A CSS-only fold: a transparent checkbox over "Have a discount code?",
+    // the panel shown while it is checked. Measured live: the finder saw the
+    // hidden field and no way to open it, and the shopper got no prompt.
+    const FOLD =
+        '<div class="collapse"><input type="checkbox" id="cb" aria-label="Toggle discount code input">' +
+        '<div class="title">Have a discount code? Discounts cannot be combined with other offers.</div>' +
+        '<div id="content" style="display:none"><input id="dc" name="discount_code" type="text">' +
+        '<button id="ap" type="button">Apply</button></div></div>'
+    const wire = () =>
+        document.getElementById('cb').addEventListener('change', e => {
+            document.getElementById('content').style.display = e.target.checked
+                ? ''
+                : 'none'
+        })
+
+    it('opens it with the checkbox that holds it', async () => {
+        document.body.innerHTML = FOLD + TOTAL
+        wire()
+
+        expect(caramelFinderSeesBox()).toBe(true)
+        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+
+        expect(document.querySelector(rec.couponInput)?.id).toBe('dc')
+        expect(document.querySelector(rec.showInput)?.id).toBe('cb')
+    })
+
+    it('never clicks a checkbox that is not the box’s own fold', async () => {
+        // "Use gift card balance" changes what the shopper pays.
+        document.body.innerHTML =
+            '<div class="pay"><input type="checkbox" id="gb"><label for="gb">Use gift card balance</label></div>' +
+            '<div class="promo" style="display:none"><input id="dc" name="discount_code" type="text">' +
+            '<button id="ap" type="button">Apply</button></div>' +
+            TOTAL
+
+        expect(caramelFinderSeesBox()).toBe(false)
+        expect(
+            await caramelDiscoveredRecord({ domain: 'shop.test' }),
+        ).toBeNull()
+        expect(document.getElementById('gb').checked).toBe(false)
     })
 })
 

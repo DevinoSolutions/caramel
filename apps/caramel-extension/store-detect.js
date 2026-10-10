@@ -265,9 +265,17 @@ export function _hostMatchesDomain(host, domain) {
  * WooCommerce carts live there; measured on a live store whose cart is /cart-2/
  * and which was never offered a code. Only there: /products/golf-cart-3,
  * /collections/gift-basket-50 and /blog/checkout-2024 are not carts, and a
- * product slug does not stop at a number (/products/cart-2-pack stays out). */
+ * product slug does not stop at a number (/products/cart-2-pack stays out).
+ *
+ * And a segment that IS the cart page in an older platform's spelling: a file
+ * extension (/cart.php is every BigCommerce cart) or the word joined to
+ * my/view/show/shop(ping) (/mycart, /my_cart.aspx, /ShoppingCart.asp).
+ * Measured: six of the stores the live runs left silent had a promo box and a
+ * total in plain view on exactly these pages, and the finder was never asked.
+ * Only on a segment that starts with it: /products/golf-cart.html is a product
+ * (Magento names its product pages .html). */
 const CARAMEL_CART_PATH_RE =
-    /(?:^|[/\-_])(cart|carts|basket|checkout|checkouts)(?:[/?#]|$)|(?:^|\/)(?:cart|carts|basket|checkout|checkouts)-\d\d?(?:[/?#]|$)/i
+    /(?:^|[/\-_])(cart|carts|basket|checkout|checkouts)(?:[/?#]|$)|(?:^|\/)(?:cart|carts|basket|checkout|checkouts)-\d\d?(?:[/?#]|$)|(?:^|\/)(?:(?:my|view|show|shop|shopping)[-_]?)?(?:cart|carts|basket|checkout|checkouts)(?:\.(?:php|aspx?|html?|jsp|cfm|do))?(?:[/?#]|$)/i
 
 /* A query key that means "the cart drawer is open".
  *
