@@ -1060,10 +1060,11 @@ const DISCOUNT_LABEL =
 const DISCOUNT_NOT =
     /sub[- ]?total|total|sav(e|ed|ing|ings)\b|shipping|tax|eligible|exclud|cannot|can't|only|enter|apply|add |have|gift|points|reward|member|minimum|spend|purchase|requir|more|qualif|valid|expire|balance|credit|card/i
 const CUR = '(?:[$£€¥₹₩₺₱₪₫฿₦]|[A-Z]{3}\\s?)'
-// A deduction mark touches its amount: "-$20.00", "$-20.00", "-20.00",
-// "($20.00)". A dash set apart by spaces is a separator, not a minus.
+// A deduction mark: a minus that starts a word ("-$20.00", or "-" and
+// "$20.00" drawn as two elements, measured live), "$-20.00", or "($20.00)".
+// A dash inside a word ("SAVE-20") is not a minus.
 const DEDUCTION_RE = new RegExp(
-    `[-−–]${CUR}?\\d|[$£€¥₹₩₺₱₪₫฿₦][-−–]\\d|\\(\\s?(?:${CUR}\\s?\\d[\\d.,]*|\\d[\\d.,]*[.,]\\d{2})\\s?\\)`,
+    `(?:^|\\s)[-−–]\\s*${CUR}?\\d|[$£€¥₹₩₺₱₪₫฿₦][-−–]\\d|\\(\\s?(?:${CUR}\\s?\\d[\\d.,]*|\\d[\\d.,]*[.,]\\d{2})\\s?\\)`,
 )
 
 // The subtotal's own summary: the widest ancestor still small enough to be
@@ -1088,7 +1089,7 @@ function summaryOf(el) {
 // every amount, and the label of every element that speaks of a discount.
 function summaryBefore(el) {
     const scope = el && summaryOf(el)
-    if (!scope) return { amounts: [], labels: [] }
+    if (!scope) return { scope, amounts: [], labels: [] }
     const amounts = []
     const labels = []
     const tw = el.ownerDocument.createTreeWalker(scope, NodeFilter.SHOW_TEXT)
@@ -1098,12 +1099,14 @@ function summaryBefore(el) {
         if (n.parentElement && DISCOUNT_WORDS.test(n.textContent))
             labels.push(ownLabel(n.parentElement).bare.toLowerCase())
     }
-    return { amounts, labels }
+    return { scope, amounts, labels }
 }
 
-// The one deduction the code added, or 0.
+// The one deduction the code added, or 0. Read in the baseline's own summary
+// while the page still has it: a summary re-derived after the store removed
+// a long paragraph can climb wider and take in rows the baseline never saw.
 function newDeduction(el, base) {
-    const scope = el && summaryOf(el)
+    const scope = base.scope?.isConnected ? base.scope : el && summaryOf(el)
     if (!scope) return 0
     const hits = scanTotalRows(el.ownerDocument, DISCOUNT_LABEL, DISCOUNT_NOT, {
         root: scope,
@@ -1118,7 +1121,14 @@ function newDeduction(el, base) {
         const t = textOf(h.el).replace(/\([^)]*[a-z][^)]*\)/gi, ' ')
         const money = caramelFindMoney(t)
         const a = money.length === 1 ? Math.abs(money[0].value) : 0
-        if (a > off && DEDUCTION_RE.test(t) && !base.amounts.includes(a))
+        // The whole row is judged, not only its label: "Promo code -$5.00
+        // not applied (minimum $50.00)" is a refusal.
+        if (
+            a > off &&
+            DEDUCTION_RE.test(t) &&
+            !DISCOUNT_NOT.test(t) &&
+            !base.amounts.includes(a)
+        )
             off = a
     }
     return off

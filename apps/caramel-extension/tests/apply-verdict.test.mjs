@@ -1068,6 +1068,62 @@ describe('a finder-picked box the store re-draws to answer', () => {
             }
         }, 15000)
 
+        it('counts a coupon line drawn as a minus and an amount apart', async () => {
+            // Measured live: the line read "Coupon\n-\n$20.00".
+            try {
+                document.body.innerHTML =
+                    `<aside class="sec">${SECTION('')}</aside>` + SUMMARY('')
+                answerOnClick(
+                    null,
+                    '<div class="cl"><span>Coupon</span> <span>-\n<div>$20.00 </div></span></div>',
+                )
+                const rec = await finderRecord({ domain: 'shop.test' })
+
+                const res = await applyCoupon('TWENTYOFF', rec)
+
+                expect(res.success).toBe(true)
+                expect(res.newTotal).toBe(79.99)
+            } finally {
+                restore()
+            }
+        }, 15000)
+
+        it('reads no deduction from a dash inside a word', async () => {
+            try {
+                document.body.innerHTML =
+                    `<aside class="sec">${SECTION('')}</aside>` + SUMMARY('')
+                answerOnClick(
+                    null,
+                    '<div class="cl"><b>Promo code</b> A-1 needs a $50.00 order</div>',
+                )
+                const rec = await finderRecord({ domain: 'shop.test' })
+
+                const res = await applyCoupon('NOPE', rec)
+
+                expect(res.success).toBe(false)
+            } finally {
+                restore()
+            }
+        }, 15000)
+
+        it('reads no deduction from a row that says the code was refused', async () => {
+            try {
+                document.body.innerHTML =
+                    `<aside class="sec">${SECTION('')}</aside>` + SUMMARY('')
+                answerOnClick(
+                    null,
+                    '<div class="cl"><b>Promo code</b> -$5.00 once you spend more</div>',
+                )
+                const rec = await finderRecord({ domain: 'shop.test' })
+
+                const res = await applyCoupon('NOPE', rec)
+
+                expect(res.success).toBe(false)
+            } finally {
+                restore()
+            }
+        }, 15000)
+
         it('reads no deduction from a count in brackets beside a plain amount', async () => {
             try {
                 document.body.innerHTML =
