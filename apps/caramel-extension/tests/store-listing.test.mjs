@@ -71,6 +71,16 @@ describe('store listing copy', () => {
         )
     })
 
+    it('declares no non-exempt encryption in the Safari app Info.plist', () => {
+        const workflow = readFileSync(
+            join(EXT_ROOT, '../../.github/workflows/release-extension.yml'),
+            'utf8',
+        )
+        expect(workflow).toContain(
+            'Add :ITSAppUsesNonExemptEncryption bool false',
+        )
+    })
+
     it('never says AI', () => {
         for (const text of ALL) {
             expect(text).not.toMatch(/\bA\.?I\b|artificial intelligence/i)
