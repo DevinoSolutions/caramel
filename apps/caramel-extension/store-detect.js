@@ -631,25 +631,32 @@ async function _caramelContinueRun(rec, finder = false) {
     // the first click ran on.
     const runRec =
         rec ?? (finder ? caramelConfiglessRecord(location.hostname) : null)
-    if (!runRec) return false
+    // Every refusal says which bound stopped the chain: on a form-POST cart the
+    // shopper then gets one code per click, and which of these it was is the
+    // whole diagnosis.
+    const stop = reason => {
+        log('AUTO_INSERT_RUN_STOPS', { reason, finder })
+        return false
+    }
+    if (!runRec) return stop('no record')
     if (finder) {
-        if (!(await _finderSeesBox())) return false
+        if (!(await _finderSeesBox())) return stop('no box')
     } else {
         const box = pickBestMatch(rec.couponInput)
         const toggle = rec.showInput ? pickBestMatch(rec.showInput) : null
-        if (!box && !toggle) return false
+        if (!box && !toggle) return stop('no box')
     }
     let codes = []
     try {
         codes = await getCachedCodes(runRec)
     } catch {
-        return false
+        return stop('no codes')
     }
     const tried = _getTriedCodes()
     const untried = (codes || []).filter(c => c && c.code && !(c.code in tried))
-    if (!untried.length) return false
+    if (!untried.length) return stop('all tried')
     const hop = caramelClaimRunHop()
-    if (!hop) return false
+    if (!hop) return stop('no hop')
     log('AUTO_INSERT_RUN_CONTINUES', {
         hop: hop.hops,
         remaining: hop.remaining,
@@ -740,11 +747,12 @@ async function _resumePendingSubmit() {
     // A finder run goes on only when it could read the total and it did not
     // move: an unreadable total may be hiding a win (the store renamed the
     // row), and submitting the next code onto that cart could replace it.
-    if (
-        (!pending.finder || Number.isFinite(now)) &&
-        (await _caramelContinueRun(rec, !!pending.finder))
-    )
-        return true
+    if (pending.finder && !Number.isFinite(now))
+        log('AUTO_INSERT_RUN_STOPS', {
+            reason: 'total unreadable',
+            finder: true,
+        })
+    else if (await _caramelContinueRun(rec, !!pending.finder)) return true
     caramelEndRun()
 
     if (Number.isFinite(now)) {

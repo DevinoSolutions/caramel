@@ -636,6 +636,17 @@ describe('finding the same box again after the store re-draws it', () => {
         expect(document.querySelector(rec.couponInput)?.id).toBe(':r2:')
     })
 
+    it('keeps an id a person wrote, numbers and all', async () => {
+        const BOX =
+            '<div class="promo"><input id="coupon1234" type="text"><button id="ap" type="button">Apply</button></div>'
+        document.body.innerHTML = BOX + TOTAL
+        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+        document.querySelector('.promo').outerHTML = BOX
+
+        expect(rec?.caramelInputSig).toBe('i:coupon1234')
+        expect(caramelRemarkFoundBox(false, rec)).toBe(true)
+    })
+
     it('never opens the re-drawn box with a toggle that is not its own', async () => {
         document.body.innerHTML = PROMO_BOX + TOTAL
         const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
@@ -716,6 +727,48 @@ describe('a promo box folded behind a checkbox', () => {
             ).toBeNull()
             expect(document.getElementById('nl').checked, words).toBe(false)
         }
+    })
+
+    it('opens a fold that speaks of entering a code, whatever else it mentions', async () => {
+        for (const words of [
+            'Save with a promo code?',
+            'Have a gift card or promo code?',
+            'Enter a promotional code or offer code',
+            'Got a coupon?',
+        ]) {
+            document.body.innerHTML =
+                `<div class="promo"><input type="checkbox" id="cb"><label id="lb" for="cb">${words}</label>` +
+                '<div id="content" style="display:none"><input id="dc" name="discount_code" type="text">' +
+                '<button id="ap" type="button">Apply</button></div></div>' +
+                TOTAL
+            document.getElementById('cb').addEventListener('change', e => {
+                document.getElementById('content').style.display = e.target
+                    .checked
+                    ? ''
+                    : 'none'
+            })
+
+            const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+
+            expect(document.querySelector(rec?.couponInput)?.id, words).toBe(
+                'dc',
+            )
+        }
+    })
+
+    it('never clicks a radio, which a second click cannot put back', async () => {
+        // A payment-method pick that happens to mention a promo code.
+        document.body.innerHTML =
+            '<div class="pay"><input type="radio" id="r0" name="pay" checked><label for="r0">Card</label>' +
+            '<input type="radio" id="r1" name="pay"><label for="r1">Redeem promo code</label>' +
+            '<div style="display:none"><input id="dc" name="discount_code" type="text">' +
+            '<button id="ap" type="button">Apply</button></div></div>' +
+            TOTAL
+
+        expect(
+            await caramelDiscoveredRecord({ domain: 'shop.test' }),
+        ).toBeNull()
+        expect(document.getElementById('r0').checked).toBe(true)
     })
 
     it('opens a fold whose box is only drawn once it is checked', async () => {

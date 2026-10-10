@@ -651,14 +651,16 @@ function ownsBox(el, input) {
     return false
 }
 
-// A promo box's own words, which a checkbox must say to be its fold.
-const PROMO_WORDS_RE = /\b(promo|coupon|discount|voucher)|\bcodes?\b/i
-// ...and never these. A checkbox beside the box that says promo is far more
-// often a setting than a fold: "Email me promo codes and offers" is marketing
-// consent, "I have a discount card" and "Use my voucher balance" change what
-// the shopper pays. Sitting in the same small panel does not tell them apart.
-const NOT_A_FOLD_RE =
-    /\b(e-?mail|sms|text me|newsletter|subscri\w*|offers?|news|updates?|sign me up|send me|notif\w*|marketing|balance|card|points|rewards?|terms|agree|remember|save)\b/i
+// A checkbox beside the box that says promo is far more often a setting than
+// a fold, and sitting in the same small panel does not tell them apart. So it
+// must speak of ENTERING a code ("Have a promo code?", "Toggle discount code
+// input", "Got a coupon?"), never of a card, a balance or points ("I have a
+// discount card", "Use my voucher balance"), and never ask for consent ("Email
+// me promo codes and offers").
+const CODE_ENTRY_RE =
+    /\b(?:promo(?:tional)?|coupon|discount|voucher|offer|gift)\s+codes?\b|\b(?:have|got|enter|add|apply|use)\s+(?:a|an|your)?\s*(?:promo(?:tional)?|coupon|discount|voucher)\b(?!\s+(?:card|balance|points))/i
+const CONSENT_RE =
+    /\b(?:e-?mail|sms|text me|newsletter|subscri\w*|sign me up|send me|notif\w*|marketing)\b/i
 
 // What a toggle says. A checkbox says it in its accessible name.
 function toggleText(el) {
@@ -674,7 +676,7 @@ function scoreToggle(el, t) {
     if (tag === 'INPUT') {
         // A CSS-only fold (a transparent checkbox over "Have a discount
         // code?"). findToggle lets one through only when it holds the box.
-        if (!PROMO_WORDS_RE.test(t)) return null
+        if (!CODE_ENTRY_RE.test(t)) return null
         s += 50
         reasons.push('owned-checkbox')
     } else if (TOGGLE_RE.test(t) || TOGGLE_OBJ_RE.test(t)) {
@@ -825,12 +827,14 @@ function findToggle(doc, input) {
         // A box that only renders once its fold is checked has no input to
         // own yet: then a label or wrapper may still open it (what its words
         // say decides), but a bare checkbox never.
+        // A radio is never a fold: it picks one option of a group (a payment
+        // method), and a second click cannot put the shopper's pick back.
         const check = checkboxOf(el)
+        if (check?.type.toLowerCase() === 'radio') continue
         if (check && (input ? !ownsBox(el, input) : el.tagName === 'INPUT'))
             continue
         const t = toggleText(el)
-        if (check && (!PROMO_WORDS_RE.test(t) || NOT_A_FOLD_RE.test(t)))
-            continue
+        if (check && (!CODE_ENTRY_RE.test(t) || CONSENT_RE.test(t))) continue
         if (!t || t.length > 60) continue
         if (!visible(el)) continue
         const r = scoreToggle(el, t)
@@ -1140,9 +1144,13 @@ export async function caramelDiscoveredRecord(rec, doc = document) {
             found = caramelDiscoverCouponBox(doc)
             if (found.inputVisible) break
         }
-        // A checkbox that showed no box was not its fold: put it back the way
-        // the shopper left it, so nothing about the order changed.
-        if (!found.inputVisible && check && check.checked !== wasChecked) {
+        // A checkbox that opened no box we can use was not its fold, or not
+        // one worth keeping open: put it back the way the shopper left it.
+        if (
+            (!found.inputVisible || !confident(found)) &&
+            check &&
+            check.checked !== wasChecked
+        ) {
             log('FINDER_TOGGLE_RESTORED', {})
             toggle.click()
         }
@@ -1198,7 +1206,7 @@ export async function caramelDiscoveredRecord(rec, doc = document) {
 // An id a framework generates (React ':r1:', 'mui-12', 'ember123') is new on
 // every re-draw, so it names nothing: the next key is read instead.
 const GENERATED_ID_RE =
-    /:|^(?:mui|ember|radix|headlessui|react|rc|chakra|downshift|field|input)[-_]?\d|\d{4,}|[0-9a-f]{8,}/i
+    /:|^(?:mui|ember|radix|headlessui|react|rc|chakra|downshift|field|input)[-_]?\d|(?=[0-9a-f]*\d)[0-9a-f]{8,}/i
 const SIG_KEYS = [
     ['n', el => el.getAttribute('name')],
     ['i', el => (GENERATED_ID_RE.test(el.id) ? '' : el.id)],
