@@ -878,6 +878,23 @@ const moneyCount = t =>
 // we can read honestly, because its largest number need not be the total.
 const ROW_MAX = 90
 
+// An element's own words, and the same with amount and parentheses cut: a
+// label may carry its own amount ("Bag total: £32.00 (1 Item)").
+function ownLabel(el) {
+    const own = norm(
+        [...el.childNodes]
+            .filter(n => n.nodeType === 3)
+            .map(n => n.textContent)
+            .join(' '),
+    )
+    const bare = own
+        .replace(/\(.*?\)/g, ' ')
+        .replace(new RegExp(MONEY_RE.source, 'gi'), ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+    return { own, bare }
+}
+
 function scanTotalRows(
     doc,
     LABEL,
@@ -902,19 +919,7 @@ function scanTotalRows(
             continue
         const th = el.closest('th')
         if (th && !th.closest('tr')?.querySelector('td')) continue
-        const own = norm(
-            [...el.childNodes]
-                .filter(n => n.nodeType === 3)
-                .map(n => n.textContent)
-                .join(' '),
-        )
-        // The label may carry its own amount ("Bag total: £32.00 (1 Item)"):
-        // judge the words with amount and parentheses cut.
-        const bare = own
-            .replace(/\(.*?\)/g, ' ')
-            .replace(new RegExp(MONEY_RE.source, 'gi'), ' ')
-            .replace(/\s+/g, ' ')
-            .trim()
+        const { own, bare } = ownLabel(el)
         if (
             !own ||
             own.length > 40 ||
@@ -1033,25 +1038,32 @@ function positiveTotal(selector) {
  * the subtotal where it was. Measured live: the store said "$20.00 Off", the
  * subtotal stayed $99.99, and the shopper was told the code did not stick.
  *
- * So the read before a code (the baseline) records the subtotal and every
- * deduction line of its summary, shown or not, and a later read takes off only
- * a deduction line that was not there then. Three rules keep it from claiming
- * money that did not move:
+ * So the read before a code (the baseline) records the subtotal and what its
+ * summary already says, shown or not: every amount in it and every label that
+ * speaks of a discount. A later read takes off one line the code added. Each
+ * rule below keeps it from claiming money that did not move:
  *  - a subtotal that itself moved answers alone: a store whose subtotal is
  *    already net of the code also lists the line, and both would count;
- *  - only an amount marked as a deduction ("-$20.00", "($20.00)") counts, so
- *    a "requires a minimum purchase of $50.00" message is not a discount;
- *  - a line the cart already had, even folded away, is never new: a summary
- *    that unfolds after the apply shows an old line, not a saving.
+ *  - the line must be in plain view, under a label the summary did not show
+ *    before, with one amount marked as a deduction ("-$20.00", "($20.00)")
+ *    that the summary did not hold before: an old line the summary unfolds,
+ *    or re-draws with a new amount, is not the code's, and a "requires a
+ *    minimum purchase of $50.00" message is not a discount;
+ *  - one code is one deduction: the largest new line is taken, never a sum,
+ *    so a summary line and its per-item shares count once;
+ *  - a deduction the store printed beside a rejection of the code is not a
+ *    saving (coupon-apply.js reads rec.caramelNetted for that).
  * A read with no baseline (a fresh page after a reload) takes off nothing. */
 const DISCOUNT_WORDS = /coupon|discount|promo|voucher/i
 const DISCOUNT_LABEL =
     /^(?:order |cart |basket )?(?:coupon|discount|promo(?:tion)?|voucher)s?(?: code)?\b[^.!?]{0,30}$/i
 const DISCOUNT_NOT =
-    /sub[- ]?total|total|sav(e|ed|ing|ings)\b|shipping|tax|eligible|exclud|cannot|can't|only|enter|apply|add |have|gift|points|reward|member|minimum|spend|purchase|requir|more|qualif|valid|expire/i
+    /sub[- ]?total|total|sav(e|ed|ing|ings)\b|shipping|tax|eligible|exclud|cannot|can't|only|enter|apply|add |have|gift|points|reward|member|minimum|spend|purchase|requir|more|qualif|valid|expire|balance|credit|card/i
 const CUR = '(?:[$£€¥₹₩₺₱₪₫฿₦]|[A-Z]{3}\\s?)'
+// A deduction mark touches its amount: "-$20.00", "$-20.00", "-20.00",
+// "($20.00)". A dash set apart by spaces is a separator, not a minus.
 const DEDUCTION_RE = new RegExp(
-    `[-−–]\\s?${CUR}\\s?\\d|[$£€¥₹₩₺₱₪₫฿₦]\\s?[-−–]\\s?\\d|\\(\\s?${CUR}?\\s?\\d[\\d.,]*\\s?\\)|[-−–]\\s?\\d[\\d.,]*[.,]\\d{2}\\b`,
+    `[-−–]${CUR}?\\d|[$£€¥₹₩₺₱₪₫฿₦][-−–]\\d|\\(\\s?(?:${CUR}\\s?\\d[\\d.,]*|\\d[\\d.,]*[.,]\\d{2})\\s?\\)`,
 )
 
 // The subtotal's own summary: the widest ancestor still small enough to be
@@ -1072,49 +1084,67 @@ function summaryOf(el) {
     return scope
 }
 
-// The deduction amounts of the subtotal's summary. shownOnly leaves out lines
-// the page hides (a hidden mobile copy would count the same line twice).
-function deductionLines(el, shownOnly) {
+// What the summary says before a code, from its text nodes, hidden or not:
+// every amount, and the label of every element that speaks of a discount.
+function summaryBefore(el) {
     const scope = el && summaryOf(el)
-    if (!scope) return []
+    if (!scope) return { amounts: [], labels: [] }
+    const amounts = []
+    const labels = []
+    const tw = el.ownerDocument.createTreeWalker(scope, NodeFilter.SHOW_TEXT)
+    for (let n = tw.nextNode(); n; n = tw.nextNode()) {
+        for (const m of caramelFindMoney(n.textContent))
+            amounts.push(Math.abs(m.value))
+        if (n.parentElement && DISCOUNT_WORDS.test(n.textContent))
+            labels.push(ownLabel(n.parentElement).bare.toLowerCase())
+    }
+    return { amounts, labels }
+}
+
+// The one deduction the code added, or 0.
+function newDeduction(el, base) {
+    const scope = el && summaryOf(el)
+    if (!scope) return 0
     const hits = scanTotalRows(el.ownerDocument, DISCOUNT_LABEL, DISCOUNT_NOT, {
         root: scope,
         words: DISCOUNT_WORDS,
-    }).filter(h => (!shownOnly || h.visible) && !h.el.contains(el))
-    // One line, counted once: a row nested in another hit is the same line,
-    // and so is a second row naming the same amount (a summary line and a
-    // "Coupon applied" note). Two real discounts of equal size then count
-    // once, which can hide a saving and never invents one.
-    const amounts = new Set()
+    }).filter(
+        h => h.visible && !h.el.contains(el) && !base.labels.includes(h.label),
+    )
+    let off = 0
     for (const h of hits) {
         if (hits.some(o => o !== h && o.el.contains(h.el))) continue
         // A code in brackets ("Coupon (SAVE20)") names the code, not an amount.
         const t = textOf(h.el).replace(/\([^)]*[a-z][^)]*\)/gi, ' ')
         const money = caramelFindMoney(t)
-        if (money.length === 1 && DEDUCTION_RE.test(t))
-            amounts.add(Math.abs(money[0].value))
+        const a = money.length === 1 ? Math.abs(money[0].value) : 0
+        if (a > off && DEDUCTION_RE.test(t) && !base.amounts.includes(a))
+            off = a
     }
-    return [...amounts]
+    return off
 }
 
 function finderTotal(selector, kind, doc, rec, baseline) {
+    if (rec) {
+        rec.caramelNetted = false
+        if (baseline) rec.caramelSubtotalBase = null
+    }
     const gross = positiveTotal(selector)
     if (kind !== 'subtotal' || !(gross > 0) || !rec) return gross
     const el = doc.querySelector(selector)
     if (baseline) {
-        rec.caramelSubtotalBase = { gross, lines: deductionLines(el, false) }
+        rec.caramelSubtotalBase = { gross, ...summaryBefore(el) }
         return gross
     }
     const base = rec.caramelSubtotalBase
     if (!base || base.gross !== gross) return gross
-    let off = 0
-    for (const a of deductionLines(el, true))
-        if (!base.lines.includes(a)) off += a
+    const off = newDeduction(el, base)
     if (!off) return gross
     const net = Math.round((gross - off) * 100) / 100
     // A coupon line as big as the whole subtotal is not one we can read.
     if (!(net > 0)) return NaN
     caramelSetLastPrices([net])
+    rec.caramelNetted = true
     return net
 }
 

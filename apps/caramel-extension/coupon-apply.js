@@ -802,6 +802,9 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
         // A finder-read total of zero or less is a placeholder caught mid-
         // render (see caramelFinderTotalNow), never a measured saving.
         if (rec.caramelFound && !(newTotal > 0)) priceDropped = false
+        // A drop read off a new deduction line, beside the store's own fresh
+        // rejection of the code, is not a saving (see finderTotal).
+        if (rec.caramelNetted && errorIsNew) priceDropped = false
     }
     // Success rules (in priority order):
     //  1. price dropped                       → real win

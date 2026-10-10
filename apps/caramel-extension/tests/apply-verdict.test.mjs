@@ -937,6 +937,151 @@ describe('a finder-picked box the store re-draws to answer', () => {
                 restore()
             }
         })
+
+        // The store's answer: its section re-drawn with a message, and lines
+        // added to the summary, all at once.
+        function answerOnClick(msg, lines) {
+            clicks = e => {
+                if (!e.target.matches?.('.ap')) return
+                const code = document.querySelector('[name=promo_code]').value
+                setTimeout(() => {
+                    if (msg) {
+                        document.querySelector('.sec').innerHTML = SECTION(
+                            msg(code),
+                        )
+                        document.querySelector('[name=promo_code]').value = code
+                    }
+                    if (lines)
+                        document
+                            .querySelector('.sum p')
+                            .insertAdjacentHTML('beforebegin', lines)
+                }, 900)
+            }
+            document.addEventListener('click', clicks)
+        }
+
+        it('never reads an old line the summary only showed as invisible text as new', async () => {
+            // visibility:hidden leaves a line out of innerText, so a reader
+            // that took its amount from what is shown never recorded it.
+            const proto = globalThis.HTMLElement.prototype
+            const inner = Object.getOwnPropertyDescriptor(proto, 'innerText')
+            Object.defineProperty(proto, 'innerText', {
+                configurable: true,
+                get() {
+                    for (
+                        let n = this;
+                        n && n.nodeType === 1;
+                        n = n.parentElement
+                    )
+                        if (n.style?.visibility === 'hidden') return ''
+                    return this.textContent
+                },
+            })
+            try {
+                document.body.innerHTML =
+                    `<aside class="sec">${SECTION('')}</aside>` +
+                    SUMMARY(
+                        LINE(
+                            'Discount',
+                            '-$10.00',
+                            ' style="visibility:hidden"',
+                        ),
+                    )
+                clicks = e => {
+                    if (!e.target.matches?.('.ap')) return
+                    setTimeout(() => {
+                        document.querySelector('.cl').style.visibility = ''
+                    }, 900)
+                }
+                document.addEventListener('click', clicks)
+                const rec = await finderRecord({ domain: 'shop.test' })
+
+                const res = await applyCoupon('NOPE', rec)
+
+                expect(res.success).toBe(false)
+            } finally {
+                Object.defineProperty(proto, 'innerText', inner)
+                restore()
+            }
+        }, 15000)
+
+        it('takes one deduction for one code, never the line and its shares', async () => {
+            try {
+                document.body.innerHTML =
+                    `<aside class="sec">${SECTION('')}</aside>` + SUMMARY('')
+                answerOnClick(
+                    null,
+                    LINE('Coupon', '-$20.00') +
+                        LINE('Discount on item one', '-$12.00') +
+                        LINE('Discount on item two', '-$8.00'),
+                )
+                const rec = await finderRecord({ domain: 'shop.test' })
+
+                const res = await applyCoupon('TWENTYOFF', rec)
+
+                expect(res.success).toBe(true)
+                expect(res.newTotal).toBe(79.99)
+            } finally {
+                restore()
+            }
+        }, 15000)
+
+        it('never reads a line the summary had before as new once it shows an amount', async () => {
+            try {
+                document.body.innerHTML =
+                    `<aside class="sec">${SECTION('')}</aside>` +
+                    SUMMARY(LINE('Discount', '&mdash;'))
+                clicks = e => {
+                    if (!e.target.matches?.('.ap')) return
+                    setTimeout(() => {
+                        document.querySelector(
+                            '.cl',
+                        ).lastElementChild.textContent = '-$10.00'
+                    }, 900)
+                }
+                document.addEventListener('click', clicks)
+                const rec = await finderRecord({ domain: 'shop.test' })
+
+                const res = await applyCoupon('NOPE', rec)
+
+                expect(res.success).toBe(false)
+            } finally {
+                restore()
+            }
+        }, 15000)
+
+        it('reads no saving from a line the store prints beside its rejection of the code', async () => {
+            try {
+                document.body.innerHTML =
+                    `<aside class="sec">${SECTION('')}</aside>` + SUMMARY('')
+                answerOnClick(
+                    c => `Sorry, code "${c}" isn't valid for this order.`,
+                    LINE('Promo TWENTYOFF', '-$20.00'),
+                )
+                const rec = await finderRecord({ domain: 'shop.test' })
+
+                const res = await applyCoupon('TWENTYOFF', rec)
+
+                expect(res.success).toBe(false)
+            } finally {
+                restore()
+            }
+        }, 15000)
+
+        it('reads no deduction from a count in brackets beside a plain amount', async () => {
+            try {
+                document.body.innerHTML =
+                    `<aside class="sec">${SECTION('')}</aside>` + SUMMARY('')
+                answerOnClick(null, LINE('Coupons (2)', '$5.00'))
+                const rec = await finderRecord({ domain: 'shop.test' })
+
+                const res = await applyCoupon('NOPE', rec)
+
+                expect(res.success).toBe(false)
+            } finally {
+                restore()
+            }
+        }, 15000)
     })
 
     it('sees the answer in a section that replaced the one it watched', async () => {
