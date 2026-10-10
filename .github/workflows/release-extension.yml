@@ -1074,6 +1074,35 @@ jobs:
             /usr/libexec/PlistBuddy -c "Set :LSApplicationCategoryType ${MAC_CATEGORY}" "$plist"
           done
 
+      # Export compliance. Without ITSAppUsesNonExemptEncryption every uploaded
+      # build sits in TestFlight as "Missing Compliance" until a human answers
+      # the export-compliance question in App Store Connect, which blocks
+      # submission. The extension does no non-exempt encryption of its own: it
+      # speaks HTTPS through Apple's OS networking and ships no crypto, so the
+      # answer is false and belongs in the containing APP's Info.plist, not the
+      # .appex's. If that ever changes, this key must change with it and App
+      # Store Connect documentation may be required. The converter lays the
+      # project out as `<App Name>/macOS (App)`, `iOS (App)`, `Shared (App)`
+      # plus the matching `(Extension)` dirs; patching every Info.plist under
+      # an `(App)` directory hits exactly the two app targets without depending
+      # on the precise folder names. Asserted after archive by "Assert export
+      # compliance key".
+      - name: Patch app Info.plist ITSAppUsesNonExemptEncryption
+        run: |
+          set -euo pipefail
+          patched=0
+          while IFS= read -r -d '' plist; do
+            /usr/libexec/PlistBuddy -c "Add :ITSAppUsesNonExemptEncryption bool false" "$plist" \
+              2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Set :ITSAppUsesNonExemptEncryption false" "$plist"
+            echo "patched: ${plist}"
+            patched=$((patched + 1))
+          done < <(find SafariExtProject/${{ env.APP_NAME }} -path '*(App)*' -name Info.plist -print0)
+          if [ "$patched" -eq 0 ]; then
+            echo "::error::No (App) Info.plist found to patch — the export compliance key was not set."
+            exit 1
+          fi
+
       # MV3 deployment floor. safari-web-extension-converter stamps its own
       # defaults (iOS 15.0 / macOS 10.14) onto the generated project, and both
       # are below what this extension can actually run on: MV3 web extensions
@@ -1177,6 +1206,36 @@ jobs:
             exit 1
           fi
           echo "Checked ${checked} bundle(s) against the MV3 deployment floor."
+          exit "$fail"
+
+      # The key only counts if it reached the archived APP bundles (App Store
+      # Connect does not read it from the .appex inside). Looks at the top-level
+      # .app of each archive only: iOS keeps its Info.plist at the bundle root,
+      # macOS under Contents/. Inspecting zero files is a failure too.
+      - name: Assert export compliance key
+        run: |
+          set -euo pipefail
+          fail=0
+          checked=0
+          for archive in \
+            "SafariExtProject/${{ env.APP_NAME }}-ios.xcarchive" \
+            "SafariExtProject/${{ env.APP_NAME }}-macos.xcarchive"; do
+            while IFS= read -r -d '' plist; do
+              checked=$((checked + 1))
+              value=$(/usr/libexec/PlistBuddy -c "Print :ITSAppUsesNonExemptEncryption" "$plist" 2>/dev/null || true)
+              if [ "$value" = "false" ]; then
+                echo "ok: ${plist} ITSAppUsesNonExemptEncryption=false"
+              else
+                echo "::error::${plist} has ITSAppUsesNonExemptEncryption='${value}', expected false"
+                fail=1
+              fi
+            done < <(find "${archive}/Products/Applications" -maxdepth 3 \
+              \( -path '*.app/Info.plist' -o -path '*.app/Contents/Info.plist' \) -print0)
+          done
+          if [ "$checked" -eq 0 ]; then
+            echo "::error::No archived app Info.plist found — the export compliance gate inspected nothing."
+            exit 1
+          fi
           exit "$fail"
 
       - name: Write exportOptions (macOS)
