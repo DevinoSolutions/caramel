@@ -147,6 +147,13 @@ const serverObjectSchema = z.object({
         .enum(['true', 'false'])
         .default('false')
         .transform(value => value === 'true'),
+    // Served to the extension by GET /api/extension/features. On, the
+    // extension may find a store's promo box itself when no config describes
+    // it. Same strict two-value enum as SHOPPER_CODE_CAPTURE_ENABLED.
+    COUPON_BOX_DISCOVERY_ENABLED: z
+        .enum(['true', 'false'])
+        .default('false')
+        .transform(value => value === 'true'),
     OPENROUTER_API_KEY: z.string().optional(),
     // Base URL of the OpenAI-compatible chat API that openrouter.ts POSTs
     // `${OPENROUTER_API_URL}/chat/completions` to. Unset (or blank) =

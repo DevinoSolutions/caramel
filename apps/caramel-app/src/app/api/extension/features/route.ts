@@ -20,6 +20,12 @@ import { NextResponse } from 'next/server'
 // from capturing once the flag is on. The extension must not even send a
 // capture while this is false.
 //
+// couponBoxDiscovery: may the extension look for a promo box itself when a
+// store has no config row, or when the config's selectors match nothing on the
+// page? Mirrors COUPON_BOX_DISCOVERY_ENABLED, false by default. Off, the
+// extension behaves exactly as it did before the finder existed: it offers the
+// codes to copy. Older extension builds ignore this key.
+//
 // withRoute: public read like extension/supported-stores (rate-limited, no
 // auth/origin gate); cors 'extension' + the OPTIONS preflight mirror
 // extension/me, so a preflighted extension-origin fetch can read it.
@@ -42,5 +48,6 @@ export const GET = withRoute(
     () =>
         NextResponse.json({
             shopperCodeCapture: env.SHOPPER_CODE_CAPTURE_ENABLED,
+            couponBoxDiscovery: env.COUPON_BOX_DISCOVERY_ENABLED,
         }),
 )

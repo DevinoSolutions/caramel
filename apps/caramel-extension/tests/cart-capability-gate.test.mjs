@@ -246,10 +246,61 @@ describe('isCheckout — cart intent the path does not spell out', () => {
     })
 
     it('does not read a product SLUG as a cart', async () => {
-        setPath('/products/cart-organizer')
-
-        expect(await isCheckout()).toBe(false)
+        for (const url of [
+            '/products/cart-organizer',
+            '/products/cart-2-pack',
+            '/products/basket-12x12',
+            // A numbered slug is a cart only when the segment IS the word.
+            '/products/golf-cart-3',
+            '/collections/gift-basket-50',
+            '/products/wicker-basket-2',
+            '/blog/checkout-2024',
+            // Magento names its product pages .html.
+            '/products/golf-cart.html',
+            '/collections/cart-accessories.html',
+            '/minecart',
+            '/mycart-tips',
+            // An older platform's cart spelling deeper in a path is a page
+            // ABOUT carts, and a query string is not where the shopper is.
+            '/garden/cart.html',
+            '/products/shopping-cart.html',
+            '/collections/basket.html',
+            '/help/checkout.html',
+            '/login?redirect=/cart.php',
+            '/cartography.html',
+        ]) {
+            setPath(url)
+            expect(await isCheckout(), url).toBe(false)
+        }
         expect(probeCalls).toBe(0)
+    })
+
+    // Measured: six stores the live runs left silent had a promo box and a
+    // total in plain view on exactly these pages.
+    it('opens on a cart page spelled the way older platforms spell it', async () => {
+        for (const url of [
+            '/cart.php',
+            '/cart.php?action=view',
+            '/my_cart.aspx',
+            '/mycart',
+            '/ShoppingCart.asp',
+            '/shopping-cart.php',
+            '/viewcart',
+            '/en/cart.html',
+            '/checkout.php',
+            '/shop/basket.aspx?cart=1',
+            '/store/cart.php',
+        ]) {
+            setPath(url)
+            expect(await isCheckout(), url).toBe(true)
+        }
+    })
+
+    it('opens on a cart whose page slug carries a number (WordPress /cart-2/)', async () => {
+        for (const url of ['/cart-2/', '/basket-3', '/cart-2/?coupon=1']) {
+            setPath(url)
+            expect(await isCheckout(), url).toBe(true)
+        }
     })
 
     describe('the store bounced the shopper off its own cart URL', () => {

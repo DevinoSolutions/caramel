@@ -32,6 +32,10 @@ import {
     setInputValue,
 } from './coupon-apply.js'
 import {
+    caramelCouponBoxDiscoveryOn,
+    caramelDiscoveredRecord,
+} from './coupon-box-discovery.js'
+import {
     _caramelCleanCodes,
     caramelRankByValue,
     fetchCoupons,
@@ -795,6 +799,17 @@ export async function startApplyingCoupons(rec, options) {
             _box = pickBestMatch(rec.couponInput)
         }
     }
+    // No config describes a box we can see. Before handing the codes over to
+    // copy, let the finder look (coupon-box-discovery.js; off unless the
+    // server's couponBoxDiscovery flag is on). It returns a record aimed at
+    // the box it found, or null and this page keeps its copy-the-codes answer.
+    if ((!_box || !_isVisible(_box)) && (await caramelCouponBoxDiscoveryOn())) {
+        const found = await caramelDiscoveredRecord(rec)
+        if (found) {
+            rec = found
+            _box = pickBestMatch(rec.couponInput)
+        }
+    }
     if (!_box || !_isVisible(_box)) {
         log('AUTO_INSERT_STOP', {
             result: 'no-coupon-box',
@@ -937,7 +952,18 @@ export async function startApplyingCoupons(rec, options) {
         // Written BEFORE the submit, because a submit that navigates never
         // comes back here (see caramelMarkPendingSubmit). Cleared immediately
         // after, so a normal attempt leaves nothing for the next page to read.
-        caramelMarkPendingSubmit(code, coupons[i].id, originalPrices)
+        caramelMarkPendingSubmit(
+            code,
+            coupons[i].id,
+            originalPrices,
+            rec.caramelFound === true
+                ? {
+                      kind: rec.caramelTotalKind || 'total',
+                      label: rec.caramelTotalLabel,
+                      rows: rec.caramelTotalRows,
+                  }
+                : false,
+        )
         const res = await applyCoupon(code, rec)
         caramelClearPendingSubmit()
 

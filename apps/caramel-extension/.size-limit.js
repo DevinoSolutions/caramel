@@ -42,7 +42,21 @@ module.exports = [
         // (owner rule 2026-10-06) — the consent card (UI-helpers.js
         // showCodeSharingPrompt) and the consent record module
         // (code-sharing-consent.js). Measured 76.66 kB: one new UI surface.
-        limit: '80 KB',
+        // 2026-10-09, raised 80 -> 101 kB: coupon-box-discovery.js, the
+        // promo-box finder for stores with no usable config (its vocabularies
+        // in nine languages, the field/button/toggle scoring, the total-row
+        // reader). Measured 91.74 kB: one new capability, off behind a server
+        // flag, not prose.
+        // 2026-10-10, raised 101 -> 106 kB: the finder hardened against live
+        // stores — after a store re-draws the box it re-finds only the SAME
+        // one (signature match, so a gift-card box is never taken while ours
+        // is disabled), reopens a box re-drawn folded via its toggle, reads a
+        // Total row whose label cell is display:none (a measured lost win), a
+        // stricter acceptance check and a time-throttled re-find. Measured
+        // 101.23 kB, +0.7 kB for five fixes. 4.7% headroom rather than 10% on
+        // purpose: this is the same capability hardening, not a new one — the
+        // next capability should trip the ratchet and be a decision.
+        limit: '106 KB',
         brotli: false,
     },
     {
@@ -101,7 +115,11 @@ module.exports = [
         // checkoutCodeSharingConsent record (code-sharing-consent.js) and
         // answers no-consent, so nothing is sent before an explicit yes.
         // Measured 9.29 kB.
-        limit: '10 KB',
+        // 2026-10-09, raised 10 -> 10.7 kB: the features cache now carries the
+        // couponBoxDiscovery flag too, answered to the content script on its
+        // own message route. Measured 9.67 kB; raised rather than left at 3.3%
+        // headroom (see the 2026-08-10 note above).
+        limit: '10.7 KB',
         brotli: false,
     },
 ]

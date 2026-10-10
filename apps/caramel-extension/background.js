@@ -180,8 +180,8 @@ async function fetchCaramelApi(url, opts = {}, timeoutMs = FETCH_TIMEOUT_MS) {
 const FEATURES_CACHE_KEY = 'caramel_features'
 const FEATURES_TTL_ON_MS = 6 * 60 * 60 * 1000
 const FEATURES_TTL_OFF_MS = 30 * 60 * 1000
-let _featuresInflight = null // Promise<boolean> while a fetch is running
-let _featuresMemo = null // { shopperCodeCapture, ts }
+let _featuresInflight = null // Promise<entry> while a fetch is running
+let _featuresMemo = null // { shopperCodeCapture, couponBoxDiscovery, ts }
 
 function _readFeaturesSession() {
     return new Promise(resolve => {
@@ -208,7 +208,12 @@ function _writeFeaturesSession(entry) {
 
 function _featuresFresh(e) {
     if (!e || typeof e.shopperCodeCapture !== 'boolean') return false
-    const ttl = e.shopperCodeCapture ? FEATURES_TTL_ON_MS : FEATURES_TTL_OFF_MS
+    // While the promo-box finder is on, the short lifetime: turning it OFF is
+    // the kill switch, and it must reach extensions within 30 minutes.
+    const ttl =
+        e.shopperCodeCapture && e.couponBoxDiscovery !== true
+            ? FEATURES_TTL_ON_MS
+            : FEATURES_TTL_OFF_MS
     return Date.now() - e.ts < ttl
 }
 
@@ -221,15 +226,20 @@ async function _fetchFeatures() {
         throw new Error('features: shopperCodeCapture is not a boolean')
     _featuresMemo = {
         shopperCodeCapture: json.shopperCodeCapture,
+        // Anything but a literal true is off: an app that predates the flag
+        // omits it, and the finder must never switch itself on.
+        couponBoxDiscovery: json.couponBoxDiscovery === true,
         ts: Date.now(),
     }
     _writeFeaturesSession(_featuresMemo)
-    return json.shopperCodeCapture
+    return _featuresMemo
 }
 
-function _shopperCaptureEnabled() {
-    if (_featuresFresh(_featuresMemo))
-        return Promise.resolve(_featuresMemo.shopperCodeCapture)
+/* The cached features entry. Lifetime (see _featuresFresh): 6 hours only while
+ * capture is on and the finder is off, 30 minutes otherwise, so switching the
+ * finder off reaches every extension within 30 minutes. */
+function _features() {
+    if (_featuresFresh(_featuresMemo)) return Promise.resolve(_featuresMemo)
     // One fetch for however many callers arrive while it is running; cleared
     // when it settles so a failure is retried by the next caller.
     if (!_featuresInflight) {
@@ -237,7 +247,7 @@ function _shopperCaptureEnabled() {
             const stored = await _readFeaturesSession()
             if (_featuresFresh(stored)) {
                 _featuresMemo = stored
-                return stored.shopperCodeCapture
+                return stored
             }
             return _fetchFeatures()
         })().finally(() => {
@@ -245,6 +255,22 @@ function _shopperCaptureEnabled() {
         })
     }
     return _featuresInflight
+}
+
+function _shopperCaptureEnabled() {
+    return _features().then(e => e.shopperCodeCapture)
+}
+
+// Answers the content script's couponBoxDiscoveryEnabled message. Any failure
+// to read the flag is answered as off: the finder is an addition, never a
+// requirement.
+async function couponBoxDiscoveryEnabled() {
+    try {
+        return (await _features()).couponBoxDiscovery === true
+    } catch (err) {
+        logError('features', err)
+        return false
+    }
 }
 
 function _forgetFeatures() {
@@ -647,6 +673,11 @@ export function initBackground() {
                         sendResponse({ error: String(err) })
                     })
 
+                return true
+            } else if (message.action === 'couponBoxDiscoveryEnabled') {
+                couponBoxDiscoveryEnabled().then(enabled =>
+                    sendResponse({ enabled }),
+                )
                 return true
             } else if (message.action === 'getFavoriteStores') {
                 // The stores this account follows. fetchCaramelApi so the stored
