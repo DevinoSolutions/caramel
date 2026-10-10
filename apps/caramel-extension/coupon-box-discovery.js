@@ -653,6 +653,12 @@ function ownsBox(el, input) {
 
 // A promo box's own words, which a checkbox must say to be its fold.
 const PROMO_WORDS_RE = /\b(promo|coupon|discount|voucher)|\bcodes?\b/i
+// ...and never these. A checkbox beside the box that says promo is far more
+// often a setting than a fold: "Email me promo codes and offers" is marketing
+// consent, "I have a discount card" and "Use my voucher balance" change what
+// the shopper pays. Sitting in the same small panel does not tell them apart.
+const NOT_A_FOLD_RE =
+    /\b(e-?mail|sms|text me|newsletter|subscri\w*|offers?|news|updates?|sign me up|send me|notif\w*|marketing|balance|card|points|rewards?|terms|agree|remember|save)\b/i
 
 // What a toggle says. A checkbox says it in its accessible name.
 function toggleText(el) {
@@ -816,10 +822,15 @@ function findToggle(doc, input) {
         // A click on a checkbox CHANGES the order ("Use my gift card
         // balance"). One is a toggle only when it folds the promo box itself
         // and says so.
+        // A box that only renders once its fold is checked has no input to
+        // own yet: then a label or wrapper may still open it (what its words
+        // say decides), but a bare checkbox never.
         const check = checkboxOf(el)
-        if (check && !ownsBox(el, input)) continue
+        if (check && (input ? !ownsBox(el, input) : el.tagName === 'INPUT'))
+            continue
         const t = toggleText(el)
-        if (check && !PROMO_WORDS_RE.test(t)) continue
+        if (check && (!PROMO_WORDS_RE.test(t) || NOT_A_FOLD_RE.test(t)))
+            continue
         if (!t || t.length > 60) continue
         if (!visible(el)) continue
         const r = scoreToggle(el, t)
@@ -1120,11 +1131,20 @@ export async function caramelDiscoveredRecord(rec, doc = document) {
             })
             return null
         }
-        found.toggle.click()
+        const toggle = found.toggle
+        const check = checkboxOf(toggle)
+        const wasChecked = check?.checked
+        toggle.click()
         for (let waited = 0; waited < 2500; waited += 250) {
             await sleep(250)
             found = caramelDiscoverCouponBox(doc)
             if (found.inputVisible) break
+        }
+        // A checkbox that showed no box was not its fold: put it back the way
+        // the shopper left it, so nothing about the order changed.
+        if (!found.inputVisible && check && check.checked !== wasChecked) {
+            log('FINDER_TOGGLE_RESTORED', {})
+            toggle.click()
         }
     }
     if (!found.inputVisible || !confident(found)) {
@@ -1175,9 +1195,13 @@ export async function caramelDiscoveredRecord(rec, doc = document) {
 // answer, does not make the same box a stranger. '' when nothing names it: a
 // wordless box cannot be told from another wordless box (a gift-card field
 // beside it), so it is never found again.
+// An id a framework generates (React ':r1:', 'mui-12', 'ember123') is new on
+// every re-draw, so it names nothing: the next key is read instead.
+const GENERATED_ID_RE =
+    /:|^(?:mui|ember|radix|headlessui|react|rc|chakra|downshift|field|input)[-_]?\d|\d{4,}|[0-9a-f]{8,}/i
 const SIG_KEYS = [
     ['n', el => el.getAttribute('name')],
-    ['i', el => el.id],
+    ['i', el => (GENERATED_ID_RE.test(el.id) ? '' : el.id)],
     ['a', el => el.getAttribute('aria-label')],
     ['p', el => el.getAttribute('placeholder')],
     ['l', el => labelText(el)],

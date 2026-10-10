@@ -623,6 +623,19 @@ describe('finding the same box again after the store re-draws it', () => {
         expect(document.querySelector(rec.couponInput)?.id).toBe('dc')
     })
 
+    it('knows its own box when the framework gives the re-drawn one a new id', async () => {
+        // React useId / MUI / Ember ids are minted again on every re-draw.
+        const BOX = id =>
+            `<div class="promo"><input id="${id}" placeholder="Discount code" type="text">` +
+            '<button id="ap" type="button">Apply</button></div>'
+        document.body.innerHTML = BOX(':r1:') + TOTAL
+        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+        document.querySelector('.promo').outerHTML = BOX(':r2:')
+
+        expect(caramelRemarkFoundBox(false, rec)).toBe(true)
+        expect(document.querySelector(rec.couponInput)?.id).toBe(':r2:')
+    })
+
     it('never opens the re-drawn box with a toggle that is not its own', async () => {
         document.body.innerHTML = PROMO_BOX + TOTAL
         const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
@@ -681,6 +694,60 @@ describe('a promo box folded behind a checkbox', () => {
             await caramelDiscoveredRecord({ domain: 'shop.test' }),
         ).toBeNull()
         expect(document.getElementById('gb').checked).toBe(false)
+    })
+
+    it('never clicks a setting that sits in the box’s own panel and says promo', async () => {
+        // Marketing consent, and a card that changes what the shopper pays.
+        for (const words of [
+            'Email me promo codes and offers',
+            'I have a discount card',
+            'Use my voucher balance',
+        ]) {
+            document.body.innerHTML =
+                `<div class="panel"><input type="checkbox" id="nl"><label for="nl">${words}</label>` +
+                '<div style="display:none"><input id="dc" name="discount_code" type="text">' +
+                '<button id="ap" type="button">Apply</button></div></div>' +
+                TOTAL
+
+            expect(caramelFinderSeesBox(), words).toBe(false)
+            expect(
+                await caramelDiscoveredRecord({ domain: 'shop.test' }),
+                words,
+            ).toBeNull()
+            expect(document.getElementById('nl').checked, words).toBe(false)
+        }
+    })
+
+    it('opens a fold whose box is only drawn once it is checked', async () => {
+        document.body.innerHTML =
+            '<div class="promo"><input type="checkbox" id="cb"><label id="lb" for="cb">Have a promo code?</label>' +
+            '<div id="slot"></div></div>' +
+            TOTAL
+        document.getElementById('cb').addEventListener('change', e => {
+            document.getElementById('slot').innerHTML = e.target.checked
+                ? '<input id="dc" name="discount_code" type="text"><button id="ap" type="button">Apply</button>'
+                : ''
+        })
+
+        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+
+        expect(document.querySelector(rec.couponInput)?.id).toBe('dc')
+        expect(document.querySelector(rec.showInput)?.id).toBe('lb')
+    })
+
+    it('puts a checkbox back when checking it showed no box', async () => {
+        // Its words named a code, but it opened nothing: whatever it changed,
+        // the shopper did not ask for.
+        document.body.innerHTML =
+            '<div class="promo"><input type="checkbox" id="cb"><label for="cb">Have a promo code?</label>' +
+            '<div style="display:none"><input id="dc" name="discount_code" type="text">' +
+            '<button id="ap" type="button">Apply</button></div></div>' +
+            TOTAL
+
+        expect(
+            await caramelDiscoveredRecord({ domain: 'shop.test' }),
+        ).toBeNull()
+        expect(document.getElementById('cb').checked).toBe(false)
     })
 })
 

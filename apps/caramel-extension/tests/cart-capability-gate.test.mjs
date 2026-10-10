@@ -260,6 +260,13 @@ describe('isCheckout — cart intent the path does not spell out', () => {
             '/collections/cart-accessories.html',
             '/minecart',
             '/mycart-tips',
+            // An older platform's cart spelling deeper in a path is a page
+            // ABOUT carts, and a query string is not where the shopper is.
+            '/garden/cart.html',
+            '/products/shopping-cart.html',
+            '/collections/basket.html',
+            '/help/checkout.html',
+            '/login?redirect=/cart.php',
             '/cartography.html',
         ]) {
             setPath(url)
@@ -281,6 +288,8 @@ describe('isCheckout — cart intent the path does not spell out', () => {
             '/viewcart',
             '/en/cart.html',
             '/checkout.php',
+            '/shop/basket.aspx?cart=1',
+            '/store/cart.php',
         ]) {
             setPath(url)
             expect(await isCheckout(), url).toBe(true)

@@ -267,15 +267,37 @@ export function _hostMatchesDomain(host, domain) {
  * /collections/gift-basket-50 and /blog/checkout-2024 are not carts, and a
  * product slug does not stop at a number (/products/cart-2-pack stays out).
  *
- * And a segment that IS the cart page in an older platform's spelling: a file
- * extension (/cart.php is every BigCommerce cart) or the word joined to
- * my/view/show/shop(ping) (/mycart, /my_cart.aspx, /ShoppingCart.asp).
- * Measured: six of the stores the live runs left silent had a promo box and a
- * total in plain view on exactly these pages, and the finder was never asked.
- * Only on a segment that starts with it: /products/golf-cart.html is a product
- * (Magento names its product pages .html). */
+ * The older platforms' spellings (/cart.php, /mycart) are a separate rule,
+ * _caramelCartFilePath below, because they are only safe at the top of a path. */
 const CARAMEL_CART_PATH_RE =
-    /(?:^|[/\-_])(cart|carts|basket|checkout|checkouts)(?:[/?#]|$)|(?:^|\/)(?:cart|carts|basket|checkout|checkouts)-\d\d?(?:[/?#]|$)|(?:^|\/)(?:(?:my|view|show|shop|shopping)[-_]?)?(?:cart|carts|basket|checkout|checkouts)(?:\.(?:php|aspx?|html?|jsp|cfm|do))?(?:[/?#]|$)/i
+    /(?:^|[/\-_])(cart|carts|basket|checkout|checkouts)(?:[/?#]|$)|(?:^|\/)(?:cart|carts|basket|checkout|checkouts)-\d\d?(?:[/?#]|$)/i
+
+/* The cart page in an older platform's spelling: a file extension (/cart.php is
+ * every BigCommerce cart) or the word joined to my/view/show/shop(ping)
+ * (/mycart, /my_cart.aspx, /ShoppingCart.asp). Measured: six of the stores the
+ * live runs left silent had a promo box and a total in plain view on exactly
+ * these pages, and the finder was never asked.
+ *
+ * Only as the LAST segment of the PATH, and only when every segment before it is
+ * a locale or a word that names the store's own shop (/en/cart.html,
+ * /shop/basket.aspx). Anywhere else the same spelling is a page about carts:
+ * /products/shopping-cart.html and /garden/cart.html are products (Magento names
+ * its product pages .html), /help/checkout.html is a help page, and a query
+ * string (?redirect=/cart.php) is not where the shopper is. */
+const CARAMEL_CART_FILE_RE =
+    /^(?:(?:my|view|show|shop|shopping)[-_]?)?(?:cart|carts|basket|checkout|checkouts)(?:\.(?:php|aspx?|html?|jsp|cfm|do))?$/i
+const CARAMEL_CART_FILE_PARENT_RE =
+    /^(?:[a-z]{2}(?:[-_][a-z]{2})?|store|shop|checkout|cart|basket|secure|order|orders)$/i
+function _caramelCartFilePath(pathname) {
+    const segs = String(pathname || '')
+        .split('/')
+        .filter(Boolean)
+    if (!segs.length || segs.length > 3) return false
+    return (
+        CARAMEL_CART_FILE_RE.test(segs[segs.length - 1]) &&
+        segs.slice(0, -1).every(seg => CARAMEL_CART_FILE_PARENT_RE.test(seg))
+    )
+}
 
 /* A query key that means "the cart drawer is open".
  *
@@ -323,7 +345,11 @@ function _caramelReferrerCartBounce() {
         return false
     }
     if (from.origin !== location.origin) return false
-    if (!CARAMEL_CART_PATH_RE.test(from.pathname)) return false
+    if (
+        !CARAMEL_CART_PATH_RE.test(from.pathname) &&
+        !_caramelCartFilePath(from.pathname)
+    )
+        return false
     return CARAMEL_SITE_ROOT_RE.test(location.pathname)
 }
 
@@ -351,7 +377,10 @@ export function _caramelCartHostname(hostname) {
 }
 
 function _caramelCartIntentSignal() {
-    if (CARAMEL_CART_PATH_RE.test(location.pathname + location.search))
+    if (
+        CARAMEL_CART_PATH_RE.test(location.pathname + location.search) ||
+        _caramelCartFilePath(location.pathname)
+    )
         return 'path'
     if (_caramelCartHostname(location.hostname)) return 'host'
     for (const [key, value] of new URLSearchParams(location.search)) {
