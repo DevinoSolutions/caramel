@@ -325,20 +325,23 @@ function _caramelFinderSaysNo(text) {
         !(_CARAMEL_FIELD_RE.test(t) && !_CARAMEL_COUPON_WORD_RE.test(t))
     )
 }
-// The store saying it took the code, in a sentence that was not on the page
-// before we submitted and that negates nothing ("could not be applied" is a
-// refusal, not an acceptance).
+// The store saying it took the code: a sentence about a code, not on the page
+// before we submitted, that negates nothing and refuses nothing ("could not be
+// applied", "already been redeemed" are refusals; "Item added" and "Free
+// shipping applied" are about something else).
 const _CARAMEL_ACCEPTED_RE =
     /\b(applied|added|activated|accepted|redeemed|success(ful(ly)?)?)\b/i
 const _CARAMEL_NEGATION_RE =
-    /\b(not|no|never|unable|cannot|can.?t|couldn.?t|won.?t|isn.?t|wasn.?t)\b/i
+    /\b(not|no|never|unable|cannot|invalid|(can|couldn|won|isn|wasn|doesn|didn|don|aren|hasn).?t)\b/i
 function _caramelSaysAccepted(text, before) {
     const old = new Set(_caramelSentencesOf(before))
     return _caramelSentencesOf(text).some(
         s =>
             !old.has(s) &&
             _CARAMEL_ACCEPTED_RE.test(s) &&
-            !_CARAMEL_NEGATION_RE.test(s),
+            _CARAMEL_COUPON_WORD_RE.test(s) &&
+            !_CARAMEL_NEGATION_RE.test(s) &&
+            !_caramelFinderSaysNo(s),
     )
 }
 function _caramelSentencesOf(text) {
@@ -447,16 +450,15 @@ function detectCouponError(rec, baseline, code, priorText) {
             // and the quote goes to the shopper and into the report.
             // No such element is no quote: the window would hand over
             // whatever sits near the words, a form field's own error included.
-            if (rec.caramelFound)
-                return _caramelSmallestSaying(scope, priorText)
-            const idx = Math.max(
-                0,
-                text.search(
-                    rec.caramelFound
-                        ? _CARAMEL_FINDER_NO_RE
-                        : GENERIC_ERROR_TEXT_RE,
-                ),
-            )
+            // A level whose saying element is the field's own error goes on
+            // climbing: the store's refusal may sit one level up.
+            if (rec.caramelFound) {
+                const said = _caramelSmallestSaying(scope, priorText)
+                if (said) return said
+                scope = scope.parentElement
+                continue
+            }
+            const idx = Math.max(0, text.search(GENERIC_ERROR_TEXT_RE))
             return text
                 .slice(Math.max(0, idx - 40), idx + 120)
                 .replace(/\s+/g, ' ')
@@ -619,12 +621,15 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
         // The sentences, not just the words: a second refused code changes
         // "the code A is not valid" into "the code B is not valid". A store
         // that re-draws the section to answer gets its new section read.
-        let remarks = 0
+        // Looked for again at most every 500ms for the whole window: a section
+        // that shows a spinner first has no box to find yet.
+        let remarkedAt = 0
         const rejections = () => {
             if (
                 !answerEl.isConnected &&
-                remarks++ < 5 &&
-                caramelRemarkFoundBox(true)
+                performance.now() - remarkedAt > 500 &&
+                ((remarkedAt = performance.now()),
+                caramelRemarkFoundBox(true, rec.caramelInputSig))
             )
                 answerEl = qOne(rec.caramelAnswer) || answerEl
             return _caramelRejectionSentences(answerEl).join(' ¶ ')
@@ -724,7 +729,7 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
         stuck = stuckCount > beforeAppliedNodes
     }
     // The store's answer is read around the box: the one it drew, if it did.
-    if (rec.caramelFound) caramelRemarkFoundBox(false)
+    if (rec.caramelFound) caramelRemarkFoundBox(false, rec.caramelInputSig)
     const errorMsg = detectCouponError(rec, errorBaseline, code, priorAreaText)
     // Quotable only if the store said it BECAUSE of us (see
     // _caramelCouponAreaText). Detection above is deliberately untouched.
@@ -854,7 +859,8 @@ export async function applyCoupon(code, rec) {
              toggle, the identical sequence fires the real couponPost). So:
              if the input is missing OR hidden, click showInput and wait for
              the input to become VISIBLE, not merely attached. */
-        if (rec.caramelFound) caramelRemarkFoundBox(!!rec.caramelAnswer)
+        if (rec.caramelFound)
+            caramelRemarkFoundBox(!!rec.caramelAnswer, rec.caramelInputSig)
         let input = pickBestMatch(rec.couponInput)
         if ((!input || !_isVisible(input)) && rec.showInput) {
             const showBtn = pickBestMatch(rec.showInput, input)

@@ -763,6 +763,33 @@ describe('a finder-picked box the store re-draws to answer', () => {
         }
     }, 15000)
 
+    it('keeps looking for the section while the store shows a spinner first', async () => {
+        try {
+            clicks = e => {
+                if (!e.target.matches?.('.ap')) return
+                const code = document.querySelector('[name=promo_code]').value
+                setTimeout(() => {
+                    document.querySelector('.sec').outerHTML =
+                        '<aside class="sec"><p>Loading</p></aside>'
+                }, 150)
+                setTimeout(() => {
+                    document.querySelector('.sec').outerHTML =
+                        `<aside class="sec">${SECTION(`Sorry, code "${code}" isn't valid.`)}</aside>`
+                }, 1800)
+            }
+            document.addEventListener('click', clicks)
+            const rec = await finderRecord({ domain: 'shop.test' })
+
+            const started = performance.now()
+            const res = await applyCoupon('NOPE', rec)
+
+            expect(res.errorMsg).toBe('Sorry, code "NOPE" isn\'t valid.')
+            expect(performance.now() - started).toBeLessThan(5000)
+        } finally {
+            restore()
+        }
+    }, 15000)
+
     it("reads the store's answer in the section it drew", async () => {
         try {
             redrawOnClick(c => `Sorry, code "${c}" isn't valid.`)
@@ -795,6 +822,99 @@ describe('a finder-picked box the store re-draws to answer', () => {
             restore()
         }
     }, 30000)
+
+    it('opens the box again when the store re-draws it folded', async () => {
+        // Measured live on a WooCommerce cart: every answer re-draws the cart
+        // with the promo panel folded, and the next code had no box to go in.
+        const FOLD = msg =>
+            '<div class="cpn">' +
+            (msg ? `<p class="err">${msg}</p>` : '') +
+            '<button type="button" class="tg">Have a promo code?</button>' +
+            '<div class="panel" style="display:none">' +
+            '<input name="promo_code" type="text" />' +
+            '<button type="button" class="ap">Apply</button></div></div>'
+        const vis = Element.prototype.checkVisibility
+        Element.prototype.checkVisibility = function () {
+            for (let n = this; n && n.nodeType === 1; n = n.parentElement)
+                if (n.style?.display === 'none') return false
+            return true
+        }
+        try {
+            document.querySelector('.sec').innerHTML = FOLD('')
+            clicks = e => {
+                if (e.target.matches?.('.tg'))
+                    document.querySelector('.panel').style.display = ''
+                if (!e.target.matches?.('.ap')) return
+                const code = document.querySelector('[name=promo_code]').value
+                setTimeout(() => {
+                    document.querySelector('.sec').innerHTML = FOLD(
+                        `Coupon "${code}" does not exist!`,
+                    )
+                }, 150)
+            }
+            document.addEventListener('click', clicks)
+            const rec = await finderRecord({ domain: 'shop.test' })
+            await applyCoupon('NOPE', rec)
+
+            const res = await applyCoupon('SECOND', rec)
+
+            expect(res.errorMsg).toBe('Coupon "SECOND" does not exist!')
+        } finally {
+            Element.prototype.checkVisibility = vis
+            restore()
+        }
+    }, 30000)
+
+    it('quotes a refusal printed above fine print that also says "not valid"', async () => {
+        const FINE =
+            'Promo codes are not valid on gift cards, sale items, previous ' +
+            'purchases, shipping charges or taxes, and cannot be combined ' +
+            'with any other offer, discount, loyalty reward or employee ' +
+            'pricing unless the offer itself says otherwise.'
+        try {
+            document
+                .querySelector('.promo')
+                .insertAdjacentHTML('afterbegin', `<p class="fine">${FINE}</p>`)
+            clicks = e => {
+                if (!e.target.matches?.('.ap')) return
+                setTimeout(() => {
+                    document
+                        .querySelector('.sec')
+                        .insertAdjacentHTML(
+                            'afterbegin',
+                            '<p class="note">Sorry, that code is not valid.</p>',
+                        )
+                }, 150)
+            }
+            document.addEventListener('click', clicks)
+            const rec = await finderRecord({ domain: 'shop.test' })
+
+            const res = await applyCoupon('NOPE', rec)
+
+            expect(res.errorMsg).toBe('Sorry, that code is not valid.')
+        } finally {
+            restore()
+        }
+    }, 15000)
+
+    for (const said of [
+        'This code has already been redeemed.',
+        'Free shipping applied! Sorry, that code is not valid.',
+    ])
+        it(`reads "${said}" as the refusal it is, without waiting`, async () => {
+            try {
+                redrawOnClick(() => said)
+                const rec = await finderRecord({ domain: 'shop.test' })
+
+                const started = performance.now()
+                const res = await applyCoupon('NOPE', rec)
+
+                expect(res.success).toBe(false)
+                expect(performance.now() - started).toBeLessThan(4000)
+            } finally {
+                restore()
+            }
+        }, 15000)
 })
 
 describe('caramelAwaitCouponVerdict — logging of the code', () => {

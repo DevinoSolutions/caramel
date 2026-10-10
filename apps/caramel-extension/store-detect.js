@@ -260,12 +260,14 @@ export function _hostMatchesDomain(host, domain) {
  * price, and it is the cheap side of that trade: a missed probe costs nothing,
  * a prompt on the wrong page is the defect this whole file guards against.
  *
- * One continuation is allowed: a bare number (/cart-2/). That is how WordPress
- * names a page whose slug was taken, and WooCommerce carts live there; measured
- * on a live store whose cart is /cart-2/ and which was never offered a code. A
+ * One continuation is allowed: a short number on a segment that IS the word
+ * (/cart-2/). That is how WordPress names a page whose slug was taken, and
+ * WooCommerce carts live there; measured on a live store whose cart is /cart-2/
+ * and which was never offered a code. Only there: /products/golf-cart-3,
+ * /collections/gift-basket-50 and /blog/checkout-2024 are not carts, and a
  * product slug does not stop at a number (/products/cart-2-pack stays out). */
 const CARAMEL_CART_PATH_RE =
-    /(?:^|[/\-_])(cart|carts|basket|checkout|checkouts)(?:-\d+)?(?:[/?#]|$)/i
+    /(?:^|[/\-_])(cart|carts|basket|checkout|checkouts)(?:[/?#]|$)|(?:^|\/)(?:cart|carts|basket|checkout|checkouts)-\d\d?(?:[/?#]|$)/i
 
 /* A query key that means "the cart drawer is open".
  *

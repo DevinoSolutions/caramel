@@ -6,6 +6,7 @@ import {
     caramelDiscoveredRecord,
     caramelFinderSeesBox,
     caramelFindOrderTotal,
+    caramelRemarkFoundBox,
 } from '../coupon-box-discovery.js'
 import { startApplyingCoupons } from '../coupon-runner.js'
 import {
@@ -182,6 +183,37 @@ describe('what the finder picks', () => {
             '<div id="t"><span>Order total</span><span>$100.00</span></div>'
 
         expect(caramelFindOrderTotal()?.id).toBe('t')
+    })
+
+    it('the total row whose label the store hides (a responsive cart table)', () => {
+        // WooCommerce draws these labels from the cell's data-title; the
+        // <th> itself is display:none, so the row shows "$150.00" alone.
+        document.body.innerHTML =
+            '<table><tbody>' +
+            '<tr id="s"><th style="display:none">Subtotal</th><td data-title="Subtotal">$150.00</td></tr>' +
+            '<tr><th style="display:none">Coupon: potus25</th><td data-title="Coupon: potus25">-$6.00</td></tr>' +
+            '<tr id="t"><th style="display:none">Total</th><td data-title="Total">$144.00</td></tr>' +
+            '</tbody></table>'
+        // Rendered text leaves a hidden child's words out, as a browser does.
+        const proto = HTMLElement.prototype
+        const prior = Object.getOwnPropertyDescriptor(proto, 'innerText')
+        const shown = n =>
+            n.nodeType === 3
+                ? n.textContent
+                : n.style?.display === 'none'
+                  ? ''
+                  : [...n.childNodes].map(shown).join(' ')
+        Object.defineProperty(proto, 'innerText', {
+            configurable: true,
+            get() {
+                return shown(this)
+            },
+        })
+        try {
+            expect(caramelFindOrderTotal()?.id).toBe('t')
+        } finally {
+            Object.defineProperty(proto, 'innerText', prior)
+        }
     })
 
     it('the subtotal when the page has no total row at all', () => {
@@ -473,9 +505,10 @@ describe('the record the apply flow runs on', () => {
             'dismissButton',
             'successIndicator',
             'errorIndicator',
-            'showInput',
         ])
             expect(rec[k]).toBeNull()
+        // Its toggle is only ever the one the finder itself marks.
+        expect(rec.showInput).toBe('[data-caramel-found="toggle"]')
     })
 
     it('no readable total, no record: there would be nothing honest to measure', async () => {
@@ -502,6 +535,62 @@ describe('the record the apply flow runs on', () => {
 
         expect(document.querySelector(rec.couponInput)?.id).toBe('pc')
         expect(document.querySelector(rec.couponSubmit)?.id).toBe('pa')
+        // Kept, so the box can be opened again if the store folds it again.
+        expect(document.querySelector(rec.showInput)?.id).toBe('tg')
+    })
+})
+
+describe('finding the same box again after the store re-draws it', () => {
+    const GIFT =
+        '<div class="gift"><label for="gc">Redeem gift card</label>' +
+        '<input id="gc" name="gift_card_redeem" type="text">' +
+        '<button id="ga" type="button">Redeem</button></div>'
+
+    it('never takes a gift-card box while ours is disabled for the request', async () => {
+        document.body.innerHTML = PROMO_BOX + GIFT + TOTAL
+        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+        // The store re-draws the promo box disabled while it answers.
+        document.querySelector('.promo').outerHTML = PROMO_BOX.replace(
+            'type="text"',
+            'type="text" disabled',
+        )
+
+        expect(caramelRemarkFoundBox(false, rec.caramelInputSig)).toBe(false)
+        expect(document.querySelector(rec.couponInput)).toBeNull()
+
+        document.getElementById('dc').disabled = false
+        expect(caramelRemarkFoundBox(false, rec.caramelInputSig)).toBe(true)
+        expect(document.querySelector(rec.couponInput)?.id).toBe('dc')
+    })
+
+    it('marks the new box when the store keeps the old one hidden', async () => {
+        document.body.innerHTML = PROMO_BOX + TOTAL
+        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+        const old = document.querySelector('.promo')
+        old.style.display = 'none'
+        old.insertAdjacentHTML(
+            'afterend',
+            PROMO_BOX.replace(/"(dc|ap)"/g, '"$1-2"'),
+        )
+
+        expect(caramelRemarkFoundBox(false, rec.caramelInputSig)).toBe(true)
+        expect(document.querySelector(rec.couponInput)?.id).toBe('dc-2')
+        expect(document.querySelector(rec.couponSubmit)?.id).toBe('ap-2')
+    })
+
+    it('marks the toggle of a box the store re-drew folded', async () => {
+        const FOLDED = open =>
+            '<div class="cpn"><button id="tg" type="button" aria-expanded="false">Have a promo code?</button>' +
+            `<div id="panel"${open ? '' : ' style="display:none"'}>` +
+            '<input id="pc" name="promo_code" type="text"><button id="pa">Apply</button></div></div>'
+        document.body.innerHTML = FOLDED(true) + TOTAL
+        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+        // WooCommerce: every answer re-draws the cart, the promo panel folded.
+        document.querySelector('.cpn').outerHTML = FOLDED(false)
+
+        expect(caramelRemarkFoundBox(false, rec.caramelInputSig)).toBe(true)
+        expect(document.querySelector(rec.couponInput)?.id).toBe('pc')
+        expect(document.querySelector(rec.showInput)?.id).toBe('tg')
     })
 })
 

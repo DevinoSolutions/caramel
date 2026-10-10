@@ -250,6 +250,11 @@ describe('isCheckout — cart intent the path does not spell out', () => {
             '/products/cart-organizer',
             '/products/cart-2-pack',
             '/products/basket-12x12',
+            // A numbered slug is a cart only when the segment IS the word.
+            '/products/golf-cart-3',
+            '/collections/gift-basket-50',
+            '/products/wicker-basket-2',
+            '/blog/checkout-2024',
         ]) {
             setPath(url)
             expect(await isCheckout(), url).toBe(false)

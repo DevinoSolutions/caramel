@@ -852,7 +852,13 @@ function scanTotalRows(doc, LABEL, NOT) {
             i < 4 && p;
             i++, prev = p, p = p.parentElement
         ) {
-            const t = norm(textOf(p))
+            // A label the store hides (WooCommerce's responsive table draws it
+            // from the cell's data-title instead) is not in the shown text:
+            // the row's own words are. Measured live: the Total row read as
+            // "$150.00" alone, the subtotal was measured, and a cart coupon
+            // that took $6 off the total never counted.
+            let t = norm(textOf(p))
+            if (!t.includes(own)) t = norm(p.textContent)
             if (t.length > ROW_MAX || moneyCount(t) > 1) {
                 const sib = (prev || el).nextElementSibling
                 const st = sib ? norm(textOf(sib)) : ''
@@ -1047,10 +1053,11 @@ export async function caramelDiscoveredRecord(rec, doc = document) {
         return null
     }
     let found = caramelDiscoverCouponBox(doc)
+    const opened = found.inputVisible ? null : found.toggle
     if (!found.inputVisible && found.toggle) {
         if (toggleRefused(found.toggle)) {
             log('AUTO_INSERT_REFUSED_CONTROL', {
-                reason: 'the finder picked an order-completing control, or the submit button of a checkout form, as the promo toggle',
+                reason: 'finder toggle completes the order or submits a checkout form',
             })
             return null
         }
@@ -1084,9 +1091,15 @@ export async function caramelDiscoveredRecord(rec, doc = document) {
         // the whole answer window. It never decides a success (the money rule
         // does) and is never quoted: it holds the field's own label too.
         caramelAnswer: answer ? mark(answer, 'answer') : null,
+        // The box as itself, so a re-drawn one is found again only as itself
+        // (caramelRemarkFoundBox).
+        caramelInputSig: inputSig(found.input),
+        // The toggle that opened a folded box. A store that re-draws the box
+        // folded again (WooCommerce, after every answer) gets it opened again
+        // before the next code, the way a config's toggle is.
+        showInput: opened?.isConnected ? mark(opened, 'toggle') : sel('toggle'),
         // Everything else a config row says describes a page that is not this
         // one (that is why we are here): never click or read it.
-        showInput: null,
         errorIndicator: null,
         dismissButton: null,
         successIndicator: null,
@@ -1095,22 +1108,55 @@ export async function caramelDiscoveredRecord(rec, doc = document) {
     }
 }
 
+// What a box IS: its own words, not its place on the page. The id goes in
+// only when nothing else names the field.
+function inputSig(el) {
+    const s = norm(
+        [
+            el.getAttribute('name'),
+            el.getAttribute('placeholder'),
+            el.getAttribute('aria-label'),
+            labelText(el),
+        ].join('|'),
+    )
+    return s.replace(/\|/g, '') ? s : norm(el.id)
+}
+
 /* Mark the box again after the store re-drew it. Some carts replace the whole
  * promo section to show their answer, and the marks went with the old nodes:
- * the answer was never seen and the next code had no box to go into. Clicks
- * nothing. true when the box (and, if asked, its answer area) is marked. */
+ * the answer was never seen and the next code had no box to go into.
+ *
+ * Only the SAME box (sig, from caramelInputSig): while ours is disabled for the
+ * request, a gift-card field beside it scores higher, and every later code
+ * would be typed there. A box re-drawn folded is marked with its toggle, which
+ * the apply flow opens (showInput). Clicks nothing. true when the box (and, if
+ * asked, its answer area) is marked. */
 // Called from coupon-apply.js.
-export function caramelRemarkFoundBox(answerToo, doc = document) {
+export function caramelRemarkFoundBox(answerToo, sig, doc = document) {
+    const marked = doc.querySelector(sel('input'))
     if (
-        doc.querySelector(sel('input')) &&
+        marked &&
+        visible(marked) &&
+        doc.querySelector(sel('submit')) &&
         (!answerToo || doc.querySelector(sel('answer')))
     )
         return true
-    const found = caramelDiscoverCouponBox(doc)
-    if (!found.inputVisible || !confident(found)) return false
-    log('FINDER_REMARKED', { reasons: found.reasons })
+    const top = scoreInputs(doc).find(
+        c => sig == null || inputSig(c.el) === sig,
+    )
+    const button = top && findButton(top.el)
+    const found = {
+        input: top?.el,
+        button: button?.el,
+        reasons: { input: top?.reasons || [], button: button?.reasons || [] },
+    }
+    if (!confident(found)) return false
+    const toggle = top.visible ? null : findToggle(doc)?.el
+    if (!top.visible && (!toggle || toggleRefused(toggle))) return false
+    log('FINDER_REMARKED', { reasons: found.reasons, folded: !!toggle })
     mark(found.input, 'input')
     mark(found.button, 'submit')
+    if (toggle) mark(toggle, 'toggle')
     const answer = answerArea(found.input, found.button)
     if (answer) mark(answer, 'answer')
     return !answerToo || !!answer
