@@ -1,6 +1,16 @@
 import next from 'eslint-config-next'
 import { fileURLToPath } from 'node:url'
 import noInsensitivePrismaLiteralMatch from './tools/eslint-rules/no-insensitive-prisma-literal-match.mjs'
+import noRawClientIpHeader from './tools/eslint-rules/no-raw-client-ip-header.mjs'
+
+// ONE plugin object for every block that uses a caramel/* rule: flat config
+// refuses two different objects registered under the same plugin name.
+const caramelPlugin = {
+    rules: {
+        'no-insensitive-prisma-literal-match': noInsensitivePrismaLiteralMatch,
+        'no-raw-client-ip-header': noRawClientIpHeader,
+    },
+}
 
 /** @type {import('eslint').Linter.Config[]} */
 export default [
@@ -127,15 +137,35 @@ export default [
         basePath: fileURLToPath(new URL('./apps/caramel-app', import.meta.url)),
         files: ['**/*.{ts,tsx,mts,cts,js,mjs}'],
         plugins: {
-            caramel: {
-                rules: {
-                    'no-insensitive-prisma-literal-match':
-                        noInsensitivePrismaLiteralMatch,
-                },
-            },
+            caramel: caramelPlugin,
         },
         rules: {
             'caramel/no-insensitive-prisma-literal-match': 'error',
+        },
+    },
+    {
+        // Client-IP door (#256, 2026-10-10) — "rules become checks". The
+        // trusted client-IP header order (CF-Connecting-IP first: Traefik's
+        // X-Real-IP is the Cloudflare edge) lives ONLY in src/lib/clientIp.ts,
+        // shared by our rate limiter and Better Auth's. A rule of its own, not
+        // a `no-restricted-syntax` selector, for the reason the Prisma block
+        // above gives (a second entry for the env-door files would REPLACE the
+        // env door's). `**/src/**` for the same dual-invocation-base reason
+        // as the blocks around it.
+        files: ['**/src/**/*.{ts,tsx}'],
+        ignores: [
+            // The door itself.
+            '**/src/lib/clientIp.ts',
+            // TODO(2026-10-10): move onto the shared client-IP helper once PR
+            // #321 lands (it rewrites this file). It still forwards x-real-ip /
+            // x-forwarded-for by hand to its inner /api/extension/oauth call.
+            '**/src/app/api/extension/oauth/redirect/route.ts',
+        ],
+        plugins: {
+            caramel: caramelPlugin,
+        },
+        rules: {
+            'caramel/no-raw-client-ip-header': 'error',
         },
     },
     {

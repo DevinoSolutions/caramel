@@ -102,6 +102,40 @@ describe('agent-setup prompt.md', () => {
         expect(call[0].properties.user_agent).toBe('claude-code/2.0')
     })
 
+    it('keys the fetcher id on the Cloudflare client IP, not a spoofable X-Forwarded-For', async () => {
+        const fetchWith = async (headers: Record<string, string>) => {
+            captureMock.mockClear()
+            await getPromptMd(
+                new Request('https://grabcaramel.com/agent-setup/prompt.md', {
+                    headers: { 'user-agent': 'claude-code/2.0', ...headers },
+                }),
+            )
+            const call = captureMock.mock.calls[0] as unknown as [
+                { distinctId: string },
+            ]
+            return call[0].distinctId
+        }
+
+        const real = await fetchWith({
+            'cf-connecting-ip': '203.0.113.7',
+            'x-forwarded-for': '198.51.100.1',
+        })
+        // Same visitor, different forged X-Forwarded-For: same id.
+        expect(
+            await fetchWith({
+                'cf-connecting-ip': '203.0.113.7',
+                'x-forwarded-for': '198.51.100.99',
+            }),
+        ).toBe(real)
+        // A different Cloudflare client IP: different id.
+        expect(
+            await fetchWith({
+                'cf-connecting-ip': '203.0.113.8',
+                'x-forwarded-for': '198.51.100.1',
+            }),
+        ).not.toBe(real)
+    })
+
     it('installs a plugin + skill that actually exist in this repo and name the same API', () => {
         const marketplace = JSON.parse(
             fs.readFileSync(
