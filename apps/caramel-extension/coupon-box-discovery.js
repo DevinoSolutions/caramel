@@ -1033,20 +1033,30 @@ function positiveTotal(selector) {
  * the subtotal where it was. Measured live: the store said "$20.00 Off", the
  * subtotal stayed $99.99, and the shopper was told the code did not stick.
  *
- * So a subtotal is read net of the coupon and discount lines of its own
- * summary. Every read goes through here, before and after a code alike, so a
- * discount line the cart already showed comes off both and moves nothing: only
- * a line the code added, or changed, moves the number. Only lines in plain
- * view count (a hidden mobile copy would count the same line twice), and each
- * must be a short row holding exactly one amount, the way a total row must. */
+ * So the read before a code (the baseline) records the subtotal and every
+ * deduction line of its summary, shown or not, and a later read takes off only
+ * a deduction line that was not there then. Three rules keep it from claiming
+ * money that did not move:
+ *  - a subtotal that itself moved answers alone: a store whose subtotal is
+ *    already net of the code also lists the line, and both would count;
+ *  - only an amount marked as a deduction ("-$20.00", "($20.00)") counts, so
+ *    a "requires a minimum purchase of $50.00" message is not a discount;
+ *  - a line the cart already had, even folded away, is never new: a summary
+ *    that unfolds after the apply shows an old line, not a saving.
+ * A read with no baseline (a fresh page after a reload) takes off nothing. */
 const DISCOUNT_WORDS = /coupon|discount|promo|voucher/i
 const DISCOUNT_LABEL =
     /^(?:order |cart |basket )?(?:coupon|discount|promo(?:tion)?|voucher)s?(?: code)?\b[^.!?]{0,30}$/i
 const DISCOUNT_NOT =
-    /sub[- ]?total|total|sav(e|ed|ing|ings)\b|shipping|tax|eligible|exclud|cannot|can't|only|enter|apply|add |have|gift|points|reward|member/i
+    /sub[- ]?total|total|sav(e|ed|ing|ings)\b|shipping|tax|eligible|exclud|cannot|can't|only|enter|apply|add |have|gift|points|reward|member|minimum|spend|purchase|requir|more|qualif|valid|expire/i
+const CUR = '(?:[$£€¥₹₩₺₱₪₫฿₦]|[A-Z]{3}\\s?)'
+const DEDUCTION_RE = new RegExp(
+    `[-−–]\\s?${CUR}\\s?\\d|[$£€¥₹₩₺₱₪₫฿₦]\\s?[-−–]\\s?\\d|\\(\\s?${CUR}?\\s?\\d[\\d.,]*\\s?\\)|[-−–]\\s?\\d[\\d.,]*[.,]\\d{2}\\b`,
+)
 
 // The subtotal's own summary: the widest ancestor still small enough to be
-// one panel rather than the whole cart.
+// one panel rather than the whole cart. Sized by textContent, which needs no
+// layout: this runs on every read of a polling wait.
 function summaryOf(el) {
     const doc = el.ownerDocument
     let scope = null
@@ -1056,19 +1066,21 @@ function summaryOf(el) {
         p = p.parentElement, i++
     ) {
         if (p === doc.body || p === doc.documentElement) break
-        if (norm(textOf(p)).length > 1500) break
+        if ((p.textContent || '').replace(/\s+/g, ' ').length > 1500) break
         scope = p
     }
     return scope
 }
 
-function discountLinesOff(el) {
+// The deduction amounts of the subtotal's summary. shownOnly leaves out lines
+// the page hides (a hidden mobile copy would count the same line twice).
+function deductionLines(el, shownOnly) {
     const scope = el && summaryOf(el)
-    if (!scope) return 0
+    if (!scope) return []
     const hits = scanTotalRows(el.ownerDocument, DISCOUNT_LABEL, DISCOUNT_NOT, {
         root: scope,
         words: DISCOUNT_WORDS,
-    }).filter(h => h.visible && !h.el.contains(el))
+    }).filter(h => (!shownOnly || h.visible) && !h.el.contains(el))
     // One line, counted once: a row nested in another hit is the same line,
     // and so is a second row naming the same amount (a summary line and a
     // "Coupon applied" note). Two real discounts of equal size then count
@@ -1076,18 +1088,28 @@ function discountLinesOff(el) {
     const amounts = new Set()
     for (const h of hits) {
         if (hits.some(o => o !== h && o.el.contains(h.el))) continue
-        const money = caramelFindMoney(textOf(h.el))
-        if (money.length === 1) amounts.add(Math.abs(money[0].value))
+        // A code in brackets ("Coupon (SAVE20)") names the code, not an amount.
+        const t = textOf(h.el).replace(/\([^)]*[a-z][^)]*\)/gi, ' ')
+        const money = caramelFindMoney(t)
+        if (money.length === 1 && DEDUCTION_RE.test(t))
+            amounts.add(Math.abs(money[0].value))
     }
-    let off = 0
-    for (const a of amounts) off += a
-    return off
+    return [...amounts]
 }
 
-function finderTotal(selector, kind, doc = document) {
+function finderTotal(selector, kind, doc, rec, baseline) {
     const gross = positiveTotal(selector)
-    if (kind !== 'subtotal' || !(gross > 0)) return gross
-    const off = discountLinesOff(doc.querySelector(selector))
+    if (kind !== 'subtotal' || !(gross > 0) || !rec) return gross
+    const el = doc.querySelector(selector)
+    if (baseline) {
+        rec.caramelSubtotalBase = { gross, lines: deductionLines(el, false) }
+        return gross
+    }
+    const base = rec.caramelSubtotalBase
+    if (!base || base.gross !== gross) return gross
+    let off = 0
+    for (const a of deductionLines(el, true))
+        if (!base.lines.includes(a)) off += a
     if (!off) return gross
     const net = Math.round((gross - off) * 100) / 100
     // A coupon line as big as the whole subtotal is not one we can read.
@@ -1388,7 +1410,7 @@ export function caramelFinderReadTotal(doc = document, kind = 'total', was) {
         ? findSameTotalRow(doc, { ...was, kind })
         : findTotalRow(doc, kind === 'subtotal' ? 'subtotal' : 'total')?.el
     if (!el) return NaN
-    return finderTotal(mark(el, 'total'), kind, doc)
+    return finderTotal(mark(el, 'total'), kind, doc, null, false)
 }
 
 /* The finder's total, read now. NaN whenever it cannot be read honestly.
@@ -1399,9 +1421,10 @@ export function caramelFinderReadTotal(doc = document, kind = 'total', was) {
  * when the baseline was read. While the summary is mid-render (a skeleton), a
  * line item's own "Total $19.99" can be the only total row on the page;
  * marking it would read a saving that never happened. A zero or negative total
- * is a placeholder caught mid-render, never an answer. */
+ * is a placeholder caught mid-render, never an answer. baseline marks the
+ * read before a code is tried (see finderTotal). */
 // Called from coupon-apply.js.
-export function caramelFinderTotalNow(rec, doc = document) {
+export function caramelFinderTotalNow(rec, doc = document, baseline = false) {
     const el = doc.querySelector(rec.priceContainer)
     if (!el || !el.isConnected || !_isVisible(el)) {
         const row = findSameTotalRow(doc, {
@@ -1412,7 +1435,13 @@ export function caramelFinderTotalNow(rec, doc = document) {
         if (!row) return NaN
         mark(row, 'total')
     }
-    return finderTotal(rec.priceContainer, rec.caramelTotalKind, doc)
+    return finderTotal(
+        rec.priceContainer,
+        rec.caramelTotalKind,
+        doc,
+        rec,
+        baseline,
+    )
 }
 
 // Read-only: detection must not move the marker or the last-read prices.

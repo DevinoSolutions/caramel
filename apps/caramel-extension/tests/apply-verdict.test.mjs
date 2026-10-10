@@ -806,7 +806,7 @@ describe('a finder-picked box the store re-draws to answer', () => {
                     `<aside class="sec">${SECTION('')}</aside>` + SUMMARY('')
                 addLineOnClick(
                     LINE('Coupon', '-$20.00') +
-                        LINE('Coupon TWENTYOFF applied', '$20.00'),
+                        LINE('Coupon TWENTYOFF applied', '-$20.00'),
                 )
                 const rec = await finderRecord({ domain: 'shop.test' })
 
@@ -842,6 +842,101 @@ describe('a finder-picked box the store re-draws to answer', () => {
                 restore()
             }
         }, 15000)
+
+        it('takes a subtotal that moved on its own, and never its line as well', async () => {
+            // A store whose subtotal is already net of the code also lists
+            // the code's line: counting both would claim $40 for a $20 code.
+            try {
+                document.body.innerHTML =
+                    `<aside class="sec">${SECTION('')}</aside>` + SUMMARY('')
+                clicks = e => {
+                    if (!e.target.matches?.('.ap')) return
+                    setTimeout(() => {
+                        document.querySelector(
+                            '.row',
+                        ).lastElementChild.textContent = '$79.99'
+                        document
+                            .querySelector('.sum p')
+                            .insertAdjacentHTML(
+                                'beforebegin',
+                                LINE('Discount: TWENTYOFF', '-$20.00'),
+                            )
+                    }, 900)
+                }
+                document.addEventListener('click', clicks)
+                const rec = await finderRecord({ domain: 'shop.test' })
+
+                const res = await applyCoupon('SAVE20', rec)
+
+                expect(res.success).toBe(true)
+                expect(res.newTotal).toBe(79.99)
+            } finally {
+                restore()
+            }
+        }, 15000)
+
+        it('reads no discount from a message naming a minimum spend', async () => {
+            try {
+                document.body.innerHTML =
+                    `<aside class="sec">${SECTION('')}</aside>` + SUMMARY('')
+                addLineOnClick(
+                    '<p class="cl"><strong>Discount code</strong> requires a minimum purchase of $50.00</p>',
+                )
+                const rec = await finderRecord({ domain: 'shop.test' })
+
+                const res = await applyCoupon('NOPE', rec)
+
+                expect(res.success).toBe(false)
+            } finally {
+                restore()
+            }
+        }, 15000)
+
+        it('never reads an old line the summary unfolds after the code as new', async () => {
+            const vis = Element.prototype.checkVisibility
+            Element.prototype.checkVisibility = function () {
+                for (let n = this; n && n.nodeType === 1; n = n.parentElement)
+                    if (n.style?.display === 'none') return false
+                return true
+            }
+            try {
+                document.body.innerHTML =
+                    `<aside class="sec">${SECTION('')}</aside>` +
+                    SUMMARY(
+                        LINE('Discount', '-$10.00', ' style="display:none"'),
+                    )
+                clicks = e => {
+                    if (!e.target.matches?.('.ap')) return
+                    setTimeout(() => {
+                        document.querySelector('.cl').style.display = ''
+                    }, 900)
+                }
+                document.addEventListener('click', clicks)
+                const rec = await finderRecord({ domain: 'shop.test' })
+
+                const res = await applyCoupon('NOPE', rec)
+
+                expect(res.success).toBe(false)
+            } finally {
+                Element.prototype.checkVisibility = vis
+                restore()
+            }
+        }, 15000)
+
+        it('takes nothing off a subtotal read after a reload, with no baseline', async () => {
+            try {
+                document.body.innerHTML =
+                    `<aside class="sec">${SECTION('')}</aside>` +
+                    SUMMARY(LINE('Coupon', '-$20.00'))
+                const { caramelFinderReadTotal } = await import(
+                    '../coupon-box-discovery.js'
+                )
+
+                expect(caramelFinderReadTotal(document, 'subtotal')).toBe(99.99)
+            } finally {
+                restore()
+            }
+        })
     })
 
     it('sees the answer in a section that replaced the one it watched', async () => {

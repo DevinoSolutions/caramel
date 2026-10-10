@@ -528,7 +528,7 @@ export function caramelSnapshotCart(rec) {
     const original = !hasPriceCfg
         ? NaN
         : rec.caramelFound
-          ? caramelFinderTotalNow(rec)
+          ? caramelFinderTotalNow(rec, document, true)
           : getPrice(rec.priceContainer, { returnLargest: true })
     // EVERY number the container held before we touched it — the post-apply
     // read needs to know which prices are new (see its comment).
