@@ -1,5 +1,6 @@
 import { handleRouteError } from '@/lib/api/handleRouteError'
 import { preflight, withRoute } from '@/lib/api/withRoute'
+import { isAllowedExtensionRedirectUri } from '@/lib/auth/extensionOAuthRedirect'
 import { env } from '@/lib/env'
 import { BASE_URL } from '@/lib/env.client'
 import { isValidNonce } from '@/lib/extension-oauth-nonce'
@@ -106,6 +107,19 @@ export const GET = withRoute(
             )
         }
         const nonce = nonceParam ?? undefined
+
+        // Never sign a state (or build a provider URL) for a destination that
+        // is not one of our extensions — the redirect hop refuses to forward
+        // to one anyway (extensionOAuthRedirect.ts), this just fails at the
+        // call that caused it. The Safari nonce flow is exempt: its
+        // redirect_uri is our OWN /redirect, which exchanges the code
+        // server-side and never forwards it. TODO(safari-shim-removal)
+        if (!nonce && !isAllowedExtensionRedirectUri(redirectUri)) {
+            return NextResponse.json(
+                { error: 'Disallowed redirect_uri' },
+                { status: 400 },
+            )
+        }
 
         try {
             const baseURL = env.BETTER_AUTH_URL || BASE_URL

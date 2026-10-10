@@ -121,7 +121,7 @@ vi.mock('@/lib/prisma', () => ({ default: prismaMock }))
 
 const SAFARI_REDIRECT_URI = `${BASE}/api/extension/oauth/redirect`
 const CHROME_REDIRECT_URI =
-    'https://bncdbnjkcbemlmoaflgnpoghogadlgce.chromiumapp.org/'
+    'https://gaimofgglbackoimfjopicmbmnlccfoe.chromiumapp.org/'
 /** What the shipped popup generates: crypto.randomUUID(), 36 chars. */
 const NONCE = '3f2b1c7a-9d41-4e2f-8a55-0b6c9d1e2f30'
 
@@ -166,9 +166,13 @@ function installFetchImpl(options: { googleEmailVerified?: boolean } = {}) {
 /** The authorize call the shipped Safari popup makes, returning the signed
  * state it would carry into the provider. */
 async function authorizeWithNonce(nonce: string | null) {
+    // A nonce-less call is the Chrome/Edge shape, which carries an extension
+    // redirect URI — authorize refuses a non-extension destination without a
+    // nonce (extensionOAuthRedirect.ts).
     const params = new URLSearchParams({
         provider: 'google',
-        redirect_uri: SAFARI_REDIRECT_URI,
+        redirect_uri:
+            nonce === null ? CHROME_REDIRECT_URI : SAFARI_REDIRECT_URI,
     })
     if (nonce !== null) params.set('nonce', nonce)
     const res = await authorizeGET(

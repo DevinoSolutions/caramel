@@ -80,7 +80,10 @@ describe('extension/oauth/authorize — a handler throw now reaches Sentry', () 
     it('createSignedState throwing -> 500 {error:"Internal server error while getting OAuth URL"} + Sentry.captureException + x-request-id (was console.error only)', async () => {
         const url = new URL('http://localhost/api/extension/oauth/authorize')
         url.searchParams.set('provider', 'google')
-        url.searchParams.set('redirect_uri', 'https://abc123.chromiumapp.org/')
+        url.searchParams.set(
+            'redirect_uri',
+            'https://gaimofgglbackoimfjopicmbmnlccfoe.chromiumapp.org/',
+        )
 
         const res = await authorizeGET(new NextRequest(url))
 

@@ -294,7 +294,8 @@ function exchangeRequest(
 
 describe('extension/oauth (exchange) — mint characterization (F-007 4a/4b/4c)', () => {
     it('Google, brand-new user: 200 {token,username,image} with the raw session token, user/account/session all created once', async () => {
-        const redirectUri = 'https://abc123.chromiumapp.org/'
+        const redirectUri =
+            'https://gaimofgglbackoimfjopicmbmnlccfoe.chromiumapp.org/'
         const state = signState({ provider: 'google', redirectUri })
 
         const res = await oauthPOST(
@@ -333,7 +334,8 @@ describe('extension/oauth (exchange) — mint characterization (F-007 4a/4b/4c)'
             username: 'oldusername',
             emailVerified: false,
         }
-        const redirectUri = 'https://abc123.chromiumapp.org/'
+        const redirectUri =
+            'https://gaimofgglbackoimfjopicmbmnlccfoe.chromiumapp.org/'
         const state = signState({ provider: 'google', redirectUri })
 
         const res = await oauthPOST(
@@ -361,7 +363,8 @@ describe('extension/oauth (exchange) — mint characterization (F-007 4a/4b/4c)'
     })
 
     it('Apple, brand-new user with email: 200, username falls through to email (Apple never gives a name)', async () => {
-        const redirectUri = 'https://abc123.chromiumapp.org/'
+        const redirectUri =
+            'https://gaimofgglbackoimfjopicmbmnlccfoe.chromiumapp.org/'
         const state = signState({ provider: 'apple', redirectUri })
 
         const res = await oauthPOST(
@@ -428,7 +431,8 @@ describe('extension/oauth (exchange) — mint characterization (F-007 4a/4b/4c)'
                 })
             throw new Error(`unexpected fetch ${url}`)
         })
-        const redirectUri = 'https://abc123.chromiumapp.org/'
+        const redirectUri =
+            'https://gaimofgglbackoimfjopicmbmnlccfoe.chromiumapp.org/'
         const state = signState({ provider: 'apple', redirectUri })
 
         const res = await oauthPOST(
@@ -464,7 +468,8 @@ describe('extension/oauth (exchange) — mint characterization (F-007 4a/4b/4c)'
                 provider: 'facebook',
                 code: 'x',
                 state: 'x',
-                redirectUri: 'https://abc123.chromiumapp.org/',
+                redirectUri:
+                    'https://gaimofgglbackoimfjopicmbmnlccfoe.chromiumapp.org/',
             }),
         )
         expect(res.status).toBe(422)
@@ -476,7 +481,8 @@ describe('extension/oauth (exchange) — mint characterization (F-007 4a/4b/4c)'
                 provider: 'google',
                 code: 'x',
                 state: 'garbage',
-                redirectUri: 'https://abc123.chromiumapp.org/',
+                redirectUri:
+                    'https://gaimofgglbackoimfjopicmbmnlccfoe.chromiumapp.org/',
             }),
         )
         expect(res.status).toBe(400)
@@ -506,7 +512,8 @@ describe('extension/oauth (exchange) — mint characterization (F-007 4a/4b/4c)'
 // Absent/false -> 403 with a named error, no user/session write. Present+true
 // -> mint proceeds even when the local User row is emailVerified:false.
 describe('extension/oauth (exchange) — emailVerified gate (NF-07)', () => {
-    const redirectUri = 'https://abc123.chromiumapp.org/'
+    const redirectUri =
+        'https://gaimofgglbackoimfjopicmbmnlccfoe.chromiumapp.org/'
 
     function googleFetch(verifiedEmail: unknown, hasVerifiedKey = true) {
         return async (input: RequestInfo | URL) => {
@@ -636,7 +643,8 @@ describe('extension/oauth/authorize — CORS + rate-limit (F-007)', () => {
         const res = await authorizeGET(
             authorizeRequest({
                 provider: 'google',
-                redirect_uri: 'https://abc123.chromiumapp.org/',
+                redirect_uri:
+                    'https://gaimofgglbackoimfjopicmbmnlccfoe.chromiumapp.org/',
             }),
         )
         expect(res.status).toBe(200)
@@ -651,7 +659,8 @@ describe('extension/oauth/authorize — CORS + rate-limit (F-007)', () => {
     it('missing provider -> 400 "Missing provider parameter"', async () => {
         const res = await authorizeGET(
             authorizeRequest({
-                redirect_uri: 'https://abc123.chromiumapp.org/',
+                redirect_uri:
+                    'https://gaimofgglbackoimfjopicmbmnlccfoe.chromiumapp.org/',
             }),
         )
         expect(res.status).toBe(400)
@@ -667,18 +676,62 @@ describe('extension/oauth/authorize — CORS + rate-limit (F-007)', () => {
             error: 'Missing redirect_uri parameter',
         })
     })
+
+    // Security report 2026-10: authorize used to sign a state for ANY
+    // redirect_uri, so a third-party extension could start a Caramel Apple
+    // sign-in that ended at its own chromiumapp.org host. Verified live on
+    // prod before the fix (200 + a signed state naming the foreign host).
+    it.each([
+        [
+            'apple',
+            'a foreign extension',
+            'https://aaaabbbbccccddddeeeeffffgggghhhh.chromiumapp.org/',
+        ],
+        [
+            'google',
+            'a foreign extension',
+            'https://aaaabbbbccccddddeeeeffffgggghhhh.chromiumapp.org/',
+        ],
+        ['apple', 'a website', 'https://evil.example.com/'],
+    ])(
+        '%s: refuses to sign a state for %s (no nonce) -> 400',
+        async (provider, _label, redirectUri) => {
+            const res = await authorizeGET(
+                authorizeRequest({ provider, redirect_uri: redirectUri }),
+            )
+            expect(res.status).toBe(400)
+            expect(await res.json()).toEqual({
+                error: 'Disallowed redirect_uri',
+            })
+        },
+    )
+
+    it('accepts the Edge Add-ons build redirect URI', async () => {
+        const res = await authorizeGET(
+            authorizeRequest({
+                provider: 'google',
+                redirect_uri:
+                    'https://leodahchedhnenmiengkfpmmcdendnof.chromiumapp.org/',
+            }),
+        )
+        expect(res.status).toBe(200)
+    })
 })
 
 describe('extension/oauth/redirect — error boundary, no rate-limit (F-007)', () => {
     it('GET with code+state -> redirects to the extension redirect URI', async () => {
         const req = new NextRequest(
             'http://localhost/api/extension/oauth/redirect?code=abc&state=xyz&extension_redirect=' +
-                encodeURIComponent('https://abc123.chromiumapp.org/'),
+                encodeURIComponent(
+                    'https://gaimofgglbackoimfjopicmbmnlccfoe.chromiumapp.org/',
+                ),
         )
         const res = await redirectGET(req)
         expect(res.status).toBe(307)
         const location = res.headers.get('location')
-        expect(location).toContain('abc123.chromiumapp.org')
+        expect(location).toContain(
+            'gaimofgglbackoimfjopicmbmnlccfoe.chromiumapp.org',
+        )
         expect(location).toContain('code=abc')
     })
 
