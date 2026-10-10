@@ -305,12 +305,21 @@ function parseResponse(
     return result.data
 }
 
+/**
+ * `admitModelCall` runs only on a cache MISS, immediately before the paid
+ * model call, and may throw to refuse it (the route passes
+ * classifyCartModelBudget's admitClassifyModelCall). The eval harness omits
+ * it — evals must measure the model, not the budget.
+ */
 export async function classifyCart(
     signals: CartSignals,
+    admitModelCall?: () => Promise<void>,
 ): Promise<Classification> {
     const key = cacheKey(signals)
     const hit = cacheGet(key)
     if (hit) return { ...hit, cached: true }
+
+    await admitModelCall?.()
 
     const messages = buildMessages(signals)
     let raw: string

@@ -1,7 +1,12 @@
 import { handleRouteError } from '@/lib/api/handleRouteError'
 import { withRoute } from '@/lib/api/withRoute'
 import { classifyCart, type CartSignals } from '@/lib/cartClassifier'
+import {
+    admitClassifyModelCall,
+    ClassifyModelBudgetExceededError,
+} from '@/lib/classifyCartModelBudget'
 import { OpenRouterError } from '@/lib/openrouter'
+import { getClientIp } from '@/lib/rateLimit'
 import { NextResponse } from 'next/server'
 
 // Cap payload size to protect the route from noisy senders.
@@ -54,7 +59,10 @@ export const POST = withRoute(
         routeName: 'classify-cart',
         rateLimit: 'mutation',
         // Paid, LLM-backed, extension-only endpoint (no web-app page calls
-        // it — grep-confirmed). origin: true's isOriginAllowed() lets a
+        // it — grep-confirmed). The origin gate below only stops BROWSERS:
+        // any HTTP client can send `Origin: chrome-extension://…`, so the
+        // real bound on spend is the model-call budget passed to
+        // classifyCart (classifyCartModelBudget.ts). origin: true's isOriginAllowed() lets a
         // request with NO Origin header through by design (server-to-
         // server/curl), which left this route reachable origin-less (E2E
         // report D5). 'extension' requires the Origin to be present AND an
@@ -86,13 +94,39 @@ export const POST = withRoute(
         }
 
         try {
-            const result = await classifyCart(signals)
+            const result = await classifyCart(signals, () =>
+                admitClassifyModelCall({
+                    ip: getClientIp(req),
+                    path: req.nextUrl.pathname,
+                    userAgent:
+                        req.headers.get('user-agent')?.slice(0, 80) ?? '-',
+                }),
+            )
             return NextResponse.json(result, {
                 headers: {
                     'Cache-Control': 'private, no-store',
                 },
             })
         } catch (error) {
+            // The spend ceiling (classifyCartModelBudget.ts) — an expected
+            // refusal, already reported there, so it is a 429 and NOT routed
+            // through handleRouteError's Sentry exception path. The extension
+            // treats any non-2xx as "no category hint" and carries on.
+            if (error instanceof ClassifyModelBudgetExceededError) {
+                return NextResponse.json(
+                    {
+                        error: 'Too many requests. Please slow down.',
+                        retryAfter: error.retryAfterSec,
+                    },
+                    {
+                        status: 429,
+                        headers: {
+                            'Retry-After': String(error.retryAfterSec),
+                            'Cache-Control': 'private, no-store',
+                        },
+                    },
+                )
+            }
             console.error('[classify-cart] failed', error)
             return handleRouteError(error, {
                 req,
