@@ -1,8 +1,13 @@
 'use client'
 
+import CouponFeedback from '@/components/coupons/CouponFeedback'
 import CouponStatusBadge from '@/components/coupons/coupon-status-badge'
-import { couponBadge, discountBadgeText } from '@/lib/coupons'
-import { formatWorkedAgo } from '@/lib/relativeTime'
+import {
+    couponBadge,
+    discountBadgeText,
+    isRecentlyFailing,
+} from '@/lib/coupons'
+import { formatFailedAgo, formatWorkedAgo } from '@/lib/relativeTime'
 import type { Coupon } from '@/types/coupon'
 import { motion } from 'framer-motion'
 import { useState } from 'react'
@@ -15,12 +20,16 @@ interface CouponCardProps {
 
 export default function CouponCard({ coupon, index }: CouponCardProps) {
     const [showCode, setShowCode] = useState(false)
+    // Unlike showCode (a 3-second overlay), this stays true once the shopper
+    // has copied the code, so the "Did it work?" question outlives the overlay.
+    const [copied, setCopied] = useState(false)
 
     const handleCopyCode = async () => {
         if (coupon.code) {
             await navigator.clipboard.writeText(coupon.code)
             toast.success('Coupon code copied!')
             setShowCode(true)
+            setCopied(true)
             setTimeout(() => setShowCode(false), 3000)
         }
     }
@@ -36,11 +45,20 @@ export default function CouponCard({ coupon, index }: CouponCardProps) {
     // App-owned trust signal (W1) — "Just worked" / "Worked Xh ago" when the
     // extension last reported this coupon working, and only if that was
     // recent (<7 days). null (unshown) when there is no such report.
-    const workedAgo = formatWorkedAgo(coupon.lastWorkedAt)
+    //
+    // A code reported failing again since its last success is shown as such
+    // INSTEAD: the later failure supersedes the earlier success, so neither the
+    // "Worked Xh ago" line nor the proven-by-use Verified upgrade (both read
+    // lastWorkedAt) may sit beside a "Reported not working" hint. These are
+    // shopper/extension reports, so the hint says "Reported", never "Broken".
+    const failing = isRecentlyFailing(coupon)
+    const failedAgo = failing ? formatFailedAgo(coupon.lastFailedAt) : null
+    const lastWorkedAt = failing ? null : coupon.lastWorkedAt
+    const workedAgo = formatWorkedAgo(lastWorkedAt)
     // Catalog status badge, upgraded to Verified when a shopper's apply in
     // the last 24h proved an unverified code (coupons.ts couponBadge) — so a
     // green "Just worked" line never sits next to an "Unverified" badge.
-    const badge = couponBadge(coupon.status, coupon.lastWorkedAt)
+    const badge = couponBadge(coupon.status, lastWorkedAt)
 
     return (
         <motion.div
@@ -101,6 +119,14 @@ export default function CouponCard({ coupon, index }: CouponCardProps) {
                             {workedAgo}
                         </p>
                     )}
+                    {failedAgo && (
+                        <p
+                            className="text-xs font-medium text-amber-700 dark:text-amber-400"
+                            title="Based on reports from shoppers and the Caramel extension, not a check we ran."
+                        >
+                            {failedAgo}
+                        </p>
+                    )}
                     {badge && (
                         <CouponStatusBadge
                             badge={badge}
@@ -121,6 +147,10 @@ export default function CouponCard({ coupon, index }: CouponCardProps) {
                     </button>
                 </div>
             </div>
+
+            {/* Client-only: mounts after the copy click, so it is never in the
+                server HTML. */}
+            {copied && <CouponFeedback couponId={coupon.id} />}
 
             {/* Hover Overlay - Show Code */}
             {showCode && coupon.code && (

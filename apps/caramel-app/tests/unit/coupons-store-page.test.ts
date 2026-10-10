@@ -138,6 +138,8 @@ describe('StoreCouponsPage — CouponListRow + TotalCountRow', () => {
                 discount_amount: 10,
                 // attachSignals merges this on; no seeded signal → null.
                 lastWorkedAt: null,
+                lastFailedAt: null,
+                failCount: 0,
             },
         ])
         expect(couponsSectionEl.props.initialTotal).toBe(1)

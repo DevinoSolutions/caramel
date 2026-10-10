@@ -35,6 +35,8 @@
 // headers, `hasMore`/`active` computed fields, and auth/rate-limit/origin
 // gates all stay in the calling route (`withRoute` config + the route body).
 import {
+    FAILING_MIN_FAIL_COUNT,
+    FAILING_WINDOW_DAYS,
     RESTRICTED_COUPON_STATUSES,
     VISIBLE_COUPON_STATUSES,
 } from '@/lib/coupons'
@@ -113,6 +115,42 @@ const visibleCouponsWhere = () =>
  * sort total, so page N+1 resumes exactly where page N stopped.
  */
 const rankingOrderSql = () => Prisma.sql`rating DESC, created_at DESC, id DESC`
+
+/**
+ * SQL twin of coupons.ts's isRecentlyFailing(): true for a coupon whose
+ * coupon_signals row holds at least FAILING_MIN_FAIL_COUNT failures, the latest
+ * within FAILING_WINDOW_DAYS and newer than the last success (or no success
+ * ever). The numbers come from coupons.ts, so the ordering and the card's hint
+ * cannot drift apart.
+ *
+ * A hashed uncorrelated `id IN (SELECT ...)`, not a JOIN: coupon_signals has
+ * only a few hundred rows (one per coupon an extension ever reported on), so
+ * the subquery is built once and probed per row, and joining would make the
+ * unqualified `created_at`/`updated_at` columns of the surrounding queries
+ * ambiguous. The window compares against UTC because Prisma writes these
+ * timestamp-WITHOUT-time-zone columns as UTC.
+ */
+const failingSinkSql = () => Prisma.sql`(id IN (
+    SELECT s.coupon_id FROM coupon_signals s
+    WHERE s.fail_count >= ${FAILING_MIN_FAIL_COUNT}
+      AND s.last_failed_at > (NOW() AT TIME ZONE 'UTC') - (${FAILING_WINDOW_DAYS}::int * INTERVAL '1 day')
+      AND (s.last_worked_at IS NULL OR s.last_failed_at > s.last_worked_at)
+))`
+
+/**
+ * The order of ONE store's codes: recently-failing codes sink below the rest
+ * (false sorts first), each group in rankingOrderSql() order. Sunk, never
+ * hidden: the visibility predicate is untouched. It lives in SQL, not as a
+ * post-fetch sort, because these lists are paginated (store page: first 20, then
+ * /api/coupons pages) and a sort after the fetch could only reorder one page —
+ * a failing code on page 1 would still outrank a good one on page 2.
+ *
+ * Store-scoped reads only. A site-less listing (the /coupons browse/search
+ * page) keeps rankingOrderSql() alone: the extra key would force a sort over
+ * the whole catalog for a page nobody uses to apply codes.
+ */
+const storeRankingOrderSql = () =>
+    Prisma.sql`${failingSinkSql()} ASC, ${rankingOrderSql()}`
 
 /**
  * coupons/stats/route.ts's census predicate. Deliberately NOT
@@ -247,7 +285,7 @@ export async function listCoupons(
                    status, verification_message AS "verificationMessage"
             FROM coupons
             WHERE ${whereClause}
-            ORDER BY ${rankingOrderSql()}
+            ORDER BY ${baseSite ? storeRankingOrderSql() : rankingOrderSql()}
             LIMIT ${limit} OFFSET ${skip}
         `),
         prisma.$queryRaw(
@@ -312,7 +350,7 @@ export async function listStoreCoupons(
             FROM coupons
             WHERE ${visible}
               AND ${onStoreSql(base)}
-            ORDER BY ${rankingOrderSql()}
+            ORDER BY ${storeRankingOrderSql()}
             LIMIT ${limit}
         `),
         // One aggregate: the count every store page needs, plus the facts

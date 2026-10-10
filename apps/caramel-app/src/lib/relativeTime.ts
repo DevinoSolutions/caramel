@@ -56,3 +56,24 @@ export function formatWorkedLabel(
     if (workedAgeMs(lastWorkedAt, now) === null || !lastWorkedAt) return null
     return `Worked ${WORKED_ON_DATE.format(new Date(lastWorkedAt))}`
 }
+
+/**
+ * The "not working" hint for a lastFailedAt timestamp (the caller has already
+ * established the code is recently failing, coupons.ts isRecentlyFailing):
+ *   under 1 hour → "Reported not working just now"
+ *   under 1 day  → "Reported not working 3h ago" (whole hours)
+ *   otherwise    → "Reported not working 2d ago" (whole days)
+ * Worded as a report, never a verdict: it is shopper/extension feedback, not a
+ * check we ran. Null when the value is absent, unparseable or in the future.
+ */
+export function formatFailedAgo(
+    lastFailedAt: string | Date | null | undefined,
+    now: number = Date.now(),
+): string | null {
+    const age = workedAgeMs(lastFailedAt, now)
+    if (age === null) return null
+    if (age < HOUR_MS) return 'Reported not working just now'
+    if (age < DAY_MS)
+        return `Reported not working ${Math.floor(age / HOUR_MS)}h ago`
+    return `Reported not working ${Math.floor(age / DAY_MS)}d ago`
+}

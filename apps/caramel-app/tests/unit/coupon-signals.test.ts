@@ -11,7 +11,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 //     never double-counts.
 const { prismaMock, signalState } = vi.hoisted(() => {
     const signalState = {
-        rows: [] as { couponId: string; lastWorkedAt: Date | null }[],
+        rows: [] as {
+            couponId: string
+            lastWorkedAt: Date | null
+            lastFailedAt?: Date | null
+            failCount?: number
+        }[],
     }
     return {
         signalState,
@@ -34,6 +39,8 @@ const { prismaMock, signalState } = vi.hoisted(() => {
 })
 vi.mock('@/lib/prisma', () => ({ default: prismaMock }))
 vi.mock('@sentry/nextjs', () => ({ captureException: vi.fn() }))
+
+const NO_SIGNAL = { lastWorkedAt: null, lastFailedAt: null, failCount: 0 }
 
 beforeEach(() => {
     signalState.rows = []
@@ -59,9 +66,48 @@ describe('attachSignals (app-owned lastWorkedAt merge)', () => {
         ])
 
         expect(out).toEqual([
-            { id: '1', code: 'A', lastWorkedAt: worked.toISOString() },
-            { id: '2', code: 'B', lastWorkedAt: null },
+            {
+                id: '1',
+                code: 'A',
+                lastWorkedAt: worked.toISOString(),
+                lastFailedAt: null,
+                failCount: 0,
+            },
+            { id: '2', code: 'B', ...NO_SIGNAL },
         ])
+    })
+
+    it('attaches the failure side (lastFailedAt ISO string + failCount) beside lastWorkedAt', async () => {
+        const failed = new Date('2026-07-15T08:30:00.000Z')
+        signalState.rows = [
+            {
+                couponId: '1',
+                lastWorkedAt: null,
+                lastFailedAt: failed,
+                failCount: 4,
+            },
+        ]
+
+        const out = await attachSignals([{ id: '1' }])
+
+        expect(out[0]).toEqual({
+            id: '1',
+            lastWorkedAt: null,
+            lastFailedAt: failed.toISOString(),
+            failCount: 4,
+        })
+    })
+
+    it('selects the failure columns but NOT the free-text lastFailReason', async () => {
+        await attachSignals([{ id: '1' }])
+
+        const arg = prismaMock.couponSignal.findMany.mock.calls[0]![0]
+        expect(arg.select).toEqual({
+            couponId: true,
+            lastWorkedAt: true,
+            lastFailedAt: true,
+            failCount: true,
+        })
     })
 
     it('a signal row with a null lastWorkedAt (failures only) resolves to null', async () => {
@@ -93,8 +139,8 @@ describe('attachSignals (app-owned lastWorkedAt merge)', () => {
         ])
 
         expect(out).toEqual([
-            { id: '1', code: 'A', lastWorkedAt: null },
-            { id: '2', code: 'B', lastWorkedAt: null },
+            { id: '1', code: 'A', ...NO_SIGNAL },
+            { id: '2', code: 'B', ...NO_SIGNAL },
         ])
         expect(Sentry.captureException).toHaveBeenCalledTimes(1)
 

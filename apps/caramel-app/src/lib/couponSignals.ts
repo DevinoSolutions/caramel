@@ -97,13 +97,33 @@ export async function recordFailed(
     })
 }
 
+/** The trust overlay attachSignals merges onto each coupon (ISO strings; null/0 when we hold no signal). */
+export type CouponSignalOverlay = {
+    lastWorkedAt: string | null
+    lastFailedAt: string | null
+    failCount: number
+}
+
+const NO_SIGNAL: CouponSignalOverlay = {
+    lastWorkedAt: null,
+    lastFailedAt: null,
+    failCount: 0,
+}
+
 /**
- * Attach each coupon's app-owned `lastWorkedAt` (an ISO string, or null when
- * we hold no signal for it) via a single keyed lookup — the "merge, not SQL
- * join" boundary. The coupon rows come from the external catalog (couponsRepo,
- * unchanged); the signal comes from OUR Postgres; the two are joined here in
- * application code, never across the DB boundary. Empty-in → empty-out, so a
- * page with no coupons issues no query.
+ * Attach each coupon's app-owned trust overlay — `lastWorkedAt` and
+ * `lastFailedAt` (ISO strings, or null when we hold no signal for it) plus
+ * `failCount` — via a single keyed lookup, the "merge, not SQL join" boundary.
+ * The coupon rows come from the catalog (couponsRepo, unchanged); the signal
+ * comes from `coupon_signals`; the two are merged here in application code.
+ * `lastFailReason` is deliberately NOT attached: it is free text a client
+ * supplied and nothing renders it. Empty-in → empty-out, so a page with no
+ * coupons issues no query.
+ *
+ * This only DECORATES the page a listing already picked. The ORDER of a store's
+ * list (recently-failing codes sink, coupons.ts isRecentlyFailing) is decided in
+ * SQL by couponsRepo.failingSinkSql(): the list is paginated, so a sort here
+ * could only reorder the page it was handed.
  *
  * NON-FATAL: the trust overlay is non-critical. A signal-store failure — or an
  * environment whose `coupon_signals` migration hasn't run yet — degrades to
@@ -112,25 +132,33 @@ export async function recordFailed(
  */
 export async function attachSignals<T extends { id: string }>(
     coupons: T[],
-): Promise<(T & { lastWorkedAt: string | null })[]> {
+): Promise<(T & CouponSignalOverlay)[]> {
     if (coupons.length === 0) return []
 
     try {
         const ids = coupons.map(coupon => coupon.id)
         const signals = await prisma.couponSignal.findMany({
             where: { couponId: { in: ids } },
-            select: { couponId: true, lastWorkedAt: true },
+            select: {
+                couponId: true,
+                lastWorkedAt: true,
+                lastFailedAt: true,
+                failCount: true,
+            },
         })
-        const workedAtById = new Map(
-            signals.map(
-                signal => [signal.couponId, signal.lastWorkedAt] as const,
-            ),
+        const signalById = new Map(
+            signals.map(signal => [signal.couponId, signal] as const),
         )
 
-        return coupons.map(coupon => ({
-            ...coupon,
-            lastWorkedAt: workedAtById.get(coupon.id)?.toISOString() ?? null,
-        }))
+        return coupons.map(coupon => {
+            const signal = signalById.get(coupon.id)
+            return {
+                ...coupon,
+                lastWorkedAt: signal?.lastWorkedAt?.toISOString() ?? null,
+                lastFailedAt: signal?.lastFailedAt?.toISOString() ?? null,
+                failCount: signal?.failCount ?? 0,
+            }
+        })
     } catch (error) {
         // Trust overlay is non-critical — degrade LOUDLY (Sentry), never throw.
         Sentry.captureException(error, {
@@ -140,6 +168,6 @@ export async function attachSignals<T extends { id: string }>(
             '[couponSignals] attachSignals failed — serving coupons without the trust overlay:',
             error,
         )
-        return coupons.map(coupon => ({ ...coupon, lastWorkedAt: null }))
+        return coupons.map(coupon => ({ ...coupon, ...NO_SIGNAL }))
     }
 }
