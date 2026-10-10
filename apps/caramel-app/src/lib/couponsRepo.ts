@@ -189,12 +189,25 @@ const likeLiteral = (typed: string) => typed.replace(/[\\%_]/g, '\\$&')
 
 /**
  * A coupon belongs to a store when its `site` IS the store or one of its
- * subdomains. The suffix is compared as text with `right()`, so every character
- * of the store matches only itself. The `site LIKE '%.' || store` this replaced
- * read `_` and `%` as wildcards: `a_cd.com` owned shop.abcd.com's codes. The
- * callers bind resolveStoreDomain output, which cannot hold either character,
- * so that was never reachable. This keeps it so without relying on the callers
- * (2026-09-27, fleet ILIKE sweep).
+ * subdomains: `site` equals the store, or ends in `'.' || store`. Every
+ * character of the store matches only itself. The `site LIKE '%.' || store`
+ * this replaced read `_` and `%` as wildcards: `a_cd.com` owned
+ * shop.abcd.com's codes. The callers bind resolveStoreDomain output, which
+ * cannot hold either character, so that was never reachable. This keeps it so
+ * without relying on the callers (2026-09-27, fleet ILIKE sweep).
+ *
+ * The suffix arm is a PREFIX match on the reversed text:
+ * `reverse(site) LIKE reverse('.' || store) || '%'`, with the store's LIKE
+ * metacharacters (`\`, `%`, `_`) escaped in SQL (so it holds for a column
+ * `store` too) and an explicit ESCAPE clause. That form is what
+ * coupons_site_reverse_idx (`reverse(site) text_pattern_ops`) can answer, so a
+ * bound store makes Postgres BitmapOr coupons_site_idx (exact) with that index
+ * (subdomains). The `right(site, length(store) + 1) = '.' || store` this
+ * replaced was equivalent but unsargable: the OR forced a Parallel Seq Scan
+ * over every coupon on every store read (prod, 2026-10-10: ~40-65 ms x2 per
+ * store page). A mere suffix never matches: `notebay.com` does not end in
+ * `.ebay.com`. tests/integration/coupons-store-index.itest.ts pins both the
+ * semantics and the index use.
  *
  * Case-sensitive on purpose: `site` is stored lowercase, callers lowercase the
  * store, and plain equality keeps using coupons_site_idx. It is the ONE copy of
@@ -206,8 +219,12 @@ const likeLiteral = (typed: string) => typed.replace(/[\\%_]/g, '\\$&')
 const onStoreSql = (
     store: string | Prisma.Sql,
     site: Prisma.Sql = Prisma.sql`site`,
-) =>
-    Prisma.sql`(${site} = ${store} OR right(${site}, length(${store}) + 1) = '.' || ${store})`
+) => {
+    // Backslash first, so the escapes added for % and _ are not re-escaped.
+    // The doubled backslashes below are JS escapes: the SQL sees one.
+    const escapedReversedSuffix = Prisma.sql`replace(replace(replace(reverse('.' || ${store}), '\\', '\\\\'), '%', '\\%'), '_', '\\_')`
+    return Prisma.sql`(${site} = ${store} OR reverse(${site}) LIKE ${escapedReversedSuffix} || '%' ESCAPE '\\')`
+}
 
 // ---------------------------------------------------------------------------
 // Reads
