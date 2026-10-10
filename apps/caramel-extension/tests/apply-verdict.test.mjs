@@ -747,6 +747,103 @@ describe('a finder-picked box the store re-draws to answer', () => {
         }
     }, 15000)
 
+    describe('on a cart with no total row', () => {
+        // Measured live: the store said "$20.00 Off" on a line of its own,
+        // the subtotal stayed $99.99, and the shopper was told no code worked.
+        const SUMMARY = lines =>
+            '<div class="sum"><div class="row"><span>Subtotal</span> <span>$99.99</span></div>' +
+            lines +
+            '<p>Shipping and taxes calculated at checkout</p></div>'
+        const LINE = (label, amount, style = '') =>
+            `<div class="cl"${style}><span>${label}</span> <span>${amount}</span></div>`
+        function addLineOnClick(line) {
+            clicks = e => {
+                if (!e.target.matches?.('.ap')) return
+                setTimeout(() => {
+                    document
+                        .querySelector('.sum p')
+                        .insertAdjacentHTML('beforebegin', line)
+                }, 900)
+            }
+            document.addEventListener('click', clicks)
+        }
+
+        it('counts a code the store shows on its own coupon line', async () => {
+            try {
+                document.body.innerHTML =
+                    `<aside class="sec">${SECTION('')}</aside>` + SUMMARY('')
+                addLineOnClick(LINE('Coupon', '-$20.00'))
+                const rec = await finderRecord({ domain: 'shop.test' })
+
+                const res = await applyCoupon('SAVE20', rec)
+
+                expect(res.success).toBe(true)
+                expect(res.newTotal).toBe(79.99)
+            } finally {
+                restore()
+            }
+        }, 15000)
+
+        it('reads no saving from a coupon line the cart showed before the code', async () => {
+            try {
+                document.body.innerHTML =
+                    `<aside class="sec">${SECTION('')}</aside>` +
+                    SUMMARY(LINE('Discount', '-$10.00'))
+                redrawOnClick(c => `Sorry, code "${c}" isn't valid.`)
+                const rec = await finderRecord({ domain: 'shop.test' })
+
+                const res = await applyCoupon('NOPE', rec)
+
+                expect(res.success).toBe(false)
+            } finally {
+                restore()
+            }
+        }, 15000)
+
+        it('counts one amount once when the store repeats it in a note', async () => {
+            try {
+                document.body.innerHTML =
+                    `<aside class="sec">${SECTION('')}</aside>` + SUMMARY('')
+                addLineOnClick(
+                    LINE('Coupon', '-$20.00') +
+                        LINE('Coupon TWENTYOFF applied', '$20.00'),
+                )
+                const rec = await finderRecord({ domain: 'shop.test' })
+
+                const res = await applyCoupon('TWENTYOFF', rec)
+
+                expect(res.success).toBe(true)
+                expect(res.newTotal).toBe(79.99)
+            } finally {
+                restore()
+            }
+        }, 15000)
+
+        it('never counts a coupon line the store keeps hidden', async () => {
+            const vis = Element.prototype.checkVisibility
+            Element.prototype.checkVisibility = function () {
+                for (let n = this; n && n.nodeType === 1; n = n.parentElement)
+                    if (n.style?.display === 'none') return false
+                return true
+            }
+            try {
+                document.body.innerHTML =
+                    `<aside class="sec">${SECTION('')}</aside>` + SUMMARY('')
+                addLineOnClick(
+                    LINE('Coupon', '-$20.00', ' style="display:none"'),
+                )
+                const rec = await finderRecord({ domain: 'shop.test' })
+
+                const res = await applyCoupon('SAVE20', rec)
+
+                expect(res.success).toBe(false)
+            } finally {
+                Element.prototype.checkVisibility = vis
+                restore()
+            }
+        }, 15000)
+    })
+
     it('sees the answer in a section that replaced the one it watched', async () => {
         try {
             redrawOnClick(c => `Sorry, code "${c}" isn't valid.`, true)

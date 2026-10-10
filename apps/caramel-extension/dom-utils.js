@@ -429,6 +429,13 @@ if (typeof _caramelLastPrices === 'undefined') {
 // getPrice last parsed. (global-map.json misses this one: its regex looks for
 // column-0 declarations and this `var` sits inside the re-injection guard.)
 export { _caramelLastPrices }
+// The one other writer: a finder read that is not a single container's price
+// (a subtotal net of the summary's coupon lines) records the number it read,
+// so the before and after sets stay like for like.
+// Consumed by coupon-box-discovery.js (cross-file content-script call).
+export function caramelSetLastPrices(prices) {
+    _caramelLastPrices = prices.slice()
+}
 
 /* The tightest cart baseline consistent with an observed post-discount total:
  * the SMALLEST price seen in the container that is still >= `newTotal`.

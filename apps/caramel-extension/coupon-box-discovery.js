@@ -35,6 +35,7 @@ import {
     _isVisible,
     caramelFindMoney,
     caramelIsForbiddenControl,
+    caramelSetLastPrices,
     getPrice,
 } from './dom-utils.js'
 
@@ -877,12 +878,17 @@ const moneyCount = t =>
 // we can read honestly, because its largest number need not be the total.
 const ROW_MAX = 90
 
-function scanTotalRows(doc, LABEL, NOT) {
+function scanTotalRows(
+    doc,
+    LABEL,
+    NOT,
+    { root = doc.body, words = /total|amount due|gesamt|summe|totale/i } = {},
+) {
     const hits = []
     const labels = new Set()
-    const tw = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT, {
+    const tw = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
         acceptNode: n =>
-            /total|amount due|gesamt|summe|totale/i.test(n.textContent)
+            words.test(n.textContent)
                 ? NodeFilter.FILTER_ACCEPT
                 : NodeFilter.FILTER_SKIP,
     })
@@ -974,7 +980,8 @@ function scanTotalRows(doc, LABEL, NOT) {
 // measure the same row kind as the baseline did.
 // Known limit: a cart measured on its subtotal (no total row) shows a code
 // that discounts only shipping or tax as no saving at all. That costs a win,
-// never invents one.
+// never invents one. (A code shown as its own coupon line is read: see
+// finderTotal.)
 function findTotalRow(doc, kind) {
     let found = 'total'
     let hits =
@@ -1019,6 +1026,74 @@ function findSameTotalRow(doc, was) {
 function positiveTotal(selector) {
     const now = getPrice(selector, { returnLargest: true })
     return now > 0 ? now : NaN
+}
+
+/* A cart with no total row is measured on its subtotal, and many such carts
+ * take a code off on a line of its own beneath it ("Coupon -$20.00") and leave
+ * the subtotal where it was. Measured live: the store said "$20.00 Off", the
+ * subtotal stayed $99.99, and the shopper was told the code did not stick.
+ *
+ * So a subtotal is read net of the coupon and discount lines of its own
+ * summary. Every read goes through here, before and after a code alike, so a
+ * discount line the cart already showed comes off both and moves nothing: only
+ * a line the code added, or changed, moves the number. Only lines in plain
+ * view count (a hidden mobile copy would count the same line twice), and each
+ * must be a short row holding exactly one amount, the way a total row must. */
+const DISCOUNT_WORDS = /coupon|discount|promo|voucher/i
+const DISCOUNT_LABEL =
+    /^(?:order |cart |basket )?(?:coupon|discount|promo(?:tion)?|voucher)s?(?: code)?\b[^.!?]{0,30}$/i
+const DISCOUNT_NOT =
+    /sub[- ]?total|total|sav(e|ed|ing|ings)\b|shipping|tax|eligible|exclud|cannot|can't|only|enter|apply|add |have|gift|points|reward|member/i
+
+// The subtotal's own summary: the widest ancestor still small enough to be
+// one panel rather than the whole cart.
+function summaryOf(el) {
+    const doc = el.ownerDocument
+    let scope = null
+    for (
+        let p = el.parentElement, i = 0;
+        p && i < 6;
+        p = p.parentElement, i++
+    ) {
+        if (p === doc.body || p === doc.documentElement) break
+        if (norm(textOf(p)).length > 1500) break
+        scope = p
+    }
+    return scope
+}
+
+function discountLinesOff(el) {
+    const scope = el && summaryOf(el)
+    if (!scope) return 0
+    const hits = scanTotalRows(el.ownerDocument, DISCOUNT_LABEL, DISCOUNT_NOT, {
+        root: scope,
+        words: DISCOUNT_WORDS,
+    }).filter(h => h.visible && !h.el.contains(el))
+    // One line, counted once: a row nested in another hit is the same line,
+    // and so is a second row naming the same amount (a summary line and a
+    // "Coupon applied" note). Two real discounts of equal size then count
+    // once, which can hide a saving and never invents one.
+    const amounts = new Set()
+    for (const h of hits) {
+        if (hits.some(o => o !== h && o.el.contains(h.el))) continue
+        const money = caramelFindMoney(textOf(h.el))
+        if (money.length === 1) amounts.add(Math.abs(money[0].value))
+    }
+    let off = 0
+    for (const a of amounts) off += a
+    return off
+}
+
+function finderTotal(selector, kind, doc = document) {
+    const gross = positiveTotal(selector)
+    if (kind !== 'subtotal' || !(gross > 0)) return gross
+    const off = discountLinesOff(doc.querySelector(selector))
+    if (!off) return gross
+    const net = Math.round((gross - off) * 100) / 100
+    // A coupon line as big as the whole subtotal is not one we can read.
+    if (!(net > 0)) return NaN
+    caramelSetLastPrices([net])
+    return net
 }
 
 // Exported for tests/coupon-box-discovery.test.mjs.
@@ -1313,7 +1388,7 @@ export function caramelFinderReadTotal(doc = document, kind = 'total', was) {
         ? findSameTotalRow(doc, { ...was, kind })
         : findTotalRow(doc, kind === 'subtotal' ? 'subtotal' : 'total')?.el
     if (!el) return NaN
-    return positiveTotal(mark(el, 'total'))
+    return finderTotal(mark(el, 'total'), kind, doc)
 }
 
 /* The finder's total, read now. NaN whenever it cannot be read honestly.
@@ -1337,7 +1412,7 @@ export function caramelFinderTotalNow(rec, doc = document) {
         if (!row) return NaN
         mark(row, 'total')
     }
-    return positiveTotal(rec.priceContainer)
+    return finderTotal(rec.priceContainer, rec.caramelTotalKind, doc)
 }
 
 // Read-only: detection must not move the marker or the last-read prices.
