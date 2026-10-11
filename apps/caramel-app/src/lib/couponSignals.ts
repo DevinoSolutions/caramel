@@ -22,6 +22,7 @@
 // point of the trust loop is to own this signal ourselves rather than mirror
 // (or mutate) the externally-owned catalog. Signals are keyed by the catalog
 // coupon id as a string, matching the app's Coupon.id: string.
+import { keepsFailing } from '@/lib/coupons'
 import prisma from '@/lib/prisma'
 import type { Prisma } from '@prisma/client'
 import * as Sentry from '@sentry/nextjs'
@@ -102,18 +103,21 @@ export type CouponSignalOverlay = {
     lastWorkedAt: string | null
     lastFailedAt: string | null
     failCount: number
+    /** coupons.ts keepsFailing(), decided server-side so the popup and the web agree. */
+    keepsFailing: boolean
 }
 
 const NO_SIGNAL: CouponSignalOverlay = {
     lastWorkedAt: null,
     lastFailedAt: null,
     failCount: 0,
+    keepsFailing: false,
 }
 
 /**
  * Attach each coupon's app-owned trust overlay — `lastWorkedAt` and
  * `lastFailedAt` (ISO strings, or null when we hold no signal for it) plus
- * `failCount` — via a single keyed lookup, the "merge, not SQL join" boundary.
+ * `failCount` and the derived `keepsFailing` flag — via a single keyed lookup, the "merge, not SQL join" boundary.
  * The coupon rows come from the catalog (couponsRepo, unchanged); the signal
  * comes from `coupon_signals`; the two are merged here in application code.
  * `lastFailReason` is deliberately NOT attached: it is free text a client
@@ -157,6 +161,7 @@ export async function attachSignals<T extends { id: string }>(
                 lastWorkedAt: signal?.lastWorkedAt?.toISOString() ?? null,
                 lastFailedAt: signal?.lastFailedAt?.toISOString() ?? null,
                 failCount: signal?.failCount ?? 0,
+                keepsFailing: signal ? keepsFailing(signal) : false,
             }
         })
     } catch (error) {

@@ -37,6 +37,7 @@
 import {
     FAILING_MIN_FAIL_COUNT,
     FAILING_WINDOW_DAYS,
+    KEEPS_FAILING_MIN_FAIL_COUNT,
     RESTRICTED_COUPON_STATUSES,
     VISIBLE_COUPON_STATUSES,
 } from '@/lib/coupons'
@@ -130,16 +131,28 @@ const rankingOrderSql = () => Prisma.sql`rating DESC, created_at DESC, id DESC`
  * ambiguous. The window compares against UTC because Prisma writes these
  * timestamp-WITHOUT-time-zone columns as UTC.
  */
-const failingSinkSql = () => Prisma.sql`(id IN (
+const failingSinkSql = () => failingSignalIdsSql(FAILING_MIN_FAIL_COUNT)
+
+/**
+ * SQL twin of coupons.ts's keepsFailing(): the same predicate at
+ * KEEPS_FAILING_MIN_FAIL_COUNT. A subset of failingSinkSql(), used as the
+ * SECOND ORDER BY key so the codes the web page and the popup collapse are the
+ * very last rows of the list, behind the merely-failing ones: the collapsed
+ * group is then one contiguous tail, however the list is paginated.
+ */
+const keepsFailingSql = () => failingSignalIdsSql(KEEPS_FAILING_MIN_FAIL_COUNT)
+
+const failingSignalIdsSql = (minFailCount: number) => Prisma.sql`(id IN (
     SELECT s.coupon_id FROM coupon_signals s
-    WHERE s.fail_count >= ${FAILING_MIN_FAIL_COUNT}
+    WHERE s.fail_count >= ${minFailCount}
       AND s.last_failed_at > (NOW() AT TIME ZONE 'UTC') - (${FAILING_WINDOW_DAYS}::int * INTERVAL '1 day')
       AND (s.last_worked_at IS NULL OR s.last_failed_at > s.last_worked_at)
 ))`
 
 /**
  * The order of ONE store's codes: recently-failing codes sink below the rest
- * (false sorts first), each group in rankingOrderSql() order. Sunk, never
+ * (false sorts first), and the keeps-failing ones (collapsed by the page and the
+ * popup) sink below those, each group in rankingOrderSql() order. Sunk, never
  * hidden: the visibility predicate is untouched. It lives in SQL, not as a
  * post-fetch sort, because these lists are paginated (store page: first 20, then
  * /api/coupons pages) and a sort after the fetch could only reorder one page —
@@ -150,7 +163,7 @@ const failingSinkSql = () => Prisma.sql`(id IN (
  * the whole catalog for a page nobody uses to apply codes.
  */
 const storeRankingOrderSql = () =>
-    Prisma.sql`${failingSinkSql()} ASC, ${rankingOrderSql()}`
+    Prisma.sql`${failingSinkSql()} ASC, ${keepsFailingSql()} ASC, ${rankingOrderSql()}`
 
 /**
  * coupons/stats/route.ts's census predicate. Deliberately NOT

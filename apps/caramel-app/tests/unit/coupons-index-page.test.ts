@@ -79,6 +79,7 @@ describe('CouponsPage (/coupons index) — server-rendered first page', () => {
                 lastWorkedAt: null,
                 lastFailedAt: null,
                 failCount: 0,
+                keepsFailing: false,
             },
         ])
 

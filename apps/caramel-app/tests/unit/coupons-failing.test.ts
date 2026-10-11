@@ -2,6 +2,8 @@ import {
     FAILING_MIN_FAIL_COUNT,
     FAILING_WINDOW_DAYS,
     isRecentlyFailing,
+    KEEPS_FAILING_MIN_FAIL_COUNT,
+    keepsFailing,
 } from '@/lib/coupons'
 import { listCoupons, listStoreCoupons } from '@/lib/couponsRepo'
 import { formatFailedAgo } from '@/lib/relativeTime'
@@ -23,6 +25,100 @@ const DAY = 24 * HOUR
 function ago(ms: number): string {
     return new Date(NOW - ms).toISOString()
 }
+
+describe('keepsFailing (the collapse threshold, a stricter isRecentlyFailing)', () => {
+    it('the collapse threshold is above the sink threshold', () => {
+        expect(KEEPS_FAILING_MIN_FAIL_COUNT).toBe(3)
+        expect(KEEPS_FAILING_MIN_FAIL_COUNT).toBeGreaterThan(
+            FAILING_MIN_FAIL_COUNT,
+        )
+    })
+
+    it('no signal, or a sink-only count (2 failures) → false', () => {
+        expect(keepsFailing({}, NOW)).toBe(false)
+        expect(keepsFailing({ failCount: 0, lastFailedAt: null }, NOW)).toBe(
+            false,
+        )
+        expect(
+            keepsFailing(
+                { failCount: FAILING_MIN_FAIL_COUNT, lastFailedAt: ago(HOUR) },
+                NOW,
+            ),
+        ).toBe(false)
+    })
+
+    it('the threshold itself (3 recent failures, no success) → true', () => {
+        expect(
+            keepsFailing(
+                {
+                    failCount: KEEPS_FAILING_MIN_FAIL_COUNT,
+                    lastFailedAt: ago(HOUR),
+                },
+                NOW,
+            ),
+        ).toBe(true)
+        expect(
+            keepsFailing(
+                {
+                    failCount: KEEPS_FAILING_MIN_FAIL_COUNT - 1,
+                    lastFailedAt: ago(HOUR),
+                },
+                NOW,
+            ),
+        ).toBe(false)
+    })
+
+    it('one later success clears it, however many failures piled up', () => {
+        expect(
+            keepsFailing(
+                {
+                    failCount: 50,
+                    lastFailedAt: ago(2 * DAY),
+                    lastWorkedAt: ago(DAY),
+                },
+                NOW,
+            ),
+        ).toBe(false)
+        // A success BEFORE the last failure does not save it.
+        expect(
+            keepsFailing(
+                {
+                    failCount: 4,
+                    lastFailedAt: ago(DAY),
+                    lastWorkedAt: ago(5 * DAY),
+                },
+                NOW,
+            ),
+        ).toBe(true)
+    })
+
+    it('failures outside the 30-day window no longer count', () => {
+        expect(
+            keepsFailing(
+                {
+                    failCount: 10,
+                    lastFailedAt: ago((FAILING_WINDOW_DAYS + 1) * DAY),
+                },
+                NOW,
+            ),
+        ).toBe(false)
+        expect(
+            keepsFailing(
+                {
+                    failCount: 10,
+                    lastFailedAt: ago((FAILING_WINDOW_DAYS - 1) * DAY),
+                },
+                NOW,
+            ),
+        ).toBe(true)
+    })
+
+    it('an unparseable timestamp is "no signal", never "keeps failing"', () => {
+        expect(
+            keepsFailing({ failCount: 9, lastFailedAt: 'not a date' }, NOW),
+        ).toBe(false)
+    })
+})
 
 describe('isRecentlyFailing', () => {
     it('no signal at all → false (absent is never "failing")', () => {
@@ -225,6 +321,23 @@ describe('failing codes sink in SQL on store-scoped reads (sink, never hide)', (
         // The thresholds are the coupons.ts constants, bound as parameters.
         expect(values).toContain(FAILING_MIN_FAIL_COUNT)
         expect(values).toContain(FAILING_WINDOW_DAYS)
+    })
+
+    it('keeps-failing is the SECOND ordering key: merely-failing codes precede it, ranking breaks ties', async () => {
+        await listStoreCoupons('example.com', 20)
+
+        const { sql, values } = listQuery()
+        const order = orderBy(sql)
+        // Two coupon_signals subqueries (sink, then collapse), both ASC, then ranking.
+        expect(order.match(/FROM coupon_signals s/g)).toHaveLength(2)
+        expect(order).toMatch(
+            /\)\) ASC,\s*\(id IN \(\s*SELECT s\.coupon_id[\s\S]*\)\) ASC, rating DESC, created_at DESC, id DESC\s+LIMIT/,
+        )
+        // Each subquery binds its own fail_count threshold, in sink-then-collapse order.
+        expect(values.indexOf(FAILING_MIN_FAIL_COUNT)).toBeGreaterThanOrEqual(0)
+        expect(values.indexOf(KEEPS_FAILING_MIN_FAIL_COUNT)).toBeGreaterThan(
+            values.indexOf(FAILING_MIN_FAIL_COUNT),
+        )
     })
 
     it('listCoupons with a site uses the same sinking order', async () => {

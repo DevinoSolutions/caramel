@@ -140,6 +140,7 @@ describe('StoreCouponsPage — CouponListRow + TotalCountRow', () => {
                 lastWorkedAt: null,
                 lastFailedAt: null,
                 failCount: 0,
+                keepsFailing: false,
             },
         ])
         expect(couponsSectionEl.props.initialTotal).toBe(1)

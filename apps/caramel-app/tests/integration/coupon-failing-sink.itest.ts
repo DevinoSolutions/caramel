@@ -113,8 +113,8 @@ describe('failing codes sink (real pg)', () => {
             '988000003', // rating 3, reset by a later success
             '988000004', // rating 2, failure outside the window
             '988000005', // rating 1, a single failure
-            '988000001', // rating 5 but failing
-            '988000006', // rating 0.5 and failing
+            '988000006', // rating 0.5, failing (2 failures): sunk, not collapsed
+            '988000001', // rating 5, keeps failing (3 failures): the very last row
         ])
         expect(total).toBe(6)
     })
@@ -130,10 +130,11 @@ describe('failing codes sink (real pg)', () => {
             '988000005',
         ])
         // The failing codes are on page 2 even though one has the best rating:
-        // a post-fetch sort of page 1 could not have put them there.
+        // a post-fetch sort of page 1 could not have put them there. The
+        // keeps-failing one (collapsed by the page and the popup) is last.
         expect(second.coupons.map(c => c.id)).toEqual([
-            '988000001',
             '988000006',
+            '988000001',
         ])
         expect(first.total).toBe(6)
         expect(second.total).toBe(6)
@@ -149,17 +150,32 @@ describe('failing codes sink (real pg)', () => {
         const tail = decorated.slice(-failingByTs.length).map(c => c.id)
 
         // Both lists keep list order, so no sorting is needed to compare them.
-        expect(failingByTs).toEqual(['988000001', '988000006'])
+        expect(failingByTs).toEqual(['988000006', '988000001'])
         expect(tail).toEqual(failingByTs)
     })
 
-    it('a later success lifts a failing code back to its ranking position', async () => {
+    it('keepsFailing (the field /api/coupons ships) is true only for the 3-failure code, and that code is the list tail', async () => {
+        const { coupons } = await listStoreCoupons(SITE, 20)
+        const decorated = await attachSignals(coupons)
+
+        expect(decorated.filter(c => c.keepsFailing).map(c => c.id)).toEqual([
+            '988000001',
+        ])
+        expect(decorated[decorated.length - 1]?.keepsFailing).toBe(true)
+        // Collapsing is presentation only: the row is still listed, still valid.
+        expect(coupons.find(c => c.id === '988000001')?.status).toBe('valid')
+        expect(decorated).toHaveLength(6)
+    })
+
+    it('a later success lifts a failing code back to its ranking position and clears keepsFailing', async () => {
         await prisma.couponSignal.update({
             where: { couponId: '988000001' },
             data: { lastWorkedAt: new Date() },
         })
         const { coupons } = await listStoreCoupons(SITE, 20)
+        const decorated = await attachSignals(coupons)
 
         expect(coupons[0]?.id).toBe('988000001')
+        expect(decorated.some(c => c.keepsFailing)).toBe(false)
     })
 })

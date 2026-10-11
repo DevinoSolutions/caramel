@@ -39,6 +39,10 @@ export interface Coupon {
     // these + lastWorkedAt — shopper/extension reports, not verification.
     lastFailedAt?: string | null
     failCount?: number
+    // coupons.ts keepsFailing(), computed server-side by attachSignals so the
+    // website and the extension popup collapse the same codes. false/absent when
+    // there is no signal. Presentation only: never a status or a deletion.
+    keepsFailing?: boolean
 }
 
 export interface CouponFilters {

@@ -9,12 +9,13 @@ import { MagnifyingGlassIcon } from '@heroicons/react/24/outline'
 import { AnimatePresence, motion } from 'framer-motion'
 import Image from 'next/image'
 import Link from 'next/link'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FaChrome, FaEdge, FaFirefox, FaSafari } from 'react-icons/fa'
 import InfiniteScroll from 'react-infinite-scroll-component'
 import { toast } from 'sonner'
 import CouponCard from './coupon-card'
 import CouponFiltersComponent from './coupon-filters'
+import FailingCodesDisclosure from './FailingCodesDisclosure'
 // Tabs temporarily hidden until backed by data
 // import CouponTabs from './coupon-tabs'
 
@@ -94,6 +95,27 @@ export default function CouponsSection({
     useEffect(() => {
         couponsLengthRef.current = coupons.length
     }, [coupons.length])
+
+    // Codes shoppers keep reporting as not working (coupons.ts keepsFailing,
+    // flagged server-side) are collapsed behind a disclosure at the END of a
+    // STORE's list instead of mixed into it (DESIGN.md §2(q)). Only a store-
+    // scoped list is ordered so they form its tail (couponsRepo
+    // storeRankingOrderSql); the site-less browse list keeps them in place.
+    //
+    // The tail can start on any page, so while more pages remain the flagged
+    // codes loaded so far are held back and the disclosure appears once the last
+    // page is in: its count is then exact, and "load more" keeps working off
+    // the unchanged `coupons`/`hasMore` state.
+    const groupFailing = filters.site.trim() !== ''
+    const { mainCoupons, failingCoupons } = useMemo(() => {
+        if (!groupFailing) {
+            return { mainCoupons: coupons, failingCoupons: [] as Coupon[] }
+        }
+        return {
+            mainCoupons: coupons.filter(coupon => !coupon.keepsFailing),
+            failingCoupons: coupons.filter(coupon => coupon.keepsFailing),
+        }
+    }, [coupons, groupFailing])
 
     // Prefetch filter metadata (stores and discount types)
     useEffect(() => {
@@ -377,7 +399,7 @@ export default function CouponsSection({
                                     mode="popLayout"
                                     initial={false}
                                 >
-                                    {coupons.map((coupon, index) => (
+                                    {mainCoupons.map((coupon, index) => (
                                         <CouponCard
                                             key={`${coupon.id}-${index}`}
                                             coupon={coupon}
@@ -386,6 +408,12 @@ export default function CouponsSection({
                                     ))}
                                 </AnimatePresence>
                             </div>
+                            {!hasMore ? (
+                                <FailingCodesDisclosure
+                                    coupons={failingCoupons}
+                                    startIndex={mainCoupons.length}
+                                />
+                            ) : null}
                             {isLoadingMore && hasMore ? (
                                 <div className="flex justify-center py-6">
                                     <Loader label="Loading more coupons..." />
