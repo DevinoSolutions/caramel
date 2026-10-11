@@ -2,6 +2,7 @@ import { withRoute } from '@/lib/api/withRoute'
 import {
     admitFailedReport,
     releaseFailedReport,
+    type FailedReportReporter,
 } from '@/lib/couponFailureReportDedupe'
 import {
     recordFailed,
@@ -77,23 +78,25 @@ export const POST = withRoute(
             )
         }
 
-        // At most one 'failed' report per client IP per coupon per 24h
+        const userId = session?.user?.id ?? null
+
+        // At most one 'failed' report per reporter per coupon per 24h
         // (couponFailureReportDedupe.ts): reports are anonymous, and failures
-        // sink then collapse a code, so one address must not be able to flag a
-        // code alone. A duplicate is a 2xx no-op, never an error: the extension
-        // and the web card must not show a failure for a harmless repeat.
-        // 'worked' reports are left alone (they never hide anything).
-        const dedupeClient = { ip: getClientIp(req), couponId: id }
-        if (
-            body.outcome === 'failed' &&
-            !(await admitFailedReport(dedupeClient))
-        ) {
+        // sink then collapse a code, so one reporter must not be able to flag a
+        // code alone. The reporter is the signed-in USER when there is a session
+        // (two users behind one IP each keep their own report and attribution
+        // row) and the client IP only for anonymous callers. A duplicate is a 2xx
+        // no-op, never an error: the extension and the web card must not show a
+        // failure for a harmless repeat. 'worked' reports are left alone and
+        // never consume a slot (they never hide anything).
+        const reporter: FailedReportReporter = userId
+            ? { kind: 'user', userId }
+            : { kind: 'ip', ip: getClientIp(req) }
+        if (body.outcome === 'failed' && !admitFailedReport(reporter, id)) {
             return NextResponse.json({ ok: true, deduped: true })
         }
 
         try {
-            const userId = session?.user?.id ?? null
-
             // The aggregate signal write — identical for every caller, so the
             // signed-in path can never end up writing a DIFFERENT signal than the
             // anonymous one.
@@ -170,7 +173,7 @@ export const POST = withRoute(
             // The report never landed: free its slot so a retry is not deduped.
             // withRoute still routes the rethrown error to Sentry.
             if (body.outcome === 'failed') {
-                await releaseFailedReport(dedupeClient)
+                releaseFailedReport(reporter, id)
             }
             throw error
         }

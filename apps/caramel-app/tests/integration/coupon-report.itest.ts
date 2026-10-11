@@ -135,25 +135,32 @@ describe('POST /api/coupons/[id]/report — attribution against real pg :58005',
         expect(signal?.lastWorkedAt).toBeInstanceOf(Date)
     })
 
-    it('a same-day repeat adds no second row; a repeat from ANOTHER IP still bumps the aggregate, the same IP does not', async () => {
+    it('a same-day repeat adds no second row and no second failure (the signed-in dedupe is per USER, whatever the IP); an anonymous report still counts once per IP', async () => {
         await POST(
             reportRequest(KNOWN_ID, { outcome: 'failed' }, '203.0.113.1'),
         )
-        const sameIp = await POST(
+        for (const ip of ['203.0.113.1', '203.0.113.2']) {
+            const repeat = await POST(
+                reportRequest(KNOWN_ID, { outcome: 'failed' }, ip),
+            )
+            expect(repeat.status).toBe(200)
+            expect(await repeat.json()).toEqual({ ok: true, deduped: true })
+        }
+
+        // An anonymous caller behind the same IP is a different reporter.
+        getSessionMock.mockImplementation(async () => null)
+        const anonymous = await POST(
             reportRequest(KNOWN_ID, { outcome: 'failed' }, '203.0.113.1'),
         )
-        expect(sameIp.status).toBe(200)
-        expect(await sameIp.json()).toEqual({ ok: true, deduped: true })
-        const otherIp = await POST(
-            reportRequest(KNOWN_ID, { outcome: 'failed' }, '203.0.113.2'),
+        expect(await anonymous.json()).toEqual({ ok: true })
+        const anonymousAgain = await POST(
+            reportRequest(KNOWN_ID, { outcome: 'failed' }, '203.0.113.1'),
         )
-        expect(otherIp.status).toBe(200)
+        expect(await anonymousAgain.json()).toEqual({ ok: true, deduped: true })
 
         expect(
             await prisma.couponReport.count({ where: { couponId: KNOWN_ID } }),
         ).toBe(1)
-        // One failure per IP per coupon per 24h: the same-IP repeat was dropped,
-        // the other address counted.
         const signal = await prisma.couponSignal.findUnique({
             where: { couponId: KNOWN_ID },
         })
