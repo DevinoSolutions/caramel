@@ -58,7 +58,14 @@ export default function CouponCard({ coupon, index }: CouponCardProps) {
     // Catalog status badge, upgraded to Verified when a shopper's apply in
     // the last 24h proved an unverified code (coupons.ts couponBadge) — so a
     // green "Just worked" line never sits next to an "Unverified" badge.
-    const badge = couponBadge(coupon.status, lastWorkedAt)
+    const catalogBadge = couponBadge(coupon.status, lastWorkedAt)
+    // A code shoppers keep reporting as not working must not carry the green
+    // Verified badge beside that hint: the catalog's check is older than the
+    // reports. Other tiers (unverified, restricted, ...) are unaffected.
+    const badge =
+        coupon.keepsFailing && catalogBadge?.tier === 'green'
+            ? null
+            : catalogBadge
 
     return (
         <motion.div

@@ -140,6 +140,32 @@ describe('FailingCodesDisclosure', () => {
         expect(region.hidden).toBe(true)
     })
 
+    it('moreToLoad shows "N+"; allFlagged shows the line (singular wording for one code)', () => {
+        const { rerender } = render(
+            <FailingCodesDisclosure
+                coupons={[failingOne('1')]}
+                startIndex={0}
+                moreToLoad
+            />,
+        )
+        expect(
+            screen.getByRole('button', {
+                name: '1+ codes reported not working',
+            }),
+        ).toBeTruthy()
+
+        rerender(
+            <FailingCodesDisclosure
+                coupons={[failingOne('1')]}
+                startIndex={0}
+                allFlagged
+            />,
+        )
+        expect(
+            screen.getByText('The only code was reported not working'),
+        ).toBeTruthy()
+    })
+
     it('keeps the collapsed codes in the server HTML (collapsed, never removed)', () => {
         const html = renderToString(
             <FailingCodesDisclosure
@@ -188,7 +214,7 @@ describe('CouponsSection groups keeps-failing codes at the end of a store list',
         ])
     })
 
-    it('while more pages remain, flagged codes loaded so far are held back and no partial count is shown', () => {
+    it('while more pages remain, flagged codes loaded so far are STILL rendered (collapsed) and the count reads "N+"', () => {
         render(
             <CouponsSection
                 defaultFilters={{ site: 'example.com' }}
@@ -198,9 +224,137 @@ describe('CouponsSection groups keeps-failing codes at the end of a store list',
             />,
         )
 
-        expect(screen.queryByTestId('failing-codes')).toBeNull()
+        const button = screen.getByRole('button', {
+            name: '1+ codes reported not working',
+        })
+        const region = document.getElementById(
+            button.getAttribute('aria-controls') ?? '',
+        )!
+        expect(region.hidden).toBe(true)
+        expect(within(region).getByText('Title 2')).toBeTruthy()
         expect(screen.getByText('Title 1')).toBeTruthy()
-        expect(screen.queryByText('Title 2')).toBeNull()
+    })
+
+    it('the server HTML of a store list with more pages contains the flagged codes inside the hidden region', () => {
+        const html = renderToString(
+            <CouponsSection
+                defaultFilters={{ site: 'example.com' }}
+                initialCoupons={[coupon('1'), failingOne('2')]}
+                initialTotal={9}
+                disableInitialFetch
+            />,
+        )
+
+        expect(html).toContain('Title 1')
+        expect(html).toContain('Title 2')
+        expect(html).toContain('1+ codes reported not working')
+        // Title 2 sits after the disclosure's hidden region opens.
+        const hiddenAt = html.search(/<div[^>]*\shidden=""/)
+        expect(hiddenAt).toBeGreaterThan(-1)
+        expect(html.indexOf('Title 2')).toBeGreaterThan(hiddenAt)
+        expect(html.indexOf('Title 1')).toBeLessThan(hiddenAt)
+    })
+
+    it('a row returned on BOTH pages (signals moved between fetches) is rendered once, in one list, with unique keys', async () => {
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+        ;(fetch as ReturnType<typeof vi.fn>).mockImplementation(
+            (input: string | URL) => {
+                if (String(input).includes('/api/coupons/filters')) {
+                    return Promise.resolve(filtersResponse)
+                }
+                return Promise.resolve({
+                    ok: true,
+                    json: async () => ({
+                        // 2 was flagged on page 1 and 1 re-appears flagged too
+                        coupons: [failingOne('2'), failingOne('1')],
+                        page: 2,
+                        total: 3,
+                        hasMore: false,
+                    }),
+                })
+            },
+        )
+        class FiringObserver {
+            constructor(
+                private cb: (entries: { isIntersecting: boolean }[]) => void,
+            ) {}
+            observe() {
+                this.cb([{ isIntersecting: true }])
+            }
+            disconnect() {}
+            unobserve() {}
+        }
+        vi.stubGlobal('IntersectionObserver', FiringObserver)
+
+        render(
+            <CouponsSection
+                defaultFilters={{ site: 'example.com' }}
+                initialCoupons={[coupon('1'), failingOne('2')]}
+                initialTotal={3}
+                pageSize={2}
+                disableInitialFetch
+            />,
+        )
+
+        // Coupon 1 is first seen healthy (page 1) then flagged (page 2): the
+        // first occurrence wins, so it stays in the main list and is not
+        // duplicated into the disclosure.
+        await screen.findByRole('button', {
+            name: '1 code reported not working',
+        })
+        expect(screen.getAllByText('Title 1')).toHaveLength(1)
+        expect(screen.getAllByText('Title 2')).toHaveLength(1)
+        expect(
+            errorSpy.mock.calls.some(call =>
+                String(call[0]).includes('unique "key"'),
+            ),
+        ).toBe(false)
+        errorSpy.mockRestore()
+    })
+
+    it('when EVERY code is flagged (last page in) a line says so above the disclosure', () => {
+        render(
+            <CouponsSection
+                defaultFilters={{ site: 'example.com' }}
+                initialCoupons={[failingOne('1'), failingOne('2')]}
+                initialTotal={2}
+                disableInitialFetch
+            />,
+        )
+
+        expect(
+            screen.getByText('All 2 codes were reported not working'),
+        ).toBeTruthy()
+        expect(
+            screen.getByRole('button', {
+                name: '2 codes reported not working',
+            }),
+        ).toBeTruthy()
+        expect(screen.queryByText('No coupons found')).toBeNull()
+    })
+
+    it('the all-flagged line is absent when healthy codes exist, and absent while more pages remain', () => {
+        const { rerender } = render(
+            <CouponsSection
+                defaultFilters={{ site: 'example.com' }}
+                initialCoupons={[coupon('1'), failingOne('2')]}
+                initialTotal={2}
+                disableInitialFetch
+            />,
+        )
+        expect(screen.queryByText(/were reported not working/)).toBeNull()
+        rerender(<div />)
+        cleanup()
+
+        render(
+            <CouponsSection
+                defaultFilters={{ site: 'example.com' }}
+                initialCoupons={[failingOne('1')]}
+                initialTotal={5}
+                disableInitialFetch
+            />,
+        )
+        expect(screen.queryByText(/were reported not working/)).toBeNull()
     })
 
     it('load-more still works: the final page brings the disclosure, counting the flagged codes from every page', async () => {

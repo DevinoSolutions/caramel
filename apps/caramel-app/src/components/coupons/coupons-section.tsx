@@ -102,18 +102,28 @@ export default function CouponsSection({
     // scoped list is ordered so they form its tail (couponsRepo
     // storeRankingOrderSql); the site-less browse list keeps them in place.
     //
-    // The tail can start on any page, so while more pages remain the flagged
-    // codes loaded so far are held back and the disclosure appears once the last
-    // page is in: its count is then exact, and "load more" keeps working off
-    // the unchanged `coupons`/`hasMore` state.
+    // The collapsed codes loaded so far are ALWAYS rendered (inside the
+    // disclosure's hidden region, so they are in the server HTML too); while more
+    // pages remain its count reads "N+", exact once the last page is in. "Load
+    // more" runs off the unchanged `coupons`/`hasMore` state.
+    //
+    // Deduped by id first (first occurrence wins): the order depends on signals
+    // that can change between two page fetches, so a row can come back on page 2
+    // after page 1 already had it. That would duplicate a card and a React key.
     const groupFailing = filters.site.trim() !== ''
     const { mainCoupons, failingCoupons } = useMemo(() => {
+        const seen = new Set<string>()
+        const unique = coupons.filter(coupon => {
+            if (seen.has(coupon.id)) return false
+            seen.add(coupon.id)
+            return true
+        })
         if (!groupFailing) {
-            return { mainCoupons: coupons, failingCoupons: [] as Coupon[] }
+            return { mainCoupons: unique, failingCoupons: [] as Coupon[] }
         }
         return {
-            mainCoupons: coupons.filter(coupon => !coupon.keepsFailing),
-            failingCoupons: coupons.filter(coupon => coupon.keepsFailing),
+            mainCoupons: unique.filter(coupon => !coupon.keepsFailing),
+            failingCoupons: unique.filter(coupon => coupon.keepsFailing),
         }
     }, [coupons, groupFailing])
 
@@ -408,12 +418,14 @@ export default function CouponsSection({
                                     ))}
                                 </AnimatePresence>
                             </div>
-                            {!hasMore ? (
-                                <FailingCodesDisclosure
-                                    coupons={failingCoupons}
-                                    startIndex={mainCoupons.length}
-                                />
-                            ) : null}
+                            <FailingCodesDisclosure
+                                coupons={failingCoupons}
+                                startIndex={mainCoupons.length}
+                                moreToLoad={hasMore}
+                                allFlagged={
+                                    !hasMore && mainCoupons.length === 0
+                                }
+                            />
                             {isLoadingMore && hasMore ? (
                                 <div className="flex justify-center py-6">
                                     <Loader label="Loading more coupons..." />

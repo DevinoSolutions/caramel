@@ -2,6 +2,7 @@ import StoreCouponsPage, {
     generateMetadata,
 } from '@/app/(marketing)/coupons/[store]/page'
 import { BASE_URL } from '@/lib/env.client'
+import prisma from '@/lib/prisma'
 import type { ReactElement } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -176,6 +177,72 @@ describe('StoreCouponsPage — CouponListRow + TotalCountRow', () => {
                 name: couponFixture.title,
                 description: couponFixture.description,
             },
+        ])
+    })
+
+    it('codes that keep failing are collapsed on the page, so the ItemList JSON-LD and the FAQ "ranked first" claim skip them (they stay in the section props)', async () => {
+        const flaggedRow = {
+            ...supplierRow,
+            id: 41,
+            code: 'FLAGGED41',
+            title: 'Flagged top-ranked code',
+        }
+        const okRow = { ...supplierRow, id: 43, title: 'Healthy code' }
+        mockRows(
+            sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
+            [flaggedRow, okRow],
+        )
+        mockRows(
+            sql => sql.includes('COUNT(*)::int AS total'),
+            [storeAggregateRow(2)],
+        )
+        vi.mocked(prisma.couponSignal.findMany).mockResolvedValueOnce([
+            {
+                couponId: '41',
+                lastWorkedAt: null,
+                lastFailedAt: new Date(Date.now() - 60 * 60 * 1000),
+                failCount: 4,
+            },
+        ] as never)
+
+        const mainEl = (await StoreCouponsPage({
+            params: { store: 'example.com' },
+        })) as ReactElement<{ children: ReactElement[] }>
+
+        const scripts = mainEl.props.children.filter(
+            (
+                c,
+            ): c is ReactElement<{
+                dangerouslySetInnerHTML: { __html: string }
+            }> => (c as ReactElement)?.type === 'script',
+        )
+        // oxlint-disable-next-line no-underscore-dangle -- React's own prop name
+        const itemList = JSON.parse(
+            scripts[0]!.props.dangerouslySetInnerHTML.__html,
+        )
+        expect(
+            itemList.itemListElement.map((i: { name: string }) => i.name),
+        ).toEqual(['Healthy code'])
+        expect(itemList.itemListElement[0].position).toBe(1)
+
+        // oxlint-disable-next-line no-underscore-dangle -- React's own prop name
+        const faqJson = scripts[2]!.props.dangerouslySetInnerHTML.__html
+        expect(faqJson).toContain('Healthy code')
+        expect(faqJson).not.toContain('Flagged top-ranked code')
+        expect(faqJson).not.toContain('FLAGGED41')
+
+        // The flagged code is NOT removed from the page: the section still gets
+        // it (flagged), and collapses it inside its hidden region.
+        const section = mainEl.props.children.find(
+            c => (c as ReactElement)?.type !== 'script',
+        ) as ReactElement<{
+            initialCoupons: Array<{ id: string; keepsFailing: boolean }>
+        }>
+        expect(
+            section.props.initialCoupons.map(c => [c.id, c.keepsFailing]),
+        ).toEqual([
+            ['41', true],
+            ['43', false],
         ])
     })
 
