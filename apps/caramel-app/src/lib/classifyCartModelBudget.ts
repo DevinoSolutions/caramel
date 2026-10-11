@@ -106,6 +106,9 @@ export async function admitClassifyModelCall(client: {
                 },
             )
         }
+        // Intentional: during a global trip the per-client bucket no longer fills
+        // (refunded below), so the per-IP abuse signal won't fire; the global
+        // Sentry event above is the signal instead.
         // The client's point was spent on a call that never reached the model:
         // give it back, so a global refusal (which the client cannot cause or
         // avoid) does not also eat into its own per-client budget.

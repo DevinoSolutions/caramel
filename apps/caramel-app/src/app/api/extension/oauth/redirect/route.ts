@@ -88,11 +88,18 @@ function signInFailedPage(detail: string) {
  * becomes a session (it verifies the signed state, enforces the provider's
  * verified-email claim, and mints via mintExtensionSession), so the Safari
  * path gets the exact same token class as every other client and cannot drift
- * from it. The cost is one loopback request.
+ * from it. The cost is one extra request, made to the PUBLIC base URL.
  *
  * The caller's client-IP headers are forwarded (clientIp.ts owns which ones)
- * so that POST's per-IP rate limit is charged to the real user instead of
- * pooling every Safari sign-in into one bucket keyed by the loopback.
+ * in the hope that POST's per-IP rate limit is charged per user rather than
+ * pooling every Safari sign-in into one bucket.
+ *
+ * TODO(safari-shim-removal): that hope is unverified. The inner call goes out
+ * through Cloudflare, which rewrites CF-Connecting-IP (the header the limiter
+ * trusts first) to this server's own egress address, so the inner POST is
+ * probably still metered under one shared key. Fixing it means calling the
+ * exchange in-process instead of over HTTP, which is more than this shim
+ * (already slated for removal) warrants.
  */
 async function completeSafariOauth(args: {
     baseURL: string

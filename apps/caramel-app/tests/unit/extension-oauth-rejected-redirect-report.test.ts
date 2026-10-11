@@ -3,6 +3,14 @@ import {
     GET as redirectGET,
     POST as redirectPOST,
 } from '@/app/api/extension/oauth/redirect/route'
+import {
+    reportRejectedExtensionRedirect,
+    resetRejectedRedirectReportThrottleForTests,
+} from '@/lib/auth/extensionOAuthRedirect'
+import {
+    REJECTED_REDIRECT_SURFACE_TAG,
+    scrubRejectedRedirectEvent,
+} from '@/lib/rejectedRedirectEventScrub'
 import { NextRequest } from 'next/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -74,8 +82,8 @@ function expectOneWarning(route: string, provider: string, host: string) {
     const [message, options] = captureMessageMock.mock.calls[0]
     expect(options).toEqual({
         level: 'warning',
-        tags: { route, provider },
-        extra: { rejectedHost: host },
+        tags: { route, provider, surface: REJECTED_REDIRECT_SURFACE_TAG },
+        extra: { rejectedHost: host, suppressedSinceLast: 0 },
     })
     // Nothing from the URL beyond the host may appear anywhere in the report.
     const everything = JSON.stringify([message, options])
@@ -86,6 +94,8 @@ function expectOneWarning(route: string, provider: string, host: string) {
 
 beforeEach(() => {
     captureMessageMock.mockClear()
+    vi.useRealTimers()
+    resetRejectedRedirectReportThrottleForTests()
 })
 
 describe('authorize reports a refused redirect_uri', () => {
@@ -172,5 +182,107 @@ describe('redirect reports a refused extension destination', () => {
         })
         expect(res.headers.get('location')).not.toBeNull()
         expect(captureMessageMock).not.toHaveBeenCalled()
+    })
+})
+
+describe('flood protection', () => {
+    const rejectOnRedirect = () =>
+        reportRejectedExtensionRedirect({
+            route: 'extension/oauth/redirect',
+            provider: 'apple',
+            redirectUri: 'https://x.example/',
+        })
+
+    it('N rapid rejections (even from distinct hosts) send at most one event, and the next window reports the suppressed count', () => {
+        vi.useFakeTimers()
+        vi.setSystemTime(new Date('2026-10-11T12:00:00Z'))
+
+        for (let i = 0; i < 50; i++) {
+            reportRejectedExtensionRedirect({
+                route: 'extension/oauth/redirect',
+                provider: 'apple',
+                redirectUri: `https://host-${i}.example/`,
+            })
+        }
+        expect(captureMessageMock).toHaveBeenCalledTimes(1)
+        expect(captureMessageMock.mock.calls[0][1].extra).toEqual({
+            rejectedHost: 'host-0.example',
+            suppressedSinceLast: 0,
+        })
+
+        // Still inside the window: still quiet.
+        vi.advanceTimersByTime(59_000)
+        rejectOnRedirect()
+        expect(captureMessageMock).toHaveBeenCalledTimes(1)
+
+        // Next window: one more event, carrying how many were swallowed (49 + 1).
+        vi.advanceTimersByTime(2_000)
+        rejectOnRedirect()
+        expect(captureMessageMock).toHaveBeenCalledTimes(2)
+        expect(captureMessageMock.mock.calls[1][1].extra).toEqual({
+            rejectedHost: 'x.example',
+            suppressedSinceLast: 50,
+        })
+
+        // ...and the counter restarts from zero.
+        vi.advanceTimersByTime(61_000)
+        rejectOnRedirect()
+        expect(
+            captureMessageMock.mock.calls[2][1].extra.suppressedSinceLast,
+        ).toBe(0)
+    })
+
+    it('throttles per route: a flood on /redirect does not hide an /authorize rejection', () => {
+        rejectOnRedirect()
+        rejectOnRedirect()
+        reportRejectedExtensionRedirect({
+            route: 'extension/oauth/authorize',
+            provider: 'google',
+            redirectUri: 'https://x.example/',
+        })
+        expect(captureMessageMock).toHaveBeenCalledTimes(2)
+    })
+
+    it('through the real route: a loop of bad redirects reports once', async () => {
+        for (let i = 0; i < 20; i++) {
+            await redirect({
+                extension_redirect: `https://h${i}.example/`,
+                code: 'SECRET-CODE',
+                state: 's',
+            })
+        }
+        expect(captureMessageMock).toHaveBeenCalledTimes(1)
+    })
+})
+
+describe('request query string scrub (sendDefaultPii)', () => {
+    const ours = () => ({
+        tags: { surface: REJECTED_REDIRECT_SURFACE_TAG },
+        request: {
+            url: 'https://grabcaramel.com/api/extension/oauth/redirect?code=SECRET-CODE&state=SECRET-STATE#f',
+            query_string: 'code=SECRET-CODE&state=SECRET-STATE',
+            cookies: { session: 'SECRET-TOKEN' },
+            data: 'code=SECRET-CODE',
+            method: 'GET',
+        },
+    })
+
+    it('strips the query string, fragment, cookies and body from our events', () => {
+        const out = scrubRejectedRedirectEvent(ours() as never) as ReturnType<
+            typeof ours
+        >
+        expect(out.request).toEqual({
+            url: 'https://grabcaramel.com/api/extension/oauth/redirect',
+            method: 'GET',
+        })
+        expect(JSON.stringify(out)).not.toContain('SECRET')
+    })
+
+    it('leaves every other event untouched', () => {
+        const other = { ...ours(), tags: { surface: 'something-else' } }
+        const before = JSON.stringify(other)
+        expect(JSON.stringify(scrubRejectedRedirectEvent(other as never))).toBe(
+            before,
+        )
     })
 })

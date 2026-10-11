@@ -1,5 +1,6 @@
 import * as Sentry from '@sentry/nextjs'
 import { SENTRY_RELEASE } from './src/lib/buildInfo'
+import { scrubRejectedRedirectEvent } from './src/lib/rejectedRedirectEventScrub'
 
 const isProd = process.env.NODE_ENV === 'production'
 
@@ -23,6 +24,9 @@ export function initSentry(
         tracesSampleRate: 0.05,
         debug: false,
         sendDefaultPii: true,
+        // sendDefaultPii attaches the request URL + query string; for the OAuth
+        // callback reports that query is `?code=…&state=…`. Strip it there.
+        beforeSend: scrubRejectedRedirectEvent,
         ...customOptions,
     })
 }
