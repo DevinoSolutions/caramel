@@ -62,13 +62,14 @@ export const POST = withRoute(
         // it — grep-confirmed). The origin gate below only stops BROWSERS:
         // any HTTP client can send `Origin: chrome-extension://…`, so the
         // real bound on spend is the model-call budget passed to
-        // classifyCart (classifyCartModelBudget.ts). origin: true's isOriginAllowed() lets a
-        // request with NO Origin header through by design (server-to-
-        // server/curl), which left this route reachable origin-less (E2E
-        // report D5). 'extension' requires the Origin to be present AND an
-        // actual browser-extension protocol — real calls are unaffected:
-        // they originate from background.js's service-worker fetch, which
-        // always carries `Origin: chrome-extension://<id>`.
+        // classifyCart (classifyCartModelBudget.ts). The looser `origin: true`
+        // would also let a request with NO Origin header through (isOriginAllowed
+        // permits that by design for server-to-server/curl), which left this
+        // route reachable origin-less (E2E report D5). 'extension' requires
+        // the Origin to be present AND an actual browser-extension protocol —
+        // real calls are unaffected: they originate from background.js's
+        // service-worker fetch, which always carries
+        // `Origin: chrome-extension://<id>`.
         origin: 'extension',
         // Keeps its own sanitize() below (already validated-or-400, not a
         // swallow) rather than a wrapper zod schema — see PLAN-F-007.md

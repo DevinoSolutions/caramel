@@ -106,6 +106,10 @@ export async function admitClassifyModelCall(client: {
                 },
             )
         }
+        // The client's point was spent on a call that never reached the model:
+        // give it back, so a global refusal (which the client cannot cause or
+        // avoid) does not also eat into its own per-client budget.
+        await perClientLimiter.reward(client.ip, 1)
         throw new ClassifyModelBudgetExceededError('global', retryAfterSec)
     }
 }

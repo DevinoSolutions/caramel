@@ -44,7 +44,9 @@ vi.mock('@/lib/rateLimit', async importOriginal => {
 
 import { POST as classifyCartPOST } from '@/app/api/classify-cart/route'
 import {
+    admitClassifyModelCall,
     CLASSIFY_MODEL_BUDGET,
+    ClassifyModelBudgetExceededError,
     resetClassifyModelBudgetForTests,
 } from '@/lib/classifyCartModelBudget'
 
@@ -126,5 +128,47 @@ describe('classify-cart model-call budget', () => {
             'classify-cart global model-call budget exhausted',
             expect.objectContaining({ level: 'warning' }),
         )
+    })
+
+    it('a global refusal gives the client its point back: it never burns the per-client budget', async () => {
+        const admit = (ip: string) =>
+            admitClassifyModelCall({
+                ip,
+                path: '/api/classify-cart',
+                userAgent: 't',
+            })
+        const refusalScope = async (ip: string) => {
+            try {
+                await admit(ip)
+            } catch (error) {
+                if (error instanceof ClassifyModelBudgetExceededError)
+                    return error.scope
+                throw error
+            }
+            return 'admitted' as const
+        }
+
+        // Spend the whole global ceiling across other clients, leaving victim
+        // `v` with HALF its own budget used (10 of 20 admitted).
+        const half = CLASSIFY_MODEL_BUDGET.perClient / 2
+        for (let i = 0; i < half; i++)
+            expect(await refusalScope('v')).toBe('admitted')
+        let spent = half
+        for (let c = 0; spent < CLASSIFY_MODEL_BUDGET.global; c++) {
+            const take = Math.min(
+                CLASSIFY_MODEL_BUDGET.perClient,
+                CLASSIFY_MODEL_BUDGET.global - spent,
+            )
+            for (let i = 0; i < take; i++)
+                expect(await refusalScope(`filler-${c}`)).toBe('admitted')
+            spent += take
+        }
+
+        // Many more attempts than the client's remaining 10 points. Without
+        // the refund the 11th would flip from 'global' to 'client' (the
+        // client's own bucket full of calls that never reached the model).
+        for (let i = 0; i < CLASSIFY_MODEL_BUDGET.perClient * 2; i++) {
+            expect(await refusalScope('v')).toBe('global')
+        }
     })
 })
