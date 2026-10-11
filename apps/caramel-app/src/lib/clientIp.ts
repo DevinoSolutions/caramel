@@ -57,3 +57,16 @@ export function readClientIp(headers: Headers): string | null {
     }
     return null
 }
+
+/**
+ * Copy every client-IP header present on `from` onto `to`. For a server-side
+ * hop that re-issues the visitor's request to our own API (the Safari OAuth
+ * shim's loopback exchange): the inner request is metered by readClientIp too,
+ * so it must carry the same headers, not the loopback's.
+ */
+export function forwardClientIpHeaders(from: Headers, to: Headers): void {
+    for (const name of CLIENT_IP_HEADERS) {
+        const value = from.get(name)
+        if (value) to.set(name, value)
+    }
+}

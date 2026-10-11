@@ -20,6 +20,7 @@
 // what gives the Apple leg (whose registered redirect is our own /redirect) the
 // same property.
 import { env } from '@/lib/env'
+import * as Sentry from '@sentry/nextjs'
 
 /** Store-published Chromium builds. These IDs are public (they are the store
  * listing URLs) and stable for the life of the listing. Edge assigns its own ID
@@ -73,4 +74,35 @@ export function isAllowedExtensionRedirectUri(uri: string): boolean {
     }
     const id = extensionIdOf(parsed)
     return id !== null && allowedExtensionIds().has(id)
+}
+
+/** Only the host of a rejected redirect URI is ever reported: the full URL can
+ * carry the authorization code, state or a token (the redirect hop sees the
+ * provider's callback), and userinfo/path/query are attacker-chosen noise. */
+function hostOfRejectedUri(uri: string): string {
+    try {
+        return new URL(uri).hostname.slice(0, 100) || '<empty-host>'
+    } catch {
+        return '<unparseable>'
+    }
+}
+
+/**
+ * Report that an OAuth route refused an extension redirect URI. A refusal is
+ * either an attack (someone crafting a flow toward a foreign extension) or our
+ * own allowlist going stale (a new store build whose ID is not listed above),
+ * and both must be visible rather than a bare 400. Warning level, one message
+ * text so Sentry groups it; the route and provider are tags, the rejected host
+ * is the only URI-derived value.
+ */
+export function reportRejectedExtensionRedirect(args: {
+    route: 'extension/oauth/authorize' | 'extension/oauth/redirect'
+    provider: 'google' | 'apple' | 'unknown'
+    redirectUri: string
+}): void {
+    Sentry.captureMessage('Disallowed extension OAuth redirect URI', {
+        level: 'warning',
+        tags: { route: args.route, provider: args.provider },
+        extra: { rejectedHost: hostOfRejectedUri(args.redirectUri) },
+    })
 }

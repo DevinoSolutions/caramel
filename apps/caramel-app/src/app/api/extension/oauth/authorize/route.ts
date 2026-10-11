@@ -1,6 +1,9 @@
 import { handleRouteError } from '@/lib/api/handleRouteError'
 import { preflight, withRoute } from '@/lib/api/withRoute'
-import { isAllowedExtensionRedirectUri } from '@/lib/auth/extensionOAuthRedirect'
+import {
+    isAllowedExtensionRedirectUri,
+    reportRejectedExtensionRedirect,
+} from '@/lib/auth/extensionOAuthRedirect'
 import { env } from '@/lib/env'
 import { BASE_URL } from '@/lib/env.client'
 import { isValidNonce } from '@/lib/extension-oauth-nonce'
@@ -108,13 +111,27 @@ export const GET = withRoute(
         }
         const nonce = nonceParam ?? undefined
 
+        const baseURL = env.BETTER_AUTH_URL || BASE_URL
+
         // Never sign a state (or build a provider URL) for a destination that
         // is not one of our extensions — the redirect hop refuses to forward
         // to one anyway (extensionOAuthRedirect.ts), this just fails at the
-        // call that caused it. The Safari nonce flow is exempt: its
-        // redirect_uri is our OWN /redirect, which exchanges the code
-        // server-side and never forwards it. TODO(safari-shim-removal)
-        if (!nonce && !isAllowedExtensionRedirectUri(redirectUri)) {
+        // call that caused it. The Safari nonce flow is exempt ONLY for its
+        // one real redirect_uri, our OWN /redirect (it exchanges the code
+        // server-side and never forwards it): a nonce on any other
+        // destination gets no free pass. TODO(safari-shim-removal)
+        const isSafariShimRedirect =
+            nonce !== undefined &&
+            redirectUri === `${baseURL}/api/extension/oauth/redirect`
+        if (
+            !isSafariShimRedirect &&
+            !isAllowedExtensionRedirectUri(redirectUri)
+        ) {
+            reportRejectedExtensionRedirect({
+                route: 'extension/oauth/authorize',
+                provider,
+                redirectUri,
+            })
             return NextResponse.json(
                 { error: 'Disallowed redirect_uri' },
                 { status: 400 },
@@ -122,8 +139,6 @@ export const GET = withRoute(
         }
 
         try {
-            const baseURL = env.BETTER_AUTH_URL || BASE_URL
-
             // Construct OAuth URLs directly using OAuth provider endpoints
             // This bypasses better-auth's redirect handling which doesn't work well for extensions
             let oauthUrl: URL

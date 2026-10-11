@@ -156,10 +156,6 @@ export default [
         ignores: [
             // The door itself.
             '**/src/lib/clientIp.ts',
-            // TODO(2026-10-10): move onto the shared client-IP helper once PR
-            // #321 lands (it rewrites this file). It still forwards x-real-ip /
-            // x-forwarded-for by hand to its inner /api/extension/oauth call.
-            '**/src/app/api/extension/oauth/redirect/route.ts',
         ],
         plugins: {
             caramel: caramelPlugin,

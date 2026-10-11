@@ -236,6 +236,54 @@ describe('authorize accepts the shipped Safari nonce', () => {
         expect('nonce' in payload).toBe(false)
     })
 
+    it('a nonce is NOT a free pass: a foreign redirect_uri alongside it is refused', async () => {
+        // The exemption covers exactly one destination, our own /redirect.
+        // Anything else with a nonce attached must hit the same allowlist as a
+        // Chrome/Edge call (and sign no state).
+        for (const foreign of [
+            'https://evil.example/',
+            'https://evil.example/api/extension/oauth/redirect',
+            `${BASE}/api/extension/oauth/redirect/extra`,
+            `${BASE}/api/extension/oauth/redirect?x=1`,
+            `${BASE}.evil.example/api/extension/oauth/redirect`,
+            'https://foreign-extension-id.chromiumapp.org/',
+        ]) {
+            const params = new URLSearchParams({
+                provider: 'google',
+                redirect_uri: foreign,
+                nonce: NONCE,
+            })
+            const res = await authorizeGET(
+                new NextRequest(
+                    `${BASE}/api/extension/oauth/authorize?${params.toString()}`,
+                    { headers: { origin: KNOWN_ORIGIN } },
+                ),
+            )
+            const body = (await res.json()) as {
+                state?: string
+                error?: string
+            }
+            expect(res.status, foreign).toBe(400)
+            expect(body.error, foreign).toBe('Disallowed redirect_uri')
+            expect(body.state, foreign).toBeUndefined()
+        }
+    })
+
+    it('a nonce plus one of our own extension redirect URIs still passes the allowlist', async () => {
+        const params = new URLSearchParams({
+            provider: 'google',
+            redirect_uri: CHROME_REDIRECT_URI,
+            nonce: NONCE,
+        })
+        const res = await authorizeGET(
+            new NextRequest(
+                `${BASE}/api/extension/oauth/authorize?${params.toString()}`,
+                { headers: { origin: KNOWN_ORIGIN } },
+            ),
+        )
+        expect(res.status).toBe(200)
+    })
+
     it('refuses a nonce /poll could never look up, instead of signing a dead state', async () => {
         // Silently accepting it would make the popup poll a nonce that cannot
         // exist for its full 5 minutes and then report a timeout.

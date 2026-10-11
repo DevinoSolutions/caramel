@@ -98,13 +98,13 @@ describe('the root eslint config', () => {
                 )
             })
 
-            it('exempts the OAuth redirect route until PR #321 lands (dated TODO in the config)', () => {
+            it('bans the raw header in the OAuth redirect route too (its exemption is gone)', () => {
                 assert.deepEqual(
                     ruleIdsFor(
                         cwd,
                         'apps/caramel-app/src/app/api/extension/oauth/redirect/route.ts',
                     ),
-                    [],
+                    [RULE_ID],
                 )
             })
         })

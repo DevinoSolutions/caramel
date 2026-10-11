@@ -1,5 +1,9 @@
 import { withRoute } from '@/lib/api/withRoute'
-import { isAllowedExtensionRedirectUri } from '@/lib/auth/extensionOAuthRedirect'
+import {
+    isAllowedExtensionRedirectUri,
+    reportRejectedExtensionRedirect,
+} from '@/lib/auth/extensionOAuthRedirect'
+import { forwardClientIpHeaders } from '@/lib/clientIp'
 import { env } from '@/lib/env'
 import { BASE_URL } from '@/lib/env.client'
 import { isValidNonce, setNonceResult } from '@/lib/extension-oauth-nonce'
@@ -46,6 +50,18 @@ function readSignedStatePayload(signedState: string): {
     }
 }
 
+/** The provider named in the (unverified) signed state, for tagging a Sentry
+ * report only: the redirect hop never trusts it, and a state that is not ours
+ * (or has no provider) reports as 'unknown'. */
+function providerOfState(
+    signedState: string | null,
+): 'google' | 'apple' | 'unknown' {
+    return (
+        (signedState && readSignedStatePayload(signedState).provider) ||
+        'unknown'
+    )
+}
+
 /** The end-of-flow page the Safari user lands on. They finish in a normal tab
  * (not an extension-controlled one), so this is the only feedback they get —
  * the extension itself learns the outcome from /poll. */
@@ -74,9 +90,9 @@ function signInFailedPage(detail: string) {
  * path gets the exact same token class as every other client and cannot drift
  * from it. The cost is one loopback request.
  *
- * The caller's IP headers are forwarded so that POST's per-IP rate limit is
- * charged to the real user instead of pooling every Safari sign-in into one
- * bucket keyed by the loopback (Traefik sets these; we only pass them along).
+ * The caller's client-IP headers are forwarded (clientIp.ts owns which ones)
+ * so that POST's per-IP rate limit is charged to the real user instead of
+ * pooling every Safari sign-in into one bucket keyed by the loopback.
  */
 async function completeSafariOauth(args: {
     baseURL: string
@@ -88,10 +104,7 @@ async function completeSafariOauth(args: {
     forwardHeaders: Headers
 }): Promise<{ ok: true } | { ok: false; error: string }> {
     const headers = new Headers({ 'Content-Type': 'application/json' })
-    for (const name of ['x-real-ip', 'x-forwarded-for']) {
-        const value = args.forwardHeaders.get(name)
-        if (value) headers.set(name, value)
-    }
+    forwardClientIpHeaders(args.forwardHeaders, headers)
 
     let exchangeRes: Response
     try {
@@ -289,6 +302,13 @@ async function handleRedirect(req: NextRequest) {
             if (originalState) errorUrl.searchParams.set('state', originalState)
             return NextResponse.redirect(errorUrl.toString())
         }
+        if (extensionRedirectUri) {
+            reportRejectedExtensionRedirect({
+                route: 'extension/oauth/redirect',
+                provider: providerOfState(originalState),
+                redirectUri: extensionRedirectUri,
+            })
+        }
         return NextResponse.json({ error }, { status: 400 })
     }
 
@@ -314,6 +334,11 @@ async function handleRedirect(req: NextRequest) {
     // authorize also refuses foreign destinations: an attacker can rewrite
     // `r` in a legitimately-issued authorize URL.
     if (!isAllowedExtensionRedirectUri(extensionRedirectUri)) {
+        reportRejectedExtensionRedirect({
+            route: 'extension/oauth/redirect',
+            provider: providerOfState(originalState),
+            redirectUri: extensionRedirectUri,
+        })
         return NextResponse.json(
             { error: 'Disallowed extension redirect origin' },
             { status: 400 },
