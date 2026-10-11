@@ -624,12 +624,38 @@ export function initBackground() {
                 // Trust-loop signal from the apply flow (coupon-runner). Fire-and-forget:
                 // errors are logged, never surfaced — a report must not break checkout.
                 // A "worked" outcome also bumps the public usage counter.
-                const { id, outcome, storeReason } = message
-                fetchCaramelApi(caramelUrl(`api/coupons/${id}/report`), {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ outcome, storeReason }),
-                }).catch(err => logError('reportOutcome', err))
+                const { id, outcome, storeReason, awaitResult } = message
+                const report = fetchCaramelApi(
+                    caramelUrl(`api/coupons/${id}/report`),
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ outcome, storeReason }),
+                    },
+                )
+                if (awaitResult) {
+                    // The popup's "Did it work?" vote: the shopper is waiting on
+                    // the answer, so the real status goes back (a 429 reads
+                    // differently from a dead network) instead of a swallowed
+                    // failure. No usage bump — a vote is not an apply.
+                    report
+                        .then(r =>
+                            sendResponse(
+                                r.ok
+                                    ? { success: true }
+                                    : {
+                                          error: `HTTP ${r.status}`,
+                                          status: r.status,
+                                      },
+                            ),
+                        )
+                        .catch(err => {
+                            logError('reportOutcome', err)
+                            sendResponse({ error: String(err) })
+                        })
+                    return true
+                }
+                report.catch(err => logError('reportOutcome', err))
                 if (outcome === 'worked') {
                     fetchCaramelApi(caramelUrl('api/coupons/increment'), {
                         method: 'POST',

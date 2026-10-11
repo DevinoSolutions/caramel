@@ -521,6 +521,156 @@ body {
     gap: 6px;
     padding: 2px 2px 10px;
 }
+/* Per-shopper controls (issue #288). Everything here lives INSIDE .coupon-list
+   so the 320px cap stays the only height the chrome above has to account for
+   (tests/popup-sizing.test.mjs). */
+
+/* "Did CODE work?" — first child of the list, a compact tinted strip. */
+.coupon-vote {
+    margin-bottom: 10px;
+    padding: 9px 12px;
+    background: var(--cm-brand-soft-2);
+    border: 1px dashed var(--cm-border-dashed);
+    border-radius: var(--cm-radius-md);
+    color: var(--cm-text-primary);
+    font-size: var(--cm-text-sm);
+    text-align: left;
+}
+.coupon-vote-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px 10px;
+}
+.coupon-vote-question {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+.coupon-vote-question b {
+    font-family: var(--cm-font-mono);
+    color: var(--cm-brand-strong);
+}
+.coupon-vote-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+.coupon-vote-btn {
+    padding: 5px 11px;
+    border: 1.5px solid var(--cm-border-dashed);
+    border-radius: var(--cm-radius-pill);
+    background: var(--cm-surface);
+    color: var(--cm-text-primary);
+    font-size: var(--cm-text-xs);
+    font-weight: 700;
+    cursor: pointer;
+    transition:
+        border-color var(--cm-dur-fast) var(--cm-ease),
+        color var(--cm-dur-fast) var(--cm-ease);
+}
+.coupon-vote-btn:hover:not(:disabled) {
+    border-color: var(--cm-brand);
+    color: var(--cm-brand-strong);
+}
+.coupon-vote-btn:disabled,
+.coupon-vote-dismiss:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+.coupon-vote-btn:focus-visible,
+.coupon-vote-dismiss:focus-visible,
+.coupon-hide-btn:focus-visible,
+.coupon-disclosure-toggle:focus-visible {
+    outline: 2px solid var(--cm-brand);
+    outline-offset: 2px;
+}
+.coupon-vote-dismiss,
+.coupon-hide-btn {
+    border: none;
+    background: none;
+    color: var(--cm-text-secondary);
+    font-size: var(--cm-text-xs);
+    cursor: pointer;
+    text-decoration: underline;
+}
+.coupon-vote-dismiss {
+    padding: 5px 4px;
+}
+.coupon-vote-msg {
+    margin: 0;
+    font-weight: 600;
+    color: var(--cm-tier-green-text);
+}
+.coupon-vote-msg:empty {
+    display: none;
+}
+.coupon-vote-row + .coupon-vote-msg {
+    margin-top: 6px;
+}
+.coupon-vote-msg--error {
+    color: var(--cm-danger-text);
+}
+
+/* A card plus its "Hide" link. The link is a SIBLING of the card, never a
+   child: the card is role="button", and a button nested in a button is not
+   something a screen reader can reach. The card's own bottom margin moves to
+   the row so the rhythm between rows stays 12px. */
+.coupon-row {
+    margin-bottom: 12px;
+}
+.coupon-row > .coupon-item {
+    margin-bottom: 0;
+}
+.coupon-hide-btn {
+    display: block;
+    margin: 2px 4px 0 auto;
+    padding: 3px 4px;
+}
+.coupon-hide-btn:hover {
+    color: var(--cm-brand-strong);
+}
+
+/* Collapsed sections at the foot of the list ("N codes reported not
+   working", "Hidden codes (N) — show"). */
+.coupon-disclosure {
+    margin: 4px 0 8px;
+}
+.coupon-disclosure-toggle {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px 12px;
+    border: 1px dashed var(--cm-border-dashed);
+    border-radius: var(--cm-radius-md);
+    background: var(--cm-surface-dim);
+    color: var(--cm-text-secondary);
+    font-size: var(--cm-text-sm);
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+}
+.coupon-disclosure-toggle::before {
+    content: '\25B8';
+    display: inline-block;
+    margin-right: 6px;
+    transition: transform var(--cm-dur-fast) var(--cm-ease);
+}
+.coupon-disclosure-toggle[aria-expanded='true']::before {
+    transform: rotate(90deg);
+}
+.coupon-disclosure-toggle:hover {
+    border-color: var(--cm-brand);
+    color: var(--cm-brand-strong);
+}
+.coupon-disclosure [hidden] {
+    display: none;
+}
+.coupon-disclosure > div:not([hidden]) {
+    margin-top: 10px;
+}
+
 .coupon-list::-webkit-scrollbar {
     width: 8px;
 }

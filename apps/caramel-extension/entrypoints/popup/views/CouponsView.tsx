@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { caramelSendMessage, log } from '../../../caramel-base.js'
+import {
+    caramelSendMessage,
+    currentBrowser,
+    log,
+    logError,
+} from '../../../caramel-base.js'
 import { fetchCouponsPage } from '../../../coupon-fetch.js'
 import {
     COUPON_PAGE_EMPTY_LIMIT,
@@ -10,8 +15,20 @@ import {
 import { caramelCopyText } from '../../../UI-helpers.js'
 import { AllSitesBanner } from '../components/AllSitesBanner'
 import { CouponCard } from '../components/CouponCard'
+import { CouponDisclosure } from '../components/CouponDisclosure'
+import { DidItWorkPrompt } from '../components/DidItWorkPrompt'
 import { SavingsBanner } from '../components/SavingsBanner'
 import { useToast } from '../components/toast'
+import {
+    couponKey,
+    pendingVoteToAsk,
+    readVoteState,
+    rememberCopiedCoupon,
+    setCouponHidden,
+    splitCoupons,
+    withId,
+    type PendingVote,
+} from '../couponVote'
 import type { AppApi, Coupon, CouponsPage, PopupUser } from '../types'
 
 /**
@@ -239,8 +256,46 @@ export function CouponsView({
 
     const paging = pagingRef.current
 
+    // Per-shopper coupon memory (issue #288), loaded once per mount from
+    // storage.local. `prompt` is a SNAPSHOT of the pending vote taken at load:
+    // once the shopper answers, the stored record is cleared but the prompt
+    // stays mounted to show its thanks.
+    const [hidden, setHidden] = useState<string[]>([])
+    const [prompt, setPrompt] = useState<PendingVote | null>(null)
+    useEffect(() => {
+        let alive = true
+        readVoteState(currentBrowser)
+            .then(state => {
+                if (!alive) return
+                setHidden(state.hidden)
+                setPrompt(pendingVoteToAsk(state, domain))
+            })
+            .catch((err: Error) => logError('readVoteState', err))
+        return () => {
+            alive = false
+        }
+    }, [domain])
+
+    const hideCoupon = useCallback(
+        (coupon: Coupon, hide: boolean) => {
+            const key = couponKey(coupon)
+            if (key === null) return
+            // Optimistic, reconciled by the write: the list moves at once and
+            // a failed write is reported (the hide then only lasts this open).
+            setHidden(current =>
+                hide ? withId(current, key) : current.filter(x => x !== key),
+            )
+            setCouponHidden(currentBrowser, key, hide).catch((err: Error) => {
+                logError('setCouponHidden', err)
+                showToast("Couldn't save that — please try again")
+            })
+        },
+        [showToast],
+    )
+
     const copyCode = useCallback(
-        async (code: string) => {
+        async (coupon: Coupon) => {
+            const code = coupon.code
             // Robust copy (shared caramelCopyText): the bare
             // navigator.clipboard path silently did nothing when the API was
             // blocked — the shopper now gets either the code on the clipboard
@@ -257,9 +312,18 @@ export function CouponsView({
             // failed copy leaves the popup open, because the toast's text IS
             // the code and closing would take the fallback away with it. The
             // beat before closing is what lets the "Copied" toast register.
-            if (ok) setTimeout(() => window.close(), CLOSE_AFTER_COPY_MS)
+            if (ok) {
+                // Remember the copy BEFORE the popup closes: the vote prompt
+                // is asked on the next open, since this popup is about to go.
+                await rememberCopiedCoupon(
+                    currentBrowser,
+                    coupon,
+                    domain,
+                ).catch((err: Error) => logError('rememberCopiedCoupon', err))
+                setTimeout(() => window.close(), CLOSE_AFTER_COPY_MS)
+            }
         },
-        [showToast],
+        [domain, showToast],
     )
 
     // The auto-chase re-enters the loader, and an observer callback captured
@@ -362,6 +426,28 @@ export function CouponsView({
     }, [meta])
 
     const visibleRows = guestGated ? rows.slice(0, GUEST_COUPON_LIMIT) : rows
+    // DISPLAY split only (issue #288): auto-apply reads the catalog itself
+    // (coupon-runner.js) and never sees the shopper's hides or `keepsFailing`.
+    const {
+        main,
+        failing,
+        hidden: hiddenRows,
+    } = splitCoupons(visibleRows, hidden)
+    const renderCard = (coupon: Coupon, hideAction: 'hide' | 'unhide') => (
+        <div key={couponIdentity(coupon)} className="coupon-row">
+            <CouponCard coupon={coupon} onCopy={() => void copyCode(coupon)} />
+            {couponKey(coupon) !== null && (
+                <button
+                    type="button"
+                    className="coupon-hide-btn"
+                    aria-label={`${hideAction === 'hide' ? 'Hide' : 'Unhide'} code ${coupon.code}`}
+                    onClick={() => hideCoupon(coupon, hideAction === 'hide')}
+                >
+                    {hideAction === 'hide' ? 'Hide' : 'Unhide'}
+                </button>
+            )}
+        </div>
+    )
     const avatar = user?.image?.length
         ? user.image
         : 'assets/default-profile.png'
@@ -421,16 +507,25 @@ export function CouponsView({
             <h3 className="coupon-header">Coupons for {domain}</h3>
 
             <div id="couponList" className="coupon-list" ref={listRef}>
-                {visibleRows.length === 0 ? (
-                    <p>No coupons available for this store right now.</p>
+                {prompt && (
+                    <DidItWorkPrompt
+                        pending={prompt}
+                        onVoted={(couponId, vote) => {
+                            if (vote === 'failed')
+                                setHidden(current => withId(current, couponId))
+                        }}
+                        onDismiss={() => setPrompt(null)}
+                    />
+                )}
+
+                {main.length === 0 ? (
+                    <p>
+                        {visibleRows.length === 0
+                            ? 'No coupons available for this store right now.'
+                            : 'No other codes to show right now.'}
+                    </p>
                 ) : (
-                    visibleRows.map(coupon => (
-                        <CouponCard
-                            key={couponIdentity(coupon)}
-                            coupon={coupon}
-                            onCopy={code => void copyCode(code)}
-                        />
-                    ))
+                    main.map(coupon => renderCard(coupon, 'hide'))
                 )}
 
                 {footerVisible && (
@@ -469,6 +564,24 @@ export function CouponsView({
                             </p>
                         )}
                     </div>
+                )}
+
+                {failing.length > 0 && (
+                    <CouponDisclosure
+                        id="couponFailingDisclosure"
+                        label={`${failing.length} ${failing.length === 1 ? 'code' : 'codes'} reported not working`}
+                    >
+                        {failing.map(coupon => renderCard(coupon, 'hide'))}
+                    </CouponDisclosure>
+                )}
+
+                {hiddenRows.length > 0 && (
+                    <CouponDisclosure
+                        id="couponHiddenDisclosure"
+                        label={`Hidden codes (${hiddenRows.length}) — show`}
+                    >
+                        {hiddenRows.map(coupon => renderCard(coupon, 'unhide'))}
+                    </CouponDisclosure>
                 )}
 
                 {guestGated && (
