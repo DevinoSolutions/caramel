@@ -84,7 +84,7 @@ module.exports = [
         // work?" vote prompt, per-shopper hide, and the two collapsed
         // sections (reported-not-working, hidden) — three new components plus
         // the storage module behind them (couponVote.ts). Measured 31.33 ->
-        // 37.39 kB (+6.06 kB): one new feature surface, not prose.
+        // 37.97 kB (+6.64 kB): one new feature surface, not prose.
         limit: '41 KB',
         brotli: false,
     },

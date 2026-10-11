@@ -89,6 +89,13 @@ export function withId(list: string[], id: string): string[] {
     return [...list.filter(x => x !== id), id].slice(-COUPON_ID_LIST_MAX)
 }
 
+/** True once a copy is past the ask window — it will never be asked about,
+ *  on any site. A future timestamp (clock skew) is not "expired". */
+export const pendingVoteExpired = (
+    pending: PendingVote,
+    now: number = Date.now(),
+): boolean => now - pending.copiedAt > PENDING_VOTE_WINDOW_MS
+
 /** The pending vote worth asking about NOW, or null: it must be for this
  *  site, still inside the window (a future timestamp is clock skew, not
  *  "fresh"), and not already voted. */
@@ -99,8 +106,7 @@ export function pendingVoteToAsk(
 ): PendingVote | null {
     const p = state.pending
     if (!p || p.site !== site) return null
-    const age = now - p.copiedAt
-    if (age < 0 || age > PENDING_VOTE_WINDOW_MS) return null
+    if (p.copiedAt > now || pendingVoteExpired(p, now)) return null
     if (state.voted.includes(p.couponId)) return null
     return p
 }

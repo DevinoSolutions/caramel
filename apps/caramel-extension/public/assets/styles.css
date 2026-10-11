@@ -570,12 +570,12 @@ body {
         border-color var(--cm-dur-fast) var(--cm-ease),
         color var(--cm-dur-fast) var(--cm-ease);
 }
-.coupon-vote-btn:hover:not(:disabled) {
+.coupon-vote-btn:hover:not([aria-disabled='true']) {
     border-color: var(--cm-brand);
     color: var(--cm-brand-strong);
 }
-.coupon-vote-btn:disabled,
-.coupon-vote-dismiss:disabled {
+.coupon-vote-btn[aria-disabled='true'],
+.coupon-vote-dismiss[aria-disabled='true'] {
     opacity: 0.6;
     cursor: not-allowed;
 }
@@ -603,11 +603,14 @@ body {
     font-weight: 600;
     color: var(--cm-tier-green-text);
 }
-.coupon-vote-msg:empty {
-    display: none;
-}
-.coupon-vote-row + .coupon-vote-msg {
+/* The live region stays rendered while empty (an inserted-with-its-text region
+   is not reliably announced); spacing and the focus ring only apply once it
+   has something to say. */
+.coupon-vote-msg:not(:empty) {
     margin-top: 6px;
+}
+.coupon-vote-msg:focus {
+    outline: none;
 }
 .coupon-vote-msg--error {
     color: var(--cm-danger-text);

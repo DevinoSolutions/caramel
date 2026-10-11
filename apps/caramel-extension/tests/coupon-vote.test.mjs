@@ -11,6 +11,7 @@ import {
     clearPendingVote,
     parseIdList,
     parsePendingVote,
+    pendingVoteExpired,
     pendingVoteToAsk,
     readVoteState,
     recordVote,
@@ -100,6 +101,26 @@ describe('pending vote parsing + the ask window', () => {
         expect(
             pendingVoteToAsk(at(NOW + 60_000), 'shop.example', NOW),
         ).toBeNull()
+    })
+
+    it('pendingVoteExpired is true only strictly past the window, on any site', () => {
+        expect(pendingVoteExpired(pending(), NOW)).toBe(false)
+        expect(
+            pendingVoteExpired(
+                pending({ copiedAt: NOW - PENDING_VOTE_WINDOW_MS }),
+                NOW,
+            ),
+        ).toBe(false)
+        expect(
+            pendingVoteExpired(
+                pending({ copiedAt: NOW - PENDING_VOTE_WINDOW_MS - 1 }),
+                NOW,
+            ),
+        ).toBe(true)
+        // Clock skew (a future stamp) is not "expired" — it is just not asked.
+        expect(
+            pendingVoteExpired(pending({ copiedAt: NOW + 60_000 }), NOW),
+        ).toBe(false)
     })
 
     it('never asks twice for the same coupon (one vote per coupon)', () => {
@@ -319,4 +340,21 @@ describe('display-only: the apply path never sees any of it', () => {
             expect(source).not.toMatch(/caramel_pending_vote/)
         },
     )
+})
+
+describe('popup stylesheet a11y pins', () => {
+    const root = join(dirname(fileURLToPath(import.meta.url)), '..')
+    const css = readFileSync(
+        join(root, 'public', 'assets', 'styles.css'),
+        'utf8',
+    ).replace(/\/\*[\s\S]*?\*\//g, '')
+
+    it('never hides the vote live region while it is empty (display:none drops it from the a11y tree, so the first message may not be announced)', () => {
+        expect(css).not.toMatch(/\.coupon-vote-msg:empty/)
+        expect(css).not.toMatch(/\.coupon-vote-msg[^{]*\{[^}]*display:\s*none/)
+    })
+
+    it('the vote buttons are aria-disabled while sending, not :disabled (a disabled button drops focus)', () => {
+        expect(css).not.toMatch(/\.coupon-vote-(btn|dismiss):disabled/)
+    })
 })

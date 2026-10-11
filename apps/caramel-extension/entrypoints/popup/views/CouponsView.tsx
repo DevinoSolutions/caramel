@@ -20,7 +20,9 @@ import { DidItWorkPrompt } from '../components/DidItWorkPrompt'
 import { SavingsBanner } from '../components/SavingsBanner'
 import { useToast } from '../components/toast'
 import {
+    clearPendingVote,
     couponKey,
+    pendingVoteExpired,
     pendingVoteToAsk,
     readVoteState,
     rememberCopiedCoupon,
@@ -261,6 +263,9 @@ export function CouponsView({
     // once the shopper answers, the stored record is cleared but the prompt
     // stays mounted to show its thanks.
     const [hidden, setHidden] = useState<string[]>([])
+    // Read by the page loader, whose closure must see the CURRENT hide list.
+    const hiddenRef = useRef(hidden)
+    hiddenRef.current = hidden
     const [prompt, setPrompt] = useState<PendingVote | null>(null)
     useEffect(() => {
         let alive = true
@@ -269,12 +274,29 @@ export function CouponsView({
                 if (!alive) return
                 setHidden(state.hidden)
                 setPrompt(pendingVoteToAsk(state, domain))
+                // A copy past the window will never be asked about, on any
+                // site: drop it here so it does not sit in storage forever.
+                if (state.pending && pendingVoteExpired(state.pending))
+                    clearPendingVote(currentBrowser).catch((err: Error) =>
+                        logError('clearExpiredPendingVote', err),
+                    )
             })
             .catch((err: Error) => logError('readVoteState', err))
         return () => {
             alive = false
         }
     }, [domain])
+
+    /** A row that moves lists unmounts the control that had focus, and focus
+     *  would fall back to <body>. Hand it to the neighbouring row's action
+     *  (those nodes survive the re-render), else to the list itself. */
+    const moveFocusFrom = useCallback((control: HTMLElement) => {
+        const row = control.closest('.coupon-row')
+        const neighbour = [row?.nextElementSibling, row?.previousElementSibling]
+            .find(el => el?.matches('.coupon-row'))
+            ?.querySelector<HTMLElement>('.coupon-hide-btn')
+        ;(neighbour ?? listRef.current)?.focus()
+    }, [])
 
     const hideCoupon = useCallback(
         (coupon: Coupon, hide: boolean) => {
@@ -358,12 +380,14 @@ export function CouponsView({
                 state.seen.add(key)
                 return true
             })
-            if (fresh.length) {
-                state.empty = 0
-                setRows(current => [...current, ...fresh])
-            } else {
-                state.empty += 1
-            }
+            if (fresh.length) setRows(current => [...current, ...fresh])
+            // Progress is rows that land in the MAIN list. A page that is all
+            // flagged or hidden grows nothing the shopper sees, so the footer
+            // never leaves the viewport and the observer would not fire again.
+            const progressed =
+                splitCoupons(fresh, hiddenRef.current).main.length > 0
+            if (progressed) state.empty = 0
+            else state.empty += 1
 
             if (!state.hasMore) {
                 setFooterState('end')
@@ -371,12 +395,13 @@ export function CouponsView({
                 observerRef.current = null
                 return
             }
-            // A page that was entirely duplicates leaves the footer exactly
-            // where it was, so the observer has no boundary left to cross and
-            // would wait forever. Pull the next page ourselves — but only a few
-            // times, so a backend insisting there is more while returning
-            // nothing new ends at a button the shopper can press, not a loop.
-            if (fresh.length) {
+            // A page that added nothing to the main list (all duplicates, or
+            // all flagged/hidden) leaves the footer exactly where it was, so
+            // the observer has no boundary left to cross and would wait
+            // forever. Pull the next page ourselves — but only a few times, so
+            // a backend insisting there is more while returning nothing new
+            // ends at a button the shopper can press, not a loop.
+            if (progressed) {
                 setFooterState('idle')
             } else if (state.empty >= COUPON_PAGE_EMPTY_LIMIT) {
                 setFooterState('error')
@@ -441,7 +466,10 @@ export function CouponsView({
                     type="button"
                     className="coupon-hide-btn"
                     aria-label={`${hideAction === 'hide' ? 'Hide' : 'Unhide'} code ${coupon.code}`}
-                    onClick={() => hideCoupon(coupon, hideAction === 'hide')}
+                    onClick={e => {
+                        moveFocusFrom(e.currentTarget)
+                        hideCoupon(coupon, hideAction === 'hide')
+                    }}
                 >
                     {hideAction === 'hide' ? 'Hide' : 'Unhide'}
                 </button>
@@ -506,7 +534,14 @@ export function CouponsView({
 
             <h3 className="coupon-header">Coupons for {domain}</h3>
 
-            <div id="couponList" className="coupon-list" ref={listRef}>
+            <div
+                id="couponList"
+                className="coupon-list"
+                ref={listRef}
+                // Programmatic focus target only (a dismissed prompt or the
+                // last moved row has no neighbour to hand focus to).
+                tabIndex={-1}
+            >
                 {prompt && (
                     <DidItWorkPrompt
                         pending={prompt}
@@ -514,7 +549,10 @@ export function CouponsView({
                             if (vote === 'failed')
                                 setHidden(current => withId(current, couponId))
                         }}
-                        onDismiss={() => setPrompt(null)}
+                        onDismiss={() => {
+                            setPrompt(null)
+                            listRef.current?.focus()
+                        }}
                     />
                 )}
 
@@ -526,6 +564,26 @@ export function CouponsView({
                     </p>
                 ) : (
                     main.map(coupon => renderCard(coupon, 'hide'))
+                )}
+
+                {/* Above the footer: while more pages are coming the footer is a
+                    skeleton card, and the sections must not sit under it. */}
+                {failing.length > 0 && (
+                    <CouponDisclosure
+                        id="couponFailingDisclosure"
+                        label={`${failing.length} ${failing.length === 1 ? 'code' : 'codes'} reported not working`}
+                    >
+                        {failing.map(coupon => renderCard(coupon, 'hide'))}
+                    </CouponDisclosure>
+                )}
+
+                {hiddenRows.length > 0 && (
+                    <CouponDisclosure
+                        id="couponHiddenDisclosure"
+                        label={`Hidden codes (${hiddenRows.length})`}
+                    >
+                        {hiddenRows.map(coupon => renderCard(coupon, 'unhide'))}
+                    </CouponDisclosure>
                 )}
 
                 {footerVisible && (
@@ -564,24 +622,6 @@ export function CouponsView({
                             </p>
                         )}
                     </div>
-                )}
-
-                {failing.length > 0 && (
-                    <CouponDisclosure
-                        id="couponFailingDisclosure"
-                        label={`${failing.length} ${failing.length === 1 ? 'code' : 'codes'} reported not working`}
-                    >
-                        {failing.map(coupon => renderCard(coupon, 'hide'))}
-                    </CouponDisclosure>
-                )}
-
-                {hiddenRows.length > 0 && (
-                    <CouponDisclosure
-                        id="couponHiddenDisclosure"
-                        label={`Hidden codes (${hiddenRows.length}) — show`}
-                    >
-                        {hiddenRows.map(coupon => renderCard(coupon, 'unhide'))}
-                    </CouponDisclosure>
                 )}
 
                 {guestGated && (

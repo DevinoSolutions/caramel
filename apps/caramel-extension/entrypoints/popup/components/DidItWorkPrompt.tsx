@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import {
     caramelSendMessage,
     currentBrowser,
@@ -39,6 +39,7 @@ export function DidItWorkPrompt({
     pending: PendingVote
     /** The vote landed; "failed" also hides the code (the caller mirrors it). */
     onVoted: (couponId: string, vote: Vote) => void
+    /** The prompt is gone: the caller owns where focus goes next. */
     onDismiss: () => void
 }) {
     const [done, setDone] = useState<Vote | null>(null)
@@ -47,6 +48,12 @@ export function DidItWorkPrompt({
     // Synchronous double-click guard: `busy` only updates on the next render.
     const inFlight = useRef(false)
     const questionId = useId()
+    // The answer buttons unmount on a successful vote; focus follows the
+    // thanks, which is also the live region, so it is both read and kept.
+    const thanksRef = useRef<HTMLParagraphElement>(null)
+    useEffect(() => {
+        if (done !== null) thanksRef.current?.focus()
+    }, [done])
 
     const send = async (vote: Vote) => {
         if (inFlight.current) return
@@ -86,6 +93,7 @@ export function DidItWorkPrompt({
     }
 
     const dismiss = () => {
+        if (inFlight.current) return
         void clearPendingVote(currentBrowser).catch((err: Error) =>
             logError('clearPendingVote', err),
         )
@@ -109,7 +117,10 @@ export function DidItWorkPrompt({
                                 key={vote}
                                 type="button"
                                 className="coupon-vote-btn"
-                                disabled={busy}
+                                // aria-disabled, not disabled: a disabled
+                                // button drops focus, and after a failed send
+                                // the shopper is still on this control.
+                                aria-disabled={busy}
                                 onClick={() => void send(vote)}
                             >
                                 {label}
@@ -118,7 +129,7 @@ export function DidItWorkPrompt({
                         <button
                             type="button"
                             className="coupon-vote-dismiss"
-                            disabled={busy}
+                            aria-disabled={busy}
                             onClick={dismiss}
                         >
                             Not now
@@ -130,6 +141,8 @@ export function DidItWorkPrompt({
                 into it (a live region inserted together with its text is not
                 reliably announced). */}
             <p
+                ref={thanksRef}
+                tabIndex={-1}
                 aria-live="polite"
                 className={
                     errorText
