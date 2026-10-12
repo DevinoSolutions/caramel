@@ -860,14 +860,20 @@ function findToggle(doc, input) {
 const TOTAL_LABEL =
     /^(order |estimated |grand |cart |basket |bag |your )?total( due| to pay| \(.*\))?:?$|^total\b|^(est\.?|estimated) (order )?total|^order total|^amount due|^total à payer|^gesamt|^summe|^totale/i
 const TOTAL_NOT =
-    /sub[- ]?total|sav(e|ed|ing|ings)\b|discount|items? total|total items|shipping|tax|points|weight|qty|quantity|calculated/i
+    /sub[- ]?total|sav(ed?|ings?)\b|discount|items? total|total items|shipping|tax|points|weight|qty|quantity|calculated/i
 const SUB_LABEL =
     /^(order |cart |merchandise |product |est\.? |estimated )?sub[- ]?total( \(.*\))?:?$|^product total:?$/i
-const SUB_NOT = /sav(e|ed|ing|ings)\b|discount|shipping|tax|points/i
+const SUB_NOT = /sav(ed?|ings?)\b|discount|shipping|tax|points/i
+// A currency sign. One spelling, shared by every money pattern below.
+const SIGN = '[$£€¥₹₩₺₱₪₫฿₦]'
 // An amount: a currency mark beside digits, or digits with cents.
-const MONEY_RE =
-    /(?:[$£€¥₹₩₺₱₪₫฿₦]|R\$|\b(?:USD|CAD|AUD|NZD|EUR|GBP|CHF|SEK|NOK|DKK|PLN|AED|SAR|INR|JPY|HKD|SGD|MXN|ZAR|kr)\b)\s?-?\d[\d.,]*|\d[\d.,]*\s?(?:[$£€¥₹₩₺₱₪₫฿₦]|\b(?:USD|EUR|GBP|CHF|kr)\b|zł)|\d[\d,]*[.,]\d{2}\b/i
-const AMOUNT_ONLY = /^[^\w$£€¥₹₩₺₱₪₫฿₦]{0,3}\S{0,4}\s?-?\d[\d.,\s]*\S{0,4}$/
+const MONEY_RE = new RegExp(
+    `(?:${SIGN}|R\\$|\\b(?:USD|CAD|AUD|NZD|EUR|GBP|CHF|SEK|NOK|DKK|PLN|AED|SAR|INR|JPY|HKD|SGD|MXN|ZAR|kr)\\b)\\s?-?\\d[\\d.,]*|\\d[\\d.,]*\\s?(?:${SIGN}|\\b(?:USD|EUR|GBP|CHF|kr)\\b|zł)|\\d[\\d,]*[.,]\\d{2}\\b`,
+    'i',
+)
+const AMOUNT_ONLY = new RegExp(
+    `^[^\\w${SIGN.slice(1, -1)}]{0,3}\\S{0,4}\\s?-?\\d[\\d.,\\s]*\\S{0,4}$`,
+)
 // A parenthetical ("incl. 15,17 € VAT") is commentary on the amount, not a
 // second total.
 const moneyCount = t =>
@@ -954,6 +960,7 @@ function scanTotalRows(
                 )
                     hits.push({
                         el: sib,
+                        row: sib.parentElement,
                         visible: visible(sib),
                         label: bare.toLowerCase(),
                     })
@@ -1058,14 +1065,18 @@ const DISCOUNT_WORDS = /coupon|discount|promo|voucher/i
 const DISCOUNT_LABEL =
     /^(?:order |cart |basket )?(?:coupon|discount|promo(?:tion)?|voucher)s?(?: code)?\b[^.!?]{0,30}$/i
 const DISCOUNT_NOT =
-    /sub[- ]?total|total|sav(e|ed|ing|ings)\b|shipping|tax|eligible|exclud|cannot|can't|only|enter|apply|add |have|gift|points|reward|member|minimum|spend|purchase|requir|more|qualif|valid|expire|balance|credit|card/i
-const CUR = '(?:[$£€¥₹₩₺₱₪₫฿₦]|[A-Z]{3}\\s?)'
+    /total|sav(ed?|ings?)\b|shipping|tax|eligible|exclud|cannot|can't|only|enter|apply|add |have|gift|points|reward|member|minimum|spend|purchase|requir|more|qualif|valid|expire|balance|credit|card/i
+const CUR = `(?:${SIGN}|[A-Z]{3}\\s?)`
 // A deduction mark: a minus that starts a word ("-$20.00", or "-" and
-// "$20.00" drawn as two elements, measured live), "$-20.00", or "($20.00)".
-// A dash inside a word ("SAVE-20") is not a minus.
+// "$20.00" drawn as two elements, measured live), a minus on a currency sign
+// ("Coupon-$20.00" or "Coupon- $20.00", label and value in two spans),
+// "$-20.00", or "($20.00)". A dash inside a word ("SAVE-20") is not a minus.
 const DEDUCTION_RE = new RegExp(
-    `(?:^|\\s)[-−–]\\s*${CUR}?\\d|[$£€¥₹₩₺₱₪₫฿₦][-−–]\\d|\\(\\s?(?:${CUR}\\s?\\d[\\d.,]*|\\d[\\d.,]*[.,]\\d{2})\\s?\\)`,
+    `(?:^|\\s)[-−–]\\s*${CUR}?\\d|[-−–]\\s?${SIGN}\\d|${SIGN}[-−–]\\d|\\(\\s?(?:${CUR}\\s?\\d[\\d.,]*|\\d[\\d.,]*[.,]\\d{2})\\s?\\)`,
 )
+// ...and a deduction line ENDS at its amount (a currency code or a "Remove"
+// link may follow): "- $5.00 off your next order" is an offer, not a line.
+const DEDUCTION_END = /\d\W*(?:USD|CAD|EUR|GBP|AUD|remove)?\W*$/i
 
 // The subtotal's own summary: the widest ancestor still small enough to be
 // one panel rather than the whole cart. Sized by textContent, which needs no
@@ -1121,12 +1132,15 @@ function newDeduction(el, base) {
         const t = textOf(h.el).replace(/\([^)]*[a-z][^)]*\)/gi, ' ')
         const money = caramelFindMoney(t)
         const a = money.length === 1 ? Math.abs(money[0].value) : 0
-        // The whole row is judged, not only its label: "Promo code -$5.00
-        // not applied (minimum $50.00)" is a refusal.
+        // The whole row is judged, not only its label or value cell: "Promo
+        // code -$5.00 not applied (minimum $50.00)" is a refusal. A deduction
+        // line ends at its amount: "Promo code - $5.00 off your next order"
+        // and a bulleted note are not one.
         if (
             a > off &&
             DEDUCTION_RE.test(t) &&
-            !DISCOUNT_NOT.test(t) &&
+            DEDUCTION_END.test(t) &&
+            !DISCOUNT_NOT.test(textOf(h.row || h.el)) &&
             !base.amounts.includes(a)
         )
             off = a

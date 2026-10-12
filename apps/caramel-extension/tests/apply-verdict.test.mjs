@@ -1112,7 +1112,62 @@ describe('a finder-picked box the store re-draws to answer', () => {
                     `<aside class="sec">${SECTION('')}</aside>` + SUMMARY('')
                 answerOnClick(
                     null,
-                    '<div class="cl"><b>Promo code</b> -$5.00 once you spend more</div>',
+                    '<div class="cl"><b>Promo code</b> once you spend more -$5.00</div>',
+                )
+                const rec = await finderRecord({ domain: 'shop.test' })
+
+                const res = await applyCoupon('NOPE', rec)
+
+                expect(res.success).toBe(false)
+            } finally {
+                restore()
+            }
+        }, 15000)
+
+        it('reads no deduction from a refused row whose amount sits in its own cell', async () => {
+            try {
+                document.body.innerHTML =
+                    `<aside class="sec">${SECTION('')}</aside>` + SUMMARY('')
+                answerOnClick(
+                    null,
+                    '<div class="cl"><span>Promo code</span><span>- $5.00</span>' +
+                        '<small>Minimum order $50.00</small></div>',
+                )
+                const rec = await finderRecord({ domain: 'shop.test' })
+
+                const res = await applyCoupon('NOPE', rec)
+
+                expect(res.success).toBe(false)
+            } finally {
+                restore()
+            }
+        }, 15000)
+
+        it('reads no deduction from a dash that separates an offer', async () => {
+            try {
+                document.body.innerHTML =
+                    `<aside class="sec">${SECTION('')}</aside>` + SUMMARY('')
+                answerOnClick(
+                    null,
+                    '<div class="cl"><b>Promo code</b> – $5.00 off your next order</div>',
+                )
+                const rec = await finderRecord({ domain: 'shop.test' })
+
+                const res = await applyCoupon('NOPE', rec)
+
+                expect(res.success).toBe(false)
+            } finally {
+                restore()
+            }
+        }, 15000)
+
+        it('reads no deduction from a bulleted promo note', async () => {
+            try {
+                document.body.innerHTML =
+                    `<aside class="sec">${SECTION('')}</aside>` + SUMMARY('')
+                answerOnClick(
+                    null,
+                    '<div class="cl"><b>Promo code</b> SPRING\n- $5.00 off\n- for all items</div>',
                 )
                 const rec = await finderRecord({ domain: 'shop.test' })
 

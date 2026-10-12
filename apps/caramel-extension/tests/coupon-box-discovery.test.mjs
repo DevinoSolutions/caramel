@@ -5,6 +5,7 @@ import {
     caramelDiscoverCouponBox,
     caramelDiscoveredRecord,
     caramelFinderSeesBox,
+    caramelFinderTotalNow,
     caramelFindOrderTotal,
     caramelRemarkFoundBox,
 } from '../coupon-box-discovery.js'
@@ -851,5 +852,37 @@ describe('the flag decides whether the shopper sees any of this', () => {
         const { rec } = appliedWith[0]
         expect(rec.caramelFound).toBe(true)
         expect(document.querySelector(rec.couponInput)?.id).toBe('dc')
+    })
+})
+
+// The subtotal reader on a cart with no total row nets the subtotal of a coupon
+// line the code added. Driven directly here, so the store's answer reader (which
+// also refuses a code beside a fresh rejection) cannot stand in for it.
+describe('a subtotal is netted only of a line the code added', () => {
+    const SUMMARY =
+        '<div class="sum"><div class="row" id="sub"><span>Subtotal</span> <span>$99.99</span></div></div>'
+    function after(line) {
+        document.body.innerHTML = SUMMARY
+        const rec = { priceContainer: '#sub', caramelTotalKind: 'subtotal' }
+        caramelFinderTotalNow(rec, document, true)
+        document.querySelector('.sum').insertAdjacentHTML('beforeend', line)
+        return caramelFinderTotalNow(rec)
+    }
+
+    it('nets a coupon line drawn as a label and a value cell', () => {
+        expect(
+            after(
+                '<div class="cl"><span>Coupon</span><span>- $20.00</span></div>',
+            ),
+        ).toBe(79.99)
+    })
+
+    it('reads no deduction from a refused row whose amount sits in its own cell', () => {
+        expect(
+            after(
+                '<div class="cl"><span>Promo code</span><span>- $5.00</span>' +
+                    '<small>Minimum order $50.00</small></div>',
+            ),
+        ).toBe(99.99)
     })
 })
