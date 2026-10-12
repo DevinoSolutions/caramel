@@ -56,7 +56,13 @@ module.exports = [
         // 101.23 kB, +0.7 kB for five fixes. 4.7% headroom rather than 10% on
         // purpose: this is the same capability hardening, not a new one — the
         // next capability should trip the ratchet and be a decision.
-        limit: '106 KB',
+        // 2026-10-12, raised 106 -> 107 kB: the subtotal reader's coupon-line
+        // check, three review findings and no new capability — a code name
+        // like "SPRING-$10" was read as a $10 deduction (a false saving), a
+        // summary drawn as one flat grid no longer netted a real coupon line,
+        // and a line ending in "Remove coupon"/"Edit"/a currency code was
+        // dropped. Measured 106.17 kB after sharing the currency-code list.
+        limit: '107 KB',
         brotli: false,
     },
     {

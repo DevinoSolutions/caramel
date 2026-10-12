@@ -871,9 +871,12 @@ const SUB_LABEL =
 const SUB_NOT = /sav(ed?|ings?)\b|discount|shipping|tax|points/i
 // A currency sign. One spelling, shared by every money pattern below.
 const SIGN = '[$£€¥₹₩₺₱₪₫฿₦]'
+// ...and the currency codes written beside an amount.
+const CODES =
+    'USD|CAD|AUD|NZD|EUR|GBP|CHF|SEK|NOK|DKK|PLN|AED|SAR|INR|JPY|HKD|SGD|MXN|ZAR|kr'
 // An amount: a currency mark beside digits, or digits with cents.
 const MONEY_RE = new RegExp(
-    `(?:${SIGN}|R\\$|\\b(?:USD|CAD|AUD|NZD|EUR|GBP|CHF|SEK|NOK|DKK|PLN|AED|SAR|INR|JPY|HKD|SGD|MXN|ZAR|kr)\\b)\\s?-?\\d[\\d.,]*|\\d[\\d.,]*\\s?(?:${SIGN}|\\b(?:USD|EUR|GBP|CHF|kr)\\b|zł)|\\d[\\d,]*[.,]\\d{2}\\b`,
+    `(?:${SIGN}|R\\$|\\b(?:${CODES})\\b)\\s?-?\\d[\\d.,]*|\\d[\\d.,]*\\s?(?:${SIGN}|\\b(?:USD|EUR|GBP|CHF|kr)\\b|zł)|\\d[\\d,]*[.,]\\d{2}\\b`,
     'i',
 )
 const AMOUNT_ONLY = new RegExp(
@@ -962,13 +965,26 @@ function scanTotalRows(
                     st.length <= 40 &&
                     AMOUNT_ONLY.test(st) &&
                     moneyCount(st) === 1
-                )
+                ) {
+                    // The row this cell belongs to: the label, the value and
+                    // any note after it ("Minimum order $50.00"), up to the
+                    // next label/value pair. A flat grid holds every summary
+                    // row as siblings, so its parent is the whole summary.
+                    const amt = n => n && AMOUNT_ONLY.test(norm(textOf(n)))
+                    let row = norm(textOf(prev || el)) + ' ' + st
+                    for (
+                        let n = sib.nextElementSibling;
+                        n && !amt(n) && !amt(n.nextElementSibling);
+                        n = n.nextElementSibling
+                    )
+                        row += ' ' + textOf(n)
                     hits.push({
                         el: sib,
-                        row: sib.parentElement,
+                        row,
                         visible: visible(sib),
                         label: bare.toLowerCase(),
                     })
+                }
                 break
             }
             const after = t.slice(t.indexOf(own) + own.length)
@@ -1075,13 +1091,17 @@ const CUR = `(?:${SIGN}|[A-Z]{3}\\s?)`
 // A deduction mark: a minus that starts a word ("-$20.00", or "-" and
 // "$20.00" drawn as two elements, measured live), a minus on a currency sign
 // ("Coupon-$20.00" or "Coupon- $20.00", label and value in two spans),
-// "$-20.00", or "($20.00)". A dash inside a word ("SAVE-20") is not a minus.
+// "$-20.00", or "($20.00)". A dash inside a word ("SAVE-20") is not a minus,
+// nor one inside a code name ("SPRING-$10": capitals or a digit before it).
 const DEDUCTION_RE = new RegExp(
-    `(?:^|\\s)[-−–]\\s*${CUR}?\\d|[-−–]\\s?${SIGN}\\d|${SIGN}[-−–]\\d|\\(\\s?(?:${CUR}\\s?\\d[\\d.,]*|\\d[\\d.,]*[.,]\\d{2})\\s?\\)`,
+    `(?:^|\\s)[-−–]\\s*${CUR}?\\d|(?<![A-Z\\d])[-−–]\\s?${SIGN}\\d|${SIGN}[-−–]\\d|\\(\\s?(?:${CUR}\\s?\\d[\\d.,]*|\\d[\\d.,]*[.,]\\d{2})\\s?\\)`,
 )
-// ...and a deduction line ENDS at its amount (a currency code or a "Remove"
-// link may follow): "- $5.00 off your next order" is an offer, not a line.
-const DEDUCTION_END = /\d\W*(?:USD|CAD|EUR|GBP|AUD|remove)?\W*$/i
+// ...and a deduction line ENDS at its amount (a currency code or a "Remove" /
+// "Edit" link may follow): "- $5.00 off your next order" is an offer, not a line.
+const DEDUCTION_END = new RegExp(
+    `\\d\\W*(?:${CODES}|zł|(?:remove|edit|change|delete)(?:\\W+(?:coupon|code|discount|promo|voucher))?)?\\W*$`,
+    'i',
+)
 
 // The subtotal's own summary: the widest ancestor still small enough to be
 // one panel rather than the whole cart. Sized by textContent, which needs no
@@ -1145,7 +1165,7 @@ function newDeduction(el, base) {
             a > off &&
             DEDUCTION_RE.test(t) &&
             DEDUCTION_END.test(t) &&
-            !DISCOUNT_NOT.test(textOf(h.row || h.el)) &&
+            !DISCOUNT_NOT.test(h.row || textOf(h.el)) &&
             !base.amounts.includes(a)
         )
             off = a

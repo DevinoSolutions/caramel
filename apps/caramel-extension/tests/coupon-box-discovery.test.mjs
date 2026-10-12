@@ -880,8 +880,12 @@ describe('the flag decides whether the shopper sees any of this', () => {
 describe('a subtotal is netted only of a line the code added', () => {
     const SUMMARY =
         '<div class="sum"><div class="row" id="sub"><span>Subtotal</span> <span>$99.99</span></div></div>'
-    function after(line) {
-        document.body.innerHTML = SUMMARY
+    // A summary drawn as one flat grid: every label and value is a sibling.
+    const GRID =
+        '<div class="sum"><span>Subtotal</span> <span id="sub">$99.99</span> <span>Shipping</span> <span>$4.00</span>' +
+        ' <span>Tax</span> <span>$1.00</span> <span>Total</span> <span>$104.99</span></div>'
+    function after(line, summary = SUMMARY) {
+        document.body.innerHTML = summary
         const rec = { priceContainer: '#sub', caramelTotalKind: 'subtotal' }
         caramelFinderTotalNow(rec, document, true)
         document.querySelector('.sum').insertAdjacentHTML('beforeend', line)
@@ -903,5 +907,40 @@ describe('a subtotal is netted only of a line the code added', () => {
                     '<small>Minimum order $50.00</small></div>',
             ),
         ).toBe(99.99)
+    })
+
+    it('reads no amount out of a code name that carries a dash and a sign', () => {
+        expect(
+            after(
+                '<div class="cl"><span>Coupon code</span> <span>SPRING-$10</span></div>' +
+                    '<div class="cl"><span>Discount</span> <span>-$2.00</span></div>',
+            ),
+        ).toBe(97.99)
+    })
+
+    it('nets a coupon line added to a summary drawn as one flat grid', () => {
+        expect(after(' <span>Coupon</span> <span>-$5.00</span>', GRID)).toBe(
+            94.99,
+        )
+    })
+
+    it.each([
+        ['<button>Remove coupon</button>'],
+        ['<a href="#">Remove code</a>'],
+        ['<a href="#">Edit</a>'],
+    ])('nets a coupon line followed by a %s control', control => {
+        expect(
+            after(
+                `<div class="cl"><span>Coupon</span> <span>-$5.00</span> ${control}</div>`,
+            ),
+        ).toBe(94.99)
+    })
+
+    it('nets a coupon line that ends in a currency code', () => {
+        expect(
+            after(
+                '<div class="cl"><span>Coupon</span> <span>-$5.00 CHF</span></div>',
+            ),
+        ).toBe(94.99)
     })
 })
