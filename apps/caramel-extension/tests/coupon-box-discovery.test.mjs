@@ -1092,6 +1092,16 @@ describe('a subtotal is netted only of a line the code added', () => {
         ).toBe(94.99)
     })
 
+    it('drops the last code baseline when the next baseline read fails', () => {
+        document.body.innerHTML = SUMMARY
+        const rec = { priceContainer: '#sub', caramelTotalKind: 'subtotal' }
+        caramelFinderTotalNow(rec, document, true, 'OLD10')
+        expect(rec.caramelSubtotalBase?.code).toBe('OLD10')
+        document.body.innerHTML = ''
+        expect(caramelFinderTotalNow(rec, document, true, 'NEW20')).toBeNaN()
+        expect(rec.caramelSubtotalBase).toBeNull()
+    })
+
     // Without the typed code no code name is accepted, so a call site that
     // stops passing it silently loses every named coupon line.
     it('passes the typed code from both apply paths to the baseline read', () => {

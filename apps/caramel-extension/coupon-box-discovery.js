@@ -1529,6 +1529,9 @@ export function caramelFinderTotalNow(
     baseline = false,
     code = '',
 ) {
+    // A baseline read that fails below must not leave the last code's
+    // baseline (and its code name) for this code's later reads.
+    if (baseline) rec.caramelSubtotalBase = null
     const el = doc.querySelector(rec.priceContainer)
     if (!el || !el.isConnected || !_isVisible(el)) {
         const row = findSameTotalRow(doc, {
