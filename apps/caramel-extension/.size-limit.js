@@ -67,7 +67,14 @@ module.exports = [
         // the line, a bracketed qualifier, "up to"); a sixth replaced the
         // refusal word lists with one accepted line shape, whose only allowed
         // name is the code that was typed. Measured 106.66 kB.
-        limit: '107 KB',
+        // 2026-10-13, raised 107 -> 113 kB: the finder's server pick, one new
+        // capability behind its own server flag (couponBoxLlm). When the rules
+        // read a total but find no box, the page outline the pick was measured
+        // on (coupon-box-outline.js, 3.7 kB of it) is sent once per store per
+        // tab session, and the answer is checked on the page before it joins
+        // the normal apply flow. No existing way to load content code on
+        // demand, so it ships in the bundle. Measured 112.8 kB.
+        limit: '113 KB',
         brotli: false,
     },
     {

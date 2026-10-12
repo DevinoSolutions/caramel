@@ -181,7 +181,7 @@ const FEATURES_CACHE_KEY = 'caramel_features'
 const FEATURES_TTL_ON_MS = 6 * 60 * 60 * 1000
 const FEATURES_TTL_OFF_MS = 30 * 60 * 1000
 let _featuresInflight = null // Promise<entry> while a fetch is running
-let _featuresMemo = null // { shopperCodeCapture, couponBoxDiscovery, ts }
+let _featuresMemo = null // { shopperCodeCapture, couponBoxDiscovery, couponBoxLlm, ts }
 
 function _readFeaturesSession() {
     return new Promise(resolve => {
@@ -208,10 +208,13 @@ function _writeFeaturesSession(entry) {
 
 function _featuresFresh(e) {
     if (!e || typeof e.shopperCodeCapture !== 'boolean') return false
-    // While the promo-box finder is on, the short lifetime: turning it OFF is
-    // the kill switch, and it must reach extensions within 30 minutes.
+    // While the promo-box finder or its server pick is on, the short lifetime:
+    // turning either OFF is the kill switch, and it must reach extensions
+    // within 30 minutes.
     const ttl =
-        e.shopperCodeCapture && e.couponBoxDiscovery !== true
+        e.shopperCodeCapture &&
+        e.couponBoxDiscovery !== true &&
+        e.couponBoxLlm !== true
             ? FEATURES_TTL_ON_MS
             : FEATURES_TTL_OFF_MS
     return Date.now() - e.ts < ttl
@@ -229,6 +232,8 @@ async function _fetchFeatures() {
         // Anything but a literal true is off: an app that predates the flag
         // omits it, and the finder must never switch itself on.
         couponBoxDiscovery: json.couponBoxDiscovery === true,
+        // The same rule for the server pick (POST coupon-box-pick).
+        couponBoxLlm: json.couponBoxLlm === true,
         ts: Date.now(),
     }
     _writeFeaturesSession(_featuresMemo)
@@ -271,6 +276,38 @@ async function couponBoxDiscoveryEnabled() {
         logError('features', err)
         return false
     }
+}
+
+// Answers the content script's couponBoxLlmEnabled message, the same way.
+async function couponBoxLlmEnabled() {
+    try {
+        return (await _features()).couponBoxLlm === true
+    } catch (err) {
+        logError('features', err)
+        return false
+    }
+}
+
+/* Asks the server which element of a page outline is the promo box (see
+ * coupon-box-outline.js and the finder's caramelPickedRecord). The outline is
+ * forwarded as built; the answer is passed back as the server sent it, and a
+ * refusal (429 over budget, 413 too large) as { error }. The flag is read
+ * again here, so a content script on a stale answer cannot spend a call. */
+// The model answers in ~4s, its slowest measured answer took 13.6s.
+const COUPON_BOX_PICK_TIMEOUT_MS = 15000
+async function couponBoxPick({ domain, outline }) {
+    if (!(await couponBoxLlmEnabled())) return { error: 'disabled' }
+    const r = await fetchCaramelApi(
+        caramelUrl('api/extension/coupon-box-pick'),
+        {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ domain, outline }),
+        },
+        COUPON_BOX_PICK_TIMEOUT_MS,
+    )
+    if (!r.ok) return { error: `HTTP ${r.status}` }
+    return r.json()
 }
 
 function _forgetFeatures() {
@@ -678,6 +715,17 @@ export function initBackground() {
                 couponBoxDiscoveryEnabled().then(enabled =>
                     sendResponse({ enabled }),
                 )
+                return true
+            } else if (message.action === 'couponBoxLlmEnabled') {
+                couponBoxLlmEnabled().then(enabled => sendResponse({ enabled }))
+                return true
+            } else if (message.action === 'couponBoxPick') {
+                couponBoxPick(message)
+                    .then(resp => sendResponse(resp))
+                    .catch(err => {
+                        logError('couponBoxPick', err)
+                        sendResponse({ error: String(err) })
+                    })
                 return true
             } else if (message.action === 'getFavoriteStores') {
                 // The stores this account follows. fetchCaramelApi so the stored
