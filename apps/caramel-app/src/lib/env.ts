@@ -162,6 +162,17 @@ const serverObjectSchema = z.object({
         )
         .pipe(z.url()),
     OPENROUTER_MODEL: z.string().default('anthropic/claude-haiku-4.5'),
+    // Paid fallback through the Devino proxy (src/lib/proxy-fallback-headers.ts):
+    // the app's OWN OpenRouter key, sent as X-ORF-Fallback-Key only when
+    // OPENROUTER_API_URL is the proxy, never to openrouter.ai. Unset = no
+    // header, behaviour unchanged. MODEL is an optional paid OpenRouter id
+    // (unset = the proxy's default); AFTER_SECONDS is the optional free-route
+    // first-token budget before the proxy goes paid. Blank, non-numeric, zero
+    // or negative AFTER_SECONDS is ignored, never a boot failure. Server-only;
+    // CI and evals never set these (vitest.eval.config.ts blanks them).
+    OPENROUTER_FALLBACK_API_KEY: z.string().optional(),
+    OPENROUTER_FALLBACK_MODEL: z.string().optional(),
+    OPENROUTER_FALLBACK_AFTER_SECONDS: z.string().optional(),
     API_ENCRYPTION_ENABLED: z.string().optional(),
     // Which PostHog project this deploy's SERVER-side captures target (the
     // feedback+observability foundation). 'production' → the real project;

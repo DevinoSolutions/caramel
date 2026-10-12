@@ -1,4 +1,5 @@
 import { env } from '@/lib/env'
+import { proxyFallbackHeaders } from '@/lib/proxy-fallback-headers'
 import * as Sentry from '@sentry/nextjs'
 
 const DEFAULT_MODEL = env.OPENROUTER_MODEL
@@ -68,6 +69,9 @@ export async function chat(
                 'HTTP-Referer': 'https://caramel.app',
                 'X-Title': 'Caramel Extension',
                 'X-Request-Id': requestId,
+                // Empty unless OPENROUTER_FALLBACK_API_KEY is set and the
+                // base URL is the Devino proxy (see proxy-fallback-headers.ts).
+                ...proxyFallbackHeaders(env.OPENROUTER_API_URL),
             },
             body: JSON.stringify(body),
         })
