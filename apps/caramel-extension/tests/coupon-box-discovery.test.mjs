@@ -1001,6 +1001,45 @@ describe('a subtotal is netted only of a line the code added', () => {
         expect(src).not.toMatch(/\(\?<[=!]/)
     })
 
+    // Review 5: four lines read as savings that did not happen. A line holds
+    // ONE amount; a struck-out old amount, a threshold after it, a qualifier
+    // in brackets or an "up to" is not a deduction we can claim.
+    it.each([
+        ['<div class="cl"><b>Coupon</b> <s>-$10.00</s> -$5.00</div>'],
+        [
+            '<div class="cl"><span>Promo</span><span>-$5.00</span><span>Orders over</span><span>$150.00</span></div>',
+        ],
+        [
+            '<div class="cl"><span>Promo</span><span>-$5.00</span><span>Free delivery over</span><span>$150.00</span></div>',
+        ],
+        [
+            '<table><tr><td>Coupon</td><td>-$5.00</td><td>Orders over $150.00</td></tr></table>',
+        ],
+        ['<div class="cl"><b>Promo</b> -$5.00 (on your next order)</div>'],
+        ['<div class="cl"><b>Promo</b> -$5.00 (on orders over $150.00)</div>'],
+        ['<div class="cl"><b>Promo</b> -$5.00 (not yet active)</div>'],
+        ['<div class="cl"><b>Promo</b> -$5.00 (Pro price)</div>'],
+        ['<div class="cl"><b>Discount</b> up to -$10.00</div>'],
+    ])('reads no deduction from %s', line => {
+        expect(after(line)).toBe(99.99)
+    })
+
+    it('still names the code in brackets: Coupon (SAVE20) -$5.00 nets', () => {
+        expect(
+            after('<div class="cl"><b>Coupon (SAVE20)</b> -$5.00</div>'),
+        ).toBe(94.99)
+    })
+
+    it.each([
+        ['<b>Cart coupon</b>- $5.00'],
+        ['<b>Order discount</b>-$5.00'],
+        ['<b>Basket promo</b>- $5.00'],
+        ['<b>Coupon applied:</b>-$5.00'],
+        ['<b>Coupon</b> ‏-$5.00'],
+    ])('nets the real coupon line %s', line => {
+        expect(after(`<div class="cl">${line}</div>`)).toBe(94.99)
+    })
+
     it('nets a coupon line that ends in a currency code', () => {
         expect(
             after(

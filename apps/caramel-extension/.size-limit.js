@@ -62,7 +62,9 @@ module.exports = [
         // line ending in "Remove coupon"/"Edit"/a currency code was dropped.
         // Netting a coupon line inside a summary drawn as one flat grid was
         // tried and dropped: three reviews kept finding rows it misread as
-        // savings, so such a line is refused instead. Measured 106.17 kB.
+        // savings, so such a line is refused instead. A fifth review closed four
+        // older false-saving shapes (a struck-out amount, a threshold after
+        // the line, a bracketed qualifier, "up to"). Measured 106.29 kB.
         limit: '107 KB',
         brotli: false,
     },

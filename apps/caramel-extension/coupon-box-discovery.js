@@ -974,8 +974,9 @@ function scanTotalRows(
                     // like "Shipping | $4.00", and no word list told them
                     // apart (three reviews, each a false saving).
                     let end = ''
-                    for (let n = sib; n; n = n.nextElementSibling)
-                        end += ' ' + textOf(n)
+                    for (let n = sib; n; n = n.nextSibling)
+                        end +=
+                            ' ' + (n.nodeType === 1 ? textOf(n) : n.textContent)
                     hits.push({
                         el: sib,
                         row: textOf(sib.parentElement),
@@ -1085,19 +1086,19 @@ const DISCOUNT_WORDS = /coupon|discount|promo|voucher/i
 const DISCOUNT_LABEL =
     /^(?:order |cart |basket )?(?:coupon|discount|promo(?:tion)?|voucher)s?(?: code)?\b[^.!?]{0,30}$/i
 const DISCOUNT_NOT =
-    /total|sav(ed?|ings?)\b|shipping|tax|eligible|exclud|cannot|can't|only|enter|apply|add |have|gift|points|reward|member|minimum|spend|purchase|requir|more|qualif|valid|expire|balance|credit|card|not appl|pending/i
+    /total|sav(ed?|ings?)\b|shipping|tax|eligible|exclud|cannot|can't|only|enter|apply|add |have|gift|points|reward|member|minimum|spend|purchase|requir|more|qualif|valid|expire|balance|credit|card|not appl|pending|up to/i
 // The label a line drawn in ONE element starts with, blanked before the minus
 // is looked for: "COUPON-$5.00" (label and value glued) is a minus. Only the
 // leading label goes, so a code name after it ("Coupon code PROMO-$10") stays
 // a name; a value cell must read as an amount, so it never starts with one.
 const LABEL_WORD =
-    /^\W*(?:coupon|discount|promo(?:tion)?|voucher)s?(?: code)?\b:?/i
+    /^\W*(?:(?:order|cart|basket) )?(?:coupon|discount|promo(?:tion)?|voucher)s?(?: code)?(?: applied)?\b:?/i
 const CUR = `(?:${SIGN}|[A-Z]{3}\\s?)`
 // A deduction mark: a minus that starts a word ("-$20.00", or "-" and
 // "$20.00" drawn as two elements, measured live), "$-20.00", or "($20.00)".
 // A dash inside a word ("SAVE-20", "SPRING-$10") is not a minus.
 const DEDUCTION_RE = new RegExp(
-    `(?:^|\\s)[-−–]\\s*${CUR}?\\d|${SIGN}[-−–]\\d|\\(\\s?(?:${CUR}\\s?\\d[\\d.,]*|\\d[\\d.,]*[.,]\\d{2})\\s?\\)`,
+    `(?:^|[\\s\u200e\u200f])[-−–]\\s*${CUR}?\\d|${SIGN}[-−–]\\d|\\(\\s?(?:${CUR}\\s?\\d[\\d.,]*|\\d[\\d.,]*[.,]\\d{2})\\s?\\)`,
 )
 // ...and a deduction line ENDS at its amount (a currency code or a "Remove" /
 // "Edit" link may follow): "- $5.00 off your next order" is an offer, not a line.
@@ -1157,7 +1158,7 @@ function newDeduction(el, base) {
     for (const h of hits) {
         if (hits.some(o => o !== h && o.el.contains(h.el))) continue
         // A code in brackets ("Coupon (SAVE20)") names the code, not an amount.
-        const t = textOf(h.el).replace(/\([^)]*[a-z][^)]*\)/gi, ' ')
+        const t = textOf(h.el).replace(/\(\s*[\w-]*[a-z][\w-]*\s*\)/gi, ' ')
         const money = caramelFindMoney(t)
         const a = money.length === 1 ? Math.abs(money[0].value) : 0
         // The whole row is judged, not only its label or value cell: "Promo
@@ -1168,6 +1169,7 @@ function newDeduction(el, base) {
             a > off &&
             DEDUCTION_RE.test(t.replace(LABEL_WORD, ' ')) &&
             DEDUCTION_END.test(h.end || t) &&
+            (!h.end || caramelFindMoney(h.end).length === 1) &&
             !DISCOUNT_NOT.test(h.row || textOf(h.el)) &&
             !base.amounts.includes(a)
         )
