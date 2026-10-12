@@ -203,7 +203,7 @@ jobs:
         shell: bash
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-        run: pnpm exec vitest run --config vitest.eval.config.ts --silent=false evals/couponBoxPick.eval.ts | tee eval-report.txt
+        run: pnpm exec vitest run --config vitest.eval.config.ts --silent=false --reporter=verbose evals/couponBoxPick.eval.ts | tee eval-report.txt
 
       - name: Upload eval report
         if: ${{ !cancelled() }}

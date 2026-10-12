@@ -116,8 +116,12 @@ export function couponBoxLlmEnabled(): boolean {
 }
 
 const EMAIL_SHAPED = /[\w.+-]+@[\w-]+\.[\w.]+/g
-// A node line's leading `- [n] ` index. The only digits the outline may keep.
-const NODE_INDEX = /^(\s*- \[\d+\] )?(.*)$/
+// A node line's leading `- [n] role` head. Its index is the only number the
+// outline may keep, and only when a role word follows it: a line of page text
+// that happens to start like an index is scrubbed like any other text.
+const NODE_HEAD = /^\s*- \[(\d{1,6})\] (?=[a-z]+\b)/
+// Every line break a browser can put in an accessible name, not only \n.
+const LINE_BREAK = /\r\n|[\n\r\u2028\u2029]/
 
 function scrubText(text: string): string {
     return text.replace(EMAIL_SHAPED, '[email]').replace(/\d/g, '#')
@@ -128,31 +132,69 @@ function scrubText(text: string): string {
  * pick back through it). */
 export function scrubOutline(outline: string): string {
     return outline
-        .split('\n')
+        .split(LINE_BREAK)
         .map(line => {
-            const m = NODE_INDEX.exec(line)
-            return (m?.[1] ?? '') + scrubText(m?.[2] ?? line)
+            const head = NODE_HEAD.exec(line)?.[0] ?? ''
+            return head + scrubText(line.slice(head.length))
         })
         .join('\n')
 }
 
-function outlineIndexes(outline: string): Set<number> {
-    return new Set(
-        Array.from(outline.matchAll(/^\s*- \[(\d+)\] /gm), m => Number(m[1])),
-    )
+interface OutlineNode {
+    role: string
+    name: string
 }
 
-const indexSchema = z.number().int().nonnegative().nullable().default(null)
+/** Index -> the node line it names, read from the SCRUBBED outline (the one
+ * the model saw). */
+function outlineNodes(outline: string): Map<number, OutlineNode> {
+    const nodes = new Map<number, OutlineNode>()
+    const lines = outline.matchAll(/^\s*- \[(\d{1,6})\] ([a-z]+)\b(.*)$/gm)
+    for (const m of Array.from(lines)) {
+        nodes.set(Number(m[1]), { role: m[2] ?? '', name: m[3] ?? '' })
+    }
+    return nodes
+}
 
-const answerSchema = z.object({
-    input: indexSchema,
-    button: indexSchema,
-    toggle: indexSchema,
-    confidence: z.number().min(0).max(100),
-    why: z.string().transform(s => s.slice(0, WHY_MAX_CHARS)),
-})
+// The roles each pick may have. The extension types into the input and
+// CLICKS the button and the toggle, so a pick of another kind of element is
+// refused rather than trusted.
+const INPUT_ROLES = new Set(['textbox', 'combobox', 'searchbox'])
+const CLICK_ROLES = new Set(['button', 'link', 'tab', 'checkbox', 'switch'])
+// A control the extension must never click on the model's word, whatever its
+// role: it leaves the cart, spends money, removes items or signs in.
+const NEVER_CLICK =
+    /check ?out|place (?:my |your )?order|\bpay\b|pay ?pal|pay now|buy now|purchase|\bremove\b|\bdelete\b|empty (?:cart|basket|bag)|sign ?in|sign ?up|log ?in|register|create (?:an )?account|subscribe|continue/i
 
-function parseAnswer(raw: string): z.infer<typeof answerSchema> | null {
+interface Answer {
+    input: number | null
+    button: number | null
+    toggle: number | null
+    confidence: number
+    why: string
+}
+
+// A malformed index is a non-answer for THAT field, never a reason to throw
+// away the whole pick; the confidence and the reason are cosmetic.
+const asIndex = (v: unknown) =>
+    typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : null
+
+function toAnswer(o: Record<string, unknown>): Answer {
+    const c =
+        typeof o.confidence === 'string' ? Number(o.confidence) : o.confidence
+    return {
+        input: asIndex(o.input),
+        button: asIndex(o.button),
+        toggle: asIndex(o.toggle),
+        confidence:
+            typeof c === 'number' && Number.isFinite(c)
+                ? Math.min(100, Math.max(0, c))
+                : 0,
+        why: typeof o.why === 'string' ? o.why.slice(0, WHY_MAX_CHARS) : '',
+    }
+}
+
+function parseAnswer(raw: string): Answer | null {
     let parsed: unknown
     try {
         parsed = JSON.parse(raw)
@@ -163,20 +205,23 @@ function parseAnswer(raw: string): z.infer<typeof answerSchema> | null {
             return null
         }
     }
-    const result = answerSchema.safeParse(parsed)
-    return result.success ? result.data : null
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+        return null
+    return toAnswer(parsed as Record<string, unknown>)
 }
 
-/** An index the outline does not contain is a hallucination: it becomes null.
- * With neither an input nor a toggle left, the answer is "no box". */
-function toCachedAnswer(
-    answer: z.infer<typeof answerSchema>,
-    outline: string,
-): CachedAnswer {
-    const known = outlineIndexes(outline)
-    const real = (n: number | null) => (n !== null && known.has(n) ? n : null)
-    const input = real(answer.input)
-    const toggle = real(answer.toggle)
+/** An index the outline does not contain is a hallucination, and an index of
+ * the wrong kind of element is refused: both become null. With neither an
+ * input nor a toggle left, the answer is "no box". */
+function toCachedAnswer(answer: Answer, outline: string): CachedAnswer {
+    const nodes = outlineNodes(outline)
+    const pick = (n: number | null, roles: Set<string>, clicked: boolean) => {
+        const node = n === null ? undefined : nodes.get(n)
+        if (!node || !roles.has(node.role)) return null
+        return clicked && NEVER_CLICK.test(node.name) ? null : n
+    }
+    const input = pick(answer.input, INPUT_ROLES, false)
+    const toggle = pick(answer.toggle, CLICK_ROLES, true)
     if (input === null && toggle === null) {
         return {
             outcome: 'no_box',
@@ -187,7 +232,7 @@ function toCachedAnswer(
     return {
         outcome: 'box',
         input,
-        button: real(answer.button),
+        button: pick(answer.button, CLICK_ROLES, true),
         toggle,
         confidence: answer.confidence,
         why: answer.why,

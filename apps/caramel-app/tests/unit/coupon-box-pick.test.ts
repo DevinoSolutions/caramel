@@ -237,6 +237,24 @@ describe('the pick', () => {
         expect(sent).toContain('[10004] button "Order Summary ## €"')
     })
 
+    it('keeps every index across CR, CRLF and Unicode line breaks', () => {
+        expect(
+            scrubOutline(
+                '- [7] textbox "Promo"\r\n- [8] button "Apply"\r- [9] link "Pr omo 5"',
+            ),
+        ).toBe(
+            '- [7] textbox "Promo"\n- [8] button "Apply"\n- [9] link "Pr\nomo #"',
+        )
+    })
+
+    it('scrubs a number that only looks like an index', () => {
+        expect(
+            scrubOutline(
+                ['- [4155551234] textbox "x"', '- [12] "call 555"'].join('\n'),
+            ),
+        ).toBe(['- [##########] textbox "x"', '- [##] "call ###"'].join('\n'))
+    })
+
     it('drops an index that is not in the outline (a hallucination)', async () => {
         chatMock.mockImplementation(async () =>
             answer({ input: 99, button: 8, toggle: 12 }),
@@ -275,6 +293,71 @@ describe('the pick', () => {
         ).toMatchObject({ outcome: 'no_box' })
     })
 
+    // The extension types into the input and CLICKS the button and toggle,
+    // so an index of the wrong kind of element, or of a control that leaves
+    // the cart or spends money, is refused.
+    const GUARDED = [
+        '- main:',
+        '  - [2] textbox "Promo code"',
+        '  - [3] button "Apply"',
+        '  - [4] button "Checkout"',
+        '  - [5] link "Remove item"',
+        '  - [6] button "Place order"',
+        '  - [7] button "Sign in"',
+        '  - [8] link "Continue shopping"',
+        '  - [9] checkbox "Gift wrap"',
+        '  - [10] button "Have a promo code?"',
+        '  - [11] button "Pay with PayPal"',
+    ].join('\n')
+
+    it.each([4, 5, 6, 7, 8, 11])(
+        'never returns control [%i] as the apply button',
+        async n => {
+            chatMock.mockImplementation(async () =>
+                answer({ input: 2, button: n, toggle: null }),
+            )
+            expect(
+                await pickCouponBox({
+                    domain: freshDomain(),
+                    outline: GUARDED,
+                }),
+            ).toMatchObject({ outcome: 'box', input: 2, button: null })
+        },
+    )
+
+    it.each([4, 5, 6, 7, 11])(
+        'never returns control [%i] as the toggle',
+        async n => {
+            chatMock.mockImplementation(async () =>
+                answer({ input: null, button: null, toggle: n }),
+            )
+            expect(
+                await pickCouponBox({
+                    domain: freshDomain(),
+                    outline: GUARDED,
+                }),
+            ).toMatchObject({ outcome: 'no_box' })
+        },
+    )
+
+    it('refuses an input that is not a text field', async () => {
+        chatMock.mockImplementation(async () =>
+            answer({ input: 9, button: 3, toggle: null }),
+        )
+        expect(
+            await pickCouponBox({ domain: freshDomain(), outline: GUARDED }),
+        ).toMatchObject({ outcome: 'no_box' })
+    })
+
+    it('keeps a real apply button and a real toggle', async () => {
+        chatMock.mockImplementation(async () =>
+            answer({ input: 2, button: 3, toggle: 10 }),
+        )
+        expect(
+            await pickCouponBox({ domain: freshDomain(), outline: GUARDED }),
+        ).toMatchObject({ outcome: 'box', input: 2, button: 3, toggle: 10 })
+    })
+
     it('reads the first JSON object out of a reply with prose around it', async () => {
         chatMock.mockImplementation(
             async () => `Sure: ${answer({ input: 7 })}\nHope that helps {}`,
@@ -284,11 +367,46 @@ describe('the pick', () => {
         ).toMatchObject({ outcome: 'box', input: 7 })
     })
 
+    // A cosmetic field going wrong never throws away a usable pick: the
+    // confidence is clamped, a missing reason is empty, and a malformed index
+    // is a non-answer for that field alone.
+    it.each([
+        [
+            'an out-of-range confidence',
+            answer({ input: 7, confidence: 150 }),
+            { input: 7, confidence: 100 },
+        ],
+        [
+            'a string confidence',
+            answer({ input: 7, confidence: '80' }),
+            { input: 7, confidence: 80 },
+        ],
+        [
+            'a missing why',
+            JSON.stringify({ input: 7, button: 8, confidence: 90 }),
+            { input: 7, button: 8, why: '' },
+        ],
+        [
+            'a non-integer button',
+            answer({ input: 7, button: 'eight' }),
+            { input: 7, button: null },
+        ],
+    ])(
+        'keeps the pick when the reply has %s',
+        async (_label, reply, expected) => {
+            chatMock.mockImplementation(async () => reply)
+            expect(
+                await pickCouponBox({
+                    domain: freshDomain(),
+                    outline: OUTLINE,
+                }),
+            ).toMatchObject({ outcome: 'box', ...expected })
+        },
+    )
+
     it.each([
         ['non-JSON prose', 'I think the promo box is number seven.'],
-        ['an out-of-range confidence', answer({ input: 7, confidence: 150 })],
-        ['a non-integer index', answer({ input: 'seven' })],
-        ['a missing why', JSON.stringify({ input: 7, confidence: 90 })],
+        ['a JSON array', '[7, 8]'],
     ])(
         'malformed output (%s) is no_pick/unparsable, logged to Sentry, never cached',
         async (_label, reply) => {
