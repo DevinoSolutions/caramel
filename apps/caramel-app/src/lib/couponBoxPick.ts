@@ -29,7 +29,7 @@ import { z } from 'zod'
 
 /** Largest outline the pick accepts, in UTF-8 bytes. The route caps the whole
  * request body a little above this. */
-export const MAX_OUTLINE_BYTES = 16 * 1024
+export const MAX_OUTLINE_BYTES = 40 * 1024
 
 // The system prompt, verbatim as it was measured (see the eval scoreboard).
 const SYSTEM_PROMPT = [

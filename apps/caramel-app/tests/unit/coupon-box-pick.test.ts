@@ -158,7 +158,7 @@ describe('request gates', () => {
     })
 
     it('rejects an outline over the cap with 413, and the lib refuses it too', async () => {
-        const outline = `- [1] textbox "Promo"\n${'- heading "x"\n'.repeat(1500)}`
+        const outline = `- [1] textbox "Promo"\n${'- heading "x"\n'.repeat(3500)}`
         expect(Buffer.byteLength(outline)).toBeGreaterThan(MAX_OUTLINE_BYTES)
         expect((await post({ domain: freshDomain(), outline })).status).toBe(
             413,

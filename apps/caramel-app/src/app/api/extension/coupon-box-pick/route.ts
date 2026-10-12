@@ -23,7 +23,7 @@ import { NextResponse } from 'next/server'
 // The outline cap plus room for the JSON envelope: escaping the outline's
 // quotes and newlines adds up to ~13% on real cart pages (measured on the
 // eval fixtures), so a maximal outline still fits.
-const MAX_BODY_BYTES = 20 * 1024
+const MAX_BODY_BYTES = 46 * 1024
 
 const NO_STORE = { 'Cache-Control': 'private, no-store' } as const
 
