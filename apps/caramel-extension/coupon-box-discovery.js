@@ -212,6 +212,7 @@ const TOGGLE_TAIL_RE =
 /* --------------------------------------------------------------- helpers */
 const norm = s => (s || '').toString().toLowerCase().replace(/\s+/g, ' ').trim()
 const textOf = el => (el ? el.innerText || el.textContent || '' : '')
+const ariaOf = el => el.getAttribute('aria-label')
 const styleOf = el => el.ownerDocument.defaultView.getComputedStyle(el)
 const pointer = el => styleOf(el).cursor === 'pointer'
 
@@ -257,7 +258,7 @@ function contextText(el) {
     }
     let q = el.parentElement
     for (let i = 0; i < 8 && q; i++, q = q.parentElement) {
-        const own = q.getAttribute('aria-label') || ''
+        const own = ariaOf(q) || ''
         const ids = (q.getAttribute('aria-labelledby') || '')
             .split(/\s+/)
             .filter(Boolean)
@@ -282,7 +283,7 @@ function attrText(el) {
         el.id,
         el.getAttribute('name'),
         el.getAttribute('placeholder'),
-        el.getAttribute('aria-label'),
+        ariaOf(el),
         el.getAttribute('autocomplete'),
         el.getAttribute('title'),
         typeof el.className === 'string' ? el.className : '',
@@ -435,7 +436,7 @@ const buttonLabel = el =>
     norm(
         el.innerText ||
             el.value ||
-            el.getAttribute('aria-label') ||
+            ariaOf(el) ||
             el.getAttribute('title') ||
             el.textContent,
     )
@@ -664,10 +665,14 @@ const CONSENT_RE =
     /\b(?:e-?mail|sms|text me|newsletter|subscri\w*|sign me up|send me|notif\w*|marketing)\b/i
 
 // What a toggle says. A checkbox says it in its accessible name.
+// An icon with no text is named by its aria-label (castlery: a "+" button
+// labelled "Add coupon code").
 function toggleText(el) {
-    return el.tagName === 'INPUT'
-        ? norm(el.getAttribute('aria-label') || labelText(el))
-        : norm(textOf(el))
+    return norm(
+        el.tagName === 'INPUT'
+            ? ariaOf(el) || labelText(el)
+            : textOf(el).trim() || ariaOf(el),
+    )
 }
 
 function scoreToggle(el, t) {
@@ -1361,7 +1366,7 @@ const GENERATED_ID_RE =
 const SIG_KEYS = [
     ['n', el => el.getAttribute('name')],
     ['i', el => (GENERATED_ID_RE.test(el.id) ? '' : el.id)],
-    ['a', el => el.getAttribute('aria-label')],
+    ['a', ariaOf],
     ['p', el => el.getAttribute('placeholder')],
     ['l', el => labelText(el)],
 ]

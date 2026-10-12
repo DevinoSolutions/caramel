@@ -539,6 +539,25 @@ describe('the record the apply flow runs on', () => {
         // Kept, so the box can be opened again if the store folds it again.
         expect(document.querySelector(rec.showInput)?.id).toBe('tg')
     })
+
+    it('opens a folded box whose toggle is an icon named only by aria-label', async () => {
+        // castlery.com.au: the row reads "Add Coupon Code" and the only control
+        // is a "+" icon button carrying aria-label="Add coupon code".
+        document.body.innerHTML =
+            '<div class="row"><span>Add Coupon Code</span>' +
+            '<button id="tg" type="button" aria-label="Add coupon code"><svg></svg></button></div>' +
+            '<div id="panel" style="display:none">' +
+            '<input id="pc" name="promo_code" type="text"><button id="pa">Apply</button></div>' +
+            TOTAL
+        document.getElementById('tg').addEventListener('click', () => {
+            document.getElementById('panel').style.display = ''
+        })
+
+        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+
+        expect(document.querySelector(rec.couponInput)?.id).toBe('pc')
+        expect(document.querySelector(rec.showInput)?.id).toBe('tg')
+    })
 })
 
 describe('finding the same box again after the store re-draws it', () => {
