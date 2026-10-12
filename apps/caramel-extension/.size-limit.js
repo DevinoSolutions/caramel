@@ -61,7 +61,10 @@ module.exports = [
         // like "SPRING-$10" was read as a $10 deduction (a false saving), a
         // summary drawn as one flat grid no longer netted a real coupon line,
         // and a line ending in "Remove coupon"/"Edit"/a currency code was
-        // dropped. Measured 106.17 kB after sharing the currency-code list.
+        // dropped. A second review found the flat-grid row read too loosely
+        // (a "Minimum order | $50.00" refusal looks like a summary line), so
+        // the row skips only the summary's own lines. Measured 106.38 kB
+        // after sharing the currency-code list.
         limit: '107 KB',
         brotli: false,
     },

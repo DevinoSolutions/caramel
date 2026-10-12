@@ -966,21 +966,36 @@ function scanTotalRows(
                     AMOUNT_ONLY.test(st) &&
                     moneyCount(st) === 1
                 ) {
-                    // The row this cell belongs to: the label, the value and
-                    // any note after it ("Minimum order $50.00"), up to the
-                    // next label/value pair. A flat grid holds every summary
-                    // row as siblings, so its parent is the whole summary.
-                    const amt = n => n && AMOUNT_ONLY.test(norm(textOf(n)))
-                    let row = norm(textOf(prev || el)) + ' ' + st
-                    for (
-                        let n = sib.nextElementSibling;
-                        n && !amt(n) && !amt(n.nextElementSibling);
-                        n = n.nextElementSibling
-                    )
-                        row += ' ' + textOf(n)
+                    // The row this cell belongs to is every sibling except the
+                    // summary's own lines (a flat grid holds Subtotal, Total,
+                    // Shipping... as siblings too). Any other pair stays in:
+                    // "Minimum order" | "$50.00" looks just like a summary
+                    // line, and it is a refusal. `end` is the value and what
+                    // follows it, which must end at the amount.
+                    const kids = [...sib.parentElement.children]
+                    let row = '',
+                        end = ''
+                    for (let i = 0; i < kids.length; i++) {
+                        const k = kids[i],
+                            kt = norm(textOf(k)),
+                            nx = kids[i + 1]
+                        if (
+                            k !== sib &&
+                            k !== (prev || el) &&
+                            SUMMARY_LINE.test(kt) &&
+                            nx &&
+                            AMOUNT_ONLY.test(norm(textOf(nx)))
+                        ) {
+                            i++
+                            continue
+                        }
+                        row += ' ' + kt
+                        if (end || k === sib) end += ' ' + kt
+                    }
                     hits.push({
                         el: sib,
                         row,
+                        end,
                         visible: visible(sib),
                         label: bare.toLowerCase(),
                     })
@@ -1086,20 +1101,24 @@ const DISCOUNT_WORDS = /coupon|discount|promo|voucher/i
 const DISCOUNT_LABEL =
     /^(?:order |cart |basket )?(?:coupon|discount|promo(?:tion)?|voucher)s?(?: code)?\b[^.!?]{0,30}$/i
 const DISCOUNT_NOT =
-    /total|sav(ed?|ings?)\b|shipping|tax|eligible|exclud|cannot|can't|only|enter|apply|add |have|gift|points|reward|member|minimum|spend|purchase|requir|more|qualif|valid|expire|balance|credit|card/i
+    /total|sav(ed?|ings?)\b|shipping|tax|eligible|exclud|cannot|can't|only|enter|apply|add |have|gift|points|reward|member|minimum|spend|purchase|requir|more|qualif|valid|expire|balance|credit|card|not appl|pending/i
+// A summary's own line, skipped when a flat grid is read as one coupon row.
+const SUMMARY_LINE = /total|shipping|delivery|tax|vat|gst|hst|fee|handling/i
+// The label word of a coupon line, blanked before the minus is looked for:
+// "COUPON-$5.00" (label and value glued) is a minus, "SPRING-$10" is a name.
+const LABEL_WORD =
+    /\b(?:coupon|discount|promo(?:tion)?|voucher)s?(?: code)?\b:?/gi
 const CUR = `(?:${SIGN}|[A-Z]{3}\\s?)`
 // A deduction mark: a minus that starts a word ("-$20.00", or "-" and
-// "$20.00" drawn as two elements, measured live), a minus on a currency sign
-// ("Coupon-$20.00" or "Coupon- $20.00", label and value in two spans),
-// "$-20.00", or "($20.00)". A dash inside a word ("SAVE-20") is not a minus,
-// nor one inside a code name ("SPRING-$10": capitals or a digit before it).
+// "$20.00" drawn as two elements, measured live), "$-20.00", or "($20.00)".
+// A dash inside a word ("SAVE-20", "SPRING-$10") is not a minus.
 const DEDUCTION_RE = new RegExp(
-    `(?:^|\\s)[-−–]\\s*${CUR}?\\d|(?<![A-Z\\d])[-−–]\\s?${SIGN}\\d|${SIGN}[-−–]\\d|\\(\\s?(?:${CUR}\\s?\\d[\\d.,]*|\\d[\\d.,]*[.,]\\d{2})\\s?\\)`,
+    `(?:^|\\s)[-−–]\\s*${CUR}?\\d|${SIGN}[-−–]\\d|\\(\\s?(?:${CUR}\\s?\\d[\\d.,]*|\\d[\\d.,]*[.,]\\d{2})\\s?\\)`,
 )
 // ...and a deduction line ENDS at its amount (a currency code or a "Remove" /
 // "Edit" link may follow): "- $5.00 off your next order" is an offer, not a line.
 const DEDUCTION_END = new RegExp(
-    `\\d\\W*(?:${CODES}|zł|(?:remove|edit|change|delete)(?:\\W+(?:coupon|code|discount|promo|voucher))?)?\\W*$`,
+    `\\d\\W*(?:${CODES}|zł|(?:remove|edit|change|delete)(?:\\W+(?:coupon|code|discount|promo|voucher)){0,2})?\\W*$`,
     'i',
 )
 
@@ -1163,8 +1182,8 @@ function newDeduction(el, base) {
         // and a bulleted note are not one.
         if (
             a > off &&
-            DEDUCTION_RE.test(t) &&
-            DEDUCTION_END.test(t) &&
+            DEDUCTION_RE.test(t.replace(LABEL_WORD, ' ')) &&
+            DEDUCTION_END.test(h.end || t) &&
             !DISCOUNT_NOT.test(h.row || textOf(h.el)) &&
             !base.amounts.includes(a)
         )

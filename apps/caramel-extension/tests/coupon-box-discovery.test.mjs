@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { initCaramelBase } from '../caramel-base.js'
 import {
@@ -16,6 +18,7 @@ import {
     getDomainRecord,
     tryInitialize,
 } from '../store-detect.js'
+import { EXT_ROOT } from './_entry-modules.mjs'
 
 // The promo-box finder: when no config describes a store's promo box, it reads
 // the page the way a shopper does. These pin three things:
@@ -934,6 +937,47 @@ describe('a subtotal is netted only of a line the code added', () => {
                 `<div class="cl"><span>Coupon</span> <span>-$5.00</span> ${control}</div>`,
             ),
         ).toBe(94.99)
+    })
+
+    // A flat grid's refusal is drawn exactly like a summary line, and a note
+    // may sit before the label: neither may be read as a saving.
+    it.each([
+        [
+            ' <span>Promo</span> <span>-$5.00</span> <span>Minimum order</span> <span>$50.00</span>',
+        ],
+        [' <span>Not applied</span> <span>Promo</span> <span>-$5.00</span>'],
+        [' <span>Promo</span> <span>-$5.00</span> <span>Pending</span>'],
+        [
+            ' <span>Promo</span> <span>-$5.00</span> <span>off your next order</span>',
+        ],
+    ])('reads no deduction from a refused line in a flat grid: %s', line => {
+        expect(after(line, GRID)).toBe(99.99)
+    })
+
+    it('nets a coupon line whose capitalised label is glued to its amount', () => {
+        expect(
+            after(
+                '<div class="cl"><span>COUPON</span><span>-$5.00</span></div>',
+            ),
+        ).toBe(94.99)
+    })
+
+    it('nets a coupon line followed by a two-word Edit link', () => {
+        expect(
+            after(
+                '<div class="cl"><b>Coupon</b> -$5.00 Edit coupon code</div>',
+            ),
+        ).toBe(94.99)
+    })
+
+    // Safari 16.1-16.3 (macOS 13.0-13.2, inside the deployment floor) has no
+    // regex lookbehind: one in a module-level pattern kills the whole script.
+    it('uses no regex lookbehind, which the oldest supported Safari lacks', () => {
+        const src = readFileSync(
+            join(EXT_ROOT, 'coupon-box-discovery.js'),
+            'utf8',
+        )
+        expect(src).not.toMatch(/\(\?<[=!]/)
     })
 
     it('nets a coupon line that ends in a currency code', () => {
