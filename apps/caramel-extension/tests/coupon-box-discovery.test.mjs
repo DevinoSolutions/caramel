@@ -1024,6 +1024,54 @@ describe('a subtotal is netted only of a line the code added', () => {
         expect(after(line)).toBe(99.99)
     })
 
+    // Review 6: a refusal word list always misses the next phrasing, and an
+    // amount in a format the money reader misses slips past a one-amount
+    // count. A coupon line nets only in ONE shape: its label, at most a code
+    // name, one amount marked as a deduction, then only a currency code or a
+    // Remove/Edit control.
+    it.each([
+        '<span>Orders over</span><span>150.00</span>',
+        '<span>Orders over</span><span>150</span>',
+        '<span>Orders over</span><span>Rp150.000</span>',
+        '<span>Orders over</span><span>150 usd</span>',
+    ])('reads no deduction from a line followed by %s', tail => {
+        expect(
+            after(
+                `<div class="cl"><span>Promo</span><span>-$5.00</span>${tail}</div>`,
+            ),
+        ).toBe(99.99)
+    })
+
+    it.each([
+        '<b>Coupon</b> (not yet active) -$5.00',
+        '<span>Coupon (not yet active)</span> <span>-$5.00</span>',
+        '<b>Promo</b> -$5.00 (inactive)',
+        '<b>Promo</b> -$5.00 (next-order)',
+        '<b>Promo</b> -$5.00 (in-store)',
+        '<b>Discount</b> (max) -$10.00',
+        '<b>Discount</b> upto -$10.00',
+        '<b>Coupon</b> for your next order -$5.00',
+    ])('reads no deduction from the qualified line %s', line => {
+        expect(after(`<div class="cl">${line}</div>`)).toBe(99.99)
+    })
+
+    it('nets a real line whose value cell is followed by a framework comment', () => {
+        expect(
+            after(
+                '<div class="cl"><span>Handling</span><span>$2.00</span><span>Promo</span><span>-$5.00</span><!--v-if--><!-- /ko --></div>',
+            ),
+        ).toBe(94.99)
+    })
+
+    it.each([
+        '<b>Coupon (SAVE20) applied</b> -$5.00 <a href="#">Remove</a>',
+        '<b>Promo code:</b> (WELCOME) -$5.00',
+        '<span>Discount</span><span>- $ 5.00</span>',
+        '<span>Coupon</span><span>($5.00)</span>',
+    ])('nets the real coupon line %s', line => {
+        expect(after(`<div class="cl">${line}</div>`)).toBe(94.99)
+    })
+
     it('still names the code in brackets: Coupon (SAVE20) -$5.00 nets', () => {
         expect(
             after('<div class="cl"><b>Coupon (SAVE20)</b> -$5.00</div>'),

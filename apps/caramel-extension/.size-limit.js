@@ -64,7 +64,8 @@ module.exports = [
         // tried and dropped: three reviews kept finding rows it misread as
         // savings, so such a line is refused instead. A fifth review closed four
         // older false-saving shapes (a struck-out amount, a threshold after
-        // the line, a bracketed qualifier, "up to"). Measured 106.29 kB.
+        // the line, a bracketed qualifier, "up to"); a sixth replaced the
+        // refusal word lists with one accepted line shape. Measured 106.6 kB.
         limit: '107 KB',
         brotli: false,
     },

@@ -975,12 +975,13 @@ function scanTotalRows(
                     // apart (three reviews, each a false saving).
                     let end = ''
                     for (let n = sib; n; n = n.nextSibling)
-                        end +=
-                            ' ' + (n.nodeType === 1 ? textOf(n) : n.textContent)
+                        if (n.nodeType === 1) end += ' ' + textOf(n)
+                        else if (n.nodeType === 3) end += n.textContent
                     hits.push({
                         el: sib,
                         row: textOf(sib.parentElement),
                         end,
+                        line: textOf(el) + ' ' + end,
                         visible: visible(sib),
                         label: bare.toLowerCase(),
                     })
@@ -1087,25 +1088,42 @@ const DISCOUNT_LABEL =
     /^(?:order |cart |basket )?(?:coupon|discount|promo(?:tion)?|voucher)s?(?: code)?\b[^.!?]{0,30}$/i
 const DISCOUNT_NOT =
     /total|sav(ed?|ings?)\b|shipping|tax|eligible|exclud|cannot|can't|only|enter|apply|add |have|gift|points|reward|member|minimum|spend|purchase|requir|more|qualif|valid|expire|balance|credit|card|not appl|pending|up to/i
-// The label a line drawn in ONE element starts with, blanked before the minus
-// is looked for: "COUPON-$5.00" (label and value glued) is a minus. Only the
-// leading label goes, so a code name after it ("Coupon code PROMO-$10") stays
-// a name; a value cell must read as an amount, so it never starts with one.
-const LABEL_WORD =
+// A coupon line nets in ONE shape only: its label, at most a code name, ONE
+// amount marked as a deduction ("-$5.00", "- $ 5.00", "$-5.00", "($5.00)"),
+// then only a currency code or a Remove/Edit control. Anything else on the
+// line is not read: a threshold ("Orders over 150"), "up to", "next order",
+// a note in brackets. Five reviews each found a phrasing a list of refusal
+// words missed; a shape needs no list. A dash inside a word ("SPRING-$10")
+// is not a minus, and a code name has a digit or is written in capitals.
+const LINE_LABEL =
     /^\W*(?:(?:order|cart|basket) )?(?:coupon|discount|promo(?:tion)?|voucher)s?(?: code)?(?: applied)?\b:?/i
-const CUR = `(?:${SIGN}|[A-Z]{3}\\s?)`
-// A deduction mark: a minus that starts a word ("-$20.00", or "-" and
-// "$20.00" drawn as two elements, measured live), "$-20.00", or "($20.00)".
-// A dash inside a word ("SAVE-20", "SPRING-$10") is not a minus.
-const DEDUCTION_RE = new RegExp(
-    `(?:^|[\\s\u200e\u200f])[-−–]\\s*${CUR}?\\d|${SIGN}[-−–]\\d|\\(\\s?(?:${CUR}\\s?\\d[\\d.,]*|\\d[\\d.,]*[.,]\\d{2})\\s?\\)`,
-)
-// ...and a deduction line ENDS at its amount (a currency code or a "Remove" /
-// "Edit" link may follow): "- $5.00 off your next order" is an offer, not a line.
-const DEDUCTION_END = new RegExp(
-    `\\d\\W*(?:${CODES}|zł|(?:remove|edit|change|delete)(?:\\W+(?:coupon|code|discount|promo|voucher)){0,2})?\\W*$`,
+const LINE_TAIL = new RegExp(
+    `\\s*(?:${CODES}|zł)?(?:\\W+(?:remove|edit|change|delete)(?:\\W+(?:coupon|code|discount|promo|voucher)){0,2})?\\W*$`,
     'i',
 )
+const CUR = `(?:${SIGN}|[A-Z]{3})\\s?`
+const LINE_AMOUNT = new RegExp(
+    `(?:^|[\\s\\u200e\\u200f:("'“])(?:[-−–]\\s*(?:${CUR})?|${SIGN}[-−–]|\\(\\s?(?:${CUR})?)\\d[\\d.,]*\\s?(?:${SIGN})?\\)?$`,
+)
+function isCouponLine(line) {
+    // Case kept: a code name is told from a word by its capitals.
+    const s = line
+        .replace(/\s+/g, ' ')
+        .replace(LINE_LABEL, '')
+        .replace(LINE_TAIL, '')
+    const m = s.match(LINE_AMOUNT)
+    if (!m) return false
+    const code = s
+        .slice(0, m.index)
+        .trim()
+        .replace(/\s*\bapplied\b:?$/i, '')
+        .replace(/^["'“‘([]+|["'”’)\]:]+$/g, '')
+    return (
+        !code ||
+        (/^[\w-]{2,30}$/.test(code) &&
+            (/\d/.test(code) || /^[A-Z][A-Z_-]{2,}$/.test(code)))
+    )
+}
 
 // The subtotal's own summary: the widest ancestor still small enough to be
 // one panel rather than the whole cart. Sized by textContent, which needs no
@@ -1167,8 +1185,7 @@ function newDeduction(el, base) {
         // and a bulleted note are not one.
         if (
             a > off &&
-            DEDUCTION_RE.test(t.replace(LABEL_WORD, ' ')) &&
-            DEDUCTION_END.test(h.end || t) &&
+            isCouponLine(h.line || textOf(h.el)) &&
             (!h.end || caramelFindMoney(h.end).length === 1) &&
             !DISCOUNT_NOT.test(h.row || textOf(h.el)) &&
             !base.amounts.includes(a)
