@@ -912,20 +912,41 @@ describe('a subtotal is netted only of a line the code added', () => {
         ).toBe(99.99)
     })
 
-    it('reads no amount out of a code name that carries a dash and a sign', () => {
-        expect(
-            after(
-                '<div class="cl"><span>Coupon code</span> <span>SPRING-$10</span></div>' +
-                    '<div class="cl"><span>Discount</span> <span>-$2.00</span></div>',
-            ),
-        ).toBe(97.99)
-    })
+    it.each([['SPRING-$10'], ['PROMO-$10'], ['COUPON-$10']])(
+        'reads no amount out of the code name %s',
+        name => {
+            expect(
+                after(
+                    `<div class="cl"><span>Coupon code</span> <span>${name}</span></div>` +
+                        '<div class="cl"><span>Discount</span> <span>-$2.00</span></div>',
+                ),
+            ).toBe(97.99)
+        },
+    )
 
-    it('nets a coupon line added to a summary drawn as one flat grid', () => {
+    // In a summary drawn as one flat grid the coupon line's "row" is the whole
+    // summary, and a refusal there ("Minimum order total | $50.00") is drawn
+    // exactly like a summary line: the line is refused, never guessed at.
+    it('refuses rather than guesses at a coupon line in a flat grid', () => {
         expect(after(' <span>Coupon</span> <span>-$5.00</span>', GRID)).toBe(
-            94.99,
+            99.99,
         )
     })
+
+    it.each([
+        ['<span>Not applied</span> <span>$50.00</span>'],
+        ['<span>Pending</span>'],
+        ['<span>off your next order</span>'],
+    ])(
+        'reads no deduction from a coupon row whose value cell is followed by %s',
+        note => {
+            expect(
+                after(
+                    `<div class="cl"><span>Promo</span> <span>-$5.00</span> ${note}</div>`,
+                ),
+            ).toBe(99.99)
+        },
+    )
 
     it.each([
         ['<button>Remove coupon</button>'],

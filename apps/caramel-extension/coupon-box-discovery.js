@@ -966,35 +966,19 @@ function scanTotalRows(
                     AMOUNT_ONLY.test(st) &&
                     moneyCount(st) === 1
                 ) {
-                    // The row this cell belongs to is every sibling except the
-                    // summary's own lines (a flat grid holds Subtotal, Total,
-                    // Shipping... as siblings too). Any other pair stays in:
-                    // "Minimum order" | "$50.00" looks just like a summary
-                    // line, and it is a refusal. `end` is the value and what
-                    // follows it, which must end at the amount.
-                    const kids = [...sib.parentElement.children]
-                    let row = '',
-                        end = ''
-                    for (let i = 0; i < kids.length; i++) {
-                        const k = kids[i],
-                            kt = norm(textOf(k)),
-                            nx = kids[i + 1]
-                        if (
-                            k !== sib &&
-                            k !== (prev || el) &&
-                            SUMMARY_LINE.test(kt) &&
-                            nx &&
-                            AMOUNT_ONLY.test(norm(textOf(nx)))
-                        ) {
-                            i++
-                            continue
-                        }
-                        row += ' ' + kt
-                        if (end || k === sib) end += ' ' + kt
-                    }
+                    // The whole row is judged, and the line must end at its
+                    // amount counting everything after the value cell. A
+                    // summary drawn as one flat grid makes the "row" the
+                    // whole summary, so a coupon line there is refused, not
+                    // netted: "Minimum order total | $50.00" is drawn exactly
+                    // like "Shipping | $4.00", and no word list told them
+                    // apart (three reviews, each a false saving).
+                    let end = ''
+                    for (let n = sib; n; n = n.nextElementSibling)
+                        end += ' ' + textOf(n)
                     hits.push({
                         el: sib,
-                        row,
+                        row: textOf(sib.parentElement),
                         end,
                         visible: visible(sib),
                         label: bare.toLowerCase(),
@@ -1102,12 +1086,12 @@ const DISCOUNT_LABEL =
     /^(?:order |cart |basket )?(?:coupon|discount|promo(?:tion)?|voucher)s?(?: code)?\b[^.!?]{0,30}$/i
 const DISCOUNT_NOT =
     /total|sav(ed?|ings?)\b|shipping|tax|eligible|exclud|cannot|can't|only|enter|apply|add |have|gift|points|reward|member|minimum|spend|purchase|requir|more|qualif|valid|expire|balance|credit|card|not appl|pending/i
-// A summary's own line, skipped when a flat grid is read as one coupon row.
-const SUMMARY_LINE = /total|shipping|delivery|tax|vat|gst|hst|fee|handling/i
-// The label word of a coupon line, blanked before the minus is looked for:
-// "COUPON-$5.00" (label and value glued) is a minus, "SPRING-$10" is a name.
+// The label a line drawn in ONE element starts with, blanked before the minus
+// is looked for: "COUPON-$5.00" (label and value glued) is a minus. Only the
+// leading label goes, so a code name after it ("Coupon code PROMO-$10") stays
+// a name; a value cell must read as an amount, so it never starts with one.
 const LABEL_WORD =
-    /\b(?:coupon|discount|promo(?:tion)?|voucher)s?(?: code)?\b:?/gi
+    /^\W*(?:coupon|discount|promo(?:tion)?|voucher)s?(?: code)?\b:?/i
 const CUR = `(?:${SIGN}|[A-Z]{3}\\s?)`
 // A deduction mark: a minus that starts a word ("-$20.00", or "-" and
 // "$20.00" drawn as two elements, measured live), "$-20.00", or "($20.00)".

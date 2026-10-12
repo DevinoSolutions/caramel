@@ -57,14 +57,12 @@ module.exports = [
         // purpose: this is the same capability hardening, not a new one — the
         // next capability should trip the ratchet and be a decision.
         // 2026-10-12, raised 106 -> 107 kB: the subtotal reader's coupon-line
-        // check, three review findings and no new capability — a code name
-        // like "SPRING-$10" was read as a $10 deduction (a false saving), a
-        // summary drawn as one flat grid no longer netted a real coupon line,
-        // and a line ending in "Remove coupon"/"Edit"/a currency code was
-        // dropped. A second review found the flat-grid row read too loosely
-        // (a "Minimum order | $50.00" refusal looks like a summary line), so
-        // the row skips only the summary's own lines. Measured 106.38 kB
-        // after sharing the currency-code list.
+        // check, review findings and no new capability — a code name like
+        // "SPRING-$10" was read as a $10 deduction (a false saving), and a
+        // line ending in "Remove coupon"/"Edit"/a currency code was dropped.
+        // Netting a coupon line inside a summary drawn as one flat grid was
+        // tried and dropped: three reviews kept finding rows it misread as
+        // savings, so such a line is refused instead. Measured 106.17 kB.
         limit: '107 KB',
         brotli: false,
     },
