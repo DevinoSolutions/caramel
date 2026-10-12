@@ -1094,19 +1094,21 @@ const DISCOUNT_NOT =
 // line is not read: a threshold ("Orders over 150"), "up to", "next order",
 // a note in brackets. Five reviews each found a phrasing a list of refusal
 // words missed; a shape needs no list. A dash inside a word ("SPRING-$10")
-// is not a minus, and a code name has a digit or is written in capitals.
+// is not a minus, and the only name a line may carry is the code that was
+// typed: "(INACTIVE)" looks like a code and is a status. Only ASCII
+// punctuation may follow the amount; a note in any script is words.
 const LINE_LABEL =
     /^\W*(?:(?:order|cart|basket) )?(?:coupon|discount|promo(?:tion)?|voucher)s?(?: code)?(?: applied)?\b:?/i
+const PUNCT = '[\\s.,;:!?()[\\]|/*×✕-]'
 const LINE_TAIL = new RegExp(
-    `\\s*(?:${CODES}|zł)?(?:\\W+(?:remove|edit|change|delete)(?:\\W+(?:coupon|code|discount|promo|voucher)){0,2})?\\W*$`,
+    `\\s*(?:${CODES}|zł)?(?:${PUNCT}+(?:remove|edit|change|delete)(?:${PUNCT}+(?:coupon|code|discount|promo|voucher)){0,2})?${PUNCT}*$`,
     'i',
 )
-const CUR = `(?:${SIGN}|[A-Z]{3})\\s?`
+const CUR = `(?:${SIGN}|\\b(?:${CODES}))\\s?`
 const LINE_AMOUNT = new RegExp(
-    `(?:^|[\\s\\u200e\\u200f:("'“])(?:[-−–]\\s*(?:${CUR})?|${SIGN}[-−–]|\\(\\s?(?:${CUR})?)\\d[\\d.,]*\\s?(?:${SIGN})?\\)?$`,
+    `(?:^|[\\s\\u200e\\u200f:()"'“”])(?:[-−–]\\s*(?:${CUR})?|${SIGN}[-−–]|\\(\\s?(?:${CUR})?)\\d[\\d.,]*\\s?(?:${SIGN})?\\)?$`,
 )
-function isCouponLine(line) {
-    // Case kept: a code name is told from a word by its capitals.
+function isCouponLine(line, typed) {
     const s = line
         .replace(/\s+/g, ' ')
         .replace(LINE_LABEL, '')
@@ -1118,11 +1120,7 @@ function isCouponLine(line) {
         .trim()
         .replace(/\s*\bapplied\b:?$/i, '')
         .replace(/^["'“‘([]+|["'”’)\]:]+$/g, '')
-    return (
-        !code ||
-        (/^[\w-]{2,30}$/.test(code) &&
-            (/\d/.test(code) || /^[A-Z][A-Z_-]{2,}$/.test(code)))
-    )
+    return !code || (!!typed && code.toLowerCase() === typed.toLowerCase())
 }
 
 // The subtotal's own summary: the widest ancestor still small enough to be
@@ -1185,7 +1183,7 @@ function newDeduction(el, base) {
         // and a bulleted note are not one.
         if (
             a > off &&
-            isCouponLine(h.line || textOf(h.el)) &&
+            isCouponLine(h.line || textOf(h.el), base.code) &&
             (!h.end || caramelFindMoney(h.end).length === 1) &&
             !DISCOUNT_NOT.test(h.row || textOf(h.el)) &&
             !base.amounts.includes(a)
@@ -1195,7 +1193,7 @@ function newDeduction(el, base) {
     return off
 }
 
-function finderTotal(selector, kind, doc, rec, baseline) {
+function finderTotal(selector, kind, doc, rec, baseline, code) {
     if (rec) {
         rec.caramelNetted = false
         if (baseline) rec.caramelSubtotalBase = null
@@ -1204,7 +1202,7 @@ function finderTotal(selector, kind, doc, rec, baseline) {
     if (kind !== 'subtotal' || !(gross > 0) || !rec) return gross
     const el = doc.querySelector(selector)
     if (baseline) {
-        rec.caramelSubtotalBase = { gross, ...summaryBefore(el) }
+        rec.caramelSubtotalBase = { gross, code, ...summaryBefore(el) }
         return gross
     }
     const base = rec.caramelSubtotalBase
@@ -1525,7 +1523,12 @@ export function caramelFinderReadTotal(doc = document, kind = 'total', was) {
  * is a placeholder caught mid-render, never an answer. baseline marks the
  * read before a code is tried (see finderTotal). */
 // Called from coupon-apply.js.
-export function caramelFinderTotalNow(rec, doc = document, baseline = false) {
+export function caramelFinderTotalNow(
+    rec,
+    doc = document,
+    baseline = false,
+    code = '',
+) {
     const el = doc.querySelector(rec.priceContainer)
     if (!el || !el.isConnected || !_isVisible(el)) {
         const row = findSameTotalRow(doc, {
@@ -1542,6 +1545,7 @@ export function caramelFinderTotalNow(rec, doc = document, baseline = false) {
         doc,
         rec,
         baseline,
+        code,
     )
 }
 

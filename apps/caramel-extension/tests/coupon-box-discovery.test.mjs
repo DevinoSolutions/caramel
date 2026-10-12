@@ -887,10 +887,10 @@ describe('a subtotal is netted only of a line the code added', () => {
     const GRID =
         '<div class="sum"><span>Subtotal</span> <span id="sub">$99.99</span> <span>Shipping</span> <span>$4.00</span>' +
         ' <span>Tax</span> <span>$1.00</span> <span>Total</span> <span>$104.99</span></div>'
-    function after(line, summary = SUMMARY) {
+    function after(line, summary = SUMMARY, code = '') {
         document.body.innerHTML = summary
         const rec = { priceContainer: '#sub', caramelTotalKind: 'subtotal' }
-        caramelFinderTotalNow(rec, document, true)
+        caramelFinderTotalNow(rec, document, true, code)
         document.querySelector('.sum').insertAdjacentHTML('beforeend', line)
         return caramelFinderTotalNow(rec)
     }
@@ -1064,18 +1064,68 @@ describe('a subtotal is netted only of a line the code added', () => {
     })
 
     it.each([
-        '<b>Coupon (SAVE20) applied</b> -$5.00 <a href="#">Remove</a>',
-        '<b>Promo code:</b> (WELCOME) -$5.00',
-        '<span>Discount</span><span>- $ 5.00</span>',
-        '<span>Coupon</span><span>($5.00)</span>',
-    ])('nets the real coupon line %s', line => {
-        expect(after(`<div class="cl">${line}</div>`)).toBe(94.99)
+        [
+            '<b>Coupon (SAVE20) applied</b> -$5.00 <a href="#">Remove</a>',
+            'SAVE20',
+        ],
+        ['<b>Promo code:</b> (WELCOME) -$5.00', 'welcome'],
+        ['<b>Coupon (SAVE10)</b>-$5.00', 'SAVE10'],
+        [
+            '<span>Coupon: freeship</span> <span>-$5.00 [Remove]</span>',
+            'freeship',
+        ],
+        ['<span>Discount</span><span>- $ 5.00</span>', ''],
+        ['<span>Coupon</span><span>($5.00)</span>', ''],
+    ])('nets the real coupon line %s', (line, code) => {
+        expect(after(`<div class="cl">${line}</div>`, SUMMARY, code)).toBe(
+            94.99,
+        )
     })
 
     it('still names the code in brackets: Coupon (SAVE20) -$5.00 nets', () => {
         expect(
-            after('<div class="cl"><b>Coupon (SAVE20)</b> -$5.00</div>'),
+            after(
+                '<div class="cl"><b>Coupon (SAVE20)</b> -$5.00</div>',
+                SUMMARY,
+                'SAVE20',
+            ),
         ).toBe(94.99)
+    })
+
+    // Without the typed code no code name is accepted, so a call site that
+    // stops passing it silently loses every named coupon line.
+    it('passes the typed code from both apply paths to the baseline read', () => {
+        const apply = readFileSync(join(EXT_ROOT, 'coupon-apply.js'), 'utf8')
+        const capture = readFileSync(join(EXT_ROOT, 'code-capture.js'), 'utf8')
+        expect(apply).toContain(
+            'caramelFinderTotalNow(rec, document, true, code)',
+        )
+        expect(apply).toContain('caramelSnapshotCart(rec, code)')
+        expect(capture).toContain('caramelSnapshotCart(rec, code)')
+        expect(apply).not.toContain('caramelSnapshotCart(rec)')
+        expect(capture).not.toContain('caramelSnapshotCart(rec)')
+    })
+
+    // Review 7: the only name a line may carry is the code that was typed.
+    // An all-caps status looks like a code; a note after the amount in any
+    // script, or a glyph, is words; a three-letter word is not a currency.
+    it.each([
+        ['<b>Coupon</b> (INACTIVE) -$5.00', 'SAVE20'],
+        ['<b>Coupon</b> (REMOVED) -$5.00', 'SAVE20'],
+        ['<b>Coupon</b> NOT-APPLIED -$5.00', 'SAVE20'],
+        ['<b>Coupon (OTHER10)</b> -$5.00', 'SAVE20'],
+        ['<b>Coupon (SAVE20)</b> -$5.00', ''],
+        ['<span>Coupon</span><span>-$5.00</span><span>未適用</span>', 'SAVE20'],
+        [
+            '<span>Coupon</span><span>-$5.00</span><span>не применён</span>',
+            'SAVE20',
+        ],
+        ['<span>Coupon</span><span>-$5.00</span><span>⚠</span>', 'SAVE20'],
+        ['<b>Coupon</b> -NEW20.00', 'SAVE20'],
+    ])('reads no deduction from %s', (line, code) => {
+        expect(after(`<div class="cl">${line}</div>`, SUMMARY, code)).toBe(
+            99.99,
+        )
     })
 
     it.each([

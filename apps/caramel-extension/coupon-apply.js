@@ -519,7 +519,7 @@ export function caramelPostNavigationVerdict(rec, code) {
  * Synchronous on purpose: capture-phase listeners must snapshot before the
  * store's own handler reacts to the shopper's click. */
 // Called from code-capture.js (cross-file content-script call).
-export function caramelSnapshotCart(rec) {
+export function caramelSnapshotCart(rec, code = '') {
     const hasPriceCfg = !!rec.priceContainer
     // A finder's total is read the way every later read is: a store that
     // re-drew its cart since the last code took the marked row with it, and a
@@ -528,7 +528,7 @@ export function caramelSnapshotCart(rec) {
     const original = !hasPriceCfg
         ? NaN
         : rec.caramelFound
-          ? caramelFinderTotalNow(rec, document, true)
+          ? caramelFinderTotalNow(rec, document, true, code)
           : getPrice(rec.priceContainer, { returnLargest: true })
     // EVERY number the container held before we touched it — the post-apply
     // read needs to know which prices are new (see its comment).
@@ -939,7 +939,7 @@ export async function applyCoupon(code, rec) {
 
         // Everything the verdict will be compared against, captured BEFORE we
         // touch the page (see caramelSnapshotCart).
-        const snapshot = caramelSnapshotCart(rec)
+        const snapshot = caramelSnapshotCart(rec, code)
 
         /* 3] fill & apply — choose method dynamically:
              a) if applyBtn === input → auto-validate on input event

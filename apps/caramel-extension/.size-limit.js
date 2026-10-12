@@ -65,7 +65,8 @@ module.exports = [
         // savings, so such a line is refused instead. A fifth review closed four
         // older false-saving shapes (a struck-out amount, a threshold after
         // the line, a bracketed qualifier, "up to"); a sixth replaced the
-        // refusal word lists with one accepted line shape. Measured 106.6 kB.
+        // refusal word lists with one accepted line shape, whose only allowed
+        // name is the code that was typed. Measured 106.66 kB.
         limit: '107 KB',
         brotli: false,
     },
