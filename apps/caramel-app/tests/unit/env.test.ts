@@ -191,6 +191,42 @@ describe('parseServerEnv', () => {
         ).toThrow(/SHOPPER_CODE_CAPTURE_ENABLED/)
     })
 
+    it('COUPON_BOX_LLM_ENABLED is a strict boolean (default off) and a typo fails boot', () => {
+        expect(parseServerEnv(validServerFixture).COUPON_BOX_LLM_ENABLED).toBe(
+            false,
+        )
+        expect(
+            parseServerEnv({
+                ...validServerFixture,
+                COUPON_BOX_LLM_ENABLED: 'true',
+            }).COUPON_BOX_LLM_ENABLED,
+        ).toBe(true)
+        expect(() =>
+            parseServerEnv({
+                ...validServerFixture,
+                COUPON_BOX_LLM_ENABLED: 'yes',
+            }),
+        ).toThrow(/COUPON_BOX_LLM_ENABLED/)
+    })
+
+    it('COUPON_BOX_PICK_MODEL has no default: unset or blank reads as not configured', () => {
+        expect(
+            parseServerEnv(validServerFixture).COUPON_BOX_PICK_MODEL,
+        ).toBeUndefined()
+        expect(
+            parseServerEnv({
+                ...validServerFixture,
+                COUPON_BOX_PICK_MODEL: '  ',
+            }).COUPON_BOX_PICK_MODEL,
+        ).toBeUndefined()
+        expect(
+            parseServerEnv({
+                ...validServerFixture,
+                COUPON_BOX_PICK_MODEL: ' openai/gpt-oss-20b ',
+            }).COUPON_BOX_PICK_MODEL,
+        ).toBe('openai/gpt-oss-20b')
+    })
+
     it('(g) the Playwright/CI-only read key present in app env throws (key hygiene)', () => {
         expect(() =>
             parseServerEnv({

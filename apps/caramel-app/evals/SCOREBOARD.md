@@ -100,3 +100,14 @@ jewelry_accessories-exemplar`. Confounded by the maxTokens bug above
   the mechanism the scramble is meant to isolate is the free test's job;
   this run mainly proves the live command/CI path itself exits non-zero
   and names cases correctly end-to-end.
+
+## Coupon-box pick
+
+Dated rows from real `couponBoxPick.eval.ts` runs (51 cases, gate: pass rate
+≥ 0.90). "Over cap" = cases whose outline exceeds `MAX_OUTLINE_BYTES`
+(16 KiB): the route refuses them, so they score as no pick.
+
+| Date       | Model                         | Cases | Pass rate         | Within the 16 KiB cap | p50 / p95 latency | Notes                                                                                                                                                                                                                                                  |
+| ---------- | ----------------------------- | ----- | ----------------- | --------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 2026-10-12 | gpt-oss-20b (exact-model pin) | 51    | **84.3%** (43/51) | 43/45                 | 3563 / 8126ms     | **RED.** 6 failures are over-cap pages that have a box (carsondellosa, costway, caudalie, furniturevillage, zagg, footasylum). oakfurnitureland: picked a saved-basket code field on a page with no coupon box. castlery: the 20s model timeout fired. |
+| 2026-10-12 | gpt-oss-20b (exact-model pin) | 51    | **86.3%** (44/51) | 44/45                 | 5901 / 13768ms    | **RED**, same 6 over-cap pages + oakfurnitureland. With the cap lifted to 40 KiB in a separate, uncommitted measurement, the model answered 7 of the 8 over-cap pages correctly (zagg timed out).                                                      |

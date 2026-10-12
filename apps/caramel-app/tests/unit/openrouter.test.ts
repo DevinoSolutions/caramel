@@ -136,6 +136,50 @@ describe('chat() — OpenRouter fetch contract (F-011 pin)', () => {
     })
 })
 
+describe('chat() — per-call extra headers', () => {
+    const FIXED_HEADERS = [
+        'Authorization',
+        'Content-Type',
+        'HTTP-Referer',
+        'X-Request-Id',
+        'X-Title',
+    ]
+
+    it('a caller that passes no headers sends exactly the fixed set (existing callers unchanged)', async () => {
+        fetchMock.mockResolvedValueOnce(
+            jsonResponse({ choices: [{ message: { content: 'ok' } }] }),
+        )
+        await chat([{ role: 'user', content: 'hi' }], {
+            responseFormat: 'json_object',
+            maxTokens: 600,
+            timeoutMs: 7000,
+        })
+        const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+        expect(
+            Object.keys(init.headers as Record<string, string>).sort(),
+        ).toEqual(FIXED_HEADERS)
+    })
+
+    it('adds the given headers, but never lets them replace a fixed one', async () => {
+        fetchMock.mockResolvedValueOnce(
+            jsonResponse({ choices: [{ message: { content: 'ok' } }] }),
+        )
+        await chat([{ role: 'user', content: 'hi' }], {
+            headers: {
+                'X-ORF-Strict': '1',
+                Authorization: 'Bearer someone-else',
+            },
+        })
+        const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+        const headers = init.headers as Record<string, string>
+        expect(headers['X-ORF-Strict']).toBe('1')
+        expect(headers['Authorization']).toBe('Bearer test-openrouter-key')
+        expect(Object.keys(headers).sort()).toEqual(
+            [...FIXED_HEADERS, 'X-ORF-Strict'].sort(),
+        )
+    })
+})
+
 // F-011 — coarse cross-hop trace correlation: OpenRouter's own response `id`
 // (generation id, visible in their dashboard) plus our locally-generated
 // request id, stashed on the active Sentry span. Sentry already auto-spans

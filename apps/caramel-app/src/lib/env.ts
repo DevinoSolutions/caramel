@@ -162,6 +162,25 @@ const serverObjectSchema = z.object({
         )
         .pipe(z.url()),
     OPENROUTER_MODEL: z.string().default('anthropic/claude-haiku-4.5'),
+    // Coupon-box pick (POST /api/extension/coupon-box-pick): when the
+    // extension's rules cannot find a store's coupon box, it may send a
+    // trimmed page outline and a model picks the box. OFF by default; a strict
+    // two-value enum like SHOPPER_CODE_CAPTURE_ENABLED, so a typo fails boot
+    // instead of silently reading as on or off. The feature is live only when
+    // this is 'true' AND COUPON_BOX_PICK_MODEL names a model; the extension
+    // reads the same condition from GET /api/extension/features.
+    COUPON_BOX_LLM_ENABLED: z
+        .enum(['true', 'false'])
+        .default('false')
+        .transform(value => value === 'true'),
+    // The model id the coupon-box pick sends to OPENROUTER_API_URL (same base
+    // and key as the cart classifier). No default on purpose: the pick is
+    // eval-gated per model (evals/couponBoxPick.eval.ts), so an unset or
+    // blank value keeps the feature off rather than guessing a model.
+    COUPON_BOX_PICK_MODEL: z
+        .string()
+        .optional()
+        .transform(v => v?.trim() || undefined),
     API_ENCRYPTION_ENABLED: z.string().optional(),
     // Which PostHog project this deploy's SERVER-side captures target (the
     // feedback+observability foundation). 'production' → the real project;
