@@ -15,12 +15,19 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 // this file pins is the ROUTE's contract: the gates, the status codes, and the
 // one rule that separates the two sources (only a checkout capture, where the
 // store itself accepted the code, stamps "worked").
+interface CapturedEvent {
+    event: string
+    distinctId: string
+    properties?: Record<string, unknown>
+}
+
 const {
     envMock,
     getSessionMock,
     submitShopperCouponMock,
     recordWorkedMock,
     checkRateLimitMock,
+    captureMock,
 } = vi.hoisted(() => ({
     envMock: { SHOPPER_CODE_CAPTURE_ENABLED: false } as Record<string, unknown>,
     getSessionMock: vi.fn(
@@ -36,6 +43,21 @@ const {
     ),
     recordWorkedMock: vi.fn(async (_couponId: string) => {}),
     checkRateLimitMock: vi.fn(async () => null as unknown),
+    captureMock: vi.fn(async (_args: CapturedEvent) => true),
+}))
+
+// The outcome telemetry goes through the shared server capture helper; it is
+// replaced so nothing leaves the process, and after() (which needs a Next
+// request scope vitest does not have) runs its task inline so the capture is
+// still asserted. Same shape as agent-setup.test.ts.
+vi.mock('@/lib/analytics/posthogServer', () => ({
+    captureServerEvent: captureMock,
+}))
+vi.mock('next/server', async importOriginal => ({
+    ...(await importOriginal<typeof import('next/server')>()),
+    after: (task: () => unknown) => {
+        void task()
+    },
 }))
 
 // The real env (withRoute and rateLimit read it too) with the capture flag
@@ -103,6 +125,8 @@ beforeEach(() => {
     recordWorkedMock.mockImplementation(async () => {})
     checkRateLimitMock.mockReset()
     checkRateLimitMock.mockImplementation(async () => null)
+    captureMock.mockReset()
+    captureMock.mockImplementation(async () => true)
 })
 
 describe('POST /api/coupons/submit — gates', () => {
@@ -795,5 +819,296 @@ describe('POST /api/coupons/submit — failures', () => {
         expect(res.status).toBe(500)
         expect(recordWorkedMock).not.toHaveBeenCalled()
         errorSpy.mockRestore()
+    })
+})
+
+// Outcome telemetry: ONE `coupon_submit_outcome` event per request, at every
+// exit, carrying {outcome, submit_source, status, store?} and nothing that
+// identifies the shopper. This is how a zero-rows production result becomes
+// "no qualifying event" or "N refusals of kind X" instead of a guess.
+describe('POST /api/coupons/submit — outcome telemetry', () => {
+    const SECRET_CODE = 'SUPERSECRET-CODE-77'
+
+    function lastEvent(): CapturedEvent {
+        expect(captureMock).toHaveBeenCalledTimes(1)
+        return captureMock.mock.calls[0]![0]
+    }
+
+    function expectOutcome(
+        outcome: string,
+        source: string,
+        status: number,
+    ): Record<string, unknown> {
+        const event = lastEvent()
+        expect(event.event).toBe('coupon_submit_outcome')
+        expect(event.properties).toMatchObject({
+            outcome,
+            submit_source: source,
+            status,
+        })
+        return event.properties ?? {}
+    }
+
+    it('created: a new manual code', async () => {
+        signedInAs('user-1')
+
+        await POST(
+            submitRequest({
+                site: 'www.ebay.com',
+                code: SECRET_CODE,
+                source: 'manual',
+            }),
+        )
+
+        const props = expectOutcome('created', 'manual', 200)
+        expect(props.store).toBe('ebay.com')
+    })
+
+    it('already-listed: the dedupe returned created:false (200, no row)', async () => {
+        signedInAs('user-1')
+        submitShopperCouponMock.mockImplementation(async () => ({
+            couponId: '900000000000000001',
+            created: false,
+        }))
+
+        envMock.SHOPPER_CODE_CAPTURE_ENABLED = true
+
+        const res = await POST(
+            submitRequest({
+                site: 'ebay.com',
+                code: SECRET_CODE,
+                source: 'checkout',
+                consent: VALID_CONSENT,
+            }),
+        )
+
+        expect(res.status).toBe(200)
+        expectOutcome('already-listed', 'checkout', 200)
+    })
+
+    it('capture-disabled: checkout with the flag off', async () => {
+        signedInAs('user-1')
+
+        await POST(
+            submitRequest({
+                site: 'ebay.com',
+                code: SECRET_CODE,
+                source: 'checkout',
+                consent: VALID_CONSENT,
+            }),
+        )
+
+        expectOutcome('capture-disabled', 'checkout', 403)
+    })
+
+    it('consent-required: flag on, checkout without consent proof', async () => {
+        signedInAs('user-1')
+        envMock.SHOPPER_CODE_CAPTURE_ENABLED = true
+
+        await POST(
+            submitRequest({
+                site: 'ebay.com',
+                code: SECRET_CODE,
+                source: 'checkout',
+            }),
+        )
+
+        expectOutcome('consent-required', 'checkout', 403)
+    })
+
+    it('unauthenticated: no session is recorded with source unknown (body never read)', async () => {
+        await POST(
+            submitRequest({
+                site: 'ebay.com',
+                code: SECRET_CODE,
+                source: 'manual',
+            }),
+        )
+
+        expectOutcome('unauthenticated', 'unknown', 401)
+    })
+
+    it('origin-not-allowed: withRoute origin gate, handler never ran', async () => {
+        signedInAs('user-1')
+
+        await POST(
+            submitRequest(
+                { site: 'ebay.com', code: SECRET_CODE, source: 'manual' },
+                { origin: 'https://evil.example', host: 'localhost' },
+            ),
+        )
+
+        expectOutcome('origin-not-allowed', 'unknown', 403)
+    })
+
+    it('bad-origin: checkout from a non-extension Origin (flag on)', async () => {
+        signedInAs('user-1')
+        envMock.SHOPPER_CODE_CAPTURE_ENABLED = true
+
+        await POST(
+            submitRequest(
+                {
+                    site: 'ebay.com',
+                    code: SECRET_CODE,
+                    source: 'checkout',
+                    consent: VALID_CONSENT,
+                },
+                { origin: 'http://localhost', host: 'localhost' },
+            ),
+        )
+
+        expectOutcome('bad-origin', 'checkout', 403)
+    })
+
+    it('rate-limited and invalid-body: withRoute refusals are recorded too', async () => {
+        signedInAs('user-1')
+        checkRateLimitMock.mockImplementation(async () =>
+            Response.json({ error: 'Too many requests' }, { status: 429 }),
+        )
+        await POST(
+            submitRequest({
+                site: 'ebay.com',
+                code: SECRET_CODE,
+                source: 'manual',
+            }),
+        )
+        expectOutcome('rate-limited', 'unknown', 429)
+
+        captureMock.mockClear()
+        checkRateLimitMock.mockImplementation(async () => null)
+        await POST(submitRequest({ site: 'ebay.com', source: 'bogus' }))
+        expectOutcome('invalid-body', 'unknown', 422)
+    })
+
+    it('invalid-code, not-a-store (both flavours) and daily-limit', async () => {
+        signedInAs('user-1')
+
+        await POST(
+            submitRequest({ site: 'ebay.com', code: '   ', source: 'manual' }),
+        )
+        expectOutcome('invalid-code', 'manual', 422)
+
+        captureMock.mockClear()
+        await POST(
+            submitRequest({
+                site: 'not a domain',
+                code: SECRET_CODE,
+                source: 'manual',
+            }),
+        )
+        expectOutcome('not-a-store', 'manual', 422)
+
+        captureMock.mockClear()
+        submitShopperCouponMock.mockImplementation(async () => {
+            throw new UnknownStoreError()
+        })
+        await POST(
+            submitRequest({
+                site: 'unknown-store.com',
+                code: SECRET_CODE,
+                source: 'manual',
+            }),
+        )
+        const props = expectOutcome('not-a-store', 'manual', 422)
+        expect(props.store).toBe('unknown-store.com')
+
+        captureMock.mockClear()
+        submitShopperCouponMock.mockImplementation(async () => {
+            throw new ShopperSubmissionLimitError()
+        })
+        await POST(
+            submitRequest({
+                site: 'ebay.com',
+                code: SECRET_CODE,
+                source: 'manual',
+            }),
+        )
+        expectOutcome('daily-limit', 'manual', 429)
+    })
+
+    it('server-error: an unexpected repo error is recorded and still a 500', async () => {
+        signedInAs('user-1')
+        submitShopperCouponMock.mockImplementation(async () => {
+            throw new Error('connection reset')
+        })
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+        const res = await POST(
+            submitRequest({
+                site: 'ebay.com',
+                code: SECRET_CODE,
+                source: 'manual',
+            }),
+        )
+
+        expect(res.status).toBe(500)
+        expectOutcome('server-error', 'manual', 500)
+        errorSpy.mockRestore()
+    })
+
+    it('never carries the code, the user id or the client IP', async () => {
+        signedInAs('user-private-id-42')
+        const res = await POST(
+            submitRequest(
+                { site: 'ebay.com', code: SECRET_CODE, source: 'manual' },
+                { 'x-forwarded-for': '203.0.113.9' },
+            ),
+        )
+
+        expect(res.status).toBe(200)
+        const serialized = JSON.stringify(lastEvent())
+        expect(serialized).not.toContain(SECRET_CODE)
+        expect(serialized).not.toContain('user-private-id-42')
+        expect(serialized).not.toContain('203.0.113.9')
+        expect(lastEvent().properties).toMatchObject({
+            $process_person_profile: false,
+        })
+    })
+
+    it('telemetry failure never reaches the shopper: same response, and the failure is logged with context', async () => {
+        signedInAs('user-1')
+        captureMock.mockImplementation(async () => {
+            throw new Error('posthog unreachable')
+        })
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+        const res = await POST(
+            submitRequest({
+                site: 'ebay.com',
+                code: SECRET_CODE,
+                source: 'manual',
+            }),
+        )
+        await vi.waitFor(() => expect(errorSpy).toHaveBeenCalled())
+
+        expect(res.status).toBe(200)
+        expect(await res.json()).toMatchObject({ created: true })
+        expect(errorSpy).toHaveBeenCalledWith(
+            expect.stringContaining('[coupon-submit-outcome]'),
+            expect.any(Error),
+            { outcome: 'created', source: 'manual' },
+        )
+        errorSpy.mockRestore()
+    })
+
+    it('an unsent event (capture disabled / failed) is warned about with the outcome, not silent', async () => {
+        signedInAs('user-1')
+        captureMock.mockImplementation(async () => false)
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+        await POST(
+            submitRequest({
+                site: 'ebay.com',
+                code: SECRET_CODE,
+                source: 'manual',
+            }),
+        )
+        await vi.waitFor(() => expect(warnSpy).toHaveBeenCalled())
+
+        expect(warnSpy).toHaveBeenCalledWith(
+            expect.stringContaining('[coupon-submit-outcome]'),
+            { outcome: 'created', source: 'manual' },
+        )
+        warnSpy.mockRestore()
     })
 })
