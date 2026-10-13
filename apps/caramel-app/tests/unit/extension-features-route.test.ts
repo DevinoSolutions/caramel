@@ -36,7 +36,7 @@ beforeEach(() => {
 })
 
 describe('GET /api/extension/features', () => {
-    it('flag off (the default, and prod until the owner approves the policy sentence) → { shopperCodeCapture: false }', async () => {
+    it('flag off (the code default) → { shopperCodeCapture: false }', async () => {
         const res = await GET(featuresRequest())
 
         expect(res.status).toBe(200)

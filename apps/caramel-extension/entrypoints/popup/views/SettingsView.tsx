@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react'
 import {
+    caramelGetCodeSharingConsent,
     caramelGetSession,
     caramelGetSettings,
     caramelSendMessage,
+    caramelSetCodeSharingConsent,
     caramelSetSettings,
     caramelSyncSavings,
+    logError,
 } from '../../../caramel-base.js'
 import { caramelUrl } from '../../../popup-core.js'
 import { SavingsBanner } from '../components/SavingsBanner'
@@ -23,7 +26,6 @@ interface Settings {
     autoApply: boolean
     disabledSites: string[]
     syncSavings: boolean
-    shareCheckoutCodes: boolean
 }
 
 export function SettingsView({
@@ -43,18 +45,33 @@ export function SettingsView({
     const [syncSavings, setSyncSavings] = useState(false)
     const [syncBusy, setSyncBusy] = useState(false)
     const [syncStatus, setSyncStatus] = useState('')
+    // Checkout code sharing is ON only for an explicit, recorded "accepted"
+    // (checkoutCodeSharingConsent). No record, a declined one, or one that
+    // could not be read all display OFF.
+    const [shareCodes, setShareCodes] = useState(false)
 
     useEffect(() => {
         let alive = true
         void Promise.all([
             caramelGetSettings(),
             caramelGetSession().catch(() => null),
-        ]).then(([loaded, session]: [Settings, { token?: string } | null]) => {
-            if (!alive) return
-            setSettings(loaded)
-            setSyncSavings(loaded.syncSavings)
-            setHasAccount(!!session?.token)
-        })
+            caramelGetCodeSharingConsent().catch((err: unknown) => {
+                logError('settings: code-sharing consent read', err)
+                return null
+            }),
+        ]).then(
+            ([loaded, session, consent]: [
+                Settings,
+                { token?: string } | null,
+                { choice: string } | null,
+            ]) => {
+                if (!alive) return
+                setSettings(loaded)
+                setSyncSavings(loaded.syncSavings)
+                setHasAccount(!!session?.token)
+                setShareCodes(consent?.choice === 'accepted')
+            },
+        )
         return () => {
             alive = false
         }
@@ -80,12 +97,23 @@ export function SettingsView({
         void caramelSetSettings({ autoApply: checked })
     }
 
-    // Per-user switch for code-capture.js. Stored like the checkout prompt
-    // (storage.sync roams it with the profile); the sign-in gate and the
-    // server flag are enforced in background.js, so this only records consent.
-    const toggleShareCheckoutCodes = (checked: boolean) => {
-        setSettings({ ...settings, shareCheckoutCodes: checked })
-        void caramelSetSettings({ shareCheckoutCodes: checked })
+    // Turning this ON is itself the explicit opt-in (it records `accepted`);
+    // turning it OFF records `declined`, so the consent card does not come back.
+    // The record is the authority code-capture.js and background.js read; the
+    // sign-in gate and the server flag stay in background.js. The write must
+    // land before the switch is allowed to claim anything: on failure the
+    // switch goes back and the shopper is told.
+    const toggleShareCheckoutCodes = async (requested: boolean) => {
+        setShareCodes(requested)
+        try {
+            await caramelSetCodeSharingConsent(
+                requested ? 'accepted' : 'declined',
+            )
+        } catch (err) {
+            logError('settings: code-sharing consent write', err)
+            setShareCodes(!requested)
+            showToast('Couldn’t change that setting. Please try again.')
+        }
     }
 
     const toggleSite = async (checked: boolean) => {
@@ -175,16 +203,18 @@ export function SettingsView({
                 <span className="settings-copy">
                     <span>Share codes I enter at checkout</span>
                     <small>
-                        Only the code and store, when the store accepts it.
-                        Requires sign-in.
+                        Off unless you turn it on. Shares only the code and
+                        store, when the store accepts it. Requires sign-in.
                     </small>
                 </span>
                 <input
                     type="checkbox"
                     id="shareCheckoutCodesToggle"
                     className="settings-switch"
-                    checked={settings.shareCheckoutCodes}
-                    onChange={e => toggleShareCheckoutCodes(e.target.checked)}
+                    checked={shareCodes}
+                    onChange={e =>
+                        void toggleShareCheckoutCodes(e.target.checked)
+                    }
                 />
             </label>
 

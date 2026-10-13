@@ -27,8 +27,9 @@ import {
 // and `siteSuggestion.updateMany` really evaluates the where against an
 // in-memory table (support/siteSuggestionsPrismaFake.ts). A recording-only mock
 // could not tell a matching predicate from a missing one, which is the whole
-// question here. The case-insensitive match is Postgres behaviour imitated in
-// that fake and pinned for real in tests/integration/site-suggestions.itest.ts.
+// question here. That the match is EXACT — an `_` or `%` in an account's email
+// never reaching somebody else's row — is Postgres behaviour, pinned for real
+// in tests/integration/site-suggestions.itest.ts.
 
 const { prismaMock } = vi.hoisted(() => ({
     prismaMock: {
@@ -111,9 +112,15 @@ function row(id: string) {
     return table.find(r => r.id === id)!
 }
 
+/** What the signed-out visitor TYPED was `Shopper@Example.COM`; the row holds it
+ * FOLDED, because recordSiteSuggestion folds on write and the database refuses
+ * anything else (site_suggestions_requester_email_folded). The match is exact
+ * on that folded address — pinned for real in site-suggestions.itest.ts. */
+const SIGNED_OUT_STORED = 'shopper@example.com'
+
 /** The three rows every case below needs: one made while signed IN, one made
- * while signed OUT (email only, and typed in a different case), and one
- * belonging to somebody else entirely. */
+ * while signed OUT (email only, typed in a different case and stored folded),
+ * and one belonging to somebody else entirely. */
 function seedTheThreeRows() {
     seedRow('signed-in', {
         domain: 'worldofbooks.com',
@@ -124,8 +131,7 @@ function seedTheThreeRows() {
     seedRow('signed-out', {
         domain: 'peepers.com',
         userId: null,
-        // What they TYPED — the account's own spelling is lower case.
-        requesterEmail: 'Shopper@Example.COM',
+        requesterEmail: SIGNED_OUT_STORED,
         userAgent: 'Mozilla/5.0 (their phone)',
     })
     seedRow('somebody-else', {
@@ -159,7 +165,7 @@ describe('delete-my-data scrubs the requester identity — THE PAIR', () => {
         ])
 
         expect(row('signed-in').requesterEmail).toBe(USER_EMAIL)
-        expect(row('signed-out').requesterEmail).toBe('Shopper@Example.COM')
+        expect(row('signed-out').requesterEmail).toBe(SIGNED_OUT_STORED)
     })
 
     it('the NAIVE fix — matching on user_id alone — leaves the signed-out row’s email in place', async () => {
@@ -178,7 +184,7 @@ describe('delete-my-data scrubs the requester identity — THE PAIR', () => {
 
         expect(row('signed-in').requesterEmail).toBeNull()
         // ...and here is the address the route exists to remove, still there.
-        expect(row('signed-out').requesterEmail).toBe('Shopper@Example.COM')
+        expect(row('signed-out').requesterEmail).toBe(SIGNED_OUT_STORED)
     })
 
     it('the SHIPPED route scrubs BOTH — the user_id-matched row and the email-only one', async () => {
@@ -296,7 +302,7 @@ describe('delete-my-data scrubs the requester identity — transactional', () =>
         // The route builds the batch before handing it over, so the operation
         // object exists; what must NOT have happened is the row changing.
         expect(row('signed-in').requesterEmail).toBe(USER_EMAIL)
-        expect(row('signed-out').requesterEmail).toBe('Shopper@Example.COM')
+        expect(row('signed-out').requesterEmail).toBe(SIGNED_OUT_STORED)
     })
 })
 

@@ -63,6 +63,13 @@ export interface AccountExport {
     preferences: {
         savingsSyncEnabled: boolean
     }
+    /**
+     * Where this account came from (`users.acquisition`, written once at
+     * signup: campaign / referrer / click ids, signup surface + method). Null
+     * for accounts created before it was recorded. It is the user's own data,
+     * so it travels with the export.
+     */
+    acquisition: Record<string, string | number | boolean> | null
     favoriteStores: { domain: string; starredAt: string }[]
     savingsEvents: {
         storeDomain: string
@@ -140,6 +147,8 @@ export interface AccountExportInput {
         username: string | null
         createdAt: Date
         emailVerified: boolean
+        /** The raw `users.acquisition` JSON column (Prisma Json, hence unknown). */
+        acquisition: unknown
     }
     savingsSyncEnabled: boolean
     favoriteStores: { storeName: string; createdAt: Date }[]
@@ -155,6 +164,31 @@ export interface AccountExportInput {
         createdAt: Date
         coupon: { site: string | null; code: string } | null
     }[]
+}
+
+/**
+ * The stored acquisition JSON as a flat record of primitives, or null when the
+ * column is null or not a JSON object. Nested values are not part of the
+ * contract (acquisition is a flat label bag) and are dropped rather than
+ * exported unreviewed; the forbidden-key guard still runs over what remains.
+ */
+export function exportableAcquisition(
+    value: unknown,
+): Record<string, string | number | boolean> | null {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+        return null
+    }
+    const flat: Record<string, string | number | boolean> = {}
+    for (const [key, child] of Object.entries(value)) {
+        if (
+            typeof child === 'string' ||
+            typeof child === 'number' ||
+            typeof child === 'boolean'
+        ) {
+            flat[key] = child
+        }
+    }
+    return flat
 }
 
 /**
@@ -184,6 +218,7 @@ export function buildAccountExport(
         preferences: {
             savingsSyncEnabled: input.savingsSyncEnabled,
         },
+        acquisition: exportableAcquisition(input.account.acquisition),
         favoriteStores: input.favoriteStores.map(row => ({
             domain: row.storeName,
             starredAt: row.createdAt.toISOString(),

@@ -255,13 +255,19 @@ export default async function StoreCouponsPage({
     // Per-store questions answered from the catalog read above (see
     // storeFaq.ts for what may and may not be claimed). Empty when the store
     // has no active codes, and for a slug that names no store.
+    //
+    // Codes that keep failing (keepsFailing) are collapsed on the page, so
+    // neither the "ranked first" claim nor the structured data below may point
+    // at one: they use the non-flagged codes only.
+    const listedCoupons = coupons.filter(coupon => !coupon.keepsFailing)
+    const topListed = listedCoupons[0]
     const faqItems = base
         ? buildStoreFaq({
               base,
               total,
               facts,
-              topCoupon: coupons[0]
-                  ? { title: coupons[0].title, code: coupons[0].code }
+              topCoupon: topListed
+                  ? { title: topListed.title, code: topListed.code }
                   : null,
               uk,
           })
@@ -279,7 +285,7 @@ export default async function StoreCouponsPage({
             : `${base} coupons and promo codes`,
         url: storeUrl,
         numberOfItems: total,
-        itemListElement: (coupons || []).map((coupon: Coupon, idx: number) => ({
+        itemListElement: listedCoupons.map((coupon: Coupon, idx: number) => ({
             '@type': 'ListItem',
             position: idx + 1,
             url: storeUrl,

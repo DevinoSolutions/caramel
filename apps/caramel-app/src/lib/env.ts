@@ -12,6 +12,11 @@
 // `next dev`/`next build` never brick on a feature the current environment
 // simply doesn't configure (social login, extension OAuth, email, the
 // coupons-bridge sync, ...).
+import {
+    isValidFallbackAfterSeconds,
+    isValidFallbackKey,
+    isValidFallbackModel,
+} from '@/lib/proxy-fallback-headers'
 import 'server-only'
 import { z } from 'zod'
 
@@ -130,10 +135,15 @@ const serverObjectSchema = z.object({
     SITE_SUGGESTIONS_AUTO_NOTIFY: z.enum(['true', 'false']).default('false'),
     // Global kill switch for shopper-typed codes CAPTURED AT CHECKOUT by the
     // extension (POST /api/coupons/submit with source 'checkout', and the
-    // extension's GET /api/extension/features read of it). OFF by default and
-    // OFF in prod until the owner approves the privacy-policy sentence that
-    // discloses the capture. It gates ONLY the automatic capture: the website's
-    // manual "Add a code" form (source 'manual') works with it off.
+    // extension's GET /api/extension/features read of it). OFF by default in code;
+    // prod stays OFF until a consent-carrying extension build (1.4.9+) is the
+    // LIVE version in every store that ships Caramel: capture is opt-in per
+    // shopper (owner rule 2026-10-06) and builds 1.4.3-1.4.7 would capture by
+    // default with no prompt. This flag is GLOBAL and only the server's half,
+    // never consent by itself: the submit route additionally refuses (403
+    // consent-required) a checkout submission without the extension's consent
+    // proof. It gates ONLY the automatic capture: the website's manual "Add a
+    // code" form (source 'manual') works with it off.
     // A strict two-value enum, like SITE_SUGGESTIONS_AUTO_NOTIFY: a typo
     // ('yes') fails boot with this variable's name rather than being read as
     // off (capture silently never ships) or on (capture silently ships).
@@ -155,7 +165,46 @@ const serverObjectSchema = z.object({
         .default('false')
         .transform(value => value === 'true'),
     OPENROUTER_API_KEY: z.string().optional(),
+    // Base URL of the OpenAI-compatible chat API that openrouter.ts POSTs
+    // `${OPENROUTER_API_URL}/chat/completions` to. Unset (or blank) =
+    // OpenRouter itself, byte-identical to the old hardcoded URL. Set to the
+    // Devino proxy (https://proxyai.devino.ca/v1) to route the classifier
+    // there; OPENROUTER_API_KEY and OPENROUTER_MODEL must then be a proxy key
+    // and a proxy pin. Trailing slashes are stripped; a non-URL fails boot.
+    OPENROUTER_API_URL: z
+        .string()
+        .optional()
+        .transform(v =>
+            (v?.trim() || 'https://openrouter.ai/api/v1').replace(/\/+$/, ''),
+        )
+        .pipe(z.url()),
     OPENROUTER_MODEL: z.string().default('anthropic/claude-haiku-4.5'),
+    // Paid fallback through the Devino proxy (src/lib/proxy-fallback-headers.ts):
+    // the app's OWN OpenRouter org key, sent as X-ORF-Fallback-Key only to
+    // https://proxyai.devino.ca and only on a chat() call that opts in. Unset =
+    // no header, behaviour unchanged. Blank is fine; a malformed value refuses
+    // boot here (the message names the variable, never the value) because a
+    // key with a newline would otherwise make every LLM call throw. Server-
+    // only; CI, evals and e2e never set these (vitest.eval.config.ts and
+    // playwright.config.ts blank them).
+    OPENROUTER_FALLBACK_API_KEY: z
+        .string()
+        .optional()
+        .refine(isValidFallbackKey, {
+            error: 'OPENROUTER_FALLBACK_API_KEY must be blank or an OpenRouter sk-or-v1-... key',
+        }),
+    OPENROUTER_FALLBACK_MODEL: z
+        .string()
+        .optional()
+        .refine(isValidFallbackModel, {
+            error: 'OPENROUTER_FALLBACK_MODEL must be blank or an OpenRouter model id like vendor/model',
+        }),
+    OPENROUTER_FALLBACK_AFTER_SECONDS: z
+        .string()
+        .optional()
+        .refine(isValidFallbackAfterSeconds, {
+            error: 'OPENROUTER_FALLBACK_AFTER_SECONDS must be blank or a plain number of seconds in (0, 300]',
+        }),
     API_ENCRYPTION_ENABLED: z.string().optional(),
     // Which PostHog project this deploy's SERVER-side captures target (the
     // feedback+observability foundation). 'production' → the real project;

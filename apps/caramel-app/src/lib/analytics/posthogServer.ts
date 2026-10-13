@@ -74,8 +74,12 @@ export async function captureServerEvent(args: {
     event: string
     distinctId: string
     properties?: Record<string, unknown>
-    /** Deterministic event id, for a caller that may re-send the same
-     * logical event after a lost response. Omitted → the SDK generates one. */
+    /**
+     * Idempotency key for events a client may retry (`extension_installed`,
+     * `extension_active`).
+     * Becomes the event UUID (PostHog dedupes on it) and `$insert_id`. Must be
+     * a valid UUID — posthog-node rejects anything else.
+     */
     uuid?: string
 }): Promise<boolean> {
     try {
@@ -90,6 +94,7 @@ export async function captureServerEvent(args: {
                 app_version: APP_VERSION,
                 environment: active.target.environment,
                 platform: 'web',
+                ...(args.uuid ? { $insert_id: args.uuid } : {}),
                 ...args.properties,
             },
         })
@@ -97,6 +102,41 @@ export async function captureServerEvent(args: {
     } catch (error) {
         Sentry.captureException(error, {
             tags: { operation: 'posthog_capture_server' },
+        })
+        return false
+    }
+}
+
+/**
+ * The capture project token the server is currently sending to, or null when
+ * capture is disabled. Needed to locate the browser's `ph_<token>_posthog`
+ * persistence cookie on an incoming request (firstTouchServer.ts).
+ */
+export function getServerPosthogProjectToken(): string | null {
+    return resolveServerTarget()?.token ?? null
+}
+
+/**
+ * Link a pre-signup anonymous distinct id to the account's id so the visits
+ * that led to the signup join the person. Same contract as
+ * `captureServerEvent`: never throws, `false` when disabled or on failure
+ * (failure reported to Sentry), so callers check the boolean.
+ */
+export async function aliasServerDistinctId(args: {
+    anonymousDistinctId: string
+    userId: string
+}): Promise<boolean> {
+    try {
+        const active = getActiveClient()
+        if (!active) return false
+        await active.client.aliasImmediate({
+            distinctId: args.userId,
+            alias: args.anonymousDistinctId,
+        })
+        return true
+    } catch (error) {
+        Sentry.captureException(error, {
+            tags: { operation: 'posthog_alias_server' },
         })
         return false
     }

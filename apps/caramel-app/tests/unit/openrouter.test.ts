@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const { envMock } = vi.hoisted(() => ({
     envMock: {
         OPENROUTER_API_KEY: 'test-openrouter-key' as string | undefined,
+        OPENROUTER_API_URL: 'https://openrouter.ai/api/v1',
         OPENROUTER_MODEL: 'openai/gpt-5-mini',
     },
 }))
@@ -44,6 +45,7 @@ beforeEach(() => {
         setAttributes: setAttributesMock,
     }))
     envMock.OPENROUTER_API_KEY = 'test-openrouter-key'
+    envMock.OPENROUTER_API_URL = 'https://openrouter.ai/api/v1'
     envMock.OPENROUTER_MODEL = 'openai/gpt-5-mini'
 })
 
@@ -185,5 +187,62 @@ describe('chat() — Sentry span trace correlation (F-011)', () => {
             'ok',
         )
         expect(setAttributesMock).not.toHaveBeenCalled()
+    })
+})
+
+describe('chat() — OPENROUTER_API_URL base (OpenRouter by default, Devino proxy when set)', () => {
+    // The real zod parse, not the mock above: proves the value env.ts
+    // produces for an UNSET variable is exactly the old hardcoded base.
+    async function realParsedBase(source: Record<string, string | undefined>) {
+        const actual =
+            await vi.importActual<typeof import('@/lib/env')>('@/lib/env')
+        return actual.parseServerEnv({
+            DATABASE_URL: 'postgresql://postgres:postgres@localhost:58005/x',
+            BETTER_AUTH_SECRET: 'test-better-auth-secret',
+            ...source,
+        }).OPENROUTER_API_URL
+    }
+
+    it('with OPENROUTER_API_URL unset, POSTs to the unchanged https://openrouter.ai/api/v1/chat/completions', async () => {
+        envMock.OPENROUTER_API_URL = await realParsedBase({})
+        fetchMock.mockResolvedValueOnce(
+            jsonResponse({ choices: [{ message: { content: 'ok' } }] }),
+        )
+        await chat([{ role: 'user', content: 'hi' }])
+        const [url] = fetchMock.mock.calls[0] as [string, RequestInit]
+        expect(url).toBe('https://openrouter.ai/api/v1/chat/completions')
+    })
+
+    it('with OPENROUTER_API_URL set to the Devino proxy, POSTs there with the same body and bearer key', async () => {
+        envMock.OPENROUTER_API_URL = await realParsedBase({
+            OPENROUTER_API_URL: 'https://proxyai.devino.ca/v1',
+        })
+        fetchMock.mockResolvedValueOnce(
+            jsonResponse({ choices: [{ message: { content: 'ok' } }] }),
+        )
+        await chat([{ role: 'user', content: 'hi' }], { maxTokens: 50 })
+        const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+        expect(url).toBe('https://proxyai.devino.ca/v1/chat/completions')
+        expect((init.headers as Record<string, string>)['Authorization']).toBe(
+            'Bearer test-openrouter-key',
+        )
+        expect(JSON.parse(init.body as string)).toEqual({
+            model: 'openai/gpt-5-mini',
+            messages: [{ role: 'user', content: 'hi' }],
+            temperature: 0,
+            max_tokens: 50,
+        })
+    })
+
+    it('strips a trailing slash from OPENROUTER_API_URL so the path never doubles up', async () => {
+        envMock.OPENROUTER_API_URL = await realParsedBase({
+            OPENROUTER_API_URL: 'https://proxyai.devino.ca/v1/',
+        })
+        fetchMock.mockResolvedValueOnce(
+            jsonResponse({ choices: [{ message: { content: 'ok' } }] }),
+        )
+        await chat([{ role: 'user', content: 'hi' }])
+        const [url] = fetchMock.mock.calls[0] as [string, RequestInit]
+        expect(url).toBe('https://proxyai.devino.ca/v1/chat/completions')
     })
 })

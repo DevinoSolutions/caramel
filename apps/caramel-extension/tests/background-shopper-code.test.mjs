@@ -13,6 +13,14 @@ let fetchCalls
 let responses // queue of fetch results, consumed in order
 let localData
 let sessionData
+let syncData
+
+const CONSENT_KEY = 'checkoutCodeSharingConsent'
+const consent = choice => ({
+    choice,
+    at: '2026-10-06T12:00:00.000Z',
+    promptVersion: 1,
+})
 
 function installWorkerRealm() {
     const cache = new WeakMap()
@@ -44,7 +52,7 @@ function installWorkerRealm() {
         },
     })
     stub.storage.local = area(() => localData)
-    stub.storage.sync = area(() => ({}))
+    stub.storage.sync = area(() => syncData)
     stub.storage.session = area(() => sessionData)
     stub.runtime.lastError = undefined
     const listeners = []
@@ -85,6 +93,9 @@ beforeEach(async () => {
     responses = []
     localData = { token: 'tok-123' }
     sessionData = {}
+    // Consent is accepted unless a test says otherwise: the gates below are the
+    // subject of the consent describe, everything else assumes a yes.
+    syncData = { [CONSENT_KEY]: consent('accepted') }
     globalThis.fetch = async (url, opts) => {
         fetchCalls.push({ url: String(url), opts })
         const next = responses.shift()
@@ -202,8 +213,80 @@ describe('submitShopperCode — gates', () => {
     })
 })
 
+describe('submitShopperCode — consent gate (owner rule 2026-10-06)', () => {
+    it.each([
+        ['no record', undefined],
+        ['declined', consent('declined')],
+        ['an unknown choice', { ...consent('accepted'), choice: 'maybe' }],
+        [
+            'another prompt version',
+            { ...consent('accepted'), promptVersion: 2 },
+        ],
+        ['a malformed date', { ...consent('accepted'), at: 'soon' }],
+        ['a bare true', true],
+    ])(
+        '%s: skipped as no-consent, and NOTHING is submitted',
+        async (_label, record) => {
+            if (record === undefined) delete syncData[CONSENT_KEY]
+            else syncData[CONSENT_KEY] = record
+            // A stale legacy opt-in must not count as consent.
+            syncData.caramel_settings = { shareCheckoutCodes: true }
+            responses.push(features(true))
+
+            expect(await invoke(CAPTURE)).toEqual({ skipped: 'no-consent' })
+
+            expect(submitCalls()).toHaveLength(0)
+        },
+    )
+
+    it('accepted: submitted', async () => {
+        responses.push(
+            features(true),
+            ok({ couponId: '9', created: true, status: 'unverified' }),
+        )
+
+        expect((await invoke(CAPTURE)).couponId).toBe('9')
+        expect(submitCalls()).toHaveLength(1)
+    })
+
+    it('the consent gate runs AFTER sign-in and the flag, so the prompt is only asked when sharing could happen', async () => {
+        delete syncData[CONSENT_KEY]
+
+        // Signed out: answered before consent is even considered.
+        localData = {}
+        expect(await invoke(CAPTURE)).toEqual({ skipped: 'signed-out' })
+        // Flag off: same.
+        localData = { token: 'tok-123' }
+        responses.push(features(false))
+        expect(await invoke(CAPTURE)).toEqual({ skipped: 'disabled' })
+    })
+
+    it('a consent record that cannot be read is a real error (loud), never a send', async () => {
+        responses.push(features(true))
+        // Like Chrome: lastError is set only inside the failing call's own
+        // callback, so the sign-in and flag reads before it still succeed.
+        const realSyncGet = globalThis.chrome.storage.sync.get
+        globalThis.chrome.storage.sync.get = (_keys, cb) => {
+            globalThis.chrome.runtime.lastError = {
+                message: 'sync unavailable',
+            }
+            try {
+                cb({})
+            } finally {
+                globalThis.chrome.runtime.lastError = undefined
+            }
+        }
+
+        const resp = await invoke(CAPTURE)
+
+        globalThis.chrome.storage.sync.get = realSyncGet
+        expect(resp.error).toMatch(/consent read failed: sync unavailable/)
+        expect(submitCalls()).toHaveLength(0)
+    })
+})
+
 describe('submitShopperCode — the submit and its answers', () => {
-    it('flag on: POSTs {site, code, source:"checkout"} with the bearer', async () => {
+    it('flag on: POSTs {site, code, source:"checkout", consent} with the bearer', async () => {
         responses.push(
             features(true),
             ok({
@@ -227,9 +310,34 @@ describe('submitShopperCode — the submit and its answers', () => {
             site: 'ebay.com',
             code: 'SAVE10',
             source: 'checkout',
+            // The server's consent gate reads exactly this proof, taken from
+            // the stored record the local gate just accepted.
+            consent: {
+                choice: 'accepted',
+                promptVersion: 1,
+                at: '2026-10-06T12:00:00.000Z',
+            },
         })
         // The flag fetch is anonymous: nothing user-scoped in the answer.
         expect(featureCalls()[0].opts?.headers?.Authorization).toBeUndefined()
+    })
+
+    it('403 consent-required (the server refused our consent proof): a quiet skip that is NOT no-consent (that one re-opens the consent card), not an error', async () => {
+        responses.push(
+            features(true),
+            refused(403, { error: 'consent-required' }),
+        )
+
+        expect(await invoke(CAPTURE)).toEqual({ skipped: 'consent-rejected' })
+        expect(localData.caramel_bg_errors).toBeUndefined()
+    })
+
+    it('the consent proof is never sent for a non-accepted record (nothing is submitted at all)', async () => {
+        syncData[CONSENT_KEY] = consent('declined')
+        responses.push(features(true))
+
+        expect(await invoke(CAPTURE)).toEqual({ skipped: 'no-consent' })
+        expect(submitCalls()).toHaveLength(0)
     })
 
     it('403 capture-disabled: skipped, and the cached flag is dropped', async () => {

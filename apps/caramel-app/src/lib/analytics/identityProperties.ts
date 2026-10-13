@@ -9,7 +9,7 @@
 // PII contract, enforced here: the distinct_id is ALWAYS the internal user
 // UUID (it is `input.user.id`, never touched by these builders) and the email
 // is a property only. `resolveDisplayName` must never fall back to the email.
-import type { FirstTouchRecord } from './firstTouch'
+import type { FirstTouchRecord } from './firstTouchRecord'
 
 /** Person-property values we are willing to send: scalars only. */
 export type PersonProperties = Record<string, string | number | boolean>
@@ -115,6 +115,34 @@ export function toIsoTimestamp(
 }
 
 /**
+ * The first-touch record as flat `first_*` properties — the ONE mapping, used
+ * for the person's `$set_once` (identify, browser) and for the server-side
+ * signup / install events (flat on the event AND in their `$set_once`), so
+ * the same source reads under the same property name wherever it was captured.
+ * Empty values are dropped, so an organic record yields just the landing path.
+ */
+export function buildFirstTouchProperties(
+    firstTouch: FirstTouchRecord | null | undefined,
+): PersonProperties {
+    return compactProperties({
+        first_utm_source: firstTouch?.utm_source,
+        first_utm_medium: firstTouch?.utm_medium,
+        first_utm_campaign: firstTouch?.utm_campaign,
+        first_utm_term: firstTouch?.utm_term,
+        first_utm_content: firstTouch?.utm_content,
+        first_ref: firstTouch?.ref,
+        first_gclid: firstTouch?.gclid,
+        first_gbraid: firstTouch?.gbraid,
+        first_wbraid: firstTouch?.wbraid,
+        first_fbclid: firstTouch?.fbclid,
+        first_msclkid: firstTouch?.msclkid,
+        first_ttclid: firstTouch?.ttclid,
+        first_referrer_domain: firstTouch?.referrer_domain,
+        first_landing_path: firstTouch?.landing_path,
+    })
+}
+
+/**
  * Build the `$set` / `$set_once` bags for one identify call.
  *
  * `$set` is the current truth about the person and is safe to re-send;
@@ -156,16 +184,7 @@ export function buildIdentityPayload(input: {
         signup_date: createdAt ?? input.identifiedAt,
         first_platform: context.platform,
         first_app_version: context.app_version,
-        first_utm_source: firstTouch?.utm_source,
-        first_utm_medium: firstTouch?.utm_medium,
-        first_utm_campaign: firstTouch?.utm_campaign,
-        first_utm_term: firstTouch?.utm_term,
-        first_utm_content: firstTouch?.utm_content,
-        first_ref: firstTouch?.ref,
-        first_gclid: firstTouch?.gclid,
-        first_fbclid: firstTouch?.fbclid,
-        first_referrer_domain: firstTouch?.referrer_domain,
-        first_landing_path: firstTouch?.landing_path,
+        ...buildFirstTouchProperties(firstTouch),
     })
 
     return { set, setOnce }

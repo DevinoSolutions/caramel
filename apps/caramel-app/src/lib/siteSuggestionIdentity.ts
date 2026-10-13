@@ -21,8 +21,15 @@ import type { Prisma } from '@prisma/client'
  * the address the person typed is the only thing on it. Matching by user id
  * alone is the predicate that looks right and misses exactly those.
  *
- * Case-insensitive, because the suggest form records what the visitor typed
- * (`Shopper@Example.COM`) while the account holds its own spelling.
+ * An EXACT match on the folded address, never `mode: 'insensitive'`. Prisma
+ * compiles `{ equals, mode: 'insensitive' }` to an UNESCAPED `ILIKE`, so an `_`
+ * or `%` in the account's email was a wildcard: `j_hn@x` counted — and, on
+ * delete-my-data, SCRUBBED — the requests `john@x` made while signed out.
+ * Case is settled at WRITE time instead: recordSiteSuggestion stores the
+ * address through foldRequesterEmail, the 20260927120000 migration folded
+ * every earlier row, and a CHECK constraint makes the database refuse an
+ * unfolded one, so no writer can store a spelling this match would miss. The
+ * account's own spelling is folded the same way here.
  *
  * An account with NO email (the schema allows one) contributes no email branch
  * rather than a `null` one, which would match every anonymous suggestion ever
@@ -35,6 +42,17 @@ import type { Prisma } from '@prisma/client'
  * anonymous row that carries only a `user_agent` belongs to nobody and is not
  * matched either. Both are pinned rather than left as reasoning.
  */
+/**
+ * The ONE spelling of a requester email: lower case. Both sides of the
+ * identity match go through it — recordSiteSuggestion when the row is written,
+ * siteSuggestionIdentityWhere when an account looks for its rows — and the
+ * `site_suggestions_requester_email_folded` CHECK constraint refuses anything
+ * else, so the exact match cannot miss a row over case.
+ */
+export function foldRequesterEmail(email: string): string {
+    return email.toLowerCase()
+}
+
 export function siteSuggestionIdentityWhere(input: {
     userId: string
     email: string | null
@@ -43,16 +61,7 @@ export function siteSuggestionIdentityWhere(input: {
     return {
         OR: [
             { userId },
-            ...(email
-                ? [
-                      {
-                          requesterEmail: {
-                              equals: email,
-                              mode: 'insensitive' as const,
-                          },
-                      },
-                  ]
-                : []),
+            ...(email ? [{ requesterEmail: foldRequesterEmail(email) }] : []),
         ],
     }
 }

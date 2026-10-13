@@ -1,4 +1,9 @@
 import { withRoute } from '@/lib/api/withRoute'
+import {
+    isAllowedExtensionRedirectUri,
+    reportRejectedExtensionRedirect,
+} from '@/lib/auth/extensionOAuthRedirect'
+import { forwardClientIpHeaders } from '@/lib/clientIp'
 import { env } from '@/lib/env'
 import { BASE_URL } from '@/lib/env.client'
 import { isValidNonce, setNonceResult } from '@/lib/extension-oauth-nonce'
@@ -45,6 +50,18 @@ function readSignedStatePayload(signedState: string): {
     }
 }
 
+/** The provider named in the (unverified) signed state, for tagging a Sentry
+ * report only: the redirect hop never trusts it, and a state that is not ours
+ * (or has no provider) reports as 'unknown'. */
+function providerOfState(
+    signedState: string | null,
+): 'google' | 'apple' | 'unknown' {
+    return (
+        (signedState && readSignedStatePayload(signedState).provider) ||
+        'unknown'
+    )
+}
+
 /** The end-of-flow page the Safari user lands on. They finish in a normal tab
  * (not an extension-controlled one), so this is the only feedback they get —
  * the extension itself learns the outcome from /poll. */
@@ -71,11 +88,18 @@ function signInFailedPage(detail: string) {
  * becomes a session (it verifies the signed state, enforces the provider's
  * verified-email claim, and mints via mintExtensionSession), so the Safari
  * path gets the exact same token class as every other client and cannot drift
- * from it. The cost is one loopback request.
+ * from it. The cost is one extra request, made to the PUBLIC base URL.
  *
- * The caller's IP headers are forwarded so that POST's per-IP rate limit is
- * charged to the real user instead of pooling every Safari sign-in into one
- * bucket keyed by the loopback (Traefik sets these; we only pass them along).
+ * The caller's client-IP headers are forwarded (clientIp.ts owns which ones)
+ * in the hope that POST's per-IP rate limit is charged per user rather than
+ * pooling every Safari sign-in into one bucket.
+ *
+ * TODO(safari-shim-removal): that hope is unverified. The inner call goes out
+ * through Cloudflare, which rewrites CF-Connecting-IP (the header the limiter
+ * trusts first) to this server's own egress address, so the inner POST is
+ * probably still metered under one shared key. Fixing it means calling the
+ * exchange in-process instead of over HTTP, which is more than this shim
+ * (already slated for removal) warrants.
  */
 async function completeSafariOauth(args: {
     baseURL: string
@@ -87,10 +111,7 @@ async function completeSafariOauth(args: {
     forwardHeaders: Headers
 }): Promise<{ ok: true } | { ok: false; error: string }> {
     const headers = new Headers({ 'Content-Type': 'application/json' })
-    for (const name of ['x-real-ip', 'x-forwarded-for']) {
-        const value = args.forwardHeaders.get(name)
-        if (value) headers.set(name, value)
-    }
+    forwardClientIpHeaders(args.forwardHeaders, headers)
 
     let exchangeRes: Response
     try {
@@ -274,12 +295,26 @@ async function handleRedirect(req: NextRequest) {
     if (safari) return safari
 
     if (error) {
-        // If there's an error, redirect to extension with error
-        if (extensionRedirectUri) {
+        // Hand the provider's error back to the extension so it can render it
+        // — but ONLY to one of our extensions. This branch used to redirect to
+        // whatever `extension_redirect` said before any destination check ran,
+        // which made grabcaramel.com an open redirect for phishing links
+        // (security report 2026-10). A foreign destination gets the JSON 400.
+        if (
+            extensionRedirectUri &&
+            isAllowedExtensionRedirectUri(extensionRedirectUri)
+        ) {
             const errorUrl = new URL(extensionRedirectUri)
             errorUrl.searchParams.set('error', error)
             if (originalState) errorUrl.searchParams.set('state', originalState)
             return NextResponse.redirect(errorUrl.toString())
+        }
+        if (extensionRedirectUri) {
+            reportRejectedExtensionRedirect({
+                route: 'extension/oauth/redirect',
+                provider: providerOfState(originalState),
+                redirectUri: extensionRedirectUri,
+            })
         }
         return NextResponse.json({ error }, { status: 400 })
     }
@@ -298,30 +333,27 @@ async function handleRedirect(req: NextRequest) {
         )
     }
 
-    // Redirect to extension's redirect URI with the code
-    // Use originalState (which may be the decoded state from Apple's response)
-    let redirectUrl: URL
-    try {
-        redirectUrl = new URL(extensionRedirectUri)
-    } catch {
-        return NextResponse.json(
-            { error: 'Invalid extension redirect URI' },
-            { status: 400 },
-        )
-    }
-
-    const isChromeExtension = redirectUrl.protocol === 'chrome-extension:'
-    const isChromiumAppOrigin =
-        redirectUrl.protocol === 'https:' &&
-        redirectUrl.hostname.endsWith('.chromiumapp.org')
-
-    if (!isChromeExtension && !isChromiumAppOrigin) {
+    // Only OUR extensions may receive the code. A shape check (any
+    // chromiumapp.org host) let a third-party extension receive a Caramel
+    // user's Apple code and exchange it for a session — see
+    // extensionOAuthRedirect.ts. The destination comes from the UNSIGNED
+    // outer `r` of the Apple envelope, so it is checked here even though
+    // authorize also refuses foreign destinations: an attacker can rewrite
+    // `r` in a legitimately-issued authorize URL.
+    if (!isAllowedExtensionRedirectUri(extensionRedirectUri)) {
+        reportRejectedExtensionRedirect({
+            route: 'extension/oauth/redirect',
+            provider: providerOfState(originalState),
+            redirectUri: extensionRedirectUri,
+        })
         return NextResponse.json(
             { error: 'Disallowed extension redirect origin' },
             { status: 400 },
         )
     }
 
+    // Use originalState (which may be the decoded state from Apple's response)
+    const redirectUrl = new URL(extensionRedirectUri)
     redirectUrl.searchParams.set('code', code)
     if (originalState) redirectUrl.searchParams.set('state', originalState)
 

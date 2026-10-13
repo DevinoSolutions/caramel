@@ -1,4 +1,5 @@
 import InstallCallout from '@/components/growth/InstallCallout'
+import SourceRefList, { SourceList } from '@/components/seo/SourceRefs'
 import { BASE_URL } from '@/lib/env.client'
 import { faqPageJsonLd, jsonLdString } from '@/lib/jsonLd'
 import {
@@ -7,13 +8,13 @@ import {
     COMPARISON_FAQ,
     COMPARISON_PATH,
     COMPARISON_PICKS,
-    COMPARISON_SOURCES,
     COMPARISON_SUMMARY,
     HONEY_TIMELINE,
     comparisonSourceOrder,
     formatComparisonDate,
     type ComparisonSourceId,
 } from '@/lib/seo/extensionComparison'
+import { HONEY_GUIDE_PATH } from '@/lib/seo/honeyExtensionGuide'
 import type { Metadata } from 'next'
 import Link from 'next/link'
 
@@ -57,24 +58,8 @@ export const metadata: Metadata = {
 
 const sourceOrder = comparisonSourceOrder()
 
-function SourceRefs({ ids }: { ids: ReadonlyArray<ComparisonSourceId> }) {
-    return (
-        <span>
-            {ids.map(id => {
-                const n = sourceOrder.indexOf(id) + 1
-                return (
-                    <a
-                        key={id}
-                        href={`#source-${n}`}
-                        aria-label={`Source ${n}: ${COMPARISON_SOURCES[id].title}`}
-                        className="ml-0.5 align-super text-xs font-semibold text-caramel hover:underline"
-                    >
-                        [{n}]
-                    </a>
-                )
-            })}
-        </span>
-    )
+function PageSourceRefs({ ids }: { ids: ReadonlyArray<ComparisonSourceId> }) {
+    return <SourceRefList ids={ids} order={sourceOrder} />
 }
 
 const sectionHeading =
@@ -191,7 +176,7 @@ export default function CompareCouponExtensionsPage() {
                                             {row.sourceCode}
                                         </td>
                                         <td className="px-4 py-3">
-                                            <SourceRefs ids={row.sources} />
+                                            <PageSourceRefs ids={row.sources} />
                                         </td>
                                     </tr>
                                 ))}
@@ -244,11 +229,22 @@ export default function CompareCouponExtensionsPage() {
                                 </time>
                                 <p className={bodyText}>
                                     {event.text}
-                                    <SourceRefs ids={event.sources} />
+                                    <PageSourceRefs ids={event.sources} />
                                 </p>
                             </li>
                         ))}
                     </ol>
+                    <p className={`${bodyText} mt-6`}>
+                        What Honey does, how it makes money, and the controversy
+                        and lawsuit are explained in{' '}
+                        <Link
+                            href={HONEY_GUIDE_PATH}
+                            className="font-semibold text-caramel hover:underline"
+                        >
+                            the Honey extension, explained
+                        </Link>
+                        .
+                    </p>
                 </section>
 
                 <section
@@ -291,26 +287,7 @@ export default function CompareCouponExtensionsPage() {
                     <h2 id="compare-sources-heading" className={sectionHeading}>
                         Sources
                     </h2>
-                    <ol className="list-decimal space-y-2 pl-6 text-sm text-gray-700 dark:text-gray-300">
-                        {sourceOrder.map((id, index) => {
-                            const source = COMPARISON_SOURCES[id]
-                            return (
-                                <li
-                                    key={id}
-                                    id={`source-${index + 1}`}
-                                    className="scroll-mt-28"
-                                >
-                                    <a
-                                        href={source.url}
-                                        className="font-medium text-caramel hover:underline"
-                                    >
-                                        {source.title}
-                                    </a>
-                                    , {source.publisher}
-                                </li>
-                            )
-                        })}
-                    </ol>
+                    <SourceList order={sourceOrder} />
                 </section>
             </article>
             <script

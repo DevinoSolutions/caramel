@@ -33,6 +33,16 @@ export interface Coupon {
     // external catalog. Absent/null until the extension starts reporting (W2);
     // the card/popup render "worked Xh ago" only when it's present and recent.
     lastWorkedAt?: string | null
+    // Failure side of the same overlay (attachSignals): when the last failed
+    // apply was reported and how many have been, in total. The card shows its
+    // "Reported not working" hint from coupons.ts's isRecentlyFailing() over
+    // these + lastWorkedAt — shopper/extension reports, not verification.
+    lastFailedAt?: string | null
+    failCount?: number
+    // coupons.ts keepsFailing(), computed server-side by attachSignals so the
+    // website and the extension popup collapse the same codes. false/absent when
+    // there is no signal. Presentation only: never a status or a deletion.
+    keepsFailing?: boolean
 }
 
 export interface CouponFilters {

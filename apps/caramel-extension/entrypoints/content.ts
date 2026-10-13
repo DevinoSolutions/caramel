@@ -19,9 +19,11 @@ import '../caramel-content.css'
 
 import { initCaramelBase } from '../caramel-base.js'
 import { initCartSignals } from '../cart-signals.js'
+import { initCodeCapture } from '../code-capture.js'
 import { initCouponConstants } from '../coupon-constants.generated.js'
 import { initCouponRunner } from '../coupon-runner.js'
 import { initInject } from '../inject.js'
+import { showCodeSharingPrompt } from '../UI-helpers.js'
 
 export default defineContentScript({
     matches: ['https://*/*'],
@@ -32,6 +34,9 @@ export default defineContentScript({
         initCartSignals()
         initCaramelBase()
         initCouponRunner()
+        // Checkout code sharing asks for consent through the content UI's card;
+        // injected here because a direct import would be a module cycle.
+        initCodeCapture({ askConsent: showCodeSharingPrompt })
         initInject()
     },
 })

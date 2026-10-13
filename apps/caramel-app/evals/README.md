@@ -26,9 +26,9 @@ as the permanent before/after record.
 
 ## What's here
 
-- `fixtures/cart-cases.ts` — 40 labeled `CartSignals` cases in the real
+- `fixtures/cart-cases.ts` — 41 labeled `CartSignals` cases in the real
   wire shape (`apps/caramel-extension/cart-signals.js`'s
-  `collectCartSignals()` payload): 16 clear per-category exemplars, 10
+  `collectCartSignals()` payload): 16 clear per-category exemplars, 11
   realistic multi-item carts, 8 ambiguous/adversarial cases (including two
   prompt-injection attempts the model must resist), 6 junk/non-commerce
   pages.
@@ -53,8 +53,8 @@ calls, runs on every normal `pnpm test`).
 
 ## Why 0.85
 
-Primary-match rate ≥ 0.85 over the 40-case dataset. The dataset isn't
-uniformly easy: 8 of the 40 cases (20%) are deliberately ambiguous or
+Primary-match rate ≥ 0.85 over the 41-case dataset. The dataset isn't
+uniformly easy: 8 of the 41 cases (~20%) are deliberately ambiguous or
 adversarial, where even a well-behaved model may reasonably land on either
 of two accepted categories, or where resisting a prompt-injection attempt
 is the actual thing under test. 0.85 leaves room for that designed-in
@@ -73,7 +73,7 @@ Reads `OPENROUTER_API_KEY` (and `OPENROUTER_MODEL`, if you want to
 override the code default) from this package's own `.env` —
 `vitest.eval.config.ts` loads it via Node's built-in
 `process.loadEnvFile()` (no dotenv-cli, no new dependency; see
-`PLAN-F-012.md`'s CR-9). Costs real OpenRouter spend: ~40 short
+`PLAN-F-012.md`'s CR-9). Costs real OpenRouter spend: ~41 short
 completions at `temperature: 0`, well under $0.20 per full run.
 
 ## Red-proof
@@ -148,6 +148,19 @@ Stage-3 report. Whoever adds the CI secret above should add the matching
 Dokploy env var at the same time, and update this note with whatever
 model id ends up pinned.
 
+### Routing through the Devino proxy
+
+`OPENROUTER_API_URL` (default `https://openrouter.ai/api/v1`) sets the base
+the classifier POSTs `<base>/chat/completions` to. To move production off
+OpenRouter, set three env vars together on the deploy:
+`OPENROUTER_API_URL=https://proxyai.devino.ca/v1`, `OPENROUTER_API_KEY` = a
+Caramel proxy key, and `OPENROUTER_MODEL` = the eval-gated proxy pin in
+`SCOREBOARD.md` (2026-09-26: `cohere/command-a-plus-05-2026`). Rollback =
+unset `OPENROUTER_API_URL` and restore the OpenRouter key and model. CI moves
+the same way: `ai-evals.yml` reads the repo variables `OPENROUTER_API_URL`
+and `OPENROUTER_MODEL` when they are set (empty = the code defaults), and
+the `OPENROUTER_API_KEY` secret must then hold a proxy key.
+
 ## Codify
 
 > AI model/prompt changes are eval-gated: `pnpm eval` green **twice**
@@ -157,5 +170,6 @@ model id ends up pinned.
 > addresses them.
 
 The canonical copy of this rule lives in the repo root `CLAUDE.md`
-(§Conventions in force → eval gate); this section stays as the local
-how-to. If the two ever disagree, `CLAUDE.md` wins.
+(§Conventions in force; full text in
+`docs/agent/conventions-and-checks.md`, eval gate); this section stays
+as the local how-to. If the two ever disagree, `CLAUDE.md` wins.

@@ -34,6 +34,7 @@ import {
     resolveClientPosthogTarget,
     type PosthogTarget,
 } from './posthogDataset'
+import { resolveBrowserPosthogHosts } from './posthogHosts'
 
 export { isPosthogActive }
 
@@ -189,8 +190,13 @@ function initPosthogInstance(
     target: PosthogTarget,
     { isE2E, deferRecording }: { isE2E: boolean; deferRecording: boolean },
 ): void {
+    const hosts = resolveBrowserPosthogHosts(target)
     posthog.init(target.token, {
-        api_host: target.host,
+        // Production: our own origin (/_t/k3v, proxied by next.config.mjs) so a
+        // content blocker keyed on the PostHog hostname cannot hide the visit;
+        // ui_host stays the real host for toolbar links. e2e: direct, as before.
+        api_host: hosts.apiHost,
+        ...(hosts.uiHost ? { ui_host: hosts.uiHost } : {}),
         capture_pageview: 'history_change',
         capture_pageleave: true,
         // Session recording ON, masked to match the Sentry Replay privacy

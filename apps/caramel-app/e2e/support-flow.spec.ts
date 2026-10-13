@@ -12,7 +12,7 @@ import {
 // appears in the shared #Shared_Apps_E2E_Testing project — asserting on the
 // real, ingested properties (feedback_id, app_id, environment, test_run_id).
 //
-// TWO run contexts (see CLAUDE.md):
+// TWO run contexts (see CLAUDE.md, docs/agent/conventions-and-checks.md):
 //  - hermetic (e2e-pr / local): fresh migrated Postgres + the app booted with
 //    POSTHOG_DATASET=e2e and the e2e capture pair → the ingestion tests run.
 //  - deployed (e2e-push): live dev site with NO DATABASE_URL and (for now) no

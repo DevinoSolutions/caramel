@@ -6,6 +6,7 @@ import {
     INSTAGRAM_URL,
 } from '@/lib/brandLinks'
 import { COMPARISON_PATH } from '@/lib/seo/extensionComparison'
+import { HONEY_GUIDE_PATH } from '@/lib/seo/honeyExtensionGuide'
 import { canAdvertiseInstall } from '@/lib/surface/detectSurface'
 import { useSurface } from '@/lib/surface/SurfaceProvider'
 import { m } from 'framer-motion'
@@ -29,6 +30,7 @@ const productLinks = [
     { name: 'Sources', url: '/sources' },
     { name: 'FAQ', url: '/faq' },
     { name: 'Compare extensions', url: COMPARISON_PATH },
+    { name: 'Honey extension, explained', url: HONEY_GUIDE_PATH },
     { name: 'For AI agents', url: '/agent-setup' },
 ]
 

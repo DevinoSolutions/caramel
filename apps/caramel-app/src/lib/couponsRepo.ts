@@ -35,6 +35,9 @@
 // headers, `hasMore`/`active` computed fields, and auth/rate-limit/origin
 // gates all stay in the calling route (`withRoute` config + the route body).
 import {
+    FAILING_MIN_FAIL_COUNT,
+    FAILING_WINDOW_DAYS,
+    KEEPS_FAILING_MIN_FAIL_COUNT,
     RESTRICTED_COUPON_STATUSES,
     VISIBLE_COUPON_STATUSES,
 } from '@/lib/coupons'
@@ -99,18 +102,6 @@ const visibleCouponsWhere = () =>
     Prisma.sql`status IN (${Prisma.join([...VISIBLE_COUPON_STATUSES])}) AND expired = FALSE`
 
 /**
- * "This coupon belongs to store `base`": the store page's own predicate — the
- * exact domain, or any subdomain of it. `base` MUST already be lowercase: the
- * `site` column is stored lowercase and this comparison is case-sensitive on
- * purpose (plain equality keeps using coupons_site_idx), so every caller
- * lowercases before binding. Shared by both listings AND by the shopper-
- * submission dedupe, so a code is "already listed" under exactly the rule the
- * store page uses to list it.
- */
-const siteBaseMatchSql = (base: string) =>
-    Prisma.sql`(site = ${base} OR site LIKE ${'%.' + base})`
-
-/**
  * Shared ranking order — the list query and the marketing store page both sort
  * by this identical order.
  *
@@ -125,6 +116,54 @@ const siteBaseMatchSql = (base: string) =>
  * sort total, so page N+1 resumes exactly where page N stopped.
  */
 const rankingOrderSql = () => Prisma.sql`rating DESC, created_at DESC, id DESC`
+
+/**
+ * SQL twin of coupons.ts's isRecentlyFailing(): true for a coupon whose
+ * coupon_signals row holds at least FAILING_MIN_FAIL_COUNT failures, the latest
+ * within FAILING_WINDOW_DAYS and newer than the last success (or no success
+ * ever). The numbers come from coupons.ts, so the ordering and the card's hint
+ * cannot drift apart.
+ *
+ * A hashed uncorrelated `id IN (SELECT ...)`, not a JOIN: coupon_signals has
+ * only a few hundred rows (one per coupon an extension ever reported on), so
+ * the subquery is built once and probed per row, and joining would make the
+ * unqualified `created_at`/`updated_at` columns of the surrounding queries
+ * ambiguous. The window compares against UTC because Prisma writes these
+ * timestamp-WITHOUT-time-zone columns as UTC.
+ */
+const failingSinkSql = () => failingSignalIdsSql(FAILING_MIN_FAIL_COUNT)
+
+/**
+ * SQL twin of coupons.ts's keepsFailing(): the same predicate at
+ * KEEPS_FAILING_MIN_FAIL_COUNT. A subset of failingSinkSql(), used as the
+ * SECOND ORDER BY key so the codes the web page and the popup collapse are the
+ * very last rows of the list, behind the merely-failing ones: the collapsed
+ * group is then one contiguous tail, however the list is paginated.
+ */
+const keepsFailingSql = () => failingSignalIdsSql(KEEPS_FAILING_MIN_FAIL_COUNT)
+
+const failingSignalIdsSql = (minFailCount: number) => Prisma.sql`(id IN (
+    SELECT s.coupon_id FROM coupon_signals s
+    WHERE s.fail_count >= ${minFailCount}
+      AND s.last_failed_at > (NOW() AT TIME ZONE 'UTC') - (${FAILING_WINDOW_DAYS}::int * INTERVAL '1 day')
+      AND (s.last_worked_at IS NULL OR s.last_failed_at > s.last_worked_at)
+))`
+
+/**
+ * The order of ONE store's codes: recently-failing codes sink below the rest
+ * (false sorts first), and the keeps-failing ones (collapsed by the page and the
+ * popup) sink below those, each group in rankingOrderSql() order. Sunk, never
+ * hidden: the visibility predicate is untouched. It lives in SQL, not as a
+ * post-fetch sort, because these lists are paginated (store page: first 20, then
+ * /api/coupons pages) and a sort after the fetch could only reorder one page —
+ * a failing code on page 1 would still outrank a good one on page 2.
+ *
+ * Store-scoped reads only. A site-less listing (the /coupons browse/search
+ * page) keeps rankingOrderSql() alone: the extra key would force a sort over
+ * the whole catalog for a page nobody uses to apply codes.
+ */
+const storeRankingOrderSql = () =>
+    Prisma.sql`${failingSinkSql()} ASC, ${keepsFailingSql()} ASC, ${rankingOrderSql()}`
 
 /**
  * coupons/stats/route.ts's census predicate. Deliberately NOT
@@ -148,6 +187,57 @@ const percentOffSql = () =>
     Prisma.sql`UPPER(discount_type) = 'PERCENTAGE' AND discount_amount > 0 AND discount_amount < 100`
 const fixedAmountOffSql = () =>
     Prisma.sql`UPPER(discount_type) IS DISTINCT FROM 'PERCENTAGE' AND discount_amount > 0`
+
+/**
+ * What a shopper typed, made safe to put inside a LIKE/ILIKE pattern: `\`, `%`
+ * and `_` are backslash-escaped, the escape Postgres uses by default, so each
+ * one matches itself. The backslash goes first so the escapes added here are
+ * not escaped again. Every pattern built from input goes through this, and the
+ * caller adds its own `%` around the result. Without it a search for `%`
+ * listed every code and `e_ay` found ebay.com (2026-09-27, fleet ILIKE sweep).
+ * The value is still a bound parameter; this changes what the pattern means,
+ * not how it reaches the database.
+ */
+const likeLiteral = (typed: string) => typed.replace(/[\\%_]/g, '\\$&')
+
+/**
+ * A coupon belongs to a store when its `site` IS the store or one of its
+ * subdomains: `site` equals the store, or ends in `'.' || store`. Every
+ * character of the store matches only itself. The `site LIKE '%.' || store`
+ * this replaced read `_` and `%` as wildcards: `a_cd.com` owned
+ * shop.abcd.com's codes. The callers bind resolveStoreDomain output, which
+ * cannot hold either character, so that was never reachable. This keeps it so
+ * without relying on the callers (2026-09-27, fleet ILIKE sweep).
+ *
+ * The suffix arm is a PREFIX match on the reversed text:
+ * `reverse(site) LIKE reverse('.' || store) || '%'`, with the store's LIKE
+ * metacharacters (`\`, `%`, `_`) escaped in SQL (so it holds for a column
+ * `store` too) and an explicit ESCAPE clause. That form is what
+ * coupons_site_reverse_idx (`reverse(site) text_pattern_ops`) can answer, so a
+ * bound store makes Postgres BitmapOr coupons_site_idx (exact) with that index
+ * (subdomains). The `right(site, length(store) + 1) = '.' || store` this
+ * replaced was equivalent but unsargable: the OR forced a Parallel Seq Scan
+ * over every coupon on every store read (prod, 2026-10-10: ~40-65 ms x2 per
+ * store page). A mere suffix never matches: `notebay.com` does not end in
+ * `.ebay.com`. tests/integration/coupons-store-index.itest.ts pins both the
+ * semantics and the index use.
+ *
+ * Case-sensitive on purpose: `site` is stored lowercase, callers lowercase the
+ * store, and plain equality keeps using coupons_site_idx. It is the ONE copy of
+ * the predicate, so the store page, /api/coupons, the followed-store counts
+ * and the shopper-submission known-store probe and dedupe cannot disagree about
+ * which rows a store owns. `store` is a bound value or a
+ * column expression, and `site` names the coupons column (aliased in a join).
+ */
+const onStoreSql = (
+    store: string | Prisma.Sql,
+    site: Prisma.Sql = Prisma.sql`site`,
+) => {
+    // Backslash first, so the escapes added for % and _ are not re-escaped.
+    // The doubled backslashes below are JS escapes: the SQL sees one.
+    const escapedReversedSuffix = Prisma.sql`replace(replace(replace(reverse('.' || ${store}), '\\', '\\\\'), '%', '\\%'), '_', '\\_')`
+    return Prisma.sql`(${site} = ${store} OR reverse(${site}) LIKE ${escapedReversedSuffix} || '%' ESCAPE '\\')`
+}
 
 // ---------------------------------------------------------------------------
 // Reads
@@ -179,12 +269,11 @@ export async function listCoupons(
         // sensitive on purpose — plain equality keeps using coupons_site_idx.
         // Lowercasing the bound value is the one-line guard that keeps a
         // mixed-case caller from matching nothing.
-        const base = baseSite.toLowerCase()
-        conditions.push(siteBaseMatchSql(base))
+        conditions.push(onStoreSql(baseSite.toLowerCase()))
     }
 
     if (search) {
-        const s = `%${search}%`
+        const s = `%${likeLiteral(search)}%`
         conditions.push(
             Prisma.sql`(site ILIKE ${s} OR title ILIKE ${s} OR description ILIKE ${s} OR code ILIKE ${s})`,
         )
@@ -193,8 +282,9 @@ export async function listCoupons(
     if (keyWords) {
         const patterns = keyWords
             .split(',')
-            .map(k => `%${k.trim()}%`)
-            .filter(k => k.length > 2)
+            .map(k => k.trim())
+            .filter(k => k.length > 0)
+            .map(k => `%${likeLiteral(k)}%`)
         if (patterns.length > 0) {
             // Prisma's raw layer won't reliably bind a JS array to an
             // array-typed parameter, so build `ANY(ARRAY[?,?,...]::text[])`
@@ -225,7 +315,7 @@ export async function listCoupons(
                    status, verification_message AS "verificationMessage"
             FROM coupons
             WHERE ${whereClause}
-            ORDER BY ${rankingOrderSql()}
+            ORDER BY ${baseSite ? storeRankingOrderSql() : rankingOrderSql()}
             LIMIT ${limit} OFFSET ${skip}
         `),
         prisma.$queryRaw(
@@ -289,8 +379,8 @@ export async function listStoreCoupons(
                    (submission_source IS NULL) AS "isSupplier"
             FROM coupons
             WHERE ${visible}
-              AND ${siteBaseMatchSql(base)}
-            ORDER BY ${rankingOrderSql()}
+              AND ${onStoreSql(base)}
+            ORDER BY ${storeRankingOrderSql()}
             LIMIT ${limit}
         `),
         // One aggregate: the count every store page needs, plus the facts
@@ -303,7 +393,7 @@ export async function listStoreCoupons(
                    MAX(updated_at) AS last_updated
             FROM coupons
             WHERE ${visible}
-              AND ${siteBaseMatchSql(base)}
+              AND ${onStoreSql(base)}
         `),
     ])
     const listRows = parseCouponRows(
@@ -374,10 +464,10 @@ export async function getCouponStats(): Promise<StatsRow> {
  *
  * Lives here rather than in the account route for the same reason every other
  * catalog read does: it must share `visibleCouponsWhere()` and the
- * `site = store OR site LIKE '%.' || store` store-matching predicate with
- * listStoreCoupons, or the count under a favorite would disagree with the
- * store page that favorite links to. A second hand-written copy of either
- * predicate is exactly the F-006 drift this module exists to prevent.
+ * `onStoreSql()` store-matching predicate with listStoreCoupons, or the count
+ * under a favorite would disagree with the store page that favorite links to.
+ * A second hand-written copy of either predicate is exactly the F-006 drift
+ * this module exists to prevent.
  *
  * `stores` are already-normalized registrable domains (resolveStoreDomain
  * output, the same vocabulary favorite_stores.store_name stores). UNNEST turns
@@ -393,7 +483,7 @@ export async function countCouponsForStores(
         SELECT f.store AS site, COUNT(c.id)::int AS coupon_count
         FROM UNNEST(${stores}::text[]) AS f(store)
         LEFT JOIN coupons c
-               ON (c.site = f.store OR c.site LIKE '%.' || f.store)
+               ON ${onStoreSql(Prisma.sql`f.store`, Prisma.sql`c.site`)}
               AND ${visibleCouponsWhere()}
         GROUP BY f.store
     `)
@@ -418,7 +508,7 @@ export async function listStoreOptions(
         ? await prisma.$queryRaw(Prisma.sql`
               SELECT DISTINCT site FROM coupons
               WHERE ${visibleCouponsWhere()}
-                AND (site ILIKE ${'%' + q + '%'} OR site ILIKE ${q + '%'})
+                AND (site ILIKE ${'%' + likeLiteral(q) + '%'} OR site ILIKE ${likeLiteral(q) + '%'})
               ORDER BY site ASC
               LIMIT ${limit}
           `)
@@ -681,9 +771,9 @@ export async function searchSupportedSites(q: string): Promise<SiteRow[]> {
         SELECT site FROM (
             SELECT DISTINCT site FROM coupons
             WHERE ${visibleCouponsWhere()}
-              AND site ILIKE ${'%' + q + '%'}
+              AND site ILIKE ${'%' + likeLiteral(q) + '%'}
         ) matches
-        ORDER BY (site = ${q}) DESC, (site ILIKE ${q + '%'}) DESC,
+        ORDER BY (site = ${q}) DESC, (site ILIKE ${likeLiteral(q) + '%'}) DESC,
                  length(site) ASC, site ASC
         LIMIT 20
     `)
@@ -830,9 +920,9 @@ const SHOPPER_STORE_BASE_PATTERN = /^[a-z0-9.-]+$/
  * indexable and sitemap-listed). resolveStoreDomain only proves the string is a
  * registrable domain; THIS is what proves it is one of ours.
  *
- * `base` is matched with the store page's own predicate (siteBaseMatchSql:
- * exact or any subdomain) on both tables, and is bound into a LIKE pattern, so
- * it must be a clean lowercase hostname (throws a plain Error otherwise, like
+ * `base` is matched with the store page's own predicate (onStoreSql: exact
+ * or any subdomain, compared as text) on both tables, and it must be a clean
+ * lowercase hostname (throws a plain Error otherwise, like
  * submitShopperCoupon). `client` lets submitShopperCoupon run the probe inside
  * its own transaction.
  */
@@ -852,12 +942,12 @@ export async function isKnownStore(
             SELECT (
                 EXISTS (
                     SELECT 1 FROM coupons
-                    WHERE ${siteBaseMatchSql(lowered)}
+                    WHERE ${onStoreSql(lowered)}
                       AND submission_source IS NULL
                 )
                 OR EXISTS (
                     SELECT 1 FROM store_configs
-                    WHERE (store_name = ${lowered} OR store_name LIKE ${'%.' + lowered})
+                    WHERE ${onStoreSql(lowered, Prisma.sql`store_name`)}
                 )
             ) AS known
         `),
@@ -963,7 +1053,7 @@ export async function submitShopperCoupon(
             await tx.$queryRaw(Prisma.sql`
                 SELECT id FROM coupons
                 WHERE lower(code) = lower(${code})
-                  AND ${siteBaseMatchSql(base)}
+                  AND ${onStoreSql(base)}
                   AND ${visibleCouponsWhere()}
                 ORDER BY created_at, id
                 LIMIT 1

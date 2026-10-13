@@ -158,15 +158,10 @@ describe('POST /api/account/data/delete — scope', () => {
         // point, because a signed-out request carries no user id at all.
         expect(prismaMock.siteSuggestion.updateMany).toHaveBeenCalledWith({
             where: {
-                OR: [
-                    { userId: USER_ID },
-                    {
-                        requesterEmail: {
-                            equals: USER_EMAIL,
-                            mode: 'insensitive',
-                        },
-                    },
-                ],
+                // EXACT on the folded address — never `mode: 'insensitive'`,
+                // whose ILIKE would let an `_` in this account's email scrub
+                // somebody else's request (siteSuggestionIdentity.ts).
+                OR: [{ userId: USER_ID }, { requesterEmail: USER_EMAIL }],
             },
             data: {
                 userId: null,

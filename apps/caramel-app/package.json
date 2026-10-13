@@ -73,8 +73,8 @@
         "zod": "4.4.3"
     },
     "devDependencies": {
-        "@argos-ci/cli": "3.2.1",
-        "@argos-ci/playwright": "6.3.3",
+        "@argos-ci/cli": "6.9.6",
+        "@argos-ci/playwright": "7.7.1",
         "@lhci/cli": "0.15.1",
         "@playwright/test": "1.57.0",
         "@tailwindcss/forms": "0.5.10",
@@ -98,6 +98,6 @@
         "tsx": "4.20.6",
         "typescript": "5.9.2",
         "vite-tsconfig-paths": "5.1.4",
-        "vitest": "4.1.10"
+        "vitest": "4.1.11"
     }
 }

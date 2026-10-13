@@ -121,7 +121,7 @@ vi.mock('@/lib/prisma', () => ({ default: prismaMock }))
 
 const SAFARI_REDIRECT_URI = `${BASE}/api/extension/oauth/redirect`
 const CHROME_REDIRECT_URI =
-    'https://bncdbnjkcbemlmoaflgnpoghogadlgce.chromiumapp.org/'
+    'https://gaimofgglbackoimfjopicmbmnlccfoe.chromiumapp.org/'
 /** What the shipped popup generates: crypto.randomUUID(), 36 chars. */
 const NONCE = '3f2b1c7a-9d41-4e2f-8a55-0b6c9d1e2f30'
 
@@ -166,9 +166,13 @@ function installFetchImpl(options: { googleEmailVerified?: boolean } = {}) {
 /** The authorize call the shipped Safari popup makes, returning the signed
  * state it would carry into the provider. */
 async function authorizeWithNonce(nonce: string | null) {
+    // A nonce-less call is the Chrome/Edge shape, which carries an extension
+    // redirect URI — authorize refuses a non-extension destination without a
+    // nonce (extensionOAuthRedirect.ts).
     const params = new URLSearchParams({
         provider: 'google',
-        redirect_uri: SAFARI_REDIRECT_URI,
+        redirect_uri:
+            nonce === null ? CHROME_REDIRECT_URI : SAFARI_REDIRECT_URI,
     })
     if (nonce !== null) params.set('nonce', nonce)
     const res = await authorizeGET(
@@ -230,6 +234,54 @@ describe('authorize accepts the shipped Safari nonce', () => {
         const payload = statePayload(body.state!)
         expect(Object.keys(payload)).toEqual(['provider', 'redirectUri', 'iat'])
         expect('nonce' in payload).toBe(false)
+    })
+
+    it('a nonce is NOT a free pass: a foreign redirect_uri alongside it is refused', async () => {
+        // The exemption covers exactly one destination, our own /redirect.
+        // Anything else with a nonce attached must hit the same allowlist as a
+        // Chrome/Edge call (and sign no state).
+        for (const foreign of [
+            'https://evil.example/',
+            'https://evil.example/api/extension/oauth/redirect',
+            `${BASE}/api/extension/oauth/redirect/extra`,
+            `${BASE}/api/extension/oauth/redirect?x=1`,
+            `${BASE}.evil.example/api/extension/oauth/redirect`,
+            'https://foreign-extension-id.chromiumapp.org/',
+        ]) {
+            const params = new URLSearchParams({
+                provider: 'google',
+                redirect_uri: foreign,
+                nonce: NONCE,
+            })
+            const res = await authorizeGET(
+                new NextRequest(
+                    `${BASE}/api/extension/oauth/authorize?${params.toString()}`,
+                    { headers: { origin: KNOWN_ORIGIN } },
+                ),
+            )
+            const body = (await res.json()) as {
+                state?: string
+                error?: string
+            }
+            expect(res.status, foreign).toBe(400)
+            expect(body.error, foreign).toBe('Disallowed redirect_uri')
+            expect(body.state, foreign).toBeUndefined()
+        }
+    })
+
+    it('a nonce plus one of our own extension redirect URIs still passes the allowlist', async () => {
+        const params = new URLSearchParams({
+            provider: 'google',
+            redirect_uri: CHROME_REDIRECT_URI,
+            nonce: NONCE,
+        })
+        const res = await authorizeGET(
+            new NextRequest(
+                `${BASE}/api/extension/oauth/authorize?${params.toString()}`,
+                { headers: { origin: KNOWN_ORIGIN } },
+            ),
+        )
+        expect(res.status).toBe(200)
     })
 
     it('refuses a nonce /poll could never look up, instead of signing a dead state', async () => {

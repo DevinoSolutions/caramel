@@ -4,7 +4,7 @@ import { seedVerifiedUser } from './support/seed-user'
 import { firstLinkedStoreDomain } from './support/stores'
 
 // The "Add a code" form on /coupons/[store] (shopper-submitted codes, owner
-// directed 2026-10-02). Two contexts, per CLAUDE.md's e2e rules:
+// directed 2026-10-02). Two contexts, per CLAUDE.md's e2e rules (docs/agent/conventions-and-checks.md):
 //   - the signed-out assertion is DEPLOYMENT-SAFE and ungated: it only reads the
 //     page, so it runs hermetically (e2e-pr / local) AND against the live dev
 //     site (e2e-push);

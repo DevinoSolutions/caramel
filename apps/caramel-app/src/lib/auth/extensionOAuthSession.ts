@@ -28,6 +28,7 @@
 // dead fetch was deleted (NF-07). Parked per DESIGN.md §2(c): adopt
 // better-auth's own mint once a public external-code-exchange API
 // exists.
+import { recordSignup } from '@/lib/auth/signupCapture'
 import prisma from '@/lib/prisma'
 import { randomBytes } from 'crypto'
 
@@ -130,6 +131,18 @@ export async function mintExtensionSession({
                     : 'NOT_VERIFIED',
             },
             include: { accounts: true },
+        })
+        // This raw create bypasses better-auth's databaseHooks, so the signup
+        // is recorded here. The extension's fetch carries no site cookies, so
+        // there are no headers to read a first-touch cookie from: the
+        // acquisition is {source:'unknown', signup_surface:'extension'}, and
+        // the install's own attribution lives on its `extension_installed`
+        // event (keyed by the install id). recordSignup never throws or blocks.
+        await recordSignup({
+            user,
+            headers: null,
+            method: provider,
+            surface: 'extension',
         })
     } else {
         // Reassign `user` so the minted response below reflects the

@@ -59,11 +59,11 @@ describe('cartClassifier — parseResponse pins (F-012, via classifyCart)', () =
         })
     })
 
-    it('(c) unknown primary category throws, naming the offending value', async () => {
-        chatMock.mockResolvedValueOnce('{"primary":"crypto","confidence":0.9}')
+    it('(c) a blank primary category still throws (a malformed reply, not vocabulary drift)', async () => {
+        chatMock.mockResolvedValueOnce('{"primary":"  ","confidence":0.9}')
         await expect(
-            classifyCart(signalsFor('pin-unknown-primary.example')),
-        ).rejects.toThrow('unknown primary category: crypto')
+            classifyCart(signalsFor('pin-blank-primary.example')),
+        ).rejects.toThrow('unknown primary category: ')
     })
 
     it('(d) unknown secondary category is dropped, not thrown', async () => {

@@ -1,4 +1,4 @@
-// F-012 — the cart-classifier eval dataset. 40 cases in the real wire shape
+// F-012 — the cart-classifier eval dataset. 41 cases in the real wire shape
 // (apps/caramel-extension/cart-signals.js's collectCartSignals() payload —
 // domain/title/meta_description/og_site_name/cart_items are the fields
 // buildMessages() actually sends the model; url_path/og_type/platform_hints
@@ -11,8 +11,10 @@
 //     load-bearing: cartClassifier.eval.ts's SCRAMBLE_EVAL red-proof mode
 //     rotates the first 8 of these by one position, which only reliably
 //     mismatches every case if adjacent entries are different categories).
-//   10 realistic restriction-relevant carts — messier, multi-item, mixed
-//     categories, modeling real shop traffic.
+//   11 realistic restriction-relevant carts — messier, multi-item, mixed
+//     categories, modeling real shop traffic (the last one is a production
+//     regression: CARAMEL-T, a furniture cart the model labelled
+//     "furniture", which is not in the vocabulary).
 //    8 ambiguous/adversarial — genuinely dual-category carts and two
 //     prompt-injection attempts (the cart content must win over injected
 //     text asking for a different category).
@@ -424,6 +426,27 @@ const REALISTIC: CartCase[] = [
             ],
         },
         { primary: ['travel'], secondary: null, confidence: [0.3, 1] },
+    ),
+    // CARAMEL-T (2026-10-06): a production cart whose model answer was
+    // "furniture" (outside CATEGORY_ENUM), which used to 500 the route. Furniture
+    // belongs to the closest category in the prompt's vocabulary, home_garden;
+    // a model that answers an out-of-vocabulary label here now degrades to
+    // 'other' at low confidence and fails this case's primary match, so the
+    // drift shows up in the eval gate and not only in Sentry.
+    c(
+        'realistic-furniture-living-room',
+        {
+            domain: 'oakandloom.example',
+            title: 'Cart — Oak & Loom Furniture',
+            meta_description: 'Sofas, bookshelves, and living room furniture.',
+            og_site_name: 'Oak & Loom',
+            cart_items: [
+                '3-Seat Linen Sofa',
+                'Solid Oak Bookshelf 5-Tier',
+                'Walnut Coffee Table',
+            ],
+        },
+        { primary: ['home_garden'], secondary: null, confidence: [0.3, 1] },
     ),
 ]
 

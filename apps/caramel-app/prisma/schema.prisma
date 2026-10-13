@@ -91,6 +91,15 @@ model User {
   // user signs in on must agree, and a localStorage flag cannot travel.
   growthPromptsEnabled Boolean      @default(true) @map("growth_prompts_enabled")
 
+  // Where this user came from — the first-touch record (utm_*, ad click ids,
+  // referrer domain, landing path) the browser put in the `cm_ft` cookie, plus
+  // a derived `source` and the `signup_surface` (web | extension). WRITE-ONCE
+  // at signup by src/lib/auth/signupCapture.ts (an UPDATE guarded on "still
+  // NULL", so a retry or a second hook can never rewrite history). NULL = a
+  // user created before this column existed. It is the copy that survives an
+  // ad blocker: PostHog may never have seen the visit, our database did.
+  acquisition Json?
+
   accounts          Account[]
   sessions          Session[]
   couponReports     CouponReport[]

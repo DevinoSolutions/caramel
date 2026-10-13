@@ -1,7 +1,7 @@
 import { env } from '@/lib/env'
+import { proxyFallbackHeaders } from '@/lib/proxy-fallback-env'
 import * as Sentry from '@sentry/nextjs'
 
-const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
 const DEFAULT_MODEL = env.OPENROUTER_MODEL
 
 export interface ChatMessage {
@@ -15,6 +15,15 @@ export interface ChatOptions {
     maxTokens?: number
     responseFormat?: 'json_object' | 'text'
     timeoutMs?: number
+    /**
+     * Attach the Devino proxy's paid-fallback headers
+     * (src/lib/proxy-fallback-env.ts). Only for a signed-in user's request
+     * whose `timeoutMs` is at least 15 s: the proxy waits 8 s on the free route
+     * before going paid, so a shorter client deadline aborts before the paid
+     * answer lands. Never for guest/unauthenticated requests. chat() makes ONE
+     * fetch and never retries, so one opted-in call is at most one paid call.
+     */
+    paidFallback?: boolean
 }
 
 export class OpenRouterError extends Error {
@@ -56,7 +65,11 @@ export async function chat(
             body.response_format = { type: 'json_object' }
         }
 
-        const res = await fetch(OPENROUTER_URL, {
+        // env.OPENROUTER_API_URL defaults to https://openrouter.ai/api/v1 (no
+        // trailing slash), so with it unset this is exactly the URL this file
+        // used to hardcode; set, it points at an OpenAI-compatible relay such
+        // as the Devino proxy (https://proxyai.devino.ca/v1).
+        const res = await fetch(`${env.OPENROUTER_API_URL}/chat/completions`, {
             method: 'POST',
             signal: controller.signal,
             headers: {
@@ -65,6 +78,12 @@ export async function chat(
                 'HTTP-Referer': 'https://caramel.app',
                 'X-Title': 'Caramel Extension',
                 'X-Request-Id': requestId,
+                // Empty unless the caller opted in, OPENROUTER_FALLBACK_API_KEY
+                // is set and the base URL is https://proxyai.devino.ca.
+                // Shorter client deadlines stay free: paid cannot answer before abort.
+                ...(opts.paidFallback && (opts.timeoutMs ?? 8000) >= 15_000
+                    ? proxyFallbackHeaders(env.OPENROUTER_API_URL)
+                    : {}),
             },
             body: JSON.stringify(body),
         })

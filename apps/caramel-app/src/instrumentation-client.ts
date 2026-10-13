@@ -1,4 +1,5 @@
 import { defersAnalytics, onFirstActivity } from '@/lib/afterPageLoad'
+import { SENTRY_RELEASE } from '@/lib/buildInfo'
 import * as Sentry from '@sentry/nextjs'
 
 // Next.js only loads client instrumentation from `instrumentation-client.ts`.
@@ -53,6 +54,8 @@ const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN
 if (process.env.NODE_ENV === 'production' && dsn) {
     Sentry.init({
         dsn,
+        // Same release as the server and edge inits (sentry.common.config.ts).
+        release: SENTRY_RELEASE,
         // Replay is added from its own chunk (addReplay above), not here.
         integrations: [],
         // Same intake bucket as the server's errors: see sentry.common.config.ts.

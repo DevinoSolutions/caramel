@@ -2,8 +2,10 @@
 // `await import` would trip TS1378 under this tsconfig.
 import { GET } from '@/app/api/account/export/route'
 import {
+    assertExportIsSafe,
     buildAccountExport,
     collectForbiddenKeys,
+    exportableAcquisition,
     exportFilename,
     type AccountExport,
 } from '@/lib/profile/accountExport'
@@ -60,6 +62,20 @@ const ACCOUNT_ROW = {
     username: 'sam',
     createdAt: CREATED_AT,
     emailVerified: true,
+    acquisition: null as unknown,
+}
+
+// What recordSignup writes to users.acquisition (src/lib/auth/signupCapture.ts).
+const ACQUISITION = {
+    utm_source: 'reddit',
+    utm_campaign: 'launch',
+    gclid: 'g1',
+    referrer_domain: 'news.ycombinator.com',
+    landing_path: '/stores/nike',
+    captured_at: '2026-03-14T09:00:00.000Z',
+    source: 'reddit',
+    signup_surface: 'web',
+    signup_method: 'google',
 }
 
 beforeEach(() => {
@@ -187,6 +203,7 @@ describe('buildAccountExport — the shape', () => {
                 emailVerified: true,
             },
             preferences: { savingsSyncEnabled: false },
+            acquisition: null,
             favoriteStores: [
                 { domain: 'nike.com', starredAt: '2026-05-01T00:00:00.000Z' },
             ],
@@ -231,6 +248,19 @@ describe('buildAccountExport — the shape', () => {
         })
     })
 
+    it('exports the acquisition record as the user own data', () => {
+        const payload = buildAccountExport({
+            account: { ...ACCOUNT_ROW, acquisition: ACQUISITION },
+            savingsSyncEnabled: false,
+            favoriteStores: [],
+            savingsEvents: [],
+            couponReports: [],
+        })
+        expect(payload.acquisition).toEqual(ACQUISITION)
+        // Its keys (click ids, utm_*, source) are not credential material.
+        expect(() => assertExportIsSafe(payload)).not.toThrow()
+    })
+
     it('names the file by date', () => {
         expect(exportFilename(new Date('2026-08-09T23:59:00.000Z'))).toBe(
             'caramel-data-2026-08-09.json',
@@ -238,7 +268,66 @@ describe('buildAccountExport — the shape', () => {
     })
 })
 
+describe('exportableAcquisition', () => {
+    it('is null for the null column, non-objects and arrays', () => {
+        for (const value of [null, undefined, 'x', 3, ['a']]) {
+            expect(exportableAcquisition(value)).toBeNull()
+        }
+    })
+
+    it('keeps flat primitive values and drops nested ones rather than exporting them unreviewed', () => {
+        expect(
+            exportableAcquisition({
+                source: 'reddit',
+                n: 1,
+                ok: true,
+                nested: { token: 'secret' },
+                list: ['a'],
+                gone: null,
+            }),
+        ).toEqual({ source: 'reddit', n: 1, ok: true })
+    })
+
+    it('a forbidden key inside a tampered record still fails the export guard', () => {
+        const payload = buildAccountExport({
+            account: { ...ACCOUNT_ROW, acquisition: { password: 'x' } },
+            savingsSyncEnabled: false,
+            favoriteStores: [],
+            savingsEvents: [],
+            couponReports: [],
+        })
+        expect(() => assertExportIsSafe(payload)).toThrow(
+            /acquisition\.password/,
+        )
+    })
+})
+
 describe('GET /api/account/export', () => {
+    it('selects acquisition and includes it in the response body', async () => {
+        prismaMock.user.findUnique.mockResolvedValue({
+            ...ACCOUNT_ROW,
+            acquisition: ACQUISITION,
+        })
+        const res = await GET(exportRequest())
+        expect(res.status).toBe(200)
+        const body = (await res.json()) as AccountExport
+
+        expect(
+            prismaMock.user.findUnique.mock.calls[0]![0].select,
+        ).toMatchObject({ acquisition: true })
+        expect(body.acquisition).toEqual(ACQUISITION)
+        // It travels alongside the data, and the never-include guard still holds.
+        expect(body.account.email).toBe('shopper@example.com')
+        expect(collectForbiddenKeys(body)).toEqual([])
+    })
+
+    it('an account created before acquisition was recorded exports acquisition: null', async () => {
+        const body = (await (
+            await GET(exportRequest())
+        ).json()) as AccountExport
+        expect(body.acquisition).toBeNull()
+    })
+
     it('returns the payload as a downloadable attachment that no cache may store', async () => {
         const res = await GET(exportRequest())
 

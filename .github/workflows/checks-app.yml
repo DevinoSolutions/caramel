@@ -81,6 +81,15 @@ jobs:
         name: Run root prettier-check
         run: pnpm prettier-check:root
 
+      # The repo's own eslint rules (tools/eslint-rules/) are tested from the
+      # repo root with node:test, not from apps/caramel-app with vitest: the
+      # prod image builds from `turbo prune caramel-app`, which has no repo
+      # root, and `next build` type-checks every .ts under the app, so a test
+      # there that imports the root config breaks the Docker build.
+      - if: matrix.task == 'unit'
+        name: Run eslint rule tests
+        run: pnpm test:eslint-rules
+
       - if: matrix.task != 'oxlint' && matrix.task != 'prettier-root'
         name: Run ${{ matrix.task }}
         working-directory: ./apps/caramel-app

@@ -54,23 +54,11 @@ function matchesField(value: unknown, cond: Condition): boolean {
             } else if (key === 'not') {
                 if (matchesField(value, record.not)) return false
             } else if (key === 'equals') {
-                // `mode: 'insensitive'` is a real Postgres behaviour; imitated
-                // here so the unit suite can exercise the case-folded match,
-                // and pinned for real in the integration suite.
-                if (record.mode === 'insensitive') {
-                    if (
-                        typeof value !== 'string' ||
-                        typeof record.equals !== 'string' ||
-                        value.toLowerCase() !== record.equals.toLowerCase()
-                    ) {
-                        return false
-                    }
-                } else if (!matchesField(value, record.equals)) {
-                    return false
-                }
-            } else if (key === 'mode') {
-                // Read by the `equals` branch above; never a filter on its own.
-                continue
+                // `mode: 'insensitive'` is deliberately NOT modelled: Prisma
+                // compiles it to an unescaped ILIKE, the lib never sends it
+                // (eslint bans it), and a `mode` key falls through to the
+                // throw below rather than being silently imitated.
+                if (!matchesField(value, record.equals)) return false
             } else {
                 throw new Error(`fake prisma: unsupported operator "${key}"`)
             }

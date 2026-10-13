@@ -8,11 +8,23 @@
 //     shopper's own gestures, so it cannot place or alter an order.
 //   · It never reads the cart, the order or payment details. The only data that
 //     leaves the page is the store's hostname and the code the shopper typed.
-//   · It does not decide whether the user is signed in or whether the server
-//     flag is on: those gates live in background.js. The per-user switch
-//     (shareCheckoutCodes) and the per-site pause ARE enforced here, from an
-//     in-memory copy kept fresh by storage change events, so that with sharing
-//     off a gesture costs nothing at all (no snapshot, no polling, no query).
+//   · It does not decide whether the user is signed in, whether the server
+//     flag is on, or whether the shopper consented: those gates live in
+//     background.js (consent: checkoutCodeSharingConsent, see
+//     code-sharing-consent.js). Only what is cheap to know in the page is
+//     enforced here, from an in-memory copy kept fresh by storage change
+//     events: the per-site pause, and a recorded "No thanks", so that with
+//     sharing declined or the site paused a gesture costs nothing at all (no
+//     snapshot, no polling, no query).
+//
+// Consent (owner rule 2026-10-06): a code is NEVER sent before the shopper has
+// explicitly accepted. The first time a typed code would be shared and there is
+// no consent record, the worker answers `no-consent` (only after it has
+// established signed-in + flag on, so the prompt is never shown when sharing
+// could not happen) and we show the consent card (UI-helpers.js
+// showCodeSharingPrompt). "Share codes" records `accepted` and then sends the
+// code the card named; "No thanks" records `declined` and never asks again;
+// dismissing records nothing, so the next qualifying capture asks again.
 //
 // What must never be shared, and how each is stopped:
 //   · A gift-card / card / email / loyalty number typed into a look-alike box:
@@ -34,9 +46,12 @@
 // no verdict to read and nothing is captured. The runner's pending-submit
 // machinery is for OUR attempts and is intentionally not reused here.
 import {
+    caramelGetCodeSharingConsent,
     caramelGetSettings,
+    caramelOnCodeSharingConsentChanged,
     caramelOnSettingsChanged,
     caramelSendMessage,
+    caramelSetCodeSharingConsent,
     caramelSiteIsPaused,
     log,
     logError,
@@ -50,6 +65,18 @@ import {
     caramelIsForbiddenControl,
     pickBestMatch,
 } from './dom-utils.js'
+
+// The consent card (UI-helpers.js showCodeSharingPrompt) is INJECTED by
+// entrypoints/content.ts through initCodeCapture, not imported: UI-helpers.js
+// -> coupon-runner.js -> store-detect.js -> code-capture.js would make an import
+// cycle. Until it is injected there is no way to ask, so nothing is sent: the
+// submit path throws (loud), it never treats "cannot ask" as a yes.
+let _askConsent = null
+export function initCodeCapture({ askConsent }) {
+    if (typeof askConsent !== 'function')
+        throw new Error('initCodeCapture: askConsent must be a function')
+    _askConsent = askConsent
+}
 
 // MIRROR of SHOPPER_CODE_PATTERN in apps/caramel-app/src/lib/shopperCoupons.ts,
 // which is the source of truth (the server re-validates). The extension cannot
@@ -89,10 +116,12 @@ const SHARED_MAX = 50
 const VERDICT_TIMEOUT_MS = 10000
 
 let _armed = false
-// In-memory copy of the two user choices that gate capture, null until the
-// first read lands (gestures are ignored until then: fail closed).
-let _prefs = null
-let _prefsFromEvent = false
+// In-memory copy of the two page-side facts that gate capture. Both are UNKNOWN
+// until a read (or a change event) lands, and gestures are ignored until then:
+// fail closed. `_paused`: null = unknown, else boolean. `_consent`:
+// undefined = unknown, null = no valid record, else the parsed record.
+let _paused = null
+let _consent = undefined
 let _prefsReady = Promise.resolve()
 // One number per qualifying gesture. A watcher compares its own against this
 // when its verdict lands; a stale one is discarded.
@@ -134,15 +163,48 @@ export function caramelCodeCaptureReady() {
     return _prefsReady
 }
 
-function _applySettings(settings) {
-    _prefs = {
-        share: settings.shareCheckoutCodes,
-        paused: caramelSiteIsPaused(settings.disabledSites, location.hostname),
-    }
+// Watch gestures unless the shopper said "No thanks" or paused this site. A
+// missing record is watched on purpose: the first accepted code is what
+// triggers the consent card. Whether anything is SENT is background.js's call.
+function _captureOn() {
+    return (
+        _paused === false &&
+        _consent !== undefined &&
+        _consent?.choice !== 'declined'
+    )
 }
 
-function _captureOn() {
-    return !!_prefs && _prefs.share && !_prefs.paused
+function _pausedIn(settings) {
+    return caramelSiteIsPaused(settings.disabledSites, location.hostname)
+}
+
+// Asks the worker to share `code`. The worker owns every gate (signed in, flag
+// on, consent); `no-consent` is its cue that all but the last hold, so this is
+// the moment to ask. Resolves the final worker answer, or a synthetic
+// `{ skipped }` when the shopper dismissed or declined; REJECTS when messaging
+// or persisting the choice fails (a "yes" that was not saved sends nothing).
+async function _submitWithConsent(code) {
+    const answer = () =>
+        caramelSendMessage({
+            action: 'submitShopperCode',
+            site: location.hostname,
+            code,
+        })
+    const first = await answer()
+    if (first?.skipped !== 'no-consent') return first
+    if (!_askConsent)
+        throw new Error(
+            'code-capture: consent prompt not wired (initCodeCapture was not called)',
+        )
+    const choice = await _askConsent({
+        site: location.hostname,
+        code,
+    })
+    if (choice === 'dismissed') return { skipped: 'consent-dismissed' }
+    _consent = await caramelSetCodeSharingConsent(choice)
+    if (choice === 'declined') return { skipped: 'consent-declined' }
+    // The card named THIS code ("Share this code…"), so it may go now.
+    return answer()
 }
 
 function _sharedKeyFor(code) {
@@ -252,11 +314,7 @@ async function _judgeAndShare(rec, code, snapshot, generation) {
     _markShared(code)
     let resp
     try {
-        resp = await caramelSendMessage({
-            action: 'submitShopperCode',
-            site: location.hostname,
-            code,
-        })
+        resp = await _submitWithConsent(code)
     } catch (err) {
         _unmarkShared(code)
         logError('submitShopperCode', err)
@@ -358,16 +416,28 @@ export function armCodeCapture(rec) {
     if (_armed || !rec || !rec.couponInput || !rec.couponSubmit) return false
     try {
         caramelOnSettingsChanged(settings => {
-            _prefsFromEvent = true
-            _applySettings(settings)
+            _paused = _pausedIn(settings)
+        })
+        caramelOnCodeSharingConsentChanged(record => {
+            _consent = record
         })
     } catch (err) {
         logError('codeCapture', err)
         return false
     }
-    _prefsReady = caramelGetSettings().then(settings => {
-        if (!_prefsFromEvent) _applySettings(settings)
-    })
+    // An event that landed first is newer than the read, so a read only fills
+    // what is still unknown. An unreadable consent record stays unknown (capture
+    // stays off for this page) and is reported, not swallowed.
+    _prefsReady = Promise.all([
+        caramelGetSettings().then(settings => {
+            if (_paused === null) _paused = _pausedIn(settings)
+        }),
+        caramelGetCodeSharingConsent()
+            .then(record => {
+                if (_consent === undefined) _consent = record
+            })
+            .catch(err => logError('codeCapture', err)),
+    ]).then(() => undefined)
     document.addEventListener('input', _onInput, true)
     document.addEventListener('click', e => _onClick(e, rec), true)
     document.addEventListener('keydown', e => _onKeydown(e, rec), true)

@@ -414,7 +414,7 @@ The public privacy policy (`/privacy`) promises two operational things; keep the
 
 ## Extension DAU telemetry (Google Chrome daily active installations)
 
-What it is: opening the extension popup in Google Chrome sends at most one successful `POST /api/extension/activity` per installation per UTC day; the route captures PostHog `extension_active` with `distinct_id` = a daily-rotating SHA-256 id, properties `day`, `extension_version`, `browser: "chrome"`, server-derived `signed_in`, `platform: "extension"`, `activity_trigger: "popup_open"`, `$process_person_profile: false`. Contract + privacy model: `apps/caramel-app/src/lib/extensionActivity.ts`; extension half: `apps/caramel-extension/extension-activity.js`; decision: DESIGN.md §2(q).
+What it is: opening the extension popup in Google Chrome sends at most one successful `POST /api/extension/activity` per installation per UTC day; the route captures PostHog `extension_active` with `distinct_id` = a daily-rotating SHA-256 id, properties `day`, `extension_version`, `browser: "chrome"`, server-derived `signed_in`, `platform: "extension"`, `activity_trigger: "popup_open"`, `$process_person_profile: false`. Contract + privacy model: `apps/caramel-app/src/lib/extensionActivity.ts`; extension half: `apps/caramel-extension/extension-activity.js`; decision: DESIGN.md §2(r).
 
 **Switch:** `EXTENSION_DAU_TELEMETRY_ENABLED` (server env, default `false`). Off → the route answers `{status:"disabled"}` and captures nothing in PostHog, but the extension's requests (dailyId, day, version, browser, and the bearer when signed in) still reach the first-party server — off stops capture, not the request; the extension then waits 6 h (bounded, per UTC day) before asking again. The capture also honours `POSTHOG_DATASET` (`disabled` → `{status:"disabled"}`; `e2e` → the e2e project). Shipped extension builds send the request whether or not the switch is on, so the privacy policy must describe it before the extension release that carries it.
 
@@ -492,3 +492,7 @@ TODO(human): record where these are actually set/rotated in Dokploy (env
 var UI vs. secret store) and the rotation procedure for
 `COUPONS_ADMIN_SECRET` / `UPKUMA_HEALTH_SECRET` — not derivable from this
 repo.
+
+## Paid fallback
+
+The optional server-only org key is sent only to https://proxyai.devino.ca, with an 8-second default wait and boot validation. Guests never invoke its env reader; client deadlines below 15 seconds stay free. The only production AI surface is the guest-reachable 7-second classifier, so its worst case is 0 paid attempts per user per day. Future signed-in callers must explicitly opt in with at least 15 seconds; one raw HTTP request has no retries. Keys are capped at $5/week per org and are blanked in evals and E2E.

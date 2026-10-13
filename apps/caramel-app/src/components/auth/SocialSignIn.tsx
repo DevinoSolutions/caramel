@@ -1,6 +1,7 @@
 'use client'
 
 import { socialButtonClasses } from '@/components/auth/authStyles'
+import { trackGrowthEvent } from '@/lib/analytics/growthEvents'
 import { signIn } from '@/lib/auth/client'
 import { useState } from 'react'
 import { FaApple } from 'react-icons/fa'
@@ -37,6 +38,12 @@ export default function SocialSignIn({
 
     const handle = async (provider: Provider) => {
         setPending(provider)
+        // Only the signup page is a signup funnel step; on /login the same
+        // buttons sign existing users in (a first-time user there still gets
+        // a server-side signup_completed).
+        if (verb === 'Sign up') {
+            trackGrowthEvent('signup_started', { method: provider })
+        }
         try {
             const result = await signIn.social({ provider, callbackURL })
             if (result?.error) {

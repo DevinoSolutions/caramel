@@ -38,7 +38,11 @@ module.exports = [
         path: '.size-cache/content-scripts.min.js',
         // 2026-08-10 — measured 70.68 kB minified, from 268.33 kB of source
         // (73.7% of the old budget was formatting and prose).
-        limit: '76 KB',
+        // 2026-10-06, raised 76 -> 80 kB: checkout code sharing became opt-in
+        // (owner rule 2026-10-06) — the consent card (UI-helpers.js
+        // showCodeSharingPrompt) and the consent record module
+        // (code-sharing-consent.js). Measured 76.66 kB: one new UI surface.
+        limit: '80 KB',
         brotli: false,
     },
     {
@@ -61,7 +65,11 @@ module.exports = [
         // every-website match pattern per runtime, the reachability probe that
         // tells "the browser refused us" apart from "you are offline", and the
         // gesture-safe request. Measured 10.04 kB.
-        limit: '11 KB',
+        // 2026-10-13, raised 11 -> 12 kB: recordPopupActivity (the popup
+        // half of the Google Chrome daily-active ping — one message to the
+        // worker, never a fetch from the popup) on top of main's 1.4.11
+        // popup growth left 1.2% headroom. Measured 10.87 kB.
+        limit: '12 KB',
         brotli: false,
     },
     {
@@ -76,7 +84,12 @@ module.exports = [
         // the browser-refused-us state that used to render as a connection
         // error) plus the AllSitesBanner component for the narrow-grant
         // install. Measured 30.39 kB — two real surfaces, not prose.
-        limit: '33.5 KB',
+        // 2026-10-11, raised 33.5 -> 41 kB (issue #288): the popup's "Did it
+        // work?" vote prompt, per-shopper hide, and the two collapsed
+        // sections (reported-not-working, hidden) — three new components plus
+        // the storage module behind them (couponVote.ts). Measured 31.33 ->
+        // 37.97 kB (+6.64 kB): one new feature surface, not prose.
+        limit: '41 KB',
         brotli: false,
     },
     {
@@ -93,13 +106,18 @@ module.exports = [
         // features cache (storage.session, memory fallback) and the mapping of
         // the submit route's answers onto skipped-vs-error. Measured 8.4 kB
         // (was 6.41 kB): one new message route, not prose.
-        // 2026-10-05, raised 9.2 -> 12 kB: extension-activity.js joined
+        // 2026-10-06, raised 9.2 -> 10 kB: submitShopperCode also reads the
+        // checkoutCodeSharingConsent record (code-sharing-consent.js) and
+        // answers no-consent, so nothing is sent before an explicit yes.
+        // Measured 9.29 kB.
+        // 2026-10-13, raised 10 -> 13 kB: extension-activity.js joined
         // this group (the Google Chrome daily-active ping's worker half —
         // seed + SHA-256 daily id, the once-per-UTC-day state, the bounded
         // disabled/failure cooldowns, the serialized in-flight attempt) plus
         // the popup-only recordExtensionActivity route in background.js.
-        // Measured 10.91 kB (was 8.55 kB): one new feature, not prose.
-        limit: '12 KB',
+        // Measured 11.96 kB after merging main's code-sharing consent (was
+        // 9.29 kB): one new feature, not prose.
+        limit: '13 KB',
         brotli: false,
     },
 ]

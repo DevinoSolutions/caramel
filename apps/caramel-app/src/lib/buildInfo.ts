@@ -17,3 +17,13 @@
 // each build context, and .github/workflows/scripts/wait-for-deploy.sh for the
 // CI gate that consumes it.
 export const BUILD_SHA: string = process.env.GIT_COMMIT_SHA ?? 'unknown'
+
+// The Sentry `release` every init (server, edge, browser) reports, so each
+// event carries the commit that produced it. Before this every event had
+// release: null, which made 'is it fixed in the deployed build?' unanswerable.
+// undefined — not the string 'unknown' — when the build could not resolve a
+// commit: Sentry then records no release instead of a bogus one that groups
+// unrelated builds together. Lives here, next to the inlined sha, because the
+// same build-time inlining caveat applies (see the header above).
+export const SENTRY_RELEASE: string | undefined =
+    BUILD_SHA === 'unknown' ? undefined : BUILD_SHA

@@ -1,0 +1,22 @@
+-- Index for the subdomain arm of every store-scoped coupon read
+-- (couponsRepo.onStoreSql): `reverse(site) LIKE reverse('.' || store) || '%'`
+-- is a PREFIX match on the reversed text, which a btree on reverse(site) with
+-- text_pattern_ops answers (text_pattern_ops because under a non-"C" collation (en_US.utf8 here)
+-- LIKE-prefix cannot use a default-opclass btree). Postgres
+-- BitmapOrs it with coupons_site_idx (the exact arm). Before this the suffix
+-- was `right(site, length(store) + 1) = '.' || store`, which defeated
+-- coupons_site_idx and made every store read a Parallel Seq Scan over all of
+-- `coupons` (217,743 rows, 82 MB, ~40-65 ms; two reads per store page).
+--
+-- NO column change: Prisma cannot model an expression index, so schema.prisma
+-- carries nothing for it and the schema-drift gates stay clean (the same
+-- arrangement as the site_suggestions_requester_email_folded CHECK).
+--
+-- Plain CREATE INDEX, not CONCURRENTLY, on purpose. At this table size the build
+-- is ~1-2 s and blocks only WRITES to `coupons` (ingest pushes, usage stamps)
+-- for that long; reads keep working. It is atomic: if it fails nothing is left
+-- behind and `migrate deploy` simply retries. CONCURRENTLY would need a
+-- single-statement non-transactional migration and, on failure, leaves an
+-- INVALID index that a retry's `IF NOT EXISTS` would silently skip.
+-- CreateIndex
+CREATE INDEX "coupons_site_reverse_idx" ON "public"."coupons" (reverse("site") text_pattern_ops);

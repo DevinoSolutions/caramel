@@ -16,6 +16,10 @@
 // registration. What is left at module scope is inert declarations, so WXT can
 // import this file in Node at build time to read the entrypoint's options.
 import { CARAMEL_BASE_URL, CARAMEL_ENV } from './caramel-env.js'
+import {
+    codeSharingAccepted,
+    readCodeSharingConsent,
+} from './code-sharing-consent.js'
 import { createActivityRecorder } from './extension-activity.js'
 
 // Assigned by initBackground() instead of at module evaluation: the IIFE throws
@@ -28,6 +32,26 @@ let currentBrowser
 let recordActivity
 
 const caramelUrl = path => new URL(path, `${CARAMEL_BASE_URL}/`).toString()
+
+// Which store channel this build is running from, for install attribution.
+// The runtime URL scheme separates Firefox and Safari; Edge installs the same
+// Chromium build as Chrome, so only its user agent tells them apart. The four
+// values mirror EXTENSION_STORES in apps/caramel-app/src/lib/extensionInstall.ts
+// (pinned by tests/install-welcome.test.mjs).
+export const detectStoreChannel = (runtimeUrl, userAgent) => {
+    if (runtimeUrl.startsWith('moz-extension://')) return 'firefox'
+    if (runtimeUrl.startsWith('safari-web-extension://')) return 'safari'
+    return /\bEdg(e|A|iOS)?\//.test(userAgent) ? 'edge' : 'chrome'
+}
+
+// The one-time post-install page (apps/caramel-app/src/app/welcome). `iid` is
+// minted per install and becomes the PostHog event uuid there, so reloading or
+// re-opening the page can never count the install twice.
+export const welcomeUrl = (store, version, iid) =>
+    caramelUrl(
+        'welcome?' +
+            new URLSearchParams({ src: 'ext', store, v: version, iid }),
+    )
 
 // Same policy as `logError` in caramel-base.js, which the service worker
 // cannot share (separate context, no content-script files loaded here): a
@@ -141,7 +165,12 @@ async function fetchCaramelApi(url, opts = {}, timeoutMs = FETCH_TIMEOUT_MS) {
 /* --------------------------------------------------  shopper code sharing
  * code-capture.js (content script) hands us a code the shopper typed and the
  * store accepted. Whether it may leave the browser is decided HERE, not in the
- * page: signed in, and the server flag on. The flag is read from the public
+ * page: signed in, the server flag on, and the shopper's explicit consent
+ * (checkoutCodeSharingConsent === accepted, see code-sharing-consent.js; absent,
+ * declined or malformed all refuse). The gates run in that order, so
+ * `no-consent` is only ever answered to a signed-in shopper while the flag is
+ * on: that answer is the content script's cue to show the consent prompt, which
+ * is therefore never shown when sharing could not happen anyway. The flag is read from the public
  * features endpoint and cached (storage.session when the browser has it, so a
  * restarted worker does not refetch; memory otherwise): 6h for `true`, but only
  * 30min for `false`, so an owner flipping the flag on is felt within half an
@@ -238,11 +267,27 @@ export async function submitShopperCode(message) {
         throw new Error('submitShopperCode: site and code must be strings')
     if (!(await getStoredToken())) return { skipped: 'signed-out' }
     if (!(await _shopperCaptureEnabled())) return { skipped: 'disabled' }
+    // A failed storage read rejects (loud, answered as `{ error }`): refusing
+    // to send is the safe side, and it must not look like a plain "no".
+    // The SAME record gates the send and is the proof sent with it: the server
+    // refuses a checkout submission without an accepted consent (403
+    // `consent-required`), so a build that omits the field can never capture.
+    const consentRecord = await readCodeSharingConsent(currentBrowser)
+    if (!codeSharingAccepted(consentRecord)) return { skipped: 'no-consent' }
 
     const r = await fetchCaramelApi(caramelUrl('api/coupons/submit'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ site, code, source: 'checkout' }),
+        body: JSON.stringify({
+            site,
+            code,
+            source: 'checkout',
+            consent: {
+                choice: consentRecord.choice,
+                promptVersion: consentRecord.promptVersion,
+                at: consentRecord.at,
+            },
+        }),
     })
     // On a refusal the body is only used to NAME it; one we cannot read just
     // falls back to the generic reason below.
@@ -263,6 +308,13 @@ export async function submitShopperCode(message) {
         _forgetFeatures()
         return { skipped: 'disabled' }
     }
+    // The server's own consent gate refused the proof we just sent (e.g. its
+    // prompt-version floor moved above ours). Quiet, nothing was stored. NOT
+    // `no-consent`: that answer is the page's cue to show the consent card
+    // (code-capture.js _submitWithConsent), and a shopper who already said yes
+    // must not be asked again because the server disagrees with the record.
+    if (r.status === 403 && body?.error === 'consent-required')
+        return { skipped: 'consent-rejected' }
     if (r.status === 422) {
         // Expected refusals (not a store we know, not a plausible code).
         if (CARAMEL_ENV.verbose)
@@ -459,6 +511,31 @@ export function initBackground() {
         })
     }
 
+    // First install only: an update (reason 'update'), a browser update and a
+    // shared-module update all pass through here too and must open nothing.
+    currentBrowser.runtime.onInstalled.addListener(details => {
+        if (details?.reason !== 'install') return
+        try {
+            const url = welcomeUrl(
+                detectStoreChannel(
+                    currentBrowser.runtime.getURL(''),
+                    navigator.userAgent,
+                ),
+                currentBrowser.runtime.getManifest().version,
+                crypto.randomUUID(),
+            )
+            currentBrowser.tabs.create({ url }, () => {
+                if (currentBrowser.runtime.lastError)
+                    logError(
+                        'onInstalledWelcome',
+                        currentBrowser.runtime.lastError,
+                    )
+            })
+        } catch (err) {
+            logError('onInstalledWelcome', err)
+        }
+    })
+
     currentBrowser.runtime.onMessage.addListener(
         (message, sender, sendResponse) => {
             if (!message || typeof message.action !== 'string') return
@@ -560,12 +637,38 @@ export function initBackground() {
                 // Trust-loop signal from the apply flow (coupon-runner). Fire-and-forget:
                 // errors are logged, never surfaced — a report must not break checkout.
                 // A "worked" outcome also bumps the public usage counter.
-                const { id, outcome, storeReason } = message
-                fetchCaramelApi(caramelUrl(`api/coupons/${id}/report`), {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ outcome, storeReason }),
-                }).catch(err => logError('reportOutcome', err))
+                const { id, outcome, storeReason, awaitResult } = message
+                const report = fetchCaramelApi(
+                    caramelUrl(`api/coupons/${id}/report`),
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ outcome, storeReason }),
+                    },
+                )
+                if (awaitResult) {
+                    // The popup's "Did it work?" vote: the shopper is waiting on
+                    // the answer, so the real status goes back (a 429 reads
+                    // differently from a dead network) instead of a swallowed
+                    // failure. No usage bump — a vote is not an apply.
+                    report
+                        .then(r =>
+                            sendResponse(
+                                r.ok
+                                    ? { success: true }
+                                    : {
+                                          error: `HTTP ${r.status}`,
+                                          status: r.status,
+                                      },
+                            ),
+                        )
+                        .catch(err => {
+                            logError('reportOutcome', err)
+                            sendResponse({ error: String(err) })
+                        })
+                    return true
+                }
+                report.catch(err => logError('reportOutcome', err))
                 if (outcome === 'worked') {
                     fetchCaramelApi(caramelUrl('api/coupons/increment'), {
                         method: 'POST',

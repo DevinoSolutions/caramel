@@ -117,6 +117,9 @@ describe('GET /api/coupons — list+count (CouponListRow + TotalCountRow)', () =
             discount_amount: 10,
             // attachSignals merges this on; no seeded signal → null.
             lastWorkedAt: null,
+            lastFailedAt: null,
+            failCount: 0,
+            keepsFailing: false,
         })
         expect(body.total).toBe(1)
         expect(body.hasMore).toBe(false)
