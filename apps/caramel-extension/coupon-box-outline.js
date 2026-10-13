@@ -13,8 +13,15 @@
 // What it never carries: free page text (product names, prices, the shopper's
 // own name and address on a checkout). Only an element's accessible name, and
 // in every name each digit becomes # and anything shaped like an email address
-// becomes [email]. The [n] index is the one number kept: the answer names
-// elements by it, and `elements[n]` maps it back to the node.
+// becomes [email]; then every word not on a fixed allowlist is dropped (see
+// ALLOWED_WORDS). The [n] index is the one number kept: the answer names
+// elements by it, and `elements[n]` maps it back to the node. A field's typed
+// value is never read: of the inputs only a submit, button or reset button is
+// named by its value, which is the label the store wrote on it.
+//
+// This file is not part of the content-script bundle. It ships beside it
+// (assets/coupon-box-outline.js) and coupon-box-discovery.js imports it only
+// when it is about to ask the server, so pages that never ask never load it.
 //
 // The format is the one the pick was measured on (roles, quoting, indentation,
 // the [disabled] / [expanded] / [collapsed] states). Changing it changes what
@@ -78,6 +85,103 @@ const clip = (s, n) => (s.length > n ? s.slice(0, n - 1) + '…' : s)
 const scrub = s =>
     s.replace(/[\w.+-]+@[\w-]+\.[\w.]+/g, '[email]').replace(/\d/g, '#')
 const bytes = s => new TextEncoder().encode(s).length
+
+// The words a name may carry. Every other word is dropped before the outline
+// is built, so anything that is not a word stores put on their own controls
+// (a person's name, a street, a city, a product, a message typed into a field)
+// can never leave the browser, whatever element it turns up in: a saved
+// address, a greeting, an aria-label, a value. A deny-list cannot promise
+// that, because the words to deny are the shopper's and cannot be listed.
+// The list is the one the server's pick was measured with: interface and
+// coupon vocabulary in the store languages the finder reads. It changes only
+// together with the server's eval.
+// Exported for the tests.
+export const ALLOWED_WORDS = new Set(
+    `
+    a about accent accept accessibility accessories account achat act
+    actiecode active add address affiliate affiliates affirm agree air
+    aktionscode all allow also always american an and anwenden apartment
+    aplicar app applica applied appliquer apply are arrivals art as at
+    available avez back bag bags balance bar basket bath bathroom be become
+    bed bedding bedroom beds bedside benefits best bestsellers billing blog
+    body bon book bookcases books boots box brand brands bundles buono
+    business buy by cadeau cadeaubon can cancel candles canjear canvas card
+    cards care careers cart categories center certificate certificates chair
+    chairs chance change chat check checkbox checkout chest choices choose
+    christmas chrome city classic clean cleaning clear clearance click close
+    clothing club code codes codice coffee collection collections com
+    commercial company compare conditions confirm consent console consumer
+    contact content continue control cookie cookies corporate cost country
+    coupon coupons create credit cupom cupones cupón curated current
+    cushions custom customer código data day deal deals decor decrease
+    delete delivery desconto descuento design desk desks details dialog
+    digital diners dining discount discounts discover do double drawers du
+    easy edge edit eingeben einlösen elo email empty enjoy enter essential
+    essentials etc event every exchanges exclusive expand explore express
+    fabric face facebook fall faq faqs favorites featured feedback filter
+    finalize financing find finder first fit floor footer footwear for
+    frames free frequently fresh friend from full functional furniture
+    gavekort get gift giftcard giftcards gifts gloves go golf got guarantee
+    guide gutschein gutscheincode hand hast have health help here hide high
+    history holiday home homepage how i ideal if ihr image in increase info
+    information inserisci instagram invoeren is it item items jackets jcb
+    join kampanjkod keep kids kitchen klarna know kod korting kortingscode
+    label language last later learn leather left legal less light lighting
+    like links list live living log login logo low loyalty made main manage
+    map mattresses me media membership men menu message method mini mirrors
+    mobile modal modern more move my name navigate navigation necessary need
+    new news next night no not notice notifications now number nursery of
+    off offer offers office ok on one onetrust online only open opens
+    optional options or order orders original our out outdoor outlet over
+    pack page pants password pay payment paypal performance personal phone
+    photo pillows pinterest place play plus policies policy postal power
+    powered pre preference preferences presentkort press previous price
+    privacy pro problem proceed product products program promo promos
+    promotion promotional promotions protection province purchase qty
+    qualify quantity questions quick rabatkode rabatowy rabatt rabattcode
+    rabattkod receive redeem redemption refer refresh refund refunds region
+    register remember remise remove report required resgatar resources
+    retail return returns review reviews reward rewards right rights room
+    rugs réduction safety saisir sale sales save sconto scroll search season
+    seater secure security see select sell sellers service services set sets
+    settings share ship shipping shoes shop shopping shorts show side
+    sideboards sign site sitemap size skip sleep slide small social sofas
+    space special start state statement status stools storage store stores
+    story street strictly style submenu submit subscribe subtotal suite
+    summary summarytotal supplies support sustainability tab table tables
+    targeting tax team terms text that the there this tienes tiktok time
+    tips to toepassen toggle tools top tops total track tracking trade
+    traditional training travel trending tu twitter type un una under une
+    unionpay up update updates use used value view votre voucher vouchers
+    vous wall warranty was water we website what window wishlist with women
+    world wrap you your youtube zip zniżka
+`
+        .split(/\s+/)
+        .filter(Boolean),
+)
+
+/* `name` with only its allowlisted words: a whitespace-separated token is
+ * kept verbatim when every run of letters in it is an allowed word (lowercased),
+ * or when it has no letters at all ("#", "/", "*"); any other token is dropped.
+ * '' when nothing is left. */
+// Exported for the tests.
+export function caramelAllowedWords(name) {
+    return name
+        .split(/\s+/)
+        .filter(token => {
+            const letters = token
+                .toLowerCase()
+                .replace(/[^\p{L}]+/gu, ' ')
+                .trim()
+            return (
+                !letters || letters.split(' ').every(w => ALLOWED_WORDS.has(w))
+            )
+        })
+        .join(' ')
+        .trim()
+}
+// What a line may print as a name: scrubbed, then allowlisted.
+const safeName = s => caramelAllowedWords(scrub(s))
 
 /* The outline of `root` (the page body by default) and the element each index
  * names: { outline, elements }, `elements[n]` being the node printed as [n].
@@ -161,8 +265,13 @@ export function caramelPageOutline(root = document.body) {
             if (ph) return ph
             return norm(el.getAttribute('title'))
         }
+        // An input's value is a label only on a button the store drew; on any
+        // other input, whatever its role, it is what the shopper typed.
         if (el.tagName === 'INPUT')
-            return norm(el.value || el.getAttribute('title'))
+            return norm(
+                (/^(submit|button|reset)$/.test(el.type) ? el.value : '') ||
+                    el.getAttribute('title'),
+            )
         const t = textOf(el)
         if (t) return t
         const img = el.querySelector && el.querySelector('img[alt]')
@@ -183,7 +292,7 @@ export function caramelPageOutline(root = document.body) {
             if (hidden(n)) continue
             const role = roleOf(n)
             if (INTERACTIVE.test(role)) {
-                const name = clip(nameOf(n, role), 80)
+                const name = safeName(clip(nameOf(n, role), 80))
                 const state = []
                 if (n.disabled || n.getAttribute('aria-disabled') === 'true')
                     state.push('disabled')
@@ -193,7 +302,7 @@ export function caramelPageOutline(root = document.body) {
                     role +
                     (name ? ' "' + name + '"' : '') +
                     (state.length ? ' [' + state.join(', ') + ']' : '')
-                push(depth, '[' + counter + '] ' + scrub(body), n, counter++)
+                push(depth, '[' + counter + '] ' + body, n, counter++)
                 if (FIELD.test(role)) continue
                 if (
                     n.querySelector(
@@ -204,19 +313,20 @@ export function caramelPageOutline(root = document.body) {
                 continue
             }
             if (role === 'heading') {
-                push(
-                    depth,
-                    scrub('heading "' + clip(nameOf(n, role), 100) + '"'),
-                )
+                const name = safeName(clip(nameOf(n, role), 100))
+                push(depth, 'heading' + (name ? ' "' + name + '"' : ''))
                 continue
             }
             if (CONTAINER.test(role)) {
                 const lb = n.getAttribute('aria-labelledby')
-                const name = clip(
-                    norm(n.getAttribute('aria-label')) || (lb ? byIds(lb) : ''),
-                    60,
+                const name = safeName(
+                    clip(
+                        norm(n.getAttribute('aria-label')) ||
+                            (lb ? byIds(lb) : ''),
+                        60,
+                    ),
                 )
-                push(depth, scrub(role + (name ? ' "' + name + '"' : '') + ':'))
+                push(depth, role + (name ? ' "' + name + '"' : '') + ':')
                 walk(n, depth + 1)
                 continue
             }

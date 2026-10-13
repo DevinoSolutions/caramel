@@ -1,13 +1,15 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
+    ALLOWED_WORDS,
     CARAMEL_OUTLINE_MAX_BYTES,
+    caramelAllowedWords,
     caramelPageOutline,
 } from '../coupon-box-outline.js'
 
 // The outline the coupon-box pick reads. Its format is the one the server's
 // pick was measured on, so these pin it to the character: roles, quoting,
 // indentation, states, and what never leaves the page (free text, digits,
-// email addresses).
+// email addresses, and every word not on the allowlist).
 
 const CART =
     '<header><nav aria-label="Main menu"><a href="/">Home</a>' +
@@ -56,7 +58,8 @@ const EXPECTED = [
     '      - [10] link "more"',
     '  - group:',
     '    - [11] button "Shipping (#)"',
-    '    - [12] link "Rates"',
+    // "Rates" is not an allowlisted word: the link keeps its role, not its name.
+    '    - [12] link',
     '  - complementary:',
     '    - dialog:',
     '      - [13] button "Close dialog #"',
@@ -122,5 +125,128 @@ describe('the page outline', () => {
             expect(line).toMatch(/^- (heading "€{99}"|\[\d+\] link "Item")$/)
         // An index cut off with its line is never mapped back.
         expect(elements).toHaveLength(last + 1)
+    })
+})
+
+// A checkout drawn for a signed-in shopper: every place a store prints the
+// shopper's own details into an element's name. Placeholder details only.
+const CHECKOUT =
+    '<header><a href="/account">Signed in as Avery Sample</a></header>' +
+    '<main>' +
+    '<h1>Hello Avery, welcome back</h1>' +
+    '<fieldset><legend>Saved addresses</legend>' +
+    '<label><input type="radio" name="addr" checked> Avery Sample, 12 Testing Lane, Sampletown</label>' +
+    '<input type="radio" name="addr" aria-label="Robin Sample, 9 Quill Road, Otherville">' +
+    '</fieldset>' +
+    '<button type="button">Deliver to Avery Sample</button>' +
+    '<section aria-label="Avery Sample delivery"><p>Arrives soon</p></section>' +
+    '<input type="text" role="button" value="Happy birthday Robin, love from Kit">' +
+    '<form>' +
+    '<label for="dc">Discount code or gift card</label><input id="dc" type="text">' +
+    '<input type="submit" value="Apply">' +
+    '</form>' +
+    '</main>'
+
+const PERSONAL = [
+    'avery',
+    'sample',
+    'robin',
+    'kit',
+    'testing',
+    'quill',
+    'sampletown',
+    'otherville',
+    'happy',
+    'birthday',
+    'love',
+    'hello',
+    'welcome',
+]
+
+describe('no shopper detail leaves the browser', () => {
+    it('drops every word that is not on the allowlist, wherever it is', () => {
+        document.body.innerHTML = CHECKOUT
+
+        const { outline } = caramelPageOutline(document.body)
+
+        for (const word of PERSONAL)
+            expect(outline.toLowerCase()).not.toContain(word)
+        expect(outline).toBe(
+            [
+                '- banner:',
+                '  - [0] link "in as"',
+                '- main:',
+                '  - heading "back"',
+                '  - group:',
+                '    - [1] radio "##"',
+                '    - [2] radio "#"',
+                '  - [3] button "to"',
+                '  - region "delivery":',
+                '  - [4] button',
+                '  - form:',
+                '    - [5] textbox "Discount code or gift card"',
+                '    - [6] button "Apply"',
+            ].join('\n'),
+        )
+    })
+
+    it('reads no value but a button the store drew', () => {
+        document.body.innerHTML =
+            '<input type="text" role="button" value="Apply">' +
+            '<input type="search" role="link" value="Apply">' +
+            '<input type="submit" value="Apply">' +
+            '<input type="button" value="Apply">' +
+            '<input type="reset" value="Apply">'
+
+        expect(caramelPageOutline(document.body).outline).toBe(
+            [
+                '- [0] button',
+                '- [1] link',
+                '- [2] button "Apply"',
+                '- [3] button "Apply"',
+                '- [4] button "Apply"',
+            ].join('\n'),
+        )
+    })
+
+    it('keeps the controls a store draws, verbatim but for digits', () => {
+        const labels = [
+            'Place order',
+            'Buy now',
+            'Delete',
+            'Checkout',
+            'Pay with PayPal',
+            'Sign in',
+            'Continue',
+            'Pay $12.50 now',
+        ]
+        document.body.innerHTML = labels
+            .map(l => `<button type="button">${l}</button>`)
+            .join('')
+
+        expect(caramelPageOutline(document.body).outline).toBe(
+            labels
+                .map((l, i) => `- [${i}] button "${l.replace(/\d/g, '#')}"`)
+                .join('\n'),
+        )
+    })
+})
+
+describe('the word allowlist', () => {
+    it('is the measured list', () => {
+        expect(ALLOWED_WORDS.size).toBe(574)
+        for (const w of ['buy', 'delete', 'place', 'voucher', 'zniżka'])
+            expect(ALLOWED_WORDS.has(w)).toBe(true)
+        for (const w of ALLOWED_WORDS) expect(w).toMatch(/^\p{Ll}+$/u)
+    })
+
+    it('keeps tokens of allowed words or no letters, verbatim, and drops the rest', () => {
+        expect(caramelAllowedWords('Enter Promo-Code (Optional) *')).toBe(
+            'Enter Promo-Code (Optional) *',
+        )
+        expect(caramelAllowedWords('Code: Avery-Sample # / ##')).toBe(
+            'Code: # / ##',
+        )
+        expect(caramelAllowedWords('Avery Sample')).toBe('')
     })
 })

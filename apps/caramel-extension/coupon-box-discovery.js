@@ -35,8 +35,12 @@
 // from an outline of the page (caramelPickedRecord, behind its own flag,
 // couponBoxLlm). Its pick goes through the same record and the same apply
 // flow as a rule pick, so every check after this point still runs.
-import { caramelSendMessage, log, sleep } from './caramel-base.js'
-import { caramelPageOutline } from './coupon-box-outline.js'
+import {
+    caramelSendMessage,
+    currentBrowser,
+    log,
+    sleep,
+} from './caramel-base.js'
 import {
     _isVisible,
     caramelFindMoney,
@@ -1359,7 +1363,7 @@ export async function caramelDiscoveredRecord(rec, doc = document) {
     }
     if (!found.inputVisible || !confident(found)) {
         log('FINDER_NO_BOX', { reasons: found.reasons })
-        return caramelPickedRecord(rec, totalRow, doc)
+        return caramelPickedRecord(rec, doc)
     }
     log('FINDER_PICKED', { reasons: found.reasons })
     return finderRecord(rec, found, totalRow, opened)
@@ -1408,8 +1412,9 @@ function finderRecord(rec, found, totalRow, opened) {
 /* ------------------------------------------------------- the server's pick */
 // The rules saw a readable total but no box. With the couponBoxLlm flag on,
 // the server is asked once, from an outline of the page (coupon-box-outline.js:
-// element names only, digits and emails scrubbed, no page text), which element
-// is the box, its apply button, or the toggle that reveals it.
+// element names only, digits and emails scrubbed, only allowlisted words, no
+// page text), which element is the box, its apply button, or the toggle that
+// reveals it.
 //
 // Its answer is a suggestion, checked here before anything is touched:
 //   · each pick must still be on the page; the input must be a field the apply
@@ -1425,8 +1430,16 @@ function finderRecord(rec, found, totalRow, opened) {
 //
 // At most one ask per store per tab session, whatever came back.
 const PICK_KEY = 'caramel_box_pick:'
-// Longer than the background's own 15s limit on the request.
-const PICK_WAIT_MS = 17000
+// How long the page waits for the answer. The server gives the model 20s and
+// then answers no_pick itself; the background allows the whole ask (flag
+// read, token read, request) COUPON_BOX_PICK_DEADLINE_MS, 24s (background.js);
+// 2s more covers the message hops and reading the answer, so an answer sent
+// inside that deadline always arrives here. Raise one, raise the ones after.
+export const PICK_WAIT_MS = 26000
+// The outline builder (coupon-box-outline.js) is not in the content-script
+// bundle: the build ships it as this file and it is loaded only by a page that
+// is about to ask.
+const OUTLINE_MODULE = 'assets/coupon-box-outline.js'
 // Labels the server refuses to click, mirrored for the button and the toggle.
 const NEVER_CLICK =
     /check ?out|place (?:my |your )?order|\bpay\b|pay ?pal|pay now|buy now|purchase|\bremove\b|\bdelete\b|empty (?:cart|basket|bag)|sign ?in|sign ?up|log ?in|register|create (?:an )?account|subscribe|continue/i
@@ -1480,14 +1493,26 @@ function clickable(el) {
 }
 
 // Called from caramelDiscoveredRecord, after the rules found no box.
-async function caramelPickedRecord(rec, totalRow, doc) {
+async function caramelPickedRecord(rec, doc) {
     if (!(await caramelCouponBoxLlmOn())) return null
     const domain = String(rec.domain || doc.location?.hostname || '')
         .trim()
         .toLowerCase()
     if (!domain || pickAsked(domain)) return null
     rememberPick(domain)
-    const { outline, elements } = caramelPageOutline(doc.body)
+    let outline, elements
+    try {
+        const { caramelPageOutline } = await import(
+            /* @vite-ignore */ currentBrowser.runtime.getURL(OUTLINE_MODULE)
+        )
+        ;({ outline, elements } = caramelPageOutline(doc.body))
+    } catch (err) {
+        // The builder did not load or failed: a miss like any other.
+        log('FINDER_PICK_MISS', {
+            outline: String(err?.message || err),
+        })
+        return null
+    }
     let answer
     try {
         answer = await caramelSendMessage(
@@ -1505,11 +1530,22 @@ async function caramelPickedRecord(rec, totalRow, doc) {
         })
         return null
     }
+    // The cart may have re-rendered while the server answered: the baseline is
+    // the total as it is now, and with no readable total nothing can be
+    // measured.
+    const total = findTotalRow(doc)
+    if (!total?.el || !readableTotal(total.el)) {
+        log('FINDER_NO_TOTAL', { after: 'pick' })
+        return null
+    }
 
     let input = pickedEl(elements, answer.input)
     if (!typeableInput(input)) input = null
     let button = pickedEl(elements, answer.button)
-    if (!clickable(button) || button === input) button = null
+    // An apply button never leaves the page: a link elsewhere is a way out of
+    // the cart, whatever it says.
+    if (!clickable(button) || button === input || navigatesAway(button))
+        button = null
     let toggle = pickedEl(elements, answer.toggle)
     if (
         toggle &&
@@ -1520,11 +1556,18 @@ async function caramelPickedRecord(rec, totalRow, doc) {
             checkboxOf(toggle)?.type === 'radio')
     )
         toggle = null
+    // The server's button, else the one the rules see beside the input; a
+    // link that leaves the page is never it either way.
+    const buttonFor = el => {
+        if (button) return button
+        const b = findButton(el)?.el
+        return b && !navigatesAway(b) ? b : null
+    }
 
     let found = null
     let opened = null
     if (input && visible(input)) {
-        found = { input, button: button || findButton(input)?.el || null }
+        found = { input, button: buttonFor(input) }
     } else if (toggle) {
         const check = checkboxOf(toggle)
         const wasChecked = check?.checked
@@ -1534,10 +1577,7 @@ async function caramelPickedRecord(rec, totalRow, doc) {
             // The server's own input once it shows, else whatever box the
             // rules can now see.
             if (input && visible(input) && typeableInput(input))
-                found = {
-                    input,
-                    button: button || findButton(input)?.el || null,
-                }
+                found = { input, button: buttonFor(input) }
             else {
                 const rules = caramelDiscoverCouponBox(doc)
                 if (rules.inputVisible && confident(rules)) found = rules
@@ -1564,7 +1604,7 @@ async function caramelPickedRecord(rec, totalRow, doc) {
         toggle: !!opened,
         reasons: found.reasons || null,
     })
-    return finderRecord(rec, found, totalRow, opened)
+    return finderRecord(rec, found, total, opened)
 }
 
 // What a box IS, by its most stable name: the field name the server reads,
