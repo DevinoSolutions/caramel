@@ -14,7 +14,7 @@
 // an IP-rotating sender gets a fresh bucket per address, and any path that
 // reaches the origin without Cloudflare can pick its own CF-Connecting-IP. So
 // a budget meters the one thing that costs money — an UNCACHED model call —
-// at two levels:
+// at two levels (plus an optional per-day cap, see `daily` below):
 //
 //   * per client: a tighter bucket than the route's, counting model calls
 //     only (cache hits stay free and unmetered);
@@ -28,7 +28,7 @@ import { reportRateLimitRejection } from '@/lib/abuseSignal'
 import * as Sentry from '@sentry/nextjs'
 import { RateLimiterMemory, type RateLimiterRes } from 'rate-limiter-flexible'
 
-export type ModelBudgetScope = 'client' | 'global'
+export type ModelBudgetScope = 'client' | 'global' | 'daily'
 
 /** Thrown by a budget's `admit` when a model call would exceed it. The route
  * turns it into a 429; the extension treats any non-2xx from these routes as
@@ -59,6 +59,10 @@ export interface ModelCallBudgetConfig {
     abuseKind: string
     perClient: BucketSize
     global: BucketSize
+    /** Optional third, process-wide bucket (a per-day cap), metered like
+     * `global`: only uncached model calls, one Sentry event per window. Absent
+     * = no such bucket (classify-cart). `points: 0` refuses every call. */
+    daily?: BucketSize
     /** Builds the refusal. Defaults to a plain ModelCallBudgetExceededError;
      * a route that already exports its own subclass passes it here. */
     createError?: (
@@ -82,7 +86,11 @@ export interface ModelCallBudget {
     admit(client: ModelCallBudgetClient): Promise<void>
     /** Test-only reset of both buckets and the report throttle. */
     resetForTests(): void
-    readonly limits: { readonly perClient: number; readonly global: number }
+    readonly limits: {
+        readonly perClient: number
+        readonly global: number
+        readonly daily?: number
+    }
 }
 
 function retryAfterOf(res: RateLimiterRes): number {
@@ -93,6 +101,7 @@ export function createModelCallBudget(
     config: ModelCallBudgetConfig,
 ): ModelCallBudget {
     const globalKey = `${config.label}:model-calls`
+    const dailyKey = `${config.label}:model-calls-daily`
     const createError =
         config.createError ??
         ((scope, retryAfterSec) =>
@@ -104,9 +113,11 @@ export function createModelCallBudget(
 
     let perClientLimiter = new RateLimiterMemory(config.perClient)
     let globalLimiter = new RateLimiterMemory(config.global)
+    let dailyLimiter = config.daily && new RateLimiterMemory(config.daily)
     /** A sustained flood is ONE Sentry event per global window, not one per
      * request: after reporting, stay quiet until the current window ends. */
     let nextGlobalTripReportAt = 0
+    let nextDailyTripReportAt = 0
 
     async function admit(client: ModelCallBudgetClient): Promise<void> {
         try {
@@ -153,6 +164,36 @@ export function createModelCallBudget(
             await perClientLimiter.reward(client.ip, 1)
             throw createError('global', retryAfterSec)
         }
+
+        if (dailyLimiter && config.daily) {
+            try {
+                await dailyLimiter.consume(dailyKey, 1)
+            } catch (rejection) {
+                const res = rejection as RateLimiterRes
+                const retryAfterSec = retryAfterOf(res)
+                if (Date.now() >= nextDailyTripReportAt) {
+                    nextDailyTripReportAt = Date.now() + res.msBeforeNext
+                    Sentry.captureMessage(
+                        `${config.label} daily model-call budget exhausted`,
+                        {
+                            level: 'warning',
+                            tags: { route: config.label, budget: 'daily' },
+                            extra: {
+                                ceiling: config.daily.points,
+                                windowSeconds: config.daily.duration,
+                                retryAfterSec,
+                                lastClientIp: client.ip,
+                            },
+                        },
+                    )
+                }
+                // Like a global trip: the refused call never reached the
+                // model, so give back both points it consumed above.
+                await perClientLimiter.reward(client.ip, 1)
+                await globalLimiter.reward(globalKey, 1)
+                throw createError('daily', retryAfterSec)
+            }
+        }
     }
 
     return {
@@ -160,11 +201,14 @@ export function createModelCallBudget(
         resetForTests() {
             perClientLimiter = new RateLimiterMemory(config.perClient)
             globalLimiter = new RateLimiterMemory(config.global)
+            dailyLimiter = config.daily && new RateLimiterMemory(config.daily)
             nextGlobalTripReportAt = 0
+            nextDailyTripReportAt = 0
         },
         limits: {
             perClient: config.perClient.points,
             global: config.global.points,
+            ...(config.daily ? { daily: config.daily.points } : {}),
         },
     }
 }

@@ -34,6 +34,18 @@ vi.mock('@sentry/nextjs', () => ({
 vi.mock('@/lib/abuseSignal', () => ({
     reportRateLimitRejection: vi.fn(async () => false),
 }))
+// MOCK (announced): the outcome event (coupon-box-pick-outcome.test.ts pins
+// it) must not leave the process, and after() needs a Next request scope vitest
+// does not have, so it runs its task inline.
+vi.mock('@/lib/analytics/posthogServer', () => ({
+    captureServerEvent: vi.fn(async () => true),
+}))
+vi.mock('next/server', async importOriginal => ({
+    ...(await importOriginal<typeof import('next/server')>()),
+    after: (task: () => unknown) => {
+        void task()
+    },
+}))
 // The route's generic per-IP limiter is rateLimit.ts's own, pinned elsewhere;
 // switched off so these tests measure the model-call budget alone.
 vi.mock('@/lib/rateLimit', async importOriginal => {

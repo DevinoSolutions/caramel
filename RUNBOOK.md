@@ -467,3 +467,71 @@ repo.
 ## Paid fallback
 
 The optional server-only org key is sent only to https://proxyai.devino.ca, with an 8-second default wait and boot validation. Guests never invoke its env reader; client deadlines below 15 seconds stay free. The only production AI surface is the guest-reachable 7-second classifier, so its worst case is 0 paid attempts per user per day. Future signed-in callers must explicitly opt in with at least 15 seconds; one raw HTTP request has no retries. Keys are capped at $5/week per org and are blanked in evals and E2E.
+
+## coupon-box pick: switch on / kill switch
+
+`POST /api/extension/coupon-box-pick` (paid, LLM-backed; `couponBoxPick.ts`) is
+off by default. Spend is bounded by three in-memory buckets on uncached model
+calls only (cache hits are free): 20 calls / 10 min per client, 600 / hour for
+the process, and a per-day cap, `COUPON_BOX_PICK_DAILY_CAP` (default 2000).
+Past any of them the route answers `429` and the extension carries on as if the
+rules found nothing. A global or daily trip sends ONE Sentry warning per window
+(`coupon-box-pick global|daily model-call budget exhausted`).
+
+**Switch on.** Set `COUPON_BOX_PICK_MODEL` (an eval-gated model id) and
+`COUPON_BOX_LLM_ENABLED=true`, optionally `COUPON_BOX_PICK_DAILY_CAP=<n>`, then
+redeploy. The extension reads the same condition from `GET /api/extension/features`.
+
+**Kill switch.**
+
+- Hard kill: `COUPON_BOX_LLM_ENABLED=false` and redeploy. The route then answers
+  `200 {outcome:'no_pick', reason:'disabled'}` without reading the body or
+  calling a model, and the features endpoint stops advertising it.
+- Spend stop, feature still answering from cache: `COUPON_BOX_PICK_DAILY_CAP=0`
+  and redeploy. The first uncached model call is refused (`429`), so no model
+  call is made; cached answers still serve. A blank value reads as the default
+  (2000), not 0; a negative or non-integer value fails boot.
+- The buckets are per process (one web instance) and reset on restart, so a
+  redeploy also starts a fresh day's count.
+
+**Read it.** Every request that reaches the handler emits the PostHog event
+`coupon_box_pick_outcome` (properties: `outcome`, `cached`, `latency_ms`,
+`model_ms` when a model was called, `store`, `model`). Requests refused earlier
+by withRoute (non-extension Origin 403, generic rate limit 429) emit nothing.
+`outcome` is one of `box`, `no_box`, `no_pick:disabled`, `no_pick:model_error`,
+`no_pick:unparsable`, `budget_exceeded:client|global|daily`, `too_large`,
+`invalid`, `server_error` (`COUPON_BOX_PICK_OUTCOMES` in
+`src/lib/analytics/couponBoxPickOutcome.ts`).
+
+Outcome mix, last 24h:
+
+```sql
+SELECT properties.outcome AS outcome,
+       count() AS requests,
+       countIf(properties.cached = true) AS cache_hits
+FROM events
+WHERE event = 'coupon_box_pick_outcome'
+  AND timestamp >= now() - INTERVAL 24 HOUR
+GROUP BY outcome
+ORDER BY requests DESC
+```
+
+Latency, last 24h (`latency_ms` = whole request in the handler; `model_ms` =
+model call only, present on requests that made one):
+
+```sql
+SELECT count() AS requests,
+       quantile(0.5)(toFloat(properties.latency_ms)) AS latency_p50_ms,
+       quantile(0.95)(toFloat(properties.latency_ms)) AS latency_p95_ms,
+       countIf(properties.model_ms IS NOT NULL) AS model_calls,
+       quantileIf(0.5)(toFloat(properties.model_ms), properties.model_ms IS NOT NULL) AS model_p50_ms,
+       quantileIf(0.95)(toFloat(properties.model_ms), properties.model_ms IS NOT NULL) AS model_p95_ms
+FROM events
+WHERE event = 'coupon_box_pick_outcome'
+  AND timestamp >= now() - INTERVAL 24 HOUR
+```
+
+Reading it: many `budget_exceeded:daily` means the cap is too low for real
+traffic (re-size it) or someone is forging the extension Origin; a rising
+`no_pick:model_error` with a high `model_p95_ms` is the model timing out
+(`TIMEOUT_MS` is 20s).

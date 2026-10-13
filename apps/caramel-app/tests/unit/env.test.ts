@@ -227,6 +227,46 @@ describe('parseServerEnv', () => {
         ).toBe('openai/gpt-oss-20b')
     })
 
+    it('COUPON_BOX_PICK_DAILY_CAP defaults to 2000, accepts 0 (kill switch) and any non-negative integer', () => {
+        expect(
+            parseServerEnv(validServerFixture).COUPON_BOX_PICK_DAILY_CAP,
+        ).toBe(2000)
+        for (const [raw, expected] of [
+            ['0', 0],
+            ['500', 500],
+            [' 75 ', 75],
+        ] as const) {
+            expect(
+                parseServerEnv({
+                    ...validServerFixture,
+                    COUPON_BOX_PICK_DAILY_CAP: raw,
+                }).COUPON_BOX_PICK_DAILY_CAP,
+            ).toBe(expected)
+        }
+    })
+
+    it('COUPON_BOX_PICK_DAILY_CAP blank reads as unset (never as 0, which would silently kill the feature)', () => {
+        for (const blank of ['', '   ']) {
+            expect(
+                parseServerEnv({
+                    ...validServerFixture,
+                    COUPON_BOX_PICK_DAILY_CAP: blank,
+                }).COUPON_BOX_PICK_DAILY_CAP,
+            ).toBe(2000)
+        }
+    })
+
+    it('COUPON_BOX_PICK_DAILY_CAP rejects a negative, fractional or non-numeric value at boot, naming the variable', () => {
+        for (const bad of ['-1', '1.5', 'many']) {
+            expect(() =>
+                parseServerEnv({
+                    ...validServerFixture,
+                    COUPON_BOX_PICK_DAILY_CAP: bad,
+                }),
+            ).toThrow(/COUPON_BOX_PICK_DAILY_CAP/)
+        }
+    })
+
     it('(g) the Playwright/CI-only read key present in app env throws (key hygiene)', () => {
         expect(() =>
             parseServerEnv({

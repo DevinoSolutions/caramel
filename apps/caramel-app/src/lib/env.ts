@@ -186,6 +186,15 @@ const serverObjectSchema = z.object({
         .string()
         .optional()
         .transform(v => v?.trim() || undefined),
+    // Per-day ceiling on UNCACHED coupon-box model calls, process-wide
+    // (couponBoxPickBudget.ts). Non-negative integer; 0 = no model calls at
+    // all (the soft kill switch, RUNBOOK.md); unset = 2000. Garbage fails boot.
+    // A blank value reads as unset: z.coerce would turn '' into 0 and silently
+    // switch the feature off.
+    COUPON_BOX_PICK_DAILY_CAP: z.preprocess(
+        v => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+        z.coerce.number().int().min(0).default(2000),
+    ),
     // Paid fallback through the Devino proxy (src/lib/proxy-fallback-headers.ts):
     // the app's OWN OpenRouter org key, sent as X-ORF-Fallback-Key only to
     // https://proxyai.devino.ca and only on a chat() call that opts in. Unset =
