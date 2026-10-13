@@ -123,7 +123,10 @@ beforeAll(async () => {
     // would silently turn a case into a free miss or a free pass.
     const stale = couponBoxCases.flatMap(c =>
         [...c.inputs, ...c.toggles]
-            .filter(n => !new RegExp(`^\\s*- \\[${n}\\] `, 'm').test(c.outline))
+            .filter(
+                n =>
+                    !new RegExp(`^\\s*- \\[${n}\\] [a-z]`, 'm').test(c.outline),
+            )
             .map(n => `${c.store}[${n}]`),
     )
     if (stale.length)
