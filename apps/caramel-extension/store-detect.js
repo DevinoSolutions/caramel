@@ -34,6 +34,11 @@ import {
     caramelSinkTriedCodes,
     probeCartJson,
 } from './coupon-apply.js'
+import {
+    caramelCouponBoxDiscoveryOn,
+    caramelFinderReadTotal,
+    caramelFinderSeesBox,
+} from './coupon-box-discovery.js'
 import { fetchCoupons } from './coupon-fetch.js'
 import { reportOutcome, startApplyingCoupons } from './coupon-runner.js'
 import {
@@ -253,9 +258,46 @@ export function _hostMatchesDomain(host, domain) {
  * with the word — /products/cart-organizer is a product, and it used to be read
  * as a checkout, prompt and cart probe and all. Trading /cart-page away is the
  * price, and it is the cheap side of that trade: a missed probe costs nothing,
- * a prompt on the wrong page is the defect this whole file guards against. */
+ * a prompt on the wrong page is the defect this whole file guards against.
+ *
+ * One continuation is allowed: a short number on a segment that IS the word
+ * (/cart-2/). That is how WordPress names a page whose slug was taken, and
+ * WooCommerce carts live there; measured on a live store whose cart is /cart-2/
+ * and which was never offered a code. Only there: /products/golf-cart-3,
+ * /collections/gift-basket-50 and /blog/checkout-2024 are not carts, and a
+ * product slug does not stop at a number (/products/cart-2-pack stays out).
+ *
+ * The older platforms' spellings (/cart.php, /mycart) are a separate rule,
+ * _caramelCartFilePath below, because they are only safe at the top of a path. */
 const CARAMEL_CART_PATH_RE =
-    /(?:^|[/\-_])(cart|carts|basket|checkout|checkouts)(?:[/?#]|$)/i
+    /(?:^|[/\-_])(cart|carts|basket|checkout|checkouts)(?:[/?#]|$)|(?:^|\/)(?:cart|carts|basket|checkout|checkouts)-\d\d?(?:[/?#]|$)/i
+
+/* The cart page in an older platform's spelling: a file extension (/cart.php is
+ * every BigCommerce cart) or the word joined to my/view/show/shop(ping)
+ * (/mycart, /my_cart.aspx, /ShoppingCart.asp). Measured: six of the stores the
+ * live runs left silent had a promo box and a total in plain view on exactly
+ * these pages, and the finder was never asked.
+ *
+ * Only as the LAST segment of the PATH, and only when every segment before it is
+ * a locale or a word that names the store's own shop (/en/cart.html,
+ * /shop/basket.aspx). Anywhere else the same spelling is a page about carts:
+ * /products/shopping-cart.html and /garden/cart.html are products (Magento names
+ * its product pages .html), /help/checkout.html is a help page, and a query
+ * string (?redirect=/cart.php) is not where the shopper is. */
+const CARAMEL_CART_FILE_RE =
+    /^(?:(?:my|view|show|shop|shopping)[-_]?)?(?:cart|carts|basket|checkout|checkouts)(?:\.(?:php|aspx?|html?|jsp|cfm|do))?$/i
+const CARAMEL_CART_FILE_PARENT_RE =
+    /^(?:[a-z]{2}(?:[-_][a-z]{2})?|store|shop|checkout|cart|basket|secure|order|orders)$/i
+function _caramelCartFilePath(pathname) {
+    const segs = String(pathname || '')
+        .split('/')
+        .filter(Boolean)
+    if (!segs.length || segs.length > 3) return false
+    return (
+        CARAMEL_CART_FILE_RE.test(segs[segs.length - 1]) &&
+        segs.slice(0, -1).every(seg => CARAMEL_CART_FILE_PARENT_RE.test(seg))
+    )
+}
 
 /* A query key that means "the cart drawer is open".
  *
@@ -303,7 +345,11 @@ function _caramelReferrerCartBounce() {
         return false
     }
     if (from.origin !== location.origin) return false
-    if (!CARAMEL_CART_PATH_RE.test(from.pathname)) return false
+    if (
+        !CARAMEL_CART_PATH_RE.test(from.pathname) &&
+        !_caramelCartFilePath(from.pathname)
+    )
+        return false
     return CARAMEL_SITE_ROOT_RE.test(location.pathname)
 }
 
@@ -331,7 +377,10 @@ export function _caramelCartHostname(hostname) {
 }
 
 function _caramelCartIntentSignal() {
-    if (CARAMEL_CART_PATH_RE.test(location.pathname + location.search))
+    if (
+        CARAMEL_CART_PATH_RE.test(location.pathname + location.search) ||
+        _caramelCartFilePath(location.pathname)
+    )
         return 'path'
     if (_caramelCartHostname(location.hostname)) return 'host'
     for (const [key, value] of new URLSearchParams(location.search)) {
@@ -433,7 +482,7 @@ export async function isCheckout() {
      * Still a high bar to appear: a cart-shaped URL, a readable cart with
      * something in it, and codes for the domain (tryInitialize). A store with
      * no codes, or a product page, is exactly as quiet as before. */
-    if (!rec) return await _platformCartUsable()
+    if (!rec) return (await _platformCartUsable()) || (await _finderSeesBox())
     // VISIBLE, not merely present: themes ship hidden coupon markup on
     // non-checkout pages, and some configs point showInput at site-wide
     // controls — the prompt belongs only where the user can actually see a
@@ -471,7 +520,25 @@ export async function isCheckout() {
         })
         return true
     }
-    return await _platformCartUsable()
+    return (await _platformCartUsable()) || (await _finderSeesBox())
+}
+
+/* No config describes a promo box here, but a shopper could still see one.
+ *
+ * The finder (coupon-box-discovery.js) reads the page the way a shopper does.
+ * It is asked only on a cart-shaped URL, the same bar _platformCartUsable sets,
+ * and only while the server's couponBoxDiscovery flag is on; tryInitialize then
+ * still requires codes for the domain before the prompt appears. Detection
+ * never clicks anything: opening a folded box waits for the shopper's tap. */
+async function _finderSeesBox() {
+    if (!_caramelCartIntentSignal()) return false
+    if (!(await caramelCouponBoxDiscoveryOn())) return false
+    try {
+        return caramelFinderSeesBox()
+    } catch (e) {
+        log('FINDER_FAILED', { error: String(e) })
+        return false
+    }
 }
 
 /* Coupon-availability cache — fetched once when a checkout is detected so we
@@ -557,29 +624,46 @@ export async function tryInitialize() {
  *   · there has to be a code we have not already tried, or the next hop is a
  *     guaranteed no-op that still costs a reload.
  */
-async function _caramelContinueRun(rec) {
-    if (!rec) return false
-    const box = pickBestMatch(rec.couponInput)
-    const toggle = rec.showInput ? pickBestMatch(rec.showInput) : null
-    if (!box && !toggle) return false
+async function _caramelContinueRun(rec, finder = false) {
+    // A finder run picked its box itself, and the reload threw that pick away.
+    // It goes on only where the finder sees a box on THIS page (the run below
+    // finds it again); a store with no config row runs on the stand-in record
+    // the first click ran on.
+    const runRec =
+        rec ?? (finder ? caramelConfiglessRecord(location.hostname) : null)
+    // Every refusal says which bound stopped the chain: on a form-POST cart the
+    // shopper then gets one code per click, and which of these it was is the
+    // whole diagnosis.
+    const stop = reason => {
+        log('AUTO_INSERT_RUN_STOPS', { reason, finder })
+        return false
+    }
+    if (!runRec) return stop('no record')
+    if (finder) {
+        if (!(await _finderSeesBox())) return stop('no box')
+    } else {
+        const box = pickBestMatch(rec.couponInput)
+        const toggle = rec.showInput ? pickBestMatch(rec.showInput) : null
+        if (!box && !toggle) return stop('no box')
+    }
     let codes = []
     try {
-        codes = await getCachedCodes(rec)
+        codes = await getCachedCodes(runRec)
     } catch {
-        return false
+        return stop('no codes')
     }
     const tried = _getTriedCodes()
     const untried = (codes || []).filter(c => c && c.code && !(c.code in tried))
-    if (!untried.length) return false
+    if (!untried.length) return stop('all tried')
     const hop = caramelClaimRunHop()
-    if (!hop) return false
+    if (!hop) return stop('no hop')
     log('AUTO_INSERT_RUN_CONTINUES', {
         hop: hop.hops,
         remaining: hop.remaining,
         untried: untried.length,
     })
     try {
-        await startApplyingCoupons(rec, { resumed: true })
+        await startApplyingCoupons(runRec, { resumed: true })
     } catch (e) {
         // A throw here would leave the shopper behind an "Applying…" overlay
         // with nothing coming. Take the overlay down and report false, so the
@@ -596,10 +680,13 @@ async function _resumePendingSubmit() {
     const pending = caramelTakePendingSubmit()
     if (!pending) return false
     const rec = await getDomainRecord(location.hostname)
-    const now =
-        rec && rec.priceContainer
-            ? getPrice(rec.priceContainer, { returnLargest: true })
-            : NaN
+    // A finder attempt's baseline came from the finder's total row; reading a
+    // config's priceContainer here would compare two different numbers.
+    const now = pending.finder
+        ? caramelFinderReadTotal(document, pending.finder, pending.finderRow)
+        : rec && rec.priceContainer
+          ? getPrice(rec.priceContainer, { returnLargest: true })
+          : NaN
     // Same tightest-defensible-baseline rule the in-page path uses, against the
     // prices captured before the submit — it can never overstate a saving.
     const baseline = caramelBaselineFor(now, pending.prices)
@@ -634,7 +721,12 @@ async function _resumePendingSubmit() {
     // holds the same line — only the store's own rejection words count.
     let others = []
     try {
-        if (rec) others = await getCachedCodes(rec)
+        // A finder run on a store with no config row ran on the stand-in
+        // record; its codes are still worth handing over.
+        const codesRec =
+            rec ??
+            (pending.finder ? caramelConfiglessRecord(location.hostname) : null)
+        if (codesRec) others = await getCachedCodes(codesRec)
     } catch {
         /* no code list to offer — the message below still stands on its own */
     }
@@ -652,7 +744,15 @@ async function _resumePendingSubmit() {
 
     // That code didn't win, and on this kind of cart every code costs a page
     // load. Carry the run on rather than making the shopper click per code.
-    if (await _caramelContinueRun(rec)) return true
+    // A finder run goes on only when it could read the total and it did not
+    // move: an unreadable total may be hiding a win (the store renamed the
+    // row), and submitting the next code onto that cart could replace it.
+    if (pending.finder && !Number.isFinite(now))
+        log('AUTO_INSERT_RUN_STOPS', {
+            reason: 'total unreadable',
+            finder: true,
+        })
+    else if (await _caramelContinueRun(rec, !!pending.finder)) return true
     caramelEndRun()
 
     if (Number.isFinite(now)) {

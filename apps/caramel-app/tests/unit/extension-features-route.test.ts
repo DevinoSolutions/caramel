@@ -3,10 +3,14 @@ import { NextRequest } from 'next/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 // GET /api/extension/features — the public, keyless feature-flag read the
-// extension background caches. Today it reports one flag: whether the server
-// accepts shopper-typed codes captured at checkout.
+// extension background caches. Two flags: whether the server accepts
+// shopper-typed codes captured at checkout, and whether the extension may find
+// a store's promo box itself when no config describes it.
 const { envMock, checkRateLimitMock } = vi.hoisted(() => ({
-    envMock: { SHOPPER_CODE_CAPTURE_ENABLED: false } as Record<string, unknown>,
+    envMock: {
+        SHOPPER_CODE_CAPTURE_ENABLED: false,
+        COUPON_BOX_DISCOVERY_ENABLED: false,
+    } as Record<string, unknown>,
     checkRateLimitMock: vi.fn(async () => null as unknown),
 }))
 
@@ -14,6 +18,7 @@ vi.mock('@/lib/env', async importOriginal => {
     const actual = await importOriginal<typeof import('@/lib/env')>()
     Object.assign(envMock, actual.env, {
         SHOPPER_CODE_CAPTURE_ENABLED: false,
+        COUPON_BOX_DISCOVERY_ENABLED: false,
     })
     return { ...actual, env: envMock }
 })
@@ -31,25 +36,44 @@ function featuresRequest(headers: Record<string, string> = {}): NextRequest {
 
 beforeEach(() => {
     envMock.SHOPPER_CODE_CAPTURE_ENABLED = false
+    envMock.COUPON_BOX_DISCOVERY_ENABLED = false
     checkRateLimitMock.mockReset()
     checkRateLimitMock.mockImplementation(async () => null)
 })
 
 describe('GET /api/extension/features', () => {
-    it('flag off (the code default) → { shopperCodeCapture: false }', async () => {
+    it('both flags off (the code default) → both false', async () => {
         const res = await GET(featuresRequest())
 
         expect(res.status).toBe(200)
-        expect(await res.json()).toEqual({ shopperCodeCapture: false })
+        expect(await res.json()).toEqual({
+            shopperCodeCapture: false,
+            couponBoxDiscovery: false,
+        })
     })
 
-    it('flag on → { shopperCodeCapture: true }', async () => {
+    it('capture flag on → { shopperCodeCapture: true }', async () => {
         envMock.SHOPPER_CODE_CAPTURE_ENABLED = true
 
         const res = await GET(featuresRequest())
 
         expect(res.status).toBe(200)
-        expect(await res.json()).toEqual({ shopperCodeCapture: true })
+        expect(await res.json()).toEqual({
+            shopperCodeCapture: true,
+            couponBoxDiscovery: false,
+        })
+    })
+
+    it('discovery flag on → { couponBoxDiscovery: true }, capture untouched', async () => {
+        envMock.COUPON_BOX_DISCOVERY_ENABLED = true
+
+        const res = await GET(featuresRequest())
+
+        expect(res.status).toBe(200)
+        expect(await res.json()).toEqual({
+            shopperCodeCapture: false,
+            couponBoxDiscovery: true,
+        })
     })
 
     it('needs no credentials (public read)', async () => {

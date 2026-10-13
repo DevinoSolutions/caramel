@@ -1,4 +1,12 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+    afterEach,
+    beforeAll,
+    beforeEach,
+    describe,
+    expect,
+    it,
+    vi,
+} from 'vitest'
 
 /**
  * Characterization of applyCoupon()'s snapshot -> verdict path.
@@ -123,6 +131,493 @@ describe('applyCoupon verdict — success rule', () => {
         expect(res.success).toBe(true)
     })
 
+    // A box the finder picked (coupon-box-discovery.js) has no store-written
+    // success selector behind it, so the money rule alone decides.
+    it('a finder-picked box: an applied row that stays is NOT a success without a price drop', async () => {
+        const rec = {
+            ...BASE,
+            successIndicator: '#applied-row',
+            priceContainer: '#total',
+            caramelFound: true,
+        }
+        respond(mountAppliedRow)
+
+        const res = await applyCoupon('SAVE10', rec)
+
+        expect(res.committed).toBe(true)
+        expect(res.success).toBe(false)
+    })
+
+    it('a finder-picked box: a price drop is a success', async () => {
+        const rec = { ...BASE, priceContainer: '#total', caramelFound: true }
+        respond(() => setText(document.getElementById('total'), '$90.00'))
+
+        const res = await applyCoupon('SAVE10', rec)
+
+        expect(res.success).toBe(true)
+        expect(res.newTotal).toBe(90)
+    })
+
+    it('a finder-picked box: the store answering in the box ends the wait early', async () => {
+        document.body.insertAdjacentHTML('beforeend', '<div id="ans"></div>')
+        const rec = {
+            ...BASE,
+            priceContainer: '#total',
+            caramelFound: true,
+            caramelAnswer: '#ans',
+        }
+        respond(() =>
+            setText(document.getElementById('ans'), 'Sorry, NOPE is not valid'),
+        )
+
+        const started = performance.now()
+        const res = await applyCoupon('NOPE', rec)
+
+        expect(res.success).toBe(false)
+        // The answer window is 10s; the store answered after 150ms.
+        expect(performance.now() - started).toBeLessThan(4000)
+    })
+
+    /** jsdom has no innerText; the finder's readers walk containers by it. */
+    async function withInnerText(fn) {
+        const proto = globalThis.HTMLElement.prototype
+        const prior = Object.getOwnPropertyDescriptor(proto, 'innerText')
+        Object.defineProperty(proto, 'innerText', {
+            configurable: true,
+            get() {
+                return this.textContent
+            },
+        })
+        try {
+            await fn()
+        } finally {
+            if (prior) Object.defineProperty(proto, 'innerText', prior)
+            else delete proto.innerText
+        }
+    }
+    const FINDER_REC = {
+        ...BASE,
+        priceContainer: '#total',
+        caramelFound: true,
+        caramelAnswer: '.promo',
+    }
+
+    it("a finder-picked box: the store's own sentence is quoted, not the field's label or a static hint", async () => {
+        document.body.innerHTML =
+            '<div class="promo"><label for="promo">Promo code</label>' +
+            '<input id="promo" /><button id="apply">Apply</button>' +
+            '<div id="msg"></div>' +
+            '<p class="hint">Enter a valid promo code to see your savings</p></div>' +
+            '<div id="total">$100.00</div>'
+        await withInnerText(async () => {
+            respond(() => {
+                document.getElementById('msg').textContent =
+                    'Sorry, the code NOPE is not valid.'
+            })
+
+            const res = await applyCoupon('NOPE', FINDER_REC)
+
+            expect(res.success).toBe(false)
+            expect(res.errorMsg).toBe('Sorry, the code NOPE is not valid.')
+            expect(res.errorIsNew).toBe(true)
+        })
+    })
+
+    it('a finder-picked box: a second refusal that only changes the code named still ends the wait', async () => {
+        document.body.innerHTML =
+            '<div class="promo"><input id="promo" /><button id="apply">Apply</button>' +
+            '<div id="msg">Sorry, the code FIRST is not valid.</div></div>' +
+            '<div id="total">$100.00</div>'
+        await withInnerText(async () => {
+            respond(() => {
+                document.getElementById('msg').textContent =
+                    'Sorry, the code SECOND is not valid.'
+            })
+
+            const started = performance.now()
+            const res = await applyCoupon('SECOND', FINDER_REC)
+
+            expect(res.success).toBe(false)
+            expect(performance.now() - started).toBeLessThan(4000)
+        })
+    }, 15000)
+
+    it('a finder-picked box: the button reading "Applying…" is not the store answering', async () => {
+        // A slow cart: the button changes at once, the total 2.5s later.
+        document.body.innerHTML =
+            '<div class="promo"><label for="promo">Promo code</label>' +
+            '<input id="promo" /><button id="apply">Apply</button></div>' +
+            '<div id="total">$100.00</div>'
+        await withInnerText(async () => {
+            document.getElementById('apply').addEventListener('click', () => {
+                setTimeout(() => {
+                    document.getElementById('apply').textContent = 'Applying…'
+                }, 50)
+                setTimeout(() => {
+                    document.getElementById('total').textContent = '$90.00'
+                }, 2500)
+            })
+
+            const res = await applyCoupon('SAVE10', FINDER_REC)
+
+            expect(res.success).toBe(true)
+            expect(res.newTotal).toBe(90)
+        })
+    }, 15000)
+
+    it('a finder-picked box: a summary that re-renders its total row is still read', async () => {
+        document.body.innerHTML =
+            '<div class="promo"><input id="promo" name="promo_code" />' +
+            '<button id="apply">Apply</button></div>' +
+            '<div id="sum"><div data-caramel-found="total"><span>Order total</span> <span>$100.00</span></div></div>'
+        await withInnerText(async () => {
+            respond(() => {
+                document.getElementById('sum').innerHTML =
+                    '<div><span>Order total</span> <span>$90.00</span></div>'
+            })
+            const rec = {
+                ...FINDER_REC,
+                priceContainer: '[data-caramel-found="total"]',
+                caramelTotalKind: 'total',
+                caramelTotalLabel: 'order total',
+                caramelTotalRows: 1,
+            }
+
+            const res = await applyCoupon('SAVE10', rec)
+
+            expect(res.success).toBe(true)
+            expect(res.newTotal).toBe(90)
+        })
+    }, 15000)
+
+    it("a finder-picked box: a line item's own total is never read while the summary is mid-render", async () => {
+        // The baseline saw two total rows: the line item's and the order's.
+        // While the store re-renders its summary (a skeleton), the line
+        // item's "Total $19.99" is the only one left on the page.
+        document.body.innerHTML =
+            '<div class="promo"><input id="promo" /><button id="apply">Apply</button>' +
+            '<div id="msg"></div></div>' +
+            '<div class="line"><span>Total</span> <span>$19.99</span></div>' +
+            '<div id="sum"><div data-caramel-found="total"><span>Order total</span> <span>$100.00</span></div></div>'
+        await withInnerText(async () => {
+            document.getElementById('apply').addEventListener('click', () => {
+                setTimeout(() => {
+                    document.getElementById('sum').innerHTML =
+                        '<div class="skeleton"></div>'
+                }, 50)
+                setTimeout(() => {
+                    document.getElementById('sum').innerHTML =
+                        '<div><span>Order total</span> <span>$100.00</span></div>'
+                    document.getElementById('msg').textContent =
+                        'Sorry, the code NOPE is not valid.'
+                }, 1500)
+            })
+            const rec = {
+                ...FINDER_REC,
+                priceContainer: '[data-caramel-found="total"]',
+                caramelTotalKind: 'total',
+                caramelTotalLabel: 'order total',
+                caramelTotalRows: 2,
+            }
+
+            const res = await applyCoupon('NOPE', rec)
+
+            expect(res.success).toBe(false)
+        })
+    }, 15000)
+
+    it('a finder-picked box: a total row that becomes two (a sticky bar appears) is still read', async () => {
+        document.body.innerHTML =
+            '<div class="promo"><input id="promo" /><button id="apply">Apply</button></div>' +
+            '<div id="sum"><div data-caramel-found="total"><span>Order total</span> <span>$100.00</span></div></div>'
+        await withInnerText(async () => {
+            respond(() => {
+                document.getElementById('sum').innerHTML =
+                    '<div><span>Order total</span> <span>$90.00</span></div>' +
+                    '<div class="sticky"><span>Order total</span> <span>$90.00</span></div>'
+            })
+            const rec = {
+                ...FINDER_REC,
+                priceContainer: '[data-caramel-found="total"]',
+                caramelTotalKind: 'total',
+                caramelTotalLabel: 'order total',
+                caramelTotalRows: 1,
+            }
+
+            const res = await applyCoupon('SAVE10', rec)
+
+            expect(res.success).toBe(true)
+            expect(res.newTotal).toBe(90)
+        })
+    }, 15000)
+
+    it('a finder-picked box: a summary that hides its old row and shows a new one is read on the new one', async () => {
+        document.body.innerHTML =
+            '<div class="promo"><input id="promo" /><button id="apply">Apply</button></div>' +
+            '<div id="old" data-caramel-found="total"><span>Order total</span> <span>$100.00</span></div>'
+        const prior = Element.prototype.checkVisibility
+        Element.prototype.checkVisibility = function () {
+            return !this.closest('[hidden]')
+        }
+        try {
+            await withInnerText(async () => {
+                respond(() => {
+                    document.getElementById('old').hidden = true
+                    document.body.insertAdjacentHTML(
+                        'beforeend',
+                        '<div><span>Order total</span> <span>$90.00</span></div>',
+                    )
+                })
+                const rec = {
+                    ...FINDER_REC,
+                    priceContainer: '[data-caramel-found="total"]',
+                    caramelTotalKind: 'total',
+                    caramelTotalLabel: 'order total',
+                    caramelTotalRows: 1,
+                }
+
+                const res = await applyCoupon('SAVE10', rec)
+
+                expect(res.success).toBe(true)
+                expect(res.newTotal).toBe(90)
+            })
+        } finally {
+            Element.prototype.checkVisibility = prior
+        }
+    }, 15000)
+
+    it('a finder-picked box: a refusal split across bold text beside a link is still read', async () => {
+        document.body.innerHTML =
+            '<div class="promo"><input id="promo" /><button id="apply">Apply</button>' +
+            '<p id="msg"></p></div>' +
+            '<div id="total">$100.00</div>'
+        await withInnerText(async () => {
+            respond(() => {
+                document.getElementById('msg').innerHTML =
+                    'Code <b>NOPE</b> is not <i>valid</i>. <a href="#">Learn more</a>'
+            })
+
+            const started = performance.now()
+            const res = await applyCoupon('NOPE', FINDER_REC)
+
+            expect(res.success).toBe(false)
+            expect(res.errorMsg).toBe('Code NOPE is not valid.')
+            expect(performance.now() - started).toBeLessThan(4000)
+        })
+    }, 15000)
+
+    it('a finder-picked box: a refusal in words the generic list lacks still ends the wait', async () => {
+        // A live store's own words: "not an active offer" is a refusal the
+        // narrow config vocabulary does not know.
+        document.body.innerHTML =
+            '<div class="promo"><input id="promo" /><button id="apply">Apply</button>' +
+            '<p id="msg"></p></div>' +
+            '<div id="total">$100.00</div>'
+        await withInnerText(async () => {
+            respond(() => {
+                document.getElementById('msg').textContent =
+                    'The discount code you entered is not an active offer.'
+            })
+
+            const started = performance.now()
+            const res = await applyCoupon('LOUNGE', FINDER_REC)
+
+            expect(res.success).toBe(false)
+            expect(res.errorMsg).toBe(
+                'The discount code you entered is not an active offer.',
+            )
+            expect(performance.now() - started).toBeLessThan(4000)
+        })
+    }, 15000)
+
+    it("a finder-picked box: a form field's own error is not the store answering", async () => {
+        // The box's own "Promo code" label sits in the same container, so the
+        // container as a whole names a coupon word: the field error must
+        // still not be quoted as the store's answer.
+        document.body.innerHTML =
+            '<div class="promo"><label for="promo">Promo code</label>' +
+            '<input id="promo" /><button id="apply">Apply</button>' +
+            '<p id="msg"></p></div>' +
+            '<div id="total">$100.00</div>'
+        await withInnerText(async () => {
+            // Write to the elements of THIS test's page: a timer left over
+            // from a failed run must not land in the next test's page.
+            const msg = document.getElementById('msg')
+            const total = document.getElementById('total')
+            document.getElementById('apply').addEventListener('click', () => {
+                setTimeout(() => {
+                    msg.textContent = 'Enter a valid email address'
+                }, 50)
+                setTimeout(() => {
+                    total.textContent = '$90.00'
+                }, 2500)
+            })
+
+            const res = await applyCoupon('SAVE10', FINDER_REC)
+
+            expect(res.success).toBe(true)
+            expect(res.newTotal).toBe(90)
+            expect(res.errorMsg).toBeNull()
+        })
+    }, 15000)
+
+    it('a finder-picked box: an acceptance with a caveat is not a refusal', async () => {
+        // "Cannot be combined with other offers" is refusal-shaped on its
+        // own; beside "applied" it is a caveat, and the total moves later.
+        document.body.innerHTML =
+            '<div class="promo"><input id="promo" /><button id="apply">Apply</button>' +
+            '<p id="msg"></p></div>' +
+            '<div id="total">$100.00</div>'
+        await withInnerText(async () => {
+            // Write to the elements of THIS test's page: a timer left over
+            // from a failed run must not land in the next test's page.
+            const msg = document.getElementById('msg')
+            const total = document.getElementById('total')
+            document.getElementById('apply').addEventListener('click', () => {
+                setTimeout(() => {
+                    msg.textContent =
+                        'Promo code applied. Cannot be combined with other offers.'
+                }, 50)
+                setTimeout(() => {
+                    total.textContent = '$90.00'
+                }, 2200)
+            })
+
+            const res = await applyCoupon('SAVE10', FINDER_REC)
+
+            expect(res.success).toBe(true)
+            expect(res.newTotal).toBe(90)
+        })
+    }, 15000)
+
+    it('a finder-picked box: a refusal-shaped caveat just before the total moves still wins', async () => {
+        document.body.innerHTML =
+            '<div class="promo"><input id="promo" /><button id="apply">Apply</button>' +
+            '<p id="msg"></p></div>' +
+            '<div id="total">$100.00</div>'
+        await withInnerText(async () => {
+            // Write to the elements of THIS test's page: a timer left over
+            // from a failed run must not land in the next test's page.
+            const msg = document.getElementById('msg')
+            const total = document.getElementById('total')
+            document.getElementById('apply').addEventListener('click', () => {
+                setTimeout(() => {
+                    msg.textContent =
+                        'This code cannot be combined with other offers.'
+                }, 50)
+                setTimeout(() => {
+                    total.textContent = '$90.00'
+                }, 900)
+            })
+
+            const res = await applyCoupon('SAVE10', FINDER_REC)
+
+            expect(res.success).toBe(true)
+            expect(res.newTotal).toBe(90)
+        })
+    }, 15000)
+
+    it('a finder-picked box: "could not be applied" is still a refusal', async () => {
+        document.body.innerHTML =
+            '<div class="promo"><input id="promo" /><button id="apply">Apply</button>' +
+            '<p id="msg"></p></div>' +
+            '<div id="total">$100.00</div>'
+        await withInnerText(async () => {
+            respond(() => {
+                document.getElementById('msg').textContent =
+                    'Coupon NOPE could not be applied.'
+            })
+
+            const started = performance.now()
+            const res = await applyCoupon('NOPE', FINDER_REC)
+
+            expect(res.success).toBe(false)
+            expect(res.errorMsg).toBe('Coupon NOPE could not be applied.')
+            expect(performance.now() - started).toBeLessThan(4000)
+        })
+    }, 15000)
+
+    it('a finder-picked box: a $0.00 placeholder caught mid-render is not a saving', async () => {
+        document.body.innerHTML =
+            '<div class="promo"><input id="promo" /><button id="apply">Apply</button>' +
+            '<div id="msg"></div></div>' +
+            '<div id="total">$100.00</div>'
+        await withInnerText(async () => {
+            document.getElementById('apply').addEventListener('click', () => {
+                setTimeout(() => {
+                    document.getElementById('total').textContent = '$0.00'
+                }, 50)
+                setTimeout(() => {
+                    document.getElementById('total').textContent = '$100.00'
+                    document.getElementById('msg').textContent =
+                        'Sorry, the code NOPE is not valid.'
+                }, 1500)
+            })
+
+            const res = await applyCoupon('NOPE', FINDER_REC)
+
+            expect(res.success).toBe(false)
+        })
+    }, 15000)
+
+    it('a finder-picked box: a hint written beside the button is not an answer when the button relabels', async () => {
+        // "Enter a valid code" sits as bare text in the same box as the
+        // button, so the box's own text changes when the button does.
+        document.body.innerHTML =
+            '<div class="promo">Enter a valid code <input id="promo" />' +
+            '<button id="apply">Apply</button></div>' +
+            '<div id="total">$100.00</div>'
+        await withInnerText(async () => {
+            document.getElementById('apply').addEventListener('click', () => {
+                setTimeout(() => {
+                    document.getElementById('apply').textContent = 'Applying…'
+                }, 50)
+                setTimeout(() => {
+                    document.getElementById('total').textContent = '$90.00'
+                }, 2500)
+            })
+
+            const res = await applyCoupon('SAVE10', FINDER_REC)
+
+            expect(res.success).toBe(true)
+            expect(res.newTotal).toBe(90)
+        })
+    }, 15000)
+
+    it('a finder-picked box: text the shopper cannot see is not the store answering', async () => {
+        document.body.innerHTML =
+            '<div class="promo"><input id="promo" /><button id="apply">Apply</button>' +
+            '<div id="tpl" hidden>The code is not valid.</div></div>' +
+            '<div id="total">$100.00</div>'
+        const prior = Element.prototype.checkVisibility
+        Element.prototype.checkVisibility = function () {
+            return !this.closest('[hidden]')
+        }
+        try {
+            await withInnerText(async () => {
+                document
+                    .getElementById('apply')
+                    .addEventListener('click', () => {
+                        setTimeout(() => {
+                            document.getElementById('tpl').textContent =
+                                'The code SAVE10 is not valid.'
+                        }, 50)
+                        setTimeout(() => {
+                            document.getElementById('total').textContent =
+                                '$90.00'
+                        }, 2500)
+                    })
+
+                const res = await applyCoupon('SAVE10', FINDER_REC)
+
+                expect(res.success).toBe(true)
+                expect(res.newTotal).toBe(90)
+            })
+        } finally {
+            Element.prototype.checkVisibility = prior
+        }
+    }, 15000)
+
     it('returns exactly the documented verdict keys', async () => {
         const rec = { ...BASE, successIndicator: '#applied-row' }
         respond(mountAppliedRow)
@@ -137,6 +632,775 @@ describe('applyCoupon verdict — success rule', () => {
             'success',
         ])
     })
+})
+
+// Measured on a live store: it answered a refused code by re-drawing its whole
+// promo section (message, a new input holding the code, a new button). The
+// finder's marks went with the old nodes, so the answer was never seen (the
+// full 10 s wait, no quote) and the next code found no box at all.
+describe('a finder-picked box the store re-draws to answer', () => {
+    const SECTION = msg =>
+        '<div class="promo">' +
+        (msg ? `<p class="err">${msg}</p>` : '') +
+        '<input name="promo_code" type="text" />' +
+        '<button type="button" class="ap">Apply</button></div>'
+    let finderRecord
+    let restore
+
+    beforeEach(async () => {
+        const proto = globalThis.HTMLElement.prototype
+        const prior = Object.getOwnPropertyDescriptor(proto, 'innerText')
+        Object.defineProperty(proto, 'innerText', {
+            configurable: true,
+            get() {
+                return this.textContent
+            },
+        })
+        const rect = Element.prototype.getBoundingClientRect
+        Element.prototype.getBoundingClientRect = () => ({
+            left: 0,
+            top: 0,
+            right: 120,
+            bottom: 30,
+            width: 120,
+            height: 30,
+        })
+        restore = () => {
+            if (prior) Object.defineProperty(proto, 'innerText', prior)
+            else delete proto.innerText
+            Element.prototype.getBoundingClientRect = rect
+        }
+        ;({ caramelDiscoveredRecord: finderRecord } = await import(
+            '../coupon-box-discovery.js'
+        ))
+        document.body.innerHTML =
+            `<aside class="sec">${SECTION('')}</aside>` +
+            '<div class="row"><span>Order total</span> <span>$100.00</span></div>'
+    })
+
+    // Every click re-draws the section, as the store does: its contents, or
+    // (whole) the section element itself.
+    let clicks
+    function redrawOnClick(msgFor, whole = false) {
+        clicks = e => {
+            if (!e.target.matches?.('.ap')) return
+            const code = document.querySelector('[name=promo_code]').value
+            const sec = document.querySelector('.sec')
+            setTimeout(() => {
+                if (whole) {
+                    sec.outerHTML = `<aside class="sec">${SECTION(msgFor(code))}</aside>`
+                } else sec.innerHTML = SECTION(msgFor(code))
+                document.querySelector('[name=promo_code]').value = code
+            }, 150)
+        }
+        document.addEventListener('click', clicks)
+    }
+    afterEach(() => document.removeEventListener('click', clicks))
+
+    it('finds the box again when the store re-draws it between codes', async () => {
+        try {
+            const rec = await finderRecord({ domain: 'shop.test' })
+            // A cart refresh after our read: the section the next code goes
+            // into is not the one the last code went into.
+            document.querySelector('.sec').innerHTML = SECTION('')
+
+            await applyCoupon('SECOND', rec)
+
+            expect(document.querySelector('[name=promo_code]').value).toBe(
+                'SECOND',
+            )
+        } finally {
+            restore()
+        }
+    }, 15000)
+
+    it('measures the next code against a total the store re-drew', async () => {
+        // Measured live: the cart re-drew its summary after the first code,
+        // the next code was judged at 0.7 s with no baseline, and the 5% it
+        // took off a moment later was never counted.
+        try {
+            const rec = await finderRecord({ domain: 'shop.test' })
+            // Fresh markup, as the store's re-render brings: none of our marks.
+            const sum = document.querySelector('.row')
+            sum.insertAdjacentHTML(
+                'afterend',
+                '<div class="row"><span>Order total</span> <span>$100.00</span></div>',
+            )
+            const fresh = sum.nextElementSibling
+            sum.remove()
+            document.addEventListener(
+                'click',
+                (clicks = e => {
+                    if (!e.target.matches?.('.ap')) return
+                    setTimeout(() => {
+                        fresh.lastElementChild.textContent = '$95.00'
+                    }, 900)
+                }),
+            )
+
+            const res = await applyCoupon('SAVE5', rec)
+
+            expect(res.success).toBe(true)
+            expect(res.newTotal).toBe(95)
+        } finally {
+            restore()
+        }
+    }, 15000)
+
+    describe('on a cart with no total row', () => {
+        // Measured live: the store said "$20.00 Off" on a line of its own,
+        // the subtotal stayed $99.99, and the shopper was told no code worked.
+        const SUMMARY = lines =>
+            '<div class="sum"><div class="row"><span>Subtotal</span> <span>$99.99</span></div>' +
+            lines +
+            '<p>Shipping and taxes calculated at checkout</p></div>'
+        const LINE = (label, amount, style = '') =>
+            `<div class="cl"${style}><span>${label}</span> <span>${amount}</span></div>`
+        function addLineOnClick(line) {
+            clicks = e => {
+                if (!e.target.matches?.('.ap')) return
+                setTimeout(() => {
+                    document
+                        .querySelector('.sum p')
+                        .insertAdjacentHTML('beforebegin', line)
+                }, 900)
+            }
+            document.addEventListener('click', clicks)
+        }
+
+        it('counts a code the store shows on its own coupon line', async () => {
+            try {
+                document.body.innerHTML =
+                    `<aside class="sec">${SECTION('')}</aside>` + SUMMARY('')
+                addLineOnClick(LINE('Coupon', '-$20.00'))
+                const rec = await finderRecord({ domain: 'shop.test' })
+
+                const res = await applyCoupon('SAVE20', rec)
+
+                expect(res.success).toBe(true)
+                expect(res.newTotal).toBe(79.99)
+            } finally {
+                restore()
+            }
+        }, 15000)
+
+        it('reads no saving from a coupon line the cart showed before the code', async () => {
+            try {
+                document.body.innerHTML =
+                    `<aside class="sec">${SECTION('')}</aside>` +
+                    SUMMARY(LINE('Discount', '-$10.00'))
+                redrawOnClick(c => `Sorry, code "${c}" isn't valid.`)
+                const rec = await finderRecord({ domain: 'shop.test' })
+
+                const res = await applyCoupon('NOPE', rec)
+
+                expect(res.success).toBe(false)
+            } finally {
+                restore()
+            }
+        }, 15000)
+
+        it('counts one amount once when the store repeats it in a note', async () => {
+            try {
+                document.body.innerHTML =
+                    `<aside class="sec">${SECTION('')}</aside>` + SUMMARY('')
+                addLineOnClick(
+                    LINE('Coupon', '-$20.00') +
+                        LINE('Coupon TWENTYOFF applied', '-$20.00'),
+                )
+                const rec = await finderRecord({ domain: 'shop.test' })
+
+                const res = await applyCoupon('TWENTYOFF', rec)
+
+                expect(res.success).toBe(true)
+                expect(res.newTotal).toBe(79.99)
+            } finally {
+                restore()
+            }
+        }, 15000)
+
+        it('never counts a coupon line the store keeps hidden', async () => {
+            const vis = Element.prototype.checkVisibility
+            Element.prototype.checkVisibility = function () {
+                for (let n = this; n && n.nodeType === 1; n = n.parentElement)
+                    if (n.style?.display === 'none') return false
+                return true
+            }
+            try {
+                document.body.innerHTML =
+                    `<aside class="sec">${SECTION('')}</aside>` + SUMMARY('')
+                addLineOnClick(
+                    LINE('Coupon', '-$20.00', ' style="display:none"'),
+                )
+                const rec = await finderRecord({ domain: 'shop.test' })
+
+                const res = await applyCoupon('SAVE20', rec)
+
+                expect(res.success).toBe(false)
+            } finally {
+                Element.prototype.checkVisibility = vis
+                restore()
+            }
+        }, 15000)
+
+        it('takes a subtotal that moved on its own, and never its line as well', async () => {
+            // A store whose subtotal is already net of the code also lists
+            // the code's line: counting both would claim $40 for a $20 code.
+            try {
+                document.body.innerHTML =
+                    `<aside class="sec">${SECTION('')}</aside>` + SUMMARY('')
+                clicks = e => {
+                    if (!e.target.matches?.('.ap')) return
+                    setTimeout(() => {
+                        document.querySelector(
+                            '.row',
+                        ).lastElementChild.textContent = '$79.99'
+                        document
+                            .querySelector('.sum p')
+                            .insertAdjacentHTML(
+                                'beforebegin',
+                                LINE('Discount: TWENTYOFF', '-$20.00'),
+                            )
+                    }, 900)
+                }
+                document.addEventListener('click', clicks)
+                const rec = await finderRecord({ domain: 'shop.test' })
+
+                const res = await applyCoupon('SAVE20', rec)
+
+                expect(res.success).toBe(true)
+                expect(res.newTotal).toBe(79.99)
+            } finally {
+                restore()
+            }
+        }, 15000)
+
+        it('reads no discount from a message naming a minimum spend', async () => {
+            try {
+                document.body.innerHTML =
+                    `<aside class="sec">${SECTION('')}</aside>` + SUMMARY('')
+                addLineOnClick(
+                    '<p class="cl"><strong>Discount code</strong> requires a minimum purchase of $50.00</p>',
+                )
+                const rec = await finderRecord({ domain: 'shop.test' })
+
+                const res = await applyCoupon('NOPE', rec)
+
+                expect(res.success).toBe(false)
+            } finally {
+                restore()
+            }
+        }, 15000)
+
+        it('never reads an old line the summary unfolds after the code as new', async () => {
+            const vis = Element.prototype.checkVisibility
+            Element.prototype.checkVisibility = function () {
+                for (let n = this; n && n.nodeType === 1; n = n.parentElement)
+                    if (n.style?.display === 'none') return false
+                return true
+            }
+            try {
+                document.body.innerHTML =
+                    `<aside class="sec">${SECTION('')}</aside>` +
+                    SUMMARY(
+                        LINE('Discount', '-$10.00', ' style="display:none"'),
+                    )
+                clicks = e => {
+                    if (!e.target.matches?.('.ap')) return
+                    setTimeout(() => {
+                        document.querySelector('.cl').style.display = ''
+                    }, 900)
+                }
+                document.addEventListener('click', clicks)
+                const rec = await finderRecord({ domain: 'shop.test' })
+
+                const res = await applyCoupon('NOPE', rec)
+
+                expect(res.success).toBe(false)
+            } finally {
+                Element.prototype.checkVisibility = vis
+                restore()
+            }
+        }, 15000)
+
+        it('takes nothing off a subtotal read after a reload, with no baseline', async () => {
+            try {
+                document.body.innerHTML =
+                    `<aside class="sec">${SECTION('')}</aside>` +
+                    SUMMARY(LINE('Coupon', '-$20.00'))
+                const { caramelFinderReadTotal } = await import(
+                    '../coupon-box-discovery.js'
+                )
+
+                expect(caramelFinderReadTotal(document, 'subtotal')).toBe(99.99)
+            } finally {
+                restore()
+            }
+        })
+
+        // The store's answer: its section re-drawn with a message, and lines
+        // added to the summary, all at once.
+        function answerOnClick(msg, lines) {
+            clicks = e => {
+                if (!e.target.matches?.('.ap')) return
+                const code = document.querySelector('[name=promo_code]').value
+                setTimeout(() => {
+                    if (msg) {
+                        document.querySelector('.sec').innerHTML = SECTION(
+                            msg(code),
+                        )
+                        document.querySelector('[name=promo_code]').value = code
+                    }
+                    if (lines)
+                        document
+                            .querySelector('.sum p')
+                            .insertAdjacentHTML('beforebegin', lines)
+                }, 900)
+            }
+            document.addEventListener('click', clicks)
+        }
+
+        it('never reads an old line the summary only showed as invisible text as new', async () => {
+            // visibility:hidden leaves a line out of innerText, so a reader
+            // that took its amount from what is shown never recorded it.
+            const proto = globalThis.HTMLElement.prototype
+            const inner = Object.getOwnPropertyDescriptor(proto, 'innerText')
+            Object.defineProperty(proto, 'innerText', {
+                configurable: true,
+                get() {
+                    for (
+                        let n = this;
+                        n && n.nodeType === 1;
+                        n = n.parentElement
+                    )
+                        if (n.style?.visibility === 'hidden') return ''
+                    return this.textContent
+                },
+            })
+            try {
+                document.body.innerHTML =
+                    `<aside class="sec">${SECTION('')}</aside>` +
+                    SUMMARY(
+                        LINE(
+                            'Discount',
+                            '-$10.00',
+                            ' style="visibility:hidden"',
+                        ),
+                    )
+                clicks = e => {
+                    if (!e.target.matches?.('.ap')) return
+                    setTimeout(() => {
+                        document.querySelector('.cl').style.visibility = ''
+                    }, 900)
+                }
+                document.addEventListener('click', clicks)
+                const rec = await finderRecord({ domain: 'shop.test' })
+
+                const res = await applyCoupon('NOPE', rec)
+
+                expect(res.success).toBe(false)
+            } finally {
+                Object.defineProperty(proto, 'innerText', inner)
+                restore()
+            }
+        }, 15000)
+
+        it('takes one deduction for one code, never the line and its shares', async () => {
+            try {
+                document.body.innerHTML =
+                    `<aside class="sec">${SECTION('')}</aside>` + SUMMARY('')
+                answerOnClick(
+                    null,
+                    LINE('Coupon', '-$20.00') +
+                        LINE('Discount on item one', '-$12.00') +
+                        LINE('Discount on item two', '-$8.00'),
+                )
+                const rec = await finderRecord({ domain: 'shop.test' })
+
+                const res = await applyCoupon('TWENTYOFF', rec)
+
+                expect(res.success).toBe(true)
+                expect(res.newTotal).toBe(79.99)
+            } finally {
+                restore()
+            }
+        }, 15000)
+
+        it('never reads a line the summary had before as new once it shows an amount', async () => {
+            try {
+                document.body.innerHTML =
+                    `<aside class="sec">${SECTION('')}</aside>` +
+                    SUMMARY(LINE('Discount', '&mdash;'))
+                clicks = e => {
+                    if (!e.target.matches?.('.ap')) return
+                    setTimeout(() => {
+                        document.querySelector(
+                            '.cl',
+                        ).lastElementChild.textContent = '-$10.00'
+                    }, 900)
+                }
+                document.addEventListener('click', clicks)
+                const rec = await finderRecord({ domain: 'shop.test' })
+
+                const res = await applyCoupon('NOPE', rec)
+
+                expect(res.success).toBe(false)
+            } finally {
+                restore()
+            }
+        }, 15000)
+
+        it('reads no saving from a line the store prints beside its rejection of the code', async () => {
+            try {
+                document.body.innerHTML =
+                    `<aside class="sec">${SECTION('')}</aside>` + SUMMARY('')
+                answerOnClick(
+                    c => `Sorry, code "${c}" isn't valid for this order.`,
+                    LINE('Promo TWENTYOFF', '-$20.00'),
+                )
+                const rec = await finderRecord({ domain: 'shop.test' })
+
+                const res = await applyCoupon('TWENTYOFF', rec)
+
+                expect(res.success).toBe(false)
+            } finally {
+                restore()
+            }
+        }, 15000)
+
+        it('counts a coupon line drawn as a minus and an amount apart', async () => {
+            // Measured live: the line read "Coupon\n-\n$20.00".
+            try {
+                document.body.innerHTML =
+                    `<aside class="sec">${SECTION('')}</aside>` + SUMMARY('')
+                answerOnClick(
+                    null,
+                    '<div class="cl"><span>Coupon</span> <span>-\n<div>$20.00 </div></span></div>',
+                )
+                const rec = await finderRecord({ domain: 'shop.test' })
+
+                const res = await applyCoupon('TWENTYOFF', rec)
+
+                expect(res.success).toBe(true)
+                expect(res.newTotal).toBe(79.99)
+            } finally {
+                restore()
+            }
+        }, 15000)
+
+        it('reads no deduction from a dash inside a word', async () => {
+            try {
+                document.body.innerHTML =
+                    `<aside class="sec">${SECTION('')}</aside>` + SUMMARY('')
+                answerOnClick(
+                    null,
+                    '<div class="cl"><b>Promo code</b> A-1 needs a $50.00 order</div>',
+                )
+                const rec = await finderRecord({ domain: 'shop.test' })
+
+                const res = await applyCoupon('NOPE', rec)
+
+                expect(res.success).toBe(false)
+            } finally {
+                restore()
+            }
+        }, 15000)
+
+        it('reads no deduction from a row that says the code was refused', async () => {
+            try {
+                document.body.innerHTML =
+                    `<aside class="sec">${SECTION('')}</aside>` + SUMMARY('')
+                answerOnClick(
+                    null,
+                    '<div class="cl"><b>Promo code</b> once you spend more -$5.00</div>',
+                )
+                const rec = await finderRecord({ domain: 'shop.test' })
+
+                const res = await applyCoupon('NOPE', rec)
+
+                expect(res.success).toBe(false)
+            } finally {
+                restore()
+            }
+        }, 15000)
+
+        it('reads no deduction from a refused row whose amount sits in its own cell', async () => {
+            try {
+                document.body.innerHTML =
+                    `<aside class="sec">${SECTION('')}</aside>` + SUMMARY('')
+                answerOnClick(
+                    null,
+                    '<div class="cl"><span>Promo code</span><span>- $5.00</span>' +
+                        '<small>Minimum order $50.00</small></div>',
+                )
+                const rec = await finderRecord({ domain: 'shop.test' })
+
+                const res = await applyCoupon('NOPE', rec)
+
+                expect(res.success).toBe(false)
+            } finally {
+                restore()
+            }
+        }, 15000)
+
+        it('reads no deduction from a dash that separates an offer', async () => {
+            try {
+                document.body.innerHTML =
+                    `<aside class="sec">${SECTION('')}</aside>` + SUMMARY('')
+                answerOnClick(
+                    null,
+                    '<div class="cl"><b>Promo code</b> – $5.00 off your next order</div>',
+                )
+                const rec = await finderRecord({ domain: 'shop.test' })
+
+                const res = await applyCoupon('NOPE', rec)
+
+                expect(res.success).toBe(false)
+            } finally {
+                restore()
+            }
+        }, 15000)
+
+        it('reads no deduction from a bulleted promo note', async () => {
+            try {
+                document.body.innerHTML =
+                    `<aside class="sec">${SECTION('')}</aside>` + SUMMARY('')
+                answerOnClick(
+                    null,
+                    '<div class="cl"><b>Promo code</b> SPRING\n- $5.00 off\n- for all items</div>',
+                )
+                const rec = await finderRecord({ domain: 'shop.test' })
+
+                const res = await applyCoupon('NOPE', rec)
+
+                expect(res.success).toBe(false)
+            } finally {
+                restore()
+            }
+        }, 15000)
+
+        it('reads no deduction from a count in brackets beside a plain amount', async () => {
+            try {
+                document.body.innerHTML =
+                    `<aside class="sec">${SECTION('')}</aside>` + SUMMARY('')
+                answerOnClick(null, LINE('Coupons (2)', '$5.00'))
+                const rec = await finderRecord({ domain: 'shop.test' })
+
+                const res = await applyCoupon('NOPE', rec)
+
+                expect(res.success).toBe(false)
+            } finally {
+                restore()
+            }
+        }, 15000)
+    })
+
+    it('sees the answer in a section that replaced the one it watched', async () => {
+        try {
+            redrawOnClick(c => `Sorry, code "${c}" isn't valid.`, true)
+            const rec = await finderRecord({ domain: 'shop.test' })
+
+            const started = performance.now()
+            const res = await applyCoupon('NOPE', rec)
+
+            expect(res.success).toBe(false)
+            expect(res.errorMsg).toBe('Sorry, code "NOPE" isn\'t valid.')
+            expect(performance.now() - started).toBeLessThan(4000)
+        } finally {
+            restore()
+        }
+    }, 15000)
+
+    it("never takes the re-drawn section's standing words for its answer", async () => {
+        // The section found after the re-draw is wider than the one watched,
+        // and holds a hint the page showed all along. The code worked; the
+        // total moves a few seconds later, as a summary re-render does.
+        try {
+            const DEEP =
+                '<div class="wrap"><p class="hint">Enter a valid promo code to get free shipping.</p>' +
+                `<div><div><aside class="sec">${SECTION('')}</aside></div></div></div>`
+            document.body.innerHTML =
+                DEEP +
+                '<div class="row"><span>Order total</span> <span>$100.00</span></div>'
+            clicks = e => {
+                if (!e.target.matches?.('.ap')) return
+                const code = document.querySelector('[name=promo_code]').value
+                setTimeout(() => {
+                    document.querySelector('.wrap').innerHTML =
+                        '<p class="hint">Enter a valid promo code to get free shipping.</p>' +
+                        SECTION('')
+                    document.querySelector('[name=promo_code]').value = code
+                }, 150)
+                setTimeout(() => {
+                    document.querySelector(
+                        '.row',
+                    ).lastElementChild.textContent = '$90.00'
+                }, 4500)
+            }
+            document.addEventListener('click', clicks)
+            const rec = await finderRecord({ domain: 'shop.test' })
+
+            const res = await applyCoupon('SAVE10', rec)
+
+            expect(res.success).toBe(true)
+            expect(res.newTotal).toBe(90)
+        } finally {
+            restore()
+        }
+    }, 20000)
+
+    it('keeps looking for the section while the store shows a spinner first', async () => {
+        try {
+            clicks = e => {
+                if (!e.target.matches?.('.ap')) return
+                const code = document.querySelector('[name=promo_code]').value
+                setTimeout(() => {
+                    document.querySelector('.sec').outerHTML =
+                        '<aside class="sec"><p>Loading</p></aside>'
+                }, 150)
+                setTimeout(() => {
+                    document.querySelector('.sec').outerHTML =
+                        `<aside class="sec">${SECTION(`Sorry, code "${code}" isn't valid.`)}</aside>`
+                }, 1800)
+            }
+            document.addEventListener('click', clicks)
+            const rec = await finderRecord({ domain: 'shop.test' })
+
+            const started = performance.now()
+            const res = await applyCoupon('NOPE', rec)
+
+            expect(res.errorMsg).toBe('Sorry, code "NOPE" isn\'t valid.')
+            expect(performance.now() - started).toBeLessThan(5000)
+        } finally {
+            restore()
+        }
+    }, 15000)
+
+    it("reads the store's answer in the section it drew", async () => {
+        try {
+            redrawOnClick(c => `Sorry, code "${c}" isn't valid.`)
+            const rec = await finderRecord({ domain: 'shop.test' })
+
+            const started = performance.now()
+            const res = await applyCoupon('NOPE', rec)
+
+            expect(res.success).toBe(false)
+            expect(res.errorMsg).toBe('Sorry, code "NOPE" isn\'t valid.')
+            expect(performance.now() - started).toBeLessThan(4000)
+        } finally {
+            restore()
+        }
+    }, 15000)
+
+    it('puts the next code into the box the store drew', async () => {
+        try {
+            redrawOnClick(c => `Sorry, code "${c}" isn't valid.`)
+            const rec = await finderRecord({ domain: 'shop.test' })
+            await applyCoupon('NOPE', rec)
+
+            const res = await applyCoupon('SECOND', rec)
+
+            expect(document.querySelector('[name=promo_code]').value).toBe(
+                'SECOND',
+            )
+            expect(res.errorMsg).toBe('Sorry, code "SECOND" isn\'t valid.')
+        } finally {
+            restore()
+        }
+    }, 30000)
+
+    it('opens the box again when the store re-draws it folded', async () => {
+        // Measured live on a WooCommerce cart: every answer re-draws the cart
+        // with the promo panel folded, and the next code had no box to go in.
+        const FOLD = msg =>
+            '<div class="cpn">' +
+            (msg ? `<p class="err">${msg}</p>` : '') +
+            '<button type="button" class="tg">Have a promo code?</button>' +
+            '<div class="panel" style="display:none">' +
+            '<input name="promo_code" type="text" />' +
+            '<button type="button" class="ap">Apply</button></div></div>'
+        const vis = Element.prototype.checkVisibility
+        Element.prototype.checkVisibility = function () {
+            for (let n = this; n && n.nodeType === 1; n = n.parentElement)
+                if (n.style?.display === 'none') return false
+            return true
+        }
+        try {
+            document.querySelector('.sec').innerHTML = FOLD('')
+            clicks = e => {
+                if (e.target.matches?.('.tg'))
+                    document.querySelector('.panel').style.display = ''
+                if (!e.target.matches?.('.ap')) return
+                const code = document.querySelector('[name=promo_code]').value
+                setTimeout(() => {
+                    document.querySelector('.sec').innerHTML = FOLD(
+                        `Coupon "${code}" does not exist!`,
+                    )
+                }, 150)
+            }
+            document.addEventListener('click', clicks)
+            const rec = await finderRecord({ domain: 'shop.test' })
+            await applyCoupon('NOPE', rec)
+
+            const res = await applyCoupon('SECOND', rec)
+
+            expect(res.errorMsg).toBe('Coupon "SECOND" does not exist!')
+        } finally {
+            Element.prototype.checkVisibility = vis
+            restore()
+        }
+    }, 30000)
+
+    it('quotes a refusal printed above fine print that also says "not valid"', async () => {
+        const FINE =
+            'Promo codes are not valid on gift cards, sale items, previous ' +
+            'purchases, shipping charges or taxes, and cannot be combined ' +
+            'with any other offer, discount, loyalty reward or employee ' +
+            'pricing unless the offer itself says otherwise.'
+        try {
+            document
+                .querySelector('.promo')
+                .insertAdjacentHTML('afterbegin', `<p class="fine">${FINE}</p>`)
+            clicks = e => {
+                if (!e.target.matches?.('.ap')) return
+                setTimeout(() => {
+                    document
+                        .querySelector('.sec')
+                        .insertAdjacentHTML(
+                            'afterbegin',
+                            '<p class="note">Sorry, that code is not valid.</p>',
+                        )
+                }, 150)
+            }
+            document.addEventListener('click', clicks)
+            const rec = await finderRecord({ domain: 'shop.test' })
+
+            const res = await applyCoupon('NOPE', rec)
+
+            expect(res.errorMsg).toBe('Sorry, that code is not valid.')
+        } finally {
+            restore()
+        }
+    }, 15000)
+
+    for (const said of [
+        'This code has already been redeemed.',
+        'Free shipping applied! Sorry, that code is not valid.',
+    ])
+        it(`reads "${said}" as the refusal it is, without waiting`, async () => {
+            try {
+                redrawOnClick(() => said)
+                const rec = await finderRecord({ domain: 'shop.test' })
+
+                const started = performance.now()
+                const res = await applyCoupon('NOPE', rec)
+
+                expect(res.success).toBe(false)
+                expect(performance.now() - started).toBeLessThan(4000)
+            } finally {
+                restore()
+            }
+        }, 15000)
 })
 
 describe('caramelAwaitCouponVerdict — logging of the code', () => {

@@ -406,3 +406,68 @@ describe('submitShopperCode — the submit and its answers', () => {
         expect(resp.error).toMatch(/must be strings/)
     })
 })
+
+describe('couponBoxDiscoveryEnabled — the promo-box finder switch', () => {
+    const ASK = { action: 'couponBoxDiscoveryEnabled' }
+
+    it('an app that predates the flag (no key) answers off', async () => {
+        responses.push(features(true))
+
+        expect(await invoke(ASK)).toEqual({ enabled: false })
+    })
+
+    it('the flag on answers on', async () => {
+        responses.push(
+            ok({ shopperCodeCapture: false, couponBoxDiscovery: true }),
+        )
+
+        expect(await invoke(ASK)).toEqual({ enabled: true })
+    })
+
+    it('anything but a literal true is off ("true" the string included)', async () => {
+        responses.push(
+            ok({ shopperCodeCapture: false, couponBoxDiscovery: 'true' }),
+        )
+
+        expect(await invoke(ASK)).toEqual({ enabled: false })
+    })
+
+    it('a failed features read answers off instead of an error', async () => {
+        responses.push(refused(500, null))
+
+        expect(await invoke(ASK)).toEqual({ enabled: false })
+    })
+
+    it('shares the one cached features read with shopper capture', async () => {
+        responses.push(
+            ok({ shopperCodeCapture: true, couponBoxDiscovery: true }),
+            ok({ couponId: 'c1', created: true, status: 'active' }),
+        )
+
+        expect(await invoke(ASK)).toEqual({ enabled: true })
+        await invoke(CAPTURE)
+        expect(featureCalls()).toHaveLength(1)
+        expect(sessionData.caramel_features.couponBoxDiscovery).toBe(true)
+    })
+
+    it('while the finder is on, the cache lives 30 minutes even with capture on (the kill switch)', async () => {
+        const t0 = 1_800_000_000_000
+        const now = vi.spyOn(Date, 'now')
+        now.mockReturnValue(t0)
+        responses.push(
+            ok({ shopperCodeCapture: true, couponBoxDiscovery: true }),
+            ok({ shopperCodeCapture: true, couponBoxDiscovery: false }),
+        )
+
+        expect(await invoke(ASK)).toEqual({ enabled: true })
+        now.mockReturnValue(t0 + 29 * 60 * 1000)
+        expect(await invoke(ASK)).toEqual({ enabled: true })
+        expect(featureCalls()).toHaveLength(1)
+
+        // 31 minutes on: the owner switched it off, and the extension sees it.
+        now.mockReturnValue(t0 + 31 * 60 * 1000)
+        expect(await invoke(ASK)).toEqual({ enabled: false })
+        expect(featureCalls()).toHaveLength(2)
+        now.mockRestore()
+    })
+})

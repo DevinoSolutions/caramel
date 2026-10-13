@@ -191,6 +191,24 @@ describe('parseServerEnv', () => {
         ).toThrow(/SHOPPER_CODE_CAPTURE_ENABLED/)
     })
 
+    it('(h) COUPON_BOX_DISCOVERY_ENABLED is a boolean defaulting to false, and a typo fails boot', () => {
+        expect(
+            parseServerEnv(validServerFixture).COUPON_BOX_DISCOVERY_ENABLED,
+        ).toBe(false)
+        expect(
+            parseServerEnv({
+                ...validServerFixture,
+                COUPON_BOX_DISCOVERY_ENABLED: 'true',
+            }).COUPON_BOX_DISCOVERY_ENABLED,
+        ).toBe(true)
+        expect(() =>
+            parseServerEnv({
+                ...validServerFixture,
+                COUPON_BOX_DISCOVERY_ENABLED: 'on',
+            }),
+        ).toThrow(/COUPON_BOX_DISCOVERY_ENABLED/)
+    })
+
     it('(g) the Playwright/CI-only read key present in app env throws (key hygiene)', () => {
         expect(() =>
             parseServerEnv({

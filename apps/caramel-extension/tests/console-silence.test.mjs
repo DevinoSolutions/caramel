@@ -32,6 +32,7 @@ const SHIPPED_TO_STRANGERS = [
     'cart-signals.js',
     'caramel-base.js',
     'dom-utils.js',
+    'coupon-box-discovery.js',
     'store-detect.js',
     'coupon-apply.js',
     'code-capture.js',
