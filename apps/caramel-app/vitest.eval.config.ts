@@ -54,12 +54,22 @@ export default defineConfig({
         // this config (see ai-evals.yml's own comment: hardcoding the
         // model here would risk exactly the silent code/deploy drift
         // F-012 exists to catch).
+        //
+        // The paid-fallback vars are the opposite case: blanked HERE so a key
+        // in a shell or the local .env (loadEnvFile above) can never reach the
+        // eval gate. The eval measures the free route; a paid answer slipping
+        // in would hide exactly the regression the gate exists to catch.
+        // Blank = unset (src/lib/proxy-fallback-headers.ts trims and ignores).
+        // Pinned by tests/unit/proxy-fallback-headers.test.ts.
         env: {
             DATABASE_URL:
                 'postgresql://postgres:postgres@localhost:58005/caramel?schema=public',
             COUPONS_DATABASE_URL:
                 'postgresql://postgres:postgres@localhost:58005/caramel_coupons',
             BETTER_AUTH_SECRET: 'vitest-fixture-better-auth-secret',
+            OPENROUTER_FALLBACK_API_KEY: '',
+            OPENROUTER_FALLBACK_MODEL: '',
+            OPENROUTER_FALLBACK_AFTER_SECONDS: '',
         },
     },
 })

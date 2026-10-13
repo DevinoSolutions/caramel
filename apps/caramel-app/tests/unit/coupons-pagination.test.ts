@@ -240,8 +240,12 @@ describe('/api/coupons — the sort that makes paging sound', () => {
         // pages are two queries, so a tied row can be served twice or never.
         // The second case is the dangerous one: no client-side dedupe can see a
         // row that was never sent.
+        //
+        // This is a store-scoped call (site=ebay.com), so the ranking is
+        // preceded by the recently-failing sink key (coupons-failing.test.ts
+        // pins that part); the total order underneath is unchanged.
         expect(listQuery().sql).toContain(
-            'ORDER BY rating DESC, created_at DESC, id DESC',
+            ') ASC, rating DESC, created_at DESC, id DESC',
         )
     })
 })

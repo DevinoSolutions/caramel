@@ -173,3 +173,31 @@ The canonical copy of this rule lives in the repo root `CLAUDE.md`
 (§Conventions in force; full text in
 `docs/agent/conventions-and-checks.md`, eval gate); this section stays
 as the local how-to. If the two ever disagree, `CLAUDE.md` wins.
+
+## Coupon-box pick eval
+
+`couponBoxPick.eval.ts` gates the second LLM surface:
+`couponBoxPick.ts` → `openrouter.ts` → `POST /api/extension/coupon-box-pick`.
+When the extension's rules cannot find a store's coupon box, it sends a
+privacy-trimmed accessibility outline of the cart page and the model picks
+the coupon input, its apply button, or the toggle that reveals the box.
+
+- `fixtures/coupon-box-cases.ts` — 51 labelled real cart/checkout pages
+  (13 have no box). The header explains the labels.
+- The suite runs the production `pickCouponBox()` (prompt, scrub, parsing,
+  index validation — imported, never copied), one case at a time, and gates
+  on a **pass rate ≥ 0.90**. A case passes when the picked input is a
+  labelled input, or no input was picked and the picked toggle is a labelled
+  toggle; on a page with no box only "no input, no toggle" passes. An outline
+  over the route's size cap (`MAX_OUTLINE_BYTES`) is refused exactly as in
+  production and counts as no pick.
+- Needs `COUPON_BOX_PICK_MODEL` (the model under test; there is no code
+  default) besides `OPENROUTER_API_KEY` / `OPENROUTER_API_URL`. Without it
+  the suite fails loudly, so `pnpm eval` with no model set fails this suite.
+  Run it alone with
+  `pnpm exec vitest run --config vitest.eval.config.ts evals/couponBoxPick.eval.ts`.
+- CI: the `Coupon box pick eval` job in `ai-evals.yml` reads the model from
+  the `COUPON_BOX_PICK_MODEL` repository variable and fails by name when it
+  is unset.
+
+Results are in `SCOREBOARD.md` § Coupon-box pick.

@@ -133,3 +133,45 @@ describe('CouponCard — "Just worked" is Verified, never beside "Unverified"', 
         expect(screen.getByText('Unverified')).toBeTruthy()
     })
 })
+
+describe('CouponCard: keeps-failing codes lose the green Verified badge', () => {
+    const verified = { ...baseCoupon, status: 'valid' as const }
+    const hoursAgo = (h: number) =>
+        new Date(Date.now() - h * 60 * 60 * 1000).toISOString()
+
+    it('a verified code shows the Verified badge', () => {
+        render(<CouponCard coupon={verified} index={0} />)
+        expect(screen.getByText(/Verified/)).toBeTruthy()
+    })
+
+    it('the same code flagged keepsFailing shows the "Reported not working" hint and NO Verified badge', () => {
+        render(
+            <CouponCard
+                coupon={{
+                    ...verified,
+                    keepsFailing: true,
+                    failCount: 4,
+                    lastFailedAt: hoursAgo(2),
+                }}
+                index={0}
+            />,
+        )
+        expect(screen.getByText(/Reported not working 2h ago/)).toBeTruthy()
+        expect(screen.queryByText(/Verified/)).toBeNull()
+    })
+
+    it('a merely-failing code (not keepsFailing) keeps its badge: only the collapse tier drops it', () => {
+        render(
+            <CouponCard
+                coupon={{
+                    ...verified,
+                    keepsFailing: false,
+                    failCount: 2,
+                    lastFailedAt: hoursAgo(2),
+                }}
+                index={0}
+            />,
+        )
+        expect(screen.getByText(/Verified/)).toBeTruthy()
+    })
+})

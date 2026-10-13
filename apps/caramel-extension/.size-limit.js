@@ -88,7 +88,12 @@ module.exports = [
         // the browser-refused-us state that used to render as a connection
         // error) plus the AllSitesBanner component for the narrow-grant
         // install. Measured 30.39 kB — two real surfaces, not prose.
-        limit: '33.5 KB',
+        // 2026-10-11, raised 33.5 -> 41 kB (issue #288): the popup's "Did it
+        // work?" vote prompt, per-shopper hide, and the two collapsed
+        // sections (reported-not-working, hidden) — three new components plus
+        // the storage module behind them (couponVote.ts). Measured 31.33 ->
+        // 37.97 kB (+6.64 kB): one new feature surface, not prose.
+        limit: '41 KB',
         brotli: false,
     },
     {

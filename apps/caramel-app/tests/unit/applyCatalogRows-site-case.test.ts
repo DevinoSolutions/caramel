@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 // Pins the ONE write-side normalization applyCatalogRows performs: `site` is
 // stored lowercased. Domains are case-insensitive, but the store-page reads
-// match `site = $base OR right(site, …) = '.' || $base` (couponsRepo's
+// match `site = $base OR <site ends in '.' || $base>` (couponsRepo's
 // onStoreSql) case-SENSITIVELY on a lowercased $base (resolveStoreDomain), so
 // a mixed-case producer value (prod 2026-09-11: `eNasco.com`,
 // `Brooklinen.com`) was unreachable from its own canonical page. The transaction is mocked so no DB is touched; the

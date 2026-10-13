@@ -1,4 +1,5 @@
 import { env } from '@/lib/env'
+import { proxyFallbackHeaders } from '@/lib/proxy-fallback-env'
 import * as Sentry from '@sentry/nextjs'
 
 const DEFAULT_MODEL = env.OPENROUTER_MODEL
@@ -14,6 +15,24 @@ export interface ChatOptions {
     maxTokens?: number
     responseFormat?: 'json_object' | 'text'
     timeoutMs?: number
+    /** How long a reasoning model may think before answering. Sent only when
+     * set, so every existing caller's request body is unchanged. */
+    reasoningEffort?: 'low' | 'medium' | 'high'
+    /** Extra request headers for this call only (none by default, so every
+     * existing caller sends exactly the headers it always did). Merged
+     * UNDER the fixed headers below: a caller can add a header but never
+     * replace Content-Type, Authorization, HTTP-Referer, X-Title or
+     * X-Request-Id. */
+    headers?: Record<string, string>
+    /**
+     * Attach the Devino proxy's paid-fallback headers
+     * (src/lib/proxy-fallback-env.ts). Only for a signed-in user's request
+     * whose `timeoutMs` is at least 15 s: the proxy waits 8 s on the free route
+     * before going paid, so a shorter client deadline aborts before the paid
+     * answer lands. Never for guest/unauthenticated requests. chat() makes ONE
+     * fetch and never retries, so one opted-in call is at most one paid call.
+     */
+    paidFallback?: boolean
 }
 
 export class OpenRouterError extends Error {
@@ -54,6 +73,7 @@ export async function chat(
         if (opts.responseFormat === 'json_object') {
             body.response_format = { type: 'json_object' }
         }
+        if (opts.reasoningEffort) body.reasoning_effort = opts.reasoningEffort
 
         // env.OPENROUTER_API_URL defaults to https://openrouter.ai/api/v1 (no
         // trailing slash), so with it unset this is exactly the URL this file
@@ -63,11 +83,18 @@ export async function chat(
             method: 'POST',
             signal: controller.signal,
             headers: {
+                ...opts.headers,
                 'Content-Type': 'application/json',
                 Authorization: `Bearer ${key}`,
                 'HTTP-Referer': 'https://caramel.app',
                 'X-Title': 'Caramel Extension',
                 'X-Request-Id': requestId,
+                // Empty unless the caller opted in, OPENROUTER_FALLBACK_API_KEY
+                // is set and the base URL is https://proxyai.devino.ca.
+                // Shorter client deadlines stay free: paid cannot answer before abort.
+                ...(opts.paidFallback && (opts.timeoutMs ?? 8000) >= 15_000
+                    ? proxyFallbackHeaders(env.OPENROUTER_API_URL)
+                    : {}),
             },
             body: JSON.stringify(body),
         })

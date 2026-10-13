@@ -1,4 +1,5 @@
 import { preflight, withRoute } from '@/lib/api/withRoute'
+import { couponBoxLlmEnabled } from '@/lib/couponBoxPick'
 import { env } from '@/lib/env'
 import { NextResponse } from 'next/server'
 
@@ -26,6 +27,11 @@ import { NextResponse } from 'next/server'
 // extension behaves exactly as it did before the finder existed: it offers the
 // codes to copy. Older extension builds ignore this key.
 //
+// couponBoxLlm: may the extension ask POST /api/extension/coupon-box-pick to
+// find a coupon box its rules missed? The same condition that route answers
+// by (COUPON_BOX_LLM_ENABLED and a configured COUPON_BOX_PICK_MODEL), so the
+// extension never sends an outline to a route that would refuse it.
+//
 // withRoute: public read like extension/supported-stores (rate-limited, no
 // auth/origin gate); cors 'extension' + the OPTIONS preflight mirror
 // extension/me, so a preflighted extension-origin fetch can read it.
@@ -49,5 +55,6 @@ export const GET = withRoute(
         NextResponse.json({
             shopperCodeCapture: env.SHOPPER_CODE_CAPTURE_ENABLED,
             couponBoxDiscovery: env.COUPON_BOX_DISCOVERY_ENABLED,
+            couponBoxLlm: couponBoxLlmEnabled(),
         }),
 )

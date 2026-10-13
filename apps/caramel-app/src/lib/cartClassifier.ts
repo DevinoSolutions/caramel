@@ -1,4 +1,6 @@
+import { firstJsonObject } from '@/lib/llmJson'
 import { chat, OpenRouterError } from '@/lib/openrouter'
+import { createTtlLruCache } from '@/lib/ttlLruCache'
 import * as Sentry from '@sentry/nextjs'
 import crypto from 'node:crypto'
 import { z } from 'zod'
@@ -43,10 +45,10 @@ export interface Classification {
 }
 
 // In-memory LRU-ish cache, capped at 2000 entries, 24h TTL.
-const CACHE_TTL_MS = 24 * 60 * 60 * 1000
-const CACHE_MAX = 2000
-type CacheEntry = { expires: number; value: Omit<Classification, 'cached'> }
-const cache = new Map<string, CacheEntry>()
+const cache = createTtlLruCache<Omit<Classification, 'cached'>>({
+    ttlMs: 24 * 60 * 60 * 1000,
+    maxEntries: 2000,
+})
 
 function cacheKey(s: CartSignals): string {
     const norm = {
@@ -60,27 +62,6 @@ function cacheKey(s: CartSignals): string {
         .update(JSON.stringify(norm))
         .digest('hex')
         .slice(0, 32)
-}
-
-function cacheGet(key: string): Omit<Classification, 'cached'> | null {
-    const entry = cache.get(key)
-    if (!entry) return null
-    if (entry.expires < Date.now()) {
-        cache.delete(key)
-        return null
-    }
-    // Refresh LRU ordering
-    cache.delete(key)
-    cache.set(key, entry)
-    return entry.value
-}
-
-function cacheSet(key: string, value: Omit<Classification, 'cached'>) {
-    if (cache.size >= CACHE_MAX) {
-        const oldest = cache.keys().next().value
-        if (oldest) cache.delete(oldest)
-    }
-    cache.set(key, { expires: Date.now() + CACHE_TTL_MS, value })
 }
 
 function buildMessages(s: CartSignals) {
@@ -186,59 +167,6 @@ export const classificationSchema = z
         }
     })
 
-// End index (exclusive) of the balanced `{...}` that opens at `start`, or
-// -1 when the braces never close (a truncated reply). Braces inside JSON
-// strings are skipped, including escaped quotes, so `{"a":"}"}` is one
-// object and not a premature close.
-function balancedObjectEnd(text: string, start: number): number {
-    let depth = 0
-    let inString = false
-    for (let i = start; i < text.length; i++) {
-        const ch = text[i]
-        if (inString) {
-            if (ch === '\\') i++
-            else if (ch === '"') inString = false
-            continue
-        }
-        if (ch === '"') inString = true
-        else if (ch === '{') depth++
-        else if (ch === '}') {
-            depth--
-            if (depth === 0) return i + 1
-        }
-    }
-    return -1
-}
-
-// CARAMEL-G (2026-09-24/25) — the FIRST complete JSON object in the reply.
-// `response_format: json_object` is a request, not a guarantee: for the
-// default model (anthropic/claude-haiku-4.5) OpenRouter can route to an
-// endpoint that does not support `response_format` at all, and the model
-// then answered with a pretty-printed object followed by a line of
-// commentary. The previous fallback, a GREEDY `/\{[\s\S]*\}/`, ran from the
-// first `{` to the LAST `}` in the whole reply, so any brace in that
-// trailing text dragged it into the slice and the unguarded JSON.parse threw
-// a raw SyntaxError ("Unexpected non-whitespace character after JSON at
-// position 77 (line 6 column 1)"). Each `{` is tried in order and the first
-// balanced slice that parses wins; one that does not parse (a brace in prose
-// before the answer) is skipped, never repaired or guessed at.
-function firstJsonObject(raw: string): unknown {
-    for (
-        let start = raw.indexOf('{');
-        start !== -1;
-        start = raw.indexOf('{', start + 1)
-    ) {
-        const end = balancedObjectEnd(raw, start)
-        if (end === -1) continue
-        try {
-            return JSON.parse(raw.slice(start, end))
-        } catch {
-            // Balanced but not JSON (e.g. "{the} answer") — try the next `{`.
-        }
-    }
-    throw new Error('llm returned non-json')
-}
-
 // CARAMEL-T (2026-10-06) — the model answered with a category outside
 // CATEGORY_ENUM ("furniture") and the whole request failed with a 500, so the
 // shopper's cart got no coupon filtering at all. The prompt is eval-gated and
@@ -305,12 +233,21 @@ function parseResponse(
     return result.data
 }
 
+/**
+ * `admitModelCall` runs only on a cache MISS, immediately before the paid
+ * model call, and may throw to refuse it (the route passes
+ * classifyCartModelBudget's admitClassifyModelCall). The eval harness omits
+ * it — evals must measure the model, not the budget.
+ */
 export async function classifyCart(
     signals: CartSignals,
+    admitModelCall?: () => Promise<void>,
 ): Promise<Classification> {
     const key = cacheKey(signals)
-    const hit = cacheGet(key)
+    const hit = cache.get(key)
     if (hit) return { ...hit, cached: true }
+
+    await admitModelCall?.()
 
     const messages = buildMessages(signals)
     let raw: string
@@ -333,12 +270,13 @@ export async function classifyCart(
             maxTokens: 600,
             temperature: 0,
             timeoutMs: 7000,
+            // No paidFallback: the 7 s abort is under 15 s and the route is guest-reachable, so this stays free.
         })
     } catch (e) {
         if (e instanceof OpenRouterError) throw e
         throw new OpenRouterError(`classify failed: ${(e as Error).message}`)
     }
     const value = parseResponse(raw, signals.domain)
-    cacheSet(key, value)
+    cache.set(key, value)
     return { ...value, cached: false }
 }

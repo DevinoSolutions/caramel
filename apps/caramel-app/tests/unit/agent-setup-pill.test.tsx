@@ -91,4 +91,34 @@ describe('AgentSetupPill', () => {
             agent: 'claude-code',
         })
     })
+
+    it("draws each chip with that agent's own brand mark, never a monogram", () => {
+        render(<AgentSetupPill surface="hero" />)
+        // Path prefixes of the Lobe Icons marks (owner request 2026-10-09):
+        // a swapped or generic glyph changes the first command of the path.
+        const markPrefix: Record<string, string> = {
+            'claude-code': 'M20.998 10.949H24v3.102',
+            codex: 'M8.086.457a6.105 6.105',
+            cursor: 'M22.106 5.68L12.5.135',
+            opencode: 'M16 6H8v12h8V6zm4 16H4V2h16v20z',
+            'github-copilot': 'M19.245 5.364c1.322 1.36',
+        }
+        for (const guide of AGENT_GUIDES) {
+            const link = screen.getByRole('link', {
+                name: `${guide.name} setup guide`,
+            })
+            const svg = link.querySelector(`svg[data-agent-icon="${guide.id}"]`)
+            expect(svg?.getAttribute('aria-hidden')).toBe('true')
+            expect(svg?.getAttribute('fill')).toBe('currentColor')
+            expect(svg?.querySelector('path')?.getAttribute('d')).toMatch(
+                new RegExp(`^${escapeRegExp(markPrefix[guide.id])}`),
+            )
+            // The retired two-letter monograms (Cu, Oc) are gone.
+            expect(link.textContent).toBe('')
+        }
+    })
 })
+
+function escapeRegExp(text: string): string {
+    return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}

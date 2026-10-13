@@ -13,6 +13,7 @@
 // Limits are intentionally per-IP, not per-route, so a scraper pivoting
 // between endpoints doesn't get a fresh budget on each one.
 import { reportRateLimitRejection } from '@/lib/abuseSignal'
+import { readClientIp } from '@/lib/clientIp'
 import { env } from '@/lib/env'
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
@@ -42,35 +43,11 @@ const limiters: Record<LimitKind, RateLimiterMemory> = {
 const burstLimiter = new RateLimiterMemory(BURST)
 
 export function getClientIp(req: NextRequest): string {
-    // CF-Connecting-IP FIRST, and this ordering is load-bearing.
-    //
-    // grabcaramel.com is proxied by Cloudflare, and Traefik behind it sets
-    // X-Real-IP to ITS OWN peer — the Cloudflare edge — not to the visitor.
-    // Preferring X-Real-IP therefore handed every visitor on earth the SAME
-    // rate-limit key, i.e. one global bucket. Measured on dev 2026-08-08 with
-    // a clean 75s window: a 30-request burst from a proxy exit returned 429s,
-    // and the very next request from a DIFFERENT machine that had been idle
-    // was also 429. Both directions of that are bad — 20 requests in 2s from
-    // one host could 429 the API for every real user (a trivial DoS), while a
-    // scraper rotating IPs got no per-client throttle at all.
-    //
-    // Cloudflare always sets CF-Connecting-IP to the true client and strips
-    // any client-supplied copy, so it is the only header here a caller cannot
-    // forge through the edge. X-Real-IP / X-Forwarded-For stay as fallbacks
-    // for topologies without Cloudflare (local dev, direct origin hits), where
-    // the old behaviour is unchanged.
-    const cfIp = req.headers.get('cf-connecting-ip')?.trim()
-    if (cfIp) return cfIp
-    const realIp = req.headers.get('x-real-ip')?.trim()
-    if (realIp) return realIp
-    const xff = req.headers.get('x-forwarded-for')
-    if (xff) {
-        const first = xff.split(',')[0]?.trim()
-        if (first) return first
-    }
+    // Header order (CF-Connecting-IP first) is load-bearing and lives with
+    // its explanation in clientIp.ts, shared with Better Auth's own limiter.
     // No headers at all (edge runtime, direct hits): a shared bucket is still
     // better than letting everything through unmetered.
-    return 'unknown'
+    return readClientIp(req.headers) ?? 'unknown'
 }
 
 /**

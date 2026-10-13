@@ -860,7 +860,16 @@ export async function startCheckoutDetection() {
     // An attempt the store's own form POST cut short finishes here, on the page
     // that replaced it — before tryInitialize can re-prompt as if nothing had
     // happened, which is precisely what the user saw before.
-    if (await _resumePendingSubmit()) return
+    if (await _resumePendingSubmit()) {
+        // Still a checkout page the shopper may type their own code into, so
+        // watch for it. Arming only attaches gesture listeners (idempotent,
+        // trusted shopper input only, silent while our overlay is up): it never
+        // re-prompts, never applies, and cannot judge the resumed verdict above.
+        // tryInitialize and the re-detection observer below stay skipped.
+        const resumedRec = await getDomainRecord(location.hostname)
+        if (resumedRec) armCodeCapture(resumedRec)
+        return
+    }
     await tryInitialize()
     const rec = await getDomainRecord(location.hostname)
     // Shopper-typed code capture (idempotent; needs the store's own selectors,
