@@ -61,7 +61,7 @@ const GENERIC_REMOVE_SELECTORS_SCOPED =
 // deleted cart. If a store genuinely needs a remove button we can't scope, that
 // belongs in its config's `couponRemove`, where it is a deliberate per-store
 // decision rather than a blind default for every store.
-const GENERIC_ERROR_TEXT_RE =
+export const GENERIC_ERROR_TEXT_RE =
     /\b(invalid|expired|not\s+(valid|applicable|eligible)|limited\s+to|cannot\s+be\s+(applied|redeemed)|doesn'?t\s+apply|no\s+eligible|enter\s+a\s+valid|nicht|ungültig|abgelaufen|expiré|expirado|caducado)\b/i
 // `abgelaufen` / `expiré` / `expirado` / `caducado` are the same word as
 // "expired" in the four European languages our catalogue actually covers, and

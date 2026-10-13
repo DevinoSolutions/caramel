@@ -27,6 +27,7 @@ import {
     caramelRowReadsRejected,
     caramelSinkTriedCodes,
     findAppliedSelector,
+    GENERIC_ERROR_TEXT_RE,
     probeCartJson,
     removeAppliedCoupon,
     setInputValue,
@@ -89,6 +90,14 @@ import {
  * the money-adjacent path when the existing seam is behavior-identical to what
  * ships today. UI-helpers writes `globalThis._caramelCancelled` explicitly. */
 globalThis._caramelCancelled = false
+
+// Does the store's reason quote the code we typed? Case-insensitive.
+function _reasonNamesCode(reason, code) {
+    const c = String(code || '')
+        .toLowerCase()
+        .trim()
+    return !!c && String(reason).toLowerCase().includes(c)
+}
 
 // Fire-and-forget trust-loop report → background (content scripts can't hit
 // the API directly). Best-effort: an asleep/unreachable SW must never break
@@ -1255,6 +1264,23 @@ export async function startApplyingCoupons(rec, options) {
                     id: lastFailId,
                     storeReason: lastStoreReason,
                     reason: 'the cart arrived with a discount, so this rejection is not evidence about the code',
+                })
+            } else if (
+                rec.caramelFound === true &&
+                !GENERIC_ERROR_TEXT_RE.test(String(lastStoreReason)) &&
+                !_reasonNamesCode(
+                    lastStoreReason,
+                    coupons.find(c => c.id === lastFailId)?.code,
+                )
+            ) {
+                // A box the finder picked is a guess at the store's markup, so
+                // a reason that is neither a generic rejection nor about our
+                // code ("Minimum spend $50") may describe the cart or another
+                // box. Only those two kinds of reason are evidence against it.
+                log('AUTO_INSERT_VERDICT_WITHHELD', {
+                    id: lastFailId,
+                    storeReason: lastStoreReason,
+                    reason: 'the box was found by the finder and the store reason names neither the code nor a generic rejection',
                 })
             } else {
                 reportOutcome(lastFailId, 'failed', lastStoreReason)

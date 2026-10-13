@@ -20,11 +20,24 @@ import {
 let applyCalls
 let finalModalCalls
 let couponList
+let outcomeMessages
+
+// applyCoupon is the real one unless a test installs a stub (the verdict
+// tests at the bottom run the real runner against a scripted store answer).
+const stubs = vi.hoisted(() => ({ applyCoupon: null }))
 
 vi.mock('../coupon-runner.js', async importOriginal => ({
     ...(await importOriginal()),
     startApplyingCoupons: (...args) => applyCalls.push(args),
 }))
+vi.mock('../coupon-apply.js', async importOriginal => {
+    const actual = await importOriginal()
+    return {
+        ...actual,
+        applyCoupon: (...args) =>
+            (stubs.applyCoupon ?? actual.applyCoupon)(...args),
+    }
+})
 vi.mock('../caramel-base.js', async importOriginal => {
     const actual = await importOriginal()
     return {
@@ -71,6 +84,7 @@ function installChromeStub() {
     }
     stub.runtime.lastError = undefined
     stub.runtime.sendMessage = (message, cb) => {
+        if (message?.action === 'reportOutcome') outcomeMessages.push(message)
         if (typeof cb !== 'function') return
         if (message?.action === 'fetchCoupons') cb({ coupons: couponList })
         else if (message?.action === 'couponBoxDiscoveryEnabled')
@@ -107,6 +121,8 @@ beforeEach(() => {
     history.replaceState({}, '', '/cart')
     applyCalls = []
     finalModalCalls = []
+    outcomeMessages = []
+    stubs.applyCoupon = null
     // jsdom has no layout: every element is shown, with a size.
     Element.prototype.checkVisibility = () => true
     Element.prototype.getBoundingClientRect = () => ({
@@ -179,5 +195,61 @@ describe('a finder run on a cart that reloads per code', () => {
 
         expect(applyCalls).toEqual([])
         expect(finalModalCalls[0][0]).toBeCloseTo(10, 2)
+    })
+})
+
+describe('the verdict on a finder run', () => {
+    // The finder's box is a guess at the store's markup, so a reason that is
+    // neither a generic rejection nor about the code we typed ("Minimum spend
+    // $50") may be describing the cart. It must not teach the trust loop that
+    // the code is dead. A configured run keeps reporting every real reason
+    // (store-said-attribution.test.mjs).
+    const FINDER_REC = {
+        domain: 'finder-store.example',
+        caramelFound: true,
+        caramelTotalKind: 'total',
+        caramelTotalLabel: 'order total',
+        caramelTotalRows: 1,
+        couponInput: '#pc',
+        couponSubmit: '#ap',
+        priceContainer: '.row',
+    }
+
+    async function runFinderRunEndingWith(storeReason) {
+        const { startApplyingCoupons: realStart } = await vi.importActual(
+            '../coupon-runner.js',
+        )
+        stubs.applyCoupon = async () => ({
+            success: false,
+            newTotal: NaN,
+            committed: false,
+            errorMsg: storeReason,
+            errorIsNew: true,
+        })
+        document.body.innerHTML = BOX + TOTAL
+        couponList = [{ code: 'DEAD5', id: 'c1' }]
+        await realStart(FINDER_REC)
+    }
+
+    it('never reports "failed" for "Minimum spend $50"', async () => {
+        await runFinderRunEndingWith('Minimum spend $50')
+
+        expect(outcomeMessages).toEqual([])
+    })
+
+    it('still reports "failed" for a generic rejection', async () => {
+        await runFinderRunEndingWith('This code has expired')
+
+        expect(outcomeMessages.map(m => [m.id, m.outcome])).toEqual([
+            ['c1', 'failed'],
+        ])
+    })
+
+    it('still reports "failed" when the reason names the code', async () => {
+        await runFinderRunEndingWith('Sorry, DEAD5 cannot be used today')
+
+        expect(outcomeMessages.map(m => [m.id, m.outcome])).toEqual([
+            ['c1', 'failed'],
+        ])
     })
 })
