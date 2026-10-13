@@ -1433,9 +1433,11 @@ const PICK_KEY = 'caramel_box_pick:'
 // How long the page waits for the answer. The server gives the model 20s and
 // then answers no_pick itself; the background allows the whole ask (flag
 // read, token read, request) COUPON_BOX_PICK_DEADLINE_MS, 24s (background.js);
-// 2s more covers the message hops and reading the answer, so an answer sent
-// inside that deadline always arrives here. Raise one, raise the ones after.
-export const PICK_WAIT_MS = 26000
+// 5s more covers waking a stopped background worker, the message hops and
+// reading the answer (the background's clock starts only once it is awake),
+// so an answer sent inside that deadline arrives here. Raise one, raise the
+// ones after.
+export const PICK_WAIT_MS = 29000
 // The outline builder (coupon-box-outline.js) is not in the content-script
 // bundle: the build ships it as this file and it is loaded only by a page that
 // is about to ask.
@@ -1580,7 +1582,16 @@ async function caramelPickedRecord(rec, doc) {
                 found = { input, button: buttonFor(input) }
             else {
                 const rules = caramelDiscoverCouponBox(doc)
-                if (rules.inputVisible && confident(rules)) found = rules
+                // Same guard as buttonFor: a button that leaves the page is
+                // never the apply button on the server-pick path.
+                if (rules.inputVisible && confident(rules))
+                    found = {
+                        ...rules,
+                        button:
+                            rules.button && !navigatesAway(rules.button)
+                                ? rules.button
+                                : null,
+                    }
             }
         }
         // A checkbox that opened no usable box goes back the way the shopper

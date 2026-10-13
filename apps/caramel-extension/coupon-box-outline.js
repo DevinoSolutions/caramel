@@ -82,8 +82,11 @@ const norm = s =>
         .trim()
 const clip = (s, n) => (s.length > n ? s.slice(0, n - 1) + '…' : s)
 // Every digit and anything email-shaped, in everything but the [n] index.
+// "Digit" is any Unicode number (\p{N}), not just 0-9: a phone number written
+// in Arabic-Indic, Persian, fullwidth or circled digits has no letters, so the
+// word allowlist below would otherwise keep it verbatim.
 const scrub = s =>
-    s.replace(/[\w.+-]+@[\w-]+\.[\w.]+/g, '[email]').replace(/\d/g, '#')
+    s.replace(/[\w.+-]+@[\w-]+\.[\w.]+/g, '[email]').replace(/\p{N}/gu, '#')
 const bytes = s => new TextEncoder().encode(s).length
 
 // The words a name may carry. Every other word is dropped before the outline
