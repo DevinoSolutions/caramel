@@ -123,8 +123,13 @@ const NODE_HEAD = /^\s*- \[(\d{1,6})\] (?=[a-z]+\b)/
 // Every line break a browser can put in an accessible name, not only \n.
 const LINE_BREAK = /\r\n|[\n\r\u2028\u2029]/
 
+// Any Unicode number (\p{N}), not just 0-9: a phone number in Arabic-Indic,
+// Persian or fullwidth digits is still a phone number. Built with the
+// constructor because this project's compile target rejects the literal `u`
+// flag; every runtime we run on supports it.
+const ANY_DIGIT = new RegExp('\\p{N}', 'gu')
 function scrubText(text: string): string {
-    return text.replace(EMAIL_SHAPED, '[email]').replace(/\d/g, '#')
+    return text.replace(EMAIL_SHAPED, '[email]').replace(ANY_DIGIT, '#')
 }
 
 /** Every digit becomes `#` and anything email-shaped becomes `[email]`,

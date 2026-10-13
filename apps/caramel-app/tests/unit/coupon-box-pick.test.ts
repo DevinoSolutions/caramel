@@ -255,6 +255,12 @@ describe('the pick', () => {
         ).toBe(['- [##########] textbox "x"', '- [##] "call ###"'].join('\n'))
     })
 
+    it('scrubs digits in any script, not only 0-9', () => {
+        expect(scrubOutline('- [3] button "to ۰۹۱۲ ٠١٢ ０３１ ①𝟏Ⅷ"')).toBe(
+            '- [3] button "to #### ### ### ###"',
+        )
+    })
+
     it('drops an index that is not in the outline (a hallucination)', async () => {
         chatMock.mockImplementation(async () =>
             answer({ input: 99, button: 8, toggle: 12 }),
