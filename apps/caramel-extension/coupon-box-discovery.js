@@ -1314,6 +1314,26 @@ export function caramelFinderSeesBox(doc = document) {
     return false
 }
 
+/* The rules see no box, but the server could still find one once the shopper
+ * taps. Without this the server pick is unreachable: the prompt only appeared
+ * where the rules already saw a box, and a page where they did had no reason
+ * to ask. So, only while the couponBoxLlm flag is on, a cart page with a
+ * readable total is offered the prompt too.
+ *
+ * Detection still never asks the server or clicks anything: the pick runs
+ * after the tap (caramelPickedRecord), once per store per tab session, and a
+ * "no box" answer ends with the codes handed over to copy. A store already
+ * asked this session is not offered again on the strength of this rule. */
+// Called from store-detect.js.
+export async function caramelFinderMayAsk(domain, doc = document) {
+    const total = caramelFindOrderTotal(doc)
+    if (!total || !readableTotal(total)) return false
+    if (domain && pickAsked(domain)) return false
+    if (!(await caramelCouponBoxLlmOn())) return false
+    log('FINDER_MAY_ASK', {})
+    return true
+}
+
 /* A record the apply flow can run on, built from what the finder sees.
  *
  * Opens a folded promo box first when only its toggle is showing (refusing any

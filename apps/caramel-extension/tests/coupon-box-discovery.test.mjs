@@ -33,6 +33,8 @@ let finalModals
 let promptedWith
 let appliedWith
 let flagOn
+// The couponBoxLlm flag: may the finder ask the server for a box it missed.
+let llmOn
 
 const COUPONS = [
     {
@@ -106,6 +108,8 @@ function installChromeStub() {
         if (message?.action === 'fetchCoupons') cb({ coupons: COUPONS })
         else if (message?.action === 'couponBoxDiscoveryEnabled')
             cb({ enabled: flagOn })
+        else if (message?.action === 'couponBoxLlmEnabled')
+            cb({ enabled: llmOn })
         else cb({})
     }
     globalThis.chrome = stub
@@ -163,6 +167,7 @@ beforeEach(() => {
     promptedWith = []
     appliedWith = []
     flagOn = true
+    llmOn = false
     _caramelResetDiscoveryFlag()
     _caramelResetCachedCodes()
     getDomainRecord.cache = []
@@ -874,6 +879,69 @@ describe('the flag decides whether the shopper sees any of this', () => {
         const { rec } = appliedWith[0]
         expect(rec.caramelFound).toBe(true)
         expect(document.querySelector(rec.couponInput)?.id).toBe('dc')
+    })
+})
+
+// A cart whose promo box the rules cannot see. Without the server pick there
+// is nothing to offer; with it, the prompt is the only way the pick is ever
+// reached, because the pick runs after the shopper's tap.
+describe('the server pick needs a prompt to be reached', () => {
+    const NO_BOX = '<div class="lines"><span>One item</span></div>'
+
+    it('pick flag off: a cart the rules see no box on gets no prompt, exactly as before', async () => {
+        document.body.innerHTML = NO_BOX + TOTAL
+
+        await tryInitialize()
+
+        expect(promptedWith).toHaveLength(0)
+    })
+
+    it('pick flag on: the same cart gets the prompt', async () => {
+        llmOn = true
+        document.body.innerHTML = NO_BOX + TOTAL
+
+        await tryInitialize()
+
+        expect(promptedWith).toHaveLength(1)
+    })
+
+    it('pick flag on, finder flag off: no prompt', async () => {
+        llmOn = true
+        flagOn = false
+        document.body.innerHTML = NO_BOX + TOTAL
+
+        await tryInitialize()
+
+        expect(promptedWith).toHaveLength(0)
+    })
+
+    it('pick flag on: never on a page that is not a cart', async () => {
+        llmOn = true
+        setPath('/')
+        document.body.innerHTML = NO_BOX + TOTAL
+
+        await tryInitialize()
+
+        expect(promptedWith).toHaveLength(0)
+    })
+
+    it('pick flag on: no readable total, nothing could be measured, no prompt', async () => {
+        llmOn = true
+        document.body.innerHTML = NO_BOX
+
+        await tryInitialize()
+
+        expect(promptedWith).toHaveLength(0)
+    })
+
+    it('pick flag on: a store already asked this tab session is not offered again', async () => {
+        llmOn = true
+        sessionStorage.setItem('caramel_box_pick:' + location.hostname, '1')
+        document.body.innerHTML = NO_BOX + TOTAL
+
+        await tryInitialize()
+
+        expect(promptedWith).toHaveLength(0)
     })
 })
 
