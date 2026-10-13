@@ -12,6 +12,11 @@
 // `next dev`/`next build` never brick on a feature the current environment
 // simply doesn't configure (social login, extension OAuth, email, the
 // coupons-bridge sync, ...).
+import {
+    isValidFallbackAfterSeconds,
+    isValidFallbackKey,
+    isValidFallbackModel,
+} from '@/lib/proxy-fallback-headers'
 import 'server-only'
 import { z } from 'zod'
 
@@ -181,6 +186,32 @@ const serverObjectSchema = z.object({
         .string()
         .optional()
         .transform(v => v?.trim() || undefined),
+    // Paid fallback through the Devino proxy (src/lib/proxy-fallback-headers.ts):
+    // the app's OWN OpenRouter org key, sent as X-ORF-Fallback-Key only to
+    // https://proxyai.devino.ca and only on a chat() call that opts in. Unset =
+    // no header, behaviour unchanged. Blank is fine; a malformed value refuses
+    // boot here (the message names the variable, never the value) because a
+    // key with a newline would otherwise make every LLM call throw. Server-
+    // only; CI, evals and e2e never set these (vitest.eval.config.ts and
+    // playwright.config.ts blank them).
+    OPENROUTER_FALLBACK_API_KEY: z
+        .string()
+        .optional()
+        .refine(isValidFallbackKey, {
+            error: 'OPENROUTER_FALLBACK_API_KEY must be blank or an OpenRouter sk-or-v1-... key',
+        }),
+    OPENROUTER_FALLBACK_MODEL: z
+        .string()
+        .optional()
+        .refine(isValidFallbackModel, {
+            error: 'OPENROUTER_FALLBACK_MODEL must be blank or an OpenRouter model id like vendor/model',
+        }),
+    OPENROUTER_FALLBACK_AFTER_SECONDS: z
+        .string()
+        .optional()
+        .refine(isValidFallbackAfterSeconds, {
+            error: 'OPENROUTER_FALLBACK_AFTER_SECONDS must be blank or a plain number of seconds in (0, 300]',
+        }),
     API_ENCRYPTION_ENABLED: z.string().optional(),
     // Which PostHog project this deploy's SERVER-side captures target (the
     // feedback+observability foundation). 'production' → the real project;
