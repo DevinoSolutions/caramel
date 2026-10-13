@@ -32,7 +32,6 @@ const SHIPPED_TO_STRANGERS = [
     'cart-signals.js',
     'caramel-base.js',
     'dom-utils.js',
-    'coupon-box-outline.js',
     'coupon-box-discovery.js',
     'store-detect.js',
     'coupon-apply.js',
@@ -44,6 +43,10 @@ const SHIPPED_TO_STRANGERS = [
     'inject.js',
     'background.js',
 ]
+// Not in any entrypoint's import graph, but shipped and run in the store's
+// page all the same: the build copies it beside the bundle and the finder
+// imports it by URL when it asks the server for a box (wxt.config.ts).
+const LOADED_ON_DEMAND = ['coupon-box-outline.js']
 
 function ungatedConsoleLines(file) {
     const src = readFileSync(join(root, file), 'utf8')
@@ -68,7 +71,7 @@ function ungatedConsoleLines(file) {
 }
 
 describe('a packed install is silent in every console it can reach', () => {
-    for (const file of SHIPPED_TO_STRANGERS) {
+    for (const file of [...SHIPPED_TO_STRANGERS, ...LOADED_ON_DEMAND]) {
         it(`${file} has no ungated console call`, () => {
             expect(ungatedConsoleLines(file)).toEqual([])
         })

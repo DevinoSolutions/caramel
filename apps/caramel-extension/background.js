@@ -146,16 +146,20 @@ function getStoredToken() {
 }
 
 async function fetchCaramelApi(url, opts = {}, timeoutMs = FETCH_TIMEOUT_MS) {
-    const token = await getStoredToken()
-    if (!token) return fetchWithTimeout(url, opts, timeoutMs)
     return fetchWithTimeout(
         url,
-        {
-            ...opts,
-            headers: { ...opts.headers, Authorization: `Bearer ${token}` },
-        },
+        withBearer(opts, await getStoredToken()),
         timeoutMs,
     )
+}
+
+// `opts` with the session bearer attached, or unchanged when signed out.
+function withBearer(opts, token) {
+    if (!token) return opts
+    return {
+        ...opts,
+        headers: { ...opts.headers, Authorization: `Bearer ${token}` },
+    }
 }
 
 /* --------------------------------------------------  shopper code sharing
@@ -292,19 +296,39 @@ async function couponBoxLlmEnabled() {
  * coupon-box-outline.js and the finder's caramelPickedRecord). The outline is
  * forwarded as built; the answer is passed back as the server sent it, and a
  * refusal (429 over budget, 413 too large) as { error }. The flag is read
- * again here, so a content script on a stale answer cannot spend a call. */
-// The model answers in ~4s, its slowest measured answer took 13.6s.
-const COUPON_BOX_PICK_TIMEOUT_MS = 15000
+ * again here, so a content script on a stale answer cannot spend a call.
+ *
+ * ONE deadline covers the whole ask: the flag read (which may refetch the
+ * features, up to FETCH_TIMEOUT_MS), the token read and the request. The
+ * request gets what is left of it, never more than its own cap, and is not
+ * sent at all with less than COUPON_BOX_PICK_MIN_MS left: a paid answer the
+ * page has stopped waiting for is money for nothing.
+ *
+ * Three numbers, each above the one before: the server gives the model 20s
+ * and then answers no_pick itself (measured p95 16-18s); this side allows the
+ * whole ask 24s, so the request can outwait the server's own limit; the page
+ * waits PICK_WAIT_MS, 26s (coupon-box-discovery.js), so an answer sent inside
+ * this deadline always reaches it. Raise one, raise the ones after it. */
+export const COUPON_BOX_PICK_DEADLINE_MS = 24000
+const COUPON_BOX_PICK_TIMEOUT_MS = 23000
+const COUPON_BOX_PICK_MIN_MS = 3000
 async function couponBoxPick({ domain, outline }) {
+    const deadline = Date.now() + COUPON_BOX_PICK_DEADLINE_MS
     if (!(await couponBoxLlmEnabled())) return { error: 'disabled' }
-    const r = await fetchCaramelApi(
+    const token = await getStoredToken()
+    const left = Math.min(COUPON_BOX_PICK_TIMEOUT_MS, deadline - Date.now())
+    if (left < COUPON_BOX_PICK_MIN_MS) return { error: 'out of time' }
+    const r = await fetchWithTimeout(
         caramelUrl('api/extension/coupon-box-pick'),
-        {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ domain, outline }),
-        },
-        COUPON_BOX_PICK_TIMEOUT_MS,
+        withBearer(
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ domain, outline }),
+            },
+            token,
+        ),
+        left,
     )
     if (!r.ok) return { error: `HTTP ${r.status}` }
     return r.json()

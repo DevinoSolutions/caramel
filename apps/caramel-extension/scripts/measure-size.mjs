@@ -63,7 +63,6 @@ export const GROUPS = {
         'cart-signals.js',
         'caramel-base.js',
         'dom-utils.js',
-        'coupon-box-outline.js',
         'coupon-box-discovery.js',
         'store-detect.js',
         'coupon-apply.js',
@@ -89,6 +88,11 @@ export const GROUPS = {
         ...(await tsSourcesUnder('../../packages/caramel-ui/src')),
     ],
     background: ['background.js'],
+    // Not injected: the build ships it as assets/coupon-box-outline.js and the
+    // finder imports it only when it is about to ask the server for a box
+    // (wxt.config.ts). Its own budget, so it can neither hide in nor inflate
+    // the per-page one.
+    'coupon-box-outline': ['coupon-box-outline.js'],
 }
 
 /** Minified bytes of one group, written as a single file for size-limit. */

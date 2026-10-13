@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { COUPON_BOX_PICK_DEADLINE_MS } from '../background.js'
 
 /**
  * background.js — the coupon-box pick request. The content script hands over
@@ -168,5 +169,70 @@ describe('couponBoxPick', () => {
             error: 'TypeError: Failed to fetch',
         })
         expect(pickCalls()).toHaveLength(1)
+    })
+})
+
+describe('couponBoxPick: one deadline for the whole ask', () => {
+    let clock
+    let timeouts
+    let featuresCost // ms the features read takes off the deadline
+
+    beforeEach(() => {
+        clock = 1_000_000
+        featuresCost = 0
+        vi.spyOn(Date, 'now').mockImplementation(() => clock)
+        // Every abort timer fetchWithTimeout arms, in order.
+        timeouts = []
+        const realSetTimeout = globalThis.setTimeout
+        vi.spyOn(globalThis, 'setTimeout').mockImplementation((fn, ms) => {
+            timeouts.push(ms)
+            return realSetTimeout(fn, 60_000)
+        })
+        const realFetch = globalThis.fetch
+        globalThis.fetch = async (url, opts) => {
+            if (String(url).includes('extension/features'))
+                clock += featuresCost
+            return realFetch(url, opts)
+        }
+    })
+    const pickTimeout = () => timeouts.at(-1)
+
+    afterEach(() => vi.restoreAllMocks())
+
+    it('a quick flag read leaves the request its 23s cap, past the 20s the server gives the model', async () => {
+        responses.push(features(true), ok({ outcome: 'no_box' }))
+
+        await invoke(PICK)
+
+        expect(pickCalls()).toHaveLength(1)
+        expect(pickTimeout()).toBe(23000)
+    })
+
+    it('a slow features refetch is taken off the request', async () => {
+        featuresCost = 9000
+        responses.push(features(true), ok({ outcome: 'no_box' }))
+
+        await invoke(PICK)
+
+        expect(pickCalls()).toHaveLength(1)
+        expect(pickTimeout()).toBe(COUPON_BOX_PICK_DEADLINE_MS - 9000)
+    })
+
+    it('under 3s left: no request is sent', async () => {
+        featuresCost = COUPON_BOX_PICK_DEADLINE_MS - 2500
+        responses.push(features(true))
+
+        expect(await invoke(PICK)).toEqual({ error: 'out of time' })
+        expect(pickCalls()).toHaveLength(0)
+    })
+
+    it('exactly 3s left: the request still goes, with those 3s', async () => {
+        featuresCost = COUPON_BOX_PICK_DEADLINE_MS - 3000
+        responses.push(features(true), ok({ outcome: 'no_box' }))
+
+        await invoke(PICK)
+
+        expect(pickCalls()).toHaveLength(1)
+        expect(pickTimeout()).toBe(3000)
     })
 })

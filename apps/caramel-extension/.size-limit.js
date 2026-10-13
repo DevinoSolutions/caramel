@@ -67,14 +67,16 @@ module.exports = [
         // the line, a bracketed qualifier, "up to"); a sixth replaced the
         // refusal word lists with one accepted line shape, whose only allowed
         // name is the code that was typed. Measured 106.66 kB.
-        // 2026-10-13, raised 107 -> 113 kB: the finder's server pick, one new
-        // capability behind its own server flag (couponBoxLlm). When the rules
-        // read a total but find no box, the page outline the pick was measured
-        // on (coupon-box-outline.js, 3.7 kB of it) is sent once per store per
-        // tab session, and the answer is checked on the page before it joins
-        // the normal apply flow. No existing way to load content code on
-        // demand, so it ships in the bundle. Measured 112.8 kB.
-        limit: '113 KB',
+        // 2026-10-13, raised 107 -> 111.5 kB: the finder's server pick, one
+        // new capability behind its own server flag (couponBoxLlm). When the
+        // rules read a total but find no box, the page is outlined and the
+        // server asked once per store per tab session, and the answer is
+        // checked on the page before it joins the normal apply flow. The
+        // outline builder itself is NOT in this bundle: it ships as its own
+        // file, loaded only when the pick is asked, and has its own budget
+        // below. What is here is the asking and the checking. Measured
+        // 109.36 kB.
+        limit: '111.5 KB',
         brotli: false,
     },
     {
@@ -137,7 +139,20 @@ module.exports = [
         // couponBoxDiscovery flag too, answered to the content script on its
         // own message route. Measured 9.67 kB; raised rather than left at 3.3%
         // headroom (see the 2026-08-10 note above).
-        limit: '10.7 KB',
+        // 2026-10-13, raised 10.7 -> 11.3 kB: the coupon-box pick request (its
+        // flag, its message route, and one deadline over the flag read, the
+        // token read and the request). Measured 10.52 kB.
+        limit: '11.3 KB',
+        brotli: false,
+    },
+    {
+        name: 'coupon-box-outline.js (loaded on demand, minified)',
+        path: '.size-cache/coupon-box-outline.min.js',
+        // 2026-10-13 — measured 8.30 kB minified. Not injected on every page:
+        // the finder imports it only when it is about to ask the server for a
+        // box. About half of it is the word allowlist every name is filtered
+        // through, which is data the server's eval was measured with.
+        limit: '9.2 KB',
         brotli: false,
     },
 ]

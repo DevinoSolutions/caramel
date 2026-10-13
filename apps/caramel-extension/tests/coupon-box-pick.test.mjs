@@ -1,16 +1,20 @@
+import { resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { COUPON_BOX_PICK_DEADLINE_MS } from '../background.js'
 import { initCaramelBase } from '../caramel-base.js'
 import {
     _caramelResetDiscoveryFlag,
     caramelDiscoveredRecord,
+    PICK_WAIT_MS,
 } from '../coupon-box-discovery.js'
-import { caramelPageOutline } from '../coupon-box-outline.js'
 import { startApplyingCoupons } from '../coupon-runner.js'
 import { caramelConfiglessRecord } from '../store-detect.js'
 
 // The server's pick: when the finder's rules see a total but no promo box, the
 // extension may ask the server which element is the box. These pin that:
-//   · nothing is asked, and no outline is built, unless both flags are on;
+//   · nothing is asked, and the outline builder is not even loaded, unless
+//     both flags are on;
 //   · one ask per store per tab session, whatever the answer;
 //   · the pick is checked on the page before anything is touched, and nothing
 //     but a revealing toggle is ever clicked on the server's word;
@@ -23,6 +27,14 @@ let flagOn
 let llmOn
 let pickCalls
 let answer // the server's answer: an object, or a function of the request
+// The outline builder is loaded from the extension's own URL, which the stub
+// maps onto the source file. outlineLoads counts every time it is asked for.
+// (Under jsdom import.meta.url is an http URL, which import() refuses.)
+const OUTLINE_FILE = pathToFileURL(
+    resolve(import.meta.dirname, '../coupon-box-outline.js'),
+).href
+let outlineUrl
+let outlineLoads
 
 const COUPONS = [
     {
@@ -33,10 +45,6 @@ const COUPONS = [
     },
 ]
 
-vi.mock('../coupon-box-outline.js', async importOriginal => {
-    const actual = await importOriginal()
-    return { ...actual, caramelPageOutline: vi.fn(actual.caramelPageOutline) }
-})
 vi.mock('../coupon-apply.js', async importOriginal => ({
     ...(await importOriginal()),
     applyCoupon: async (code, rec) => {
@@ -91,6 +99,12 @@ function installChromeStub() {
         }
     }
     stub.runtime.lastError = undefined
+    stub.runtime.getURL = path => {
+        if (path !== 'assets/coupon-box-outline.js')
+            return 'chrome-extension://caramel/' + path
+        outlineLoads++
+        return outlineUrl
+    }
     stub.runtime.sendMessage = (message, cb) => {
         const a = message?.action
         if (a === 'fetchCoupons') cb({ coupons: COUPONS })
@@ -136,12 +150,15 @@ const TOTAL = '<div class="row"><span>Total</span><span>$100.00</span></div>'
 const BARE_BOX =
     '<div class="f"><input id="x" name="field_7" type="text">' +
     '<button id="go" type="button">Go</button></div>'
-// A box the rules do recognise, folded behind a toggle they do not.
+// A box the rules do recognise, folded behind a toggle they do not. "Extras"
+// is not an allowlisted word, so the toggle's line carries no name: TOGGLE.
 const FOLDED =
     '<button id="tg" type="button">Extras</button>' +
     '<div id="panel" style="display:none"><label for="dc">Discount code</label>' +
     '<input id="dc" name="discount_code" type="text">' +
     '<button id="ap" type="button">Apply</button></div>'
+
+const TOGGLE = /\] button$/
 
 // The index the outline gave the element on the line matching `re`.
 function idx(outline, re) {
@@ -179,8 +196,9 @@ beforeEach(() => {
     flagOn = true
     llmOn = true
     answer = { outcome: 'no_box', confidence: 80, why: 'none', cached: false }
+    outlineUrl = OUTLINE_FILE
+    outlineLoads = 0
     _caramelResetDiscoveryFlag()
-    caramelPageOutline.mockClear()
 })
 
 describe('nothing is asked unless both flags are on', () => {
@@ -191,7 +209,7 @@ describe('nothing is asked unless both flags are on', () => {
         await run()
 
         expect(pickCalls).toHaveLength(0)
-        expect(caramelPageOutline).not.toHaveBeenCalled()
+        expect(outlineLoads).toBe(0)
         expect(appliedWith).toHaveLength(0)
         gaveCodesToCopy()
     })
@@ -203,7 +221,7 @@ describe('nothing is asked unless both flags are on', () => {
         await run()
 
         expect(pickCalls).toHaveLength(0)
-        expect(caramelPageOutline).not.toHaveBeenCalled()
+        expect(outlineLoads).toBe(0)
     })
 
     it('no readable total: nothing could be measured, so nothing is asked', async () => {
@@ -264,7 +282,7 @@ describe('a usable pick runs through the normal apply flow', () => {
         document.getElementById('po').addEventListener('click', () => {
             orderClicks++
         })
-        answer = req => box(null, null, idx(req.outline, /button "Extras"/))
+        answer = req => box(null, null, idx(req.outline, TOGGLE))
 
         const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
 
@@ -282,7 +300,7 @@ describe('a usable pick runs through the normal apply flow', () => {
         document
             .getElementById('tg')
             .addEventListener('click', () => toggleClicks++)
-        answer = req => box(null, null, idx(req.outline, /button "Extras"/))
+        answer = req => box(null, null, idx(req.outline, TOGGLE))
 
         expect(await caramelDiscoveredRecord({ domain: 'shop.test' })).toBe(
             null,
@@ -419,4 +437,97 @@ describe('a refusal or a failure ends exactly as a rule miss does', () => {
             expect(appliedWith).toHaveLength(0)
             gaveCodesToCopy()
         })
+})
+
+describe('the outline builder is loaded only to ask', () => {
+    it('loaded once, from the extension, when the pick is asked', async () => {
+        document.body.innerHTML = BARE_BOX + TOTAL
+
+        await run()
+
+        expect(outlineLoads).toBe(1)
+        expect(pickCalls).toHaveLength(1)
+    })
+
+    it('a builder that will not load ends as a miss: nothing asked, codes handed over', async () => {
+        outlineUrl = pathToFileURL(
+            resolve(import.meta.dirname, 'no-such-outline.js'),
+        ).href
+        document.body.innerHTML = BARE_BOX + TOTAL
+
+        await run()
+
+        expect(outlineLoads).toBe(1)
+        expect(pickCalls).toHaveLength(0)
+        expect(appliedWith).toHaveLength(0)
+        gaveCodesToCopy()
+    })
+
+    it('the page waits longer than the background may spend on the ask', () => {
+        expect(PICK_WAIT_MS).toBeGreaterThanOrEqual(
+            COUPON_BOX_PICK_DEADLINE_MS + 2000,
+        )
+    })
+})
+
+describe('an apply button never leaves the page', () => {
+    it('a link to another page, named as the button, is never clicked', async () => {
+        document.body.innerHTML =
+            '<div><input id="x" name="field_7" type="text">' +
+            '<a id="b" href="/cart/checkout" class="btn">Apply</a></div>' +
+            TOTAL
+        let clicks = 0
+        document.getElementById('b').addEventListener('click', e => {
+            e.preventDefault()
+            clicks++
+        })
+        answer = req =>
+            box(idx(req.outline, /textbox/), idx(req.outline, /link "Apply"/))
+
+        await run()
+
+        expect(pickCalls).toHaveLength(1)
+        expect(clicks).toBe(0)
+        expect(appliedWith).toHaveLength(0)
+        gaveCodesToCopy()
+    })
+})
+
+describe('the total is read again once the server has answered', () => {
+    it('a cart re-drawn during the ask: the record holds the new total', async () => {
+        document.body.innerHTML = BARE_BOX + TOTAL
+        answer = req => {
+            const pick = box(
+                idx(req.outline, /textbox/),
+                idx(req.outline, /button "Go"/),
+            )
+            document.querySelector('.row').outerHTML =
+                '<div class="row"><span>Total</span><span>$90.00</span></div>'
+            return pick
+        }
+
+        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+
+        const total = document.querySelector(rec.priceContainer)
+        expect(total?.isConnected).toBe(true)
+        expect(total.textContent).toContain('$90.00')
+    })
+
+    it('a total gone by the time the answer came: nothing can be measured, a miss', async () => {
+        document.body.innerHTML = BARE_BOX + TOTAL
+        answer = req => {
+            const pick = box(
+                idx(req.outline, /textbox/),
+                idx(req.outline, /button "Go"/),
+            )
+            document.querySelector('.row').remove()
+            return pick
+        }
+
+        await run()
+
+        expect(pickCalls).toHaveLength(1)
+        expect(appliedWith).toHaveLength(0)
+        gaveCodesToCopy()
+    })
 })
