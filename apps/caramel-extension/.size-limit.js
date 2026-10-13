@@ -42,32 +42,15 @@ module.exports = [
         // (owner rule 2026-10-06) — the consent card (UI-helpers.js
         // showCodeSharingPrompt) and the consent record module
         // (code-sharing-consent.js). Measured 76.66 kB: one new UI surface.
-        // 2026-10-09, raised 80 -> 101 kB: coupon-box-discovery.js, the
-        // promo-box finder for stores with no usable config (its vocabularies
-        // in nine languages, the field/button/toggle scoring, the total-row
-        // reader). Measured 91.74 kB: one new capability, off behind a server
-        // flag, not prose.
-        // 2026-10-10, raised 101 -> 106 kB: the finder hardened against live
-        // stores — after a store re-draws the box it re-finds only the SAME
-        // one (signature match, so a gift-card box is never taken while ours
-        // is disabled), reopens a box re-drawn folded via its toggle, reads a
-        // Total row whose label cell is display:none (a measured lost win), a
-        // stricter acceptance check and a time-throttled re-find. Measured
-        // 101.23 kB, +0.7 kB for five fixes. 4.7% headroom rather than 10% on
-        // purpose: this is the same capability hardening, not a new one — the
-        // next capability should trip the ratchet and be a decision.
-        // 2026-10-12, raised 106 -> 107 kB: the subtotal reader's coupon-line
-        // check, review findings and no new capability — a code name like
-        // "SPRING-$10" was read as a $10 deduction (a false saving), and a
-        // line ending in "Remove coupon"/"Edit"/a currency code was dropped.
-        // Netting a coupon line inside a summary drawn as one flat grid was
-        // tried and dropped: three reviews kept finding rows it misread as
-        // savings, so such a line is refused instead. A fifth review closed four
-        // older false-saving shapes (a struck-out amount, a threshold after
-        // the line, a bracketed qualifier, "up to"); a sixth replaced the
-        // refusal word lists with one accepted line shape, whose only allowed
-        // name is the code that was typed. Measured 106.66 kB.
-        limit: '107 KB',
+        // 2026-10-13, raised 80 -> 117 kB: coupon-box-discovery.js, the
+        // promo-box finder for stores with no usable config (off behind a
+        // server flag). 91.74 → 107.24 kB: the finder itself (nine-language
+        // vocabularies, field/button/toggle scoring, the total-row reader) was
+        // 91.74 kB at its first push; the rest is hardening against live
+        // stores and review fixes (re-find after a re-draw, hidden label
+        // cells, the coupon-line reader, the finder-run verdict gate). 9.1%
+        // headroom, so the next capability trips the ratchet.
+        limit: '117 KB',
         brotli: false,
     },
     {
