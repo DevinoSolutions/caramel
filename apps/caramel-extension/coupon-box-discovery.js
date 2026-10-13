@@ -18,7 +18,7 @@
 // (GET /api/extension/features) turns it on. Off, nothing here runs.
 //
 // Two rules keep it from claiming what it cannot see:
-//   · no total row, no discovery. A store found this way is judged by its
+//   · no total or subtotal row, no finder. A store found this way is judged by its
 //     total alone (coupon-apply.js caramelAwaitCouponVerdict): the code worked
 //     only if the total went down. Without a readable total there is nothing
 //     honest to say, so the old copy-the-codes answer stands.
@@ -1567,7 +1567,10 @@ export function caramelCouponBoxDiscoveryOn() {
             action: 'couponBoxDiscoveryEnabled',
         })
             .then(resp => resp?.enabled === true)
-            .catch(() => false)
+            .catch(e => {
+                log('FINDER_FLAG_UNREADABLE', { error: String(e) })
+                return false
+            })
     return _discoveryOn
 }
 

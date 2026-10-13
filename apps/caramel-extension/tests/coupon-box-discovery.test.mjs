@@ -33,6 +33,8 @@ let finalModals
 let promptedWith
 let appliedWith
 let flagOn
+let flagReadThrows
+let logCalls
 
 const COUPONS = [
     {
@@ -71,6 +73,7 @@ vi.mock('../caramel-base.js', async importOriginal => {
             return actual.currentBrowser
         },
         caramelRecordSaving: () => {},
+        log: (...args) => logCalls.push(args),
         // The finder's open-up wait: no need to spend real time here.
         sleep: async () => {},
     }
@@ -103,6 +106,8 @@ function installChromeStub() {
     }
     stub.runtime.lastError = undefined
     stub.runtime.sendMessage = (message, cb) => {
+        if (flagReadThrows && message?.action === 'couponBoxDiscoveryEnabled')
+            throw new Error('Extension context invalidated')
         if (message?.action === 'fetchCoupons') cb({ coupons: COUPONS })
         else if (message?.action === 'couponBoxDiscoveryEnabled')
             cb({ enabled: flagOn })
@@ -163,6 +168,8 @@ beforeEach(() => {
     promptedWith = []
     appliedWith = []
     flagOn = true
+    flagReadThrows = false
+    logCalls = []
     _caramelResetDiscoveryFlag()
     _caramelResetCachedCodes()
     getDomainRecord.cache = []
@@ -835,6 +842,17 @@ describe('the flag decides whether the shopper sees any of this', () => {
         await tryInitialize()
 
         expect(promptedWith).toHaveLength(0)
+    })
+
+    it('flag unreadable: the finder stays off and the failure is logged, not swallowed', async () => {
+        flagReadThrows = true
+        document.body.innerHTML = PROMO_BOX + TOTAL
+
+        await tryInitialize()
+
+        expect(promptedWith).toHaveLength(0)
+        const logged = logCalls.find(c => c[0] === 'FINDER_FLAG_UNREADABLE')
+        expect(logged?.[1].error).toMatch(/Extension context invalidated/)
     })
 
     it('flag on: the same cart gets the prompt', async () => {
