@@ -302,9 +302,13 @@ export async function pickCouponBox(
                 maxTokens: MAX_TOKENS,
                 responseFormat: 'json_object',
                 timeoutMs: TIMEOUT_MS,
-                // Measured live 2026-10-13 on a real cart: at the model's
-                // default effort it reasoned through the whole MAX_TOKENS and
-                // returned nothing after 32s; at low it answered in ~60 tokens.
+                // Measured 2026-10-13 on a real cart: at the model's default
+                // effort the route hit TIMEOUT_MS, and the same prompt sent
+                // directly with no timeout reasoned through the whole
+                // MAX_TOKENS and returned nothing after 32s; at low it
+                // answered in ~60 tokens. A model swap must accept this
+                // field: a provider that rejects it turns every pick into
+                // no_pick, which the eval reports as red.
                 reasoningEffort: 'low',
                 // Pins the exact model on a relay that would otherwise fall
                 // back to another one; ignored by a provider that does not
