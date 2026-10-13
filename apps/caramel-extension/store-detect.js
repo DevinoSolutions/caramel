@@ -36,6 +36,7 @@ import {
 } from './coupon-apply.js'
 import {
     caramelCouponBoxDiscoveryOn,
+    caramelFinderMayAsk,
     caramelFinderReadTotal,
     caramelFinderSeesBox,
 } from './coupon-box-discovery.js'
@@ -482,7 +483,11 @@ export async function isCheckout() {
      * Still a high bar to appear: a cart-shaped URL, a readable cart with
      * something in it, and codes for the domain (tryInitialize). A store with
      * no codes, or a product page, is exactly as quiet as before. */
-    if (!rec) return (await _platformCartUsable()) || (await _finderSeesBox())
+    if (!rec)
+        return (
+            (await _platformCartUsable()) ||
+            (await _finderMayOffer(location.hostname))
+        )
     // VISIBLE, not merely present: themes ship hidden coupon markup on
     // non-checkout pages, and some configs point showInput at site-wide
     // controls — the prompt belongs only where the user can actually see a
@@ -520,7 +525,7 @@ export async function isCheckout() {
         })
         return true
     }
-    return (await _platformCartUsable()) || (await _finderSeesBox())
+    return (await _platformCartUsable()) || (await _finderMayOffer(rec.domain))
 }
 
 /* No config describes a promo box here, but a shopper could still see one.
@@ -535,6 +540,24 @@ async function _finderSeesBox() {
     if (!(await caramelCouponBoxDiscoveryOn())) return false
     try {
         return caramelFinderSeesBox()
+    } catch (e) {
+        log('FINDER_FAILED', { error: String(e) })
+        return false
+    }
+}
+
+/* The prompt's half of the finder: a box the rules can see, or, while the
+ * couponBoxLlm flag is on, a cart the server could still find one on once the
+ * shopper taps (caramelFinderMayAsk). The reload chain (_caramelContinueRun)
+ * keeps asking _finderSeesBox alone: the server is asked once per store per
+ * tab session, so a page the rules cannot see has nothing left to continue
+ * on. */
+async function _finderMayOffer(domain) {
+    if (await _finderSeesBox()) return true
+    if (!_caramelCartIntentSignal()) return false
+    if (!(await caramelCouponBoxDiscoveryOn())) return false
+    try {
+        return await caramelFinderMayAsk(domain)
     } catch (e) {
         log('FINDER_FAILED', { error: String(e) })
         return false
