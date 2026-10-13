@@ -463,3 +463,7 @@ TODO(human): record where these are actually set/rotated in Dokploy (env
 var UI vs. secret store) and the rotation procedure for
 `COUPONS_ADMIN_SECRET` / `UPKUMA_HEALTH_SECRET` — not derivable from this
 repo.
+
+## Paid fallback
+
+The optional server-only org key is sent only to https://proxyai.devino.ca, with an 8-second default wait and boot validation. Guests never invoke its env reader; client deadlines below 15 seconds stay free. The only production AI surface is the guest-reachable 7-second classifier, so its worst case is 0 paid attempts per user per day. Future signed-in callers must explicitly opt in with at least 15 seconds; one raw HTTP request has no retries. Keys are capped at $5/week per org and are blanked in evals and E2E.

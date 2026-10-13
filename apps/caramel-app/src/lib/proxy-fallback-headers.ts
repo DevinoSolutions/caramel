@@ -1,66 +1,99 @@
-// src/lib/proxy-fallback-headers.ts
-//
-// The Devino proxy (https://proxyai.devino.ca/v1) serves free models. When the
-// free route gives no answer token within N seconds (default 20) or is out of
-// capacity, it can retry the request ONCE on paid OpenRouter, with an
-// OpenRouter key the app sends on the request; the proxy stores no key. All
-// fallback logic lives in the proxy; this module only builds the headers:
-//
-//   X-ORF-Fallback-Key    the app's own sk-or-v1-... key
-//                         (OPENROUTER_FALLBACK_API_KEY)
-//   X-ORF-Fallback-Model  optional paid OpenRouter id (OPENROUTER_FALLBACK_MODEL)
-//   X-ORF-Fallback-After  optional seconds before the proxy goes paid
-//                         (OPENROUTER_FALLBACK_AFTER_SECONDS)
-//
-// Unset key = no header, behaviour unchanged. Never sent to openrouter.ai (the
-// key would leak to the upstream it already authenticates against, for no
-// purpose). CI and evals run without it on purpose: the free route is the
-// canary, so vitest.eval.config.ts blanks all three vars.
-import { env } from '@/lib/env'
+/**
+ * Paid-fallback headers for the Devino proxy.
+ *
+ * The proxy (https://proxyai.devino.ca/v1) serves free models. When the free
+ * route gives no answer token within `X-ORF-Fallback-After` seconds, or is out
+ * of capacity, it retries the request once on paid OpenRouter with the key
+ * this app sends in `X-ORF-Fallback-Key`. The proxy stores no key; this module
+ * only builds the request headers.
+ *
+ * - Unset or blank key: no headers, behaviour unchanged.
+ * - The key goes ONLY to https://proxyai.devino.ca (allowlist), never to
+ *   openrouter.ai, another gateway, or plain http.
+ * - A malformed value never breaks a request: it is treated as unset here, and
+ *   the env schema refuses it at boot (`isValidFallbackKey` & co).
+ * - Guests, evals and CI never carry the key.
+ *
+ * Canonical copy: keep this file identical in every Devino app. It is pure (no
+ * env import) so the env schema can import its predicates without a cycle; the
+ * env read lives in `proxy-fallback-env.ts`.
+ */
 
-/** True when `baseUrl` is OpenRouter itself rather than the Devino proxy. */
-function isOpenRouterBaseUrl(baseUrl: string): boolean {
-    const host = new URL(baseUrl).hostname.toLowerCase()
-    return host === 'openrouter.ai' || host.endsWith('.openrouter.ai')
+/** The only hosts that may receive the app's paid OpenRouter key. */
+const PAID_FALLBACK_HOSTS: ReadonlySet<string> = new Set(['proxyai.devino.ca'])
+
+/** Seconds the proxy waits on the free route before going paid. */
+export const DEFAULT_FALLBACK_AFTER_SECONDS = '8'
+
+const FALLBACK_KEY_PATTERN = /^sk-or-v1-[A-Za-z0-9]{20,}$/
+const FALLBACK_MODEL_PATTERN = /^[a-z0-9][a-z0-9._-]*\/[A-Za-z0-9._:-]+$/
+const PLAIN_DECIMAL_PATTERN = /^\d+(\.\d+)?$/
+const MAX_FALLBACK_AFTER_SECONDS = 300
+
+/** True only for https://proxyai.devino.ca (any path, any case, trailing dot tolerated). */
+export function isDevinoProxyUrl(baseUrl: string | undefined): boolean {
+    if (!baseUrl) return false
+    let url: URL
+    try {
+        url = new URL(baseUrl)
+    } catch {
+        return false
+    }
+    const host = url.hostname.toLowerCase().replace(/\.$/, '')
+    return url.protocol === 'https:' && PAID_FALLBACK_HOSTS.has(host)
 }
 
-function parseFallbackAfterSeconds(
+/** The canonical seconds string, or undefined unless a plain decimal in (0, 300]. */
+export function parseFallbackAfterSeconds(
     raw: string | undefined,
 ): string | undefined {
     const text = raw?.trim()
-    if (!text) return undefined
+    if (!text || !PLAIN_DECIMAL_PATTERN.test(text)) return undefined
     const seconds = Number(text)
-    return Number.isFinite(seconds) && seconds > 0 ? text : undefined
+    return seconds > 0 && seconds <= MAX_FALLBACK_AFTER_SECONDS
+        ? String(seconds)
+        : undefined
 }
 
-/** Pure: empty when there is no key or the endpoint is OpenRouter. */
+/** Env-schema check: blank/unset, or an OpenRouter `sk-or-v1-` key. */
+export function isValidFallbackKey(raw: string | undefined): boolean {
+    const text = raw?.trim()
+    return !text || FALLBACK_KEY_PATTERN.test(text)
+}
+
+/** Env-schema check: blank/unset, or an OpenRouter model id like `vendor/model`. */
+export function isValidFallbackModel(raw: string | undefined): boolean {
+    const text = raw?.trim()
+    return !text || FALLBACK_MODEL_PATTERN.test(text)
+}
+
+/** Env-schema check: blank/unset, or a plain decimal in (0, 300]. */
+export function isValidFallbackAfterSeconds(raw: string | undefined): boolean {
+    return !raw?.trim() || parseFallbackAfterSeconds(raw) !== undefined
+}
+
+/** Pure: the fallback headers, or `{}` without a valid key or off the Devino proxy. */
 export function buildProxyFallbackHeaders(input: {
-    baseUrl: string
+    baseUrl: string | undefined
     key: string | undefined
     model: string | undefined
-    afterSeconds?: string | undefined
+    afterSeconds: string | undefined
 }): Record<string, string> {
     const key = input.key?.trim()
-    if (!key || isOpenRouterBaseUrl(input.baseUrl)) return {}
+    if (
+        !key ||
+        !FALLBACK_KEY_PATTERN.test(key) ||
+        !isDevinoProxyUrl(input.baseUrl)
+    )
+        return {}
     const model = input.model?.trim()
-    const after = parseFallbackAfterSeconds(input.afterSeconds)
     return {
         'X-ORF-Fallback-Key': key,
-        ...(model ? { 'X-ORF-Fallback-Model': model } : {}),
-        ...(after ? { 'X-ORF-Fallback-After': after } : {}),
+        'X-ORF-Fallback-After':
+            parseFallbackAfterSeconds(input.afterSeconds) ??
+            DEFAULT_FALLBACK_AFTER_SECONDS,
+        ...(model && FALLBACK_MODEL_PATTERN.test(model)
+            ? { 'X-ORF-Fallback-Model': model }
+            : {}),
     }
-}
-
-/**
- * The fallback headers for requests to `baseUrl`, read from env. `baseUrl` is
- * env.OPENROUTER_API_URL, which env.ts already pipes through z.url() (a
- * non-URL fails boot), so `new URL` above cannot throw on a request.
- */
-export function proxyFallbackHeaders(baseUrl: string): Record<string, string> {
-    return buildProxyFallbackHeaders({
-        baseUrl,
-        key: env.OPENROUTER_FALLBACK_API_KEY,
-        model: env.OPENROUTER_FALLBACK_MODEL,
-        afterSeconds: env.OPENROUTER_FALLBACK_AFTER_SECONDS,
-    })
 }

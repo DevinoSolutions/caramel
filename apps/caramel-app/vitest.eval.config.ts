@@ -60,6 +60,7 @@ export default defineConfig({
         // eval gate. The eval measures the free route; a paid answer slipping
         // in would hide exactly the regression the gate exists to catch.
         // Blank = unset (src/lib/proxy-fallback-headers.ts trims and ignores).
+        // Pinned by tests/unit/proxy-fallback-headers.test.ts.
         env: {
             DATABASE_URL:
                 'postgresql://postgres:postgres@localhost:58005/caramel?schema=public',
