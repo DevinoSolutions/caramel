@@ -1324,14 +1324,44 @@ export function caramelFinderSeesBox(doc = document) {
  * after the tap (caramelPickedRecord), once per store per tab session, and a
  * "no box" answer ends with the codes handed over to copy. A store already
  * asked this session is not offered again on the strength of this rule. */
+//
+// Three things a cart URL and a total row do not prove, each refused here:
+// the order is already placed (a thank-you page under /checkout/ still shows
+// a "Total"), the cart is empty (a "$0.00" subtotal), and the total row is one
+// the shopper cannot see (a closed mini-cart drawer on the home page the
+// shopper reached from /cart).
 // Called from store-detect.js.
 export async function caramelFinderMayAsk(domain, doc = document) {
-    const total = caramelFindOrderTotal(doc)
-    if (!total || !readableTotal(total)) return false
-    if (domain && pickAsked(domain)) return false
     if (!(await caramelCouponBoxLlmOn())) return false
+    if (ORDER_PLACED_PATH_RE.test(doc.location?.pathname || '')) return false
+    if (pickAsked(domain || doc.location?.hostname)) return false
+    if (!shownPositiveTotal(doc)) return false
     log('FINDER_MAY_ASK', {})
     return true
+}
+
+/* A path a store shows AFTER the order is placed: WooCommerce
+ * /checkout/order-received/123/, Magento /checkout/onepage/success/, Shopify
+ * /checkouts/c/<token>/thank-you, and the plain /order-confirmation. The word
+ * must be a whole part of a path segment, so /products/success-kit is not one
+ * only by accident of a prefix. */
+const ORDER_PLACED_PATH_RE =
+    /(?:^|[/\-_])(?:order[-_]?received|order[-_]?(?:confirmation|confirmed|complete|completed)|thank[-_]?you|thanks|success|confirmation)(?:[/.]|$)/i
+
+/* Is there a total row the shopper can see, holding an amount above zero?
+ * findTotalRow falls back to a hidden row because the apply flow may measure
+ * one; whether to OFFER anything is decided only on what is in view. */
+function shownPositiveTotal(doc) {
+    for (const [label, not] of [
+        [TOTAL_LABEL, TOTAL_NOT],
+        [SUB_LABEL, SUB_NOT],
+    ]) {
+        const shown = scanTotalRows(doc, label, not).filter(h => h.visible)
+        if (!shown.length) continue
+        const row = shown[shown.length - 1].el
+        return caramelFindMoney(row.innerText || '').some(m => m.value > 0)
+    }
+    return false
 }
 
 /* A record the apply flow can run on, built from what the finder sees.
@@ -1467,7 +1497,15 @@ const NEVER_CLICK =
     /check ?out|place (?:my |your )?order|\bpay\b|pay ?pal|pay now|buy now|purchase|\bremove\b|\bdelete\b|empty (?:cart|basket|bag)|sign ?in|sign ?up|log ?in|register|create (?:an )?account|subscribe|continue/i
 const _pickAsked = new Set()
 
+// The one spelling of a store in the asked-memory: the prompt gate reads it
+// with whatever domain it was handed, the pick writes it with the record's.
+const pickKey = domain =>
+    String(domain || '')
+        .trim()
+        .toLowerCase()
+
 function pickAsked(domain) {
+    domain = pickKey(domain)
     if (_pickAsked.has(domain)) return true
     try {
         return sessionStorage.getItem(PICK_KEY + domain) !== null
@@ -1479,6 +1517,7 @@ function pickAsked(domain) {
 }
 
 function rememberPick(domain) {
+    domain = pickKey(domain)
     _pickAsked.add(domain)
     try {
         sessionStorage.setItem(PICK_KEY + domain, '1')
@@ -1517,9 +1556,7 @@ function clickable(el) {
 // Called from caramelDiscoveredRecord, after the rules found no box.
 async function caramelPickedRecord(rec, doc) {
     if (!(await caramelCouponBoxLlmOn())) return null
-    const domain = String(rec.domain || doc.location?.hostname || '')
-        .trim()
-        .toLowerCase()
+    const domain = pickKey(rec.domain || doc.location?.hostname)
     if (!domain || pickAsked(domain)) return null
     rememberPick(domain)
     let outline, elements

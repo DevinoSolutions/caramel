@@ -6,6 +6,7 @@ import {
     _caramelResetDiscoveryFlag,
     caramelDiscoverCouponBox,
     caramelDiscoveredRecord,
+    caramelFinderMayAsk,
     caramelFinderSeesBox,
     caramelFinderTotalNow,
     caramelFindOrderTotal,
@@ -942,6 +943,81 @@ describe('the server pick needs a prompt to be reached', () => {
         await tryInitialize()
 
         expect(promptedWith).toHaveLength(0)
+    })
+
+    it('pick flag on: never on a page shown after the order is placed', async () => {
+        llmOn = true
+        for (const path of [
+            '/checkout/order-received/123/',
+            '/checkout/onepage/success/',
+            '/checkouts/c/abc123/thank-you',
+            '/order-confirmation',
+        ]) {
+            setPath(path)
+            document.body.innerHTML = NO_BOX + TOTAL
+            promptedWith = []
+
+            await tryInitialize()
+
+            expect(promptedWith, path).toHaveLength(0)
+        }
+    })
+
+    it('pick flag on: an empty cart ($0.00) gets no prompt', async () => {
+        llmOn = true
+        document.body.innerHTML =
+            NO_BOX +
+            '<div class="row"><span>Total</span><span>$0.00</span></div>'
+
+        await tryInitialize()
+
+        expect(promptedWith).toHaveLength(0)
+    })
+
+    it('pick flag on: a total row the shopper cannot see gets no prompt', async () => {
+        llmOn = true
+        // A closed mini-cart drawer still holding its total.
+        document.body.innerHTML =
+            NO_BOX + '<div id="drawer" style="display:none">' + TOTAL + '</div>'
+        // A browser's innerText of an element it does not render is its
+        // textContent; this file's layout stub answers '' instead, which would
+        // hide the row from every reader and prove nothing.
+        for (const el of document.querySelectorAll('#drawer, #drawer *'))
+            Object.defineProperty(el, 'innerText', {
+                get() {
+                    return this.textContent
+                },
+            })
+
+        await tryInitialize()
+
+        expect(promptedWith).toHaveLength(0)
+    })
+
+    it('after the tap asked the server, the same store is not offered again', async () => {
+        llmOn = true
+        document.body.innerHTML = NO_BOX + TOTAL
+        await tryInitialize()
+        expect(promptedWith).toHaveLength(1)
+
+        // The tap: the pick is asked (and misses here), the codes are handed
+        // over to copy.
+        await startApplyingCoupons(promptedWith[0])
+        expect(finalModals.at(-1)[2]).toMatch(/couldn't find the promo box/)
+
+        promptedWith = []
+        await tryInitialize()
+        expect(promptedWith).toHaveLength(0)
+    })
+
+    it('the asked-memory reads a store the way the pick wrote it', async () => {
+        llmOn = true
+        document.body.innerHTML = NO_BOX + TOTAL
+        await startApplyingCoupons(caramelConfiglessRecord('Shop.Test'))
+
+        // A catalogue domain in another case, or with stray whitespace.
+        expect(await caramelFinderMayAsk(' SHOP.test ')).toBe(false)
+        expect(await caramelFinderMayAsk('other.test')).toBe(true)
     })
 })
 
