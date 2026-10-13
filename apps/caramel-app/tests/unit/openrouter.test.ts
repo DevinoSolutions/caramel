@@ -102,6 +102,19 @@ describe('chat() — OpenRouter fetch contract (F-011 pin)', () => {
         expect(body.temperature).toBe(0)
         expect(body.max_tokens).toBe(200)
         expect(body.response_format).toBeUndefined()
+        expect('reasoning_effort' in body).toBe(false)
+    })
+
+    it('sends reasoning_effort only when reasoningEffort is set', async () => {
+        fetchMock.mockResolvedValueOnce(
+            jsonResponse({ choices: [{ message: { content: '{}' } }] }),
+        )
+        await chat([{ role: 'user', content: 'hi' }], {
+            reasoningEffort: 'low',
+        })
+        const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+        const body = JSON.parse(init.body as string)
+        expect(body.reasoning_effort).toBe('low')
     })
 
     it('sets response_format when responseFormat: "json_object" is requested', async () => {

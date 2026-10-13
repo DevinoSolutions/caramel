@@ -103,7 +103,7 @@ jewelry_accessories-exemplar`. Confounded by the maxTokens bug above
 
 ## Coupon-box pick
 
-Dated rows from real `couponBoxPick.eval.ts` runs (51 cases, gate: pass rate
+Dated rows from real `couponBoxPick.eval.ts` runs (51 cases, 52 from 2026-10-13 low effort; gate: pass rate
 ≥ 0.90). Pages whose outline exceeds `MAX_OUTLINE_BYTES` (the Cap column) are
 refused by the route and score as no pick; the largest fixture outline is ~35 KiB.
 
@@ -116,3 +116,5 @@ refused by the route and score as no pick; the largest fixture outline is ~35 Ki
 | 2026-10-12 | gpt-oss-20b (exact-model pin) | 40 KiB | **98.0%** (50/51)  | 4417 / 13340ms    | **GREEN**, with the pick guard (input must be a text field; button/toggle a clickable control never named like checkout, pay, remove or sign-in). Same single miss: oakfurnitureland.                                                                                                                        |
 | 2026-10-13 | gpt-oss-20b (exact-model pin) | 40 KiB | **94.1%** (48/51)  | 4091 / 17724ms    | **GREEN**, outlines as the extension now sends them: every label keeps only words on its fixed shopping-UI word list, so no name, address or product name leaves the browser. Misses: oakfurnitureland (as before), restaurant.com (toggle on a page with no box), castlery.com.au (model timed out at 20s). |
 | 2026-10-13 | gpt-oss-20b (exact-model pin) | 40 KiB | **96.1%** (49/51)  | 6030 / 16411ms    | **GREEN** ×2, same outlines. Misses: oakfurnitureland, zagg.com (model timed out at 20s).                                                                                                                                                                                                                    |
+| 2026-10-13 | gpt-oss-20b (exact-model pin) | 40 KiB | **98.1%** (51/52)  | 2268 / 4224ms     | **GREEN**, reasoning effort low. New case smkw.com (box folded behind a toggle; at default effort the model reasoned through its token budget and timed out live). Miss: restaurant.com (toggle on a page with no box). No timeouts.                                                                         |
+| 2026-10-13 | gpt-oss-20b (exact-model pin) | 40 KiB | **96.2%** (50/52)  | 1742 / 2789ms     | **GREEN** ×2, reasoning effort low. Misses: restaurant.com, smkw.com (answered no box, so the same page passes one run and fails the next).                                                                                                                                                                  |

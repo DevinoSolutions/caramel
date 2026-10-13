@@ -9,7 +9,7 @@
 // OPENROUTER_API_URL when the model lives behind another OpenAI-compatible
 // base) plus COUPON_BOX_PICK_MODEL — the model under test. With no model the
 // suite fails loudly instead of passing vacuously. Costs one short completion
-// per case (51), temperature 0.
+// per case (52), temperature 0.
 //
 // A case passes when:
 //   * the page has a box: the picked input is one of the labelled inputs, or
@@ -29,7 +29,7 @@ import { couponBoxCases, type CouponBoxCase } from './fixtures/coupon-box-cases'
 
 const PASS_RATE_THRESHOLD = 0.9
 // Cases run one at a time, as production calls arrive, so the latency figures
-// are not inflated by the suite's own load (51 calls: ~4 minutes measured).
+// are not inflated by the suite's own load (52 calls: ~4 minutes measured).
 const SUITE_TIMEOUT_MS = 12 * 60 * 1000
 
 interface Pick {

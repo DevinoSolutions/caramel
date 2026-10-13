@@ -1,4 +1,4 @@
-// The coupon-box pick eval dataset (evals/couponBoxPick.eval.ts): 51 real
+// The coupon-box pick eval dataset (evals/couponBoxPick.eval.ts): 52 real
 // shopping-cart and checkout pages, each as the page outline the extension
 // sends to POST /api/extension/coupon-box-pick, labelled by hand.
 //
@@ -30,6 +30,14 @@ export interface CouponBoxCase {
 }
 
 export const couponBoxCases: CouponBoxCase[] = [
+    {
+        store: 'smkw.com',
+        inputs: [],
+        toggles: [34],
+        note: "Live 2026-10-13: the box is folded behind Add Discount Code. At the model's default reasoning it spent its whole token budget and timed out.",
+        outline:
+            '- [0] link "> See Details"\n- [1] link "(###) ###-####"\n- banner:\n  - [2] link\n  - [3] link "Sign in"\n  - [4] link "Register"\n- main:\n  - heading "YOUR CART (# ITEM)"\n  - table:\n    - row:\n    - row:\n      - heading\n      - [5] button "DECREASE QUANTITY OF"\n      - [6] textbox\n      - [7] button "INCREASE QUANTITY OF"\n      - [8] button "Remove from cart"\n  - [9] link "KEEP SHOPPING"\n  - heading "A ABOUT YOUR ORDER:"\n  - heading "HERE TO HELP!"\n  - [10] link "(###) ###-####"\n  - heading "RETURNS"\n  - [11] link "Learn More"\n  - banner:\n    - heading "HOW ABOUT"\n  - [12] button "Previous slide"\n    - [13] button "Previous"\n  - group "# / ##":\n    - [14] link "and ##.##"\n    - [15] button "QUICK VIEW"\n    - [16] checkbox "COMPARE"\n    - [17] link "ADD TO CART"\n    - heading "and"\n  - group "# / ##":\n    - [18] link "#### Christmas ##.##"\n    - [19] button "QUICK VIEW"\n    - [20] checkbox "COMPARE"\n    - [21] link "ADD TO CART"\n    - heading "#### Christmas"\n  - group "# / ##":\n    - [22] link "Design"\n    - [23] button "QUICK VIEW"\n    - [24] checkbox "COMPARE"\n    - [25] link "ADD TO CART"\n    - heading "Design"\n  - group "# / ##":\n    - [26] link "Exclusive ##.##"\n    - [27] button "QUICK VIEW"\n    - [28] checkbox "COMPARE"\n    - [29] link "ADD TO CART"\n    - heading "Exclusive"\n  - [30] button "Next slide"\n    - [31] button "Next"\n  - [32] link\n  - heading "ORDER SUMMARY"\n  - list:\n    - [33] button "Add Info" [collapsed]\n    - [34] button "Add Discount Code" [expanded]\n  - [35] link "Proceed to Checkout"\n- dialog "cookie consent":\n  - [36] button "Close consent"\n  - heading "Cookies."\n  - [37] button "SETTINGS"\n  - [38] button "ALL"\n  - [39] button "ACCEPT ALL COOKIES"',
+    },
     {
         store: 'tractive.com',
         inputs: [7],

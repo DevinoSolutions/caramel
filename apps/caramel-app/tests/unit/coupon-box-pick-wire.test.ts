@@ -46,7 +46,7 @@ beforeEach(() => {
 })
 
 describe('coupon-box pick request', () => {
-    it('sends X-ORF-Strict: 1 with the configured model, temperature 0 and a JSON response format', async () => {
+    it('sends X-ORF-Strict: 1 with the configured model, temperature 0, low reasoning effort and a JSON response format', async () => {
         const result = await pickCouponBox({
             domain: 'wire-test.example',
             outline: '- form:\n  - [7] textbox "Promo code"',
@@ -64,6 +64,9 @@ describe('coupon-box pick request', () => {
             model: 'test/box-model',
             temperature: 0,
             response_format: { type: 'json_object' },
+            // At the default effort the model can reason through its whole
+            // token budget and time out (smkw.com, 2026-10-13).
+            reasoning_effort: 'low',
         })
         expect(body.messages[1].content).toBe(
             'Store: wire-test.example\n\n- form:\n  - [7] textbox "Promo code"',
