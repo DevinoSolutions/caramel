@@ -103,6 +103,23 @@ describe('the page outline', () => {
             expect(outline).not.toContain(text)
     })
 
+    // A digit in any script has no letters, so without a Unicode-aware scrub
+    // the allowlist would keep a phone number written in it verbatim.
+    it('carries no digit in any script', () => {
+        document.body.innerHTML = [
+            '<button>Deliver to ۰۹۱۲۳۴۵۶۷۸۹</button>',
+            '<button>Deliver to ٠١٢٣٤٥٦٧٨٩</button>',
+            '<button>Deliver to ０３１２３４５６７８</button>',
+            '<button>Deliver to ①②③ 𝟏𝟐𝟑 Ⅷ</button>',
+        ].join('')
+
+        const { outline } = caramelPageOutline(document.body)
+        const unindexed = outline.replace(/^(\s*- )\[\d+\] /gm, '$1')
+
+        expect(unindexed).not.toMatch(/\p{N}/u)
+        expect(outline).toContain('- [0] button "to ###########"')
+    })
+
     it('never goes over the cap, and drops whole lines from the end', () => {
         // The cap is in UTF-8 bytes: each € heading line is ~300 bytes for
         // ~100 characters.

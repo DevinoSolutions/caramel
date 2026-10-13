@@ -465,7 +465,7 @@ describe('the outline builder is loaded only to ask', () => {
 
     it('the page waits longer than the background may spend on the ask', () => {
         expect(PICK_WAIT_MS).toBeGreaterThanOrEqual(
-            COUPON_BOX_PICK_DEADLINE_MS + 2000,
+            COUPON_BOX_PICK_DEADLINE_MS + 5000,
         )
     })
 })
@@ -490,6 +490,29 @@ describe('an apply button never leaves the page', () => {
         expect(clicks).toBe(0)
         expect(appliedWith).toHaveLength(0)
         gaveCodesToCopy()
+    })
+
+    it('a box a server toggle revealed never takes a link to another page as its button', async () => {
+        document.body.innerHTML =
+            '<button id="tg" type="button">Extras</button>' +
+            '<div id="panel" style="display:none"><label for="dc">Discount code</label>' +
+            '<input id="dc" name="discount_code" type="text">' +
+            '<a id="ap" href="/cart/checkout" class="btn">Apply</a></div>' +
+            TOTAL
+        let linkClicks = 0
+        document.getElementById('tg').addEventListener('click', () => {
+            document.getElementById('panel').style.display = ''
+        })
+        document.getElementById('ap').addEventListener('click', e => {
+            e.preventDefault()
+            linkClicks++
+        })
+        answer = req => box(null, null, idx(req.outline, TOGGLE))
+
+        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+
+        expect(linkClicks).toBe(0)
+        expect(rec?.couponSubmit ?? null).toBeNull()
     })
 })
 

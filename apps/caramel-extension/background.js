@@ -307,7 +307,7 @@ async function couponBoxLlmEnabled() {
  * Three numbers, each above the one before: the server gives the model 20s
  * and then answers no_pick itself (measured p95 16-18s); this side allows the
  * whole ask 24s, so the request can outwait the server's own limit; the page
- * waits PICK_WAIT_MS, 26s (coupon-box-discovery.js), so an answer sent inside
+ * waits PICK_WAIT_MS, 29s (coupon-box-discovery.js), so an answer sent inside
  * this deadline always reaches it. Raise one, raise the ones after it. */
 export const COUPON_BOX_PICK_DEADLINE_MS = 24000
 const COUPON_BOX_PICK_TIMEOUT_MS = 23000
