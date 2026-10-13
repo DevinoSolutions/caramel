@@ -290,12 +290,24 @@ const CARAMEL_CART_PATH_RE =
  * string (?redirect=/cart.php) is not where the shopper is. */
 const CARAMEL_CART_FILE_RE =
     /^(?:(?:my|view|show|shop|shopping)[-_]?)?(?:cart|carts|basket|checkout|checkouts)(?:\.(?:php|aspx?|html?|jsp|cfm|do))?$/i
+/* A parent may also be a word that ENDS in store or shop: the shop's own name
+ * for itself (/acestore/shoppingcart.aspx, measured on acefitness.org with a
+ * promo box and a total in view; /webshop/, /eshop/). */
 const CARAMEL_CART_FILE_PARENT_RE =
-    /^(?:[a-z]{2}(?:[-_][a-z]{2})?|store|shop|checkout|cart|basket|secure|order|orders)$/i
+    /^(?:[a-z]{2}(?:[-_][a-z]{2})?|[a-z]*(?:store|shop)|checkout|cart|basket|secure|order|orders)$/i
+
+/* A path segment that is an action on the cart, written as one word
+ * (/app/manageCart/showManageOrder, the hosted order form of a checkout
+ * platform many small stores use). Only verbs, and only the WHOLE segment: a
+ * verb is never a product name, so unlike /mycart this is safe at any depth,
+ * and /viewcart-tips stays out. */
+const CARAMEL_CART_ACTION_SEGMENT_RE = /^(?:manage|view)[-_]?(?:cart|basket)$/i
+
 function _caramelCartFilePath(pathname) {
     const segs = String(pathname || '')
         .split('/')
         .filter(Boolean)
+    if (segs.some(seg => CARAMEL_CART_ACTION_SEGMENT_RE.test(seg))) return true
     if (!segs.length || segs.length > 3) return false
     return (
         CARAMEL_CART_FILE_RE.test(segs[segs.length - 1]) &&

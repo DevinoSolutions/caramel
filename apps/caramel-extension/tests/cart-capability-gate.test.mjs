@@ -268,6 +268,13 @@ describe('isCheckout — cart intent the path does not spell out', () => {
             '/help/checkout.html',
             '/login?redirect=/cart.php',
             '/cartography.html',
+            // A store-ish parent does not make a product slug a cart, and a
+            // cart action must be the whole segment.
+            '/acestore/products/shoppingcart.aspx',
+            '/storefront/cart-organizer.html',
+            '/blog/viewcart-tips',
+            '/help/managecart-guide',
+            '/products/mycart',
         ]) {
             setPath(url)
             expect(await isCheckout(), url).toBe(false)
@@ -290,6 +297,13 @@ describe('isCheckout — cart intent the path does not spell out', () => {
             '/checkout.php',
             '/shop/basket.aspx?cart=1',
             '/store/cart.php',
+            // The shop's own name for itself as the parent (acefitness.org).
+            '/acestore/shoppingcart.aspx',
+            '/acestore/shoppingcart.aspx?ACEProdSkus=OLC-CCOM-10',
+            '/webshop/cart.html',
+            // A cart action as one word, at any depth (a hosted order form).
+            '/app/manageCart/showManageOrder',
+            '/orders/viewbasket',
         ]) {
             setPath(url)
             expect(await isCheckout(), url).toBe(true)
