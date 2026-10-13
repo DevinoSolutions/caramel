@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+    _caramelCartFilePath,
     _caramelCartHostname,
     getDomainRecord,
     isCheckout,
@@ -275,6 +276,21 @@ describe('isCheckout — cart intent the path does not spell out', () => {
             '/blog/viewcart-tips',
             '/help/managecart-guide',
             '/products/mycart',
+            // A cart action deep in a path, or under a parent that is not the
+            // shop's own, is a page ABOUT the action.
+            '/products/viewcart',
+            '/docs/api/viewcart',
+            '/blog/2024/05/viewcart',
+            '/a/b/c/d/viewcart',
+            '/admin/settings/managecart',
+            // An ordinary word ending in shop/store is not the shop's name.
+            '/workshop/basket.html',
+            '/giftshop/basket.html',
+            '/photoshop/checkout.html',
+            '/bishop/cart.html',
+            '/restore/cart.php',
+            // Past the three-segment limit.
+            '/en/us/shop/cart.php',
         ]) {
             setPath(url)
             expect(await isCheckout(), url).toBe(false)
@@ -297,17 +313,43 @@ describe('isCheckout — cart intent the path does not spell out', () => {
             '/checkout.php',
             '/shop/basket.aspx?cart=1',
             '/store/cart.php',
-            // The shop's own name for itself as the parent (acefitness.org).
-            '/acestore/shoppingcart.aspx',
-            '/acestore/shoppingcart.aspx?ACEProdSkus=OLC-CCOM-10',
+            // The shop's own name for itself as the parent.
             '/webshop/cart.html',
-            // A cart action as one word, at any depth (a hosted order form).
+            '/eshop/basket.aspx',
+            '/onlinestore/shoppingcart.asp',
+            // A server session parameter is not part of the page name.
+            '/shop/cart.do;jsessionid=AB12CD',
+            // A cart action as one whole segment near the top (a hosted order
+            // form).
             '/app/manageCart/showManageOrder',
             '/orders/viewbasket',
+            '/viewbasket',
         ]) {
             setPath(url)
             expect(await isCheckout(), url).toBe(true)
         }
+    })
+
+    // jsdom serves every page from localhost, so the store-name rule is pinned
+    // on the function itself with the host it was measured on.
+    it('takes store or shop after the start of the store’s own name as a parent', () => {
+        const host = 'www.acefitness.org'
+        for (const url of [
+            '/acestore/shoppingcart.aspx',
+            '/acestore/shoppingcart.aspx;jsessionid=AB12CD',
+            '/acefitnessshop/cart.html',
+        ])
+            expect(_caramelCartFilePath(url, host), url).toBe(true)
+        for (const url of [
+            '/acestore/products/shoppingcart.aspx',
+            '/workshop/cart.html',
+            '/xstore/cart.html',
+        ])
+            expect(_caramelCartFilePath(url, host), url).toBe(false)
+        // The same parent on another store's host is an ordinary word.
+        expect(
+            _caramelCartFilePath('/acestore/shoppingcart.aspx', 'example.com'),
+        ).toBe(false)
     })
 
     it('opens on a cart whose page slug carries a number (WordPress /cart-2/)', async () => {

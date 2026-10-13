@@ -290,28 +290,48 @@ const CARAMEL_CART_PATH_RE =
  * string (?redirect=/cart.php) is not where the shopper is. */
 const CARAMEL_CART_FILE_RE =
     /^(?:(?:my|view|show|shop|shopping)[-_]?)?(?:cart|carts|basket|checkout|checkouts)(?:\.(?:php|aspx?|html?|jsp|cfm|do))?$/i
-/* A parent may also be a word that ENDS in store or shop: the shop's own name
- * for itself (/acestore/shoppingcart.aspx, measured on acefitness.org with a
- * promo box and a total in view; /webshop/, /eshop/). */
+/* A parent may also be the shop's own name for itself: store or shop, with no
+ * prefix or a generic one (/webshop/, /eshop/, /onlinestore/), or after the
+ * start of the store's OWN name (/acestore/ on acefitness.org, measured with a
+ * promo box and a total in view). That last form is the capture group, and the
+ * caller checks it against the host: any other prefix is an ordinary word
+ * (/workshop/, /giftshop/, /bishop/, /restore/). */
 const CARAMEL_CART_FILE_PARENT_RE =
-    /^(?:[a-z]{2}(?:[-_][a-z]{2})?|[a-z]*(?:store|shop)|checkout|cart|basket|secure|order|orders)$/i
+    /^(?:[a-z]{2}(?:[-_][a-z]{2})?|(?:e|web|online|([a-z]{2,}))?(?:store|shop)|checkout|cart|basket|secure|orders?|app)$/i
 
 /* A path segment that is an action on the cart, written as one word
  * (/app/manageCart/showManageOrder, the hosted order form of a checkout
- * platform many small stores use). Only verbs, and only the WHOLE segment: a
- * verb is never a product name, so unlike /mycart this is safe at any depth,
- * and /viewcart-tips stays out. */
+ * platform many small stores use). Only verbs, and only the WHOLE segment, and
+ * only near the top of the path under the same parents as a cart file:
+ * /products/viewcart and /docs/api/viewcart are pages ABOUT the action. */
 const CARAMEL_CART_ACTION_SEGMENT_RE = /^(?:manage|view)[-_]?(?:cart|basket)$/i
 
-function _caramelCartFilePath(pathname) {
-    const segs = String(pathname || '')
+// Exported for tests/cart-capability-gate.test.mjs (the store-name parent pins).
+export function _caramelCartFilePath(pathname, hostname = location.hostname) {
+    // A ;jsessionid=… (or any ;param) belongs to the server, not the page name.
+    const segs = pathname
+        .replace(/;[^/]*/g, '')
         .split('/')
         .filter(Boolean)
-    if (segs.some(seg => CARAMEL_CART_ACTION_SEGMENT_RE.test(seg))) return true
-    if (!segs.length || segs.length > 3) return false
+    // Where the cart word sits: an action in the first two segments, or a cart
+    // file as the last of at most three. Everything before it must be a parent.
+    let at = segs
+        .slice(0, 2)
+        .findIndex(seg => CARAMEL_CART_ACTION_SEGMENT_RE.test(seg))
+    if (at < 0 && segs.length < 4 && CARAMEL_CART_FILE_RE.test(segs.at(-1)))
+        at = segs.length - 1
     return (
-        CARAMEL_CART_FILE_RE.test(segs[segs.length - 1]) &&
-        segs.slice(0, -1).every(seg => CARAMEL_CART_FILE_PARENT_RE.test(seg))
+        at >= 0 &&
+        segs.slice(0, at).every(seg => {
+            const m = CARAMEL_CART_FILE_PARENT_RE.exec(seg)
+            return (
+                m &&
+                (!m[1] ||
+                    hostname
+                        .replace(/^www\./, '')
+                        .startsWith(m[1].toLowerCase()))
+            )
+        })
     )
 }
 
