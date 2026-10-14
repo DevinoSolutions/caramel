@@ -336,7 +336,7 @@ async function _judgeAndShare(rec, code, snapshot, generation) {
 }
 
 function _start(rec, code) {
-    const snapshot = caramelSnapshotCart(rec)
+    const snapshot = caramelSnapshotCart(rec, code)
     const generation = _generation
     _current = { generation, code }
     _judgeAndShare(rec, code, snapshot, generation)

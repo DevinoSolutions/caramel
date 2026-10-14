@@ -15,6 +15,9 @@
  *     `identity` permission and extension-pages CSP are Chrome-only, exactly
  *     like the retired manifest.json / manifest-firefox.json twins were.
  */
+import { transform } from 'esbuild'
+import { readFile } from 'node:fs/promises'
+import { resolve } from 'node:path'
 import { defineConfig } from 'wxt'
 
 import { ENVIRONMENTS, stampFor } from './scripts/environments.mjs'
@@ -56,6 +59,32 @@ function resolveEnvironment(mode: string): EnvironmentName {
 
 export default defineConfig({
     modules: ['@wxt-dev/module-react'],
+    hooks: {
+        // The coupon-box outline builder ships as its own file rather than in
+        // the content-script bundle: coupon-box-discovery.js imports it only
+        // when it is about to ask the server for a box, so pages that never
+        // ask never load it. It has no imports of its own, so it is minified
+        // on its own with the same esbuild settings scripts/measure-size.mjs
+        // budgets it with, and the file that ships is the file that is
+        // measured; assets/* is already web-accessible, which a content
+        // script's import() of an extension URL needs.
+        'build:publicAssets': async (wxt, files) => {
+            const source = await readFile(
+                resolve(wxt.config.root, 'coupon-box-outline.js'),
+                'utf8',
+            )
+            const { code } = await transform(source, {
+                loader: 'js',
+                format: 'esm',
+                minify: true,
+                target: 'es2022',
+            })
+            files.push({
+                contents: code,
+                relativeDest: 'assets/coupon-box-outline.js',
+            })
+        },
+    },
     zip: {
         // The AMO sources archive (`wxt zip -b firefox` emits it beside the
         // store zip) does NOT honor .gitignore — measured 2026-08-13: it swept

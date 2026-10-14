@@ -42,7 +42,20 @@ module.exports = [
         // (owner rule 2026-10-06) — the consent card (UI-helpers.js
         // showCodeSharingPrompt) and the consent record module
         // (code-sharing-consent.js). Measured 76.66 kB: one new UI surface.
-        limit: '80 KB',
+        // 2026-10-13, raised 80 -> 117 kB: coupon-box-discovery.js, the
+        // promo-box finder for stores with no usable config (off behind a
+        // server flag). 91.74 → 107.8 kB: the finder itself (nine-language
+        // vocabularies, field/button/toggle scoring, the total-row reader) was
+        // 91.74 kB at its first push; the rest is hardening against live
+        // stores and review fixes (re-find after a re-draw, hidden label
+        // cells, the coupon-line reader, the finder-run verdict gate, and the
+        // lookbehind-free text readers Safari 16.0-16.3 needs). Same date, the
+        // finder's server pick (own flag, couponBoxLlm): the asking and the
+        // checking of the answer live here, 107.8 -> 111.27 kB; the outline
+        // builder is NOT in this bundle, it ships as assets/coupon-box-outline.js
+        // and has its own budget below. 4.9% headroom over 111.27 kB, so the
+        // next capability trips the ratchet.
+        limit: '117 KB',
         brotli: false,
     },
     {
@@ -110,6 +123,14 @@ module.exports = [
         // checkoutCodeSharingConsent record (code-sharing-consent.js) and
         // answers no-consent, so nothing is sent before an explicit yes.
         // Measured 9.29 kB.
+        // 2026-10-09, raised 10 -> 10.7 kB: the features cache now carries the
+        // couponBoxDiscovery flag too, answered to the content script on its
+        // own message route. Measured 9.85 kB (re-measured 2026-10-13; first
+        // recorded as 9.67); raised rather than left at 1.5%
+        // headroom (see the 2026-08-10 note above).
+        // 2026-10-13, raised 10.7 -> 11.3 kB: the coupon-box pick request (its
+        // flag, its message route, and one deadline over the flag read, the
+        // token read and the request). Measured 10.52 kB.
         // 2026-10-13, raised 10 -> 13 kB: extension-activity.js joined
         // this group (the Google Chrome daily-active ping's worker half —
         // seed + SHA-256 daily id, the once-per-UTC-day state, the bounded
@@ -117,7 +138,21 @@ module.exports = [
         // the popup-only recordExtensionActivity route in background.js.
         // Measured 11.96 kB after merging main's code-sharing consent (was
         // 9.29 kB): one new feature, not prose.
-        limit: '13 KB',
+        // 2026-10-14, raised 13 -> 14 kB on merging main's coupon-box
+        // discovery + pick routes into the daily-active ping (the two raises
+        // above were each measured without the other). Measured 13.04 kB:
+        // the sum of both features, not prose.
+        limit: '14 KB',
+        brotli: false,
+    },
+    {
+        name: 'coupon-box-outline.js (loaded on demand, minified)',
+        path: '.size-cache/coupon-box-outline.min.js',
+        // 2026-10-13 — measured 8.30 kB minified. Not injected on every page:
+        // the finder imports it only when it is about to ask the server for a
+        // box. About half of it is the word allowlist every name is filtered
+        // through, which is data the server's eval was measured with.
+        limit: '9.2 KB',
         brotli: false,
     },
 ]

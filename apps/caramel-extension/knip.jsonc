@@ -12,6 +12,9 @@
         "coupon-runner.js",
         "UI-helpers.js",
         "inject.js",
+        // Loaded by URL (import of runtime.getURL) in coupon-box-discovery.js,
+        // so no import statement names it.
+        "coupon-box-outline.js",
         "background.js",
         "popup-core.js",
         "entrypoints/*.ts",

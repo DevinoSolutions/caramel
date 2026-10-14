@@ -164,6 +164,13 @@ const serverObjectSchema = z.object({
         .enum(['true', 'false'])
         .default('false')
         .transform(value => value === 'true'),
+    // Served to the extension by GET /api/extension/features. On, the
+    // extension may find a store's promo box itself when no config describes
+    // it. Same strict two-value enum as SHOPPER_CODE_CAPTURE_ENABLED.
+    COUPON_BOX_DISCOVERY_ENABLED: z
+        .enum(['true', 'false'])
+        .default('false')
+        .transform(value => value === 'true'),
     OPENROUTER_API_KEY: z.string().optional(),
     // Base URL of the OpenAI-compatible chat API that openrouter.ts POSTs
     // `${OPENROUTER_API_URL}/chat/completions` to. Unset (or blank) =
@@ -179,6 +186,34 @@ const serverObjectSchema = z.object({
         )
         .pipe(z.url()),
     OPENROUTER_MODEL: z.string().default('anthropic/claude-haiku-4.5'),
+    // Coupon-box pick (POST /api/extension/coupon-box-pick): when the
+    // extension's rules cannot find a store's coupon box, it may send a
+    // trimmed page outline and a model picks the box. OFF by default; a strict
+    // two-value enum like SHOPPER_CODE_CAPTURE_ENABLED, so a typo fails boot
+    // instead of silently reading as on or off. The feature is live only when
+    // this is 'true' AND COUPON_BOX_PICK_MODEL names a model; the extension
+    // reads the same condition from GET /api/extension/features.
+    COUPON_BOX_LLM_ENABLED: z
+        .enum(['true', 'false'])
+        .default('false')
+        .transform(value => value === 'true'),
+    // The model id the coupon-box pick sends to OPENROUTER_API_URL (same base
+    // and key as the cart classifier). No default on purpose: the pick is
+    // eval-gated per model (evals/couponBoxPick.eval.ts), so an unset or
+    // blank value keeps the feature off rather than guessing a model.
+    COUPON_BOX_PICK_MODEL: z
+        .string()
+        .optional()
+        .transform(v => v?.trim() || undefined),
+    // Per-day ceiling on UNCACHED coupon-box model calls, process-wide
+    // (couponBoxPickBudget.ts). Non-negative integer; 0 = no model calls at
+    // all (the soft kill switch, RUNBOOK.md); unset = 2000. Garbage fails boot.
+    // A blank value reads as unset: z.coerce would turn '' into 0 and silently
+    // switch the feature off.
+    COUPON_BOX_PICK_DAILY_CAP: z.preprocess(
+        v => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+        z.coerce.number().int().min(0).default(2000),
+    ),
     // Paid fallback through the Devino proxy (src/lib/proxy-fallback-headers.ts):
     // the app's OWN OpenRouter org key, sent as X-ORF-Fallback-Key only to
     // https://proxyai.devino.ca and only on a chat() call that opts in. Unset =
