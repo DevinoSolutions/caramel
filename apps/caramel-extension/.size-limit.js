@@ -49,8 +49,12 @@ module.exports = [
         // 91.74 kB at its first push; the rest is hardening against live
         // stores and review fixes (re-find after a re-draw, hidden label
         // cells, the coupon-line reader, the finder-run verdict gate, and the
-        // lookbehind-free text readers Safari 16.0-16.3 needs). 8.5%
-        // headroom, so the next capability trips the ratchet.
+        // lookbehind-free text readers Safari 16.0-16.3 needs). Same date, the
+        // finder's server pick (own flag, couponBoxLlm): the asking and the
+        // checking of the answer live here, 107.8 -> 111.27 kB; the outline
+        // builder is NOT in this bundle, it ships as assets/coupon-box-outline.js
+        // and has its own budget below. 4.9% headroom over 111.27 kB, so the
+        // next capability trips the ratchet.
         limit: '117 KB',
         brotli: false,
     },
