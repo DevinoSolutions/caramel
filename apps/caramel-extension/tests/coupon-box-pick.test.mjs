@@ -6,6 +6,7 @@ import { initCaramelBase } from '../caramel-base.js'
 import {
     _caramelResetDiscoveryFlag,
     caramelDiscoveredRecord,
+    caramelRemarkFoundBox,
     PICK_WAIT_MS,
 } from '../coupon-box-discovery.js'
 import { startApplyingCoupons } from '../coupon-runner.js'
@@ -467,6 +468,112 @@ describe('the outline builder is loaded only to ask', () => {
         expect(PICK_WAIT_MS).toBeGreaterThanOrEqual(
             COUPON_BOX_PICK_DEADLINE_MS + 5000,
         )
+    })
+})
+
+// The dev browser test on tractive.com (2026-10-14): the server answered
+// {"outcome":"box","input":21,"button":null,"toggle":null,"confidence":90,
+// "why":"Only discount field present, no apply button"}, the checkout's
+// "Discount Code (Optional)" field that applies on Enter. The client threw it
+// away (FINDER_PICK_UNUSABLE) and the shopper saw "We couldn't find the promo
+// box on this page".
+describe('a box the server says has no apply button (it applies on Enter)', () => {
+    // No button anywhere near the field, so the rules cannot supply one.
+    const INPUT_ONLY =
+        '<div class="f"><input id="x" name="field_7" type="text"></div>'
+
+    it('an input with no button is a usable record: the input stands in as its own submit', async () => {
+        document.body.innerHTML = INPUT_ONLY + TOTAL
+        answer = req => box(idx(req.outline, /textbox/), null)
+
+        await run()
+
+        expect(pickCalls).toHaveLength(1)
+        expect(appliedWith.length).toBeGreaterThan(0)
+        const { rec } = appliedWith[0]
+        // Held to the money rule like any picked box.
+        expect(rec.caramelFound).toBe(true)
+        const input = document.querySelector(rec.couponInput)
+        expect(input?.id).toBe('x')
+        // applyCoupon's `applyBtn === input` branch: type the code, press Enter.
+        expect(document.querySelector(rec.couponSubmit)).toBe(input)
+        // Nothing is marked as a button: there is none to click.
+        expect(document.querySelector('[data-caramel-found="submit"]')).toBe(
+            null,
+        )
+        expect(
+            document.querySelector(rec.priceContainer)?.textContent,
+        ).toContain('$100.00')
+    })
+
+    it('the record is built through the same path the rules use, so the box is found again after a re-draw', async () => {
+        // The tractive.com shape: a labelled field the rules score as the
+        // box, but with no apply button, so they will not settle on it.
+        const labelled = id =>
+            '<div class="f"><label for="' +
+            id +
+            '">Discount Code (Optional)</label>' +
+            '<input id="' +
+            id +
+            '" name="discount_code" type="text"></div>'
+        document.body.innerHTML = labelled('dc') + TOTAL
+        answer = req => box(idx(req.outline, /textbox/), null)
+        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+        expect(rec).not.toBeNull()
+
+        // The store replaces the whole section to show its answer.
+        document.querySelector('.f').outerHTML = labelled('y')
+
+        expect(caramelRemarkFoundBox(false, rec)).toBe(true)
+        expect(document.querySelector(rec.couponInput)?.id).toBe('y')
+        expect(document.querySelector(rec.couponSubmit)?.id).toBe('y')
+    })
+
+    it('a pick with no input is still rejected, whatever else it names', async () => {
+        document.body.innerHTML = BARE_BOX + TOTAL
+        answer = req => box(null, idx(req.outline, /button "Go"/))
+
+        await run()
+
+        expect(pickCalls).toHaveLength(1)
+        expect(appliedWith).toHaveLength(0)
+        gaveCodesToCopy()
+    })
+
+    it('a pick naming nothing at all is rejected too', async () => {
+        document.body.innerHTML = INPUT_ONLY + TOTAL
+        answer = box(null, null, null)
+
+        await run()
+
+        expect(appliedWith).toHaveLength(0)
+        gaveCodesToCopy()
+    })
+
+    it('a field the apply flow cannot type into is not an input-only box', async () => {
+        document.body.innerHTML =
+            '<div class="f"><input id="e" type="email" name="field_7"></div>' +
+            TOTAL
+        answer = req => box(idx(req.outline, /textbox/), null)
+
+        await run()
+
+        expect(appliedWith).toHaveLength(0)
+        gaveCodesToCopy()
+    })
+
+    it('a button the server named but the page refuses never becomes an Enter press', async () => {
+        document.body.innerHTML =
+            '<div class="f"><input id="x" name="field_7" type="text"></div>' +
+            '<a id="b" href="/cart/checkout" class="btn">Apply</a>' +
+            TOTAL
+        answer = req =>
+            box(idx(req.outline, /textbox/), idx(req.outline, /link "Apply"/))
+
+        await run()
+
+        expect(appliedWith).toHaveLength(0)
+        gaveCodesToCopy()
     })
 })
 

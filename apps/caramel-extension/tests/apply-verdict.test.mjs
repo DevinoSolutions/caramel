@@ -1443,3 +1443,34 @@ describe('caramelAwaitCouponVerdict — logging of the code', () => {
         expect(JSON.stringify(lines)).not.toContain('invalid')
     })
 })
+
+// A box with no apply button (a server-picked box that applies on Enter, see
+// coupon-box-discovery.js finderRecord): couponSubmit is the input's own
+// selector, and the code goes in by typing it and pressing Enter, no click.
+describe('applyCoupon with no apply button (couponSubmit is the input)', () => {
+    it('types the code and presses Enter; a price drop is the success', async () => {
+        document.body.innerHTML =
+            '<input id="promo" /><div id="total"></div><div id="err"></div>'
+        setText(document.getElementById('total'), '$100.00')
+        let typed = null
+        document.getElementById('promo').addEventListener('keydown', e => {
+            if (e.key !== 'Enter') return
+            typed = e.target.value
+            setTimeout(
+                () => setText(document.getElementById('total'), '$90.00'),
+                150,
+            )
+        })
+        const rec = {
+            ...BASE,
+            couponSubmit: '#promo',
+            priceContainer: '#total',
+        }
+
+        const res = await applyCoupon('SAVE10', rec)
+
+        expect(typed).toBe('SAVE10')
+        expect(res.success).toBe(true)
+        expect(res.newTotal).toBe(90)
+    })
+})

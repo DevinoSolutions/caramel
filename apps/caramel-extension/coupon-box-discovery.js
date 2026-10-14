@@ -1421,12 +1421,17 @@ export async function caramelDiscoveredRecord(rec, doc = document) {
 
 // The record for a box the finder settled on: `found` holds a visible input
 // and its button, `opened` the toggle clicked to reveal them (or null).
+// `found.button` is null only for a box the server said has no apply button
+// (it applies on Enter): couponSubmit then names the input itself, the shape the
+// apply flow already runs (coupon-apply.js: applyBtn === input types the code
+// and presses Enter, no click).
 function finderRecord(rec, found, totalRow, opened) {
-    const answer = answerArea(found.input, found.button)
+    const answer = answerArea(found.input, found.button || found.input)
+    const inputSel = mark(found.input, 'input')
     return {
         ...rec,
-        couponInput: mark(found.input, 'input'),
-        couponSubmit: mark(found.button, 'submit'),
+        couponInput: inputSel,
+        couponSubmit: found.button ? mark(found.button, 'submit') : inputSel,
         priceContainer: mark(totalRow.el, 'total'),
         // Which row kind the baseline came from; every later read uses it.
         caramelTotalKind: totalRow.kind,
@@ -1623,6 +1628,14 @@ async function caramelPickedRecord(rec, doc) {
         return b && !navigatesAway(b) ? b : null
     }
 
+    // A usable pick: an input with its button, or the server's own input when
+    // the server named NO button (a box that applies on Enter). A button the
+    // server did name but this page refused above (a link out of the cart, an
+    // order control) never turns into an Enter press: that stays a miss.
+    const usableBox = f =>
+        !!f?.input &&
+        (!!f.button || (f.input === input && answer.button == null))
+
     let found = null
     let opened = null
     if (input && visible(input)) {
@@ -1653,13 +1666,13 @@ async function caramelPickedRecord(rec, doc) {
         }
         // A checkbox that opened no usable box goes back the way the shopper
         // left it, as for a rule pick.
-        if (!found?.button && check && check.checked !== wasChecked) {
+        if (!usableBox(found) && check && check.checked !== wasChecked) {
             log('FINDER_TOGGLE_RESTORED', {})
             toggle.click()
         }
         opened = toggle
     }
-    if (!found?.input || !found.button) {
+    if (!usableBox(found)) {
         log('FINDER_PICK_UNUSABLE', {
             input: !!input,
             button: !!button,
@@ -1717,24 +1730,29 @@ function sameBox(el, sig) {
  * when the box (and, if asked, its answer area) is marked. */
 // Called from coupon-apply.js.
 export function caramelRemarkFoundBox(answerToo, rec, doc = document) {
+    // A box picked with no apply button (finderRecord) has no 'submit' mark:
+    // its couponSubmit is the input's own selector.
+    const inputOnly = !!rec && rec.couponSubmit === rec.couponInput
     const marked = doc.querySelector(sel('input'))
     if (
         marked &&
         visible(marked) &&
-        doc.querySelector(sel('submit')) &&
+        (inputOnly || doc.querySelector(sel('submit'))) &&
         (!answerToo || doc.querySelector(sel('answer')))
     )
         return true
     const sig = rec?.caramelInputSig
     if (!sig) return false
     const top = scoreInputs(doc).find(c => sameBox(c.el, sig))
-    const button = top && findButton(top.el)
+    const button = inputOnly ? null : top && findButton(top.el)
     const found = {
         input: top?.el,
         button: button?.el,
         reasons: { input: top?.reasons || [], button: button?.reasons || [] },
     }
-    if (!confident(found)) return false
+    // The same name already identified the box; with no button to confirm it
+    // the name is all there is.
+    if (inputOnly ? !top : !confident(found)) return false
     let toggle = null
     if (!top.visible) {
         const t = findToggle(doc, top.el)?.el
@@ -1752,9 +1770,9 @@ export function caramelRemarkFoundBox(answerToo, rec, doc = document) {
     }
     log('FINDER_REMARKED', { reasons: found.reasons, folded: !!toggle })
     mark(found.input, 'input')
-    mark(found.button, 'submit')
+    if (found.button) mark(found.button, 'submit')
     if (toggle) mark(toggle, 'toggle')
-    const answer = answerArea(found.input, found.button)
+    const answer = answerArea(found.input, found.button || found.input)
     if (answer) mark(answer, 'answer')
     return !answerToo || !!answer
 }
