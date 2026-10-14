@@ -47,9 +47,11 @@ import {
     rmSync,
     writeFileSync,
 } from 'node:fs'
+import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { gunzipSync } from 'node:zlib'
 import { chromium } from 'playwright'
 import { stampFor } from './environments.mjs'
 
@@ -146,6 +148,221 @@ async function waitForServiceWorker(context, timeout = 15000) {
         await new Promise(r => setTimeout(r, 200))
     }
     return null
+}
+
+/* ── 7b. the Google Chrome daily-active ping ────────────────────────────────
+ *
+ * Two modes, chosen by how the APP under test was booted:
+ *
+ *   CARAMEL_E2E_POSTHOG_MOCK_PORT set — the app runs with
+ *     EXTENSION_DAU_TELEMETRY_ENABLED=true, POSTHOG_DATASET=e2e and its e2e
+ *     PostHog host pointed at http://localhost:<port>, where THIS script
+ *     listens. That is a MOCK of PostHog's ingestion endpoint: the real
+ *     posthog-node SDK in the real route sends to it, nothing reaches any real
+ *     PostHog project, and what is verified is the capture REQUEST, not
+ *     ingestion.
+ *   unset — the app's own .env decides; the default (switch off) must answer
+ *     `disabled`, which proves the full popup → worker → route path and that a
+ *     disabled answer is not recorded as a counted day.
+ *
+ * Playwright's Chromium reports no "Google Chrome" UA-CH brand, so the popup
+ * opened in step 7 must have sent nothing (the browser-scope gate, checked
+ * first). The positive path then EMULATES Google Chrome's brand list on the
+ * popup page over CDP — a test seam for the brand check only; the Safari and
+ * Edge exclusions are pinned by the unit suites. */
+const MOCK_PORT = Number(process.env.CARAMEL_E2E_POSTHOG_MOCK_PORT) || 0
+const GOOGLE_CHROME_UA_METADATA = {
+    brands: [
+        { brand: 'Chromium', version: '130' },
+        { brand: 'Google Chrome', version: '130' },
+        { brand: 'Not?A_Brand', version: '99' },
+    ],
+    fullVersion: '130.0.0.0',
+    platform: 'Linux',
+    platformVersion: '',
+    architecture: 'x86',
+    model: '',
+    mobile: false,
+}
+
+/** Mock PostHog ingestion: records every POST body (gunzipped, JSON-parsed)
+ * and answers 200 after `holdMs`, so the test can close the popup while the
+ * route — and therefore the worker's request — is still waiting. */
+function startPosthogMock(port, holdMs) {
+    const received = []
+    const server = createServer((req, res) => {
+        const chunks = []
+        req.on('data', c => chunks.push(c))
+        req.on('end', () => {
+            let raw = Buffer.concat(chunks)
+            if (/gzip/.test(req.headers['content-encoding'] || ''))
+                raw = gunzipSync(raw)
+            let body = null
+            try {
+                body = JSON.parse(raw.toString('utf8'))
+            } catch {
+                body = raw.toString('utf8')
+            }
+            received.push({ path: req.url, body })
+            setTimeout(() => {
+                res.writeHead(200, { 'Content-Type': 'application/json' })
+                res.end('{"status":"Ok"}')
+            }, holdMs)
+        })
+    })
+    return new Promise(resolve =>
+        server.listen(port, '127.0.0.1', () => resolve({ server, received })),
+    )
+}
+
+/** Every captured event object named `name`, wherever the SDK's envelope
+ * (batch v0 or capture v1) put it. */
+function findEvents(node, name, out = []) {
+    if (Array.isArray(node)) node.forEach(n => findEvents(n, name, out))
+    else if (node && typeof node === 'object') {
+        if (node.event === name) out.push(node)
+        else Object.values(node).forEach(v => findEvents(v, name, out))
+    }
+    return out
+}
+
+const readActivityStorage = sw =>
+    sw.evaluate(
+        () =>
+            new Promise(res =>
+                chrome.storage.local.get(
+                    [
+                        'caramel_activity_seed',
+                        'caramel_activity_state',
+                        'token',
+                    ],
+                    res,
+                ),
+            ),
+    )
+
+async function waitForActivityState(sw, predicate, timeout = 20000) {
+    const start = Date.now()
+    while (Date.now() - start < timeout) {
+        const s = await readActivityStorage(sw)
+        if (predicate(s.caramel_activity_state)) return s
+        await new Promise(r => setTimeout(r, 250))
+    }
+    return readActivityStorage(sw)
+}
+
+async function openPopupAsGoogleChrome(context, extensionId) {
+    const page = await context.newPage()
+    const cdp = await context.newCDPSession(page)
+    const ua = await page.evaluate(() => navigator.userAgent)
+    await cdp.send('Emulation.setUserAgentOverride', {
+        userAgent: ua,
+        userAgentMetadata: GOOGLE_CHROME_UA_METADATA,
+    })
+    await page.goto(`chrome-extension://${extensionId}/popup.html`)
+    return page
+}
+
+async function checkDailyActivePing(context, sw, extensionId) {
+    // (a) Plain Chromium (step 7's popup) is not Google Chrome: no seed, no state.
+    const before = await readActivityStorage(sw)
+    log(
+        'DAU: plain Chromium popup open sends nothing',
+        !before.caramel_activity_seed && !before.caramel_activity_state,
+        `seed=${before.caramel_activity_seed ? 'present' : 'absent'}`,
+    )
+
+    // `next dev` compiles a route on its first request (measured 2026-10-05:
+    // ~5 s cold), which can outrun the worker's 8 s fetch budget and turn a
+    // successful capture into a "lost response" retry. A preflight compiles
+    // the same route module and captures nothing.
+    await fetch(`${API_BASE}/api/extension/activity`, { method: 'OPTIONS' })
+    const mock = MOCK_PORT ? await startPosthogMock(MOCK_PORT, 1000) : null
+    try {
+        // (b) Popup open as Google Chrome, closed mid-delivery.
+        const popup = await openPopupAsGoogleChrome(context, extensionId)
+        const brandSeen = await popup.evaluate(() =>
+            (navigator.userAgentData?.brands || []).map(b => b.brand),
+        )
+        if (mock) {
+            // The capture reached the mock ⇒ the worker's request is inside the
+            // route, which is now waiting on the held mock response. Close the
+            // popup here: delivery must not depend on it.
+            const start = Date.now()
+            while (!mock.received.length && Date.now() - start < 15000)
+                await new Promise(r => setTimeout(r, 100))
+        } else {
+            await popup.waitForTimeout(300)
+        }
+        await popup.close()
+
+        if (mock) {
+            const after = await waitForActivityState(sw, s => s?.recordedDay)
+            const today = new Date().toISOString().slice(0, 10)
+            const events = findEvents(
+                mock.received.map(r => r.body),
+                'extension_active',
+            )
+            const ev = events[0]
+            const props = ev?.properties || {}
+            const wire = JSON.stringify(mock.received)
+            const okEvent =
+                events.length === 1 &&
+                /^[0-9a-f]{64}$/.test(ev.distinct_id) &&
+                props.day === today &&
+                props.browser === 'chrome' &&
+                typeof props.extension_version === 'string' &&
+                props.signed_in === !!after.token &&
+                props.platform === 'extension' &&
+                props.$process_person_profile === false &&
+                !wire.includes(after.caramel_activity_seed) &&
+                !(after.token && wire.includes(after.token)) &&
+                !wire.includes(TEST_EMAIL)
+            log(
+                'DAU: popup → worker → route → PostHog capture request (MOCK host, not live ingestion)',
+                okEvent,
+                `brands=${brandSeen.join('|')} events=${events.length} signed_in=${props.signed_in} keys=${Object.keys(
+                    props,
+                )
+                    .filter(k => !k.startsWith('$lib'))
+                    .join(',')}`,
+            )
+            log(
+                'DAU: day recorded by the worker after the popup closed',
+                after.caramel_activity_state?.recordedDay === today,
+                JSON.stringify(after.caramel_activity_state),
+            )
+
+            // (c) Same-day repeat open: no second request.
+            const again = await openPopupAsGoogleChrome(context, extensionId)
+            await again.waitForTimeout(2500)
+            await again.close()
+            const repeat = findEvents(
+                mock.received.map(r => r.body),
+                'extension_active',
+            )
+            log(
+                'DAU: repeat popup open the same UTC day sends nothing',
+                repeat.length === 1,
+                `events=${repeat.length}`,
+            )
+        } else {
+            const after = await waitForActivityState(
+                sw,
+                s => s?.retryAfter || s?.recordedDay,
+            )
+            const st = after.caramel_activity_state
+            log(
+                'DAU: popup → worker → route answered disabled (switch off); day NOT recorded, cooldown set',
+                !!after.caramel_activity_seed &&
+                    !st?.recordedDay &&
+                    !!st?.retryAfter,
+                `brands=${brandSeen.join('|')} state=${JSON.stringify(st)}`,
+            )
+        }
+    } finally {
+        mock?.server.close()
+    }
 }
 
 async function main() {
@@ -349,6 +566,10 @@ async function main() {
 
             await popup.close()
         }
+
+        // 7b. DAILY-ACTIVE PING — popup open → worker → POST
+        // /api/extension/activity → the route's PostHog capture boundary.
+        await checkDailyActivePing(context, sw, extensionId)
 
         // 8. DOM INJECTION — real applyCoupon() against a synthetic supported-store DOM
         {

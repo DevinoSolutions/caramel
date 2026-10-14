@@ -52,6 +52,16 @@ function getActiveClient(): ActiveClient | null {
 }
 
 /**
+ * True when this deploy's server dataset routes captures somewhere
+ * (production or e2e with a complete pair). Lets a caller tell "analytics is
+ * off here" apart from a capture that FAILED — `captureServerEvent` returns
+ * `false` for both.
+ */
+export function isServerCaptureConfigured(): boolean {
+    return resolveServerTarget() !== null
+}
+
+/**
  * Capture one server-side event. Contract:
  *  - no-ops returning `false` when the dataset is disabled/unconfigured;
  *  - stamps app_id / app_version / environment / platform on every event;
@@ -65,7 +75,8 @@ export async function captureServerEvent(args: {
     distinctId: string
     properties?: Record<string, unknown>
     /**
-     * Idempotency key for events a client may retry (`extension_installed`).
+     * Idempotency key for events a client may retry (`extension_installed`,
+     * `extension_active`).
      * Becomes the event UUID (PostHog dedupes on it) and `$insert_id`. Must be
      * a valid UUID — posthog-node rejects anything else.
      */

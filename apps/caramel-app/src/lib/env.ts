@@ -152,6 +152,18 @@ const serverObjectSchema = z.object({
         .enum(['true', 'false'])
         .default('false')
         .transform(value => value === 'true'),
+    // Kill switch for the Google Chrome extension's daily-active-installation
+    // ping (POST /api/extension/activity → PostHog `extension_active`, see
+    // src/lib/extensionActivity.ts). OFF by default: the route answers
+    // { status: 'disabled' } and captures nothing (the extension's requests
+    // still reach this server — off stops CAPTURE, not the request). Turning it on in prod is a
+    // maintainer action that waits on the privacy policy AND the Chrome Web
+    // Store privacy-tab disclosure (RUNBOOK.md "Extension DAU telemetry").
+    // Same strict two-value enum as above, for the same reason.
+    EXTENSION_DAU_TELEMETRY_ENABLED: z
+        .enum(['true', 'false'])
+        .default('false')
+        .transform(value => value === 'true'),
     // Served to the extension by GET /api/extension/features. On, the
     // extension may find a store's promo box itself when no config describes
     // it. Same strict two-value enum as SHOPPER_CODE_CAPTURE_ENABLED.

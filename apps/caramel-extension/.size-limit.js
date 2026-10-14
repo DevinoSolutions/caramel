@@ -78,7 +78,11 @@ module.exports = [
         // every-website match pattern per runtime, the reachability probe that
         // tells "the browser refused us" apart from "you are offline", and the
         // gesture-safe request. Measured 10.04 kB.
-        limit: '11 KB',
+        // 2026-10-13, raised 11 -> 12 kB: recordPopupActivity (the popup
+        // half of the Google Chrome daily-active ping — one message to the
+        // worker, never a fetch from the popup) on top of main's 1.4.11
+        // popup growth left 1.2% headroom. Measured 10.87 kB.
+        limit: '12 KB',
         brotli: false,
     },
     {
@@ -127,7 +131,18 @@ module.exports = [
         // 2026-10-13, raised 10.7 -> 11.3 kB: the coupon-box pick request (its
         // flag, its message route, and one deadline over the flag read, the
         // token read and the request). Measured 10.52 kB.
-        limit: '11.3 KB',
+        // 2026-10-13, raised 10 -> 13 kB: extension-activity.js joined
+        // this group (the Google Chrome daily-active ping's worker half —
+        // seed + SHA-256 daily id, the once-per-UTC-day state, the bounded
+        // disabled/failure cooldowns, the serialized in-flight attempt) plus
+        // the popup-only recordExtensionActivity route in background.js.
+        // Measured 11.96 kB after merging main's code-sharing consent (was
+        // 9.29 kB): one new feature, not prose.
+        // 2026-10-14, raised 13 -> 14 kB on merging main's coupon-box
+        // discovery + pick routes into the daily-active ping (the two raises
+        // above were each measured without the other). Measured 13.04 kB:
+        // the sum of both features, not prose.
+        limit: '14 KB',
         brotli: false,
     },
     {

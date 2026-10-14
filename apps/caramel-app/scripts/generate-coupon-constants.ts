@@ -29,6 +29,12 @@ import {
     WORKED_AT_CLOCK_SKEW_TOLERANCE_MS,
     WORKED_VERIFIED_WINDOW_MS,
 } from '../src/lib/coupons'
+import {
+    EXTENSION_ACTIVITY_BROWSER,
+    EXTENSION_ACTIVITY_ID_DOMAIN,
+    EXTENSION_ACTIVITY_PATH,
+    EXTENSION_ACTIVITY_STATUS,
+} from '../src/lib/extensionActivity'
 
 const OUTPUT_PATH = path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),
@@ -61,9 +67,19 @@ export async function renderCouponConstants(): Promise<string> {
         WORKED_VERIFIED_WINDOW_MS,
         WORKED_AT_CLOCK_SKEW_TOLERANCE_MS,
     }
+    // The extension DAU ping's wire contract (src/lib/extensionActivity.ts):
+    // the background worker builds its request and reads the route's answer
+    // from these, so producer and consumer cannot drift.
+    const activityPayload = {
+        PATH: EXTENSION_ACTIVITY_PATH,
+        ID_DOMAIN: EXTENSION_ACTIVITY_ID_DOMAIN,
+        BROWSER: EXTENSION_ACTIVITY_BROWSER,
+        STATUS: EXTENSION_ACTIVITY_STATUS,
+    }
 
     const raw = `// GENERATED FILE — DO NOT EDIT BY HAND.
-// Source: apps/caramel-app/src/lib/coupons.ts
+// Sources: apps/caramel-app/src/lib/coupons.ts,
+//          apps/caramel-app/src/lib/extensionActivity.ts
 // Regenerate: pnpm --filter caramel-app generate:coupon-constants
 // (apps/caramel-app/scripts/generate-coupon-constants.ts)
 //
@@ -76,6 +92,9 @@ export async function renderCouponConstants(): Promise<string> {
 // any not-yet-ported call-time reader; the entrypoints call it first in realm
 // order.
 export const CaramelCoupons = ${JSON.stringify(payload, null, 4)}
+
+// The extension DAU ping's wire contract (extension-activity.js).
+export const CaramelExtensionActivity = ${JSON.stringify(activityPayload, null, 4)}
 
 export function initCouponConstants() {
     window.CaramelCoupons = CaramelCoupons
