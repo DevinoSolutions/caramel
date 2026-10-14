@@ -1743,7 +1743,13 @@ export function caramelRemarkFoundBox(answerToo, rec, doc = document) {
         return true
     const sig = rec?.caramelInputSig
     if (!sig) return false
-    const top = scoreInputs(doc).find(c => sameBox(c.el, sig))
+    // With no button beside the field to confirm it, the rules' own evidence
+    // on the field must (see inputOnlyBox), and one box only: two fields that
+    // carry the same name are not told apart, so neither is typed into.
+    const same = scoreInputs(doc).filter(c => sameBox(c.el, sig))
+    const sure = inputOnly ? same.filter(inputOnlyBox) : same
+    if (inputOnly && sure.length !== 1) return false
+    const top = sure[0]
     const button = inputOnly ? null : top && findButton(top.el)
     const found = {
         input: top?.el,
@@ -1775,6 +1781,25 @@ export function caramelRemarkFoundBox(answerToo, rec, doc = document) {
     const answer = answerArea(found.input, found.button || found.input)
     if (answer) mark(answer, 'answer')
     return !answerToo || !!answer
+}
+
+/* Is a field the rules scored one we may press Enter in with no button to
+ * confirm it? What confident() asks of the input alone (its own attribute or
+ * label names a coupon), and none of the exclusions scoreInputs records: a
+ * search box, a field that scored as a different kind (neg:), a gift-card
+ * field. */
+function inputOnlyBox(c) {
+    const r = c.reasons
+    return (
+        r.some(x => x.startsWith('attr:') || x.startsWith('label:')) &&
+        !r.some(
+            x =>
+                x === 'in-search' ||
+                x === 'gift-only' ||
+                x.startsWith('neg:') ||
+                (x.startsWith('weak:') && x.includes('gift')),
+        )
+    )
 }
 
 // Where the store answers: the smallest ancestor holding both the box and its

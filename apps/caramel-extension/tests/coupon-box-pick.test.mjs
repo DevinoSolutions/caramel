@@ -70,7 +70,10 @@ vi.mock('../caramel-base.js', async importOriginal => {
             return actual.currentBrowser
         },
         caramelRecordSaving: () => {},
-        sleep: async () => {},
+        // A real macrotask turn, not an instant no-op: the real apply flow
+        // (the "real apply flow" tests) polls with sleep, and a no-op sleep
+        // makes that poll a microtask spin that starves the next test.
+        sleep: () => new Promise(resolve => setTimeout(resolve, 0)),
     }
 })
 
@@ -529,6 +532,62 @@ describe('a box the server says has no apply button (it applies on Enter)', () =
         expect(document.querySelector(rec.couponSubmit)?.id).toBe('y')
     })
 
+    // After a redraw the box is found again by ONE name only (its name, else
+    // its id, else its aria-label, placeholder or label text: inputSig), so the
+    // question is what else on the cart can carry that same name.
+    describe('after a redraw the box is found again only as itself', () => {
+        const promo = id =>
+            '<div class="f"><label for="' +
+            id +
+            '">Discount Code (Optional)</label>' +
+            '<input id="' +
+            id +
+            '" name="discount_code" type="text"></div>'
+        const decoys =
+            '<form role="search" action="/search"><input id="s" type="search" name="discount_code"></form>' +
+            '<input id="m" type="email" name="discount_code">' +
+            '<div><label for="g">Gift card</label>' +
+            '<input id="g" name="discount_code" type="text"></div>'
+        const pickAndRedraw = async html => {
+            document.body.innerHTML = promo('dc') + TOTAL
+            answer = req => box(idx(req.outline, /textbox/), null)
+            const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+            expect(rec).not.toBeNull()
+            document.body.innerHTML = html + TOTAL
+            return rec
+        }
+        const markedId = () =>
+            document.querySelector('[data-caramel-found="input"]')?.id ?? null
+
+        it('the promo box and a search box, an email field and a gift-card field: the promo box', async () => {
+            const rec = await pickAndRedraw(decoys + promo('y'))
+
+            expect(caramelRemarkFoundBox(false, rec)).toBe(true)
+            expect(markedId()).toBe('y')
+        })
+
+        it('a decoy that sorts first never beats the promo box', async () => {
+            const rec = await pickAndRedraw(promo('y') + decoys)
+
+            expect(caramelRemarkFoundBox(false, rec)).toBe(true)
+            expect(markedId()).toBe('y')
+        })
+
+        it('the promo box gone and only the others left: none', async () => {
+            const rec = await pickAndRedraw(decoys)
+
+            expect(caramelRemarkFoundBox(false, rec)).toBe(false)
+            expect(markedId()).toBeNull()
+        })
+
+        it('two promo boxes that cannot be told apart: none', async () => {
+            const rec = await pickAndRedraw(promo('y') + promo('z'))
+
+            expect(caramelRemarkFoundBox(false, rec)).toBe(false)
+            expect(markedId()).toBeNull()
+        })
+    })
+
     it('a pick with no input is still rejected, whatever else it names', async () => {
         document.body.innerHTML = BARE_BOX + TOTAL
         answer = req => box(null, idx(req.outline, /button "Go"/))
@@ -575,6 +634,84 @@ describe('a box the server says has no apply button (it applies on Enter)', () =
         expect(appliedWith).toHaveLength(0)
         gaveCodesToCopy()
     })
+})
+
+// Through the real apply flow (the file mocks applyCoupon for the others).
+describe('an input-only pick, driven by the real apply flow', () => {
+    let realApplyCoupon
+    beforeAll(async () => {
+        ;({ applyCoupon: realApplyCoupon } =
+            await vi.importActual('../coupon-apply.js'))
+    })
+
+    // Every Enter, submit and click the page sees, in the capture phase.
+    const watch = () => {
+        const seen = []
+        for (const type of ['keydown', 'keypress', 'keyup'])
+            document.addEventListener(
+                type,
+                e => e.key === 'Enter' && seen.push(`${type}:${e.target.id}`),
+                true,
+            )
+        document.addEventListener('submit', () => seen.push('submit'), true)
+        document.addEventListener(
+            'click',
+            e => seen.push(`click:${e.target.id}`),
+            true,
+        )
+        return seen
+    }
+
+    it('{outcome:box, input:N, button:null} ends with the code typed and Enter pressed on that input', async () => {
+        document.body.innerHTML =
+            '<div class="f"><input id="x" name="field_7" type="text"></div>' +
+            TOTAL
+        answer = req => box(idx(req.outline, /textbox/), null)
+        const seen = watch()
+        let typed = null
+        document.getElementById('x').addEventListener('keydown', e => {
+            if (e.key !== 'Enter') return
+            typed = e.target.value
+            document.querySelector('.row').lastChild.textContent = '$90.00'
+        })
+
+        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+        expect(rec).not.toBeNull()
+        const res = await realApplyCoupon('SAVE20', rec)
+
+        expect(pickCalls).toHaveLength(1)
+        expect(seen).toEqual(['keydown:x'])
+        expect(typed).toBe('SAVE20')
+        expect(res.success).toBe(true)
+        expect(res.newTotal).toBe(90)
+    })
+
+    // The pick is not what keeps an order safe: the apply flow refuses to
+    // press Enter in a field whose form could place one (the same guard a
+    // config row gets), before the code is even typed.
+    const unsafeForms = {
+        'a form with a card number field':
+            '<form><input id="x" name="field_7" type="text">' +
+            '<input name="cardnumber" type="text"></form>',
+        'a form with a place-order control':
+            '<form><input id="x" name="field_7" type="text">' +
+            '<button id="po" type="submit">Place order</button></form>',
+    }
+    for (const [name, html] of Object.entries(unsafeForms))
+        it(`never presses Enter in ${name}`, async () => {
+            document.body.innerHTML = html + TOTAL
+            answer = req => box(idx(req.outline, /textbox/), null)
+            const seen = watch()
+
+            const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+            // The pick itself is accepted: it is the apply that refuses.
+            expect(rec).not.toBeNull()
+            const res = await realApplyCoupon('SAVE20', rec)
+
+            expect(seen).toEqual([])
+            expect(res.success).toBe(false)
+            expect(document.getElementById('x').value).toBe('')
+        })
 })
 
 describe('an apply button never leaves the page', () => {
