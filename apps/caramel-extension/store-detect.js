@@ -36,8 +36,10 @@ import {
 } from './coupon-apply.js'
 import {
     caramelCouponBoxDiscoveryOn,
+    caramelFinderMayAsk,
     caramelFinderReadTotal,
     caramelFinderSeesBox,
+    caramelFinderSeesKeptPick,
 } from './coupon-box-discovery.js'
 import { fetchCoupons } from './coupon-fetch.js'
 import { reportOutcome, startApplyingCoupons } from './coupon-runner.js'
@@ -482,7 +484,11 @@ export async function isCheckout() {
      * Still a high bar to appear: a cart-shaped URL, a readable cart with
      * something in it, and codes for the domain (tryInitialize). A store with
      * no codes, or a product page, is exactly as quiet as before. */
-    if (!rec) return (await _platformCartUsable()) || (await _finderSeesBox())
+    if (!rec)
+        return (
+            (await _platformCartUsable()) ||
+            (await _finderMayOffer(location.hostname))
+        )
     // VISIBLE, not merely present: themes ship hidden coupon markup on
     // non-checkout pages, and some configs point showInput at site-wide
     // controls — the prompt belongs only where the user can actually see a
@@ -520,7 +526,7 @@ export async function isCheckout() {
         })
         return true
     }
-    return (await _platformCartUsable()) || (await _finderSeesBox())
+    return (await _platformCartUsable()) || (await _finderMayOffer(rec.domain))
 }
 
 /* No config describes a promo box here, but a shopper could still see one.
@@ -529,12 +535,34 @@ export async function isCheckout() {
  * It is asked only on a cart-shaped URL, the same bar _platformCartUsable sets,
  * and only while the server's couponBoxDiscovery flag is on; tryInitialize then
  * still requires codes for the domain before the prompt appears. Detection
- * never clicks anything: opening a folded box waits for the shopper's tap. */
-async function _finderSeesBox() {
+ * never clicks anything: opening a folded box waits for the shopper's tap.
+ * A box the server picked earlier in this tab counts too, found again by name
+ * (caramelFinderSeesKeptPick): a cart that reloads to show each answer. */
+async function _finderSeesBox(domain) {
     if (!_caramelCartIntentSignal()) return false
     if (!(await caramelCouponBoxDiscoveryOn())) return false
     try {
-        return caramelFinderSeesBox()
+        return (
+            caramelFinderSeesBox() || (await caramelFinderSeesKeptPick(domain))
+        )
+    } catch (e) {
+        log('FINDER_FAILED', { error: String(e) })
+        return false
+    }
+}
+
+/* The prompt's half of the finder: a box the rules can see, or, while the
+ * couponBoxLlm flag is on, a cart the server could still find one on once the
+ * shopper taps (caramelFinderMayAsk). The reload chain (_caramelContinueRun)
+ * keeps asking _finderSeesBox alone: the server is asked once per store per
+ * tab session, so a page after the ask continues only on a box the rules see
+ * or the pick it kept. */
+async function _finderMayOffer(domain) {
+    if (await _finderSeesBox(domain)) return true
+    if (!_caramelCartIntentSignal()) return false
+    if (!(await caramelCouponBoxDiscoveryOn())) return false
+    try {
+        return await caramelFinderMayAsk(domain)
     } catch (e) {
         log('FINDER_FAILED', { error: String(e) })
         return false
@@ -625,10 +653,11 @@ export async function tryInitialize() {
  *     guaranteed no-op that still costs a reload.
  */
 async function _caramelContinueRun(rec, finder = false) {
-    // A finder run picked its box itself, and the reload threw that pick away.
-    // It goes on only where the finder sees a box on THIS page (the run below
-    // finds it again); a store with no config row runs on the stand-in record
-    // the first click ran on.
+    // A finder run picked its box itself, and the reload threw its marks away
+    // (a server pick is also kept by name: caramelFinderSeesKeptPick). It goes on
+    // only where the finder sees a box on THIS page (the run below finds it
+    // again); a store with no config row runs on the stand-in record the first
+    // click ran on.
     const runRec =
         rec ?? (finder ? caramelConfiglessRecord(location.hostname) : null)
     // Every refusal says which bound stopped the chain: on a form-POST cart the
@@ -640,7 +669,7 @@ async function _caramelContinueRun(rec, finder = false) {
     }
     if (!runRec) return stop('no record')
     if (finder) {
-        if (!(await _finderSeesBox())) return stop('no box')
+        if (!(await _finderSeesBox(runRec.domain))) return stop('no box')
     } else {
         const box = pickBestMatch(rec.couponInput)
         const toggle = rec.showInput ? pickBestMatch(rec.showInput) : null

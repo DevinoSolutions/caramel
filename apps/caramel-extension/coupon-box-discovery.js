@@ -30,7 +30,17 @@
 //   · only the page's own document. A box inside a shadow root or a frame is
 //     out of reach, because the apply flow finds what we picked through a
 //     document query (the data-caramel-found marker below).
-import { caramelSendMessage, log, sleep } from './caramel-base.js'
+//
+// When the rules see a total but no box, the server can be asked to pick one
+// from an outline of the page (caramelPickedRecord, behind its own flag,
+// couponBoxLlm). Its pick goes through the same record and the same apply
+// flow as a rule pick, so every check after this point still runs.
+import {
+    caramelSendMessage,
+    currentBrowser,
+    log,
+    sleep,
+} from './caramel-base.js'
 import {
     _isVisible,
     caramelFindMoney,
@@ -816,13 +826,14 @@ function scoreToggle(el, t) {
     return { s, reasons }
 }
 
+const TOGGLE_SEL =
+    'button, a, summary, [role="button"], [aria-expanded], label, span, div, p, h2, h3, h4, header, input[type="checkbox"]'
+
 // `input` is the hidden promo field, when there is one.
 function findToggle(doc, input) {
     let best = null
     // Headings too: an accordion's trigger is often its <h3>.
-    for (const el of doc.querySelectorAll(
-        'button, a, summary, [role="button"], [aria-expanded], label, span, div, p, h2, h3, h4, header, input[type="checkbox"]',
-    )) {
+    for (const el of doc.querySelectorAll(TOGGLE_SEL)) {
         // Leaf-ish only: a div wrapping the whole sidebar also "says" promo.
         if (el.children.length > 3) continue
         // Cheap first (no layout): innerText below forces one per element.
@@ -1304,6 +1315,56 @@ export function caramelFinderSeesBox(doc = document) {
     return false
 }
 
+/* The rules see no box, but the server could still find one once the shopper
+ * taps. Without this the server pick is unreachable: the prompt only appeared
+ * where the rules already saw a box, and a page where they did had no reason
+ * to ask. So, only while the couponBoxLlm flag is on, a cart page with a
+ * readable total is offered the prompt too.
+ *
+ * Detection still never asks the server or clicks anything: the pick runs
+ * after the tap (caramelPickedRecord), once per store per tab session, and a
+ * "no box" answer ends with the codes handed over to copy. A store already
+ * asked this session is not offered again on the strength of this rule. */
+//
+// Three things a cart URL and a total row do not prove, each refused here:
+// the order is already placed (a thank-you page under /checkout/ still shows
+// a "Total"), the cart is empty (a "$0.00" subtotal), and the total row is one
+// the shopper cannot see (a closed mini-cart drawer on the home page the
+// shopper reached from /cart).
+// Called from store-detect.js.
+export async function caramelFinderMayAsk(domain, doc = document) {
+    if (!(await caramelCouponBoxLlmOn())) return false
+    if (ORDER_PLACED_PATH_RE.test(doc.location?.pathname || '')) return false
+    if (pickAsked(domain || doc.location?.hostname)) return false
+    if (!shownPositiveTotal(doc)) return false
+    log('FINDER_MAY_ASK', {})
+    return true
+}
+
+/* A path a store shows AFTER the order is placed: WooCommerce
+ * /checkout/order-received/123/, Magento /checkout/onepage/success/, Shopify
+ * /checkouts/c/<token>/thank-you, and the plain /order-confirmation. The word
+ * must be a whole part of a path segment, so /products/success-kit is not one
+ * only by accident of a prefix. */
+const ORDER_PLACED_PATH_RE =
+    /(?:^|[/\-_])(?:order[-_]?received|order[-_]?(?:confirmation|confirmed|complete|completed)|thank[-_]?you|thanks|success|confirmation)(?:[/.]|$)/i
+
+/* Is there a total row the shopper can see, holding an amount above zero?
+ * findTotalRow falls back to a hidden row because the apply flow may measure
+ * one; whether to OFFER anything is decided only on what is in view. */
+function shownPositiveTotal(doc) {
+    for (const [label, not] of [
+        [TOTAL_LABEL, TOTAL_NOT],
+        [SUB_LABEL, SUB_NOT],
+    ]) {
+        const shown = scanTotalRows(doc, label, not).filter(h => h.visible)
+        if (!shown.length) continue
+        const row = shown[shown.length - 1].el
+        return caramelFindMoney(row.innerText || '').some(m => m.value > 0)
+    }
+    return false
+}
+
 /* A record the apply flow can run on, built from what the finder sees.
  *
  * Opens a folded promo box first when only its toggle is showing (refusing any
@@ -1353,15 +1414,21 @@ export async function caramelDiscoveredRecord(rec, doc = document) {
     }
     if (!found.inputVisible || !confident(found)) {
         log('FINDER_NO_BOX', { reasons: found.reasons })
-        return null
+        return caramelPickedRecord(rec, doc)
     }
     log('FINDER_PICKED', { reasons: found.reasons })
+    return finderRecord(rec, found, totalRow, opened)
+}
+
+// The record for a box the finder settled on: `found` holds a visible input
+// and its button, `opened` the toggle clicked to reveal them (or null).
+function finderRecord(rec, found, totalRow, opened) {
     const answer = answerArea(found.input, found.button)
     return {
         ...rec,
         couponInput: mark(found.input, 'input'),
         couponSubmit: mark(found.button, 'submit'),
-        priceContainer: mark(total, 'total'),
+        priceContainer: mark(totalRow.el, 'total'),
         // Which row kind the baseline came from; every later read uses it.
         caramelTotalKind: totalRow.kind,
         // What the row looked like, so a re-rendered summary is found again
@@ -1391,6 +1458,330 @@ export async function caramelDiscoveredRecord(rec, doc = document) {
         couponRemove: null,
         caramelFound: true,
     }
+}
+
+/* ------------------------------------------------------- the server's pick */
+// The rules saw a readable total but no box. With the couponBoxLlm flag on,
+// the server is asked once, from an outline of the page (coupon-box-outline.js:
+// element names only, digits and emails scrubbed, only allowlisted words, no
+// page text), which element is the box, its apply button, or the toggle that
+// reveals it.
+//
+// Its answer is a suggestion, checked here before anything is touched:
+//   · each pick must still be on the page; the input must be a field the apply
+//     flow can type into (a text or search <input>, enabled, writable);
+//   · a button or toggle must not be an order, pay, remove, sign-in or
+//     leave-the-cart control (the server refuses these too);
+//   · a toggle alone is clicked once, and then the RULES must find the box it
+//     revealed. Nothing else is ever clicked on the server's word.
+// What survives becomes the same record a rule pick does (finderRecord), so
+// the apply flow, the coupon-evidence check and the money rule all still run.
+// Any other answer, a refusal or a failure to ask leaves the page exactly as
+// the rules left it: no box, and the codes handed over to copy.
+//
+// At most one ask per store per tab session, whatever came back. A usable
+// pick is also kept, by name (keptPick), for the next page in the tab: a cart
+// that reloads to show the store's answer gets its box found again there.
+const PICK_KEY = 'caramel_box_pick:'
+// How long the page waits for the answer. The server gives the model 20s and
+// then answers no_pick itself; the background allows the whole ask (flag
+// read, token read, request) COUPON_BOX_PICK_DEADLINE_MS, 24s (background.js);
+// 5s more covers waking a stopped background worker, the message hops and
+// reading the answer (the background's clock starts only once it is awake),
+// so an answer sent inside that deadline arrives here. Raise one, raise the
+// ones after.
+export const PICK_WAIT_MS = 29000
+// The outline builder (coupon-box-outline.js) is not in the content-script
+// bundle: the build ships it as this file and it is loaded only by a page that
+// is about to ask.
+const OUTLINE_MODULE = 'assets/coupon-box-outline.js'
+// Labels the server refuses to click, mirrored for the button and the toggle.
+const NEVER_CLICK =
+    /check ?out|place (?:my |your )?order|\bpay\b|pay ?pal|pay now|buy now|purchase|\bremove\b|\bdelete\b|empty (?:cart|basket|bag)|sign ?in|sign ?up|log ?in|register|create (?:an )?account|subscribe|continue/i
+const _pickAsked = new Set()
+
+// The one spelling of a store in the asked-memory: the prompt gate reads it
+// with whatever domain it was handed, the pick writes it with the record's.
+const pickKey = domain =>
+    String(domain || '')
+        .trim()
+        .toLowerCase()
+
+function pickAsked(domain) {
+    domain = pickKey(domain)
+    if (_pickAsked.has(domain)) return true
+    try {
+        return sessionStorage.getItem(PICK_KEY + domain) !== null
+    } catch (err) {
+        // Storage blocked: this page's own memory is all there is.
+        log('FINDER_PICK_STORAGE', { error: String(err) })
+        return false
+    }
+}
+
+function rememberPick(domain, kept = '1') {
+    domain = pickKey(domain)
+    _pickAsked.add(domain)
+    try {
+        sessionStorage.setItem(PICK_KEY + domain, kept)
+    } catch (err) {
+        log('FINDER_PICK_STORAGE', { error: String(err) })
+    }
+}
+
+// The names a usable pick left for later pages in this tab, or null: the ask
+// found nothing usable, storage is blocked (pickAsked logs that), or this is
+// not the page the pick was made on. A form-POST cart comes back to its own
+// path; a checkout page with a "code" field of its own is not that page.
+function keptPick(domain, doc) {
+    try {
+        const k = JSON.parse(sessionStorage.getItem(PICK_KEY + pickKey(domain)))
+        return k?.i && k.p === doc.location?.pathname ? k : null
+    } catch {
+        return null
+    }
+}
+
+// What an element is and what it is called: its tag, then its stable name
+// (inputSig), or for a toggle ('t') its words. A kept input ('i') is named
+// only by its field name or id: a placeholder or label ("Enter code") is
+// worn by a gift-card field too. '' when nothing names it.
+function pickName(el, how) {
+    const n = el && (how === 't' ? toggleText(el) : inputSig(el))
+    return n && (how !== 'i' || /^[ni]:/.test(n)) ? el.tagName + ' ' + n : ''
+}
+
+// The kept pick on this page. Each name must fit exactly one element (a wrapper
+// says what the control inside it says, so only the innermost counts): a name
+// that also fits a gift-card field would put the codes there.
+function refindPick(doc, k) {
+    const find = (css, name, how) => {
+        if (!name) return null
+        const m = [...doc.querySelectorAll(css)].filter(
+            el => pickName(el, how) === name,
+        )
+        const inner = m.filter(e => !m.some(o => o !== e && e.contains(o)))
+        return inner.length === 1 ? inner[0] : null
+    }
+    return {
+        input: find('input', k.i, 'i'),
+        button: find(TOGGLE_SEL + ',input', k.b, 'b'),
+        toggle: find(TOGGLE_SEL, k.t, 't'),
+    }
+}
+
+// A toggle clicked on the server's word: one the shopper can see, never an
+// order, pay, remove or leave-the-cart control (nor a part of one: a <span>
+// inside a submit button submits its form), and never a radio, which cannot
+// be put back if the box does not appear.
+const okToggle = t =>
+    visible(t) &&
+    clickable(t) &&
+    !toggleRefused(t.closest('button') || t) &&
+    !navigatesAway(t) &&
+    checkboxOf(t)?.type !== 'radio'
+
+// An apply button never leaves the page: a link elsewhere is a way out of the
+// cart, whatever it says.
+const okButton = (b, input) => clickable(b) && b !== input && !navigatesAway(b)
+
+// The apply button for `input`: the one named, else the one the rules see
+// beside it. After a reload (a kept pick) either is used only when it is this
+// box's own: in its form, or in its small panel. A page that re-drew the box
+// beside a gift-card form must not lend it that form's button.
+function applyButtonFor(input, button, kept) {
+    const ok = b =>
+        b &&
+        !navigatesAway(b) &&
+        (!kept || (b.form ? b.form === input.form : ownsBox(b, input)))
+    return [button, findButton(input)?.el].find(ok) || null
+}
+
+/* The rules see no box, but this tab's kept pick names one here: the cart
+ * reloaded to show the store's answer to the last code. Clicks nothing, and
+ * says yes only where the run could go on: a box with its button, or the
+ * toggle that opened it. */
+// Called from store-detect.js.
+export async function caramelFinderSeesKeptPick(domain, doc = document) {
+    const k =
+        (await caramelCouponBoxLlmOn()) &&
+        keptPick(domain || doc.location?.hostname, doc)
+    if (!k || !shownPositiveTotal(doc)) return false
+    const { input, button, toggle } = refindPick(doc, k)
+    const sees =
+        (typeableInput(input) &&
+            visible(input) &&
+            !!applyButtonFor(input, okButton(button, input) && button, k)) ||
+        okToggle(toggle)
+    if (sees) log('FINDER_SEES_KEPT', {})
+    return sees
+}
+
+// The element the server named by index, if it is still on the page.
+const pickedEl = (elements, n) =>
+    Number.isInteger(n) && elements[n]?.isConnected ? elements[n] : null
+
+function typeableInput(el) {
+    return (
+        !!el &&
+        el.tagName === 'INPUT' &&
+        (el.type === 'text' || el.type === 'search') &&
+        !el.disabled &&
+        !el.readOnly
+    )
+}
+
+function clickable(el) {
+    if (!el || /^(TEXTAREA|SELECT)$/.test(el.tagName)) return false
+    // Of the <input>s only a button, or a checkbox that folds the box, is a
+    // control; a text field never is.
+    if (
+        el.tagName === 'INPUT' &&
+        !/^(button|submit|image|checkbox)$/.test(el.type)
+    )
+        return false
+    const words = [textOf(el), ariaOf(el), el.value, el.title].join(' ')
+    return !caramelIsForbiddenControl(el) && !NEVER_CLICK.test(words)
+}
+
+// Ask the server once, from an outline of the page. null on any miss.
+async function askPick(domain, doc) {
+    let outline, elements
+    try {
+        const { caramelPageOutline } = await import(
+            /* @vite-ignore */ currentBrowser.runtime.getURL(OUTLINE_MODULE)
+        )
+        ;({ outline, elements } = caramelPageOutline(doc.body))
+    } catch (err) {
+        // The builder did not load or failed: a miss like any other.
+        log('FINDER_PICK_MISS', {
+            outline: String(err?.message || err),
+        })
+        return null
+    }
+    let answer
+    try {
+        answer = await caramelSendMessage(
+            { action: 'couponBoxPick', domain, outline },
+            PICK_WAIT_MS,
+        )
+    } catch (err) {
+        log('FINDER_PICK_MISS', { error: String(err?.message || err) })
+        return null
+    }
+    if (answer?.outcome !== 'box') {
+        log('FINDER_PICK_MISS', {
+            outcome: answer?.outcome || null,
+            reason: answer?.reason || answer?.error || null,
+        })
+        return null
+    }
+    return {
+        answer,
+        input: pickedEl(elements, answer.input),
+        button: pickedEl(elements, answer.button),
+        toggle: pickedEl(elements, answer.toggle),
+    }
+}
+
+// Called from caramelDiscoveredRecord, after the rules found no box.
+async function caramelPickedRecord(rec, doc) {
+    if (!(await caramelCouponBoxLlmOn())) return null
+    const domain = pickKey(rec.domain || doc.location?.hostname)
+    if (!domain) return null
+    const kept = keptPick(domain, doc)
+    let picked, answer
+    if (kept) picked = refindPick(doc, kept)
+    else {
+        if (pickAsked(domain)) return null
+        rememberPick(domain)
+        picked = await askPick(domain, doc)
+        if (!picked) return null
+        answer = picked.answer
+    }
+    // The cart may have re-rendered while the server answered: the baseline is
+    // the total as it is now, and with no readable total nothing can be
+    // measured.
+    const total = findTotalRow(doc)
+    if (!total?.el || !readableTotal(total.el)) {
+        log('FINDER_NO_TOTAL', { after: 'pick' })
+        return null
+    }
+
+    let { input, button, toggle } = picked
+    if (!typeableInput(input)) input = null
+    if (!okButton(button, input)) button = null
+    if (!okToggle(toggle)) toggle = null
+    const buttonFor = el => applyButtonFor(el, button, kept)
+
+    let found = null
+    let opened = null
+    if (input && visible(input)) {
+        found = { input, button: buttonFor(input) }
+    } else if (toggle) {
+        const check = checkboxOf(toggle)
+        const wasChecked = check?.checked
+        toggle.click()
+        for (let waited = 0; waited < 2500 && !found; waited += 250) {
+            await sleep(250)
+            // The server's own input once it shows, else whatever box the
+            // rules can now see.
+            if (input && visible(input) && typeableInput(input))
+                found = { input, button: buttonFor(input) }
+            else {
+                const rules = caramelDiscoverCouponBox(doc)
+                // Same guard as buttonFor: a button that leaves the page is
+                // never the apply button on the server-pick path.
+                if (rules.inputVisible && confident(rules))
+                    found = {
+                        ...rules,
+                        button:
+                            rules.button && !navigatesAway(rules.button)
+                                ? rules.button
+                                : null,
+                    }
+            }
+        }
+        // A checkbox that opened no usable box goes back the way the shopper
+        // left it, as for a rule pick.
+        if (!found?.button && check && check.checked !== wasChecked) {
+            log('FINDER_TOGGLE_RESTORED', {})
+            toggle.click()
+        }
+        opened = toggle
+    }
+    if (!found?.input || !found.button) {
+        log('FINDER_PICK_UNUSABLE', {
+            input: !!input,
+            button: !!button,
+            toggle: !!toggle,
+        })
+        return null
+    }
+    log('FINDER_PICK_USED', {
+        confidence: answer?.confidence ?? null,
+        toggle: !!opened,
+        kept: !!kept,
+        reasons: found.reasons || null,
+    })
+    // Kept only when each name finds exactly this element again, here: a name
+    // this page already shares with another field would not find the box
+    // after the reload either.
+    const k = {
+        p: doc.location?.pathname,
+        i: pickName(found.input, 'i'),
+        b: pickName(found.button, 'b'),
+        t: pickName(opened, 't'),
+    }
+    const again = refindPick(doc, k)
+    if (
+        !kept &&
+        again.input === found.input &&
+        again.button === (k.b ? found.button : null) &&
+        again.toggle === (k.t ? opened : null)
+    )
+        rememberPick(domain, JSON.stringify(k))
+    return finderRecord(rec, found, total, opened)
 }
 
 // What a box IS, by its most stable name: the field name the server reads,
@@ -1571,7 +1962,23 @@ export function caramelCouponBoxDiscoveryOn() {
     return _discoveryOn
 }
 
-// Test seam: forget the per-page answer.
+/* May the finder ask the server to pick a box the rules missed? Read the same
+ * way, from the couponBoxLlm flag: any failure to ask is off. */
+let _llmOn = null
+function caramelCouponBoxLlmOn() {
+    if (!_llmOn)
+        _llmOn = caramelSendMessage({ action: 'couponBoxLlmEnabled' })
+            .then(resp => resp?.enabled === true)
+            .catch(err => {
+                log('FINDER_PICK_FLAG', { error: String(err?.message || err) })
+                return false
+            })
+    return _llmOn
+}
+
+// Test seam: forget the per-page answers.
 export function _caramelResetDiscoveryFlag() {
     _discoveryOn = null
+    _llmOn = null
+    _pickAsked.clear()
 }
