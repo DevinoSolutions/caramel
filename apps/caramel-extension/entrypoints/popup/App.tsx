@@ -1,10 +1,6 @@
 import { Spinner } from 'caramel-ui'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import {
-    resolvePopupState,
-    resumeSafariOauthIfPending,
-    setAfterLoginRerender,
-} from '../../popup-core.js'
+import { resolvePopupState, setAfterLoginRerender } from '../../popup-core.js'
 import { ToastProvider } from './components/toast'
 import type { AppApi, ResolvedState } from './types'
 import { CouponsView } from './views/CouponsView'
@@ -72,14 +68,9 @@ export function App() {
         })
         void Promise.all([first, minDisplay]).then(() => setBooted(true))
 
-        // Safari finishes OAuth in a TAB, which closes this popup mid-flow —
-        // the token is waiting server-side under the stored nonce when the user
-        // reopens us. Deliberately NOT awaited into the boot gate: it can poll
-        // for up to 30s, and the popup must paint immediately. Resolves to
-        // 'idle' in every other runtime, so no other boot path changes.
-        void resumeSafariOauthIfPending().then(result => {
-            if (result.status === 'ok') refreshRef.current()
-        })
+        // Safari and Firefox finish OAuth on the website, which hands the
+        // session back through the content-script relay (it lands in storage
+        // directly); there is no popup-side result to resume at boot.
     }, [])
 
     const api: AppApi = {
