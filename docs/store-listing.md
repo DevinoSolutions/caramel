@@ -1,6 +1,6 @@
 # Chrome Web Store: Privacy practices tab (dashboard-only fields)
 
-Covers extension 1.4.12 plus the coupon-box pick client (#342, main 1650087), as of 2026-10-14
+Covers extension 1.4.13 (includes the coupon-box pick client, #342), as of 2026-10-14
 
 `apps/caramel-extension/scripts/store-listing.mjs` holds the listing text (name, summary, detailed description). This file holds the privacy tab, which exists only on the Chrome Web Store dashboard. When the extension's data flows change, this file, the dashboard and `apps/caramel-app/src/components/PrivacyPolicy.tsx` change together.
 
