@@ -826,13 +826,14 @@ function scoreToggle(el, t) {
     return { s, reasons }
 }
 
+const TOGGLE_SEL =
+    'button, a, summary, [role="button"], [aria-expanded], label, span, div, p, h2, h3, h4, header, input[type="checkbox"]'
+
 // `input` is the hidden promo field, when there is one.
 function findToggle(doc, input) {
     let best = null
     // Headings too: an accordion's trigger is often its <h3>.
-    for (const el of doc.querySelectorAll(
-        'button, a, summary, [role="button"], [aria-expanded], label, span, div, p, h2, h3, h4, header, input[type="checkbox"]',
-    )) {
+    for (const el of doc.querySelectorAll(TOGGLE_SEL)) {
         // Leaf-ish only: a div wrapping the whole sidebar also "says" promo.
         if (el.children.length > 3) continue
         // Cheap first (no layout): innerText below forces one per element.
@@ -1478,7 +1479,9 @@ function finderRecord(rec, found, totalRow, opened) {
 // Any other answer, a refusal or a failure to ask leaves the page exactly as
 // the rules left it: no box, and the codes handed over to copy.
 //
-// At most one ask per store per tab session, whatever came back.
+// At most one ask per store per tab session, whatever came back. A usable
+// pick is also kept, by name (keptPick), for the next page in the tab: a cart
+// that reloads to show the store's answer gets its box found again there.
 const PICK_KEY = 'caramel_box_pick:'
 // How long the page waits for the answer. The server gives the model 20s and
 // then answers no_pick itself; the background allows the whole ask (flag
@@ -1516,14 +1519,102 @@ function pickAsked(domain) {
     }
 }
 
-function rememberPick(domain) {
+function rememberPick(domain, kept = '1') {
     domain = pickKey(domain)
     _pickAsked.add(domain)
     try {
-        sessionStorage.setItem(PICK_KEY + domain, '1')
+        sessionStorage.setItem(PICK_KEY + domain, kept)
     } catch (err) {
         log('FINDER_PICK_STORAGE', { error: String(err) })
     }
+}
+
+// The names a usable pick left for later pages in this tab, or null: the ask
+// found nothing usable, storage is blocked (pickAsked logs that), or this is
+// not the page the pick was made on. A form-POST cart comes back to its own
+// path; a checkout page with a "code" field of its own is not that page.
+function keptPick(domain, doc) {
+    try {
+        const k = JSON.parse(sessionStorage.getItem(PICK_KEY + pickKey(domain)))
+        return k?.i && k.p === doc.location?.pathname ? k : null
+    } catch {
+        return null
+    }
+}
+
+// What an element is and what it is called: its tag, then its stable name
+// (inputSig), or for a toggle ('t') its words. A kept input ('i') is named
+// only by its field name or id: a placeholder or label ("Enter code") is
+// worn by a gift-card field too. '' when nothing names it.
+function pickName(el, how) {
+    const n = el && (how === 't' ? toggleText(el) : inputSig(el))
+    return n && (how !== 'i' || /^[ni]:/.test(n)) ? el.tagName + ' ' + n : ''
+}
+
+// The kept pick on this page. Each name must fit exactly one element (a wrapper
+// says what the control inside it says, so only the innermost counts): a name
+// that also fits a gift-card field would put the codes there.
+function refindPick(doc, k) {
+    const find = (css, name, how) => {
+        if (!name) return null
+        const m = [...doc.querySelectorAll(css)].filter(
+            el => pickName(el, how) === name,
+        )
+        const inner = m.filter(e => !m.some(o => o !== e && e.contains(o)))
+        return inner.length === 1 ? inner[0] : null
+    }
+    return {
+        input: find('input', k.i, 'i'),
+        button: find(TOGGLE_SEL + ',input', k.b, 'b'),
+        toggle: find(TOGGLE_SEL, k.t, 't'),
+    }
+}
+
+// A toggle clicked on the server's word: one the shopper can see, never an
+// order, pay, remove or leave-the-cart control (nor a part of one: a <span>
+// inside a submit button submits its form), and never a radio, which cannot
+// be put back if the box does not appear.
+const okToggle = t =>
+    visible(t) &&
+    clickable(t) &&
+    !toggleRefused(t.closest('button') || t) &&
+    !navigatesAway(t) &&
+    checkboxOf(t)?.type !== 'radio'
+
+// An apply button never leaves the page: a link elsewhere is a way out of the
+// cart, whatever it says.
+const okButton = (b, input) => clickable(b) && b !== input && !navigatesAway(b)
+
+// The apply button for `input`: the one named, else the one the rules see
+// beside it. After a reload (a kept pick) either is used only when it is this
+// box's own: in its form, or in its small panel. A page that re-drew the box
+// beside a gift-card form must not lend it that form's button.
+function applyButtonFor(input, button, kept) {
+    const ok = b =>
+        b &&
+        !navigatesAway(b) &&
+        (!kept || (b.form ? b.form === input.form : ownsBox(b, input)))
+    return [button, findButton(input)?.el].find(ok) || null
+}
+
+/* The rules see no box, but this tab's kept pick names one here: the cart
+ * reloaded to show the store's answer to the last code. Clicks nothing, and
+ * says yes only where the run could go on: a box with its button, or the
+ * toggle that opened it. */
+// Called from store-detect.js.
+export async function caramelFinderSeesKeptPick(domain, doc = document) {
+    const k =
+        (await caramelCouponBoxLlmOn()) &&
+        keptPick(domain || doc.location?.hostname, doc)
+    if (!k || !shownPositiveTotal(doc)) return false
+    const { input, button, toggle } = refindPick(doc, k)
+    const sees =
+        (typeableInput(input) &&
+            visible(input) &&
+            !!applyButtonFor(input, okButton(button, input) && button, k)) ||
+        okToggle(toggle)
+    if (sees) log('FINDER_SEES_KEPT', {})
+    return sees
 }
 
 // The element the server named by index, if it is still on the page.
@@ -1553,12 +1644,8 @@ function clickable(el) {
     return !caramelIsForbiddenControl(el) && !NEVER_CLICK.test(words)
 }
 
-// Called from caramelDiscoveredRecord, after the rules found no box.
-async function caramelPickedRecord(rec, doc) {
-    if (!(await caramelCouponBoxLlmOn())) return null
-    const domain = pickKey(rec.domain || doc.location?.hostname)
-    if (!domain || pickAsked(domain)) return null
-    rememberPick(domain)
+// Ask the server once, from an outline of the page. null on any miss.
+async function askPick(domain, doc) {
     let outline, elements
     try {
         const { caramelPageOutline } = await import(
@@ -1589,6 +1676,29 @@ async function caramelPickedRecord(rec, doc) {
         })
         return null
     }
+    return {
+        answer,
+        input: pickedEl(elements, answer.input),
+        button: pickedEl(elements, answer.button),
+        toggle: pickedEl(elements, answer.toggle),
+    }
+}
+
+// Called from caramelDiscoveredRecord, after the rules found no box.
+async function caramelPickedRecord(rec, doc) {
+    if (!(await caramelCouponBoxLlmOn())) return null
+    const domain = pickKey(rec.domain || doc.location?.hostname)
+    if (!domain) return null
+    const kept = keptPick(domain, doc)
+    let picked, answer
+    if (kept) picked = refindPick(doc, kept)
+    else {
+        if (pickAsked(domain)) return null
+        rememberPick(domain)
+        picked = await askPick(domain, doc)
+        if (!picked) return null
+        answer = picked.answer
+    }
     // The cart may have re-rendered while the server answered: the baseline is
     // the total as it is now, and with no readable total nothing can be
     // measured.
@@ -1598,30 +1708,11 @@ async function caramelPickedRecord(rec, doc) {
         return null
     }
 
-    let input = pickedEl(elements, answer.input)
+    let { input, button, toggle } = picked
     if (!typeableInput(input)) input = null
-    let button = pickedEl(elements, answer.button)
-    // An apply button never leaves the page: a link elsewhere is a way out of
-    // the cart, whatever it says.
-    if (!clickable(button) || button === input || navigatesAway(button))
-        button = null
-    let toggle = pickedEl(elements, answer.toggle)
-    if (
-        toggle &&
-        (!clickable(toggle) ||
-            toggleRefused(toggle) ||
-            navigatesAway(toggle) ||
-            // A radio cannot be put back if the box does not appear.
-            checkboxOf(toggle)?.type === 'radio')
-    )
-        toggle = null
-    // The server's button, else the one the rules see beside the input; a
-    // link that leaves the page is never it either way.
-    const buttonFor = el => {
-        if (button) return button
-        const b = findButton(el)?.el
-        return b && !navigatesAway(b) ? b : null
-    }
+    if (!okButton(button, input)) button = null
+    if (!okToggle(toggle)) toggle = null
+    const buttonFor = el => applyButtonFor(el, button, kept)
 
     let found = null
     let opened = null
@@ -1668,10 +1759,28 @@ async function caramelPickedRecord(rec, doc) {
         return null
     }
     log('FINDER_PICK_USED', {
-        confidence: answer.confidence ?? null,
+        confidence: answer?.confidence ?? null,
         toggle: !!opened,
+        kept: !!kept,
         reasons: found.reasons || null,
     })
+    // Kept only when each name finds exactly this element again, here: a name
+    // this page already shares with another field would not find the box
+    // after the reload either.
+    const k = {
+        p: doc.location?.pathname,
+        i: pickName(found.input, 'i'),
+        b: pickName(found.button, 'b'),
+        t: pickName(opened, 't'),
+    }
+    const again = refindPick(doc, k)
+    if (
+        !kept &&
+        again.input === found.input &&
+        again.button === (k.b ? found.button : null) &&
+        again.toggle === (k.t ? opened : null)
+    )
+        rememberPick(domain, JSON.stringify(k))
     return finderRecord(rec, found, total, opened)
 }
 
