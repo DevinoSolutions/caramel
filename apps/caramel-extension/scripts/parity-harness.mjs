@@ -220,6 +220,27 @@ for (const [browser, { outDir }] of Object.entries(BUILDS)) {
     for (const war of manifest.web_accessible_resources ?? [])
         refs.push(...(war.resources ?? []))
 
+    // The coupon-box outline builder is emitted by wxt.config.ts's
+    // build:publicAssets hook and loaded at runtime with
+    // import(runtime.getURL('assets/coupon-box-outline.js')) — no manifest
+    // entry names it (assets/* is a glob, satisfied by any asset), so a hook
+    // that stopped emitting it would pass every reference check above and only
+    // fail on a shopper's page, as a quiet miss. Pin the file itself, per
+    // browser: present, non-empty, and still the module the finder imports.
+    const OUTLINE_ASSET = 'assets/coupon-box-outline.js'
+    const outlineShips = files.includes(OUTLINE_ASSET)
+    check(
+        outlineShips,
+        `${browser}: ${OUTLINE_ASSET} is in the build (emitted by the build:publicAssets hook)`,
+    )
+    if (outlineShips) {
+        const outline = readFileSync(join(outDir, OUTLINE_ASSET), 'utf8')
+        check(
+            outline.length > 0 && /\bcaramelPageOutline\b/.test(outline),
+            `${browser}: ${OUTLINE_ASSET} is non-empty and still defines caramelPageOutline`,
+        )
+    }
+
     const allowedMissing = new Set(
         EXPECTED.missingReferences
             .filter(e => e.browser === browser)
