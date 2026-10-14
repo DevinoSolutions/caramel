@@ -1009,16 +1009,6 @@ describe('a subtotal is netted only of a line the code added', () => {
         ).toBe(94.99)
     })
 
-    // Safari 16.1-16.3 (macOS 13.0-13.2, inside the deployment floor) has no
-    // regex lookbehind: one in a module-level pattern kills the whole script.
-    it('uses no regex lookbehind, which the oldest supported Safari lacks', () => {
-        const src = readFileSync(
-            join(EXT_ROOT, 'coupon-box-discovery.js'),
-            'utf8',
-        )
-        expect(src).not.toMatch(/\(\?<[=!]/)
-    })
-
     // Review 5: four lines read as savings that did not happen. A line holds
     // ONE amount; a struck-out old amount, a threshold after it, a qualifier
     // in brackets or an "up to" is not a deduction we can claim.

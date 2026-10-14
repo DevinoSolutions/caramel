@@ -306,10 +306,10 @@ const _CARAMEL_CONTROLS = 'button, input, select, textarea, a, [role="button"]'
 // ist abgelaufen"). A config's box keeps its own errorIndicator and the
 // narrower GENERIC_ERROR_TEXT_RE. These words decide only when the wait for an
 // answer ends and which sentence is quoted: a finder verdict is money only.
-const _CARAMEL_FINDER_NO_RE = new RegExp(
+export const _CARAMEL_FINDER_NO_RE = new RegExp(
     GENERIC_ERROR_TEXT_RE.source +
         '|' +
-        String.raw`(gib|geben sie) einen g[üu]ltigen (rabattcode|gutschein)|(saisissez|entrez|veuillez saisir) un code (de r[ée]duction |promo )?valide|(introduce|ingresa|introduzca|ingrese) un c[oó]digo (de descuento |promocional )?v[aá]lido|inserisci un codice (sconto |promozionale )?valido|voer een geldige (kortingscode|actiecode)|(insira|introduza|digite) um c[oó]digo (de desconto )?v[aá]lido|ange en giltig rabattkod|(angiv|indtast|oppgi|skriv inn) en gyldig rabatt?kode|wprowad[źz] prawid[łl]owy kod|(gutschein(code)?|rabattcode|aktionscode|promocode)\b[^.!]{0,80}\b(nicht (eingelöst|gültig|anwendbar|einlösbar)|ungültig|abgelaufen)|(code promo(tionnel)?|code de réduction|bon de réduction|coupon)\b[^.!]{0,60}\b(invalide|n.est pas valide|n.est plus valide|expiré|non valide)|(c[oó]digo (promocional|de descuento)|cup[oó]n)\b[^.!]{0,60}\b(no es v[aá]lido|no v[aá]lido|inv[aá]lido|caducado|ha expirado)|(kortingscode|actiecode|waardebon|cadeaubon)\b[^.!]{0,60}\b(ongeldig|niet geldig|verlopen)|(codice (sconto|promozionale|promo|coupon)|buono( sconto)?|coupon)\b[^.!]{0,80}\b(non (è|e'|e) valid[oa]|non valid[oa]|scadut[oa]|non applicabile|non esiste)|(c[oó]digo (promocional|de desconto)|cupom|cup[aã]o)\b[^.!]{0,60}\b(inv[aá]lido|n[aã]o (é )?v[aá]lido|expirado)|(kod (rabatowy|promocyjny)|kupon)\b[^.!]{0,60}\b(nieprawid[łl]owy|niewa[żz]ny|wygas[łl])|(rabattkod(en)?|kampanjkod(en)?|rabatkode(n)?|rabattkode(n)?)\b[^.!]{0,60}\b(ogiltig|inte giltig|ugyldig|er ikke gyldig|udl[øo]bet|utl[øo]pt)|not applied|wasn.t applied|isn.t applied|could not be applied|invalid|not valid|isn.t valid|is not a valid|not an? valid (discount |promo(tion(al)?)? |coupon |voucher |gift ?card |offer )?(code|coupon|voucher)|(code|coupon|discount|promo(tion)?|voucher|offer|gift ?card|reduction)\b[^.!]{0,60}\b(unable|couldn.t|could not|cannot|can not|can.t be)|\b(unable|couldn.t|could not|cannot|can not|can.t)\b[^.!]{0,60}\b(code|coupon|discount|promo|voucher|offer|gift ?card)|not an? (active|current) (offer|code|promo(tion)?|coupon|voucher)|not found|(code|coupon|promo|voucher)\b[^.!]{0,40}\bnot present\b|doesn.t exist|does not exist|not recogni[sz]ed|expired|enter a valid|not applicable|not eligible|(code|coupon|promo(tion)?|discount|voucher|offer)\b[^.!;,\u2013\u2014]{0,40}\b(is|was|are|were) (now )?ineligible|no longer (valid|active|available)|(code|coupon|promo|voucher)\b[^.!]{0,40}\b(incorrect|no longer|did(n.t| not) work)|incorrect (code|coupon|promo|voucher)|make sure (that )?(you have |you've |you )?(entered|typed) (the |a |your )?(correct|valid|right) (coupon |promo |discount |voucher )?code|(?<!\bno )minimum|does not apply|doesn.t apply|ung[üu]ltig|no es v[aá]lido|n.est pas valide|usage limit|reached its (usage )?limit|limit (has been |was )?reached|already (been )?(used|redeemed|applied to (an|another) order)|has been redeemed|one.time use`,
+        String.raw`(gib|geben sie) einen g[üu]ltigen (rabattcode|gutschein)|(saisissez|entrez|veuillez saisir) un code (de r[ée]duction |promo )?valide|(introduce|ingresa|introduzca|ingrese) un c[oó]digo (de descuento |promocional )?v[aá]lido|inserisci un codice (sconto |promozionale )?valido|voer een geldige (kortingscode|actiecode)|(insira|introduza|digite) um c[oó]digo (de desconto )?v[aá]lido|ange en giltig rabattkod|(angiv|indtast|oppgi|skriv inn) en gyldig rabatt?kode|wprowad[źz] prawid[łl]owy kod|(gutschein(code)?|rabattcode|aktionscode|promocode)\b[^.!]{0,80}\b(nicht (eingelöst|gültig|anwendbar|einlösbar)|ungültig|abgelaufen)|(code promo(tionnel)?|code de réduction|bon de réduction|coupon)\b[^.!]{0,60}\b(invalide|n.est pas valide|n.est plus valide|expiré|non valide)|(c[oó]digo (promocional|de descuento)|cup[oó]n)\b[^.!]{0,60}\b(no es v[aá]lido|no v[aá]lido|inv[aá]lido|caducado|ha expirado)|(kortingscode|actiecode|waardebon|cadeaubon)\b[^.!]{0,60}\b(ongeldig|niet geldig|verlopen)|(codice (sconto|promozionale|promo|coupon)|buono( sconto)?|coupon)\b[^.!]{0,80}\b(non (è|e'|e) valid[oa]|non valid[oa]|scadut[oa]|non applicabile|non esiste)|(c[oó]digo (promocional|de desconto)|cupom|cup[aã]o)\b[^.!]{0,60}\b(inv[aá]lido|n[aã]o (é )?v[aá]lido|expirado)|(kod (rabatowy|promocyjny)|kupon)\b[^.!]{0,60}\b(nieprawid[łl]owy|niewa[żz]ny|wygas[łl])|(rabattkod(en)?|kampanjkod(en)?|rabatkode(n)?|rabattkode(n)?)\b[^.!]{0,60}\b(ogiltig|inte giltig|ugyldig|er ikke gyldig|udl[øo]bet|utl[øo]pt)|not applied|wasn.t applied|isn.t applied|could not be applied|invalid|not valid|isn.t valid|is not a valid|not an? valid (discount |promo(tion(al)?)? |coupon |voucher |gift ?card |offer )?(code|coupon|voucher)|(code|coupon|discount|promo(tion)?|voucher|offer|gift ?card|reduction)\b[^.!]{0,60}\b(unable|couldn.t|could not|cannot|can not|can.t be)|\b(unable|couldn.t|could not|cannot|can not|can.t)\b[^.!]{0,60}\b(code|coupon|discount|promo|voucher|offer|gift ?card)|not an? (active|current) (offer|code|promo(tion)?|coupon|voucher)|not found|(code|coupon|promo|voucher)\b[^.!]{0,40}\bnot present\b|doesn.t exist|does not exist|not recogni[sz]ed|expired|enter a valid|not applicable|not eligible|(code|coupon|promo(tion)?|discount|voucher|offer)\b[^.!;,\u2013\u2014]{0,40}\b(is|was|are|were) (now )?ineligible|no longer (valid|active|available)|(code|coupon|promo|voucher)\b[^.!]{0,40}\b(incorrect|no longer|did(n.t| not) work)|incorrect (code|coupon|promo|voucher)|make sure (that )?(you have |you've |you )?(entered|typed) (the |a |your )?(correct|valid|right) (coupon |promo |discount |voucher )?code|does not apply|doesn.t apply|ung[üu]ltig|no es v[aá]lido|n.est pas valide|usage limit|reached its (usage )?limit|limit (has been |was )?reached|already (been )?(used|redeemed|applied to (an|another) order)|has been redeemed|one.time use`,
     'i',
 )
 // A form's own field error ("Enter a valid email address") is not the store's
@@ -317,12 +317,49 @@ const _CARAMEL_FINDER_NO_RE = new RegExp(
 const _CARAMEL_FIELD_RE =
     /\b(e-?mail|password|phone|zip|post ?code|postal|address|card number|cvv)\b/i
 const _CARAMEL_COUPON_WORD_RE =
-    /(?<!\b(zip|post(al)?|area|country|security|verification|sort|sms|access)\s?)\bcodes?\b|coupon|promo|discount|voucher|\boffers?\b|gift ?card/i
-function _caramelFinderSaysNo(text) {
+    /coupon|promo|discount|voucher|\boffers?\b|gift ?card/i
+// "code" is a coupon word unless a form field's name sits right before it ("zip
+// code", "security code"). Safari before 16.4 has no regex lookbehind, so the
+// "unless" is a check on the text before each "code" instead of a pattern.
+const _CARAMEL_CODE_WORD_RE = /\bcodes?\b/i
+const _CARAMEL_FIELD_NAME_BEFORE_RE =
+    /\b(zip|post(al)?|area|country|security|verification|sort|sms|access)\s?$/i
+// True when `text` holds a match of `wordRe` that does not directly follow
+// `blockerEndingRe` (a pattern anchored with `$` against the text before the
+// match). The scan resumes one character after each match start, so
+// overlapping occurrences are all weighed.
+function _caramelHasWordNotAfter(text, wordRe, blockerEndingRe) {
+    const scan = new RegExp(wordRe.source, 'gi')
+    for (let m = scan.exec(text); m; m = scan.exec(text)) {
+        if (!blockerEndingRe.test(text.slice(0, m.index))) return true
+        scan.lastIndex = m.index + 1
+    }
+    return false
+}
+// "minimum" is a refusal word ("a minimum spend applies") unless it is "no
+// minimum" ("no " starting at a word boundary, one space).
+const _CARAMEL_NO_BEFORE_RE = /\bno $/i
+function _caramelFinderNoPhrase(text) {
+    return (
+        _CARAMEL_FINDER_NO_RE.test(text) ||
+        _caramelHasWordNotAfter(text, /minimum/, _CARAMEL_NO_BEFORE_RE)
+    )
+}
+function _caramelNamesCoupon(text) {
+    return (
+        _CARAMEL_COUPON_WORD_RE.test(text) ||
+        _caramelHasWordNotAfter(
+            text,
+            _CARAMEL_CODE_WORD_RE,
+            _CARAMEL_FIELD_NAME_BEFORE_RE,
+        )
+    )
+}
+export function _caramelFinderSaysNo(text) {
     const t = text || ''
     return (
-        _CARAMEL_FINDER_NO_RE.test(t) &&
-        !(_CARAMEL_FIELD_RE.test(t) && !_CARAMEL_COUPON_WORD_RE.test(t))
+        _caramelFinderNoPhrase(t) &&
+        !(_CARAMEL_FIELD_RE.test(t) && !_caramelNamesCoupon(t))
     )
 }
 // The store saying it took the code: a sentence about a code, not on the page
@@ -333,20 +370,24 @@ const _CARAMEL_ACCEPTED_RE =
     /\b(applied|added|activated|accepted|redeemed|success(ful(ly)?)?)\b/i
 const _CARAMEL_NEGATION_RE =
     /\b(not|no|never|unable|cannot|invalid|(can|couldn|won|isn|wasn|doesn|didn|don|aren|hasn).?t)\b/i
-function _caramelSaysAccepted(text, before) {
+export function _caramelSaysAccepted(text, before) {
     const old = new Set(_caramelSentencesOf(before))
     return _caramelSentencesOf(text).some(
         s =>
             !old.has(s) &&
             _CARAMEL_ACCEPTED_RE.test(s) &&
-            _CARAMEL_COUPON_WORD_RE.test(s) &&
+            _caramelNamesCoupon(s) &&
             !_CARAMEL_NEGATION_RE.test(s) &&
             !_caramelFinderSaysNo(s),
     )
 }
-function _caramelSentencesOf(text) {
+export function _caramelSentencesOf(text) {
+    // A sentence ends at ./!/? plus the whitespace after it, or at a newline.
+    // The break goes in as a newline after the punctuation (no regex
+    // lookbehind: Safari before 16.4 lacks it), then one split on newlines.
     return (text || '')
-        .split(/(?<=[.!?])\s+|\n+/)
+        .replace(/([.!?])\s+/g, '$1\n')
+        .split(/\n+/)
         .map(s => s.trim().replace(/\s+/g, ' '))
         .filter(Boolean)
 }
@@ -375,11 +416,11 @@ function _caramelRejectionSentences(scope) {
             el.querySelector(_CARAMEL_CONTROLS) ? shownWords(el) : el.innerText,
         )
     // One read in the common case: nothing here says no.
-    if (!_CARAMEL_FINDER_NO_RE.test(scope.innerText || '')) return []
+    if (!_caramelFinderNoPhrase(scope.innerText || '')) return []
     const says = el =>
         !el.closest('script, style, noscript, template') &&
         _isVisible(el) &&
-        _CARAMEL_FINDER_NO_RE.test(el.innerText || '')
+        _caramelFinderNoPhrase(el.innerText || '')
     // The scope itself counts: a bare message element has no children.
     return [scope, ...scope.querySelectorAll('*')]
         .filter(el => says(el) && ![...el.children].some(says))
