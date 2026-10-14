@@ -85,13 +85,12 @@ const PrivacyPolicy = () => {
                                 your order number or order history, or passwords
                                 you type into a store.
                             </>,
-                            // TODO(owner): wording delegated 2026-10-13. The
-                            // feature this describes ships behind two server
-                            // flags that are OFF (couponBoxDiscovery, then
-                            // couponBoxLlm): re-check every sentence against
-                            // coupon-box-outline.js and
-                            // api/extension/coupon-box-pick/route.ts before the
-                            // flags go on.
+                            // This wording is final. Its claims are pinned by
+                            // tests/unit/privacy-policy-coverage.test.tsx;
+                            // anyone changing the coupon-box pick
+                            // (api/extension/coupon-box-pick, couponBoxPick.ts)
+                            // or coupon-box-outline.js must update both this
+                            // text and that test.
                             <>
                                 <strong>
                                     Finding the promo-code box on a cart page.
@@ -306,12 +305,12 @@ const PrivacyPolicy = () => {
                                 <strong>
                                     Devino&apos;s own AI model proxy
                                 </strong>
-                                , and the AI model provider it passes the
-                                request on to: the store&apos;s hostname and the
-                                trimmed cart-page outline described above, to
-                                work out which control is the promo-code box. It
-                                is sent without your name, email address or
-                                account.
+                                , which currently passes the request to
+                                NVIDIA&apos;s hosted model service (NIM): the
+                                store&apos;s hostname and the trimmed cart-page
+                                outline described above, to work out which
+                                control is the promo-code box. It is sent
+                                without your name, email address or account.
                             </>,
                             <>
                                 <strong>Google and Apple</strong>: only if you
@@ -367,6 +366,7 @@ const PrivacyPolicy = () => {
                         'Use it for advertising, or for creditworthiness or lending decisions.',
                         'Read or collect payment card details, your address, your order number or order history, or passwords you type into stores.',
                         'Send full page addresses or page contents of the sites you visit: for each page you load, the extension sends only its hostname (see above), and the cart summary only when described above.',
+                        'The only other page content the extension sends is the trimmed cart-page outline described under “Finding the promo-code box on a cart page”, and only as described there.',
                         'Run code downloaded from the internet: everything the extension runs ships inside the extension package.',
                     ]}
                 />
@@ -440,7 +440,7 @@ const PrivacyPolicy = () => {
             >
                 <div className="mb-6 inline-flex items-center gap-3 rounded-full bg-caramel/10 px-6 py-3 text-sm font-semibold text-caramel">
                     <FaShieldAlt className="h-4 w-4" />
-                    Effective Date: October 6, 2026
+                    Effective Date: October 14, 2026
                 </div>
                 <p className="mx-auto max-w-4xl text-lg leading-relaxed text-gray-600 dark:text-gray-300">
                     Welcome to{' '}

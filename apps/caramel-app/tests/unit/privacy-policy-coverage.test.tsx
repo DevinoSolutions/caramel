@@ -75,6 +75,9 @@ describe('privacy policy coverage', () => {
             'every word that is not on a fixed list',
             'never contains text you typed into fields',
             "Devino's own AI model proxy",
+            "which currently passes the request to NVIDIA's hosted model service (NIM)",
+            'The only other page content the extension sends is the trimmed cart-page outline described under “Finding the promo-code box on a cart page”, and only as described there.',
+            'Effective Date: October 14, 2026',
             'for that store and page shape',
             'Your IP address is used to rate-limit these requests.',
         ]) {
