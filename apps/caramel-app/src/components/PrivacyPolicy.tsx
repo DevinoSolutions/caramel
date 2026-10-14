@@ -85,6 +85,49 @@ const PrivacyPolicy = () => {
                                 your order number or order history, or passwords
                                 you type into a store.
                             </>,
+                            // TODO(owner): wording delegated 2026-10-13. The
+                            // feature this describes ships behind two server
+                            // flags that are OFF (couponBoxDiscovery, then
+                            // couponBoxLlm): re-check every sentence against
+                            // coupon-box-outline.js and
+                            // api/extension/coupon-box-pick/route.ts before the
+                            // flags go on.
+                            <>
+                                <strong>
+                                    Finding the promo-code box on a cart page.
+                                </strong>{' '}
+                                When a store&apos;s known rules do not locate
+                                its promo-code box, the extension looks for it
+                                on the page, on your device. Nothing new is sent
+                                to Caramel for that, except that the extension
+                                reads Caramel&apos;s feature switches from our
+                                server. If that also fails, and only after you
+                                tap to apply codes, the extension sends one
+                                request to our server (at most once per store in
+                                a browser tab). The request contains the
+                                store&apos;s hostname and a trimmed outline of
+                                the cart page&apos;s buttons, links, headings
+                                and form-control labels. Each name in the
+                                outline is cut to at most 100 characters, every
+                                digit is replaced with &quot;#&quot;,
+                                email-shaped text is replaced with a
+                                placeholder, and every word that is not on a
+                                fixed list of common interface and coupon words
+                                is dropped. The request never contains text you
+                                typed into fields, the page text outside that
+                                outline, or the page&apos;s address path or
+                                query. Its contents are the same whether or not
+                                you are signed in; the extension attaches its
+                                usual sign-in token as it does on other
+                                requests, but our server does not use it to
+                                identify you for this request. Our server asks
+                                an AI model which control on the page is the
+                                code box (see &quot;Who Do We Share It
+                                With?&quot; below), and records the outcome, the
+                                timings, the store&apos;s hostname and the
+                                model&apos;s name as an event in our self-hosted
+                                analytics, not tied to you or your account.
+                            </>,
                             <>
                                 <strong>Coupon results.</strong> Which codes
                                 worked or failed at a store, and the
@@ -190,6 +233,7 @@ const PrivacyPolicy = () => {
                             'Run your account: sign-in, favorite stores and, if you turn it on, your savings history.',
                             'Publish codes you choose to share so other shoppers can use them.',
                             'Keep Caramel secure and working: limit abuse, and find and fix errors.',
+                            'Find the promo-code box on a cart page when a store’s known rules cannot (an AI model reads the cart-page outline described above).',
                         ]}
                     />
                     <Para>
@@ -225,6 +269,7 @@ const PrivacyPolicy = () => {
                             'Account details, favorite stores, savings history and account-linked coupon results are kept until you delete them or ask us to delete your account.',
                             'Sign-in sessions expire after 7 days (website sessions are extended while you stay active); signing out ends the session and deletes its record immediately. Records of sessions that expire without signing out, including their IP address and browser type, are kept until you delete your account.',
                             'Cart page summaries are not stored in our database. They are processed to classify your cart, and the result is kept in temporary memory for up to 24 hours so the same cart is not processed twice.',
+                            'Cart-page outlines (see “Finding the promo-code box” above) are not stored in our database. The model’s answer, which control is the code box, is kept in temporary memory for up to 24 hours for that store and page shape so the same page is not processed twice, looked up by a one-way hash of the store and outline rather than by the outline itself. Your IP address is used to rate-limit these requests. The outcome event described above is kept in our self-hosted analytics.',
                             'Coupon results without an account are kept only as anonymous per-code totals (when a code last worked or failed, and the store’s last error message).',
                             'Shared codes stay published while they are valid; deleting your account removes the link between a shared code and you.',
                             'Server logs, which can include IP addresses and browser type, are kept for up to 90 days for security and troubleshooting.',
@@ -256,6 +301,17 @@ const PrivacyPolicy = () => {
                                 item names, to work out which codes fit your
                                 cart. It is sent without your name, email
                                 address or account.
+                            </>,
+                            <>
+                                <strong>
+                                    Devino&apos;s own AI model proxy
+                                </strong>
+                                , and the AI model provider it passes the
+                                request on to: the store&apos;s hostname and the
+                                trimmed cart-page outline described above, to
+                                work out which control is the promo-code box. It
+                                is sent without your name, email address or
+                                account.
                             </>,
                             <>
                                 <strong>Google and Apple</strong>: only if you
