@@ -133,13 +133,23 @@ export default defineConfig({
                 //   optional.financialAndPaymentInfo — savings sync uploads
                 //     per-win {store, code, amountCents} records, and is
                 //     double-gated: sign-in AND an off-by-default toggle.
-                // Deliberately ABSENT: technicalAndInteraction (timings and
-                // error buffers live in chrome.storage.local with no reader
-                // that transmits them — declaring it would disclose
-                // collection that doesn't happen), websiteActivity (we click
-                // checkout buttons, we never transmit interaction data),
-                // searchTerms (the key_words API param is '' at all call
-                // sites).
+                //   optional.technicalAndInteraction — 1.4.14: the opt-in
+                //     anonymous code-sharing funnel diagnostics
+                //     (code-share-funnel.js → POST /api/extension/telemetry):
+                //     which step of the offer was reached or why it stopped,
+                //     the store's domain, the extension version and browser.
+                //     Never a code, URL, account or cart. Off until the
+                //     shopper presses Allow in the popup (or switches it on in
+                //     Settings), which asks Firefox for exactly this grant
+                //     (permissions.request({ data_collection })), and nothing
+                //     is sent while it is not held. Before 1.4.14 this was
+                //     deliberately ABSENT because the timings and error
+                //     buffers in chrome.storage.local have no reader that
+                //     transmits them, and that is still true of them: only
+                //     the funnel steps are sent.
+                // Deliberately ABSENT: websiteActivity (we click checkout
+                // buttons, we never transmit interaction data), searchTerms
+                // (the key_words API param is '' at all call sites).
                 ...(browser === 'firefox'
                     ? {
                           data_collection_permissions: {
@@ -148,6 +158,7 @@ export default defineConfig({
                                   'authenticationInfo',
                                   'personallyIdentifyingInfo',
                                   'financialAndPaymentInfo',
+                                  'technicalAndInteraction',
                               ],
                           },
                       }

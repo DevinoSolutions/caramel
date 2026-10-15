@@ -36,12 +36,15 @@ const SHIPPED_TO_STRANGERS = [
     'store-detect.js',
     'coupon-apply.js',
     'code-capture.js',
+    'code-share-funnel.js',
     'code-sharing-consent.js',
     'coupon-fetch.js',
     'coupon-runner.js',
     'UI-helpers.js',
     'inject.js',
     'install-attribution.js',
+    'permissions-api.js',
+    'usage-diagnostics-consent.js',
     'background.js',
 ]
 // Not in any entrypoint's import graph, but shipped and run in the store's

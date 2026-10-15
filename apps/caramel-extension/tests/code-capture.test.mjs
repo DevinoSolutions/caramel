@@ -46,6 +46,9 @@ let valid
 let accepted
 let sent
 let attempts
+// Every funnel-diagnostics report the page addressed to the worker
+// (reportCodeShareFunnel). Kept apart from `attempts`: those are about codes.
+let funnel
 let workerGate // 'open' | 'signed-out' | 'disabled' — what the worker says first
 let syncData
 let changeListeners
@@ -128,6 +131,11 @@ function installChromeStub() {
             lastError: undefined,
             onMessage: { addListener: () => {} },
             sendMessage: (message, cb) => {
+                if (message.action === 'reportCodeShareFunnel') {
+                    funnel.push(message)
+                    cb({ sent: true })
+                    return
+                }
                 attempts.push(message)
                 cb(workerAnswer(message))
             },
@@ -249,6 +257,7 @@ beforeEach(async () => {
     sessionStorage.clear()
     sent = []
     attempts = []
+    funnel = []
     workerGate = 'open'
     syncData = { [CODE_SHARING_CONSENT_KEY]: accepted_() }
     vi.resetModules()
@@ -1164,5 +1173,189 @@ describe('caramelCaptureAccepted', () => {
                 'X1Y',
             ),
         ).toBe(true)
+    })
+})
+
+// Funnel diagnostics (code-share-funnel.js): every point where the offer can
+// stop is reported to the worker as one step. The worker (not under test here;
+// see background-code-share-funnel.test.mjs) decides whether anything leaves
+// the browser. What THIS pins: the right step at the right point, the store's
+// domain as the only location, and never the code.
+describe('funnel diagnostics: which steps the page reports', () => {
+    const steps = () => funnel.map(m => m.step)
+    const waitForStep = step =>
+        vi.waitFor(() => expect(steps()).toContain(step), LONG)
+
+    it('an accepted, consented code: armed -> observed -> accepted -> sent', async () => {
+        await armed()
+        storeAnswers(true)
+        shopperTypes('SAVE10')
+        shopperClicksApply()
+
+        await waitForStep('submit_sent')
+        expect(steps()).toEqual([
+            'capture_armed',
+            'apply_observed',
+            'store_accepted',
+            'submit_sent',
+        ])
+        expect(funnel.every(m => m.store === 'example.com')).toBe(true)
+    })
+
+    it('no message carries the code, a URL, or any key beyond action/step/reason/store', async () => {
+        await armed()
+        storeAnswers(true)
+        shopperTypes('SAVE10')
+        shopperClicksApply()
+        await waitForStep('submit_sent')
+
+        // As the runtime delivers it: JSON drops an undefined `reason`.
+        for (const message of funnel.map(m => JSON.parse(JSON.stringify(m)))) {
+            expect(Object.keys(message).sort()).toEqual(
+                message.reason === undefined
+                    ? ['action', 'step', 'store']
+                    : ['action', 'reason', 'step', 'store'],
+            )
+        }
+        expect(JSON.stringify(funnel)).not.toMatch(/SAVE10/i)
+        expect(JSON.stringify(funnel)).not.toContain(location.href)
+    })
+
+    it('a code the store rejects: store_not_accepted with a reason, nothing after', async () => {
+        await armed()
+        storeAnswers(false)
+        shopperTypes('SAVE10')
+        shopperClicksApply()
+
+        await waitForStep('store_not_accepted')
+        await settle(300)
+        expect(funnel.slice(1)).toEqual([
+            expect.objectContaining({ step: 'apply_observed' }),
+            expect.objectContaining({
+                step: 'store_not_accepted',
+                reason: 'not-committed',
+            }),
+        ])
+    })
+
+    it('the sharing card: shown, then accepted, then sent', async () => {
+        delete syncData[CODE_SHARING_CONSENT_KEY]
+        await armed()
+        storeAnswers(true)
+        shopperTypes('SAVE10')
+        shopperClicksApply()
+        await vi.waitFor(() => expect(shareCard()).not.toBeNull(), LONG)
+
+        cardButton('caramel-share-yes').click()
+        await waitForStep('submit_sent')
+        expect(steps()).toEqual([
+            'capture_armed',
+            'apply_observed',
+            'store_accepted',
+            'prompt_shown',
+            'prompt_accepted',
+            'submit_sent',
+        ])
+    })
+
+    it('"No thanks" is prompt_declined and is not ALSO reported as a skip', async () => {
+        delete syncData[CODE_SHARING_CONSENT_KEY]
+        await armed()
+        storeAnswers(true)
+        shopperTypes('SAVE10')
+        shopperClicksApply()
+        await vi.waitFor(() => expect(shareCard()).not.toBeNull(), LONG)
+
+        cardButton('caramel-share-no').click()
+        await waitForStep('prompt_declined')
+        await settle(300)
+        expect(steps()).not.toContain('submit_skipped')
+        expect(steps().at(-1)).toBe('prompt_declined')
+    })
+
+    it('closing the card is prompt_dismissed', async () => {
+        delete syncData[CODE_SHARING_CONSENT_KEY]
+        await armed()
+        storeAnswers(true)
+        shopperTypes('SAVE10')
+        shopperClicksApply()
+        await vi.waitFor(() => expect(shareCard()).not.toBeNull(), LONG)
+
+        cardButton('caramel-share-close').click()
+        await waitForStep('prompt_dismissed')
+        await settle(300)
+        expect(steps()).not.toContain('submit_skipped')
+    })
+
+    it.each([
+        ['signed-out', 'signed-out'],
+        ['disabled', 'flag-off'],
+        ['consent-rejected', 'consent-rejected'],
+    ])('worker says %s: submit_skipped / %s', async (gate, reason) => {
+        workerGate = gate
+        await armed()
+        storeAnswers(true)
+        shopperTypes('SAVE10')
+        shopperClicksApply()
+
+        await waitForStep('submit_skipped')
+        expect(funnel.at(-1)).toMatchObject({
+            step: 'submit_skipped',
+            reason,
+        })
+    })
+
+    it('an empty box on Apply is apply_ignored / bad-code-shape', async () => {
+        await armed()
+        shopperClicksApply()
+
+        await waitForStep('apply_ignored')
+        expect(funnel.at(-1)).toMatchObject({
+            step: 'apply_ignored',
+            reason: 'bad-code-shape',
+        })
+    })
+
+    it('a code the shopper did not type (pasted by a script) is apply_ignored / not-typed', async () => {
+        await armed()
+        promo().value = 'SAVE10'
+        shopperClicksApply()
+
+        await waitForStep('apply_ignored')
+        expect(funnel.at(-1)).toMatchObject({
+            step: 'apply_ignored',
+            reason: 'not-typed',
+        })
+    })
+
+    it('a gift-card box is apply_ignored / not-promo-field, and the card number is not in any message', async () => {
+        await armed()
+        promo().setAttribute('placeholder', 'Gift card code')
+        shopperTypes('SAVE10')
+        shopperClicksApply()
+
+        await waitForStep('apply_ignored')
+        expect(funnel.at(-1)).toMatchObject({
+            step: 'apply_ignored',
+            reason: 'not-promo-field',
+        })
+        expect(JSON.stringify(funnel)).not.toMatch(/SAVE10/i)
+    })
+
+    it('a failing report is logged, not lost, and does not stop the share', async () => {
+        const realSend = globalThis.chrome.runtime.sendMessage
+        globalThis.chrome.runtime.sendMessage = (message, cb) => {
+            if (message.action === 'reportCodeShareFunnel') {
+                cb({ error: 'telemetry HTTP 500' })
+                return
+            }
+            realSend(message, cb)
+        }
+        await armed()
+        storeAnswers(true)
+        shopperTypes('SAVE10')
+        shopperClicksApply()
+
+        await vi.waitFor(() => expect(sent).toHaveLength(1), LONG)
     })
 })

@@ -135,7 +135,13 @@ module.exports = [
         // 2026-10-13, raised 10.7 -> 11.3 kB: the coupon-box pick request (its
         // flag, its message route, and one deadline over the flag read, the
         // token read and the request). Measured 10.52 kB.
-        limit: '11.3 KB',
+        // 2026-10-15, raised 11.3 -> 13.4 kB: the opt-in code-sharing funnel
+        // diagnostics (1.4.14): reportCodeShareFunnel, the consent + telemetry
+        // id module (usage-diagnostics-consent.js), the payload allowlist
+        // (code-share-funnel.js) and the shared permissions wrapper
+        // (permissions-api.js) for the Firefox data-collection grant. Measured
+        // 12.24 kB.
+        limit: '13.4 KB',
         brotli: false,
     },
     {

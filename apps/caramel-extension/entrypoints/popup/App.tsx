@@ -6,6 +6,7 @@ import {
     setAfterLoginRerender,
 } from '../../popup-core.js'
 import { ToastProvider } from './components/toast'
+import { UsageDiagnosticsCard } from './components/UsageDiagnosticsCard'
 import type { AppApi, ResolvedState } from './types'
 import { CouponsView } from './views/CouponsView'
 import { LoadErrorView } from './views/LoadErrorView'
@@ -160,6 +161,16 @@ export function App() {
                 </header>
 
                 <main id="mainContent">
+                    {/* The one-time diagnostics ask: only over a resolved view
+                        (never over sign-in, settings or an error), and it is
+                        gone for good once answered. */}
+                    {booted &&
+                        overlay === null &&
+                        (resolved?.view === 'coupons' ||
+                            resolved?.view === 'unsupported' ||
+                            resolved?.view === 'profile') && (
+                            <UsageDiagnosticsCard />
+                        )}
                     <div id="auth-container">
                         {overlay === 'signin' ? (
                             <SignInView api={api} />

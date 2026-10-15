@@ -140,6 +140,30 @@ const PrivacyPolicy = () => {
                                 Caramel, and your savings-sync and
                                 checkout-sharing choices.
                             </>,
+                            <>
+                                <strong>
+                                    Anonymous usage diagnostics, only if you opt
+                                    in.
+                                </strong>{' '}
+                                If you press Allow on the extension&apos;s
+                                &quot;Help improve Caramel?&quot; card, or
+                                switch on &quot;Send anonymous usage
+                                diagnostics&quot; in its settings (it is off by
+                                default; Firefox also asks for its own
+                                permission), the extension reports which step of
+                                the code-sharing offer was reached on a
+                                supported store and, if it stopped, why (for
+                                example, you were signed out or the store did
+                                not accept the code), with that store&apos;s
+                                domain, the extension version and your browser.
+                                These events go to our self-hosted analytics
+                                under a random ID created when you opt in, not
+                                linked to your account or install ID, and
+                                deleted when you switch it off. They never
+                                include your codes, your browsing history, or
+                                anything that identifies you. You can change
+                                this anytime in the extension&apos;s settings.
+                            </>,
                         ]}
                     />
                     <Sub>If you create an account or sign in</Sub>

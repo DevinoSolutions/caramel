@@ -41,6 +41,11 @@
 //     capture needs a committed result AND either a real price drop or an applied
 //     row that names the typed code, and is refused when a fresh error appears.
 //
+// Funnel diagnostics (code-share-funnel.js): every point above where the offer
+// can stop reports one step through _report, which only asks the worker; the
+// worker sends nothing unless the shopper opted in to anonymous usage
+// diagnostics. A step carries the store's domain and an enum, never the code.
+//
 // Known limit (documented, not hidden): a classic form-POST cart answers with a
 // full page load, which destroys this content script mid-attempt, so there is
 // no verdict to read and nothing is captured. The runner's pending-submit
@@ -56,6 +61,7 @@ import {
     log,
     logError,
 } from './caramel-base.js'
+import { funnelReasonForSkipped } from './code-share-funnel.js'
 import {
     caramelAwaitCouponVerdict,
     caramelSnapshotCart,
@@ -116,6 +122,9 @@ const SHARED_MAX = 50
 const VERDICT_TIMEOUT_MS = 10000
 
 let _armed = false
+// The matched store config's domain, set when capture is armed: the only
+// location the funnel diagnostics ever carry.
+let _funnelStore = null
 // In-memory copy of the two page-side facts that gate capture. Both are UNKNOWN
 // until a read (or a change event) lands, and gestures are ignored until then:
 // fail closed. `_paused`: null = unknown, else boolean. `_consent`:
@@ -158,6 +167,32 @@ export function caramelCaptureAccepted(verdict, code) {
     return verdict.priceDropped === true || rowNamesCode
 }
 
+// Why the store's answer did not count as an acceptance, in the order
+// caramelCaptureAccepted tests it.
+function _captureRefusalReason(verdict) {
+    if (!verdict || verdict.success !== true || verdict.committed !== true)
+        return 'not-committed'
+    if (verdict.errorMsg && verdict.errorIsNew) return 'store-error'
+    return 'not-tied-to-code'
+}
+
+// Reports one funnel step to the worker, which drops it unless the shopper
+// opted in to diagnostics. Not awaited by the flow it describes (a slow report
+// must never hold a share), but its outcome is checked: a failure is logged,
+// never lost.
+function _report(step, reason) {
+    caramelSendMessage({
+        action: 'reportCodeShareFunnel',
+        step,
+        reason,
+        store: _funnelStore,
+    })
+        .then(resp => {
+            if (resp?.error) logError('codeShareFunnel', resp.error)
+        })
+        .catch(err => logError('codeShareFunnel', err))
+}
+
 // Exported for tests: resolves when the first settings read has landed.
 export function caramelCodeCaptureReady() {
     return _prefsReady
@@ -196,15 +231,27 @@ async function _submitWithConsent(code) {
         throw new Error(
             'code-capture: consent prompt not wired (initCodeCapture was not called)',
         )
+    _report('prompt_shown')
     const choice = await _askConsent({
         site: location.hostname,
         code,
     })
+    const choiceStep = CONSENT_CHOICE_STEPS[choice]
+    if (!choiceStep)
+        throw new Error(`code-capture: unknown consent card answer "${choice}"`)
+    _report(choiceStep)
     if (choice === 'dismissed') return { skipped: 'consent-dismissed' }
     _consent = await caramelSetCodeSharingConsent(choice)
     if (choice === 'declined') return { skipped: 'consent-declined' }
     // The card named THIS code ("Share this code…"), so it may go now.
     return answer()
+}
+
+// The consent card's answer -> its funnel step.
+const CONSENT_CHOICE_STEPS = {
+    accepted: 'prompt_accepted',
+    declined: 'prompt_declined',
+    dismissed: 'prompt_dismissed',
 }
 
 function _sharedKeyFor(code) {
@@ -309,7 +356,11 @@ async function _judgeAndShare(rec, code, snapshot, generation) {
     // another code, our runner may have started, or sharing may have been
     // switched off.
     if (!_stillCurrent(rec, code, generation)) return
-    if (!caramelCaptureAccepted(verdict, code)) return
+    if (!caramelCaptureAccepted(verdict, code)) {
+        _report('store_not_accepted', _captureRefusalReason(verdict))
+        return
+    }
+    _report('store_accepted')
     if (_alreadyShared(code)) return
     _markShared(code)
     let resp
@@ -318,6 +369,7 @@ async function _judgeAndShare(rec, code, snapshot, generation) {
     } catch (err) {
         _unmarkShared(code)
         logError('submitShopperCode', err)
+        _report('submit_skipped', 'error')
         return
     }
     if (resp?.skipped) {
@@ -325,14 +377,19 @@ async function _judgeAndShare(rec, code, snapshot, generation) {
         // Unmarked so the same code can go out once the cause clears (sign-in).
         _unmarkShared(code)
         log('SHOPPER_CODE_SKIPPED', { reason: resp.skipped })
+        // null: the card's own step (declined / dismissed) already said it.
+        const reason = funnelReasonForSkipped(resp.skipped)
+        if (reason) _report('submit_skipped', reason)
         return
     }
     if (resp?.error) {
         _unmarkShared(code)
         logError('submitShopperCode', resp.error)
+        _report('submit_skipped', 'error')
         return
     }
     log('SHOPPER_CODE_SHARED', { created: resp?.created })
+    _report('submit_sent')
 }
 
 function _start(rec, code) {
@@ -388,8 +445,10 @@ function _consider(rec, input, control) {
     if (
         caramelIsForbiddenControl(control) ||
         caramelFormSubmitIsUnsafe(control)
-    )
+    ) {
+        _report('apply_ignored', 'unsafe-control')
         return
+    }
     const code = caramelShopperCodeValid(input.value)
     // Enter in the box can also click the form's submit button: the same
     // gesture reaching us twice, not a new attempt.
@@ -398,10 +457,24 @@ function _consider(rec, input, control) {
     // even when this one is then refused below.
     _generation++
     _current = null
-    if (!code || !_fieldLooksLikeAPromoBox(input)) return
+    if (!code) {
+        _report('apply_ignored', 'bad-code-shape')
+        return
+    }
+    if (!_fieldLooksLikeAPromoBox(input)) {
+        _report('apply_ignored', 'not-promo-field')
+        return
+    }
     // Only what the shopper typed (or pasted) into this very field.
-    if (_typed.get(input) !== code) return
-    if (_alreadyShared(code)) return
+    if (_typed.get(input) !== code) {
+        _report('apply_ignored', 'not-typed')
+        return
+    }
+    if (_alreadyShared(code)) {
+        _report('apply_ignored', 'already-shared')
+        return
+    }
+    _report('apply_observed')
     _start(rec, code)
 }
 
@@ -444,5 +517,8 @@ export function armCodeCapture(rec) {
     // Only now: a setup that threw above leaves nothing attached AND leaves the
     // next detection pass free to try again.
     _armed = true
+    _funnelStore =
+        typeof rec.domain === 'string' ? rec.domain.toLowerCase() : null
+    _report('capture_armed')
     return true
 }
