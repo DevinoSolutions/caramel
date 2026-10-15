@@ -26,7 +26,7 @@ import * as Sentry from '@sentry/nextjs'
 // the rrweb chunk is not even fetched. Error reporting stays on. Caramel has
 // no consent banner by design; honouring these signals is the consent gate.
 // Replays land in the self-hosted Sentry on devino-first. Sentry's session
-// sample is 5% for now (on-error stays 1.0); PostHog's is 10%, a project
+// sample is 10% (on-error stays 1.0), same as PostHog's, which is a project
 // setting, see lib/analytics/identity.ts.
 function addReplay(): void {
     import('@sentry/nextjs')
@@ -73,12 +73,10 @@ if (process.env.NODE_ENV === 'production' && dsn) {
         integrations: [],
         // Same intake bucket as the server's errors: see sentry.common.config.ts.
         tracesSampleRate: 0.05,
-        // 5%, not 10%, for now: the self-hosted Sentry still has a 5
-        // envelopes/s nginx limit (its deploy is blocked, GetItDone T-2127).
-        // Above 5%, replay bursts are rejected and the error reports inside
-        // them are lost with them. Raise this to 0.1 when the owner says
-        // Sentry can take it. On-error replays stay at 1.0.
-        replaysSessionSampleRate: 0.05,
+        // 10% session / 1.0 on-error: the T-2008 standard, raised after the
+        // self-hosted Sentry relay quota fix (#59/#60) lifted the 5 envelopes/s
+        // limit.
+        replaysSessionSampleRate: 0.1,
         replaysOnErrorSampleRate: 1.0,
         debug: false,
     })
