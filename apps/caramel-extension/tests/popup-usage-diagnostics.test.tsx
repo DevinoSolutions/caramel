@@ -23,7 +23,7 @@ import { SettingsView } from '../entrypoints/popup/views/SettingsView'
  */
 let syncData: Record<string, any>
 let localData: Record<string, any>
-let permissions: { request: any; contains: any }
+let permissions: { request: any; contains: any; remove: any }
 let runtimeUrl: string
 
 const CONSENT_KEY = 'usageDiagnosticsConsent'
@@ -123,6 +123,7 @@ beforeEach(() => {
     permissions = {
         request: vi.fn(async () => true),
         contains: vi.fn(async () => true),
+        remove: vi.fn(async () => true),
     }
 })
 
@@ -142,14 +143,14 @@ describe('the one-time "Help improve Caramel?" card', () => {
         ).toBeInTheDocument()
         expect(
             screen.getByText(
-                "Send anonymous usage diagnostics, such as whether the code-sharing offer appeared on a supported store and why a code wasn't shared. Never your codes, your browsing history, or anything that identifies you. You can change this anytime in Settings.",
+                "Send anonymous diagnostics when you're at checkout on a supported store: which store, whether the code-sharing offer appeared, and why a code wasn't shared. Never your codes, your cart, the other pages you visit, or anything that identifies you. You can change this anytime in Settings.",
             ),
         ).toBeInTheDocument()
         const allow = screen.getByRole('button', { name: 'Allow' })
         const decline = screen.getByRole('button', { name: 'No thanks' })
         // Same class: declining is exactly as easy as accepting.
         expect(allow.className).toBe(decline.className)
-        expect(syncData[CONSENT_KEY]).toBeUndefined()
+        expect(localData[CONSENT_KEY]).toBeUndefined()
         expect(localData[ID_KEY]).toBeUndefined()
     })
 
@@ -160,7 +161,7 @@ describe('the one-time "Help improve Caramel?" card', () => {
         )
 
         await waitFor(() =>
-            expect(syncData[CONSENT_KEY]).toMatchObject({
+            expect(localData[CONSENT_KEY]).toMatchObject({
                 choice: 'accepted',
                 promptVersion: 1,
             }),
@@ -184,7 +185,9 @@ describe('the one-time "Help improve Caramel?" card', () => {
         )
 
         await waitFor(() =>
-            expect(syncData[CONSENT_KEY]).toMatchObject({ choice: 'declined' }),
+            expect(localData[CONSENT_KEY]).toMatchObject({
+                choice: 'declined',
+            }),
         )
         expect(localData[ID_KEY]).toBeUndefined()
         await waitFor(() =>
@@ -200,7 +203,7 @@ describe('the one-time "Help improve Caramel?" card', () => {
         ['accepted', accepted()],
         ['declined', { ...accepted(), choice: 'declined' }],
     ])('an already %s shopper is not asked again', async (_label, stored) => {
-        syncData[CONSENT_KEY] = stored
+        localData[CONSENT_KEY] = stored
         renderCard()
         await new Promise(r => setTimeout(r, 50))
 
@@ -209,8 +212,47 @@ describe('the one-time "Help improve Caramel?" card', () => {
         ).not.toBeInTheDocument()
     })
 
+    it('a record that roamed in through storage.sync does not answer for THIS device: the card still asks', async () => {
+        syncData[CONSENT_KEY] = accepted()
+        renderCard()
+
+        expect(
+            await screen.findByRole('heading', {
+                name: 'Help improve Caramel?',
+            }),
+        ).toBeInTheDocument()
+    })
+
+    it('writes the answer to storage.local and nothing to storage.sync', async () => {
+        renderCard()
+        await userEvent.click(
+            await screen.findByRole('button', { name: 'Allow' }),
+        )
+
+        await waitFor(() =>
+            expect(localData[CONSENT_KEY]).toMatchObject({
+                choice: 'accepted',
+            }),
+        )
+        expect(syncData).toEqual({})
+    })
+
+    it('Firefox: No thanks hands the data-collection grant back when it is held', async () => {
+        asFirefox()
+        renderCard()
+        await userEvent.click(
+            await screen.findByRole('button', { name: 'No thanks' }),
+        )
+
+        await waitFor(() =>
+            expect(permissions.remove).toHaveBeenCalledWith({
+                data_collection: ['technicalAndInteraction'],
+            }),
+        )
+    })
+
     it('a record for an older prompt version asks again', async () => {
-        syncData[CONSENT_KEY] = { ...accepted(), promptVersion: 0 }
+        localData[CONSENT_KEY] = { ...accepted(), promptVersion: 0 }
         renderCard()
 
         expect(
@@ -231,7 +273,9 @@ describe('the one-time "Help improve Caramel?" card', () => {
             data_collection: ['technicalAndInteraction'],
         })
         await waitFor(() =>
-            expect(syncData[CONSENT_KEY]).toMatchObject({ choice: 'accepted' }),
+            expect(localData[CONSENT_KEY]).toMatchObject({
+                choice: 'accepted',
+            }),
         )
     })
 
@@ -246,7 +290,7 @@ describe('the one-time "Help improve Caramel?" card', () => {
         expect(
             await screen.findByText(/browser did not allow it/),
         ).toBeInTheDocument()
-        expect(syncData[CONSENT_KEY]).toBeUndefined()
+        expect(localData[CONSENT_KEY]).toBeUndefined()
         expect(localData[ID_KEY]).toBeUndefined()
         // Still on screen: they can say No thanks instead.
         expect(
@@ -256,11 +300,14 @@ describe('the one-time "Help improve Caramel?" card', () => {
 
     it('when the choice cannot be saved the shopper is told and nothing is recorded', async () => {
         const stub = (globalThis as any).chrome
-        const realSet = stub.storage.sync.set
-        stub.storage.sync.set = (_items: unknown, cb: any) => {
+        const realSet = stub.storage.local.set
+        stub.storage.local.set = (_items: unknown, cb: any) => {
             stub.runtime.lastError = { message: 'quota exceeded' }
-            cb()
-            stub.runtime.lastError = undefined
+            try {
+                cb()
+            } finally {
+                stub.runtime.lastError = undefined
+            }
         }
         renderCard()
         await userEvent.click(
@@ -270,9 +317,9 @@ describe('the one-time "Help improve Caramel?" card', () => {
         expect(
             await screen.findByText(/Couldn’t change that setting/),
         ).toBeInTheDocument()
-        expect(syncData[CONSENT_KEY]).toBeUndefined()
+        expect(localData[CONSENT_KEY]).toBeUndefined()
         expect(localData[ID_KEY]).toBeUndefined()
-        stub.storage.sync.set = realSet
+        stub.storage.local.set = realSet
     })
 })
 
@@ -286,7 +333,7 @@ describe('the Settings toggle "Send anonymous usage diagnostics"', () => {
         renderSettings()
 
         expect(await toggle()).not.toBeChecked()
-        expect(syncData[CONSENT_KEY]).toBeUndefined()
+        expect(localData[CONSENT_KEY]).toBeUndefined()
     })
 
     it('turning it on records an explicit acceptance and mints the id; turning it off declines and deletes the id', async () => {
@@ -295,30 +342,69 @@ describe('the Settings toggle "Send anonymous usage diagnostics"', () => {
 
         await userEvent.click(box)
         await waitFor(() =>
-            expect(syncData[CONSENT_KEY]).toMatchObject({ choice: 'accepted' }),
+            expect(localData[CONSENT_KEY]).toMatchObject({
+                choice: 'accepted',
+            }),
         )
         expect(localData[ID_KEY]).toBeTruthy()
         expect(box).toBeChecked()
 
         await userEvent.click(box)
         await waitFor(() =>
-            expect(syncData[CONSENT_KEY]).toMatchObject({ choice: 'declined' }),
+            expect(localData[CONSENT_KEY]).toMatchObject({
+                choice: 'declined',
+            }),
         )
         expect(localData[ID_KEY]).toBeUndefined()
         expect(box).not.toBeChecked()
     })
 
-    it('reads an accepted record back as on', async () => {
+    it('Firefox: turning it off hands the grant back; a failed removal is reported but the switch stays off', async () => {
+        asFirefox()
+        localData[CONSENT_KEY] = accepted()
+        localData[ID_KEY] = 'some-id'
+        permissions.remove.mockResolvedValue(false)
+        renderSettings()
+        const box = await toggle()
+        await waitFor(() => expect(box).toBeChecked())
+
+        await userEvent.click(box)
+
+        await waitFor(() => expect(box).not.toBeChecked())
+        await waitFor(() =>
+            expect(localData[CONSENT_KEY]).toMatchObject({
+                choice: 'declined',
+            }),
+        )
+        expect(localData[ID_KEY]).toBeUndefined()
+        expect(permissions.remove).toHaveBeenCalledTimes(1)
+        // Reported, not swallowed: logError leaves a timing entry.
+        await waitFor(() =>
+            expect(JSON.stringify(localData)).toContain(
+                'usageDiagnosticsPermissionRemove',
+            ),
+        )
+    })
+
+    it('a roamed storage.sync record does not switch it on', async () => {
         syncData[CONSENT_KEY] = accepted()
         renderSettings()
 
-        expect(await toggle()).toBeChecked()
+        expect(await toggle()).not.toBeChecked()
+    })
+
+    it('reads an accepted record back as on', async () => {
+        localData[CONSENT_KEY] = accepted()
+        renderSettings()
+
+        const box = await toggle()
+        await waitFor(() => expect(box).toBeChecked())
     })
 
     it('Firefox: accepted but the browser grant revoked shows OFF (it would send nothing)', async () => {
         asFirefox()
         permissions.contains.mockResolvedValue(false)
-        syncData[CONSENT_KEY] = accepted()
+        localData[CONSENT_KEY] = accepted()
         renderSettings()
 
         expect(await toggle()).not.toBeChecked()
@@ -332,7 +418,7 @@ describe('the Settings toggle "Send anonymous usage diagnostics"', () => {
         await userEvent.click(box)
 
         await waitFor(() => expect(box).not.toBeChecked())
-        expect(syncData[CONSENT_KEY]).toBeUndefined()
+        expect(localData[CONSENT_KEY]).toBeUndefined()
         expect(
             await screen.findByText(/browser did not allow it/),
         ).toBeInTheDocument()

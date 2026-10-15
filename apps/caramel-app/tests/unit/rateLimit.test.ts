@@ -212,3 +212,78 @@ describe('isExtensionOrigin', () => {
         expect(isExtensionOrigin(makeOriginRequest('not-a-url'))).toBe(false)
     })
 })
+
+// M1 (review of PR #353): the extension's opt-in funnel diagnostics report one
+// step per call and are low value, so they get their OWN bucket (60/min, keyed
+// ip+route) that must neither spend the shared mutation / burst budget a
+// shopper's code submission depends on, nor be starved by it.
+describe('checkRateLimit: the isolated telemetry bucket', () => {
+    const telemetryRequest = (ip: string, path = '/api/extension/telemetry') =>
+        new NextRequest(`http://localhost${path}`, {
+            method: 'POST',
+            headers: { 'x-real-ip': ip },
+        })
+
+    it('allows 60 rapid calls (it is exempt from the 20-per-2s shared burst), then 429s with its own limit header', async () => {
+        const ip = '203.0.113.20'
+
+        for (let i = 0; i < 60; i++) {
+            expect(
+                await checkRateLimit(telemetryRequest(ip), 'telemetry'),
+            ).toBeNull()
+        }
+        const blocked = await checkRateLimit(telemetryRequest(ip), 'telemetry')
+
+        expect(blocked?.status).toBe(429)
+        expect(blocked?.headers.get('X-RateLimit-Limit')).toBe('60')
+        expect(blocked?.headers.get('Retry-After')).toBeTruthy()
+    })
+
+    it('an exhausted telemetry bucket leaves the same IP its full mutation and burst budget', async () => {
+        const ip = '203.0.113.21'
+        for (let i = 0; i < 61; i++)
+            await checkRateLimit(telemetryRequest(ip), 'telemetry')
+
+        // 20 is the shared burst allowance: had telemetry drawn on it, or on
+        // the mutation bucket, a submission right after would be refused.
+        for (let i = 0; i < 20; i++) {
+            expect(
+                await checkRateLimit(
+                    makeRequest(ip, { origin: 'chrome-extension://abc' }),
+                    'mutation',
+                ),
+            ).toBeNull()
+        }
+    })
+
+    it('an exhausted mutation bucket does not starve telemetry', async () => {
+        const ip = '203.0.113.22'
+        let blocked: Awaited<ReturnType<typeof checkRateLimit>> = null
+        for (let i = 0; i < 40 && !blocked; i++)
+            blocked = await checkRateLimit(makeRequest(ip), 'mutation')
+        expect(blocked?.status).toBe(429)
+
+        expect(
+            await checkRateLimit(telemetryRequest(ip), 'telemetry'),
+        ).toBeNull()
+    })
+
+    it('is keyed ip + route: another IP, and another route on the same IP, have their own 60', async () => {
+        const ip = '203.0.113.23'
+        for (let i = 0; i < 61; i++)
+            await checkRateLimit(telemetryRequest(ip), 'telemetry')
+
+        expect(
+            await checkRateLimit(telemetryRequest('203.0.113.24'), 'telemetry'),
+        ).toBeNull()
+        expect(
+            await checkRateLimit(
+                telemetryRequest(ip, '/api/other/telemetry'),
+                'telemetry',
+            ),
+        ).toBeNull()
+        expect(
+            (await checkRateLimit(telemetryRequest(ip), 'telemetry'))?.status,
+        ).toBe(429)
+    })
+})

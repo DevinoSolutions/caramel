@@ -207,7 +207,7 @@ describe('usage-diagnostics consent prompt version: extension vs server floor', 
         // background.js sends exactly these two keys; pin that in the source.
         const background = read('background.js')
         expect(background).toMatch(
-            /consent:\s*\{\s*choice:\s*consent\.choice,\s*promptVersion:\s*consent\.promptVersion,\s*\}/,
+            /consent:\s*\{\s*choice:\s*latest\.choice,\s*promptVersion:\s*latest\.promptVersion,\s*\}/,
         )
     })
 })

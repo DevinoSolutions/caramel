@@ -264,8 +264,9 @@ export function SettingsView({
                 <span className="settings-copy">
                     <span>Send anonymous usage diagnostics</span>
                     <small>
-                        Off unless you turn it on. Never your codes, your
-                        browsing history, or anything that identifies you.
+                        Only at checkout on a supported store. Never your codes,
+                        your cart, the other pages you visit, or anything that
+                        identifies you.
                     </small>
                 </span>
                 <input

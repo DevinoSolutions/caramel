@@ -20,6 +20,7 @@ let permissions
 
 const CONSENT_KEY = 'usageDiagnosticsConsent'
 const ID_KEY = 'caramel_usage_diagnostics_id'
+const TEST_ID = '0b9e8f2a-4c1d-4e57-9a36-7d5f1c2b8e40'
 const consent = choice => ({
     choice,
     at: '2026-10-15T12:00:00.000Z',
@@ -104,8 +105,14 @@ beforeEach(async () => {
     fetchCalls = []
     responses = []
     storageListeners = []
-    localData = { token: 'tok-123' }
-    syncData = { [CONSENT_KEY]: consent('accepted') }
+    // Consent is DEVICE-LOCAL (never roams), and the id was minted by the accept
+    // path before any report runs.
+    localData = {
+        token: 'tok-123',
+        [CONSENT_KEY]: consent('accepted'),
+        [ID_KEY]: TEST_ID,
+    }
+    syncData = {}
     runtimeUrl = 'chrome-extension://abc/'
     permissions = undefined
     globalThis.fetch = async (url, opts) => {
@@ -128,8 +135,8 @@ describe('reportCodeShareFunnel: no send without accepted consent', () => {
             { ...consent('accepted'), promptVersion: 9 },
         ],
     ])('%s: skipped, and NOTHING is fetched', async (_label, stored) => {
-        if (stored === undefined) delete syncData[CONSENT_KEY]
-        else syncData[CONSENT_KEY] = stored
+        if (stored === undefined) delete localData[CONSENT_KEY]
+        else localData[CONSENT_KEY] = stored
 
         expect(await invoke(STEP)).toEqual({
             skipped: 'no-diagnostics-consent',
@@ -138,7 +145,7 @@ describe('reportCodeShareFunnel: no send without accepted consent', () => {
     })
 
     it('a stale code-sharing consent is NOT diagnostics consent', async () => {
-        delete syncData[CONSENT_KEY]
+        delete localData[CONSENT_KEY]
         syncData.checkoutCodeSharingConsent = consent('accepted')
 
         expect(await invoke(STEP)).toEqual({
@@ -168,7 +175,6 @@ describe('reportCodeShareFunnel: no send without accepted consent', () => {
         runtimeUrl = 'moz-extension://abc/'
         permissions = { contains: vi.fn(async () => true), request: vi.fn() }
         await boot()
-        syncData[CONSENT_KEY] = consent('accepted')
         responses.push(ok({ captured: true }))
 
         expect(await invoke(STEP)).toEqual({ sent: true })
@@ -178,15 +184,15 @@ describe('reportCodeShareFunnel: no send without accepted consent', () => {
     })
 
     it('an unreadable consent record rejects loudly (answered as { error }), sending nothing', async () => {
-        const realGet = globalThis.chrome.storage.sync.get
-        globalThis.chrome.storage.sync.get = (_keys, cb) => {
+        const realGet = globalThis.chrome.storage.local.get
+        globalThis.chrome.storage.local.get = (_keys, cb) => {
             globalThis.chrome.runtime.lastError = { message: 'storage down' }
             cb()
             globalThis.chrome.runtime.lastError = undefined
         }
 
         const answer = await invoke(STEP)
-        globalThis.chrome.storage.sync.get = realGet
+        globalThis.chrome.storage.local.get = realGet
 
         expect(answer.error).toMatch(/storage down/)
         expect(fetchCalls).toEqual([])
@@ -207,8 +213,7 @@ describe('reportCodeShareFunnel: what is sent when the shopper opted in', () => 
         expect(call.opts.credentials).toBe('omit')
         const body = JSON.parse(call.opts.body)
         expect(Object.keys(body).toSorted()).toEqual(['consent', 'event', 'id'])
-        expect(body.id).toBe(localData[ID_KEY])
-        expect(body.id).toMatch(/^[0-9a-f-]{36}$/)
+        expect(body.id).toBe(TEST_ID)
         expect(body.consent).toEqual({ choice: 'accepted', promptVersion: 1 })
         expect(body.event).toEqual({
             step: 'capture_armed',
@@ -220,17 +225,49 @@ describe('reportCodeShareFunnel: what is sent when the shopper opted in', () => 
         expect(call.opts.body).not.toContain('tok-123')
     })
 
-    it('the id is minted on first use if consent roamed in from another device, and then reused', async () => {
-        responses.push(ok({ captured: true }), ok({ captured: true }))
+    it('a consent record that roamed in through storage.sync is ignored: nothing is sent', async () => {
+        delete localData[CONSENT_KEY]
+        syncData[CONSENT_KEY] = consent('accepted')
+
+        expect(await invoke(STEP)).toEqual({
+            skipped: 'no-diagnostics-consent',
+        })
+        expect(fetchCalls).toEqual([])
+    })
+
+    it('the report path never mints an id: no id means skip, and none is created', async () => {
+        delete localData[ID_KEY]
+
+        expect(await invoke(STEP)).toEqual({ skipped: 'no-diagnostics-id' })
+        expect(fetchCalls).toEqual([])
         expect(ID_KEY in localData).toBe(false)
+    })
+
+    it('consent withdrawn while the id was being read: re-checked, nothing is sent', async () => {
+        const realGet = globalThis.chrome.storage.local.get
+        globalThis.chrome.storage.local.get = (keys, cb) =>
+            realGet(keys, res => {
+                if ([].concat(keys).includes(ID_KEY))
+                    localData[CONSENT_KEY] = consent('declined')
+                cb(res)
+            })
+
+        expect(await invoke(STEP)).toEqual({
+            skipped: 'no-diagnostics-consent',
+        })
+        expect(fetchCalls).toEqual([])
+    })
+
+    it('the same id is reused on every report', async () => {
+        responses.push(ok({ captured: true }), ok({ captured: true }))
 
         await invoke(STEP)
-        const first = localData[ID_KEY]
         await invoke(STEP)
 
-        expect(first).toBeTruthy()
-        expect(localData[ID_KEY]).toBe(first)
-        expect(JSON.parse(telemetryCalls()[1].opts.body).id).toBe(first)
+        expect(telemetryCalls().map(c => JSON.parse(c.opts.body).id)).toEqual([
+            TEST_ID,
+            TEST_ID,
+        ])
     })
 
     it('a code, user, URL or cart on the message never reaches the request', async () => {
@@ -338,7 +375,7 @@ describe('withdrawing consent stops sends at once and deletes the telemetry id',
         responses.push(ok({ captured: true }))
         expect(await invoke(STEP)).toEqual({ sent: true })
 
-        syncData[CONSENT_KEY] = consent('declined')
+        localData[CONSENT_KEY] = consent('declined')
 
         expect(await invoke(STEP)).toEqual({
             skipped: 'no-diagnostics-consent',
@@ -350,7 +387,7 @@ describe('withdrawing consent stops sends at once and deletes the telemetry id',
         for (const newValue of [consent('declined'), undefined, { bad: 1 }]) {
             localData[ID_KEY] = 'some-id'
             for (const fn of storageListeners)
-                fn({ [CONSENT_KEY]: { newValue } }, 'sync')
+                fn({ [CONSENT_KEY]: { newValue } }, 'local')
             await vi.waitFor(() => expect(ID_KEY in localData).toBe(false))
         }
     })
@@ -358,9 +395,10 @@ describe('withdrawing consent stops sends at once and deletes the telemetry id',
     it('an accepted record (or an unrelated change) leaves the id alone', async () => {
         localData[ID_KEY] = 'some-id'
         for (const fn of storageListeners) {
-            fn({ [CONSENT_KEY]: { newValue: consent('accepted') } }, 'sync')
-            fn({ [CONSENT_KEY]: { newValue: consent('declined') } }, 'local')
-            fn({ other: { newValue: 1 } }, 'sync')
+            fn({ [CONSENT_KEY]: { newValue: consent('accepted') } }, 'local')
+            // A roamed (sync) change to the same key is not this device's record.
+            fn({ [CONSENT_KEY]: { newValue: consent('declined') } }, 'sync')
+            fn({ other: { newValue: 1 } }, 'local')
         }
         await Promise.resolve()
 

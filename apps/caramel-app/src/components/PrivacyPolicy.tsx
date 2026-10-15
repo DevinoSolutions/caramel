@@ -150,19 +150,21 @@ const PrivacyPolicy = () => {
                                 switch on &quot;Send anonymous usage
                                 diagnostics&quot; in its settings (it is off by
                                 default; Firefox also asks for its own
-                                permission), the extension reports which step of
-                                the code-sharing offer was reached on a
-                                supported store and, if it stopped, why (for
-                                example, you were signed out or the store did
-                                not accept the code), with that store&apos;s
-                                domain, the extension version and your browser.
-                                These events go to our self-hosted analytics
-                                under a random ID created when you opt in, not
-                                linked to your account or install ID, and
-                                deleted when you switch it off. They never
-                                include your codes, your browsing history, or
-                                anything that identifies you. You can change
-                                this anytime in the extension&apos;s settings.
+                                permission), the extension sends anonymous
+                                diagnostics when you are at checkout on a
+                                supported store: which store, whether the
+                                code-sharing offer appeared, and why a code
+                                wasn&apos;t shared, along with the extension
+                                version and your browser. These events go to our
+                                self-hosted analytics under a random ID created
+                                on this device when you opt in, not linked to
+                                your account or install ID. They never include
+                                your codes, your cart, the other pages you
+                                visit, or anything that identifies you. You can
+                                change this anytime in the extension&apos;s
+                                settings. Switching it off deletes this
+                                device&apos;s random diagnostics ID; anything
+                                already sent can&apos;t be linked back to you.
                             </>,
                         ]}
                     />

@@ -26,8 +26,9 @@ import { saveInstallId } from './install-attribution.js'
 import {
     USAGE_DIAGNOSTICS_CONSENT_KEY,
     deleteTelemetryId,
-    ensureTelemetryId,
     parseUsageDiagnosticsConsent,
+    readTelemetryId,
+    readUsageDiagnosticsConsent,
     resolveUsageDiagnostics,
     usageDiagnosticsAccepted,
 } from './usage-diagnostics-consent.js'
@@ -434,7 +435,8 @@ export async function submitShopperCode(message) {
  * on Firefox, the browser's data-collection grant must be held
  * (usage-diagnostics-consent.js). Otherwise the answer is `{ skipped }` and no
  * request is made. The request is ANONYMOUS on purpose: no bearer, no cookies,
- * the per-install telemetry id as the only identity, the consent record as the
+ * the per-device telemetry id as the only identity (READ here, never minted: the
+ * accept path owns minting, so a missing id means skip), the consent record as the
  * proof the server checks (403 consent-required), and a payload that only
  * buildFunnelEvent's allowlist can produce — never a code, user, URL or cart.
  *
@@ -456,7 +458,13 @@ export async function reportCodeShareFunnel(message) {
         ),
         sharingPromptVersion: codeSharingPromptVersion(),
     })
-    const id = await ensureTelemetryId(currentBrowser)
+    const id = await readTelemetryId(currentBrowser)
+    if (!id) return { skipped: 'no-diagnostics-id' }
+    // The shopper may have withdrawn while the id was being read: the record is
+    // the gate, so look at it once more right before anything leaves.
+    const latest = await readUsageDiagnosticsConsent(currentBrowser)
+    if (!usageDiagnosticsAccepted(latest))
+        return { skipped: 'no-diagnostics-consent' }
     const r = await fetchWithTimeout(caramelUrl('api/extension/telemetry'), {
         method: 'POST',
         credentials: 'omit',
@@ -465,8 +473,8 @@ export async function reportCodeShareFunnel(message) {
             id,
             event,
             consent: {
-                choice: consent.choice,
-                promptVersion: consent.promptVersion,
+                choice: latest.choice,
+                promptVersion: latest.promptVersion,
             },
         }),
     })
@@ -613,12 +621,12 @@ export function initBackground() {
 
     keepAlive()
 
-    // Withdrawing diagnostics consent (the popup toggle, "No thanks", or the
-    // record changing on another device through sync) deletes the telemetry
-    // id: sends stop at once because the gate reads the record, and a later
-    // opt-in starts a new id that cannot be joined to this one.
+    // Withdrawing diagnostics consent (the popup toggle or "No thanks") deletes
+    // the telemetry id: sends stop at once because the gate reads the record, and
+    // a later opt-in starts a new id that cannot be joined to this one. The
+    // record is device-local, so only this device's own changes arrive here.
     currentBrowser.storage.onChanged.addListener((changes, area) => {
-        if (area !== 'sync' || !changes[USAGE_DIAGNOSTICS_CONSENT_KEY]) return
+        if (area !== 'local' || !changes[USAGE_DIAGNOSTICS_CONSENT_KEY]) return
         const next = parseUsageDiagnosticsConsent(
             changes[USAGE_DIAGNOSTICS_CONSENT_KEY].newValue,
         )

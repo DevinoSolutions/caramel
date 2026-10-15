@@ -17,7 +17,9 @@ import { NextResponse } from 'next/server'
 //     protocol. This only stops browsers (any HTTP client can forge the
 //     header); the real bounds are the consent proof below, the strict body
 //     schema (a request can only say what the vocabulary allows) and the
-//     'mutation' rate limit.
+//     'telemetry' rate limit: its OWN bucket (60/min per ip+route) that is
+//     exempt from the shared burst limiter and cannot spend the 'mutation'
+//     budget, so diagnostics traffic can never 429 a shopper's code submission.
 //   - cors: 'extension' + the OPTIONS preflight, so a preflighted
 //     extension-origin fetch can read the answer.
 //   - NO auth, on purpose: this is anonymous. The extension sends no bearer and
@@ -49,7 +51,7 @@ export const POST = withRoute(
     {
         method: 'POST',
         routeName: 'extension/telemetry',
-        rateLimit: 'mutation',
+        rateLimit: 'telemetry',
         cors: 'extension',
         origin: 'extension',
         body: ExtensionTelemetryBodySchema,

@@ -84,11 +84,11 @@ export function UsageDiagnosticsCard() {
         >
             <h3 id="usageDiagnosticsTitle">Help improve Caramel?</h3>
             <p>
-                Send anonymous usage diagnostics, such as whether the
-                code-sharing offer appeared on a supported store and why a code
-                wasn&apos;t shared. Never your codes, your browsing history, or
-                anything that identifies you. You can change this anytime in
-                Settings.
+                Send anonymous diagnostics when you&apos;re at checkout on a
+                supported store: which store, whether the code-sharing offer
+                appeared, and why a code wasn&apos;t shared. Never your codes,
+                your cart, the other pages you visit, or anything that
+                identifies you. You can change this anytime in Settings.
             </p>
             <div className="diagnostics-card-actions">
                 <button

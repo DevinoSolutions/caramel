@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
     deleteTelemetryId,
-    ensureTelemetryId,
     parseUsageDiagnosticsConsent,
     readTelemetryId,
     readUsageDiagnosticsConsent,
@@ -12,13 +11,14 @@ import {
     usageDiagnosticsAccepted,
     usageDiagnosticsBrowserPermitted,
     usageDiagnosticsPromptVersion,
+    withdrawUsageDiagnosticsPermission,
     writeUsageDiagnosticsConsent,
 } from '../usage-diagnostics-consent.js'
 
 /**
  * usage-diagnostics-consent.js — the opt-in record behind anonymous usage
- * diagnostics, the install-local telemetry id that lives only while the
- * consent stands, and the Firefox data-collection grant that must back it.
+ * diagnostics (device-local, never synced), the telemetry id that lives only
+ * while the consent stands and is minted only on the accept path, and the Firefox data-collection grant that must back it.
  * Absent / malformed / declined / old-version all mean NO.
  */
 
@@ -116,8 +116,9 @@ describe('writeUsageDiagnosticsConsent and the telemetry id', () => {
         expect(id).toMatch(
             /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
         )
-        // Local only: the id never roams through sync.
-        expect(JSON.stringify(syncData)).not.toContain(id)
+        // Local only: neither the record nor the id ever roams through sync.
+        expect(syncData).toEqual({})
+        expect(localData[USAGE_DIAGNOSTICS_CONSENT_KEY]).toEqual(written)
     })
 
     it('the id is NOT the install-attribution id (separate key, separate value)', async () => {
@@ -141,7 +142,6 @@ describe('writeUsageDiagnosticsConsent and the telemetry id', () => {
         await writeUsageDiagnosticsConsent(browser, 'accepted')
 
         expect(localData[USAGE_DIAGNOSTICS_ID_KEY]).toBe(first)
-        expect(await ensureTelemetryId(browser)).toBe(first)
     })
 
     it('withdrawing records the decline and DELETES the id; a later opt-in gets a new, unlinked one', async () => {
@@ -167,7 +167,7 @@ describe('writeUsageDiagnosticsConsent and the telemetry id', () => {
     })
 
     it('deleteTelemetryId removes it on its own', async () => {
-        await ensureTelemetryId(browser)
+        localData[USAGE_DIAGNOSTICS_ID_KEY] = 'some-id'
         await deleteTelemetryId(browser)
         expect(await readTelemetryId(browser)).toBeNull()
     })
@@ -180,8 +180,8 @@ describe('writeUsageDiagnosticsConsent and the telemetry id', () => {
         expect(localData).toEqual({})
     })
 
-    it('REJECTS when storage refuses the record, and mints no id (a yes that was not saved is not acted on)', async () => {
-        browser.storage.sync.set = (_items, cb) => {
+    it('REJECTS when storage refuses the record: no consent is recorded, so nothing can send (the id left behind is inert and reused by the next accept)', async () => {
+        browser.storage.local.set = (_items, cb) => {
             browser.runtime.lastError = { message: 'quota exceeded' }
             cb()
             browser.runtime.lastError = undefined
@@ -190,11 +190,26 @@ describe('writeUsageDiagnosticsConsent and the telemetry id', () => {
         await expect(
             writeUsageDiagnosticsConsent(browser, 'accepted'),
         ).rejects.toThrow(/quota exceeded/)
-        expect(localData).toEqual({})
+        expect(USAGE_DIAGNOSTICS_CONSENT_KEY in localData).toBe(false)
+        expect(await resolveUsageDiagnostics(browser)).toBeNull()
+    })
+
+    it('a record an earlier build left in storage.sync is never read (consent does not roam)', async () => {
+        syncData[USAGE_DIAGNOSTICS_CONSENT_KEY] = record('accepted')
+
+        expect(await readUsageDiagnosticsConsent(browser)).toBeNull()
+        expect(await resolveUsageDiagnostics(browser)).toBeNull()
+    })
+
+    it('the id is only ever minted by the accept path: nothing else in the module exports a minter', async () => {
+        const mod = await import('../usage-diagnostics-consent.js')
+        expect(Object.keys(mod)).not.toContain('ensureTelemetryId')
+        await writeUsageDiagnosticsConsent(browser, 'declined')
+        expect(USAGE_DIAGNOSTICS_ID_KEY in localData).toBe(false)
     })
 
     it('a read failure rejects loudly instead of looking like "no consent"', async () => {
-        browser.storage.sync.get = (_keys, cb) => {
+        browser.storage.local.get = (_keys, cb) => {
             browser.runtime.lastError = { message: 'storage unavailable' }
             cb()
             browser.runtime.lastError = undefined
@@ -267,7 +282,7 @@ describe('the Firefox data-collection grant', () => {
 
     it('resolveUsageDiagnostics: accepted consent but the grant revoked in about:addons => NOT allowed', async () => {
         asFirefox()
-        syncData[USAGE_DIAGNOSTICS_CONSENT_KEY] = record('accepted')
+        localData[USAGE_DIAGNOSTICS_CONSENT_KEY] = record('accepted')
         permissions.contains.mockResolvedValue(false)
 
         expect(await resolveUsageDiagnostics(browser)).toBeNull()
@@ -278,7 +293,7 @@ describe('the Firefox data-collection grant', () => {
 
     it('resolveUsageDiagnostics: accepted consent and the grant held => allowed', async () => {
         asFirefox()
-        syncData[USAGE_DIAGNOSTICS_CONSENT_KEY] = record('accepted')
+        localData[USAGE_DIAGNOSTICS_CONSENT_KEY] = record('accepted')
 
         expect(await resolveUsageDiagnostics(browser)).toEqual(
             record('accepted'),
@@ -287,7 +302,7 @@ describe('the Firefox data-collection grant', () => {
 
     it('resolveUsageDiagnostics fails closed and loud when the browser cannot say', async () => {
         asFirefox()
-        syncData[USAGE_DIAGNOSTICS_CONSENT_KEY] = record('accepted')
+        localData[USAGE_DIAGNOSTICS_CONSENT_KEY] = record('accepted')
         permissions.contains.mockResolvedValue(undefined)
 
         await expect(resolveUsageDiagnostics(browser)).rejects.toThrow(
@@ -296,9 +311,63 @@ describe('the Firefox data-collection grant', () => {
     })
 })
 
+describe('withdrawUsageDiagnosticsPermission (Firefox hands the grant back)', () => {
+    let permissions
+    beforeEach(() => {
+        permissions = {
+            contains: vi.fn(async () => true),
+            request: vi.fn(),
+            remove: vi.fn(async () => true),
+        }
+        runtimeUrl = 'moz-extension://abc/'
+        globalThis.browser = { permissions }
+    })
+
+    it('removes exactly technicalAndInteraction under data_collection', async () => {
+        await withdrawUsageDiagnosticsPermission(browser)
+
+        expect(permissions.remove).toHaveBeenCalledWith({
+            data_collection: ['technicalAndInteraction'],
+        })
+    })
+
+    it('does nothing when the grant is not held', async () => {
+        permissions.contains.mockResolvedValue(false)
+
+        await withdrawUsageDiagnosticsPermission(browser)
+
+        expect(permissions.remove).not.toHaveBeenCalled()
+    })
+
+    it('REJECTS when the browser says it did not remove a held grant', async () => {
+        permissions.remove.mockResolvedValue(false)
+
+        await expect(
+            withdrawUsageDiagnosticsPermission(browser),
+        ).rejects.toThrow(/did not remove/)
+    })
+
+    it('REJECTS when the permissions call itself fails', async () => {
+        permissions.remove.mockRejectedValue(new Error('remove blew up'))
+
+        await expect(
+            withdrawUsageDiagnosticsPermission(browser),
+        ).rejects.toThrow(/remove blew up/)
+    })
+
+    it('off Firefox it is a no-op that never touches the permissions API', async () => {
+        runtimeUrl = 'chrome-extension://abc/'
+
+        await withdrawUsageDiagnosticsPermission(browser)
+
+        expect(permissions.contains).not.toHaveBeenCalled()
+        expect(permissions.remove).not.toHaveBeenCalled()
+    })
+})
+
 describe('resolveUsageDiagnostics off Firefox: the consent record is the whole gate', () => {
     it('accepted => the record', async () => {
-        syncData[USAGE_DIAGNOSTICS_CONSENT_KEY] = record('accepted')
+        localData[USAGE_DIAGNOSTICS_CONSENT_KEY] = record('accepted')
         expect(await resolveUsageDiagnostics(browser)).toEqual(
             record('accepted'),
         )
@@ -311,7 +380,7 @@ describe('resolveUsageDiagnostics off Firefox: the consent record is the whole g
         ['another prompt version', record('accepted', { promptVersion: 9 })],
     ])('%s => null', async (_label, stored) => {
         if (stored !== undefined)
-            syncData[USAGE_DIAGNOSTICS_CONSENT_KEY] = stored
+            localData[USAGE_DIAGNOSTICS_CONSENT_KEY] = stored
         expect(await resolveUsageDiagnostics(browser)).toBeNull()
     })
 })

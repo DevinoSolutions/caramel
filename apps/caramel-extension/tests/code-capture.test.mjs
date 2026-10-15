@@ -1342,6 +1342,93 @@ describe('funnel diagnostics: which steps the page reports', () => {
         expect(JSON.stringify(funnel)).not.toMatch(/SAVE10/i)
     })
 
+    describe('checkout context only', () => {
+        const withPromoBoxVisible = visible => {
+            const { Element } = globalThis.window ?? globalThis
+            Element.prototype.checkVisibility = () => visible
+        }
+        afterEach(() => withPromoBoxVisible(true))
+
+        it('an ordinary store page (no visible promo box) arms capture but reports nothing', async () => {
+            withPromoBoxVisible(false)
+            await armed()
+            storeAnswers(true)
+            shopperTypes('SAVE10')
+            shopperClicksApply()
+
+            await vi.waitFor(() => expect(sent).toHaveLength(1), LONG)
+            expect(funnel).toEqual([])
+        })
+
+        it('capture_armed fires once per page load, on the first detection pass that sees a checkout', async () => {
+            const mod = await import('../code-capture.js')
+            withPromoBoxVisible(false)
+            await armed()
+            await settle(50)
+            expect(funnel).toEqual([])
+
+            withPromoBoxVisible(true)
+            mod.caramelNoteCheckoutForCapture(REC)
+            mod.armCodeCapture(REC)
+            mod.caramelNoteCheckoutForCapture(REC)
+            await vi.waitFor(() => expect(steps()).toEqual(['capture_armed']))
+            await settle(50)
+            expect(steps()).toEqual(['capture_armed'])
+        })
+
+        it('the promo box hiding after an accepted code does not silence the rest of the flow', async () => {
+            await armed()
+            storeAnswers(true, {
+                after: () => {
+                    withPromoBoxVisible(false)
+                },
+            })
+            shopperTypes('SAVE10')
+            shopperClicksApply()
+
+            await waitForStep('submit_sent')
+        })
+    })
+
+    describe('one report per gesture', () => {
+        it('Enter that reaches us as keydown AND click reports a refusal once', async () => {
+            await armed()
+            shopperTypes('bad code!')
+            shopperPressesEnter()
+            shopperClicksApply()
+            await settle(100)
+
+            expect(steps().filter(s => s === 'apply_ignored')).toHaveLength(1)
+        })
+
+        it('an unsafe control reports unsafe-control once for one Enter', async () => {
+            // A payment field in the promo box's own form: submitting it spends money.
+            document.body.innerHTML =
+                '<form><input id="promo" /><button id="apply" type="button">Apply</button>' +
+                '<input autocomplete="cc-number" /></form><div id="total"></div><div id="err"></div>'
+            await armed()
+            shopperTypes('SAVE10')
+            shopperPressesEnter()
+            shopperClicksApply()
+            await settle(100)
+
+            expect(
+                funnel.filter(m => m.reason === 'unsafe-control'),
+            ).toHaveLength(1)
+        })
+
+        it('an accepted code is observed once for click plus Enter', async () => {
+            await armed()
+            storeAnswers(true)
+            shopperTypes('SAVE10')
+            shopperClicksApply()
+            shopperPressesEnter()
+            await waitForStep('submit_sent')
+
+            expect(steps().filter(s => s === 'apply_observed')).toHaveLength(1)
+        })
+    })
+
     it('a failing report is logged, not lost, and does not stop the share', async () => {
         const realSend = globalThis.chrome.runtime.sendMessage
         globalThis.chrome.runtime.sendMessage = (message, cb) => {

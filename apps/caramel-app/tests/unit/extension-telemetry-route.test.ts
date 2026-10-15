@@ -26,7 +26,9 @@ interface CapturedEvent {
 
 const { captureMock, checkRateLimitMock, getSessionMock } = vi.hoisted(() => ({
     captureMock: vi.fn(async (_args: CapturedEvent) => true),
-    checkRateLimitMock: vi.fn(async () => null as unknown),
+    checkRateLimitMock: vi.fn(
+        async (_req: unknown, _kind: unknown) => null as unknown,
+    ),
     getSessionMock: vi.fn(async () => null as unknown),
 }))
 
@@ -316,6 +318,13 @@ describe('POST /api/extension/telemetry: who may call it', () => {
 
         expect(res.status).toBe(429)
         expect(captureMock).not.toHaveBeenCalled()
+    })
+
+    it('draws on its OWN rate-limit bucket, never the shared mutation budget', async () => {
+        await POST(telemetryRequest(validBody()))
+
+        expect(checkRateLimitMock).toHaveBeenCalledTimes(1)
+        expect(checkRateLimitMock.mock.calls[0]?.[1]).toBe('telemetry')
     })
 
     it('answers the preflight (204)', async () => {

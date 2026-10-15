@@ -67,6 +67,7 @@ import {
     caramelSnapshotCart,
 } from './coupon-apply.js'
 import {
+    caramelCouponAnchors,
     caramelFormSubmitIsUnsafe,
     caramelIsForbiddenControl,
     pickBestMatch,
@@ -125,6 +126,20 @@ let _armed = false
 // The matched store config's domain, set when capture is armed: the only
 // location the funnel diagnostics ever carry.
 let _funnelStore = null
+// Funnel diagnostics speak only for a checkout. Capture is armed on every page
+// of a supported store (the listeners are cheap and the cart can open anywhere),
+// but "at checkout" is the stricter claim the shopper's opt-in names, so the
+// funnel stays silent until a VISIBLE promo box has been seen on this page load
+// (the same bar store-detect's isCheckout() sets for the prompt). Latched: once
+// per page load, and the box disappearing after an accepted code (some stores
+// hide it) does not retract the checkout it belonged to.
+let _checkoutSeen = false
+// A gesture is one shopper action, but Enter in the promo box reaches us twice:
+// the keydown, then the click the browser synthesises on the form's submit
+// button. The second arrival within this window, for the same box value, is the
+// same gesture and reports nothing.
+const GESTURE_WINDOW_MS = 400
+let _lastGesture = null
 // In-memory copy of the two page-side facts that gate capture. Both are UNKNOWN
 // until a read (or a change event) lands, and gestures are ignored until then:
 // fail closed. `_paused`: null = unknown, else boolean. `_consent`:
@@ -179,8 +194,9 @@ function _captureRefusalReason(verdict) {
 // Reports one funnel step to the worker, which drops it unless the shopper
 // opted in to diagnostics. Not awaited by the flow it describes (a slow report
 // must never hold a share), but its outcome is checked: a failure is logged,
-// never lost.
+// never lost. Nothing is reported before a checkout has been seen on the page.
 function _report(step, reason) {
+    if (!_checkoutSeen) return
     caramelSendMessage({
         action: 'reportCodeShareFunnel',
         step,
@@ -438,7 +454,27 @@ function _onKeydown(event, rec) {
     _consider(rec, input, input)
 }
 
+// store-detect also calls this when the promo box appears after arming (drawer
+// carts), so `capture_armed` marks the moment capture is listening AT a
+// checkout, once per page load. A page whose box is never visible reports
+// nothing at all.
+export function caramelNoteCheckoutForCapture(rec) {
+    if (_checkoutSeen || !_armed || !rec) return
+    if (caramelCouponAnchors(rec.couponInput).length === 0) return
+    _checkoutSeen = true
+    _report('capture_armed')
+}
+
 function _consider(rec, input, control) {
+    const now = performance.now()
+    if (
+        _lastGesture &&
+        _lastGesture.value === input.value &&
+        now - _lastGesture.at < GESTURE_WINDOW_MS
+    )
+        return
+    _lastGesture = { value: input.value, at: now }
+    caramelNoteCheckoutForCapture(rec)
     // Observation only, but a config that points at an order-completing control
     // would make "the store accepted it" meaningless — same refusals as the
     // runner.
@@ -486,7 +522,11 @@ function _consider(rec, input, control) {
  * cannot tell us the user's choice changed, nothing is attached: a stale
  * "sharing is on" is the one failure that cannot be allowed. */
 export function armCodeCapture(rec) {
-    if (_armed || !rec || !rec.couponInput || !rec.couponSubmit) return false
+    if (_armed) {
+        caramelNoteCheckoutForCapture(rec)
+        return false
+    }
+    if (!rec || !rec.couponInput || !rec.couponSubmit) return false
     try {
         caramelOnSettingsChanged(settings => {
             _paused = _pausedIn(settings)
@@ -519,6 +559,6 @@ export function armCodeCapture(rec) {
     _armed = true
     _funnelStore =
         typeof rec.domain === 'string' ? rec.domain.toLowerCase() : null
-    _report('capture_armed')
+    caramelNoteCheckoutForCapture(rec)
     return true
 }

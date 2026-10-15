@@ -141,7 +141,12 @@ module.exports = [
         // (code-share-funnel.js) and the shared permissions wrapper
         // (permissions-api.js) for the Firefox data-collection grant. Measured
         // 12.24 kB.
-        limit: '13.4 KB',
+        // 2026-10-15 (review of PR #353), tightened 13.4 -> 12.7 kB: the 2 kB of
+        // slack the first raise left would have let the next unrelated growth
+        // through unnoticed. Measured 12.38 kB after the review fixes (id minted
+        // only on accept, the consent re-read, device-local consent), so the
+        // limit is measured + ~0.3 kB.
+        limit: '12.7 KB',
         brotli: false,
     },
     {

@@ -213,7 +213,11 @@ describe('funnelReasonForSkipped: the worker gates mapped onto reasons', () => {
         expect(literals.size).toBeGreaterThan(5)
         for (const skipped of literals) {
             // The funnel handler's own answers are not submit gates.
-            if (skipped === 'no-diagnostics-consent') continue
+            if (
+                skipped === 'no-diagnostics-consent' ||
+                skipped === 'no-diagnostics-id'
+            )
+                continue
             const reason = funnelReasonForSkipped(skipped)
             if (skipped === 'refused') {
                 expect(reason).toBe('refused')

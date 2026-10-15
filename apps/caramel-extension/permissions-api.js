@@ -23,6 +23,7 @@ export function getPermissionsApi() {
         return {
             contains: perms => promiseStyle.contains(perms),
             request: perms => promiseStyle.request(perms),
+            remove: perms => promiseStyle.remove(perms),
         }
     }
 
@@ -40,7 +41,11 @@ export function getPermissionsApi() {
                     reject(e)
                 }
             })
-        return { contains: wrap('contains'), request: wrap('request') }
+        return {
+            contains: wrap('contains'),
+            request: wrap('request'),
+            remove: wrap('remove'),
+        }
     }
 
     return null

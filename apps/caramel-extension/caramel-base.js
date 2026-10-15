@@ -35,6 +35,7 @@ import {
     readUsageDiagnosticsConsent,
     requestUsageDiagnosticsPermission,
     resolveUsageDiagnostics,
+    withdrawUsageDiagnosticsPermission,
     writeUsageDiagnosticsConsent,
 } from './usage-diagnostics-consent.js'
 
@@ -466,9 +467,20 @@ export function caramelGetUsageDiagnosticsConsent() {
 }
 
 // Persists 'accepted' | 'declined' (an accept mints the telemetry id, a decline
-// deletes it). Rejects when the write did not land.
-export function caramelSetUsageDiagnosticsConsent(choice) {
-    return writeUsageDiagnosticsConsent(currentBrowser, choice)
+// deletes it and, on Firefox, hands the data-collection grant back). Rejects
+// when the record write did not land. A failed grant removal does NOT undo the
+// withdrawal (the record already says "declined", so nothing is sent); it is
+// reported instead.
+export async function caramelSetUsageDiagnosticsConsent(choice) {
+    const record = await writeUsageDiagnosticsConsent(currentBrowser, choice)
+    if (choice === 'declined') {
+        try {
+            await withdrawUsageDiagnosticsPermission(currentBrowser)
+        } catch (err) {
+            logError('usageDiagnosticsPermissionRemove', err)
+        }
+    }
+    return record
 }
 
 // Firefox: ask for its data-collection grant. Call straight out of a click.
