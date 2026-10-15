@@ -35,6 +35,7 @@ import {
     type PosthogTarget,
 } from './posthogDataset'
 import { resolveBrowserPosthogHosts } from './posthogHosts'
+import { browserSignalsTrackingOptOut } from './trackingOptOut'
 
 export { isPosthogActive }
 
@@ -185,12 +186,15 @@ export function initPosthogBrowser(): boolean {
     return true
 }
 
-function initPosthogInstance(
+export function initPosthogInstance(
     posthog: PostHog,
     target: PosthogTarget,
     { isE2E, deferRecording }: { isE2E: boolean; deferRecording: boolean },
 ): void {
     const hosts = resolveBrowserPosthogHosts(target)
+    // Global Privacy Control / Do Not Track: no recording at all. Event
+    // capture is unchanged.
+    const recordingOptedOut = browserSignalsTrackingOptOut()
     posthog.init(target.token, {
         // Production: our own origin (/_t/k3v, proxied by next.config.mjs) so a
         // content blocker keyed on the PostHog hostname cannot hide the visit;
@@ -206,10 +210,19 @@ function initPosthogInstance(
         // startSessionRecording below, not at init: the recorder's full-DOM
         // snapshot was ~1.3 s of mobile main-thread work landing inside the
         // page's own load. Everywhere else it starts at init.
-        disable_session_recording: deferRecording,
+        // The ~10% sample rate lives in the PostHog project 6 setting
+        // `session_recording_sample_rate = 0.10` (set 2026-10-15), not in
+        // code, so there is no second rate to drift. Replays land in the
+        // self-hosted PostHog (and Sentry) on devino-first: keep it at about
+        // 10%; the 1.0 on-error rate is Sentry-only. Recording is also off
+        // when the browser sends GPC/DNT (recordingOptedOut).
+        disable_session_recording: deferRecording || recordingOptedOut,
         session_recording: {
             maskAllInputs: true,
-            maskTextSelector: '[data-sentry-mask], [data-ph-mask]',
+            // `.ph-sensitive` joins the masked set; `.ph-no-capture` is
+            // already blocked by PostHog's default blockClass.
+            maskTextSelector:
+                '[data-sentry-mask], [data-ph-mask], .ph-sensitive',
             blockSelector: '#card-element',
         },
         // The Caramel project has no surveys (checked 2026-09-26), so don't
@@ -247,7 +260,7 @@ function initPosthogInstance(
 
     syncSentryPosthogContext(posthog)
 
-    if (!deferRecording) return
+    if (!deferRecording || recordingOptedOut) return
     // Honours the project's remote recording settings (enabled, sampling,
     // triggers) exactly as init would have.
     onFirstActivity(() => {

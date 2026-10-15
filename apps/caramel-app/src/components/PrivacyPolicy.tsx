@@ -389,6 +389,11 @@ const PrivacyPolicy = () => {
                         ]}
                     />
                     <Para>
+                        Neither PostHog nor Sentry records a session replay when
+                        your browser sends a Global Privacy Control or Do Not
+                        Track signal.
+                    </Para>
+                    <Para>
                         The website uses cookies to keep you signed in and for
                         the analytics above. You can block or delete cookies in
                         your browser settings; you will then need to sign in

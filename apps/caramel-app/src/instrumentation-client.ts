@@ -1,4 +1,5 @@
 import { defersAnalytics, onFirstActivity } from '@/lib/afterPageLoad'
+import { browserSignalsTrackingOptOut } from '@/lib/analytics/trackingOptOut'
 import { SENTRY_RELEASE } from '@/lib/buildInfo'
 import * as Sentry from '@sentry/nextjs'
 
@@ -19,6 +20,14 @@ import * as Sentry from '@sentry/nextjs'
 // error thrown on the landing page before the first scroll, tap or
 // keypress (and within 10 s of load) is reported without a replay. Every
 // other route (app, auth, OAuth, consent) adds it right away.
+//
+// Replay is skipped entirely when the browser sends Global Privacy Control or
+// Do Not Track (browserSignalsTrackingOptOut): addReplay is never called, so
+// the rrweb chunk is not even fetched. Error reporting stays on. Caramel has
+// no consent banner by design; honouring these signals is the consent gate.
+// Replays land in the self-hosted Sentry on devino-first: keep the session
+// sample at about 10% (on-error 1.0 is Sentry-only; PostHog's rate is a
+// project setting, see lib/analytics/identity.ts).
 function addReplay(): void {
     import('@sentry/nextjs')
         .then(lazySentry => {
@@ -36,7 +45,11 @@ function addReplay(): void {
                         'input[type="email"]',
                         '#card-element',
                         '[data-sentry-mask]',
+                        '.ph-sensitive',
                     ],
+                    // Added to Sentry's default block list. PostHog blocks
+                    // `.ph-no-capture` by default; this mirrors it here.
+                    block: ['.ph-no-capture'],
                 }),
             )
         })
@@ -64,8 +77,13 @@ if (process.env.NODE_ENV === 'production' && dsn) {
         replaysOnErrorSampleRate: 1.0,
         debug: false,
     })
-    if (defersAnalytics(window.location.pathname)) onFirstActivity(addReplay)
-    else addReplay()
+    if (!browserSignalsTrackingOptOut()) {
+        if (defersAnalytics(window.location.pathname)) {
+            onFirstActivity(addReplay)
+        } else {
+            addReplay()
+        }
+    }
 }
 
 export const onRouterTransitionStart = Sentry.captureRouterTransitionStart
