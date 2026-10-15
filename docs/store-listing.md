@@ -4,9 +4,9 @@ Covers extension 1.4.13 (includes the coupon-box pick client, #342), as of 2026-
 
 `apps/caramel-extension/scripts/store-listing.mjs` holds the listing text (name, summary, detailed description). This file holds the privacy tab, which exists only on the Chrome Web Store dashboard. When the extension's data flows change, this file, the dashboard and `apps/caramel-app/src/components/PrivacyPolicy.tsx` change together.
 
-## As on the dashboard (read 2026-10-14)
+## As on the dashboard (read 2026-10-15)
 
-Read while the item (1.4.11, submitted 2026-10-13) showed "Status: Pending review". The Privacy tab was locked: every field disabled, and the "Unable to publish" dialog said "Address the issues below to publish your item. Remember to Save Draft when you are done." / "You may not edit or publish an item that is in review." Nothing was changed on the dashboard and the review was not cancelled.
+Read on 2026-10-15: the item was editable (status "Published - public"). The tabs and Host permission justifications below were saved as a draft and not submitted; they go live with the next submission.
 
 ### Single purpose
 
@@ -16,7 +16,7 @@ Read while the item (1.4.11, submitted 2026-10-13) showed "Status: Pending revie
 
 **tabs**
 
-> Reads the address of the current tab to show the toolbar badge and the popup for the store you are on, and opens the sign-in tab. On every tab switch and page load (http or https pages), the extension sends only that page's hostname to grabcaramel.com, without the sign-in token, to check whether the store has coupons for the toolbar badge. Full page addresses and page contents are never sent.
+> Reads the address of the current tab to show the toolbar badge and the popup for the store you are on, and opens the sign-in tab. On every tab switch and page load (http or https pages), the extension sends only that page's hostname to grabcaramel.com, without the sign-in token, to check whether the store has coupons for the toolbar badge. This check never sends the full page address or any page content.
 
 **storage**
 
@@ -32,7 +32,7 @@ Read while the item (1.4.11, submitted 2026-10-13) showed "Status: Pending revie
 
 **Host permission**
 
-> Caramel must run on any store's checkout, because it supports thousands of online stores and new ones are added continually. The content script finds the coupon field and the order total on the checkout page, applies codes, and keeps the one that saves the most.
+> Caramel must run on any store's checkout, because it supports thousands of online stores and new ones are added continually. The content script finds the coupon field and the order total on the checkout page, applies codes, and keeps the one that saves the most. On a cart page where it cannot locate the promo-code box, and only after the shopper taps apply, it sends a trimmed outline of the page's control labels (no typed values and no other page text) to grabcaramel.com to find the box.
 
 ### Remote code
 
@@ -53,30 +53,6 @@ Not ticked: Health information, Personal communications.
 ### Privacy policy URL
 
 https://grabcaramel.com/privacy
-
-## Pending change, to apply when the item is no longer in review
-
-The coupon-box pick (#342) sends a trimmed cart-page outline, so two permission justifications change. The limit is 1,000 characters each. Nothing below is on the dashboard yet.
-
-### tabs
-
-Before (395 characters):
-
-> Reads the address of the current tab to show the toolbar badge and the popup for the store you are on, and opens the sign-in tab. On every tab switch and page load (http or https pages), the extension sends only that page's hostname to grabcaramel.com, without the sign-in token, to check whether the store has coupons for the toolbar badge. Full page addresses and page contents are never sent.
-
-After (407 characters):
-
-> Reads the address of the current tab to show the toolbar badge and the popup for the store you are on, and opens the sign-in tab. On every tab switch and page load (http or https pages), the extension sends only that page's hostname to grabcaramel.com, without the sign-in token, to check whether the store has coupons for the toolbar badge. This check never sends the full page address or any page content.
-
-### Host permission
-
-Before (262 characters):
-
-> Caramel must run on any store's checkout, because it supports thousands of online stores and new ones are added continually. The content script finds the coupon field and the order total on the checkout page, applies codes, and keeps the one that saves the most.
-
-After (492 characters):
-
-> Caramel must run on any store's checkout, because it supports thousands of online stores and new ones are added continually. The content script finds the coupon field and the order total on the checkout page, applies codes, and keeps the one that saves the most. On a cart page where it cannot locate the promo-code box, and only after the shopper taps apply, it sends a trimmed outline of the page's control labels (no typed values and no other page text) to grabcaramel.com to find the box.
 
 ## Per-category justification (repo-only rationale, the dashboard has no field for it)
 
