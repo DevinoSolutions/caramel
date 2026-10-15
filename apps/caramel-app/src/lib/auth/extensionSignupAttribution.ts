@@ -36,19 +36,73 @@ export const NO_EXTENSION_ATTRIBUTION: ExtensionSignupAttribution = {
 /** Where the raw fields came from, for the Sentry warning. */
 type ExtensionAttributionSource = 'oauth_body' | 'authorize_query'
 
+/**
+ * Hard cap on the serialized first-touch JSON. A maximal record (every field at
+ * its 255-char limit) is several KB; carried in the signed OAuth `state` it could
+ * push the Google/Apple authorize URL past what the provider accepts and block
+ * sign-in over analytics. Over the cap the whole first touch is dropped (the
+ * install id is kept) and one Sentry warning reports the length only.
+ */
+export const FIRST_TOUCH_MAX_SERIALIZED_CHARS = 1200
+
+/** landing_path is carried truncated in the OAuth state. */
+export const STATE_LANDING_PATH_MAX_CHARS = 200
+
 function reportDropped(
     source: ExtensionAttributionSource,
     field: 'iid' | 'firstTouch',
     reason: string,
+    extra: Record<string, number> = {},
 ): void {
     Sentry.captureMessage(
         'extension sign-in attribution field invalid; dropped',
         {
             level: 'warning',
             tags: { operation: 'extension_signup_attribution', source },
-            extra: { field, reason },
+            extra: { field, reason, ...extra },
         },
     )
+}
+
+/** Drop a first touch whose serialized form exceeds the cap (loudly, length only). */
+function capFirstTouch(
+    record: FirstTouchRecord,
+    source: ExtensionAttributionSource,
+): FirstTouchRecord | null {
+    const length = JSON.stringify(record).length
+    if (length <= FIRST_TOUCH_MAX_SERIALIZED_CHARS) return record
+    reportDropped(source, 'firstTouch', 'serialized record over cap', {
+        length,
+    })
+    return null
+}
+
+/**
+ * The fields attribution needs, for the signed OAuth `state`: utm_term and
+ * utm_content are dropped and landing_path truncated. Then the serialized cap
+ * applies (over it: first touch dropped, install id kept).
+ */
+export function attributionForOAuthState(
+    attribution: ExtensionSignupAttribution,
+): ExtensionSignupAttribution {
+    const { firstTouch } = attribution
+    if (!firstTouch) return attribution
+    const { utm_term: _utmTerm, utm_content: _utmContent, ...kept } = firstTouch
+    const trimmed: FirstTouchRecord = {
+        ...kept,
+        ...(kept.landing_path !== undefined
+            ? {
+                  landing_path: kept.landing_path.slice(
+                      0,
+                      STATE_LANDING_PATH_MAX_CHARS,
+                  ),
+              }
+            : {}),
+    }
+    return {
+        installId: attribution.installId,
+        firstTouch: capFirstTouch(trimmed, 'authorize_query'),
+    }
 }
 
 /**
@@ -72,7 +126,7 @@ export function resolveExtensionAttribution(
     if (raw.firstTouch !== undefined && raw.firstTouch !== null) {
         const parsed = parseFirstTouchRecord(raw.firstTouch)
         if (parsed.ok) {
-            firstTouch = parsed.record
+            firstTouch = capFirstTouch(parsed.record, source)
         } else {
             reportDropped(source, 'firstTouch', parsed.reason)
         }

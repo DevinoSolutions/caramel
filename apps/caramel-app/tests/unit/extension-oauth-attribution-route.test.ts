@@ -212,6 +212,27 @@ describe('POST /api/extension/oauth: optional iid + firstTouch', () => {
         })
     })
 
+    it('an oversize firstTouch in the POST body is dropped, iid kept', async () => {
+        const big = 'x'.repeat(255)
+        const res = await exchange({
+            iid: IID,
+            firstTouch: {
+                ...record,
+                utm_campaign: big,
+                ref: big,
+                gclid: big,
+                fbclid: big,
+                referrer_domain: big,
+            },
+        })
+        expect(res.status).toBe(200)
+        expect(lastMintAttribution()).toEqual({
+            installId: IID,
+            firstTouch: null,
+        })
+        expect(sentryMock.captureMessage).toHaveBeenCalledTimes(1)
+    })
+
     it('the body wins over the state, field by field', async () => {
         await exchange(
             { iid: OTHER_IID },
@@ -246,6 +267,52 @@ describe('GET /api/extension/oauth/authorize: attribution for the Safari flow', 
             iid: IID,
             firstTouch: record,
         })
+    })
+
+    it('strips utm_term/utm_content and truncates landing_path in the state', async () => {
+        const res = await authorize({
+            iid: IID,
+            ft: JSON.stringify({
+                ...record,
+                utm_term: 'honey alternative',
+                utm_content: 'banner-a',
+                landing_path: `/${'p'.repeat(250)}`,
+            }),
+        })
+        const { state } = (await res.json()) as { state: string }
+        const attribution = decodeState(state).attribution as {
+            firstTouch: Record<string, string>
+        }
+        expect(attribution.firstTouch).not.toHaveProperty('utm_term')
+        expect(attribution.firstTouch).not.toHaveProperty('utm_content')
+        expect(attribution.firstTouch.landing_path).toHaveLength(200)
+        expect(attribution.firstTouch.utm_source).toBe('reddit')
+    })
+
+    it('an oversize record is dropped from the state, iid is kept, one warning (length only)', async () => {
+        const big = 'x'.repeat(255)
+        const res = await authorize({
+            iid: IID,
+            ft: JSON.stringify({
+                ...record,
+                utm_campaign: big,
+                ref: big,
+                gclid: big,
+                fbclid: big,
+                referrer_domain: big,
+                landing_path: big,
+            }),
+        })
+        expect(res.status).toBe(200)
+        const { state } = (await res.json()) as { state: string }
+        expect(decodeState(state).attribution).toEqual({ iid: IID })
+        expect(sentryMock.captureMessage).toHaveBeenCalledTimes(1)
+        const [, options] = sentryMock.captureMessage.mock.calls[0]!
+        expect(options).toMatchObject({
+            level: 'warning',
+            extra: { field: 'firstTouch' },
+        })
+        expect(JSON.stringify(options)).not.toContain('xxxx')
     })
 
     it('without them the state has no attribution key at all (byte-identical to before)', async () => {

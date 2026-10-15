@@ -5,7 +5,10 @@ import {
     isAllowedExtensionRedirectUri,
     reportRejectedExtensionRedirect,
 } from '@/lib/auth/extensionOAuthRedirect'
-import { extensionAttributionFromQuery } from '@/lib/auth/extensionSignupAttribution'
+import {
+    attributionForOAuthState,
+    extensionAttributionFromQuery,
+} from '@/lib/auth/extensionSignupAttribution'
 import { env } from '@/lib/env'
 import { BASE_URL } from '@/lib/env.client'
 import { isValidNonce } from '@/lib/extension-oauth-nonce'
@@ -154,8 +157,9 @@ export const GET = withRoute(
             let oauthUrl: URL
 
             // Generate signed state for CSRF protection that can be validated on exchange
-            const { installId, firstTouch } =
-                extensionAttributionFromQuery(searchParams)
+            const { installId, firstTouch } = attributionForOAuthState(
+                extensionAttributionFromQuery(searchParams),
+            )
             const state = createSignedState({
                 provider,
                 redirectUri,

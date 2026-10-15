@@ -83,10 +83,10 @@ module.exports = [
         // every-website match pattern per runtime, the reachability probe that
         // tells "the browser refused us" apart from "you are offline", and the
         // gesture-safe request. Measured 10.04 kB.
-        // 2026-10-15, raised 11 -> 12 kB: the sign-in sends the install's
-        // attribution (the exchange body fields, the Safari authorize query
-        // and the unreadable-storage report). Measured 10.81 kB.
-        limit: '12 KB',
+        // 2026-10-15: the sign-in sends the install's attribution (the exchange
+        // body fields, the Safari authorize query and the unreadable-storage
+        // report). Measured 10.81 kB, still under the unchanged 11 kB budget.
+        limit: '11 KB',
         brotli: false,
     },
     {
