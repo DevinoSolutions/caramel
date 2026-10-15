@@ -213,9 +213,11 @@ export function initPosthogInstance(
         // The ~10% sample rate lives in the PostHog project 6 setting
         // `session_recording_sample_rate = 0.10` (set 2026-10-15), not in
         // code, so there is no second rate to drift. Replays land in the
-        // self-hosted PostHog (and Sentry) on devino-first: keep it at about
-        // 10%; the 1.0 on-error rate is Sentry-only. Recording is also off
-        // when the browser sends GPC/DNT (recordingOptedOut).
+        // self-hosted PostHog (and Sentry) on devino-first: PostHog is 10%
+        // (that project setting); Sentry's session sample is 5% for now (see
+        // instrumentation-client.ts) and its 1.0 on-error rate is Sentry-only.
+        // Recording is also off when the browser sends GPC/DNT
+        // (recordingOptedOut).
         disable_session_recording: deferRecording || recordingOptedOut,
         session_recording: {
             maskAllInputs: true,

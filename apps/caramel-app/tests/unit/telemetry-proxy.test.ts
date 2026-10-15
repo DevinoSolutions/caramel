@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 const HOST = 'https://posthog.devino.ca'
 
 describe('buildTelemetryRewrites', () => {
-    it('proxies static, array and the catch-all to the PostHog host, in that order', () => {
+    it('proxies static, array, the /s recordings endpoint and the catch-all to the PostHog host, in that order', () => {
         expect(
             buildTelemetryRewrites({ dataset: 'production', host: HOST }),
         ).toEqual([
@@ -29,10 +29,35 @@ describe('buildTelemetryRewrites', () => {
                 destination: `${HOST}/array/:path*`,
             },
             {
+                source: `${TELEMETRY_PATH}/s`,
+                destination: `${HOST}/s/`,
+            },
+            {
                 source: `${TELEMETRY_PATH}/:path*`,
                 destination: `${HOST}/:path*`,
             },
         ])
+    })
+
+    // Session recordings stopped arriving on 2026-10-06: posthog-js POSTs to
+    // /_t/k3v/s/, the catch-all's :path* dropped the slash, and PostHog serves
+    // /s (no slash) from Django as a 403 while /s/ reaches the capture service.
+    it('sends recordings to /s/ WITH the trailing slash, ahead of the catch-all that would drop it', () => {
+        const rewrites = buildTelemetryRewrites({
+            dataset: 'production',
+            host: HOST,
+        })
+        const recordings = rewrites.findIndex(
+            r => r.source === `${TELEMETRY_PATH}/s`,
+        )
+        const catchAll = rewrites.findIndex(
+            r => r.source === `${TELEMETRY_PATH}/:path*`,
+        )
+        expect(recordings).toBeGreaterThanOrEqual(0)
+        expect(recordings).toBeLessThan(catchAll)
+        expect(rewrites[recordings]!.destination).toBe(`${HOST}/s/`)
+        // Only /s moves: the catch-all keeps passing every other path through.
+        expect(rewrites[catchAll]!.destination).toBe(`${HOST}/:path*`)
     })
 
     it('uses the host origin even when the configured value has a path or trailing slash', () => {
@@ -43,6 +68,7 @@ describe('buildTelemetryRewrites', () => {
         expect(rewrites.map(r => r.destination)).toEqual([
             `${HOST}/static/:path*`,
             `${HOST}/array/:path*`,
+            `${HOST}/s/`,
             `${HOST}/:path*`,
         ])
     })
