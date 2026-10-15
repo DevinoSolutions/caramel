@@ -204,11 +204,13 @@ const serverObjectSchema = z.object({
     ),
     // Paid fallback through the Devino proxy (src/lib/proxy-fallback-headers.ts):
     // the app's OWN OpenRouter org key, sent as X-ORF-Fallback-Key only to
-    // https://proxyai.devino.ca and only on a chat() call that opts in. Unset =
-    // no header, behaviour unchanged. Blank is fine; a malformed value refuses
-    // boot here (the message names the variable, never the value) because a
-    // key with a newline would otherwise make every LLM call throw. Server-
-    // only; CI, evals and e2e never set these (vitest.eval.config.ts and
+    // https://proxyai.devino.ca and only for a signed-in caller; no request
+    // sends it today (src/lib/proxy-fallback-env.ts). The wait before it goes
+    // paid is at most 12 s. Unset = no header, behaviour
+    // unchanged. Blank is fine; a malformed value refuses boot here (the
+    // message names the variable, never the value) because a key with a
+    // newline would otherwise make every LLM call throw. Server-only; CI,
+    // evals and e2e never set these (vitest.eval.config.ts and
     // playwright.config.ts blank them).
     OPENROUTER_FALLBACK_API_KEY: z
         .string()
@@ -226,7 +228,7 @@ const serverObjectSchema = z.object({
         .string()
         .optional()
         .refine(isValidFallbackAfterSeconds, {
-            error: 'OPENROUTER_FALLBACK_AFTER_SECONDS must be blank or a plain number of seconds in (0, 300]',
+            error: 'OPENROUTER_FALLBACK_AFTER_SECONDS must be blank or a plain number of seconds in (0, 12]',
         }),
     API_ENCRYPTION_ENABLED: z.string().optional(),
     // Which PostHog project this deploy's SERVER-side captures target (the

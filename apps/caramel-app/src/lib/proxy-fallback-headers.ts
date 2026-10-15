@@ -28,7 +28,20 @@ export const DEFAULT_FALLBACK_AFTER_SECONDS = '8'
 const FALLBACK_KEY_PATTERN = /^sk-or-v1-[A-Za-z0-9]{20,}$/
 const FALLBACK_MODEL_PATTERN = /^[a-z0-9][a-z0-9._-]*\/[A-Za-z0-9._:-]+$/
 const PLAIN_DECIMAL_PATTERN = /^\d+(\.\d+)?$/
-const MAX_FALLBACK_AFTER_SECONDS = 300
+
+/**
+ * Longest wait an app may configure. A call path only carries the headers when
+ * its client deadline is at least this plus `PAID_ANSWER_SECONDS`, so the paid
+ * answer still lands inside the deadline.
+ */
+export const MAX_FALLBACK_AFTER_SECONDS = 12
+
+/** Time a paid answer needs after the proxy switches to it. */
+export const PAID_ANSWER_SECONDS = 8
+
+/** Shortest client deadline, in seconds, of a call path that may carry the headers. */
+export const MIN_PAID_PATH_DEADLINE_SECONDS =
+    MAX_FALLBACK_AFTER_SECONDS + PAID_ANSWER_SECONDS
 
 /** True only for https://proxyai.devino.ca (any path, any case, trailing dot tolerated). */
 export function isDevinoProxyUrl(baseUrl: string | undefined): boolean {
@@ -43,7 +56,7 @@ export function isDevinoProxyUrl(baseUrl: string | undefined): boolean {
     return url.protocol === 'https:' && PAID_FALLBACK_HOSTS.has(host)
 }
 
-/** The canonical seconds string, or undefined unless a plain decimal in (0, 300]. */
+/** The canonical seconds string, or undefined unless a plain decimal in (0, 12]. */
 export function parseFallbackAfterSeconds(
     raw: string | undefined,
 ): string | undefined {
@@ -67,9 +80,21 @@ export function isValidFallbackModel(raw: string | undefined): boolean {
     return !text || FALLBACK_MODEL_PATTERN.test(text)
 }
 
-/** Env-schema check: blank/unset, or a plain decimal in (0, 300]. */
+/** Env-schema check: blank/unset, or a plain decimal in (0, 12]. */
 export function isValidFallbackAfterSeconds(raw: string | undefined): boolean {
     return !raw?.trim() || parseFallbackAfterSeconds(raw) !== undefined
+}
+
+/**
+ * `fetch` for every client that sends the fallback headers: a redirect fails
+ * instead of following, because fetch only strips `Authorization` and cookies
+ * on a cross-origin redirect and would forward `X-ORF-Fallback-Key`.
+ */
+export function fetchWithoutRedirects(
+    input: string | URL | Request,
+    init?: RequestInit,
+): Promise<Response> {
+    return fetch(input, { ...init, redirect: 'error' })
 }
 
 /** Pure: the fallback headers, or `{}` without a valid key or off the Devino proxy. */
