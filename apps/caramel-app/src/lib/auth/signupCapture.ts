@@ -25,7 +25,11 @@ import {
     readPosthogDistinctId,
     type HeaderReader,
 } from '@/lib/analytics/firstTouchServer'
-import { buildFirstTouchProperties } from '@/lib/analytics/identityProperties'
+import {
+    buildFirstTouchProperties,
+    buildUserPersonProperties,
+    type IdentityUser,
+} from '@/lib/analytics/identityProperties'
 import {
     aliasServerDistinctId,
     captureServerEvent,
@@ -138,13 +142,26 @@ async function boundedStep(
 }
 
 export async function recordSignup(args: {
-    user: { id: string }
+    /**
+     * The new account. Beyond the id, the extension surface reads email / name /
+     * createdAt to identify the person (see `$set` below).
+     */
+    user: IdentityUser
     /** The request's headers when there is a request (null for the extension mint). */
     headers: HeaderReader | null
     method: RecordedSignupMethod
     surface: SignupSurface
+    /**
+     * A first-touch record the caller already has, used INSTEAD of the request's
+     * `cm_ft` cookie. The extension mint has no cookie (its fetch carries none),
+     * so the extension hands over the record it read on its own /welcome page.
+     * Absent = read the cookie from `headers`.
+     */
+    firstTouch?: FirstTouchRecord | null
+    /** The extension install id (joins to `extension_installed`'s event uuid). */
+    installId?: string | null
 }): Promise<SignupOutcome> {
-    const { user, headers, method, surface } = args
+    const { user, headers, method, surface, installId } = args
     const outcome: SignupOutcome = {
         acquisitionSaved: false,
         eventCaptured: false,
@@ -153,9 +170,17 @@ export async function recordSignup(args: {
 
     try {
         // Invalid cookie => null + a Sentry warning inside the reader.
-        const firstTouch = readFirstTouchFromHeaders(headers)
+        const firstTouch = args.firstTouch ?? readFirstTouchFromHeaders(headers)
         const acquisition = buildAcquisition({ firstTouch, method, surface })
         const firstTouchProperties = buildFirstTouchProperties(firstTouch)
+        // The browser identifies a WEB signup itself (email, name) as soon as
+        // the session exists. An extension signup never loads the site's
+        // analytics, so without this its person stays anonymous (74 of 82 had
+        // no email). The same builder the browser uses, so the properties and
+        // their names are identical; web is left alone so the two sides never
+        // race to set the same person.
+        const identity =
+            surface === 'extension' ? buildUserPersonProperties(user) : null
 
         try {
             // WRITE-ONCE: only a row whose acquisition is still database NULL
@@ -192,7 +217,9 @@ export async function recordSignup(args: {
                     method,
                     signup_surface: surface,
                     source: acquisition.source,
+                    ...(installId ? { install_id: installId } : {}),
                     ...firstTouchProperties,
+                    ...(identity ? { $set: identity } : {}),
                     // Person-level, write-once: the acquisition story the
                     // browser also sets at identify, so a user whose browser
                     // analytics never arrived still has it.
@@ -201,6 +228,7 @@ export async function recordSignup(args: {
                         acquisition_source: acquisition.source,
                         signup_surface: surface,
                         signup_method: method,
+                        ...(installId ? { install_id: installId } : {}),
                     },
                 },
             }),

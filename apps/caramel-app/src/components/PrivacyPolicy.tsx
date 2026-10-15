@@ -162,6 +162,17 @@ const PrivacyPolicy = () => {
                                 from.
                             </>,
                             <>
+                                <strong>How you first found Caramel.</strong>{' '}
+                                Our website keeps a small first-party record of
+                                the campaign, link or site that first sent you
+                                to it, and the first page you landed on, and
+                                links it to your account when you sign up. If
+                                you sign in from the extension, it sends us the
+                                same record, which it reads only from
+                                grabcaramel.com, together with a random install
+                                ID, so your account is attributed the same way.
+                            </>,
+                            <>
                                 <strong>Favorite stores</strong> you mark in the
                                 extension or on the website.
                             </>,

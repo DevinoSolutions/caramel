@@ -41,6 +41,7 @@ const SHIPPED_TO_STRANGERS = [
     'coupon-runner.js',
     'UI-helpers.js',
     'inject.js',
+    'install-attribution.js',
     'background.js',
 ]
 // Not in any entrypoint's import graph, but shipped and run in the store's

@@ -143,6 +143,31 @@ export function buildFirstTouchProperties(
 }
 
 /**
+ * The WHO half of a person's `$set`: the properties that identify the account
+ * holder (email, display name, the user-id join key, account age). The ONE
+ * mapping, used by the browser's identify (via `buildIdentityPayload`) and by
+ * the server for a signup the browser never saw (the extension's), so a person
+ * created either way carries the same identity under the same names.
+ */
+export function buildUserPersonProperties(
+    user: IdentityUser,
+): PersonProperties {
+    return compactProperties({
+        email: user.email,
+        // `$email` is kept alongside `email` for continuity: the first
+        // PostHog integration wrote only `$email` and existing cohorts and
+        // dashboards still filter on it.
+        $email: user.email,
+        name: resolveDisplayName(user),
+        // Makes the analytics <-> customer join explicit: the distinct_id IS
+        // the internal user id, and nobody reading a dashboard should have to
+        // know that already.
+        rc_app_user_id: user.id,
+        user_created_at: toIsoTimestamp(user.createdAt),
+    })
+}
+
+/**
  * Build the `$set` / `$set_once` bags for one identify call.
  *
  * `$set` is the current truth about the person and is safe to re-send;
@@ -161,23 +186,13 @@ export function buildIdentityPayload(input: {
     const createdAt = toIsoTimestamp(user.createdAt)
 
     const set = compactProperties({
-        email: user.email,
-        // `$email` is kept alongside `email` for continuity: the first
-        // PostHog integration wrote only `$email` and existing cohorts and
-        // dashboards still filter on it.
-        $email: user.email,
-        name: resolveDisplayName(user),
-        // Makes the analytics <-> customer join explicit: the distinct_id IS
-        // the internal user id, and nobody reading a dashboard should have to
-        // know that already.
-        rc_app_user_id: user.id,
+        ...buildUserPersonProperties(user),
         app_id: context.app_id,
         app_version: context.app_version,
         platform: context.platform,
         environment: context.environment,
         locale: context.locale,
         timezone: context.timezone,
-        user_created_at: createdAt,
     })
 
     const setOnce = compactProperties({

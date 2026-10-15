@@ -68,6 +68,9 @@ export const GROUPS = {
         'coupon-apply.js',
         'code-capture.js',
         'coupon-fetch.js',
+        // Install attribution: bundled into the background, popup and content
+        // realms alike, weighed once here (it is imported by coupon-runner.js).
+        'install-attribution.js',
         'coupon-runner.js',
         'UI-helpers.js',
         'inject.js',

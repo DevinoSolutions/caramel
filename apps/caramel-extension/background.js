@@ -20,6 +20,7 @@ import {
     codeSharingAccepted,
     readCodeSharingConsent,
 } from './code-sharing-consent.js'
+import { saveInstallId } from './install-attribution.js'
 
 // Assigned by initBackground() instead of at module evaluation: the IIFE throws
 // when neither global exists, which is exactly the case in the Node import
@@ -590,13 +591,22 @@ export function initBackground() {
     currentBrowser.runtime.onInstalled.addListener(details => {
         if (details?.reason !== 'install') return
         try {
+            const iid = crypto.randomUUID()
+            // Keep the install id: the sign-in sends it to the server so the
+            // account joins this install's `extension_installed` event, and the
+            // /welcome page (content script) adds the first-touch record next
+            // to it. Not awaited: the tab does not depend on it, and storage
+            // answers long before a page has loaded. A refusal is recorded.
+            saveInstallId(currentBrowser, iid).catch(err =>
+                logError('onInstalledSaveInstallId', err),
+            )
             const url = welcomeUrl(
                 detectStoreChannel(
                     currentBrowser.runtime.getURL(''),
                     navigator.userAgent,
                 ),
                 currentBrowser.runtime.getManifest().version,
-                crypto.randomUUID(),
+                iid,
             )
             currentBrowser.tabs.create({ url }, () => {
                 if (currentBrowser.runtime.lastError)

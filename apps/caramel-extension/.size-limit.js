@@ -55,7 +55,12 @@ module.exports = [
         // builder is NOT in this bundle, it ships as assets/coupon-box-outline.js
         // and has its own budget below. 4.9% headroom over 111.27 kB, so the
         // next capability trips the ratchet.
-        limit: '117 KB',
+        // 2026-10-15, raised 117 -> 120 kB: install attribution
+        // (install-attribution.js plus the /welcome first-touch capture in
+        // coupon-runner.js) — the cookie reader pinned to the website's
+        // schema, the install-id/record storage and the bounded retry.
+        // Measured 111.27 -> 114.55 kB (+3.3 kB): one new capability, not prose.
+        limit: '120 KB',
         brotli: false,
     },
     {
@@ -78,7 +83,10 @@ module.exports = [
         // every-website match pattern per runtime, the reachability probe that
         // tells "the browser refused us" apart from "you are offline", and the
         // gesture-safe request. Measured 10.04 kB.
-        limit: '11 KB',
+        // 2026-10-15, raised 11 -> 12 kB: the sign-in sends the install's
+        // attribution (the exchange body fields, the Safari authorize query
+        // and the unreadable-storage report). Measured 10.81 kB.
+        limit: '12 KB',
         brotli: false,
     },
     {

@@ -1,9 +1,11 @@
+import type { FirstTouchRecord } from '@/lib/analytics/firstTouchRecord'
 import { handleRouteError } from '@/lib/api/handleRouteError'
 import { preflight, withRoute } from '@/lib/api/withRoute'
 import {
     isAllowedExtensionRedirectUri,
     reportRejectedExtensionRedirect,
 } from '@/lib/auth/extensionOAuthRedirect'
+import { extensionAttributionFromQuery } from '@/lib/auth/extensionSignupAttribution'
 import { env } from '@/lib/env'
 import { BASE_URL } from '@/lib/env.client'
 import { isValidNonce } from '@/lib/extension-oauth-nonce'
@@ -33,6 +35,14 @@ const createSignedState = (payload: {
     // POST exchange's verifySignedState() re-hashes the decoded payload as-is
     // (it never re-serializes), so an EXTRA key cannot invalidate a signature.
     nonce?: string
+    // The install id + first-touch record the extension passed as `iid` / `ft`
+    // (validated). Only the Safari flow sends them here: its exchange runs
+    // server-side on /redirect, which cannot see the extension's storage, so the
+    // signed state is how they reach POST /api/extension/oauth. The other
+    // browsers put the same two fields in that POST's body. Omitted entirely
+    // (not null) when absent, so an attribution-less state is byte-identical to
+    // what it was before.
+    attribution?: { iid?: string; firstTouch?: FirstTouchRecord }
 }) => {
     if (!OAUTH_STATE_SECRET) {
         throw new Error('EXTENSION_OAUTH_STATE_SECRET is not configured')
@@ -144,7 +154,20 @@ export const GET = withRoute(
             let oauthUrl: URL
 
             // Generate signed state for CSRF protection that can be validated on exchange
-            const state = createSignedState({ provider, redirectUri, nonce })
+            const { installId, firstTouch } =
+                extensionAttributionFromQuery(searchParams)
+            const state = createSignedState({
+                provider,
+                redirectUri,
+                nonce,
+                attribution:
+                    installId || firstTouch
+                        ? {
+                              ...(installId ? { iid: installId } : {}),
+                              ...(firstTouch ? { firstTouch } : {}),
+                          }
+                        : undefined,
+            })
 
             if (provider === 'google') {
                 // Google OAuth 2.0 authorization endpoint

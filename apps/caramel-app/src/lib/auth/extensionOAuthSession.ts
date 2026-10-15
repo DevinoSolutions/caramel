@@ -28,6 +28,10 @@
 // dead fetch was deleted (NF-07). Parked per DESIGN.md §2(c): adopt
 // better-auth's own mint once a public external-code-exchange API
 // exists.
+import {
+    NO_EXTENSION_ATTRIBUTION,
+    type ExtensionSignupAttribution,
+} from '@/lib/auth/extensionSignupAttribution'
 import { recordSignup } from '@/lib/auth/signupCapture'
 import prisma from '@/lib/prisma'
 import { randomBytes } from 'crypto'
@@ -74,15 +78,21 @@ export class ExtensionOAuthEmailRequiredError extends Error {
  * returns the raw session token as `token` — the extension's bearer
  * credential (better-auth's bearer plugin verifies it as-is; see the
  * module header).
+ *
+ * `attribution` is the install id + first-touch record the extension handed
+ * over (already validated, see extensionSignupAttribution.ts); it only matters
+ * when this call CREATES the user, and defaults to none (old builds).
  */
 export async function mintExtensionSession({
     provider,
     providerUser,
     tokens,
+    attribution = NO_EXTENSION_ATTRIBUTION,
 }: {
     provider: ExtensionOAuthProvider
     providerUser: ExtensionOAuthProviderUser
     tokens: ExtensionOAuthTokens
+    attribution?: ExtensionSignupAttribution
 }): Promise<MintedExtensionSession> {
     const email = providerUser.email
         ? providerUser.email.toLowerCase().trim()
@@ -134,15 +144,19 @@ export async function mintExtensionSession({
         })
         // This raw create bypasses better-auth's databaseHooks, so the signup
         // is recorded here. The extension's fetch carries no site cookies, so
-        // there are no headers to read a first-touch cookie from: the
-        // acquisition is {source:'unknown', signup_surface:'extension'}, and
-        // the install's own attribution lives on its `extension_installed`
-        // event (keyed by the install id). recordSignup never throws or blocks.
+        // there are no headers to read a first-touch cookie from: the record
+        // the extension read on its own /welcome page rides in
+        // `attribution.firstTouch`, and the install id joins this event to the
+        // install's `extension_installed`. A build that sends neither (an old
+        // one) is {source:'unknown', signup_surface:'extension'}, as before.
+        // recordSignup never throws or blocks.
         await recordSignup({
             user,
             headers: null,
             method: provider,
             surface: 'extension',
+            firstTouch: attribution.firstTouch,
+            installId: attribution.installId,
         })
     } else {
         // Reassign `user` so the minted response below reflects the

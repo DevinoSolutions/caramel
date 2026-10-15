@@ -59,6 +59,7 @@ import {
     waitForVisible,
     waitUntilReady,
 } from './dom-utils.js'
+import { recordWelcomeFirstTouch } from './install-attribution.js'
 import {
     getDomainRecord,
     startCheckoutDetection,
@@ -1368,6 +1369,43 @@ export function caramelStampPresence() {
     )
 }
 
+/* Install attribution (see install-attribution.js): on the /welcome page the
+ * extension opened after install, copy the site's first-touch record
+ * (`cm_ft`, first-party and readable here) next to the stored install id, so
+ * the sign-in can hand it to the server. The site writes that cookie from its
+ * own client code, which can run after this content script does, so ask a few
+ * times and stop at the first definite answer. Anything but 'no-cookie' is
+ * definite; after the last try 'no-cookie' is logged, not silently dropped.
+ * Exported for the suite; called from initCouponRunner. */
+const CARAMEL_FIRST_TOUCH_TRIES = 6
+const CARAMEL_FIRST_TOUCH_GAP_MS = 1500
+export async function caramelCaptureInstallFirstTouch() {
+    for (let i = 0; i < CARAMEL_FIRST_TOUCH_TRIES; i++) {
+        const { status, invalid } = await recordWelcomeFirstTouch(
+            currentBrowser,
+            {
+                href: location.href,
+                cookie: document.cookie,
+                trustedOrigins: CARAMEL_ALLOWED_ORIGINS,
+            },
+        )
+        if (invalid.length)
+            logError(
+                'INSTALL_FIRST_TOUCH_COOKIE_INVALID',
+                new Error(invalid.join('; ')),
+            )
+        if (status !== 'no-cookie') {
+            if (status === 'saved')
+                log('INSTALL_FIRST_TOUCH_SAVED', { tries: i + 1 })
+            return status
+        }
+        if (i + 1 < CARAMEL_FIRST_TOUCH_TRIES)
+            await sleep(CARAMEL_FIRST_TOUCH_GAP_MS)
+    }
+    log('INSTALL_FIRST_TOUCH_ABSENT', { tries: CARAMEL_FIRST_TOUCH_TRIES })
+    return 'no-cookie'
+}
+
 const CARAMEL_HELLO_TRIES = 5
 const CARAMEL_HELLO_GAP_MS = 600
 // Called from initCouponRunner() below; exported for the suite.
@@ -1469,6 +1507,9 @@ export function initCouponRunner() {
         if (CARAMEL_ALLOWED_ORIGINS.has(location.origin)) {
             caramelStampPresence()
             caramelAnnounceToWebsite()
+            caramelCaptureInstallFirstTouch().catch(err =>
+                logError('INSTALL_FIRST_TOUCH_FAILED', err),
+            )
         }
 
         currentBrowser.runtime.onMessage.addListener((req, _s, send) => {
