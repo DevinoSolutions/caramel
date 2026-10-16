@@ -172,9 +172,19 @@ export async function getDomainRecord(domain) {
             }
         }
     }
-    return getDomainRecord.cache?.find(r =>
-        _hostMatchesDomain(domain, r.domain),
-    )
+    // The most specific row wins, not the first. oldnavy.gap.com has its own
+    // row, but gap.com is served before it, and a first-match scan gave Old
+    // Navy's cart Gap's row: Gap's codes, Gap's selectors. 62 configured hosts
+    // in the 2026-10-16 list were shadowed by a parent store that way. On a
+    // tie the earlier row keeps it, as before.
+    let best
+    for (const r of getDomainRecord.cache || [])
+        if (
+            _hostMatchesDomain(domain, r.domain) &&
+            !(best && best.domain.length >= r.domain.length)
+        )
+            best = r
+    return best
 }
 getDomainRecord.cache = null
 
