@@ -68,12 +68,12 @@ when the edge misses.
 (porkbun.com today) is served ONLY in `gated`, tagged with the capability it
 `requires`, so extension builds that predate the bucket cannot auto-apply on it
 (a per-request version/header gate would be ignored or poisoned by the edge
-cache above). Newer builds use a gated row only while the page proves the
-capability (`apps/caramel-extension/extension-capabilities.js`). The supplier
-row is unchanged; gating is a read-side rule, not a catalog write.
+cache above). No extension build reads `gated` yet (TODO 2026-10-16, see
+`supportedStoresCache.ts`): the reader belongs in `store-detect.js`, which is
+held back while other work owns that file. The supplier row is unchanged;
+gating is a read-side rule, not a catalog write.
 
-**Gated stores on `GET /api/coupons`.** The payload split above only protects
-builds that read `gated`. Installed 1.4.13/1.4.14 have a generic promo-box
+**Gated stores on `GET /api/coupons`.** Installed 1.4.13/1.4.14 have a generic promo-box
 finder that needs no store config, so on porkbun.com they fetch codes by domain
 from `/api/coupons` and drive the checkout. That endpoint therefore withholds a
 gated store's codes (`coupons: []`, `total: 0`, header
@@ -85,7 +85,10 @@ website, curl) still get the full list. Gated-site responses are
 `Cache-Control: private, no-store` because the Cloudflare rule keys on the URL,
 not the Origin. Nothing lifts the withhold except a build that proves the
 capability; removing the store from `EXTENSION_CAPABILITY_GATES` lifts it for
-everyone. Verify on prod:
+everyone. The Origin half of the check is a stopgap for builds before 1.4.15
+(see the dated TODO in `extensionCapabilityGates.ts`). The browser may also hold
+a pre-deploy copy of the full list (`max-age=14400` on the old response) for up
+to 4 h; nothing server-side can reach it. Verify on prod:
 
 ```
 curl -s 'https://grabcaramel.com/api/coupons?site=porkbun.com&limit=3'   # website view: coupons present

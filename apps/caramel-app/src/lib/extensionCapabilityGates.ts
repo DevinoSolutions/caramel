@@ -27,6 +27,12 @@
 // page marker). No proof from an extension means no codes. The website and
 // plain API consumers still get the full list.
 //
+// TODO(2026-10-16): the extension-Origin half of that check is a STOPGAP for
+// builds before 1.4.15, which cannot be updated and cannot send `caps`
+// (1.4.13/1.4.14 are the ones with the finder). Once those are a negligible
+// share of active installs, drop the Origin test and gate on the missing proof
+// alone, or drop the gate for a store once its helper ships everywhere.
+//
 // Adding a store here is a deliberate decision: it makes the store invisible to
 // every extension build that lacks the capability (they treat it like a store
 // with no config). Name the capability in extension-capabilities.js first.

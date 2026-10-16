@@ -59,11 +59,6 @@ import {
     waitForElement,
 } from './dom-utils.js'
 import {
-    CARAMEL_CAPABILITY_MARKERS,
-    CARAMEL_HOST_CAPABILITY_REQUIREMENTS,
-    caramelCapabilityHeld,
-} from './extension-capabilities.js'
-import {
     hideTestingModal,
     insertCaramelPrompt,
     showFinalModal,
@@ -102,7 +97,6 @@ export async function getDomainRecord(domain) {
             const entry = stored?.[STORE_CACHE_KEY]
             if (ttl > 0 && entry?.data?.length && Date.now() - entry.ts < ttl) {
                 getDomainRecord.cache = entry.data
-                getDomainRecord.gated = entry.gated ?? []
                 log('Loaded supported domains from local cache')
             }
         } catch {
@@ -140,11 +134,9 @@ export async function getDomainRecord(domain) {
                     failure = null
                     if (resp?.supported?.length) {
                         getDomainRecord.cache = resp.supported
-                        getDomainRecord.gated = resp.gated ?? []
                         currentBrowser.storage.local.set({
                             [STORE_CACHE_KEY]: {
                                 data: resp.supported,
-                                gated: getDomainRecord.gated,
                                 ts: Date.now(),
                             },
                         })
@@ -173,7 +165,6 @@ export async function getDomainRecord(domain) {
                 const entry = stored?.[STORE_CACHE_KEY]
                 if (entry?.data?.length) {
                     getDomainRecord.cache = entry.data
-                    getDomainRecord.gated = entry.gated ?? []
                     log('Loaded supported domains from expired cache')
                 }
             } catch {
@@ -181,83 +172,11 @@ export async function getDomainRecord(domain) {
             }
         }
     }
-    const rec =
-        getDomainRecord.cache?.find(r =>
-            _hostMatchesDomain(domain, r.domain),
-        ) ??
-        getDomainRecord.gated?.find(r => _hostMatchesDomain(domain, r.domain))
-    if (!rec) return undefined
-    const need = rec.requires ?? _localRequirementFor(rec.domain)
-    if (!need || caramelCapabilityHeld(need)) return rec
-    _noteWithheld(rec.domain, need)
-    return undefined
+    return getDomainRecord.cache?.find(r =>
+        _hostMatchesDomain(domain, r.domain),
+    )
 }
 getDomainRecord.cache = null
-getDomainRecord.gated = []
-
-/* A store whose apply config only works with a page-side helper running
- * (extension-capabilities.js). The server keeps such a row out of `supported`,
- * where builds that predate this check would drive the store unprotected, and
- * tags it with what it `requires`. It becomes a normal record only when the
- * page proves the helper is live; otherwise the store is treated exactly like
- * one with no config, which is what an old build sees. The check runs on every
- * lookup (never cached): it describes this page, not this install. */
-function _localRequirementFor(host) {
-    for (const [domain, need] of Object.entries(
-        CARAMEL_HOST_CAPABILITY_REQUIREMENTS,
-    )) {
-        if (_hostMatchesDomain(host, domain)) return need
-    }
-    return undefined
-}
-
-function _noteWithheld(domain, requires) {
-    // Once per page: this runs on every lookup and the fact does not change.
-    if (_gatedWithheldLogged.has(domain)) return
-    _gatedWithheldLogged.add(domain)
-    log('STORE_GATED_CAPABILITY_MISSING', { domain, requires })
-    recordTiming('STORE_GATED_CAPABILITY_MISSING', { domain, requires })
-}
-
-/* Is this host one whose helper has not (yet) proven itself on this page?
- * Asked by isCheckout BEFORE anything else, because the config-less routes (the
- * platform-cart probe, the promo-box finder) would otherwise drive the store
- * without a config row at all. Synchronous and server-independent. */
-export function caramelStoreWithheld(host) {
-    const need =
-        getDomainRecord.gated?.find(r => _hostMatchesDomain(host, r.domain))
-            ?.requires ?? _localRequirementFor(host)
-    if (!need || caramelCapabilityHeld(need)) return false
-    _noteWithheld(host, need)
-    return true
-}
-const _gatedWithheldLogged = new Set()
-
-/* The helper can stamp its marker AFTER detection first ran (its handler comes
- * from a late script), and detection on a no-record page installs nothing that
- * would look again. So while the store is withheld, watch for the marker and
- * run detection once more the moment it lands. Bounded: the helper either
- * proves itself within seconds of load or this page is not one it runs on. */
-const CAPABILITY_WAIT_MS = 20000
-let _capabilityWatchStarted = false
-function _retryWhenCapabilityArrives() {
-    if (_capabilityWatchStarted) return
-    _capabilityWatchStarted = true
-    const markers = Object.values(CARAMEL_CAPABILITY_MARKERS)
-    const watch = new MutationObserver(() => {
-        if (caramelStoreWithheld(location.hostname)) return
-        watch.disconnect()
-        clearTimeout(timer)
-        startCheckoutDetection().catch(e =>
-            logError('startCheckoutDetection (capability arrived)', e),
-        )
-    })
-    const timer = setTimeout(() => watch.disconnect(), CAPABILITY_WAIT_MS)
-    watch.observe(document.documentElement, {
-        attributes: true,
-        attributeFilter: markers,
-    })
-}
 
 // Match the active hostname to a supported-store domain. Accept an exact match,
 // a real dotted subdomain (www./checkout./secure.<domain>), or a hyphen-prefixed
@@ -537,7 +456,6 @@ export function caramelConfiglessRecord(hostname) {
 // tests/cart-host-intent.test.mjs and tests/disclosure-reveal.test.mjs, which
 // pin this gate directly.
 export async function isCheckout() {
-    if (caramelStoreWithheld(location.hostname)) return false
     const rec = await getDomainRecord(location.hostname)
     /* No config row is not the same as nothing we can do.
      *
@@ -979,7 +897,6 @@ export async function startCheckoutDetection() {
         return
     }
     await tryInitialize()
-    if (caramelStoreWithheld(location.hostname)) _retryWhenCapabilityArrives()
     const rec = await getDomainRecord(location.hostname)
     // Shopper-typed code capture (idempotent; needs the store's own selectors,
     // so an unsupported store has nothing to watch). Armed BEFORE the observer

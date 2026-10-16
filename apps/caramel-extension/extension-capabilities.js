@@ -3,12 +3,11 @@
 //
 // WHY: some stores can only be driven safely when a page-world helper is
 // running (porkbun.com: porkbun-alert-shim.js, so a refused code does not open
-// a blocking alert()). The server publishes such a store's apply config in the
-// `gated` bucket of GET /api/extension/supported-stores, tagged with the
-// capability it `requires`, and ONLY a build that understands `gated` ever
-// reads it — builds without this file never look at the bucket, so they cannot
-// auto-apply on that store at all. A build that does look still must not
-// guess: it asks the PAGE whether the helper is actually running.
+// a blocking alert()). GET /api/coupons withholds such a store's codes from an
+// extension that does not say the helper is running (`?caps=`, sent by
+// coupon-fetch.js), so a build that never heard of the helper -- every build
+// before this file -- gets no codes there and has nothing to try. A build that
+// does know must not guess: it asks the PAGE whether the helper is running.
 //
 // The answer is a marker the helper stamps on <html> from its own world. The
 // DOM is the one thing both worlds share, so this measures what ran on this
@@ -27,14 +26,11 @@ export const CARAMEL_CAPABILITY_MARKERS = Object.freeze({
     alertShim: 'data-caramel-alert-shim',
 })
 
-// Stores this build knows need a capability, whatever the server says. The
-// server's `gated` bucket keeps the config away from OLD builds; this table is
-// for THIS one, so that (a) a row that reached `supported` anyway (the supplier
-// pushed before the server change was live, or a cached payload from before it)
-// is still withheld, and (b) the generic paths that need no config at all (the
-// platform-cart probe, the promo-box finder) stay off the store too.
-// apps/caramel-app/tests/unit/extension-capability-gates.test.ts pins this to
-// the server's EXTENSION_CAPABILITY_GATES.
+// Stores this build knows need a capability. coupon-fetch.js uses it to wait
+// for the helper's marker before asking for codes on such a store, because the
+// helper may stamp it at the page's load event, after the first fetch would
+// have gone out. apps/caramel-app/tests/unit/extension-capability-gates.test.ts
+// pins this to the server's EXTENSION_CAPABILITY_GATES.
 export const CARAMEL_HOST_CAPABILITY_REQUIREMENTS = Object.freeze({
     'porkbun.com': 'alertShim',
 })

@@ -59,6 +59,10 @@ async function build(): Promise<SupportedStoresPayload> {
         requires: requiredCapabilityFor(r.store_name) ?? undefined,
     }))
     // Gated stores leave `supported` entirely (extensionCapabilityGates.ts).
+    // TODO(2026-10-16): no extension build reads `gated` yet. Its reader belongs
+    // in store-detect.js (getDomainRecord), which is held back while other work
+    // owns that file; until then porkbun.com has no apply config on any build and
+    // only the promo-box finder, behind the /api/coupons proof, can drive it.
     const supported = entries.filter(e => e.requires === undefined)
     const gated = entries.filter(e => e.requires !== undefined)
     const body = JSON.stringify({ supported, gated })
