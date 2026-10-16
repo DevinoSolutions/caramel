@@ -24,6 +24,20 @@
  *   G  no config, a server-named box where
  *      the store SAYS "applied" but the
  *      total never moves                 -> no saving, no "worked" report
+ *   H  no config, a labelled box that
+ *      applies on Enter (no button), the
+ *      server names none                 -> the codes to copy, nothing pressed
+ *   I  no config, a box only the server
+ *      can name, applies on Enter        -> one pick asked, Enter pressed,
+ *                                           the true saving
+ *   J  no config, a box the rules find in
+ *      a cart that reloads per code      -> both codes tried across the
+ *                                           reloads, the true saving of the
+ *                                           one that worked
+ *   K  as J, but a box only the server
+ *      can name                          -> skipped unless the build keeps a
+ *                                           server pick across a reload
+ *                                           (CARAMEL_AUTODETECT_KEPT_PICK=1)
  *
  * Run: pnpm test:autodetect          (default: .output/chrome-mv3-dev)
  *      CARAMEL_EXT_DIR=<dir> pnpm test:autodetect
@@ -162,6 +176,69 @@ const WRONG_BOX =
     '<div class="news"><input id="in" name="newsletter" type="email">' +
     '<a id="btn" href="/checkout/next">Apply</a></div>'
 
+// Boxes that apply on Enter: no button at all. The page answers the keydown
+// the way such carts do. The rules recognise the labelled one; only the
+// server's pick can name the bare one.
+const enterPage = labelled =>
+    SHELL(`
+<div class="row"><span>Total</span> <span id="tot">$100.00</span></div>
+<div class="promo">${
+        labelled
+            ? '<label for="in">Discount code</label><input id="in" name="discount_code" type="text">'
+            : '<input id="in" name="field_7" type="text">'
+    }</div>
+<script>
+const input = document.getElementById('in')
+input.addEventListener('keydown', e => {
+    if (e.key !== 'Enter') return
+    const code = input.value
+    window.__submits.push('enter:' + code)
+    setTimeout(() => {
+        const note = document.createElement('div')
+        if (code === 'SAVE20') {
+            document.getElementById('tot').textContent = '$80.00'
+            note.textContent = 'Discount applied'
+        } else {
+            note.textContent = 'Sorry, ' + code + ' is not a valid code.'
+        }
+        input.parentElement.appendChild(note)
+    }, 200)
+})
+</script>`)
+
+/* A cart that posts its discount form and reloads the whole page after every
+ * code, the way Magento 2's couponPost does. The cart lives on the "server"
+ * (this closure): SAVE20 is refused, TENOFF takes $10 off, and the reloaded
+ * page says so. `labelled` gives the rules a box they recognise; without it
+ * only the server's pick can name the box. `posts` records every code the
+ * store received. */
+function reloadingCart(labelled) {
+    const posts = []
+    let applied = null
+    let note = ''
+    const field = labelled ? 'discount_code' : 'field_7'
+    const serve = request => {
+        if (request.method() === 'POST') {
+            const code =
+                new URLSearchParams(request.postData() || '').get(field) || ''
+            posts.push(code)
+            if (code === 'TENOFF') {
+                applied = code
+                note = 'Discount applied'
+            } else note = 'Sorry, ' + code + ' is not a valid code.'
+        }
+        const box = labelled
+            ? '<label for="in">Discount code</label><input id="in" name="discount_code" type="text">' +
+              '<button id="btn" type="submit">Apply</button>'
+            : '<input id="in" name="field_7" type="text">' +
+              '<button id="btn" type="submit">Go</button>'
+        return SHELL(`
+<div class="row"><span>Total</span> <span id="tot">$${applied ? '90.00' : '100.00'}</span></div>
+<form method="post" action="/cart" class="promo">${box}<div class="note">${note}</div></form>`)
+    }
+    return { posts, serve }
+}
+
 /* Replaces fetch inside the service worker (see test-guards.mjs for why the
  * worker's own requests are not routed through Playwright). Every pick request
  * and every coupon report is recorded in extension storage, behind a
@@ -257,6 +334,7 @@ async function runScenario({
     host,
     path,
     page: html,
+    serve = null,
     flags,
     pickPlan = null,
     expectPrompt = true,
@@ -285,7 +363,7 @@ async function runScenario({
             return route.fulfill({
                 status: 200,
                 contentType: 'text/html; charset=utf-8',
-                body: html,
+                body: serve ? serve(route.request()) : html,
             })
         })
 
@@ -583,11 +661,140 @@ const SCENARIOS = [
             check('fires no "worked" report', worked.length === 0)
         },
     },
+    {
+        // The rules never type into a box with no button to confirm it: a
+        // field named "Discount code" alone is not enough. Such a box is used
+        // only when the server names it (I). When the server says no box,
+        // this page ends exactly where it did before the finder existed.
+        name: 'H no config, a box the rules see but that applies on Enter, the server names none — the codes to copy',
+        host: 'shop-with-an-enter-box.example',
+        path: '/cart',
+        page: enterPage(true),
+        flags: true,
+        assert: ({ modal, state, savings, picks, worked }) => {
+            check('asks the server once', picks.length === 1)
+            check(
+                'presses nothing anywhere',
+                state.submits.length === 0,
+                JSON.stringify(state.submits),
+            )
+            check(
+                'hands over the codes to copy',
+                /SAVE20/.test(modal) && /TENOFF/.test(modal),
+                modal.slice(0, 120),
+            )
+            check('banks nothing', savings.length === 0)
+            check('fires no "worked" report', worked.length === 0)
+        },
+    },
+    {
+        name: 'I no config, a box only the server can name that applies on Enter — the true saving',
+        host: 'shop-with-a-bare-enter-box.example',
+        path: '/cart',
+        page: enterPage(false),
+        flags: true,
+        // The server names the input and no button.
+        pickPlan: { input: 'textbox', button: null },
+        assert: ({ modal, state, savings, picks, worked }) => {
+            check(
+                'asks the server once',
+                picks.length === 1,
+                JSON.stringify(picks),
+            )
+            check(
+                'presses Enter with SAVE20 in the named box',
+                state.submits[0] === 'enter:SAVE20',
+                JSON.stringify(state.submits),
+            )
+            check('reports the true $20.00 saving', /20\.00/.test(modal))
+            check(
+                'banks exactly that saving',
+                savings.length === 1 &&
+                    Math.abs(savings[0]?.amount - 20) < 0.01,
+                JSON.stringify(savings),
+            )
+            check('fires one "worked" report', worked.length === 1)
+        },
+    },
+    (() => {
+        const cart = reloadingCart(true)
+        return {
+            name: 'J no config, a box the rules find in a cart that reloads per code — the true saving',
+            host: 'shop-that-reloads.example',
+            path: '/cart',
+            serve: cart.serve,
+            flags: true,
+            assert: ({ modal, savings, picks, worked }) => {
+                check(
+                    'the store received both codes, one per reload',
+                    JSON.stringify(cart.posts) ===
+                        JSON.stringify(['SAVE20', 'TENOFF']),
+                    JSON.stringify(cart.posts),
+                )
+                check('reports the true $10.00 saving', /10\.00/.test(modal))
+                check(
+                    'banks exactly that saving',
+                    savings.length === 1 &&
+                        Math.abs(savings[0]?.amount - 10) < 0.01,
+                    JSON.stringify(savings),
+                )
+                check('fires one "worked" report', worked.length === 1)
+                check('never asks the server for a pick', picks.length === 0)
+            },
+        }
+    })(),
+    (() => {
+        const cart = reloadingCart(false)
+        return {
+            name: 'K no config, a box only the server can name in a cart that reloads per code — the true saving',
+            // A server pick is not kept across a reload on main: the rules see
+            // no box on the reloaded page and the store is never asked twice,
+            // so the chain stops after the first code and hands the rest over
+            // to copy. Keeping the pick is PR #348's change; this scenario is
+            // its proof once it lands.
+            skip:
+                process.env.CARAMEL_AUTODETECT_KEPT_PICK === '1'
+                    ? null
+                    : 'this build does not keep a server pick across a reload (PR #348); set CARAMEL_AUTODETECT_KEPT_PICK=1 to run it',
+            host: 'shop-that-reloads-a-bare-box.example',
+            path: '/cart',
+            serve: cart.serve,
+            flags: true,
+            pickPlan: { input: 'textbox', button: 'button "Go"' },
+            assert: ({ modal, savings, picks, worked }) => {
+                check(
+                    'asks the server once',
+                    picks.length === 1,
+                    JSON.stringify(picks),
+                )
+                check(
+                    'the store received both codes, one per reload',
+                    JSON.stringify(cart.posts) ===
+                        JSON.stringify(['SAVE20', 'TENOFF']),
+                    JSON.stringify(cart.posts),
+                )
+                check('reports the true $10.00 saving', /10\.00/.test(modal))
+                check(
+                    'banks exactly that saving',
+                    savings.length === 1 &&
+                        Math.abs(savings[0]?.amount - 10) < 0.01,
+                    JSON.stringify(savings),
+                )
+                check('fires one "worked" report', worked.length === 1)
+            },
+        }
+    })(),
 ]
 
 console.log(`extension under test: ${EXT}`)
+const skipped = []
 for (const scenario of SCENARIOS) {
     if (ONLY && !scenario.name.startsWith(ONLY)) continue
+    if (scenario.skip) {
+        console.log(`\n=== ${scenario.name} ===\n  SKIP  ${scenario.skip}`)
+        skipped.push(scenario.name)
+        continue
+    }
     try {
         await runScenario(scenario)
     } catch (err) {
@@ -597,7 +804,8 @@ for (const scenario of SCENARIOS) {
 
 const failed = results.filter(r => !r.ok)
 console.log(
-    `\n${results.length - failed.length}/${results.length} checks passed.`,
+    `\n${results.length - failed.length}/${results.length} checks passed.` +
+        (skipped.length ? ` ${skipped.length} scenario(s) skipped.` : ''),
 )
 if (failed.length) {
     console.log('FAILED:')
