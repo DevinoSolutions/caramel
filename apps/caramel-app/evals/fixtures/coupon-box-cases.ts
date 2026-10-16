@@ -1,6 +1,9 @@
 // The coupon-box pick eval dataset (evals/couponBoxPick.eval.ts): 58 real
 // shopping-cart and checkout pages, each as the page outline the extension
-// sends to POST /api/extension/coupon-box-pick, labelled by hand.
+// sends to POST /api/extension/coupon-box-pick, labelled by hand, plus 5
+// probe carts (store shop.example.com, note "Probe") built to check that
+// rewards, offers and verify-a-discount controls are never taken for the
+// coupon box; their outlines come from the extension's own outline code.
 //
 // An outline is accessibility-tree style, one node per line; interactive
 // nodes carry the [n] index the pick answers with. Every digit in a label is
@@ -16,7 +19,7 @@
 //   toggles — every [n] that reveals a hidden box ("Have a promo code?").
 // Both empty = the page has no coupon box (an empty cart, a 404, a checkout
 // step before the promo field, a code already applied); the only correct
-// answer there is no pick at all. 14 cases are like that.
+// answer there is no pick at all. 19 cases are like that.
 //
 // Each case is a fixed snapshot scored against its own labels; a later store
 // redesign does not invalidate it.
@@ -493,5 +496,45 @@ export const couponBoxCases: CouponBoxCase[] = [
         note: 'Live 2026-10-16, cart page as the extension sent it: coupons need a sign-in, and the only code control is Have a gift code? Redeem it here, a redeem flow for a gifted certificate (email and confirmation code). No coupon box. The model picked the gift-code toggle 1 of 4.',
         outline:
             '- navigation:\n  - [0] link "logo"\n  - list:\n    - [1] button "Learn about membership"\n  - list:\n    - [2] link "Find Deals"\n    - [3] link "Log In"\n    - [4] button "Sign Up"\n  - [5] button "#"\n- [6] button "Have a gift code? Redeem it here"\n- main:\n  - heading "Shopping cart"\n  - [7] link "Continue Shopping"\n  - form:\n    - [8] button\n  - form:\n    - [9] combobox "Quantity"\n  - form:\n    - [10] button "Sign in to continue"\n  - heading "Order Summary"\n  - table:\n    - row:\n    - row:\n    - row:\n  - form:\n    - [11] button "Sign in to continue"\n- contentinfo:\n  - heading\n  - list:\n    - [12] link "Have A Code?"\n    - [13] link "How It"\n    - [14] link "Account"\n    - [15] link "Help"\n    - [16] link "Feedback"\n  - heading "More Deals"\n  - list:\n    - [17] link\n    - [18] link\n    - [19] link "Dining Discount"\n    - [20] link "Deals"\n  - heading "With"\n  - list:\n    - [21] link\n    - [22] link "Affiliates"\n    - [23] link "Business"\n    - [24] link "Careers"\n  - [25] link "best deals"\n  - [26] link "top"\n  - [27] link "we"\n  - heading "Email Sign Up"\n  - form:\n    - [28] textbox "Your email"\n    - [29] button "Submit"\n  - heading "Every"\n  - [30] link "Available on the App Store"\n  - [31] link "Get it on Play"\n  - [32] link "Business Review"\n  - [33] link "Instagram"\n  - [34] link "Facebook"\n  - [35] link "(Twitter)"\n  - list:\n    - [36] link "Corporate"\n    - [37] link "Privacy Policy"\n    - [38] link "Terms & Conditions"\n    - [39] link "Sitemap"',
+    },
+    {
+        store: 'shop.example.com',
+        inputs: [],
+        toggles: [],
+        note: 'Probe, not a live capture (2026-10-16): a cart with no coupon box, built for this check, outline made by the extension outline code. Its order summary shows the shopper\'s points balance and an Apply discount button that spends them (the extension drops the word "points": it is not on the word list). Clicking it would spend rewards, so it is never the toggle.',
+        outline:
+            '- banner:\n  - navigation "Main menu":\n    - [0] link "Home"\n    - [1] link "New Arrivals"\n    - [2] link "Sale"\n    - [3] link "Sign in"\n    - [4] link "Cart # items"\n- main:\n  - heading "Your cart (# items)"\n  - table:\n    - row:\n      - [5] link "Classic"\n      - [6] spinbutton "Quantity"\n      - [7] button "Remove"\n    - row:\n      - [8] link "Canvas Bag"\n      - [9] spinbutton "Quantity"\n      - [10] button "Remove"\n  - [11] link "Continue shopping"\n  - region "Order summary":\n    - heading "Order summary"\n    - heading "You have #,###"\n    - [12] button "Apply discount"\n    - [13] button "Checkout"\n    - [14] link "PayPal"\n- contentinfo:\n  - list:\n    - [15] link "Help"\n    - [16] link "Returns"\n    - [17] link "Gift Cards"\n    - [18] link "Contact"\n  - [19] textbox "Email"\n  - [20] button "Subscribe"',
+    },
+    {
+        store: 'shop.example.com',
+        inputs: [],
+        toggles: [],
+        note: 'Probe, not a live capture (2026-10-16): a cart with no coupon box, built for this check, outline made by the extension outline code. Its order summary has a View offers button that lists promotions; there is no field to type a code.',
+        outline:
+            '- banner:\n  - navigation "Main menu":\n    - [0] link "Home"\n    - [1] link "New Arrivals"\n    - [2] link "Sale"\n    - [3] link "Sign in"\n    - [4] link "Cart # items"\n- main:\n  - heading "Your cart (# items)"\n  - table:\n    - row:\n      - [5] link "Classic"\n      - [6] spinbutton "Quantity"\n      - [7] button "Remove"\n    - row:\n      - [8] link "Canvas Bag"\n      - [9] spinbutton "Quantity"\n      - [10] button "Remove"\n  - [11] link "Continue shopping"\n  - region "Order summary":\n    - heading "Order summary"\n    - [12] button "View offers" [collapsed]\n    - [13] button "Checkout"\n    - [14] link "PayPal"\n- contentinfo:\n  - list:\n    - [15] link "Help"\n    - [16] link "Returns"\n    - [17] link "Gift Cards"\n    - [18] link "Contact"\n  - [19] textbox "Email"\n  - [20] button "Subscribe"',
+    },
+    {
+        store: 'shop.example.com',
+        inputs: [],
+        toggles: [],
+        note: 'Probe, not a live capture (2026-10-16): a cart with no coupon box, built for this check, outline made by the extension outline code. Its order summary has a Promo details button that explains a promotion; there is no field to type a code.',
+        outline:
+            '- banner:\n  - navigation "Main menu":\n    - [0] link "Home"\n    - [1] link "New Arrivals"\n    - [2] link "Sale"\n    - [3] link "Sign in"\n    - [4] link "Cart # items"\n- main:\n  - heading "Your cart (# items)"\n  - table:\n    - row:\n      - [5] link "Classic"\n      - [6] spinbutton "Quantity"\n      - [7] button "Remove"\n    - row:\n      - [8] link "Canvas Bag"\n      - [9] spinbutton "Quantity"\n      - [10] button "Remove"\n  - [11] link "Continue shopping"\n  - region "Order summary":\n    - heading "Order summary"\n    - [12] button "Promo details" [collapsed]\n    - [13] button "Checkout"\n    - [14] link "PayPal"\n- contentinfo:\n  - list:\n    - [15] link "Help"\n    - [16] link "Returns"\n    - [17] link "Gift Cards"\n    - [18] link "Contact"\n  - [19] textbox "Email"\n  - [20] button "Subscribe"',
+    },
+    {
+        store: 'shop.example.com',
+        inputs: [],
+        toggles: [],
+        note: 'Probe, not a live capture (2026-10-16): a cart with no coupon box, built for this check, outline made by the extension outline code. Its order summary links out to verify a student, military or teacher discount (those three words are not on the word list, so each link reads "discount").',
+        outline:
+            '- banner:\n  - navigation "Main menu":\n    - [0] link "Home"\n    - [1] link "New Arrivals"\n    - [2] link "Sale"\n    - [3] link "Sign in"\n    - [4] link "Cart # items"\n- main:\n  - heading "Your cart (# items)"\n  - table:\n    - row:\n      - [5] link "Classic"\n      - [6] spinbutton "Quantity"\n      - [7] button "Remove"\n    - row:\n      - [8] link "Canvas Bag"\n      - [9] spinbutton "Quantity"\n      - [10] button "Remove"\n  - [11] link "Continue shopping"\n  - region "Order summary":\n    - heading "Order summary"\n    - heading "Special discounts"\n    - [12] link "discount"\n    - [13] link "discount"\n    - [14] link "discount"\n    - [15] button "Checkout"\n    - [16] link "PayPal"\n- contentinfo:\n  - list:\n    - [17] link "Help"\n    - [18] link "Returns"\n    - [19] link "Gift Cards"\n    - [20] link "Contact"\n  - [21] textbox "Email"\n  - [22] button "Subscribe"',
+    },
+    {
+        store: 'shop.example.com',
+        inputs: [],
+        toggles: [],
+        note: 'Probe, not a live capture (2026-10-16): a cart with no coupon box, built for this check, outline made by the extension outline code. Its order summary has a button that redeems points for a discount code (the extension drops "points"). It spends rewards, so it is never the toggle.',
+        outline:
+            '- banner:\n  - navigation "Main menu":\n    - [0] link "Home"\n    - [1] link "New Arrivals"\n    - [2] link "Sale"\n    - [3] link "Sign in"\n    - [4] link "Cart # items"\n- main:\n  - heading "Your cart (# items)"\n  - table:\n    - row:\n      - [5] link "Classic"\n      - [6] spinbutton "Quantity"\n      - [7] button "Remove"\n    - row:\n      - [8] link "Canvas Bag"\n      - [9] spinbutton "Quantity"\n      - [10] button "Remove"\n  - [11] link "Continue shopping"\n  - region "Order summary":\n    - heading "Order summary"\n    - [12] button "Redeem ### for a $# discount code"\n    - [13] button "Checkout"\n    - [14] link "PayPal"\n- contentinfo:\n  - list:\n    - [15] link "Help"\n    - [16] link "Returns"\n    - [17] link "Gift Cards"\n    - [18] link "Contact"\n  - [19] textbox "Email"\n  - [20] button "Subscribe"',
     },
 ]

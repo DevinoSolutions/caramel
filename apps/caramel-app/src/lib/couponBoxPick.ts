@@ -39,9 +39,10 @@ const SYSTEM_PROMPT = [
     '- "input": the field where a shopper types a coupon, promo, discount, voucher or gift-card-or-discount code. Never a search box, postcode, quantity, newsletter/email, gift message or loyalty-number field, and never a field that takes ONLY a gift card.',
     '- A hidden or disabled input can still be THE box (behind a "Have a promo code?" link, or disabled on an empty cart).',
     '- "button": the control that applies that code (Apply, Redeem, OK, Submit beside the box). Never checkout, pay, place-order, remove or sign-in.',
-    '- "toggle": the control that reveals a hidden box ("Have a promo code?", "Promo code +", "Add discount code"); else null. A control whose own text names a coupon, promo, discount or offer code ("Promo Code", "Apply Promo Code", "Add coupon") IS the toggle when no code field is visible, and so is an order-summary button that opens the offers panel ("Available Offers").',
+    '- "toggle": the control that reveals a hidden field to TYPE a code into ("Have a promo code?", "Promo code +", "Add discount code"); else null. Its own text must say code or coupon: "Promo Code", "Apply Promo Code" or "Add coupon" IS the toggle when no code field is visible; a control that does not say code or coupon ("Apply discount", "Use discount", "View offers") is never the toggle.',
+    '- Never the toggle: details about a promotion ("Promo details"); a rewards, points, loyalty or membership control, or one that redeems them for a code; a link to verify a student, military or teacher discount; a control under a points or credit balance.',
     '- A control only for a gift card, gift code, gift certificate or gift voucher ("Have a gift code?", "Apply gift card") is not a coupon control: never answer it as input, button or toggle.',
-    '- No coupon box and no toggle on the page: input null and toggle null. A wrong field is worse than none. But a visible control that names a coupon, promo, discount or offer code (never a gift code) means the box is behind it: answer that control as the toggle, not no box.',
+    '- No coupon box and no toggle on the page: input null and toggle null. A wrong field is worse than none. But a visible control whose own text says code or coupon (never a gift code, never a rewards redemption) means the box is behind it: answer that control as the toggle, not no box.',
 ].join('\n')
 
 // A reasoning model's hidden reasoning counts against max_tokens (the F-017
@@ -149,8 +150,9 @@ export function scrubOutline(outline: string): string {
 interface OutlineNode {
     role: string
     name: string
-    /** Inside the page's own footer: a contentinfo nested in no other line,
-     * and not inside a dialog opened from it. */
+    /** Inside the page's own footer: the LAST contentinfo nested in no other
+     * line (an earlier one can be a cart summary drawn as a <footer>), and
+     * not inside a dialog opened from it. */
     inPageFooter: boolean
 }
 
@@ -163,26 +165,36 @@ const DIALOG_ROLES = new Set(['dialog', 'alertdialog'])
  * the model saw). Nesting is read from the indent. */
 function outlineNodes(outline: string): Map<number, OutlineNode> {
     const nodes = new Map<number, OutlineNode>()
+    // Each node's top-level contentinfo (its line number), when it sits in
+    // one and outside any dialog.
+    const footerOf = new Map<number, number>()
+    let lastTopFooter = -1
     // The lines that enclose the current one, outermost first.
-    const open: { indent: number; role: string }[] = []
-    for (const line of outline.split('\n')) {
+    const open: { indent: number; role: string; at: number }[] = []
+    outline.split('\n').forEach((line, at) => {
         const m = OUTLINE_LINE.exec(line)
-        if (!m) continue
+        if (!m) return
         const indent = (m[1] ?? '').length
         const role = m[3] ?? ''
         while (open.length && open[open.length - 1]!.indent >= indent)
             open.pop()
+        if (!open.length && role === 'contentinfo') lastTopFooter = at
         if (m[2] !== undefined) {
-            nodes.set(Number(m[2]), {
-                role,
-                name: m[4] ?? '',
-                inPageFooter:
-                    open[0]?.role === 'contentinfo' &&
-                    !open.some(o => DIALOG_ROLES.has(o.role)),
-            })
+            const n = Number(m[2])
+            nodes.set(n, { role, name: m[4] ?? '', inPageFooter: false })
+            const top = open[0]
+            if (
+                top?.role === 'contentinfo' &&
+                !open.some(o => DIALOG_ROLES.has(o.role))
+            )
+                footerOf.set(n, top.at)
+            else footerOf.delete(n)
         }
-        open.push({ indent, role })
-    }
+        open.push({ indent, role, at })
+    })
+    footerOf.forEach((at, n) => {
+        if (at === lastTopFooter) nodes.get(n)!.inPageFooter = true
+    })
     return nodes
 }
 
@@ -192,9 +204,21 @@ function outlineNodes(outline: string): Map<number, OutlineNode> {
 const INPUT_ROLES = new Set(['textbox', 'combobox', 'searchbox'])
 const CLICK_ROLES = new Set(['button', 'link', 'tab', 'checkbox', 'switch'])
 // A control the extension must never click on the model's word, whatever its
-// role: it leaves the cart, spends money, removes items or signs in.
+// role: it leaves the cart, spends money or the shopper's rewards, removes
+// items or signs in. Read for clicked picks only, so a "Promo or rewards
+// code" field is still a valid input.
 const NEVER_CLICK =
-    /check ?out|place (?:my |your )?order|\bpay\b|pay ?pal|pay now|buy now|purchase|\bremove\b|\bdelete\b|empty (?:cart|basket|bag)|sign ?in|sign ?up|log ?in|register|create (?:an )?account|subscribe|continue/i
+    /check ?out|place (?:my |your )?order|\bpay\b|pay ?pal|pay now|buy now|purchase|\bremove\b|\bdelete\b|empty (?:cart|basket|bag)|sign ?in|sign ?up|log ?in|register|create (?:an )?account|subscribe|continue|\bredeem|\bpoints?\b|\brewards?\b|\bloyalty\b/i
+// A toggle reveals a field to type a code into, so its own text names one.
+// A control that offers a discount without naming a code ("Apply discount"
+// under a points balance, "View offers") can apply the shopper's rewards or
+// open a list of promotions; it is never clicked as the toggle. The
+// extension drops "points" from the outline (not on its word list), so the
+// rewards words above cannot catch that button.
+const SAYS_DISCOUNT =
+    /discount|offer|\bdeals?\b|saving|rabatt|descuento|desconto|sconto|remise|réduction|korting|zniżka/i
+const SAYS_CODE =
+    /code|codice|código|\bkod|coupon|cup[oó]n|cupom|voucher|gutschein|promo/i
 
 interface Answer {
     input: number | null
@@ -241,23 +265,32 @@ function parseAnswer(raw: string): Answer | null {
 }
 
 /** An index the outline does not contain is a hallucination, and an index of
- * the wrong kind of element, or a control to click in the page footer, is
- * refused: each becomes null. With neither an
- * input nor a toggle left, the answer is "no box". */
+ * the wrong kind of element, a toggle in the page footer, or a toggle that
+ * offers a discount without naming a code, is refused: each becomes null. With neither an input nor a toggle left, the answer is
+ * "no box". */
 function toCachedAnswer(answer: Answer, outline: string): CachedAnswer {
     const nodes = outlineNodes(outline)
     const pick = (n: number | null, roles: Set<string>, clicked: boolean) => {
         const node = n === null ? undefined : nodes.get(n)
         if (!node || !roles.has(node.role)) return null
-        // A control in the page footer links to another page ("Have A Code?"
-        // beside Gift Cards and Contact Us), never to the cart's own coupon
-        // box: clicking it would leave the cart.
-        if (clicked && (node.inPageFooter || NEVER_CLICK.test(node.name)))
-            return null
-        return n
+        return clicked && NEVER_CLICK.test(node.name) ? null : n
     }
     const input = pick(answer.input, INPUT_ROLES, false)
-    const toggle = pick(answer.toggle, CLICK_ROLES, true)
+    // A toggle in the page footer ("Have A Code?" beside Gift Cards and
+    // Contact Us) leads to another page, not to this cart's box. The
+    // extension already refuses a link that leaves the page; this also
+    // covers a footer control drawn as a script button, and keeps the answer
+    // honest for the eval, which scores what the server returns. Only the
+    // toggle: an apply button is never refused for where it sits.
+    const toggleNode =
+        answer.toggle === null ? undefined : nodes.get(answer.toggle)
+    const toggle =
+        toggleNode &&
+        (toggleNode.inPageFooter ||
+            (SAYS_DISCOUNT.test(toggleNode.name) &&
+                !SAYS_CODE.test(toggleNode.name)))
+            ? null
+            : pick(answer.toggle, CLICK_ROLES, true)
     if (input === null && toggle === null) {
         return {
             outcome: 'no_box',
