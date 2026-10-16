@@ -412,10 +412,13 @@ async function runScenario({
         const url = `https://${host}${path}`
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45_000 })
         await page.waitForTimeout(2500)
+        // Store requests from this load on: a reload starts the count again.
+        let loadStart = 0
         if (!logs.length) {
             console.log(
                 '  [info] content script absent on first load — reloading once',
             )
+            loadStart = storeRequests.length
             await page.reload({ waitUntil: 'domcontentloaded' })
         }
 
@@ -444,6 +447,22 @@ async function runScenario({
                     .trim()
             })
         } else {
+            // "No prompt" proves nothing unless detection ran on this load:
+            // the content script read the store list (its log line) and,
+            // finding no config for this host, probed the cart.
+            const detected = () =>
+                logs.some(l => /Loaded supported domains/.test(l)) &&
+                storeRequests.slice(loadStart).includes('/cart.js')
+            for (let i = 0; i < 60 && !detected(); i++)
+                await page.waitForTimeout(500)
+            check(
+                'detection ran on this page',
+                detected(),
+                JSON.stringify({
+                    logs: logs.slice(0, 3),
+                    storeRequests: storeRequests.slice(loadStart),
+                }),
+            )
             // isCheckout waits up to 3s for a box, and the re-detect observer
             // is debounced: give both room to have definitively not fired.
             await page.waitForTimeout(8000)

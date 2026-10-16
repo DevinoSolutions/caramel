@@ -133,8 +133,13 @@ export async function getDomainRecord(domain) {
                         continue
                     }
                     failure = null
-                    getDomainRecord.answered = true
-                    if (resp?.supported?.length) {
+                    // Only a real list makes the store list known (see
+                    // caramelStoreListKnown): an empty or malformed answer
+                    // says nothing about which stores have a config.
+                    getDomainRecord.answered =
+                        Array.isArray(resp?.supported) &&
+                        resp.supported.length > 0
+                    if (getDomainRecord.answered) {
                         getDomainRecord.cache = resp.supported
                         currentBrowser.storage.local.set({
                             [STORE_CACHE_KEY]: {
@@ -182,15 +187,22 @@ export async function getDomainRecord(domain) {
     // bare row of the same store tie, and the earlier row keeps it, as before.
     // A www. row only reaches hosts other than its own through that
     // normalisation; there it gives way to a bare row of the same store.
+    //
+    // A <shop>.myshopify.com host matched only by its shop label ranks below
+    // every real match and keeps list order among its matches: the label says
+    // nothing about which of princesspolly.com and princesspolly.com.au it
+    // is, and ranking those by length would pick a row by the length of its
+    // country suffix.
     const host = String(domain).toLowerCase()
     let best
     let bestRank = -1
     for (const r of getDomainRecord.cache || []) {
         if (!_hostMatchesDomain(host, r.domain)) continue
         const d = String(r.domain).toLowerCase()
-        const rank =
-            _withoutWww(d).length * 2 +
-            (d.startsWith('www.') && d !== host ? 0 : 1)
+        const rank = !_hostIsUnderDomain(host, d)
+            ? 0
+            : _withoutWww(d).length * 2 +
+              (d.startsWith('www.') && d !== host ? 0 : 1)
         if (rank > bestRank) {
             best = r
             bestRank = rank
@@ -201,9 +213,9 @@ export async function getDomainRecord(domain) {
 getDomainRecord.cache = null
 
 /* The finder and the server's pick run only where the store list says a host
- * has no config. Without a list (the fetch failed and nothing is cached) that
- * cannot be known, and every configured store would read as one with none, so
- * neither runs. */
+ * has no config. Without a list (the fetch failed, or the answer was empty or
+ * not a list, and nothing is cached) that cannot be known, and every
+ * configured store would read as one with none, so neither runs. */
 export function caramelStoreListKnown() {
     return Array.isArray(getDomainRecord.cache) || !!getDomainRecord.answered
 }
@@ -220,10 +232,12 @@ export function caramelStoreListKnown() {
 // `athleta.gap.com`'s checkout) but a bare "any prefix + '-'" rule also lets
 // an ATTACKER-registered `evil-target.com` inherit `target.com`'s selectors
 // and coupons. Every genuine hyphen host in the catalog is a known checkout
-// prefix in front of a domain that already has its own subdomain, so require
-// BOTH: an allow-listed prefix label, and a domain of 3+ labels. That admits
-// every real case (`secure-{athleta,oldnavy,bananarepublic,…}.<brand>.<tld>`)
-// while `evil-target.com` → `target.com` (2 labels, unknown prefix) is out.
+// prefix in front of a store that is a SUBDOMAIN of its registrable domain
+// (`athleta` under `gap.com`), so require BOTH: an allow-listed prefix label,
+// and a prefix that lands on a label below the registrable domain. Then
+// `secure-athleta.gap.com` is still gap.com's own host, while
+// `secure-target.com` and `secure-emmabridgewater.co.uk` are different
+// registrable domains anyone could buy, and get nothing.
 const HYPHEN_CHECKOUT_PREFIXES = new Set([
     'secure',
     'checkout',
@@ -231,6 +245,51 @@ const HYPHEN_CHECKOUT_PREFIXES = new Set([
     'shop',
     'store',
 ])
+// Two-label public suffixes, where a registrable domain has three labels
+// (`x.co.uk`). Not the whole public-suffix list: the suffixes the store list
+// uses plus the common country ones. A suffix missing here makes `x.<suffix>`
+// look like a subdomain of `<suffix>` and lets its hyphen hosts match, which
+// is how the rule behaved for every suffix before.
+const TWO_LABEL_PUBLIC_SUFFIXES = new Set([
+    'co.uk',
+    'org.uk',
+    'me.uk',
+    'ac.uk',
+    'com.au',
+    'net.au',
+    'org.au',
+    'co.nz',
+    'net.nz',
+    'co.jp',
+    'ne.jp',
+    'com.br',
+    'com.mx',
+    'co.za',
+    'com.sg',
+    'com.hk',
+    'co.in',
+    'com.tr',
+    'com.cn',
+    'co.kr',
+    'com.ar',
+    'com.co',
+    'com.my',
+    'com.ph',
+    'com.tw',
+    'co.il',
+    'co.id',
+    'co.th',
+])
+// Does the domain have a label below its registrable domain?
+function _isUnderRegistrableDomain(domain) {
+    const labels = domain.split('.')
+    const suffixLabels = TWO_LABEL_PUBLIC_SUFFIXES.has(
+        labels.slice(-2).join('.'),
+    )
+        ? 2
+        : 1
+    return labels.length > suffixLabels + 1
+}
 /* A Shopify store's own checkout can live on its <shop>.myshopify.com host
  * rather than on the brand domain. 5starnutritionusa.com does exactly this
  * (QA sweep 2026-08-05): the shopper adds $44.99, hits checkout, lands on
@@ -256,8 +315,10 @@ function _shopifyShopHostMatches(host, domain) {
     const shop = host.slice(0, -CARAMEL_SHOPIFY_HOST_SUFFIX.length)
     // One label only: `a.b.myshopify.com` is not a shop host.
     if (!shop || shop.includes('.')) return false
+    // The row as written: a www. row names no shop (`www.usa.canon.com` is not
+    // the `usa` shop, and www.myshopify.com is Shopify's own site).
     const brandLabel = domain.split('.')[0]
-    return !!brandLabel && shop === brandLabel
+    return !!brandLabel && brandLabel !== 'www' && shop === brandLabel
 }
 
 // Exported for tests/host-matches-domain.test.mjs, which pins this boundary
@@ -265,11 +326,21 @@ function _shopifyShopHostMatches(host, domain) {
 export function _hostMatchesDomain(host, domain) {
     if (!host || !domain) return false
     host = String(host).toLowerCase()
+    domain = String(domain).toLowerCase()
+    return (
+        _hostIsUnderDomain(host, domain) ||
+        _shopifyShopHostMatches(host, domain)
+    )
+}
+
+// The host is the row's domain, a subdomain of it, or one of its hyphen
+// checkout hosts. The myshopify rule is separate: it names a store by its
+// first label only, so it is weaker evidence (see getDomainRecord).
+function _hostIsUnderDomain(host, domain) {
     // A row written as www.x.com describes the store x.com: it matches x.com
     // and x.com's subdomains exactly as a bare x.com row does.
-    domain = _withoutWww(String(domain).toLowerCase())
+    domain = _withoutWww(domain)
     if (host === domain) return true
-    if (_shopifyShopHostMatches(host, domain)) return true
     const i = host.length - domain.length
     if (i <= 0) return false
     if (host.slice(i) !== domain) return false
@@ -278,7 +349,7 @@ export function _hostMatchesDomain(host, domain) {
     if (sep !== '-') return false
     return (
         HYPHEN_CHECKOUT_PREFIXES.has(host.slice(0, i - 1)) &&
-        domain.split('.').length >= 3
+        _isUnderRegistrableDomain(domain)
     )
 }
 

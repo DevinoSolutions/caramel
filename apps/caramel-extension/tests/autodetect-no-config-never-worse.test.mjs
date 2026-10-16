@@ -8,6 +8,7 @@ import { startApplyingCoupons } from '../coupon-runner.js'
 import {
     _caramelResetCachedCodes,
     caramelConfiglessRecord,
+    caramelStoreListKnown,
     getDomainRecord,
     startCheckoutDetection,
     tryInitialize,
@@ -48,6 +49,8 @@ let flags
 let answer // the server's pick: an object, or a function of the request
 let platformCart // what /cart.js answers (null: not a platform cart)
 let storeList // what the supported-stores request answers
+// A row for some other store: the list was read and this host is not on it.
+const OTHER_STORE = { domain: 'some-other-store.example', couponInput: '#c' }
 let t // the recording
 
 // Every finder entry point another module calls, counted. The real
@@ -292,7 +295,7 @@ beforeEach(() => {
     flags = { discovery: false, llm: false }
     answer = { outcome: 'no_box', confidence: 80, why: 'none', cached: false }
     platformCart = null
-    storeList = { supported: [] }
+    storeList = { supported: [OTHER_STORE] }
 })
 
 describe('flags off (production today): a store with no config is exactly as before the finder', () => {
@@ -588,11 +591,31 @@ describe('the store list could not be read: nothing is auto-detected, because th
     })
 
     it('the same cart once the list is read: the prompt is back (the list is the only difference)', async () => {
-        storeList = { supported: [] }
+        storeList = { supported: [OTHER_STORE] }
         freshPage(RULES_BOX + TOTAL)
         await tryInitialize()
         expect(t.prompts).toEqual([location.hostname])
     })
+
+    // A 200 that carries no list says nothing about which stores have a
+    // config, so it counts as a list that could not be read.
+    for (const [label, answer] of [
+        ['an empty list', { supported: [] }],
+        ['a list that is not an array', { supported: 'garbage' }],
+        ['an object instead of a list', { supported: { domain: 'x.com' } }],
+        ['no list at all', {}],
+    ])
+        it(`${label}: no prompt, the finder is not asked`, async () => {
+            storeList = answer
+            freshPage(RULES_BOX + TOTAL)
+            await tryInitialize()
+            expect(asked('fetchSupportedStores').length).toBeGreaterThan(0)
+            expect(caramelStoreListKnown()).toBe(false)
+            expect(t.prompts).toEqual([])
+            expect(asked('couponBoxPick')).toEqual([])
+            expect(finderCalls.caramelFinderSeesBox).toBeUndefined()
+            expect(finderCalls.caramelFinderMayAsk).toBeUndefined()
+        })
 })
 
 describe('a loyalty or offers control is never clicked by the finder or the pick', () => {
