@@ -59,11 +59,12 @@ function installWorkerRealm() {
 }
 
 const ok = body => ({ ok: true, status: 200, json: async () => body })
-const features = llm =>
+const features = (llm, learned) =>
     ok({
         shopperCodeCapture: false,
         couponBoxDiscovery: true,
         couponBoxLlm: llm,
+        ...(learned === undefined ? {} : { couponBoxLearned: learned }),
     })
 
 function invoke(message) {
@@ -146,12 +147,37 @@ describe('couponBoxPick', () => {
         const [call] = pickCalls()
         expect(call.opts.method).toBe('POST')
         expect(call.opts.headers['Content-Type']).toBe('application/json')
+        // No learned-box flag: the request does not ask for a learned answer.
         expect(JSON.parse(call.opts.body)).toEqual({
             domain: PICK.domain,
             outline: PICK.outline,
-            // This build reads a learned answer (selectors under `box`).
+        })
+    })
+
+    it('asks for a learned answer only while the learned-box flag is on', async () => {
+        responses.push(features(true, true), ok({ outcome: 'no_box' }))
+        await invoke(PICK)
+        expect(JSON.parse(pickCalls()[0].opts.body)).toEqual({
+            domain: PICK.domain,
+            outline: PICK.outline,
             acceptsLearned: true,
         })
+    })
+
+    it('a learned-box flag that is not a literal true does not ask', async () => {
+        responses.push(
+            ok({
+                shopperCodeCapture: false,
+                couponBoxDiscovery: true,
+                couponBoxLlm: true,
+                couponBoxLearned: 'true',
+            }),
+            ok({ outcome: 'no_box' }),
+        )
+        await invoke(PICK)
+        expect(JSON.parse(pickCalls()[0].opts.body)).not.toHaveProperty(
+            'acceptsLearned',
+        )
     })
 
     it('a refusal is passed back as an error, never retried', async () => {
@@ -267,9 +293,6 @@ describe('couponBoxLlmEnabled: the pick mode', () => {
 })
 
 describe('couponBoxLearned', () => {
-    // The report route needs the install id, which the privacy policy
-    // discloses only as sent with an extension sign-in: nothing is posted,
-    // and the answer says why (the finder logs it).
     const LEARNED = {
         action: 'couponBoxLearned',
         domain: 'shop.test',
@@ -283,20 +306,77 @@ describe('couponBoxLearned', () => {
         evidence: 'total_dropped',
         outcome: 'confirmed',
     }
+    const learnedCalls = () =>
+        fetchCalls.filter(c => c.url.includes('extension/coupon-box-learned'))
+    const IID = '0b6f4c1e-8d2a-4f3b-9c5d-7e1a2b3c4d5e'
+    beforeEach(() => {
+        localData.caramel_install_attribution = { iid: IID }
+    })
 
-    it('posts nothing, even with the pick flag on and an install id stored', async () => {
-        localData.caramel_install_attribution = {
-            iid: '0b6f4c1e-8d2a-4f3b-9c5d-7e1a2b3c4d5e',
-        }
-        responses.push(features(true))
+    for (const [what, flags] of [
+        ['a server with no learned-box flag', [true, undefined]],
+        ['the learned-box flag off', [true, false]],
+        ['the pick flag off', [false, true]],
+    ])
+        it(`${what}: nothing is posted, and the answer says so`, async () => {
+            responses.push(features(...flags))
+
+            expect(await invoke(LEARNED)).toEqual({ skipped: 'disabled' })
+            expect(learnedCalls()).toHaveLength(0)
+        })
+
+    it('posts the install id, the selectors and the outcome, nothing else', async () => {
+        responses.push(features(true, true), ok({ recorded: true }))
 
         expect(await invoke(LEARNED)).toEqual({
-            skipped: 'not sent: the install id is not disclosed for this use',
+            ok: true,
+            recorded: true,
+            reason: null,
         })
-        expect(
-            fetchCalls.filter(c => c.url.includes('coupon-box-learned')),
-        ).toEqual([])
-        // Nothing read it either.
-        expect(fetchCalls).toEqual([])
+        const [call] = learnedCalls()
+        expect(call.opts.method).toBe('POST')
+        expect(JSON.parse(call.opts.body)).toEqual({
+            installId: IID,
+            domain: 'shop.test',
+            box: LEARNED.box,
+            source: 'rules',
+            evidence: 'total_dropped',
+            outcome: 'confirmed',
+        })
+    })
+
+    it('a report the server declined to record says why', async () => {
+        responses.push(
+            features(true, true),
+            ok({ recorded: false, reason: 'served_config' }),
+        )
+
+        expect(await invoke(LEARNED)).toEqual({
+            ok: true,
+            recorded: false,
+            reason: 'served_config',
+        })
+    })
+
+    it('an install with no install id posts nothing, and says so', async () => {
+        delete localData.caramel_install_attribution
+        responses.push(features(true, true))
+
+        expect(await invoke(LEARNED)).toEqual({ skipped: 'no install id' })
+        expect(learnedCalls()).toHaveLength(0)
+    })
+
+    it('a refusal is answered with its status, a network failure as an error', async () => {
+        responses.push(features(true, true), {
+            ok: false,
+            status: 429,
+            json: async () => ({}),
+        })
+        expect(await invoke(LEARNED)).toEqual({ error: 'HTTP 429' })
+
+        responses.push(new TypeError('Failed to fetch'))
+        expect(await invoke(LEARNED)).toEqual({
+            error: 'TypeError: Failed to fetch',
+        })
     })
 })

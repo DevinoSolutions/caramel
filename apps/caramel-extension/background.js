@@ -242,6 +242,11 @@ async function _fetchFeatures() {
         // sent: the content script reads anything it does not know, or any
         // mode while couponBoxLlm is off, as rules_first.
         couponBoxPickMode: json.couponBoxPickMode,
+        // Learned coupon boxes on the server (the pick's learned answer and
+        // the report route): a literal true only, like the flags above, so a
+        // build in the stores never reports to a server that has not shipped
+        // the route.
+        couponBoxLearned: json.couponBoxLearned === true,
         ts: Date.now(),
     }
     _writeFeaturesSession(_featuresMemo)
@@ -299,21 +304,67 @@ async function couponBoxLlmFlags() {
 }
 const couponBoxLlmEnabled = async () => (await couponBoxLlmFlags()).enabled
 
-/* What a coupon box did (coupon-box-discovery.js learnOutcome) is NOT sent
- * to the server yet. The report route (POST /api/extension/coupon-box-learned)
- * requires the install's anonymous install id, so it can count a box as
- * confirmed by several installs, and the privacy policy discloses that id
- * only as sent with an extension sign-in, for attribution. Sending it from
- * every install with these reports is a new use the policy does not cover.
- * TODO(learned-box-report): once the policy covers it, post
- * { installId, domain, box, source, evidence, outcome } here (installId from
- * install-attribution.js, behind the couponBoxLlm flag, no install id = no
- * post) and answer { ok, recorded, reason } / { error }. Until then the
- * answer says why nothing was sent, and the finder logs it; this install's
- * own memory of the box is unaffected. */
-const COUPON_BOX_LEARNED_NOT_SENT = {
-    skipped: 'not sent: the install id is not disclosed for this use',
+// Learned coupon boxes on the server: its flag AND the pick's, since the
+// server reads a report and serves a learned answer only with both on. Any
+// failure to read them is off.
+async function couponBoxLearnedOn() {
+    try {
+        const f = await _features()
+        return f.couponBoxLlm === true && f.couponBoxLearned === true
+    } catch (err) {
+        logError('features', err)
+        return false
+    }
 }
+
+/* Reports what a coupon box did (coupon-box-discovery.js learnOutcome): the
+ * store answered a code typed into it ('confirmed'), or a remembered box got
+ * no answer at all ('failed'). Selectors, the outcome and the anonymous
+ * install id only: the server counts a box as confirmed by several installs,
+ * never by one install reporting it twice (the privacy policy names this use
+ * of the id). Sent only while the server's learned-box flag is on, and only
+ * with an install id (installs older than the id have none: their reports
+ * are skipped, and their own memory of the box still works). The answer says
+ * whether it landed: { ok, recorded, reason } or { error } / { skipped }. */
+async function couponBoxLearned({ domain, box, source, evidence, outcome }) {
+    if (!(await couponBoxLearnedOn())) return { skipped: 'disabled' }
+    const installId = await storedInstallId()
+    if (!installId) return { skipped: 'no install id' }
+    const r = await fetchWithTimeout(
+        caramelUrl('api/extension/coupon-box-learned'),
+        {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                installId,
+                domain,
+                box,
+                source,
+                evidence,
+                outcome,
+            }),
+        },
+    )
+    if (!r.ok) return { error: `HTTP ${r.status}` }
+    const j = await r.json().catch(() => ({}))
+    return { ok: true, recorded: j.recorded === true, reason: j.reason ?? null }
+}
+
+// The anonymous install id the install saved ({ iid } under this key), or
+// null. TODO(caramel#349): once this branch is on main, import
+// INSTALL_ATTRIBUTION_KEY from install-attribution.js instead of naming the
+// key here; this branch was cut before that module landed.
+const INSTALL_ATTRIBUTION_KEY = 'caramel_install_attribution'
+const storedInstallId = () =>
+    new Promise(resolve =>
+        currentBrowser.storage.local.get([INSTALL_ATTRIBUTION_KEY], items =>
+            resolve(
+                currentBrowser.runtime.lastError
+                    ? null
+                    : items?.[INSTALL_ATTRIBUTION_KEY]?.iid || null,
+            ),
+        ),
+    )
 
 /* Asks the server which element of a page outline is the promo box (see
  * coupon-box-outline.js and the finder's caramelPickedRecord). The outline is
@@ -338,6 +389,8 @@ const COUPON_BOX_PICK_MIN_MS = 3000
 async function couponBoxPick({ domain, outline }) {
     const deadline = Date.now() + COUPON_BOX_PICK_DEADLINE_MS
     if (!(await couponBoxLlmEnabled())) return { error: 'disabled' }
+    // A learned answer only from a server that has learned boxes on.
+    const acceptsLearned = await couponBoxLearnedOn()
     const token = await getStoredToken()
     const left = Math.min(COUPON_BOX_PICK_TIMEOUT_MS, deadline - Date.now())
     if (left < COUPON_BOX_PICK_MIN_MS) return { error: 'out of time' }
@@ -347,7 +400,11 @@ async function couponBoxPick({ domain, outline }) {
             {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ domain, outline, acceptsLearned: true }),
+                body: JSON.stringify(
+                    acceptsLearned
+                        ? { domain, outline, acceptsLearned }
+                        : { domain, outline },
+                ),
             },
             token,
         ),
@@ -793,7 +850,13 @@ export function initBackground() {
                 couponBoxLlmFlags().then(sendResponse)
                 return true
             } else if (message.action === 'couponBoxLearned') {
-                sendResponse(COUPON_BOX_LEARNED_NOT_SENT)
+                couponBoxLearned(message)
+                    .then(sendResponse)
+                    .catch(err => {
+                        logError('couponBoxLearned', err)
+                        sendResponse({ error: String(err) })
+                    })
+                return true
             } else if (message.action === 'couponBoxPick') {
                 couponBoxPick(message)
                     .then(resp => sendResponse(resp))

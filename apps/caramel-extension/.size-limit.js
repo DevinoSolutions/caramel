@@ -134,12 +134,11 @@ module.exports = [
         // 2026-10-13, raised 10.7 -> 11.3 kB: the coupon-box pick request (its
         // flag, its message route, and one deadline over the flag read, the
         // token read and the request). Measured 10.52 kB.
-        // 2026-10-16, raised 11.3 -> 11.8 kB: the pick mode beside the flag,
-        // the learned-answer opt-in, and the learned coupon box route, which
-        // answers why nothing is sent (the report POST is not shipped yet).
-        // Measured 10.68 -> 10.92 kB; raised rather than left at 3.4%
-        // headroom.
-        limit: '11.8 KB',
+        // 2026-10-16, raised 11.3 -> 12.7 kB: the pick mode beside the flag,
+        // the couponBoxLearned flag, and behind it the learned-answer opt-in
+        // and the learned coupon box report (install id read, the POST, what
+        // the server recorded). Measured 10.68 -> 11.77 kB.
+        limit: '12.7 KB',
         brotli: false,
     },
     {
