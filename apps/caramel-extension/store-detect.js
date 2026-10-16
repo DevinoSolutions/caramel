@@ -58,6 +58,7 @@ import {
     pickBestMatch,
     waitForElement,
 } from './dom-utils.js'
+import { caramelCapabilityHeld } from './extension-capabilities.js'
 import {
     hideTestingModal,
     insertCaramelPrompt,
@@ -97,6 +98,7 @@ export async function getDomainRecord(domain) {
             const entry = stored?.[STORE_CACHE_KEY]
             if (ttl > 0 && entry?.data?.length && Date.now() - entry.ts < ttl) {
                 getDomainRecord.cache = entry.data
+                getDomainRecord.gated = entry.gated ?? []
                 log('Loaded supported domains from local cache')
             }
         } catch {
@@ -134,9 +136,11 @@ export async function getDomainRecord(domain) {
                     failure = null
                     if (resp?.supported?.length) {
                         getDomainRecord.cache = resp.supported
+                        getDomainRecord.gated = resp.gated ?? []
                         currentBrowser.storage.local.set({
                             [STORE_CACHE_KEY]: {
                                 data: resp.supported,
+                                gated: getDomainRecord.gated,
                                 ts: Date.now(),
                             },
                         })
@@ -165,6 +169,7 @@ export async function getDomainRecord(domain) {
                 const entry = stored?.[STORE_CACHE_KEY]
                 if (entry?.data?.length) {
                     getDomainRecord.cache = entry.data
+                    getDomainRecord.gated = entry.gated ?? []
                     log('Loaded supported domains from expired cache')
                 }
             } catch {
@@ -172,11 +177,43 @@ export async function getDomainRecord(domain) {
             }
         }
     }
-    return getDomainRecord.cache?.find(r =>
+    const rec = getDomainRecord.cache?.find(r =>
         _hostMatchesDomain(domain, r.domain),
     )
+    if (rec) return rec
+    return _gatedRecordFor(domain)
 }
 getDomainRecord.cache = null
+getDomainRecord.gated = []
+
+/* A store whose apply config only works with a page-side helper running
+ * (extension-capabilities.js). The server keeps such a row out of `supported`,
+ * where builds that predate this check would drive the store unprotected, and
+ * tags it with what it `requires`. It becomes a normal record only when the
+ * page proves the helper is live; otherwise the store is treated exactly like
+ * one with no config, which is what an old build sees. The check runs on every
+ * lookup (never cached): it describes this page, not this install. */
+function _gatedRecordFor(domain) {
+    const rec = getDomainRecord.gated?.find(r =>
+        _hostMatchesDomain(domain, r.domain),
+    )
+    if (!rec) return undefined
+    if (caramelCapabilityHeld(rec.requires)) return rec
+    // Once per page: this runs on every lookup and the fact does not change.
+    if (!_gatedWithheldLogged.has(rec.domain)) {
+        _gatedWithheldLogged.add(rec.domain)
+        log('STORE_GATED_CAPABILITY_MISSING', {
+            domain: rec.domain,
+            requires: rec.requires,
+        })
+        recordTiming('STORE_GATED_CAPABILITY_MISSING', {
+            domain: rec.domain,
+            requires: rec.requires,
+        })
+    }
+    return undefined
+}
+const _gatedWithheldLogged = new Set()
 
 // Match the active hostname to a supported-store domain. Accept an exact match,
 // a real dotted subdomain (www./checkout./secure.<domain>), or a hyphen-prefixed

@@ -7,14 +7,18 @@
  * content realm has to stay isolated. Narrowest match that works: the
  * checkout pages on the bare domain, where the coupon modal lives.
  *
- * Not in the Firefox build (`include: ['chrome']`). Safari has no WXT target:
- * the release workflow derives its package from the Chrome build, so Safari
- * DOES ship this entry. If Safari ignores `world: 'MAIN'` the script runs in the
- * isolated world, where wrapping `window.alert` and the capture listeners change
- * nothing the page can see; if it honours it, the shim behaves as on Chrome.
- * Either way Porkbun's native dialog is the fallback.
- * TODO: verify on Safari and on Firefox (128+ has `world: 'MAIN'`), then decide
- * whether Firefox joins.
+ * Shipped in every build, Safari's included (release-extension.yml derives it
+ * from the Chrome build). Whether `world: 'MAIN'` is honoured is the BROWSER's
+ * business and is never assumed: the shim stamps a marker on <html> only when it
+ * can see the page's own handler, i.e. only when it really runs in the page's
+ * world, and the store's apply config stays withheld until the content realm
+ * sees that marker (extension-capabilities.js, store-detect.js getDomainRecord).
+ * Verified live on porkbun.com 2026-10-16: Chrome (built extension) and Firefox
+ * 152 (installed through WebDriver BiDi) both stamp the marker, apply with zero
+ * native dialogs; with the script removed (the shape of a browser that ignores
+ * `world`) the marker is absent and Caramel stays silent on the store.
+ * Firefox 109-127 and Safari were not run: they take the "ignored" path above.
+ * TODO: confirm on a real Safari that the marker stays absent or true to form.
  */
 import { installPorkbunAlertShim } from '../porkbun-alert-shim.js'
 
@@ -22,7 +26,6 @@ export default defineContentScript({
     matches: ['https://porkbun.com/checkout/*'],
     world: 'MAIN',
     runAt: 'document_start',
-    include: ['chrome'],
     main() {
         installPorkbunAlertShim(window)
     },

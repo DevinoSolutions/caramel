@@ -64,6 +64,7 @@ export const GROUPS = {
         'caramel-base.js',
         'dom-utils.js',
         'coupon-box-discovery.js',
+        'extension-capabilities.js',
         'store-detect.js',
         'coupon-apply.js',
         'code-capture.js',
@@ -98,7 +99,7 @@ export const GROUPS = {
     'coupon-box-outline': ['coupon-box-outline.js'],
     // Injected only on porkbun.com/checkout/* (entrypoints/porkbun-alert.content.ts,
     // MAIN world), so it neither hides in nor inflates the per-page budget.
-    'porkbun-alert': ['porkbun-alert-shim.js'],
+    'porkbun-alert': ['extension-capabilities.js', 'porkbun-alert-shim.js'],
 }
 
 /** Minified bytes of one group, written as a single file for size-limit. */

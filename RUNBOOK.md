@@ -63,6 +63,15 @@ serialized 1.2 MB body (`src/lib/supportedStoresCache.ts`, invalidated by
 an ingest push that upserts store_configs), so origin stays cheap even
 when the edge misses.
 
+**Capability-gated stores.** `/api/extension/supported-stores` answers
+`{ supported, gated }`. A store listed in `src/lib/extensionCapabilityGates.ts`
+(porkbun.com today) is served ONLY in `gated`, tagged with the capability it
+`requires`, so extension builds that predate the bucket cannot auto-apply on it
+(a per-request version/header gate would be ignored or poisoned by the edge
+cache above). Newer builds use a gated row only while the page proves the
+capability (`apps/caramel-extension/extension-capabilities.js`). The supplier
+row is unchanged; gating is a read-side rule, not a catalog write.
+
 ## Health checks
 
 `GET /api/health` — container **liveness** (`src/app/api/health/route.ts`),

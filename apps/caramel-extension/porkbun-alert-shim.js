@@ -33,6 +33,8 @@
 // shopper's click or Enter in the modal counts as them taking over; a Tab or a
 // held modifier does not disturb a run in flight.
 
+import { CARAMEL_CAPABILITY_MARKERS } from './extension-capabilities.js'
+
 const PORKBUN_MODAL_SELECTOR = '#modal_applyCouponCode'
 export const PORKBUN_REJECTION_ID = 'caramel-porkbun-coupon-rejection'
 // The one message Porkbun's processApplyCartCoupon alerts when the API answers
@@ -116,8 +118,30 @@ export function installPorkbunAlertShim(win) {
 
     doc.addEventListener('click', onSubmitIntent, true)
     doc.addEventListener('keydown', onSubmitIntent, true)
+
+    // Tell the content realm the helper is live (extension-capabilities.js).
+    // The proof has to be that this script runs in the PAGE's world, because
+    // the DOM is shared and a stamp from the isolated world would be a lie: in
+    // a browser that ignores `world: 'MAIN'` this very code still runs, its
+    // wrapper just lands on a private copy of `alert` that the page never
+    // calls. Only the page's world can see the page's own handler, so the
+    // marker waits for it. Tried when parsing finishes and again at load (the
+    // handler may come from a late script); stamping is idempotent.
+    const marker = CARAMEL_CAPABILITY_MARKERS.alertShim
+    const stampIfInPageWorld = () => {
+        if (typeof win.processApplyCartCoupon === 'function')
+            doc.documentElement.setAttribute(marker, '1')
+    }
+    if (doc.readyState === 'loading')
+        doc.addEventListener('DOMContentLoaded', stampIfInPageWorld)
+    else stampIfInPageWorld()
+    win.addEventListener('load', stampIfInPageWorld)
+
     return function uninstall() {
         win.alert = nativeAlert
+        doc.removeEventListener('DOMContentLoaded', stampIfInPageWorld)
+        win.removeEventListener('load', stampIfInPageWorld)
+        doc.documentElement?.removeAttribute(marker)
         doc.removeEventListener('click', onSubmitIntent, true)
         doc.removeEventListener('keydown', onSubmitIntent, true)
     }
