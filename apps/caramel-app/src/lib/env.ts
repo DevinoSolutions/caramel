@@ -202,6 +202,38 @@ const serverObjectSchema = z.object({
         v => (typeof v === 'string' && v.trim() === '' ? undefined : v),
         z.coerce.number().int().min(0).default(2000),
     ),
+    // Which finder goes first on a cart page with no store config, advertised
+    // to the extension as `couponBoxPickMode` on GET /api/extension/features
+    // (only while the pick is on; otherwise always 'rules_first').
+    //   rules_first  the rules find the box; the pick is asked only when they
+    //                find nothing (the default, today's behaviour)
+    //   llm_first    the pick is asked first; any miss or error falls back to
+    //                the rules
+    //   llm_only     the pick is the only finder (battle tests and deliberate
+    //                experiments, never a default)
+    // Every safety check on the extension side runs in every mode. A blank
+    // value reads as the default; anything else outside the three fails boot.
+    COUPON_BOX_PICK_MODE: z.preprocess(
+        v => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+        z.enum(['rules_first', 'llm_first', 'llm_only']).default('rules_first'),
+    ),
+    // Salt for the one-way hashes the learned coupon box keeps
+    // (couponBoxLearned.ts): the extension's anonymous install id and the
+    // reporter's network prefix are stored only as HMAC-SHA256 under this
+    // salt, never in the clear. Unset (or blank) = learned boxes are OFF:
+    // POST /api/extension/coupon-box-learned records nothing and the pick never
+    // answers from the table (logged once at boot). Set = at least 32
+    // characters, or boot fails. Changing it starts every install's identity
+    // over (old hashes no longer match), so rotate it only on purpose.
+    COUPON_BOX_LEARNED_SALT: z.preprocess(
+        v => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+        z
+            .string()
+            .min(32, {
+                error: 'COUPON_BOX_LEARNED_SALT must be at least 32 characters (or unset to keep learned coupon boxes off)',
+            })
+            .optional(),
+    ),
     // Paid fallback through the Devino proxy (src/lib/proxy-fallback-headers.ts):
     // the app's OWN OpenRouter org key, sent as X-ORF-Fallback-Key only to
     // https://proxyai.devino.ca and only for a signed-in caller; no request

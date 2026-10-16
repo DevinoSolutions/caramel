@@ -13,6 +13,7 @@ const { envMock, checkRateLimitMock } = vi.hoisted(() => ({
         COUPON_BOX_DISCOVERY_ENABLED: false,
         COUPON_BOX_LLM_ENABLED: false,
         COUPON_BOX_PICK_MODEL: undefined,
+        COUPON_BOX_PICK_MODE: 'rules_first',
     } as Record<string, unknown>,
     checkRateLimitMock: vi.fn(async () => null as unknown),
 }))
@@ -24,6 +25,7 @@ vi.mock('@/lib/env', async importOriginal => {
         COUPON_BOX_DISCOVERY_ENABLED: false,
         COUPON_BOX_LLM_ENABLED: false,
         COUPON_BOX_PICK_MODEL: undefined,
+        COUPON_BOX_PICK_MODE: 'rules_first',
     })
     return { ...actual, env: envMock }
 })
@@ -44,6 +46,7 @@ beforeEach(() => {
     envMock.COUPON_BOX_DISCOVERY_ENABLED = false
     envMock.COUPON_BOX_LLM_ENABLED = false
     envMock.COUPON_BOX_PICK_MODEL = undefined
+    envMock.COUPON_BOX_PICK_MODE = 'rules_first'
     checkRateLimitMock.mockReset()
     checkRateLimitMock.mockImplementation(async () => null)
 })
@@ -57,6 +60,7 @@ describe('GET /api/extension/features', () => {
             shopperCodeCapture: false,
             couponBoxDiscovery: false,
             couponBoxLlm: false,
+            couponBoxPickMode: 'rules_first',
         })
     })
 
@@ -70,6 +74,7 @@ describe('GET /api/extension/features', () => {
             shopperCodeCapture: true,
             couponBoxDiscovery: false,
             couponBoxLlm: false,
+            couponBoxPickMode: 'rules_first',
         })
     })
 
@@ -83,6 +88,7 @@ describe('GET /api/extension/features', () => {
             shopperCodeCapture: false,
             couponBoxDiscovery: true,
             couponBoxLlm: false,
+            couponBoxPickMode: 'rules_first',
         })
     })
 
@@ -97,11 +103,34 @@ describe('GET /api/extension/features', () => {
             shopperCodeCapture: false,
             couponBoxDiscovery: false,
             couponBoxLlm: true,
+            couponBoxPickMode: 'rules_first',
         })
 
         envMock.COUPON_BOX_LLM_ENABLED = false
         expect((await read()).couponBoxLlm).toBe(false)
     })
+
+    it.each(['llm_first', 'llm_only'] as const)(
+        'couponBoxPickMode advertises %s only while couponBoxLlm is on',
+        async mode => {
+            const read = async () => (await GET(featuresRequest())).json()
+            envMock.COUPON_BOX_PICK_MODE = mode
+
+            // The pick is off: whatever the env says, the extension is told
+            // to run the rules first, so it never asks a route that refuses.
+            expect((await read()).couponBoxPickMode).toBe('rules_first')
+            envMock.COUPON_BOX_LLM_ENABLED = true
+            expect((await read()).couponBoxPickMode).toBe('rules_first')
+
+            envMock.COUPON_BOX_PICK_MODEL = 'test/box-model'
+            expect(await read()).toEqual({
+                shopperCodeCapture: false,
+                couponBoxDiscovery: false,
+                couponBoxLlm: true,
+                couponBoxPickMode: mode,
+            })
+        },
+    )
 
     it('needs no credentials (public read)', async () => {
         const res = await GET(featuresRequest())
