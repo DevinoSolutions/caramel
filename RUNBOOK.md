@@ -481,16 +481,17 @@ than that:
 with a named error instead of breaking deep inside a request handler). The
 operationally load-bearing ones:
 
-| Var                                                    | Used for                                                                                                                                                                               |
-| ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DATABASE_URL`                                         | auth_db + the app-owned coupon catalog (Prisma) — required                                                                                                                             |
-| `COUPONS_DATABASE_URL`                                 | OPTIONAL, bridge-sync only — read-only external `caramel_coupons` connection string; unset in normal deploys                                                                           |
-| `INGEST_API_KEY`                                       | bearer for `POST /api/ingest/catalog` (the coupons pipeline supplier push) — server-to-server, never a client                                                                          |
-| `COUPONS_ADMIN_SECRET`                                 | bearer for `POST /api/coupons/expire` + rate-limit trust exemption                                                                                                                     |
-| `UPKUMA_HEALTH_SECRET`                                 | bearer for `GET /api/health/db`                                                                                                                                                        |
-| `OPENROUTER_API_KEY`                                   | extension cart classifier (`/api/classify-cart`) — unset throws a named `OpenRouterError`, not a silent no-op                                                                          |
-| `NEXT_PUBLIC_SENTRY_DSN`                               | Sentry init (client + server) — unset means Sentry never initializes, production or not                                                                                                |
-| `APPLE_TEAM_ID` / `APPLE_KEY_ID` / `APPLE_PRIVATE_KEY` | Sign in with Apple: the app signs its own client-secret JWT from these (required when `APPLE_CLIENT_ID` is set; `.p8` as one line with literal `\n`) — see "Apple sign-in fails" above |
+| Var                                                    | Used for                                                                                                                                                                                                       |
+| ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`                                         | auth_db + the app-owned coupon catalog (Prisma) — required                                                                                                                                                     |
+| `COUPONS_DATABASE_URL`                                 | OPTIONAL, bridge-sync only — read-only external `caramel_coupons` connection string; unset in normal deploys                                                                                                   |
+| `INGEST_API_KEY`                                       | bearer for `POST /api/ingest/catalog` (the coupons pipeline supplier push) — server-to-server, never a client                                                                                                  |
+| `COUPONS_ADMIN_SECRET`                                 | bearer for `POST /api/coupons/expire` + rate-limit trust exemption                                                                                                                                             |
+| `UPKUMA_HEALTH_SECRET`                                 | bearer for `GET /api/health/db`                                                                                                                                                                                |
+| `OPENROUTER_API_KEY`                                   | extension cart classifier (`/api/classify-cart`) — unset throws a named `OpenRouterError`, not a silent no-op                                                                                                  |
+| `NEXT_PUBLIC_SENTRY_DSN`                               | Sentry init (client + server) — unset means Sentry never initializes, production or not                                                                                                                        |
+| `APPLE_TEAM_ID` / `APPLE_KEY_ID` / `APPLE_PRIVATE_KEY` | Sign in with Apple: the app signs its own client-secret JWT from these (required when `APPLE_CLIENT_ID` is set; `.p8` as one line with literal `\n`) — see "Apple sign-in fails" above                         |
+| `COUPON_BOX_LEARNED_SALT`                              | salt for the learned coupon box's one-way reporter hashes (32+ characters; unset = learned boxes off) — secret, never sent to a client; rotating it resets every install's identity (see "Learned coupon box") |
 
 TODO(human): record where these are actually set/rotated in Dokploy (env
 var UI vs. secret store) and the rotation procedure for
@@ -531,7 +532,8 @@ redeploy. The extension reads the same condition from `GET /api/extension/featur
 `coupon_box_pick_outcome` (properties: `outcome`, `cached`, `latency_ms`,
 `model_ms` when a model was called, `store`, `model`). Requests refused earlier
 by withRoute (non-extension Origin 403, generic rate limit 429) emit nothing.
-`outcome` is one of `box`, `no_box`, `no_pick:disabled`, `no_pick:model_error`,
+`outcome` is one of `box`, `no_box`, `learned` (answered from a learned coupon
+box, below: no model call), `no_pick:disabled`, `no_pick:model_error`,
 `no_pick:unparsable`, `budget_exceeded:client|global|daily`, `too_large`,
 `invalid`, `server_error` (`COUPON_BOX_PICK_OUTCOMES` in
 `src/lib/analytics/couponBoxPickOutcome.ts`).
@@ -568,3 +570,95 @@ Reading it: many `budget_exceeded:daily` means the cap is too low for real
 traffic (re-size it) or someone is forging the extension Origin; a rising
 `no_pick:model_error` with a high `model_p95_ms` is the model timing out
 (`TIMEOUT_MS` is 20s).
+
+### Pick mode: which finder goes first
+
+`COUPON_BOX_PICK_MODE` (redeploy to change) decides what the extension does on
+a cart page of a store with NO served config. It is advertised as
+`couponBoxPickMode` on `GET /api/extension/features`, and only while the pick
+is on; with `couponBoxLlm` false the extension is always told `rules_first`. A
+store with a served config is never affected by any mode.
+
+- `rules_first` (default, today's behaviour): the rules find the box; the pick
+  is asked only when they find nothing.
+- `llm_first`: the pick is asked first; a `no_box`, `no_pick`, 429, timeout or
+  error falls back to the rules exactly as before.
+- `llm_only`: the pick is the only finder (battle tests and deliberate
+  experiments only). Every safety check still runs.
+
+`llm_first` and `llm_only` ask the pick on every no-config cart page, so model
+calls rise: watch `budget_exceeded:daily` in the outcome mix and size
+`COUPON_BOX_PICK_DAILY_CAP` for it. Back to normal: `COUPON_BOX_PICK_MODE=rules_first`
+(or unset) and redeploy.
+
+## Learned coupon box
+
+When the extension finds a store's coupon box itself, types a code into it and
+the STORE ANSWERS (the total dropped, or the store showed a coupon reply), it
+reports the box to `POST /api/extension/coupon-box-learned` as `confirmed`; a
+learned box that did not work is reported `failed`. Once enough shoppers agree,
+`POST /api/extension/coupon-box-pick` answers with that box before the cache
+and the model: no model call, no budget spent, PostHog outcome `learned`. Code:
+`src/lib/couponBoxLearned.ts` (the one home of the rules below). Tables:
+`learned_coupon_boxes` and `learned_coupon_box_reporters`.
+
+**Switch.** Learned boxes ride the pick's switch: they work only while the pick
+is on (`COUPON_BOX_LLM_ENABLED=true` + `COUPON_BOX_PICK_MODEL`) AND
+`COUPON_BOX_LEARNED_SALT` is set (32+ characters, e.g. `openssl rand -hex 32`).
+Boot logs `learned coupon boxes ENABLED` or `DISABLED (COUPON_BOX_LEARNED_SALT
+unset)`. Learned-only kill switch: unset the salt and redeploy (the report
+route answers `{recorded:false, reason:'disabled'}` and the pick stops reading
+the table; the rows stay). Rotating the salt starts every install's identity
+over, so existing boxes stop gaining distinct installs from returning
+reporters; do it only on purpose. Whether learned boxes should get a switch of
+their own, separate from the model pick, is an open owner decision.
+
+**When a box is served.** All of:
+
+- at least 2 distinct installs AND at least 2 distinct networks (/24 IPv4, /48
+  IPv6) reported it. Install ids are client-made, so one client can forge many;
+  the network rule is what stops a single machine. One install's rows always
+  count as one network.
+- confirmations > failures (a tie stops serving).
+- a counted confirmation in the last 30 days.
+- the store has no served config (`store_configs` with input + apply xpaths,
+  matched on the host, its parent domains and the hyphen checkout hosts the
+  extension accepts). Such a store is never read or written.
+- the request said `acceptsLearned: true` (older builds never get one).
+
+One install counts at most once per 24h per box and per outcome. A `failed`
+report for a box nobody confirmed creates nothing. At most 50 reporter rows are
+kept per box (the least recently seen is dropped).
+
+**Wipe one poisoned store.** Read-only first, then delete (the reporters go
+with the boxes, `ON DELETE CASCADE`):
+
+```sql
+SELECT id, input_selector, apply_selector, toggle_selector, enter_only,
+       confirmations, failures, distinct_installs, distinct_networks,
+       first_source, last_confirmed_at
+FROM learned_coupon_boxes WHERE domain = 'shop.example';
+
+DELETE FROM learned_coupon_boxes WHERE domain = 'shop.example';
+```
+
+The pick stops serving it on the next request (nothing is cached). One box
+only: `DELETE FROM learned_coupon_boxes WHERE id = '<id>';`. The same store
+can be learned again by new reports; if it keeps being poisoned, give it a
+store config (a served config shuts learned boxes off for it for good).
+
+**Hand-over to the store pipeline.** The first time a store has a servable
+box, it is recorded once in the site-suggestions inbox with
+`source = 'auto_detect'`, no user and no requester email, so the coupons
+pipeline picks it up like any other store request. With no email, no status
+the pipeline sets can ever mail a shopper; marking it `supported` still sends
+the operator's own "marked supported" summary. Find them:
+`SELECT domain, status, created_at FROM site_suggestions WHERE source = 'auto_detect' ORDER BY created_at DESC;`
+
+**What is stored (privacy).** Per box: the store's host, the CSS selectors of
+the code field, its apply button and the control that reveals it, whether it
+applies on Enter, counters, timestamps, and which finder first found it. Per
+reporter: an HMAC-SHA256 of the extension's anonymous install id and of the
+network prefix, under the server-only salt, plus that reporter's counters and
+timestamps. Never: page or outline text, codes, cart contents, IP addresses,
+install ids in the clear, or anything tied to an account.

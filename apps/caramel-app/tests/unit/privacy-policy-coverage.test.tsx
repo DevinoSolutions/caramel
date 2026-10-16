@@ -68,6 +68,7 @@ describe('privacy policy coverage', () => {
         for (const claim of [
             'Finding the promo-code box on a cart page.',
             "Nothing new is sent to Caramel for that, except that the extension reads Caramel's feature switches",
+            'if the box it found works, reports where the box is',
             'only after you tap to apply codes',
             "the store's hostname and a trimmed outline",
             'every digit is replaced with "#"',
@@ -76,10 +77,27 @@ describe('privacy policy coverage', () => {
             'never contains text you typed into fields',
             "Devino's own AI model proxy",
             "which currently passes the request to NVIDIA's hosted model service (NIM)",
-            'The only other page content the extension sends is the trimmed cart-page outline described under “Finding the promo-code box on a cart page”, and only as described there.',
-            'Effective Date: October 14, 2026',
+            'The only other page content the extension sends is the trimmed cart-page outline described under “Finding the promo-code box on a cart page” and the promo-code box locations described under “Remembering a promo-code box that worked”, and only as described there.',
+            'Effective Date: October 16, 2026',
             'for that store and page shape',
             'Your IP address is used to rate-limit these requests.',
+        ]) {
+            expect(normalized).toContain(claim)
+        }
+    })
+
+    it('discloses what a learned promo-code box report sends and keeps', () => {
+        const normalized = text.replace(/&quot;/g, '"').replace(/\s+/g, ' ')
+        for (const claim of [
+            'Remembering a promo-code box that worked.',
+            'and the store responds to a code typed into it',
+            'short technical descriptions (CSS selectors)',
+            'the random install ID the extension created when it was installed',
+            'only as one-way hashes',
+            'never include codes, your cart, page text, or your account',
+            'Promo-code box locations',
+            'at most 50 per box',
+            'A box nobody has confirmed for 30 days is no longer used.',
         ]) {
             expect(normalized).toContain(claim)
         }
