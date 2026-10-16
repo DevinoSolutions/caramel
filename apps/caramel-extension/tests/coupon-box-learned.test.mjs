@@ -1,7 +1,9 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
     caramelBoxSelectors,
     caramelLearnedOutcome,
+    caramelOne,
+    caramelSelectorAllowed,
     caramelStableSelector,
     LEARNED_KEY,
     MAX_DOMAINS,
@@ -139,7 +141,19 @@ describe('caramelStableSelector', () => {
         ])
     })
 
-    it('null when nothing names it within four steps: no fragile long path', () => {
+    it('a path is at most four parts: a named ancestor three steps up, and no further', () => {
+        page(
+            '<div id="near"><div><div><button>Apply</button></div></div></div>' +
+                '<div id="far"><div><div><div><button>Apply</button></div></div></div></div>' +
+                '<button>Apply</button>',
+        )
+        expect(caramelStableSelector($('#near button'))).toBe(
+            'div#near > div > div > button',
+        )
+        expect(caramelStableSelector($('#far button'))).toBeNull()
+    })
+
+    it('null when nothing names it within three steps: no fragile long path', () => {
         page(
             '<div><div><div><div><div><button>Apply</button></div></div>' +
                 '</div></div></div><button>Apply</button>',
@@ -157,6 +171,96 @@ describe('caramelStableSelector', () => {
             if (sel) expect([...document.querySelectorAll(sel)]).toEqual([el])
         }
         expect(caramelStableSelector($('#box input'))).toBe('div#box > input')
+    })
+})
+
+// The grammar a learned box's selectors are built and read in: a served or
+// stored selector is data, and only this small, cheap subset of CSS is ever
+// queried.
+describe('the learned-box selector grammar', () => {
+    it.each([
+        'input',
+        'input#coupon-code',
+        'form#promo > div > input',
+        'div.cart-promo input',
+        'input[name="discount_code"]',
+        'input[aria-label="Promo code"]',
+        'input[placeholder="Enter code"]',
+        'input[type="text"]',
+        'input[id="promo.code"]',
+        'input[data-testid="promo-input"]',
+        'button[data-qa="apply > now"]',
+        'li:first-of-type > button',
+        'div:nth-of-type(2) > button',
+        'form#a > div > div > input',
+        'div[data-a="1"] > div[name="b"] input[id="c"]',
+    ])('allows %s', css => {
+        expect(caramelSelectorAllowed(css)).toBe(true)
+    })
+
+    it.each([
+        ['a :has()', 'div:has(input)'],
+        ['a :has() deeper in', 'form > div:has(> input) input'],
+        ['another pseudo-class', 'input:not([type="hidden"])'],
+        [':nth-child', 'div:nth-child(2) > input'],
+        ['a formula in nth-of-type', 'div:nth-of-type(2n+1)'],
+        ['a pseudo-element', 'input::before'],
+        ['a wildcard', '* > input'],
+        ['a sibling combinator', 'label + input'],
+        ['a general sibling', 'label ~ input'],
+        ['an attribute outside the list', 'a[href="/x"]'],
+        ['an unquoted value', 'input[name=code]'],
+        ['a substring match', 'input[name*="code"]'],
+        ['an escaped value', 'input[name="a\\"b"]'],
+        ['an escaped id', 'input#a\\:b'],
+        ['five parts', 'div#a > div > div > div > input'],
+        [
+            'four attribute tests',
+            'div[id="a"] div[name="b"] div[type="c"] input[name="d"]',
+        ],
+        ['a list', 'input, button'],
+        ['a leading space', ' input'],
+        ['a trailing combinator', 'div >'],
+        ['too long', 'input[name="' + 'a'.repeat(250) + '"]'],
+        ['script', 'input[name="javascript:x"]'],
+        ['empty', ''],
+        ['not a string', 7],
+    ])('refuses %s', (_what, css) => {
+        expect(caramelSelectorAllowed(css)).toBe(false)
+    })
+
+    it('a refused selector is never queried', () => {
+        page('<div><input name="a"></div>')
+        const spy = vi.spyOn(document, 'querySelectorAll')
+        expect(caramelOne(document, 'div:has(input) input')).toBeNull()
+        expect(caramelOne(document, 'div > div > div > div > input')).toBeNull()
+        expect(spy).not.toHaveBeenCalled()
+        expect(caramelOne(document, 'div > input')).toBe($('input'))
+        expect(spy).toHaveBeenCalledTimes(1)
+        spy.mockRestore()
+    })
+
+    it('a selector finds exactly one element, or none', () => {
+        page('<input name="code"><input name="code"><input name="promo">')
+        expect(caramelOne(document, 'input[name="code"]')).toBeNull()
+        expect(caramelOne(document, 'input[name="gone"]')).toBeNull()
+        expect(caramelOne(document, 'input[name="promo"]')).toBe(
+            document.querySelectorAll('input')[2],
+        )
+    })
+
+    it('every selector the builder makes is in the grammar', () => {
+        page(
+            '<form id="f"><div><input name="a" aria-label="Promo code">' +
+                '<input data-testid="x-1"><input placeholder="Enter code">' +
+                '<button id="go.now">Go</button><div><div><span>' +
+                '<button>Apply</button></span></div></div></div></form>',
+        )
+        const built = [...document.querySelectorAll('input,button')]
+            .map(caramelStableSelector)
+            .filter(Boolean)
+        expect(built.length).toBeGreaterThan(3)
+        for (const css of built) expect(caramelSelectorAllowed(css)).toBe(true)
     })
 })
 

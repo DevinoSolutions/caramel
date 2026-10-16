@@ -58,16 +58,71 @@ const usable = v =>
     !REFUSED.test(v) &&
     !PRIVATE.test(v)
 
-// The selector, when it finds exactly `el` in its document and nothing else.
-function only(el, css) {
-    if (!css || css.length > MAX_SELECTOR || REFUSED.test(css)) return null
+/* The only selectors a learned box is built from or read with, the same rule
+ * on both sides: compound parts of a tag, #id, .class,
+ * [id|name|type|aria-label|placeholder|data-*="plain value"],
+ * :first-of-type and :nth-of-type(n), joined by a space or ">". At most four
+ * parts, three attribute tests and MAX_READ_SELECTOR characters. Anything
+ * else (:has(), any other pseudo-class, a wildcard, a sibling combinator, an
+ * unquoted or escaped value) is refused before any query runs: a selector
+ * served by the server, or read back from storage, is data, and an expensive
+ * or odd one is never evaluated. */
+// The longest selector the server serves.
+export const MAX_READ_SELECTOR = 256
+const TAG_RE = /[a-z][a-z0-9-]*/iy
+const SIMPLE_RE =
+    /#[A-Za-z_][\w-]*|\.[A-Za-z_-][\w-]*|\[(?:id|name|type|aria-label|placeholder|data-[a-z0-9_-]+)="[^"\\]+"\]|:first-of-type|:nth-of-type\([1-9]\d{0,2}\)/y
+const JOIN_RE = /\s*>\s*|\s+/y
+
+// Exported for tests/coupon-box-learned.test.mjs.
+export function caramelSelectorAllowed(css) {
+    if (
+        typeof css !== 'string' ||
+        !css ||
+        css.length > MAX_READ_SELECTOR ||
+        REFUSED.test(css)
+    )
+        return false
+    let at = 0
+    let parts = 0
+    let attrs = 0
+    // The next token of `re` at `at`, consumed; '' when there is none.
+    const take = re => {
+        re.lastIndex = at
+        const m = re.exec(css)?.[0] || ''
+        at += m.length
+        return m
+    }
+    for (;;) {
+        let any = !!take(TAG_RE)
+        for (let s; (s = take(SIMPLE_RE)); any = true) if (s[0] === '[') attrs++
+        if (!any || ++parts > 4 || attrs > 3) return false
+        if (at === css.length) return true
+        if (!take(JOIN_RE) || at === css.length) return false
+    }
+}
+
+/* The one element `css` finds in `doc`, or null: a selector outside the
+ * grammar is never queried, and one that finds two elements (a gift-card
+ * field beside the box) names neither. */
+// Called from coupon-box-discovery.js.
+export function caramelOne(doc, css) {
+    if (!caramelSelectorAllowed(css)) return null
     try {
-        const m = el.ownerDocument.querySelectorAll(css)
-        return m.length === 1 && m[0] === el ? css : null
+        const m = doc.querySelectorAll(css)
+        return m.length === 1 ? m[0] : null
     } catch {
         return null
     }
 }
+
+// The selector, when it finds exactly `el` in its document and nothing else.
+const only = (el, css) =>
+    css &&
+    css.length <= MAX_SELECTOR &&
+    caramelOne(el.ownerDocument, css) === el
+        ? css
+        : null
 
 // The element's own stable names, best first, each as a selector that may or
 // may not be unique yet.
@@ -90,15 +145,16 @@ function ownNames(el) {
 }
 
 // A stable selector for `el`, or null. Its own name first; then a short path
-// (at most four steps) down from the nearest ancestor that has a unique name
-// of its own. Every answer is checked: it must find exactly this element.
+// (at most three steps, so four parts with the anchor) down from the nearest
+// ancestor that has a unique name of its own. Every answer is checked: it is
+// in the grammar and finds exactly this element.
 // Exported for tests/coupon-box-learned.test.mjs.
 export function caramelStableSelector(el) {
     if (!el || el.nodeType !== 1) return null
     for (const css of ownNames(el)) if (only(el, css)) return css
     const steps = []
     let node = el
-    for (let i = 0; i < 4 && node.parentElement; i++) {
+    for (let i = 0; i < 3 && node.parentElement; i++) {
         const parent = node.parentElement
         const tag = node.tagName.toLowerCase()
         const same = [...parent.children].filter(
