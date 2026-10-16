@@ -34,7 +34,10 @@ describe('storeDisplayName', () => {
 })
 
 describe('buildStoreTitle', () => {
-    it('coursera.org (catalog last updated in August): brand first, the live count, no month', () => {
+    it('coursera.org (catalog last updated in August): brand first, the live count, no month, and not "Active"', () => {
+        // 73 days without an update: the count is what the page lists, but a
+        // headline calling those codes "active" would claim a freshness the
+        // catalog cannot show.
         expect(
             buildStoreTitle({
                 base: 'coursera.org',
@@ -43,7 +46,30 @@ describe('buildStoreTitle', () => {
                 uk: false,
                 now: NOW,
             }),
+        ).toBe('Coursera Promo Codes & Coupons: 22 Codes | Caramel')
+    })
+
+    it('says "Active" only for a list updated in the last 30 days', () => {
+        const input = { base: 'coursera.org', total: 22, uk: false, now: NOW }
+        expect(
+            buildStoreTitle({
+                ...input,
+                facts: facts({
+                    lastUpdated: new Date('2026-09-20T00:00:00Z'),
+                }),
+            }),
         ).toBe('Coursera Promo Codes & Coupons: 22 Active Codes | Caramel')
+        expect(
+            buildStoreTitle({
+                ...input,
+                facts: facts({
+                    lastUpdated: new Date('2026-09-15T00:00:00Z'),
+                }),
+            }),
+        ).toBe('Coursera Promo Codes & Coupons: 22 Codes | Caramel')
+        expect(
+            buildStoreTitle({ ...input, facts: facts({ lastUpdated: null }) }),
+        ).toBe('Coursera Promo Codes & Coupons: 22 Codes | Caramel')
     })
 
     it('names the month only when the list was updated this month', () => {
@@ -97,7 +123,7 @@ describe('buildStoreTitle', () => {
                 uk: true,
                 now: NOW,
             }),
-        ).toBe('Argos Discount Codes & Vouchers: 9 Active Codes | Caramel')
+        ).toBe('Argos Discount Codes & Vouchers: 9 Codes | Caramel')
     })
 
     it('a store with no codes gets the generic title, never a count', () => {
@@ -162,6 +188,9 @@ describe('every title and description fits the snippet', () => {
         ['countrymusichalloffame.org', false],
         ['getthelabel.com', false],
         ['simplybe.co.uk', true],
+        // The longest UK store in the live sitemap (2026-10-16).
+        ['choicefurnituresuperstore.co.uk', true],
+        ['electronicwhiteboardswarehouse.com', false],
         ['countrystorecatalog.com', false],
     ]
     for (const [base, uk] of stores) {

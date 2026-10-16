@@ -28,6 +28,11 @@ import { parse } from 'tldts'
 const TITLE_MAX = 60
 const DESCRIPTION_MAX = 155
 const SITE_SUFFIX = ' | Caramel'
+// A title calls the listed codes "Active" only while the store's list was
+// updated within this window. The count itself is always the live count the
+// page lists; "Active" is a freshness claim, and a list nobody has touched
+// since August (coursera.org, 2026-10-16) cannot back it.
+const ACTIVE_CLAIM_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000
 
 // Brand spellings a title-cased domain label gets wrong, for stores with
 // Search Console impressions (or a home-page card). Keyed by the label in
@@ -83,6 +88,12 @@ function fitting(candidates: string[], max: number): string {
     )
 }
 
+function updatedRecently(lastUpdated: Date | null, now: Date): boolean {
+    if (!lastUpdated) return false
+    const age = now.getTime() - lastUpdated.getTime()
+    return age >= 0 && age <= ACTIVE_CLAIM_MAX_AGE_MS
+}
+
 function sameUtcMonth(a: Date, b: Date): boolean {
     return (
         a.getUTCFullYear() === b.getUTCFullYear() &&
@@ -110,9 +121,10 @@ export function buildStoreTitle(input: StoreMetadataInput): string {
     const name = storeDisplayName(base)
     if (total <= 0) {
         // Noindexed empty state: no count, no date.
-        return uk
-            ? `${name} Discount Codes & Voucher Codes${SITE_SUFFIX}`
-            : `${name} Coupons & Promo Codes${SITE_SUFFIX}`
+        const empty = uk
+            ? `${name} Discount Codes & Voucher Codes`
+            : `${name} Coupons & Promo Codes`
+        return fitting([`${empty}${SITE_SUFFIX}`, empty], TITLE_MAX)
     }
     const head = uk
         ? `${name} Discount Codes & Vouchers`
@@ -131,7 +143,9 @@ export function buildStoreTitle(input: StoreMetadataInput): string {
     return fitting(
         [
             ...dated,
-            `${head}: ${count} Active ${codes}${SITE_SUFFIX}`,
+            ...(updatedRecently(facts.lastUpdated, now)
+                ? [`${head}: ${count} Active ${codes}${SITE_SUFFIX}`]
+                : []),
             `${head}: ${count} ${codes}${SITE_SUFFIX}`,
             `${head}: ${count} ${codes}`,
             `${head}${SITE_SUFFIX}`,

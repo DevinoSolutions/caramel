@@ -4,7 +4,7 @@ import StoreCouponsPage, {
 import { BASE_URL } from '@/lib/env.client'
 import prisma from '@/lib/prisma'
 import type { ReactElement } from 'react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // F-001 — (marketing)/coupons/[store]/page.tsx is the 9th read site: an SSR
 // page (not a route handler), so it's exercised by calling the default
@@ -496,6 +496,16 @@ describe('StoreCouponsPage — "Add a code" form is offered for known stores onl
 })
 
 describe('StoreCouponsPage generateMetadata — canonical normalization + thin-page noindex', () => {
+    // The title's month and "Active" depend on render time against the
+    // fixture's last_updated (2026-09-24): pin the clock so they never drift.
+    beforeEach(() => {
+        vi.useFakeTimers({ toFake: ['Date'] })
+        vi.setSystemTime(new Date('2026-10-16T20:00:00Z'))
+    })
+    afterEach(() => {
+        vi.useRealTimers()
+    })
+
     it('canonicalizes every slug variant to the base-domain URL (www.example.com → example.com)', async () => {
         mockRows(
             sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
