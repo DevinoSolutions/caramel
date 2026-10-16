@@ -352,6 +352,55 @@ describe('isCheckout — cart intent the path does not spell out', () => {
         ).toBe(false)
     })
 
+    // The shopping bag is a cart only as a whole page of its own (ulta.com's
+    // cart is /bag); "bag" in a product or category path is merchandise.
+    it('opens on a shopping-bag page, and on no page that merely sells bags', async () => {
+        for (const url of [
+            '/bag',
+            '/bag/',
+            '/bag?step=1',
+            '/shopping-bag',
+            '/shoppingbag',
+            '/shopping_bag',
+            '/ShoppingBag.aspx',
+            '/mybag',
+            '/my-bag',
+            '/en/bag',
+            '/en-us/shopping-bag',
+            '/us/en/shoppingbag',
+            // A basket is already a cart word, in every shape.
+            '/basket',
+            '/en-gb/basket',
+            '/shop/basket.aspx',
+        ]) {
+            setPath(url)
+            expect(await isCheckout(), url).toBe(true)
+        }
+        for (const url of [
+            '/handbags',
+            '/handbags/',
+            '/bags',
+            '/bags/leather-tote',
+            '/collections/bag',
+            '/collections/bags',
+            '/products/tote-bag',
+            '/products/bag',
+            '/shop/bag',
+            '/store/bag',
+            '/women/bags/crossbody',
+            '/c/handbags/totes',
+            '/sleeping-bag',
+            '/bagels',
+            '/en/bags',
+            '/en/products/bag',
+            '/a/b/c/bag',
+            '/baggage-policy',
+        ]) {
+            setPath(url)
+            expect(await isCheckout(), url).toBe(false)
+        }
+    })
+
     it('opens on a cart whose page slug carries a number (WordPress /cart-2/)', async () => {
         for (const url of ['/cart-2/', '/basket-3', '/cart-2/?coupon=1']) {
             setPath(url)

@@ -254,8 +254,9 @@ export function _hostMatchesDomain(host, domain) {
 /* Does this URL name a cart or checkout? Generic across platforms — a word in
  * the path, never a store-specific rule. Used only to decide whether a live
  * cart probe is worth making, so a miss costs nothing but a missed probe.
- * `bag` is deliberately absent: /collections/bag is a product category on a
- * great many stores, and the prompt has no business appearing there.
+ * `bag` is deliberately absent here: /collections/bag is a product category
+ * on a great many stores, and the prompt has no business appearing there. The
+ * bag is a cart only as a whole page of its own, CARAMEL_BAG_FILE_RE below.
  *
  * The word must END its path segment. It may begin mid-segment (/shopping-cart
  * is a cart), but a segment that CONTINUES past it is a slug that merely starts
@@ -306,6 +307,15 @@ const CARAMEL_CART_FILE_PARENT_RE =
  * /products/viewcart and /docs/api/viewcart are pages ABOUT the action. */
 const CARAMEL_CART_ACTION_SEGMENT_RE = /^(?:manage|view)[-_]?(?:cart|basket)$/i
 
+/* The shopping bag as a page (/bag on ulta.com, /shopping-bag, /en-us/mybag).
+ * Stricter than a cart file: the whole last segment is the bag, singular, and
+ * only locales may come before it. /handbags, /bags/leather-tote,
+ * /products/tote-bag, /collections/bag and /shop/bag are product pages or
+ * categories on many stores. */
+const CARAMEL_BAG_FILE_RE =
+    /^(?:(?:my|view|shopping)[-_]?)?bag(?:\.(?:php|aspx?|html?|jsp|cfm|do))?$/i
+const CARAMEL_LOCALE_SEGMENT_RE = /^[a-z]{2}(?:[-_][a-z]{2})?$/i
+
 // Exported for tests/cart-capability-gate.test.mjs (the store-name parent pins).
 export function _caramelCartFilePath(pathname, hostname = location.hostname) {
     // A ;jsessionid=… (or any ;param) belongs to the server, not the page name.
@@ -313,6 +323,12 @@ export function _caramelCartFilePath(pathname, hostname = location.hostname) {
         .replace(/;[^/]*/g, '')
         .split('/')
         .filter(Boolean)
+    if (
+        segs.length < 4 &&
+        CARAMEL_BAG_FILE_RE.test(segs.at(-1)) &&
+        segs.slice(0, -1).every(seg => CARAMEL_LOCALE_SEGMENT_RE.test(seg))
+    )
+        return true
     // Where the cart word sits: an action in the first two segments, or a cart
     // file as the last of at most three. Everything before it must be a parent.
     let at = segs
