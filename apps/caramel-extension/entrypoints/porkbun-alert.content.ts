@@ -11,8 +11,10 @@
  * from the Chrome build). Whether `world: 'MAIN'` is honoured is the BROWSER's
  * business and is never assumed: the shim stamps a marker on <html> only when it
  * can see the page's own handler, i.e. only when it really runs in the page's
- * world, and the store's apply config stays withheld until the content realm
- * sees that marker (extension-capabilities.js, store-detect.js getDomainRecord).
+ * world, and the content realm sends that proof (`?caps=alertShim`) with its
+ * coupon fetch (coupon-fetch.js). GET /api/coupons withholds porkbun.com's codes
+ * from an extension that does not send it, so without the marker there are no
+ * codes to try and Caramel stays silent on the store.
  * Verified live on porkbun.com 2026-10-16: Chrome (built extension) and Firefox
  * 152 (installed through WebDriver BiDi) both stamp the marker, apply with zero
  * native dialogs; with the script removed (the shape of a browser that ignores

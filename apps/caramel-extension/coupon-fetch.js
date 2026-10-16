@@ -39,7 +39,12 @@ import { getCachedCodes } from './store-detect.js'
  * porkbun-alert-shim.js) -- bounded, and only there, so no other store's fetch
  * is ever delayed. Without it the first answer would be an empty list that
  * store-detect.js caches for the page, and Caramel would stay silent on a page
- * where the helper is in fact running. */
+ * where the helper is in fact running. It keys on THIS page's host, so the
+ * popup (whose page is the extension's own, with no marker) never proves
+ * anything and gets no porkbun codes: intended, the same withhold the server
+ * applies to any extension request without proof. On a withheld, still-loading
+ * porkbun.com checkout the wait delays the prompt by up to the bound; fail
+ * closed, and no other store is affected. */
 const CAPABILITY_LOAD_WAIT_MS = 10000
 
 function pageNeedsCapability(host) {

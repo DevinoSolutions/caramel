@@ -154,6 +154,19 @@ describe('fetchCouponsPage on a gated host whose marker has not landed', () => {
         }
     })
 
+    it('does not wait when the marker is already there, even before load', async () => {
+        const restoreHost = setHost('https://porkbun.com/checkout/cart')
+        const restoreState = setReadyState('interactive')
+        try {
+            stamp()
+            await fetchCouponsPage('porkbun.com', '', '', 1)
+            expect(sent[0].capabilities).toEqual(['alertShim'])
+        } finally {
+            restoreState()
+            restoreHost()
+        }
+    })
+
     it('does not wait when the page has already loaded', async () => {
         const restoreHost = setHost('https://porkbun.com/checkout/cart')
         const restoreState = setReadyState('complete')
