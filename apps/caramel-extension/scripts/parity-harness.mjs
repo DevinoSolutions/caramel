@@ -227,18 +227,24 @@ for (const [browser, { outDir }] of Object.entries(BUILDS)) {
     // that stopped emitting it would pass every reference check above and only
     // fail on a shopper's page, as a quiet miss. Pin the file itself, per
     // browser: present, non-empty, and still the module the finder imports.
-    const OUTLINE_ASSET = 'assets/coupon-box-outline.js'
-    const outlineShips = files.includes(OUTLINE_ASSET)
-    check(
-        outlineShips,
-        `${browser}: ${OUTLINE_ASSET} is in the build (emitted by the build:publicAssets hook)`,
-    )
-    if (outlineShips) {
-        const outline = readFileSync(join(outDir, OUTLINE_ASSET), 'utf8')
+    // The learned-box memory (assets/coupon-box-learned.js) ships the same
+    // way and is pinned the same way.
+    for (const [asset, defines] of [
+        ['assets/coupon-box-outline.js', /\bcaramelPageOutline\b/],
+        ['assets/coupon-box-learned.js', /\bcaramelLearnedOutcome\b/],
+    ]) {
+        const ships = files.includes(asset)
         check(
-            outline.length > 0 && /\bcaramelPageOutline\b/.test(outline),
-            `${browser}: ${OUTLINE_ASSET} is non-empty and still defines caramelPageOutline`,
+            ships,
+            `${browser}: ${asset} is in the build (emitted by the build:publicAssets hook)`,
         )
+        if (ships) {
+            const code = readFileSync(join(outDir, asset), 'utf8')
+            check(
+                code.length > 0 && defines.test(code),
+                `${browser}: ${asset} is non-empty and still defines ${defines.source}`,
+            )
+        }
     }
 
     const allowedMissing = new Set(

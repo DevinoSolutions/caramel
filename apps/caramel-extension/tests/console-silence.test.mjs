@@ -46,7 +46,7 @@ const SHIPPED_TO_STRANGERS = [
 // Not in any entrypoint's import graph, but shipped and run in the store's
 // page all the same: the build copies it beside the bundle and the finder
 // imports it by URL when it asks the server for a box (wxt.config.ts).
-const LOADED_ON_DEMAND = ['coupon-box-outline.js']
+const LOADED_ON_DEMAND = ['coupon-box-outline.js', 'coupon-box-learned.js']
 
 function ungatedConsoleLines(file) {
     const src = readFileSync(join(root, file), 'utf8')

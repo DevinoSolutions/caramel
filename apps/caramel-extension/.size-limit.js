@@ -140,4 +140,14 @@ module.exports = [
         limit: '9.2 KB',
         brotli: false,
     },
+    {
+        name: 'coupon-box-learned.js (loaded on demand, minified)',
+        path: '.size-cache/coupon-box-learned.min.js',
+        // 2026-10-16 — measured 3.46 kB minified. Not injected on every page:
+        // the finder imports it only on a store with no config, to name a box
+        // it may remember (stable selectors) and to save and report what a
+        // run on that box showed (the per-install memory, LRU 200 domains).
+        limit: '3.8 KB',
+        brotli: false,
+    },
 ]

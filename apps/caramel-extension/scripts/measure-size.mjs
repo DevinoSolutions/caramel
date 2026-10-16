@@ -93,6 +93,9 @@ export const GROUPS = {
     // (wxt.config.ts). Its own budget, so it can neither hide in nor inflate
     // the per-page one.
     'coupon-box-outline': ['coupon-box-outline.js'],
+    // The same, for the learned-box memory: imported only on a store with no
+    // config, when the finder is about to remember a box (wxt.config.ts).
+    'coupon-box-learned': ['coupon-box-learned.js'],
 }
 
 /** Minified bytes of one group, written as a single file for size-limit. */
