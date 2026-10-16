@@ -55,7 +55,14 @@ module.exports = [
         // builder is NOT in this bundle, it ships as assets/coupon-box-outline.js
         // and has its own budget below. 4.9% headroom over 111.27 kB, so the
         // next capability trips the ratchet.
-        limit: '117 KB',
+        // 2026-10-16, raised 117 -> 122 kB: the server's pick mode
+        // (rules_first / llm_first / llm_only, and the prompt asking the same
+        // question per mode) and the remembered coupon box (read it first,
+        // check it like any pick, carry it across a reload, hand its outcome
+        // to the module that saves it). Measured 113.05 -> 116.66 kB; naming,
+        // saving and reporting a box ship on demand (coupon-box-learned.js,
+        // below), not here.
+        limit: '122 KB',
         brotli: false,
     },
     {
@@ -127,7 +134,11 @@ module.exports = [
         // 2026-10-13, raised 10.7 -> 11.3 kB: the coupon-box pick request (its
         // flag, its message route, and one deadline over the flag read, the
         // token read and the request). Measured 10.52 kB.
-        limit: '11.3 KB',
+        // 2026-10-16, raised 11.3 -> 12.4 kB: the learned coupon box report
+        // route (flag, install id read, the POST and what the server
+        // recorded) and the pick mode beside the flag. Measured 10.68 ->
+        // 11.56 kB.
+        limit: '12.4 KB',
         brotli: false,
     },
     {
@@ -143,7 +154,7 @@ module.exports = [
     {
         name: 'coupon-box-learned.js (loaded on demand, minified)',
         path: '.size-cache/coupon-box-learned.min.js',
-        // 2026-10-16 — measured 3.46 kB minified. Not injected on every page:
+        // 2026-10-16 — measured 3.49 kB minified. Not injected on every page:
         // the finder imports it only on a store with no config, to name a box
         // it may remember (stable selectors) and to save and report what a
         // run on that box showed (the per-install memory, LRU 200 domains).
