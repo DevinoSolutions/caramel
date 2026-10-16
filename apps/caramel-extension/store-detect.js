@@ -118,6 +118,7 @@ export async function getDomainRecord(domain) {
         // leaves the cache unpoisoned so a later call can still succeed.
         if (!getDomainRecord.cache) {
             let failure = null
+            getDomainRecord.answered = false
             for (let attempt = 0; attempt < STORE_FETCH_ATTEMPTS; attempt++) {
                 if (attempt > 0) await sleep(STORE_FETCH_RETRY_DELAY_MS)
                 try {
@@ -132,6 +133,7 @@ export async function getDomainRecord(domain) {
                         continue
                     }
                     failure = null
+                    getDomainRecord.answered = true
                     if (resp?.supported?.length) {
                         getDomainRecord.cache = resp.supported
                         currentBrowser.storage.local.set({
@@ -187,6 +189,14 @@ export async function getDomainRecord(domain) {
     return best
 }
 getDomainRecord.cache = null
+
+/* The finder and the server's pick run only where the store list says a host
+ * has no config. Without a list (the fetch failed and nothing is cached) that
+ * cannot be known, and every configured store would read as one with none, so
+ * neither runs. */
+export function caramelStoreListKnown() {
+    return Array.isArray(getDomainRecord.cache) || !!getDomainRecord.answered
+}
 
 // Match the active hostname to a supported-store domain. Accept an exact match,
 // a real dotted subdomain (www./checkout./secure.<domain>), or a hyphen-prefixed
@@ -549,7 +559,7 @@ export async function isCheckout() {
  * still requires codes for the domain before the prompt appears. Detection
  * never clicks anything: opening a folded box waits for the shopper's tap. */
 async function _finderSeesBox() {
-    if (!_caramelCartIntentSignal()) return false
+    if (!caramelStoreListKnown() || !_caramelCartIntentSignal()) return false
     if (!(await caramelCouponBoxDiscoveryOn())) return false
     try {
         return caramelFinderSeesBox()
@@ -567,7 +577,7 @@ async function _finderSeesBox() {
  * on. */
 async function _finderMayOffer(domain) {
     if (await _finderSeesBox()) return true
-    if (!_caramelCartIntentSignal()) return false
+    if (!caramelStoreListKnown() || !_caramelCartIntentSignal()) return false
     if (!(await caramelCouponBoxDiscoveryOn())) return false
     try {
         return await caramelFinderMayAsk(domain)

@@ -47,6 +47,7 @@ const COUPONS = [
 let flags
 let answer // the server's pick: an object, or a function of the request
 let platformCart // what /cart.js answers (null: not a platform cart)
+let storeList // what the supported-stores request answers
 let t // the recording
 
 // Every finder entry point another module calls, counted. The real
@@ -150,7 +151,7 @@ function installChromeStub() {
         const { action } = message || {}
         t.messages.push(message)
         let reply = {}
-        if (action === 'fetchSupportedStores') reply = { supported: [] }
+        if (action === 'fetchSupportedStores') reply = storeList
         else if (action === 'fetchCoupons') reply = { coupons: COUPONS }
         else if (action === 'couponBoxDiscoveryEnabled')
             reply = { enabled: flags.discovery }
@@ -286,6 +287,7 @@ beforeEach(() => {
     flags = { discovery: false, llm: false }
     answer = { outcome: 'no_box', confidence: 80, why: 'none', cached: false }
     platformCart = null
+    storeList = { supported: [] }
 })
 
 describe('flags off (production today): a store with no config is exactly as before the finder', () => {
@@ -531,5 +533,50 @@ describe('features scoped to configured stores stay scoped on a finder store', (
         expect(JSON.parse(matches.replaceAll("'", '"'))).toEqual([
             'https://porkbun.com/checkout/*',
         ])
+    })
+})
+
+describe('the store list could not be read: nothing is auto-detected, because this may be a configured store', () => {
+    beforeEach(() => {
+        flags = { discovery: true, llm: true }
+        storeList = { error: 'HTTP 503' }
+    })
+
+    it('a cart with a box the rules would recognise: no prompt, the finder is not even asked', async () => {
+        freshPage(RULES_BOX + TOTAL)
+        await tryInitialize()
+        expect(asked('fetchSupportedStores').length).toBeGreaterThan(0)
+        expect(t.prompts).toEqual([])
+        expect(asked('couponBoxPick')).toEqual([])
+        expect(Object.keys(finderCalls)).toEqual([])
+    })
+
+    it('a cart only the server could read: no prompt, no pick', async () => {
+        freshPage(BARE_BOX + TOTAL)
+        answer = req =>
+            pick(idx(req.outline, /textbox/), idx(req.outline, /button "Go"/))
+        await tryInitialize()
+        expect(t.prompts).toEqual([])
+        expect(asked('couponBoxPick')).toEqual([])
+        expect(t.urls).not.toContain('assets/coupon-box-outline.js')
+    })
+
+    it('the apply flow reached anyway: no finder, no pick, the codes to copy', async () => {
+        freshPage(RULES_BOX + TOTAL)
+        wireStore('dc', 'ap', 'drop')
+        expect(await getDomainRecord(location.hostname)).toBeUndefined()
+        await run()
+        expect(finderCalls.caramelDiscoveredRecord).toBeUndefined()
+        expect(asked('couponBoxPick')).toEqual([])
+        expect(t.page).toEqual([])
+        expect(t.savings).toEqual([])
+        handedOver()
+    })
+
+    it('the same cart once the list is read: the prompt is back (the list is the only difference)', async () => {
+        storeList = { supported: [] }
+        freshPage(RULES_BOX + TOTAL)
+        await tryInitialize()
+        expect(t.prompts).toEqual([location.hostname])
     })
 })

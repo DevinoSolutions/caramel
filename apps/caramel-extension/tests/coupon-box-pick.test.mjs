@@ -10,7 +10,7 @@ import {
     PICK_WAIT_MS,
 } from '../coupon-box-discovery.js'
 import { startApplyingCoupons } from '../coupon-runner.js'
-import { caramelConfiglessRecord } from '../store-detect.js'
+import { caramelConfiglessRecord, getDomainRecord } from '../store-detect.js'
 
 // The server's pick: when the finder's rules see a total but no promo box, the
 // extension may ask the server which element is the box. These pin that:
@@ -202,6 +202,9 @@ beforeEach(() => {
     answer = { outcome: 'no_box', confidence: 80, why: 'none', cached: false }
     outlineUrl = OUTLINE_FILE
     outlineLoads = 0
+    // On a page the store list has been read by detection before the runner
+    // is reached; this store is not on it.
+    getDomainRecord.cache = []
     _caramelResetDiscoveryFlag()
 })
 
