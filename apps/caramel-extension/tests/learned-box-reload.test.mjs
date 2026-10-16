@@ -107,8 +107,15 @@ function installChromeStub() {
 }
 
 // A box no rule recognises: only the remembered selectors find it.
+// Six wrappers: the rules look for a field's apply button no more than six
+// levels up from it, so a button outside them is one only the server names.
+const deep = html => '<div>'.repeat(6) + html + '</div>'.repeat(6)
+const PROMO_FIELD =
+    '<input id="x" name="field_7" type="text" placeholder="Promo code">'
+// A promo box the rules never settle on: they cannot reach its button.
 const BARE_BOX =
-    '<div class="f"><input id="x" name="field_7" type="text">' +
+    '<div class="f">' +
+    deep(PROMO_FIELD) +
     '<button id="go" type="button">Go</button></div>'
 const TOTAL = amount =>
     `<div class="row"><span>Order total</span> <span>$${amount}</span></div>`

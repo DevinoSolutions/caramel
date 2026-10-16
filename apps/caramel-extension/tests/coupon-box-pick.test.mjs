@@ -27,6 +27,7 @@ let finalModals
 let appliedWith
 let flagOn
 let llmOn
+let mode // the server's couponBoxPickMode (undefined: rules_first)
 let pickCalls
 let answer // the server's answer: an object, or a function of the request
 // The outline builder is loaded from the extension's own URL, which the stub
@@ -114,7 +115,7 @@ function installChromeStub() {
         const a = message?.action
         if (a === 'fetchCoupons') cb({ coupons: COUPONS })
         else if (a === 'couponBoxDiscoveryEnabled') cb({ enabled: flagOn })
-        else if (a === 'couponBoxLlmEnabled') cb({ enabled: llmOn })
+        else if (a === 'couponBoxLlmEnabled') cb({ enabled: llmOn, mode })
         else if (a === 'couponBoxPick') {
             pickCalls.push(message)
             cb(typeof answer === 'function' ? answer(message) : answer)
@@ -151,19 +152,28 @@ function stubLayout() {
 }
 
 const TOTAL = '<div class="row"><span>Total</span><span>$100.00</span></div>'
-// A box no rule recognises: the field and its button carry no coupon words.
+// Six wrappers: the rules look for a field's apply button no more than six
+// levels up from it, so a button outside them is one only the server names.
+const deep = html => '<div>'.repeat(6) + html + '</div>'.repeat(6)
+// A promo field (a pick's field carries a coupon word, like any box the rules
+// accept) whose button the rules cannot reach, so they never settle on it.
+const PROMO_FIELD =
+    '<input id="x" name="field_7" type="text" placeholder="Promo code">'
 const BARE_BOX =
-    '<div class="f"><input id="x" name="field_7" type="text">' +
+    '<div class="f">' +
+    deep(PROMO_FIELD) +
     '<button id="go" type="button">Go</button></div>'
-// A box the rules do recognise, folded behind a toggle they do not. "Extras"
-// is not an allowlisted word, so the toggle's line carries no name: TOGGLE.
+// A box the rules do recognise, folded behind a toggle they do not: "Promo
+// code" on a plain button with no disclosure signal (no aria-expanded, no
+// aria-controls) is a row title to them, but it names a code, so a pick may
+// click it.
 const FOLDED =
-    '<button id="tg" type="button">Extras</button>' +
+    '<button id="tg" type="button">Promo code</button>' +
     '<div id="panel" style="display:none"><label for="dc">Discount code</label>' +
     '<input id="dc" name="discount_code" type="text">' +
     '<button id="ap" type="button">Apply</button></div>'
 
-const TOGGLE = /\] button$/
+const TOGGLE = /button "Promo code"/
 
 // The index the outline gave the element on the line matching `re`.
 function idx(outline, re) {
@@ -200,6 +210,7 @@ beforeEach(() => {
     pickCalls = []
     flagOn = true
     llmOn = true
+    mode = undefined
     answer = { outcome: 'no_box', confidence: 80, why: 'none', cached: false }
     outlineUrl = OUTLINE_FILE
     outlineLoads = 0
@@ -300,7 +311,9 @@ describe('a usable pick runs through the normal apply flow', () => {
 
     it('a toggle that reveals nothing the rules accept gives no record', async () => {
         document.body.innerHTML =
-            '<button id="tg" type="button">Extras</button>' + BARE_BOX + TOTAL
+            '<button id="tg" type="button">Promo code</button>' +
+            BARE_BOX +
+            TOTAL
         let toggleClicks = 0
         document
             .getElementById('tg')
@@ -318,7 +331,8 @@ describe('a pick is checked on the page before anything is touched', () => {
     for (const label of ['Place order', 'Sign in', 'Remove', 'Continue'])
         it(`never uses "${label}" as the apply button`, async () => {
             document.body.innerHTML =
-                '<div><input id="x" name="field_7" type="text">' +
+                '<div>' +
+                PROMO_FIELD +
                 `<button id="b" type="button">${label}</button></div>` +
                 TOTAL
             let clicks = 0
@@ -483,8 +497,7 @@ describe('the outline builder is loaded only to ask', () => {
 // box on this page".
 describe('a box the server says has no apply button (it applies on Enter)', () => {
     // No button anywhere near the field, so the rules cannot supply one.
-    const INPUT_ONLY =
-        '<div class="f"><input id="x" name="field_7" type="text"></div>'
+    const INPUT_ONLY = '<div class="f">' + PROMO_FIELD + '</div>'
 
     it('an input with no button is a usable record: the input stands in as its own submit', async () => {
         document.body.innerHTML = INPUT_ONLY + TOTAL
@@ -624,7 +637,9 @@ describe('a box the server says has no apply button (it applies on Enter)', () =
 
     it('a button the server named but the page refuses never becomes an Enter press', async () => {
         document.body.innerHTML =
-            '<div class="f"><input id="x" name="field_7" type="text"></div>' +
+            '<div class="f">' +
+            deep(PROMO_FIELD) +
+            '</div>' +
             '<a id="b" href="/cart/checkout" class="btn">Apply</a>' +
             TOTAL
         answer = req =>
@@ -665,8 +680,7 @@ describe('an input-only pick, driven by the real apply flow', () => {
 
     it('{outcome:box, input:N, button:null} ends with the code typed and Enter pressed on that input', async () => {
         document.body.innerHTML =
-            '<div class="f"><input id="x" name="field_7" type="text"></div>' +
-            TOTAL
+            '<div class="f">' + PROMO_FIELD + '</div>' + TOTAL
         answer = req => box(idx(req.outline, /textbox/), null)
         const seen = watch()
         let typed = null
@@ -692,10 +706,12 @@ describe('an input-only pick, driven by the real apply flow', () => {
     // config row gets), before the code is even typed.
     const unsafeForms = {
         'a form with a card number field':
-            '<form><input id="x" name="field_7" type="text">' +
+            '<form>' +
+            PROMO_FIELD +
             '<input name="cardnumber" type="text"></form>',
         'a form with a place-order control':
-            '<form><input id="x" name="field_7" type="text">' +
+            '<form>' +
+            PROMO_FIELD +
             '<button id="po" type="submit">Place order</button></form>',
     }
     for (const [name, html] of Object.entries(unsafeForms))
@@ -718,7 +734,8 @@ describe('an input-only pick, driven by the real apply flow', () => {
 describe('an apply button never leaves the page', () => {
     it('a link to another page, named as the button, is never clicked', async () => {
         document.body.innerHTML =
-            '<div><input id="x" name="field_7" type="text">' +
+            '<div>' +
+            deep(PROMO_FIELD) +
             '<a id="b" href="/cart/checkout" class="btn">Apply</a></div>' +
             TOTAL
         let clicks = 0
@@ -739,7 +756,7 @@ describe('an apply button never leaves the page', () => {
 
     it('a box a server toggle revealed never takes a link to another page as its button', async () => {
         document.body.innerHTML =
-            '<button id="tg" type="button">Extras</button>' +
+            '<button id="tg" type="button">Promo code</button>' +
             '<div id="panel" style="display:none"><label for="dc">Discount code</label>' +
             '<input id="dc" name="discount_code" type="text">' +
             '<a id="ap" href="/cart/checkout" class="btn">Apply</a></div>' +
@@ -881,9 +898,11 @@ describe('a pick is kept, by name, for the next page in the tab', () => {
         expect(pickCalls).toHaveLength(1)
     })
 
-    it('a box with no name is used once and not kept: a wordless field cannot be told from another', async () => {
+    it('a box with no field name or id is used once and not kept: its words alone cannot tell it from another', async () => {
         const WORDLESS =
-            '<div><input type="text"><button type="button">Go</button></div>'
+            '<div>' +
+            deep('<input type="text" placeholder="Promo code">') +
+            '<button type="button">Go</button></div>'
         document.body.innerHTML = WORDLESS + TOTAL
         pickBareBox()
         expect(
@@ -922,7 +941,8 @@ describe('a pick is kept, by name, for the next page in the tab', () => {
 
         // After the reload "Go" is a link to another page.
         reload(
-            '<div class="f"><input id="x" name="field_7" type="text">' +
+            '<div class="f">' +
+                deep(PROMO_FIELD) +
                 '<a id="go" href="/elsewhere">Go</a></div>' +
                 TOTAL,
         )
@@ -934,33 +954,41 @@ describe('a pick is kept, by name, for the next page in the tab', () => {
     })
 
     it("a kept button outside the box's own form is not its button", async () => {
+        // The rules settle on a promo field whose button they can reach, so
+        // the server is asked first (llm_first, a store with no config).
+        mode = 'llm_first'
+        const rec = { domain: 'shop.test', caramelNoConfig: true }
         document.body.innerHTML =
-            '<form id="promo"><input id="x" name="field_7" type="text"></form>' +
+            '<form id="promo">' +
+            PROMO_FIELD +
+            '</form>' +
             '<button id="go" type="button" form="promo">Go</button>' +
             TOTAL
         answer = req =>
             box(idx(req.outline, /textbox/), idx(req.outline, /button "Go"/))
-        expect(
-            await caramelDiscoveredRecord({ domain: 'shop.test' }),
-        ).not.toBeNull()
+        expect(await caramelDiscoveredRecord(rec)).not.toBeNull()
+        expect(pickCalls).toHaveLength(1)
 
-        // The same button now belongs to the gift-card form.
+        // The same button now belongs to the gift-card form. (The field sits
+        // deep in its form, so the rules, which run after a pick that cannot
+        // be used here, cannot reach that button either.)
         reload(
-            '<form id="promo"><input id="x" name="field_7" type="text"></form>' +
+            '<form id="promo">' +
+                deep(PROMO_FIELD) +
+                '</form>' +
                 '<form id="gift"><input name="gift_card" type="text"></form>' +
                 '<button id="go" type="button" form="gift">Go</button>' +
                 TOTAL,
         )
 
-        expect(await caramelDiscoveredRecord({ domain: 'shop.test' })).toBe(
-            null,
-        )
+        expect(await caramelDiscoveredRecord(rec)).toBe(null)
         expect(pickCalls).toHaveLength(1)
     })
 
-    it('a field named only by its placeholder is not kept: a gift-card field says "Enter code" too', async () => {
+    it('a field named only by its placeholder is not kept: a gift-card field can say "Promo code" too', async () => {
         const BOX =
-            '<div><input type="text" placeholder="Enter code">' +
+            '<div>' +
+            deep('<input type="text" placeholder="Promo code">') +
             '<button id="go" type="button">Go</button></div>'
         document.body.innerHTML = BOX + TOTAL
         pickBareBox()
@@ -970,7 +998,8 @@ describe('a pick is kept, by name, for the next page in the tab', () => {
 
         // After the reload only the gift-card field wears those words.
         reload(
-            '<div>Gift card <input type="text" placeholder="Enter code">' +
+            '<div>Gift card ' +
+                deep('<input type="text" placeholder="Promo code">') +
                 '<button id="go" type="button">Go</button></div>' +
                 TOTAL,
         )
@@ -1042,7 +1071,7 @@ describe('a pick is kept, by name, for the next page in the tab', () => {
             '<input id="dc" name="discount_code" type="text">' +
             '<button id="ap" type="button">Apply</button></div>'
         document.body.innerHTML =
-            '<span id="tg" role="button">Extras</span>' + PANEL + TOTAL
+            '<span id="tg" role="button">Promo code</span>' + PANEL + TOTAL
         document.getElementById('tg').addEventListener('click', () => {
             document.getElementById('panel').style.display = ''
         })
@@ -1053,7 +1082,7 @@ describe('a pick is kept, by name, for the next page in the tab', () => {
 
         // After the reload the same words sit inside the form's submit button.
         reload(
-            '<form><button type="submit"><span id="tg" role="button">Extras</span></button></form>' +
+            '<form><button type="submit"><span id="tg" role="button">Promo code</span></button></form>' +
                 PANEL +
                 TOTAL,
         )
@@ -1075,10 +1104,7 @@ describe('a pick is kept, by name, for the next page in the tab', () => {
         pickBareBox()
         await caramelDiscoveredRecord({ domain: 'shop.test' })
 
-        reload(
-            '<div class="f"><input id="x" name="field_7" type="text"></div>' +
-                TOTAL,
-        )
+        reload('<div class="f">' + PROMO_FIELD + '</div>' + TOTAL)
 
         expect(await caramelFinderSeesKeptPick('shop.test')).toBe(false)
         expect(await caramelDiscoveredRecord({ domain: 'shop.test' })).toBe(
@@ -1115,8 +1141,7 @@ describe('a pick is kept, by name, for the next page in the tab', () => {
     // A box the server said applies on Enter has no button to find again: it
     // is kept as Enter-only, and only a pick made that way is used without one.
     describe('a kept box that applies on Enter', () => {
-        const INPUT_ONLY =
-            '<div class="f"><input id="x" name="field_7" type="text"></div>'
+        const INPUT_ONLY = '<div class="f">' + PROMO_FIELD + '</div>'
         const pickInputOnly = () => {
             answer = req => box(idx(req.outline, /textbox/), null)
         }

@@ -163,13 +163,20 @@ const RULES_BOX =
     '<div class="r"><label for="dc">Discount code</label>' +
     '<input id="dc" name="discount_code" type="text">' +
     '<button id="ap" type="button">Apply</button></div>'
-// A box no rule recognises.
+// Six wrappers: the rules look for a field's apply button no more than six
+// levels up from it, so a button outside them is one only the server names.
+const deep = html => '<div>'.repeat(6) + html + '</div>'.repeat(6)
+const PROMO_FIELD =
+    '<input id="x" name="field_7" type="text" placeholder="Promo code">'
+// A promo box the rules never settle on: they cannot reach its button.
 const BARE_BOX =
-    '<div class="f"><input id="x" name="field_7" type="text">' +
+    '<div class="f">' +
+    deep(PROMO_FIELD) +
     '<button id="go" type="button">Go</button></div>'
-// The same box, folded behind a toggle the rules do not read.
+// The same box, folded behind a toggle the rules do not read: "Promo code"
+// on a plain button with no disclosure signal.
 const FOLDED =
-    '<button id="tg" type="button">Extras</button>' +
+    '<button id="tg" type="button">Promo code</button>' +
     '<div id="panel" style="display:none"><label for="dc">Discount code</label>' +
     '<input id="dc" name="discount_code" type="text">' +
     '<button id="ap" type="button">Apply</button></div>'
@@ -199,7 +206,10 @@ const box = (input, button, toggle = null) => ({
     cached: false,
 })
 const BARE_PICK = req =>
-    box(idx(req.outline, /\] textbox$/), idx(req.outline, /button "Go"/))
+    box(
+        idx(req.outline, /textbox "Promo code"/),
+        idx(req.outline, /button "Go"/),
+    )
 
 const noConfig = () => caramelConfiglessRecord(location.hostname)
 const run = (rec = noConfig()) => startApplyingCoupons(rec)
@@ -309,7 +319,7 @@ describe('pick mode', () => {
         document.getElementById('tg').addEventListener('click', () => {
             document.getElementById('panel').style.display = ''
         })
-        answer = req => box(null, null, idx(req.outline, /\] button$/))
+        answer = req => box(null, null, idx(req.outline, /button "Promo code"/))
 
         mode = 'llm_only'
         await run()
@@ -326,13 +336,14 @@ describe('pick mode', () => {
 
     it('llm_only: a refused button is never swapped for one the rules find', async () => {
         document.body.innerHTML =
-            '<div><input id="x" name="field_7" type="text">' +
+            '<div>' +
+            PROMO_FIELD +
             '<button id="po" type="button">Place order</button>' +
             '<button id="ap" type="button">Apply</button></div>' +
             TOTAL
         answer = req =>
             box(
-                idx(req.outline, /\] textbox$/),
+                idx(req.outline, /textbox/),
                 idx(req.outline, /button "Place order"/),
             )
 
