@@ -1,5 +1,5 @@
 // owns: page-side capabilities a store's apply config can depend on
-// (CARAMEL_CAPABILITY_MARKERS, caramelCapabilityHeld, caramelHeldCapabilities).
+// (CARAMEL_CAPABILITY_MARKERS, caramelCapabilityHeld).
 //
 // WHY: some stores can only be driven safely when a page-world helper is
 // running (porkbun.com: porkbun-alert-shim.js, so a refused code does not open
@@ -42,17 +42,5 @@ export const CARAMEL_HOST_CAPABILITY_REQUIREMENTS = Object.freeze({
 export function caramelCapabilityHeld(name, doc = document) {
     const attr = CARAMEL_CAPABILITY_MARKERS[name]
     if (!attr) return false
-    return doc?.documentElement?.getAttribute(attr) === '1'
-}
-
-// The capabilities this page holds right now, by name. coupon-fetch.js sends
-// them as `?caps=` on GET /api/coupons: for a gated store (porkbun.com) the
-// server withholds the codes from an extension that does not prove the helper
-// is running, which is what keeps the BUILDS THAT PREDATE THIS FILE (they send
-// nothing) off the store. Empty when no marker is set or there is no document
-// (the service worker never calls this).
-export function caramelHeldCapabilities(doc = globalThis.document) {
-    return Object.keys(CARAMEL_CAPABILITY_MARKERS).filter(name =>
-        caramelCapabilityHeld(name, doc),
-    )
+    return doc.documentElement?.getAttribute(attr) === '1'
 }

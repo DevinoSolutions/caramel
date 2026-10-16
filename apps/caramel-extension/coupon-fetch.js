@@ -21,8 +21,22 @@
 import { caramelSendMessage, log, recordTiming } from './caramel-base.js'
 import { CARAMEL_ENV } from './caramel-env.js'
 import { CaramelCoupons } from './coupon-constants.generated.js'
-import { caramelHeldCapabilities } from './extension-capabilities.js'
+import {
+    CARAMEL_CAPABILITY_MARKERS,
+    caramelCapabilityHeld,
+} from './extension-capabilities.js'
 import { getCachedCodes } from './store-detect.js'
+
+/* The capabilities this page holds right now, by name, sent with the request so
+ * the server will hand a gated store's codes (porkbun.com) to this build. A
+ * build that predates this sends nothing and is withheld. Lives here, not in
+ * extension-capabilities.js, because the porkbun-alert-shim bundle includes that
+ * file whole and has a 2 kB budget. */
+function heldCapabilities() {
+    return Object.keys(CARAMEL_CAPABILITY_MARKERS).filter(name =>
+        caramelCapabilityHeld(name),
+    )
+}
 
 /* --------------------------------------------------  coupon list */
 /* ONE page of the store's codes, envelope included.
@@ -58,9 +72,7 @@ export async function fetchCouponsPage(site, kw, category, page) {
             kw,
             category,
             page,
-            // The server withholds a gated store's codes (porkbun.com) from an
-            // extension that cannot say the page-side helper is running.
-            capabilities: caramelHeldCapabilities(),
+            capabilities: heldCapabilities(),
         })
         if (resp?.error) {
             log('fetchCoupons background error', resp.error)

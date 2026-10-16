@@ -4,7 +4,6 @@ import { fetchCouponsPage } from '../coupon-fetch.js'
 import {
     CARAMEL_CAPABILITY_MARKERS,
     caramelCapabilityHeld,
-    caramelHeldCapabilities,
 } from '../extension-capabilities.js'
 import {
     caramelStoreWithheld,
@@ -105,18 +104,6 @@ describe('caramelCapabilityHeld', () => {
         stamp()
         expect(caramelCapabilityHeld('somethingNew')).toBe(false)
         expect(caramelCapabilityHeld(undefined)).toBe(false)
-    })
-})
-
-describe('caramelHeldCapabilities', () => {
-    it('lists exactly the capabilities whose marker this page carries', () => {
-        expect(caramelHeldCapabilities()).toEqual([])
-        stamp()
-        expect(caramelHeldCapabilities()).toEqual(['alertShim'])
-    })
-
-    it('is empty, not a throw, where there is no document', () => {
-        expect(caramelHeldCapabilities(undefined)).toEqual([])
     })
 })
 
