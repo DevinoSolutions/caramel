@@ -96,6 +96,9 @@ export const GROUPS = {
     // (wxt.config.ts). Its own budget, so it can neither hide in nor inflate
     // the per-page one.
     'coupon-box-outline': ['coupon-box-outline.js'],
+    // Injected only on porkbun.com/checkout/* (entrypoints/porkbun-alert.content.ts,
+    // MAIN world), so it neither hides in nor inflates the per-page budget.
+    'porkbun-alert': ['porkbun-alert-shim.js'],
 }
 
 /** Minified bytes of one group, written as a single file for size-limit. */
