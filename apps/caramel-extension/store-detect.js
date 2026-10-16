@@ -176,16 +176,26 @@ export async function getDomainRecord(domain) {
     }
     // The most specific row wins, not the first. oldnavy.gap.com has its own
     // row, but gap.com is served before it, and a first-match scan gave Old
-    // Navy's cart Gap's row: Gap's codes, Gap's selectors. 62 configured hosts
-    // in the 2026-10-16 list were shadowed by a parent store that way. On a
-    // tie the earlier row keeps it, as before.
+    // Navy's cart Gap's row: Gap's codes, Gap's selectors. 31 configured
+    // stores in the 2026-10-16 list were shadowed by a parent store that way.
+    // Specificity is the domain without its www. label, so a www. row and a
+    // bare row of the same store tie, and the earlier row keeps it, as before.
+    // A www. row only reaches hosts other than its own through that
+    // normalisation; there it gives way to a bare row of the same store.
+    const host = String(domain).toLowerCase()
     let best
-    for (const r of getDomainRecord.cache || [])
-        if (
-            _hostMatchesDomain(domain, r.domain) &&
-            !(best && best.domain.length >= r.domain.length)
-        )
+    let bestRank = -1
+    for (const r of getDomainRecord.cache || []) {
+        if (!_hostMatchesDomain(host, r.domain)) continue
+        const d = String(r.domain).toLowerCase()
+        const rank =
+            _withoutWww(d).length * 2 +
+            (d.startsWith('www.') && d !== host ? 0 : 1)
+        if (rank > bestRank) {
             best = r
+            bestRank = rank
+        }
+    }
     return best
 }
 getDomainRecord.cache = null
@@ -240,6 +250,7 @@ const HYPHEN_CHECKOUT_PREFIXES = new Set([
  * catalogue row; this fixes the aligned majority, not every case.
  */
 const CARAMEL_SHOPIFY_HOST_SUFFIX = '.myshopify.com'
+const _withoutWww = d => d.replace(/^www\./, '')
 function _shopifyShopHostMatches(host, domain) {
     if (!host.endsWith(CARAMEL_SHOPIFY_HOST_SUFFIX)) return false
     const shop = host.slice(0, -CARAMEL_SHOPIFY_HOST_SUFFIX.length)
@@ -254,7 +265,9 @@ function _shopifyShopHostMatches(host, domain) {
 export function _hostMatchesDomain(host, domain) {
     if (!host || !domain) return false
     host = String(host).toLowerCase()
-    domain = String(domain).toLowerCase()
+    // A row written as www.x.com describes the store x.com: it matches x.com
+    // and x.com's subdomains exactly as a bare x.com row does.
+    domain = _withoutWww(String(domain).toLowerCase())
     if (host === domain) return true
     if (_shopifyShopHostMatches(host, domain)) return true
     const i = host.length - domain.length

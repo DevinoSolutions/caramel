@@ -548,7 +548,16 @@ describe('the store list could not be read: nothing is auto-detected, because th
         expect(asked('fetchSupportedStores').length).toBeGreaterThan(0)
         expect(t.prompts).toEqual([])
         expect(asked('couponBoxPick')).toEqual([])
-        expect(Object.keys(finderCalls)).toEqual([])
+        // Not even asked whether it is on. (Only detection's entry points
+        // are counted: an earlier test's apply loop may still be winding
+        // down in the background.)
+        for (const entry of [
+            'caramelCouponBoxDiscoveryOn',
+            'caramelFinderSeesBox',
+            'caramelFinderMayAsk',
+            'caramelDiscoveredRecord',
+        ])
+            expect(finderCalls[entry]).toBeUndefined()
     })
 
     it('a cart only the server could read: no prompt, no pick', async () => {

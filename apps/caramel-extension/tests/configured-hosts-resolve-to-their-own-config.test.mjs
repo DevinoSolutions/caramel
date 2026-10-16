@@ -76,20 +76,10 @@ describe('no configured store is mistaken for one with no config', () => {
         expect(missed).toEqual([])
     })
 
-    it('…and on its www. and checkout. hosts, apart from three www-only rows', async () => {
-        // These three rows were written with the www. label, and the store has
-        // no second row for its bare domain. A shopper on the bare host (or a
-        // checkout.* host) of these stores IS treated as having no config:
-        // with the finder flag on, the finder runs there. Pinned so a
-        // change to the list or the matcher shows up here.
-        const KNOWN_WWW_ONLY = new Set([
-            'baabuk.com',
-            'checkout.baabuk.com',
-            'stuckonyou.com',
-            'checkout.stuckonyou.com',
-            'usa.canon.com',
-            'checkout.usa.canon.com',
-        ])
+    it('…and on its www. and checkout. hosts too, including the stores whose row was written with www.', async () => {
+        // baabuk.com, stuckonyou.com and usa.canon.com have only a www. row.
+        // That row describes the store, so their bare and checkout. hosts
+        // get it too.
         const missed = []
         for (const d of DOMAINS)
             for (const host of [
@@ -98,7 +88,23 @@ describe('no configured store is mistaken for one with no config', () => {
                 'checkout.' + bare(d),
             ])
                 if (!(await lookup(host))) missed.push(host)
-        expect(new Set(missed)).toEqual(KNOWN_WWW_ONLY)
+        expect(missed).toEqual([])
+    })
+
+    it('a www.-only row is matched the way a bare row is', async () => {
+        for (const host of [
+            'baabuk.com',
+            'www.baabuk.com',
+            'checkout.baabuk.com',
+            'usa.canon.com',
+            'checkout.usa.canon.com',
+        ])
+            expect(lc(await lookup(host))).toBe(
+                'www.' + host.replace(/^(www|checkout)\./, ''),
+            )
+        // The boundary still holds: no other store inherits it.
+        expect(await lookup('notbaabuk.com')).toBeNull()
+        expect(await lookup('evil-baabuk.com')).toBeNull()
     })
 
     it('upper-case rows in the list still match the lower-case host', async () => {
@@ -111,15 +117,34 @@ describe('no configured store is mistaken for one with no config', () => {
 describe("a host gets its OWN row, never a parent store's", () => {
     // oldnavy.gap.com and gap.com are both rows. A first-match scan in list
     // order handed Old Navy's cart Gap's row (Gap's codes, Gap's selectors),
-    // because gap.com is served first. 62 configured hosts in this list were
-    // shadowed that way.
-    it('every configured domain resolves to exactly its own row', async () => {
+    // because gap.com is served first. 31 configured stores in this list were
+    // shadowed by a parent store that way.
+    //
+    // A store listed twice, as x.com and as www.x.com, is one store: which of
+    // its two rows a host gets stays decided by list order, exactly as
+    // before. (Measured on www.billabong.com's checkout, 2026-10-16: its
+    // www. row names input[name="reductions[0]"], which is not on the page;
+    // the earlier bare row names the field that is.)
+    const twinOf = d => {
+        const b = bare(d)
+        return lc(d) !== b &&
+            DOMAINS.findIndex(x => lc(x) === b) <
+                DOMAINS.findIndex(x => lc(x) === lc(d))
+            ? b
+            : null
+    }
+
+    it('every configured domain resolves to its own row, or to its earlier bare twin', async () => {
         const wrong = []
+        let twins = 0
         for (const d of DOMAINS) {
-            const got = await lookup(lc(d))
-            if (lc(got) !== lc(d)) wrong.push(`${d} -> ${got}`)
+            const got = lc(await lookup(lc(d)))
+            const twin = twinOf(d)
+            if (twin && got === twin) twins++
+            else if (got !== lc(d)) wrong.push(`${d} -> ${got}`)
         }
         expect(wrong).toEqual([])
+        expect(twins).toBe(31)
     })
 
     it('the measured cases', async () => {
@@ -129,6 +154,10 @@ describe("a host gets its OWN row, never a parent store's", () => {
         expect(await lookup('outlet.lenovo.com')).toBe('outlet.lenovo.com')
         // The parent keeps its own row.
         expect(await lookup('www.gap.com')).toBe('gap.com')
+        // A store with a bare and a www. row: list order, as before.
+        expect(await lookup('www.billabong.com')).toBe('billabong.com')
+        expect(await lookup('billabong.com')).toBe('billabong.com')
+        expect(await lookup('checkout.billabong.com')).toBe('billabong.com')
     })
 
     it('a hyphen checkout host follows the most specific store too', async () => {
