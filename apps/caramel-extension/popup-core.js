@@ -24,6 +24,7 @@ import {
 import { CARAMEL_ENV } from './caramel-env.js'
 import { CaramelCoupons } from './coupon-constants.generated.js'
 import { fetchCouponsPage } from './coupon-fetch.js'
+import { installAttributionFields } from './install-attribution.js'
 import { resolvePermissionState } from './permission-state.js'
 
 // isSafariExtensionRuntime moved to caramel-base.js (2026-08-19) so
@@ -449,6 +450,23 @@ const CARAMEL_OAUTH_CANCEL_RE =
     /did not approve|cancell?ed|closed by (the )?user/i
 
 /**
+ * The install's attribution for the OAuth exchange, or `{}`. Attribution is
+ * best-effort and must never stop a sign-in, but a storage failure is not
+ * swallowed: it is reported and the sign-in goes ahead without it.
+ */
+async function readInstallAttribution() {
+    try {
+        return await installAttributionFields(currentBrowser)
+    } catch (err) {
+        console.error(
+            'Install attribution unreadable; signing in without it',
+            err,
+        )
+        return {}
+    }
+}
+
+/**
  * The social sign-in wire flow, extracted from the vanilla handleSocialSignIn
  * with the DOM replaced by two callbacks — every URL, body, message string
  * and timing below is pinned (popup-oauth-* suites) and byte-identical to the
@@ -560,6 +578,9 @@ export async function runSocialSignIn(provider, ui = {}) {
                 code,
                 state: receivedState, // Send state back to the backend
                 redirectUri, // Include redirect URI for token exchange
+                // Install id + first-touch record, when this install has them
+                // (never the reason a sign-in fails: see readInstallAttribution).
+                ...(await readInstallAttribution()),
             }),
         })
 

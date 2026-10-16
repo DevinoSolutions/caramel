@@ -1,5 +1,6 @@
 import {
     buildIdentityPayload,
+    buildUserPersonProperties,
     compactProperties,
     identityPayloadSignature,
     resolveDisplayName,
@@ -235,5 +236,42 @@ describe('identityPayloadSignature', () => {
                 setOnce: {},
             }),
         ).not.toBe(base)
+    })
+})
+
+describe('buildUserPersonProperties (the who-half the server also uses for extension signups)', () => {
+    const user = {
+        id: 'u1',
+        email: 'a@example.com',
+        name: 'Ada',
+        createdAt: '2026-10-01T12:00:00.000Z',
+    }
+
+    it('is exactly the user-derived slice of the browser identify $set', () => {
+        const who = buildUserPersonProperties(user)
+        const { set } = buildIdentityPayload({ user, context: CONTEXT })
+        for (const [key, value] of Object.entries(who)) {
+            expect(set[key]).toBe(value)
+        }
+        // ...and nothing about the surface or runtime: the server does not know them.
+        expect(Object.keys(who).sort()).toEqual(
+            [
+                '$email',
+                'email',
+                'name',
+                'rc_app_user_id',
+                'user_created_at',
+            ].sort(),
+        )
+    })
+
+    it('drops what it does not have and never labels the person with the email', () => {
+        expect(
+            buildUserPersonProperties({ id: 'u2', email: 'b@example.com' }),
+        ).toEqual({
+            email: 'b@example.com',
+            $email: 'b@example.com',
+            rc_app_user_id: 'u2',
+        })
     })
 })

@@ -1,4 +1,5 @@
 import { defersAnalytics, onFirstActivity } from '@/lib/afterPageLoad'
+import { browserSignalsTrackingOptOut } from '@/lib/analytics/trackingOptOut'
 import { SENTRY_RELEASE } from '@/lib/buildInfo'
 import * as Sentry from '@sentry/nextjs'
 
@@ -19,6 +20,14 @@ import * as Sentry from '@sentry/nextjs'
 // error thrown on the landing page before the first scroll, tap or
 // keypress (and within 10 s of load) is reported without a replay. Every
 // other route (app, auth, OAuth, consent) adds it right away.
+//
+// Replay is skipped entirely when the browser sends Global Privacy Control or
+// Do Not Track (browserSignalsTrackingOptOut): addReplay is never called, so
+// the rrweb chunk is not even fetched. Error reporting stays on. Caramel has
+// no consent banner by design; honouring these signals is the consent gate.
+// Replays land in the self-hosted Sentry on devino-first. Sentry's session
+// sample is 10% (on-error stays 1.0), same as PostHog's, which is a project
+// setting, see lib/analytics/identity.ts.
 function addReplay(): void {
     import('@sentry/nextjs')
         .then(lazySentry => {
@@ -36,7 +45,11 @@ function addReplay(): void {
                         'input[type="email"]',
                         '#card-element',
                         '[data-sentry-mask]',
+                        '.ph-sensitive',
                     ],
+                    // Added to Sentry's default block list. PostHog blocks
+                    // `.ph-no-capture` by default; this mirrors it here.
+                    block: ['.ph-no-capture'],
                 }),
             )
         })
@@ -60,12 +73,20 @@ if (process.env.NODE_ENV === 'production' && dsn) {
         integrations: [],
         // Same intake bucket as the server's errors: see sentry.common.config.ts.
         tracesSampleRate: 0.05,
+        // 10% session / 1.0 on-error: the T-2008 standard, raised after the
+        // self-hosted Sentry relay quota fix (#59/#60) lifted the 5 envelopes/s
+        // limit.
         replaysSessionSampleRate: 0.1,
         replaysOnErrorSampleRate: 1.0,
         debug: false,
     })
-    if (defersAnalytics(window.location.pathname)) onFirstActivity(addReplay)
-    else addReplay()
+    if (!browserSignalsTrackingOptOut()) {
+        if (defersAnalytics(window.location.pathname)) {
+            onFirstActivity(addReplay)
+        } else {
+            addReplay()
+        }
+    }
 }
 
 export const onRouterTransitionStart = Sentry.captureRouterTransitionStart

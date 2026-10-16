@@ -270,7 +270,7 @@ export async function classifyCart(
             maxTokens: 600,
             temperature: 0,
             timeoutMs: 7000,
-            // No paidFallback: the 7 s abort is under 15 s and the route is guest-reachable, so this stays free.
+            // No paid-fallback headers: the 7 s abort is under MIN_PAID_PATH_DEADLINE_SECONDS (20 s) and the route is guest-reachable.
         })
     } catch (e) {
         if (e instanceof OpenRouterError) throw e

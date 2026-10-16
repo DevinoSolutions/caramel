@@ -22,6 +22,12 @@
 export const CODE_SHARING_CONSENT_KEY = 'checkoutCodeSharingConsent'
 const CODE_SHARING_PROMPT_VERSION = 1
 
+// The version the shopper is asked about now. Read by the funnel diagnostics
+// (code-share-funnel.js) so a drop can be told apart per prompt wording.
+export function codeSharingPromptVersion() {
+    return CODE_SHARING_PROMPT_VERSION
+}
+
 // Stored value -> the record, or null when it is not exactly a valid record.
 export function parseCodeSharingConsent(raw) {
     if (!raw || typeof raw !== 'object') return null

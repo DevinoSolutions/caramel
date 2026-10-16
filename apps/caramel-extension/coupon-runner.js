@@ -27,10 +27,15 @@ import {
     caramelRowReadsRejected,
     caramelSinkTriedCodes,
     findAppliedSelector,
+    GENERIC_ERROR_TEXT_RE,
     probeCartJson,
     removeAppliedCoupon,
     setInputValue,
 } from './coupon-apply.js'
+import {
+    caramelCouponBoxDiscoveryOn,
+    caramelDiscoveredRecord,
+} from './coupon-box-discovery.js'
 import {
     _caramelCleanCodes,
     caramelRankByValue,
@@ -54,6 +59,7 @@ import {
     waitForVisible,
     waitUntilReady,
 } from './dom-utils.js'
+import { recordWelcomeFirstTouch } from './install-attribution.js'
 import {
     getDomainRecord,
     startCheckoutDetection,
@@ -85,6 +91,14 @@ import {
  * the money-adjacent path when the existing seam is behavior-identical to what
  * ships today. UI-helpers writes `globalThis._caramelCancelled` explicitly. */
 globalThis._caramelCancelled = false
+
+// Does the store's reason quote the code we typed? Case-insensitive.
+function _reasonNamesCode(reason, code) {
+    const c = String(code || '')
+        .toLowerCase()
+        .trim()
+    return !!c && String(reason).toLowerCase().includes(c)
+}
 
 // Fire-and-forget trust-loop report → background (content scripts can't hit
 // the API directly). Best-effort: an asleep/unreachable SW must never break
@@ -795,6 +809,17 @@ export async function startApplyingCoupons(rec, options) {
             _box = pickBestMatch(rec.couponInput)
         }
     }
+    // No config describes a box we can see. Before handing the codes over to
+    // copy, let the finder look (coupon-box-discovery.js; off unless the
+    // server's couponBoxDiscovery flag is on). It returns a record aimed at
+    // the box it found, or null and this page keeps its copy-the-codes answer.
+    if ((!_box || !_isVisible(_box)) && (await caramelCouponBoxDiscoveryOn())) {
+        const found = await caramelDiscoveredRecord(rec)
+        if (found) {
+            rec = found
+            _box = pickBestMatch(rec.couponInput)
+        }
+    }
     if (!_box || !_isVisible(_box)) {
         log('AUTO_INSERT_STOP', {
             result: 'no-coupon-box',
@@ -937,7 +962,18 @@ export async function startApplyingCoupons(rec, options) {
         // Written BEFORE the submit, because a submit that navigates never
         // comes back here (see caramelMarkPendingSubmit). Cleared immediately
         // after, so a normal attempt leaves nothing for the next page to read.
-        caramelMarkPendingSubmit(code, coupons[i].id, originalPrices)
+        caramelMarkPendingSubmit(
+            code,
+            coupons[i].id,
+            originalPrices,
+            rec.caramelFound === true
+                ? {
+                      kind: rec.caramelTotalKind || 'total',
+                      label: rec.caramelTotalLabel,
+                      rows: rec.caramelTotalRows,
+                  }
+                : false,
+        )
         const res = await applyCoupon(code, rec)
         caramelClearPendingSubmit()
 
@@ -1230,6 +1266,23 @@ export async function startApplyingCoupons(rec, options) {
                     storeReason: lastStoreReason,
                     reason: 'the cart arrived with a discount, so this rejection is not evidence about the code',
                 })
+            } else if (
+                rec.caramelFound === true &&
+                !GENERIC_ERROR_TEXT_RE.test(String(lastStoreReason)) &&
+                !_reasonNamesCode(
+                    lastStoreReason,
+                    coupons.find(c => c.id === lastFailId)?.code,
+                )
+            ) {
+                // A box the finder picked is a guess at the store's markup, so
+                // a reason that is neither a generic rejection nor about our
+                // code ("Minimum spend $50") may describe the cart or another
+                // box. Only those two kinds of reason are evidence against it.
+                log('AUTO_INSERT_VERDICT_WITHHELD', {
+                    id: lastFailId,
+                    storeReason: lastStoreReason,
+                    reason: 'the box was found by the finder and the store reason names neither the code nor a generic rejection',
+                })
             } else {
                 reportOutcome(lastFailId, 'failed', lastStoreReason)
             }
@@ -1314,6 +1367,43 @@ export function caramelStampPresence() {
         { type: 'caramel-ext-present', version },
         location.origin,
     )
+}
+
+/* Install attribution (see install-attribution.js): on the /welcome page the
+ * extension opened after install, copy the site's first-touch record
+ * (`cm_ft`, first-party and readable here) next to the stored install id, so
+ * the sign-in can hand it to the server. The site writes that cookie from its
+ * own client code, which can run after this content script does, so ask a few
+ * times and stop at the first definite answer. Anything but 'no-cookie' is
+ * definite; after the last try 'no-cookie' is logged, not silently dropped.
+ * Exported for the suite; called from initCouponRunner. */
+const CARAMEL_FIRST_TOUCH_TRIES = 6
+const CARAMEL_FIRST_TOUCH_GAP_MS = 1500
+export async function caramelCaptureInstallFirstTouch() {
+    for (let i = 0; i < CARAMEL_FIRST_TOUCH_TRIES; i++) {
+        const { status, invalid } = await recordWelcomeFirstTouch(
+            currentBrowser,
+            {
+                href: location.href,
+                cookie: document.cookie,
+                trustedOrigins: CARAMEL_ALLOWED_ORIGINS,
+            },
+        )
+        if (invalid.length)
+            logError(
+                'INSTALL_FIRST_TOUCH_COOKIE_INVALID',
+                new Error(invalid.join('; ')),
+            )
+        if (status !== 'no-cookie') {
+            if (status === 'saved')
+                log('INSTALL_FIRST_TOUCH_SAVED', { tries: i + 1 })
+            return status
+        }
+        if (i + 1 < CARAMEL_FIRST_TOUCH_TRIES)
+            await sleep(CARAMEL_FIRST_TOUCH_GAP_MS)
+    }
+    log('INSTALL_FIRST_TOUCH_ABSENT', { tries: CARAMEL_FIRST_TOUCH_TRIES })
+    return 'no-cookie'
 }
 
 const CARAMEL_HELLO_TRIES = 5
@@ -1417,6 +1507,9 @@ export function initCouponRunner() {
         if (CARAMEL_ALLOWED_ORIGINS.has(location.origin)) {
             caramelStampPresence()
             caramelAnnounceToWebsite()
+            caramelCaptureInstallFirstTouch().catch(err =>
+                logError('INSTALL_FIRST_TOUCH_FAILED', err),
+            )
         }
 
         currentBrowser.runtime.onMessage.addListener((req, _s, send) => {

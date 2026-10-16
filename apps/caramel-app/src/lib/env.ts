@@ -152,6 +152,13 @@ const serverObjectSchema = z.object({
         .enum(['true', 'false'])
         .default('false')
         .transform(value => value === 'true'),
+    // Served to the extension by GET /api/extension/features. On, the
+    // extension may find a store's promo box itself when no config describes
+    // it. Same strict two-value enum as SHOPPER_CODE_CAPTURE_ENABLED.
+    COUPON_BOX_DISCOVERY_ENABLED: z
+        .enum(['true', 'false'])
+        .default('false')
+        .transform(value => value === 'true'),
     OPENROUTER_API_KEY: z.string().optional(),
     // Base URL of the OpenAI-compatible chat API that openrouter.ts POSTs
     // `${OPENROUTER_API_URL}/chat/completions` to. Unset (or blank) =
@@ -197,11 +204,13 @@ const serverObjectSchema = z.object({
     ),
     // Paid fallback through the Devino proxy (src/lib/proxy-fallback-headers.ts):
     // the app's OWN OpenRouter org key, sent as X-ORF-Fallback-Key only to
-    // https://proxyai.devino.ca and only on a chat() call that opts in. Unset =
-    // no header, behaviour unchanged. Blank is fine; a malformed value refuses
-    // boot here (the message names the variable, never the value) because a
-    // key with a newline would otherwise make every LLM call throw. Server-
-    // only; CI, evals and e2e never set these (vitest.eval.config.ts and
+    // https://proxyai.devino.ca and only for a signed-in caller; no request
+    // sends it today (src/lib/proxy-fallback-env.ts). The wait before it goes
+    // paid is at most 12 s. Unset = no header, behaviour
+    // unchanged. Blank is fine; a malformed value refuses boot here (the
+    // message names the variable, never the value) because a key with a
+    // newline would otherwise make every LLM call throw. Server-only; CI,
+    // evals and e2e never set these (vitest.eval.config.ts and
     // playwright.config.ts blank them).
     OPENROUTER_FALLBACK_API_KEY: z
         .string()
@@ -219,7 +228,7 @@ const serverObjectSchema = z.object({
         .string()
         .optional()
         .refine(isValidFallbackAfterSeconds, {
-            error: 'OPENROUTER_FALLBACK_AFTER_SECONDS must be blank or a plain number of seconds in (0, 300]',
+            error: 'OPENROUTER_FALLBACK_AFTER_SECONDS must be blank or a plain number of seconds in (0, 12]',
         }),
     API_ENCRYPTION_ENABLED: z.string().optional(),
     // Which PostHog project this deploy's SERVER-side captures target (the

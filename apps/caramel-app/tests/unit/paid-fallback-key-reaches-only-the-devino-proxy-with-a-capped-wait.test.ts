@@ -53,6 +53,9 @@ describe('the canonical paid fallback contract', () => {
             'https://eu.openrouter.ai./api/v1',
             'http://proxyai.devino.ca/v1',
             'https://proxyai.devino.ca.evil.com/v1',
+            'https://evilproxyai.devino.ca/v1',
+            'https://x.proxyai.devino.ca/v1',
+            'https://proxyai.devino.ca@evil.com/v1',
             'https://gateway.example.com/openrouter.ai/v1',
             'not a URL',
             '',
@@ -65,17 +68,20 @@ describe('the canonical paid fallback contract', () => {
             build(),
         )
     })
-    it('uses the safe wait for malformed numbers and normalizes leading zeroes', () => {
+    it('uses the safe wait for malformed or too-long waits, normalizes leading zeroes and accepts the 12 second cap', () => {
         for (const afterSeconds of [
             '1e3',
             '0x10',
             '-5',
             '0',
             'abc',
+            '12.5',
+            '13',
             '301',
             '08',
         ])
             expect(build({ afterSeconds })['X-ORF-Fallback-After']).toBe('8')
+        expect(build({ afterSeconds: '12' })['X-ORF-Fallback-After']).toBe('12')
     })
     it('drops an invalid model without dropping the key', () => {
         expect(build({ model: 'bad model' })).toEqual(build())
@@ -92,8 +98,18 @@ describe('the canonical paid fallback contract', () => {
         expect(isValidFallbackKey(KEY)).toBe(true)
         expect(isValidFallbackKey(`${KEY}\ninner`)).toBe(false)
         expect(isValidFallbackModel('bad model')).toBe(false)
-        for (const raw of ['1e3', '0x10', '-5', '0', 'abc', '301'])
+        for (const raw of [
+            '1e3',
+            '0x10',
+            '-5',
+            '0',
+            'abc',
+            '12.5',
+            '13',
+            '301',
+        ])
             expect(isValidFallbackAfterSeconds(raw)).toBe(false)
         expect(isValidFallbackAfterSeconds('7.50')).toBe(true)
+        expect(isValidFallbackAfterSeconds('12')).toBe(true)
     })
 })

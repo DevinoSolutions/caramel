@@ -42,7 +42,25 @@ module.exports = [
         // (owner rule 2026-10-06) — the consent card (UI-helpers.js
         // showCodeSharingPrompt) and the consent record module
         // (code-sharing-consent.js). Measured 76.66 kB: one new UI surface.
-        limit: '80 KB',
+        // 2026-10-13, raised 80 -> 117 kB: coupon-box-discovery.js, the
+        // promo-box finder for stores with no usable config (off behind a
+        // server flag). 91.74 → 107.8 kB: the finder itself (nine-language
+        // vocabularies, field/button/toggle scoring, the total-row reader) was
+        // 91.74 kB at its first push; the rest is hardening against live
+        // stores and review fixes (re-find after a re-draw, hidden label
+        // cells, the coupon-line reader, the finder-run verdict gate, and the
+        // lookbehind-free text readers Safari 16.0-16.3 needs). Same date, the
+        // finder's server pick (own flag, couponBoxLlm): the asking and the
+        // checking of the answer live here, 107.8 -> 111.27 kB; the outline
+        // builder is NOT in this bundle, it ships as assets/coupon-box-outline.js
+        // and has its own budget below. 4.9% headroom over 111.27 kB, so the
+        // next capability trips the ratchet.
+        // 2026-10-15, raised 117 -> 120 kB: install attribution
+        // (install-attribution.js plus the /welcome first-touch capture in
+        // coupon-runner.js) — the cookie reader pinned to the website's
+        // schema, the install-id/record storage and the bounded retry.
+        // Measured 111.27 -> 114.55 kB (+3.3 kB): one new capability, not prose.
+        limit: '120 KB',
         brotli: false,
     },
     {
@@ -65,6 +83,9 @@ module.exports = [
         // every-website match pattern per runtime, the reachability probe that
         // tells "the browser refused us" apart from "you are offline", and the
         // gesture-safe request. Measured 10.04 kB.
+        // 2026-10-15: the sign-in sends the install's attribution (the exchange
+        // body fields, the Safari authorize query and the unreadable-storage
+        // report). Measured 10.81 kB, still under the unchanged 11 kB budget.
         limit: '11 KB',
         brotli: false,
     },
@@ -106,7 +127,46 @@ module.exports = [
         // checkoutCodeSharingConsent record (code-sharing-consent.js) and
         // answers no-consent, so nothing is sent before an explicit yes.
         // Measured 9.29 kB.
-        limit: '10 KB',
+        // 2026-10-09, raised 10 -> 10.7 kB: the features cache now carries the
+        // couponBoxDiscovery flag too, answered to the content script on its
+        // own message route. Measured 9.85 kB (re-measured 2026-10-13; first
+        // recorded as 9.67); raised rather than left at 1.5%
+        // headroom (see the 2026-08-10 note above).
+        // 2026-10-13, raised 10.7 -> 11.3 kB: the coupon-box pick request (its
+        // flag, its message route, and one deadline over the flag read, the
+        // token read and the request). Measured 10.52 kB.
+        // 2026-10-15, raised 11.3 -> 13.4 kB: the opt-in code-sharing funnel
+        // diagnostics (1.4.14): reportCodeShareFunnel, the consent + telemetry
+        // id module (usage-diagnostics-consent.js), the payload allowlist
+        // (code-share-funnel.js) and the shared permissions wrapper
+        // (permissions-api.js) for the Firefox data-collection grant. Measured
+        // 12.24 kB.
+        // 2026-10-15 (review of PR #353), tightened 13.4 -> 12.7 kB: the 2 kB of
+        // slack the first raise left would have let the next unrelated growth
+        // through unnoticed. Measured 12.38 kB after the review fixes (id minted
+        // only on accept, the consent re-read, device-local consent), so the
+        // limit is measured + ~0.3 kB.
+        limit: '12.7 KB',
+        brotli: false,
+    },
+    {
+        name: 'coupon-box-outline.js (loaded on demand, minified)',
+        path: '.size-cache/coupon-box-outline.min.js',
+        // 2026-10-13 — measured 8.30 kB minified. Not injected on every page:
+        // the finder imports it only when it is about to ask the server for a
+        // box. About half of it is the word allowlist every name is filtered
+        // through, which is data the server's eval was measured with.
+        limit: '9.2 KB',
+        brotli: false,
+    },
+    {
+        name: 'porkbun-alert-shim.js (porkbun.com checkout only, minified)',
+        path: '.size-cache/porkbun-alert.min.js',
+        // 2026-10-15 (T-2480) — own MAIN-world content script for porkbun.com's
+        // native coupon-failure alert(). Measured 1.18 kB minified after the review
+        // fixes (duplicate-Enter drop, shopper-only disarm); the shipped WXT
+        // wrapper adds a little on top.
+        limit: '1.3 KB',
         brotli: false,
     },
 ]

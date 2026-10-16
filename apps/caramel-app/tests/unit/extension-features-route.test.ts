@@ -5,10 +5,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 // GET /api/extension/features — the public, keyless feature-flag read the
 // extension background caches. It reports whether the server accepts
 // shopper-typed codes captured at checkout, and whether the coupon-box pick
-// (POST /api/extension/coupon-box-pick) is on.
+// (POST /api/extension/coupon-box-pick) is on, and whether the extension may
+// find a store's promo box itself when no config describes it.
 const { envMock, checkRateLimitMock } = vi.hoisted(() => ({
     envMock: {
         SHOPPER_CODE_CAPTURE_ENABLED: false,
+        COUPON_BOX_DISCOVERY_ENABLED: false,
         COUPON_BOX_LLM_ENABLED: false,
         COUPON_BOX_PICK_MODEL: undefined,
     } as Record<string, unknown>,
@@ -19,6 +21,7 @@ vi.mock('@/lib/env', async importOriginal => {
     const actual = await importOriginal<typeof import('@/lib/env')>()
     Object.assign(envMock, actual.env, {
         SHOPPER_CODE_CAPTURE_ENABLED: false,
+        COUPON_BOX_DISCOVERY_ENABLED: false,
         COUPON_BOX_LLM_ENABLED: false,
         COUPON_BOX_PICK_MODEL: undefined,
     })
@@ -38,6 +41,7 @@ function featuresRequest(headers: Record<string, string> = {}): NextRequest {
 
 beforeEach(() => {
     envMock.SHOPPER_CODE_CAPTURE_ENABLED = false
+    envMock.COUPON_BOX_DISCOVERY_ENABLED = false
     envMock.COUPON_BOX_LLM_ENABLED = false
     envMock.COUPON_BOX_PICK_MODEL = undefined
     checkRateLimitMock.mockReset()
@@ -51,6 +55,7 @@ describe('GET /api/extension/features', () => {
         expect(res.status).toBe(200)
         expect(await res.json()).toEqual({
             shopperCodeCapture: false,
+            couponBoxDiscovery: false,
             couponBoxLlm: false,
         })
     })
@@ -63,6 +68,20 @@ describe('GET /api/extension/features', () => {
         expect(res.status).toBe(200)
         expect(await res.json()).toEqual({
             shopperCodeCapture: true,
+            couponBoxDiscovery: false,
+            couponBoxLlm: false,
+        })
+    })
+
+    it('discovery flag on → { couponBoxDiscovery: true }, capture untouched', async () => {
+        envMock.COUPON_BOX_DISCOVERY_ENABLED = true
+
+        const res = await GET(featuresRequest())
+
+        expect(res.status).toBe(200)
+        expect(await res.json()).toEqual({
+            shopperCodeCapture: false,
+            couponBoxDiscovery: true,
             couponBoxLlm: false,
         })
     })
@@ -76,6 +95,7 @@ describe('GET /api/extension/features', () => {
         envMock.COUPON_BOX_PICK_MODEL = 'test/box-model'
         expect(await read()).toEqual({
             shopperCodeCapture: false,
+            couponBoxDiscovery: false,
             couponBoxLlm: true,
         })
 

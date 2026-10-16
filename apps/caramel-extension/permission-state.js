@@ -15,46 +15,7 @@
 
 import { isSafariExtensionRuntime } from './caramel-base.js'
 import { CARAMEL_BASE_URL } from './caramel-env.js'
-
-/**
- * The permissions API as PROMISES, or null where the runtime has none.
- *
- * Firefox and Safari expose a promise-style `browser.permissions`; Chrome and
- * Edge expose a callback-style `chrome.permissions`. The distinction is not
- * cosmetic here: caramel-base's bootstrap resolves `currentBrowser` to
- * `chrome` FIRST when both globals exist, which on Firefox is the
- * callback-shaped object — so reading the API off `currentBrowser` and calling
- * `.then` on the result would silently do nothing on the one browser this
- * whole module was written for. Prefer `browser` explicitly, wrap `chrome`.
- */
-function getPermissionsApi() {
-    const promiseStyle = globalThis.browser?.permissions
-    if (promiseStyle && typeof promiseStyle.contains === 'function') {
-        return {
-            contains: perms => promiseStyle.contains(perms),
-            request: perms => promiseStyle.request(perms),
-        }
-    }
-
-    const callbackStyle = globalThis.chrome?.permissions
-    if (callbackStyle && typeof callbackStyle.contains === 'function') {
-        const wrap = method => perms =>
-            new Promise((resolve, reject) => {
-                try {
-                    callbackStyle[method](perms, result => {
-                        const err = globalThis.chrome?.runtime?.lastError
-                        if (err) reject(new Error(err.message || String(err)))
-                        else resolve(result)
-                    })
-                } catch (e) {
-                    reject(e)
-                }
-            })
-        return { contains: wrap('contains'), request: wrap('request') }
-    }
-
-    return null
-}
+import { getPermissionsApi } from './permissions-api.js'
 
 // The match pattern that MEANS "every website" to this runtime.
 //

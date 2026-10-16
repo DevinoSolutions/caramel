@@ -314,6 +314,7 @@ export async function pickCouponBox(
                 // back to another one; ignored by a provider that does not
                 // know it.
                 headers: { 'X-ORF-Strict': '1' },
+                // No paid-fallback headers: the route is guest-reachable (extension Origin gate only).
             },
         )
     } catch (error) {
