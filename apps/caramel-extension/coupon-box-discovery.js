@@ -615,16 +615,32 @@ function findButton(input) {
 // or on "Use my rewards" spends the shopper's points or picks an offer for
 // them, unasked, and no code is involved. The finder and the server's pick
 // never click one, as a reveal or as an apply button. Only a CLICKED control
-// is judged, by its own name and by the words beside it: a field labelled
+// is judged, by its own name and by the words around it: a field labelled
 // "Promo or rewards code" is still a coupon box, and the plain "Apply" beside
 // it is still clicked, because those words name a code. A configured store
 // never reaches this: its own selectors are clicked as written.
+//
+// This is the only layer that sees those words: the outline the server reads
+// drops "points", "student", "military", "teacher" and "verify".
 const LOYALTY_RE =
-    /\b(?:redeem(?:s|ed|ing)?|points?|rewards?|loyalty|memberships?)\b/i
+    /\b(?:redeem(?:s|ed|ing)?|points?|rewards?|loyalty|memberships?|member pric(?:e|es|ing)|students?|military|teachers?|verif(?:y|ied|ication))\b/i
 const CODE_WORD_RE = /\b(?:codes?|coupons?|vouchers?)\b/i
-// A reveal named only for offers or promotions opens a list of offers, not a
-// box to type a code into.
-const OFFERS_RE = /\b(?:offers?|promotions?|deals?)\b/i
+// "Promo or rewards code", "Rewards & Promo codes": words that name a code.
+// Taken out of the surrounding words before they are read for points, so a
+// coupon box's own label never refuses its button.
+const withoutCodePhrases = t =>
+    t.replace(/(?:[\w-]+\s+(?:or|and|&|\/)\s+)?[\w-]+\s+codes?\b/gi, ' ')
+// A reveal opens a box to type a code into, so it names one. One that offers
+// a discount without naming a code ("Apply discount" under a points balance,
+// "View offers", "Promotions") applies an offer or opens a list of them. The
+// server reads its toggles by the same rule.
+const SAYS_DISCOUNT_RE =
+    /discount|offer|\bdeals?\b|saving|\bsave\b|promotions?\b|rabatt|descuento|desconto|sconto|remise|réduction|korting|zniżka/i
+const NAMES_CODE_RE =
+    /code|codice|código|\bkod|coupon|cup[oó]n|cupom|voucher|gutschein|\bpromo\b/i
+// ...nor is a reveal of the small print ("Promo details", "Offer terms").
+const ABOUT_TERMS_RE =
+    /\b(?:details|terms|conditions|exclusions|restrictions|learn more)\b/i
 
 // Text with a space between every node: "You have 500 points" and "Apply
 // discount" in two elements must not read as "pointsApply".
@@ -637,6 +653,7 @@ const controlWords = el =>
     [
         wordsOf(el),
         ariaOf(el),
+        el.tagName === 'INPUT' ? labelText(el) : '',
         el.value,
         el.title,
         el.getAttribute('name'),
@@ -667,16 +684,38 @@ function wordsBeside(el) {
     return words
 }
 
+// The section a control sits in, by its name and heading: "Rewards",
+// "Member prices", "Students save 10%".
+const SECTION =
+    'section, aside, form, fieldset, [role="region"], [role="group"], [role="dialog"]'
+function sectionWords(el) {
+    const box = el.closest(SECTION)
+    if (!box) return ''
+    const named = (box.getAttribute('aria-labelledby') || '')
+        .split(/\s+/)
+        .map(id => id && el.ownerDocument.getElementById(id))
+        .filter(Boolean)
+        .map(wordsOf)
+    const head = box.querySelector(
+        'h1, h2, h3, h4, h5, h6, legend, [role="heading"]',
+    )
+    return [ariaOf(box), ...named, head ? wordsOf(head) : ''].join(' ')
+}
+
 // Called for every control the finder or the pick might click. A control
-// that names points or rewards itself is refused unless it also names a code;
-// a bare "Redeem", or "Apply discount" under a points balance, is judged with
-// the words beside it.
+// that names a code is never refused here. One that names points, rewards,
+// membership, a student, military or teacher discount, or verification is.
+// Any other ("Apply discount", "Apply", a bare "Redeem") is judged by the
+// words beside it and by its section's name, codes taken out.
 function spendsPoints(el) {
     const own = controlWords(el)
-    if (LOYALTY_RE.test(own.replace(/\bredeem\w*/gi, '')))
-        return !CODE_WORD_RE.test(own)
-    const words = own + ' ' + wordsBeside(el)
-    return LOYALTY_RE.test(words) && !CODE_WORD_RE.test(words)
+    if (CODE_WORD_RE.test(own)) return false
+    if (LOYALTY_RE.test(own.replace(/\bredeem\w*/gi, ''))) return true
+    const beside = wordsBeside(el)
+    // "Redeem" is how some stores name a voucher box's button: only beside a
+    // field that names a code.
+    if (/\bredeem/i.test(own) && !CODE_WORD_RE.test(beside)) return true
+    return LOYALTY_RE.test(withoutCodePhrases(beside + ' ' + sectionWords(el)))
 }
 
 // A field that takes points rather than a code ("Points to redeem"). Pressing
@@ -692,10 +731,31 @@ const pointsField = el => {
     return LOYALTY_RE.test(words) && !CODE_WORD_RE.test(words)
 }
 
+// A reveal that names no code: an offer, a discount or the small print.
 const offersOnly = el => {
     const own = controlWords(el)
-    return OFFERS_RE.test(own) && !CODE_WORD_RE.test(own)
+    if (ABOUT_TERMS_RE.test(own) && !CODE_WORD_RE.test(own)) return true
+    return SAYS_DISCOUNT_RE.test(own) && !NAMES_CODE_RE.test(own)
 }
+
+// A switch or a radio is a setting, never a fold: a radio picks one option of
+// a group (a payment method), and a second click cannot put the shopper's pick
+// back. So is a checkbox that does not speak of entering a code. The finder
+// and the server's pick are held to the same rule.
+function settingControl(el) {
+    const role = (el.getAttribute('role') || '').toLowerCase()
+    if (/^(?:switch|radio|menuitemradio|menuitemcheckbox)$/.test(role))
+        return true
+    const check = checkboxOf(el)
+    if (check?.type.toLowerCase() === 'radio') return true
+    if (!check && role !== 'checkbox') return false
+    const t = toggleText(el)
+    return !CODE_ENTRY_RE.test(t) || CONSENT_RE.test(t)
+}
+
+// Never clicked as a reveal by the finder or the pick.
+const notAReveal = el =>
+    spendsPoints(el) || offersOnly(el) || settingControl(el)
 
 /* --------------------------------------------------------------- toggles */
 // A toggle REVEALS a box on this page. A link that takes the shopper off
@@ -931,17 +991,15 @@ function findToggle(doc, input) {
         // A box that only renders once its fold is checked has no input to
         // own yet: then a label or wrapper may still open it (what its words
         // say decides), but a bare checkbox never.
-        // A radio is never a fold: it picks one option of a group (a payment
-        // method), and a second click cannot put the shopper's pick back.
+        // What it says is judged with every other reveal (settingControl):
+        // a radio never, a checkbox only when it speaks of entering a code.
         const check = checkboxOf(el)
-        if (check?.type.toLowerCase() === 'radio') continue
         if (check && (input ? !ownsBox(el, input) : el.tagName === 'INPUT'))
             continue
         const t = toggleText(el)
-        if (check && (!CODE_ENTRY_RE.test(t) || CONSENT_RE.test(t))) continue
         if (!t || t.length > 60) continue
         if (!visible(el)) continue
-        if (spendsPoints(el) || offersOnly(el)) continue
+        if (notAReveal(el)) continue
         const r = scoreToggle(el, t)
         if (!r) continue
         // Equal score: the INNERMOST element wins (an outer wrapper may not
@@ -1376,8 +1434,7 @@ function mark(el, kind) {
  * reveal never needs to submit; a submit posts the cart or, in a checkout
  * form, places the order behind an innocent label ("Have a promo code?"). */
 function toggleRefused(el) {
-    if (caramelIsForbiddenControl(el) || spendsPoints(el) || offersOnly(el))
-        return true
+    if (caramelIsForbiddenControl(el) || notAReveal(el)) return true
     return (
         !!el.form &&
         ((el.tagName === 'BUTTON' && el.type === 'submit') ||
@@ -1707,11 +1764,7 @@ async function caramelPickedRecord(rec, doc) {
     let toggle = pickedEl(elements, answer.toggle)
     if (
         toggle &&
-        (!clickable(toggle) ||
-            toggleRefused(toggle) ||
-            navigatesAway(toggle) ||
-            // A radio cannot be put back if the box does not appear.
-            checkboxOf(toggle)?.type === 'radio')
+        (!clickable(toggle) || toggleRefused(toggle) || navigatesAway(toggle))
     )
         toggle = null
     // The server's button, else the one the rules see beside the input; a

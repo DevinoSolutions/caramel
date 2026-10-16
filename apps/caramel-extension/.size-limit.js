@@ -60,7 +60,12 @@ module.exports = [
         // coupon-runner.js) — the cookie reader pinned to the website's
         // schema, the install-id/record storage and the bounded retry.
         // Measured 111.27 -> 114.55 kB (+3.3 kB): one new capability, not prose.
-        limit: '120 KB',
+        // 2026-10-16, raised 120 -> 122 kB: the finder's safety guards (it
+        // never clicks a points, rewards, offers or settings control, judged
+        // by the control's words, its neighbours and its section's name) and
+        // the store lookup's registrable-domain check for hyphen hosts.
+        // Measured 118.05 -> 120.57 kB.
+        limit: '122 KB',
         brotli: false,
     },
     {

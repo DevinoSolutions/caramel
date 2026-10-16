@@ -759,4 +759,180 @@ describe('a loyalty or offers control is never clicked by the finder or the pick
         expect(t.savings).toEqual([{ code: 'SAVE20', amount: 20 }])
         expect(reported('worked')).toHaveLength(1)
     })
+
+    // A reveal names a code. One that offers a discount, offers or the small
+    // print without naming a code is refused even with no points in sight.
+    for (const [label, html] of [
+        [
+            '"Apply discount" on its own',
+            '<div><button id="spend" type="button">Apply discount</button></div>',
+        ],
+        [
+            '"View offers"',
+            '<div><button id="spend" type="button" aria-expanded="false">View offers</button></div>',
+        ],
+        [
+            '"Promo details"',
+            '<div><button id="spend" type="button" aria-expanded="false">Promo details</button></div>',
+        ],
+    ])
+        it(`the server names ${label} as the reveal: never clicked`, async () => {
+            freshPage(html + TOTAL)
+            watch('spend')
+            answer = req => pick(null, null, idx(req.outline, /button "/))
+            await run()
+            expect(asked('couponBoxPick')).toHaveLength(1)
+            expect(spent()).toEqual([])
+            expect(t.savings).toEqual([])
+            handedOver()
+        })
+
+    // The words the server never sees: the section a control sits in.
+    for (const [label, open, close] of [
+        [
+            'an aside named "Rewards"',
+            '<aside aria-label="Rewards">',
+            '</aside>',
+        ],
+        [
+            'a section headed "Member price"',
+            '<section><h3>Member price</h3>',
+            '</section>',
+        ],
+        [
+            'a section headed "Students save 10%"',
+            '<section><h3>Students save 10%</h3>',
+            '</section>',
+        ],
+        [
+            'a section headed "Military discount"',
+            '<section><h2>Military discount</h2>',
+            '</section>',
+        ],
+        [
+            'a fieldset for teachers',
+            '<form onsubmit="return false"><fieldset><legend>Teacher discount</legend>',
+            '</fieldset></form>',
+        ],
+        [
+            'a section named by a heading elsewhere ("Verify your status")',
+            '<p id="vh">Verify your status</p><section aria-labelledby="vh">',
+            '</section>',
+        ],
+    ])
+        it(`the server names a plain "Apply" in ${label} as the apply button: never clicked, nothing typed`, async () => {
+            freshPage(
+                open +
+                    '<div class="f"><input id="x" name="field_7" type="text">' +
+                    '<button id="spend" type="button">Apply</button></div>' +
+                    close +
+                    TOTAL,
+            )
+            watch('spend')
+            answer = req =>
+                pick(
+                    idx(req.outline, /textbox/),
+                    idx(req.outline, /button "Apply/),
+                )
+            await run()
+            expect(asked('couponBoxPick')).toHaveLength(1)
+            expect(spent()).toEqual([])
+            expect(document.getElementById('x').value).toBe('')
+            expect(t.savings).toEqual([])
+            handedOver()
+        })
+
+    it('the server names a "Show" reveal in a section headed "Your rewards": never clicked', async () => {
+        freshPage(
+            '<section><h3>Your rewards</h3><div><button id="spend" type="button" aria-expanded="false">Show</button></div></section>' +
+                TOTAL,
+        )
+        watch('spend')
+        answer = req => pick(null, null, idx(req.outline, /button "Show/))
+        await run()
+        expect(asked('couponBoxPick')).toHaveLength(1)
+        expect(spent()).toEqual([])
+        handedOver()
+    })
+
+    it('a promo box in a section headed "Rewards & promo codes": its "Apply" is still clicked', async () => {
+        freshPage(
+            '<section><h3>Rewards &amp; promo codes</h3><div class="promo">' +
+                '<label for="dc">Promo code</label>' +
+                '<input id="dc" name="promo_code" type="text">' +
+                '<button id="ap" type="button">Apply</button></div></section>' +
+                TOTAL,
+        )
+        wireStore('dc', 'ap', 'drop')
+        await run()
+        expect(t.page[0]).toBe('submit:ap:SAVE20')
+        expect(t.savings).toEqual([{ code: 'SAVE20', amount: 20 }])
+    })
+
+    it('a button that names a code is clicked even inside a "Rewards" section', async () => {
+        freshPage(
+            '<aside aria-label="Rewards"><div class="promo"><label for="dc">Discount</label>' +
+                '<input id="dc" name="discount_code" type="text">' +
+                '<button id="ap" type="button">Apply code</button></div></aside>' +
+                TOTAL,
+        )
+        wireStore('dc', 'ap', 'drop')
+        await run()
+        expect(t.page[0]).toBe('submit:ap:SAVE20')
+        expect(t.savings).toEqual([{ code: 'SAVE20', amount: 20 }])
+    })
+
+    // A switch or a radio is a setting; a checkbox is a fold only when it
+    // speaks of entering a code.
+    for (const [label, html] of [
+        [
+            'a switch "Use promo"',
+            '<div><div id="spend" role="switch" aria-checked="false" tabindex="0">Use promo</div></div>',
+        ],
+        [
+            'a checkbox "Use my points"',
+            '<div><input id="spend" type="checkbox"><label for="spend">Use my points</label></div>',
+        ],
+        [
+            'a checkbox "Add shipping protection ($4.99)"',
+            '<div><input id="spend" type="checkbox"><label for="spend">Add shipping protection ($4.99)</label></div>',
+        ],
+    ])
+        it(`the server names ${label} as the reveal: never clicked`, async () => {
+            freshPage(html + TOTAL)
+            watch('spend')
+            answer = req =>
+                pick(null, null, idx(req.outline, /switch|checkbox/))
+            await run()
+            expect(asked('couponBoxPick')).toHaveLength(1)
+            expect(spent()).toEqual([])
+            expect(document.getElementById('spend').checked ?? false).toBe(
+                false,
+            )
+            handedOver()
+        })
+
+    it('a checkbox that speaks of entering a code and folds the box is still opened', async () => {
+        freshPage(
+            '<div class="promo"><input type="checkbox" id="cb"><label for="cb">Have a promo code?</label>' +
+                '<div id="content" style="display:none"><input id="dc" name="discount_code" type="text">' +
+                '<button id="ap" type="button">Apply</button></div></div>' +
+                TOTAL,
+        )
+        document.getElementById('cb').addEventListener('change', e => {
+            document.getElementById('content').style.display = e.target.checked
+                ? ''
+                : 'none'
+        })
+        wireStore('dc', 'ap', 'drop')
+        answer = req =>
+            pick(
+                idx(req.outline, /textbox/),
+                idx(req.outline, /button "Apply/),
+                idx(req.outline, /checkbox/),
+            )
+        await run()
+        expect(document.getElementById('cb').checked).toBe(true)
+        expect(t.savings).toEqual([{ code: 'SAVE20', amount: 20 }])
+    })
 })
