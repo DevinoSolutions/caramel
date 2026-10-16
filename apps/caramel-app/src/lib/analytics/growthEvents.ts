@@ -31,6 +31,10 @@ export type InstallCtaPlacement =
     | 'supported_stores'
     | 'compare_extensions'
     | 'honey_extension'
+    | 'home_features'
+    | 'coupons_section'
+    | 'profile_checklist'
+    | 'profile_favorites'
 
 export type GrowthEventProperties = {
     prompt_id?: string
@@ -40,6 +44,8 @@ export type GrowthEventProperties = {
     store?: string
     target_app?: string
     placement?: InstallCtaPlacement
+    /** `install_cta_click`: the page the CTA sat on (filled by trackGrowthEvent). */
+    path?: string
     /** `signup_started`: how the visitor chose to sign up. */
     method?: SignupMethod
 }
@@ -59,11 +65,17 @@ export function trackGrowthEvent(
     name: GrowthEventName,
     properties: GrowthEventProperties,
 ): void {
+    // Every install CTA reports the page it sat on, so the call sites stay
+    // `{ store, placement }` and the vocabulary cannot drift per component.
+    const withPath: GrowthEventProperties =
+        name === 'install_cta_click' && typeof window !== 'undefined'
+            ? { path: window.location.pathname, ...properties }
+            : properties
     // Caller properties win over the first-touch ones (they never collide
     // today: first-touch keys are all `first_*`).
     const enriched = FIRST_TOUCH_EVENTS.has(name)
-        ? { ...buildFirstTouchProperties(captureFirstTouch()), ...properties }
-        : properties
+        ? { ...buildFirstTouchProperties(captureFirstTouch()), ...withPath }
+        : withPath
     capturePosthog(name, enriched, error => {
         console.error(`[analytics] growth event "${name}" failed`, error)
         Sentry.captureException(error, {

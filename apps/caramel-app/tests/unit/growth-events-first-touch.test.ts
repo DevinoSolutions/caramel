@@ -36,6 +36,8 @@ describe('trackGrowthEvent first-touch enrichment', () => {
         expect(posthogBrowserMock.capturePosthog).toHaveBeenCalledTimes(1)
         const [event, props] = posthogBrowserMock.capturePosthog.mock.calls[0]!
         expect(event).toBe(name)
+        // install_cta_click also names the page (jsdom is not loaded here, so
+        // `window` is undefined and trackGrowthEvent adds no path).
         expect(props).toEqual({
             first_utm_source: 'reddit',
             first_msclkid: 'm1',
