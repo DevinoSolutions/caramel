@@ -826,6 +826,72 @@ async function _resumePendingSubmit() {
    the moment the coupon field appears. Debounced + self-disconnects after it
    fires once, so it costs ~nothing and never nags. */
 // Called from inject.js and from coupon-runner.js's URL-change re-detection.
+/* A cart page with no served config gets the prompt only from the finder, and
+ * the finder sees only what has rendered. A coupon box or a total drawn after
+ * load (lasthunt.com, coversandall.com, harryrosen.com) missed the one look
+ * detection took at load. So, while the finder is on, look again as the page
+ * changes: at most once a second, for 15 seconds, on this URL only, and never
+ * again once the finder offers. A same-page URL change re-runs detection
+ * (caramelHandleUrlChanged), which ends this window and opens a new one.
+ * Finder off, or not a cart page: nothing is observed. The platform cart probe
+ * is not repeated: it reads the network, which late rendering cannot change. */
+const CARAMEL_SECOND_LOOK_MS = 15000
+const _caramelPromptUp = () =>
+    [
+        'caramel-small-prompt',
+        'caramel-testing-overlay',
+        'caramel-final-overlay',
+    ].some(id => document.getElementById(id))
+
+async function _caramelSecondLook() {
+    window.__caramel_second_look?.()
+    if (!_caramelCartIntentSignal() || !(await caramelCouponBoxDiscoveryOn()))
+        return
+    window.__caramel_second_look?.()
+    if (_caramelPromptUp()) return
+    const href = location.href
+    let timer = 0
+    let done = false
+    const stop = () => {
+        done = true
+        mo.disconnect()
+        clearTimeout(timer)
+        clearTimeout(end)
+        if (window.__caramel_second_look === stop)
+            window.__caramel_second_look = null
+    }
+    const look = async () => {
+        if (location.href !== href) return stop()
+        const offer =
+            !_caramelPromptUp() && (await _finderMayOffer(location.hostname))
+        if (done) return
+        if (!offer && !_caramelPromptUp()) {
+            timer = 0
+            return
+        }
+        stop()
+        if (!offer) return
+        const rec = caramelConfiglessRecord(location.hostname)
+        if ((await getCachedCodes(rec)).length && !_caramelPromptUp())
+            await insertCaramelPrompt(rec)
+    }
+    const mo = new MutationObserver(() => {
+        if (!timer)
+            timer = setTimeout(
+                () => look().catch(e => logError('second look failed', e)),
+                1000,
+            )
+    })
+    const end = setTimeout(stop, CARAMEL_SECOND_LOOK_MS)
+    mo.observe(document.documentElement, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['class', 'style', 'hidden'],
+    })
+    window.__caramel_second_look = stop
+}
+
 export async function startCheckoutDetection() {
     // A discount-link apply reloads the page so the store's own UI shows the
     // applied code; finish that flow on the fresh document by showing the
@@ -903,7 +969,7 @@ export async function startCheckoutDetection() {
     // guard below: that guard returns early on every later detection pass.
     if (rec) armCodeCapture(rec)
     if (window.__caramel_checkout_observer) return
-    if (!rec) return // not a supported store — don't observe at all
+    if (!rec) return _caramelSecondLook() // no config: only the finder's window
     let scheduled = false
     const recheck = () => {
         scheduled = false

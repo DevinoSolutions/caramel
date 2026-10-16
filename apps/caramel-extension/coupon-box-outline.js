@@ -75,6 +75,11 @@ const INTERACTIVE =
 const FIELD = /^(textbox|searchbox|combobox|spinbutton|checkbox|radio|switch)$/
 const CONTAINER =
     /^(navigation|main|banner|contentinfo|complementary|dialog|alertdialog|form|table|row|list|group|region|tabpanel|tablist|menu|listbox)$/
+// A plain element the store made clickable (harryrosen.com's "Promo code"
+// toggle is a <div> with a click handler and a pointer cursor) prints as a
+// button when its text is this short, and at most this many times a page.
+const CLICKABLE_TEXT_MAX = 40
+const CLICKABLE_MAX = 30
 
 const norm = s =>
     String(s || '')
@@ -197,6 +202,7 @@ export function caramelPageOutline(root = document.body) {
     const lines = [] // { text, el, n } — el and n only on an indexed line
     let size = 0
     let counter = 0
+    let clickables = 0
 
     const hidden = el => {
         if (el.hidden || el.getAttribute('aria-hidden') === 'true') return true
@@ -282,18 +288,52 @@ export function caramelPageOutline(root = document.body) {
             (img && img.getAttribute('alt')) || el.getAttribute('title'),
         )
     }
+    // Clickable by the store's own hand: an inline handler, a tab stop, or a
+    // pointer cursor it set itself (a cursor inherited from a clickable parent
+    // says nothing about this element). Only outside every interactive element,
+    // and only with no field or control inside it, so a wrapper stays a
+    // wrapper and the controls in it keep their own lines.
+    const clickable = el => {
+        if (clickables >= CLICKABLE_MAX) return false
+        if (
+            !el.hasAttribute('onclick') &&
+            !(el.hasAttribute('tabindex') && el.tabIndex >= 0) &&
+            !(
+                win?.getComputedStyle &&
+                win.getComputedStyle(el).cursor === 'pointer' &&
+                win.getComputedStyle(el.parentElement || el).cursor !==
+                    'pointer'
+            )
+        )
+            return false
+        const t = textOf(el)
+        return (
+            !!t &&
+            t.length <= CLICKABLE_TEXT_MAX &&
+            !el.querySelector(
+                'input, textarea, select, button, a[href], [role]',
+            )
+        )
+    }
     // Past the cap nothing more is read: those lines would be dropped anyway.
     const push = (depth, text, el = null, n = -1) => {
         const line = '  '.repeat(depth) + '- ' + text
         lines.push({ text: line, el, n })
         size += bytes(line) + 1
     }
-    const walk = (el, depth) => {
+    const walk = (el, depth, inside = false) => {
         for (const n of el.childNodes) {
             if (size > CARAMEL_OUTLINE_MAX_BYTES) return
             if (n.nodeType !== 1 || SKIP.test(n.tagName.toUpperCase())) continue
             if (hidden(n)) continue
-            const role = roleOf(n)
+            let role = roleOf(n)
+            if (!role && !inside && clickable(n)) {
+                const name = safeName(textOf(n))
+                if (name) {
+                    clickables++
+                    role = 'button'
+                }
+            }
             if (INTERACTIVE.test(role)) {
                 const name = safeName(clip(nameOf(n, role), 80))
                 const state = []
@@ -312,7 +352,7 @@ export function caramelPageOutline(root = document.body) {
                         'input, textarea, select, button, a[href], [role]',
                     )
                 )
-                    walk(n, depth + 1)
+                    walk(n, depth + 1, true)
                 continue
             }
             if (role === 'heading') {
@@ -330,10 +370,10 @@ export function caramelPageOutline(root = document.body) {
                     ),
                 )
                 push(depth, role + (name ? ' "' + name + '"' : '') + ':')
-                walk(n, depth + 1)
+                walk(n, depth + 1, inside)
                 continue
             }
-            walk(n, depth)
+            walk(n, depth, inside)
         }
     }
     walk(root, 0)
