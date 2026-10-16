@@ -34,6 +34,10 @@
  *      a cart that reloads per code      -> both codes tried across the
  *                                           reloads, the true saving of the
  *                                           one that worked
+ *   L  no config, a points "Apply
+ *      discount" button and no coupon
+ *      box, the server names it as the
+ *      reveal                            -> nothing clicked, the codes to copy
  *   K  as J, but a box only the server
  *      can name                          -> skipped unless the build keeps a
  *                                           server pick across a reload
@@ -176,6 +180,20 @@ const WRONG_BOX =
     '<div class="news"><input id="in" name="newsletter" type="email">' +
     '<a id="btn" href="/checkout/next">Apply</a></div>'
 
+// A loyalty panel and no coupon box: "Apply discount" spends the shopper's
+// points. A click on it is recorded on the page.
+const POINTS_PAGE = SHELL(`
+<div class="row"><span>Total</span> <span id="tot">$100.00</span></div>
+<div class="loyalty"><p>You have 500 points</p>
+<button id="spend" type="button">Apply discount</button></div>
+<script>
+window.__spent = false
+document.getElementById('spend').addEventListener('click', () => {
+    window.__spent = true
+    document.getElementById('tot').textContent = '$95.00'
+})
+</script>`)
+
 // Boxes that apply on Enter: no button at all. The page answers the keydown
 // the way such carts do. The rules recognise the labelled one; only the
 // server's pick can name the bare one.
@@ -243,7 +261,7 @@ function reloadingCart(labelled) {
  * worker's own requests are not routed through Playwright). Every pick request
  * and every coupon report is recorded in extension storage, behind a
  * serialized queue the reader drains first. `pickPlan` scripts the server:
- * `{ input, button }` are regex sources matched against the outline's lines,
+ * `{ input, button, toggle }` are regex sources matched against the outline's lines,
  * and the answer names the index on the first matching line. */
 const stubApi = (sw, opts) =>
     sw.evaluate(
@@ -305,7 +323,7 @@ const stubApi = (sw, opts) =>
                         outcome: 'box',
                         input: indexOn(body.outline, plan.input),
                         button: indexOn(body.outline, plan.button),
-                        toggle: null,
+                        toggle: indexOn(body.outline, plan.toggle),
                         confidence: 90,
                         why: 'scripted',
                         cached: false,
@@ -443,6 +461,7 @@ async function runScenario({
             alertShim: document.documentElement.hasAttribute(
                 'data-caramel-alert-shim',
             ),
+            spent: window.__spent === true,
         }))
         sw = ctx.serviceWorkers()[0] || sw
         const savings = await sw.evaluate(
@@ -743,6 +762,30 @@ const SCENARIOS = [
             },
         }
     })(),
+    {
+        name: 'L no config, a points "Apply discount" and no coupon box, the server names it as the reveal — nothing clicked',
+        host: 'shop-with-points.example',
+        path: '/cart',
+        page: POINTS_PAGE,
+        flags: true,
+        // If the reveal were clicked the points would be spent (and the total
+        // would drop by $5, which no code did).
+        pickPlan: {
+            input: null,
+            button: null,
+            toggle: 'button "Apply discount"',
+        },
+        assert: ({ modal, state, savings, worked }) => {
+            check('never clicks the points button', state.spent === false)
+            check(
+                'hands over the codes to copy',
+                /SAVE20/.test(modal) && /TENOFF/.test(modal),
+                modal.slice(0, 120),
+            )
+            check('banks nothing', savings.length === 0)
+            check('fires no "worked" report', worked.length === 0)
+        },
+    },
     (() => {
         const cart = reloadingCart(false)
         return {
