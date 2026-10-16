@@ -173,11 +173,13 @@ describe('StoreCouponsPage — CouponListRow + TotalCountRow', () => {
             {
                 '@type': 'ListItem',
                 position: 1,
-                url: `${BASE_URL}/coupons/example.com`,
                 name: couponFixture.title,
                 description: couponFixture.description,
             },
         ])
+        // Every code lives on this one page: the list names the page once,
+        // never the same URL per item.
+        expect(structuredData.url).toBe(`${BASE_URL}/coupons/example.com`)
     })
 
     it('codes that keep failing are collapsed on the page, so the ItemList JSON-LD and the FAQ "ranked first" claim skip them (they stay in the section props)', async () => {
@@ -342,11 +344,9 @@ describe('StoreCouponsPage — CouponListRow + TotalCountRow', () => {
         })) as ReactElement<{ children: ReactElement[] }>
 
         const pageJson = JSON.stringify(mainEl)
-        expect(pageJson).toContain('Best example.co.uk discount codes today')
+        expect(pageJson).toContain('Best Example discount codes today')
         expect(pageJson).toContain('active discount code for example.co.uk')
-        expect(pageJson).toContain(
-            'example.co.uk discount codes and voucher codes',
-        )
+        expect(pageJson).toContain('Example discount codes and voucher codes')
         expect(pageJson).not.toContain('coupon codes today')
     })
 
@@ -516,13 +516,15 @@ describe('StoreCouponsPage generateMetadata — canonical normalization + thin-p
         expect(metadata.openGraph?.url).toBe(`${BASE_URL}/coupons/example.com`)
         // A store WITH coupons is indexable — no robots override.
         expect(metadata.robots).toBeUndefined()
-        // Title/description carry the live code count (the only data the
-        // page has besides the base domain) — singular for exactly one code.
+        // Title/description lead with the brand name and carry the live code
+        // count and best percent-off — singular for exactly one code. The
+        // fixture's list was updated in September 2026, not this month, so
+        // no month is claimed (storeMetadata.test.ts pins the dated forms).
         expect(metadata.title).toBe(
-            'example.com coupons & promo codes — 1 active code | Caramel',
+            'Example Promo Codes & Coupons: 1 Active Code | Caramel',
         )
         expect(metadata.description).toBe(
-            'Caramel lists 1 active coupon code for example.com — promo codes and discounts refreshed as new codes are found and dead ones retired.',
+            "1 Example promo code for example.com, up to 10% off. Copy it, or let Caramel's free extension try it at checkout.",
         )
         expect(metadata.openGraph?.title).toBe(metadata.title)
     })
@@ -544,10 +546,10 @@ describe('StoreCouponsPage generateMetadata — canonical normalization + thin-p
         })
 
         expect(metadata.title).toBe(
-            'example.co.uk discount codes & voucher codes — 1 active code | Caramel',
+            'Example Discount Codes & Vouchers: 1 Active Code | Caramel',
         )
         expect(metadata.description).toBe(
-            'Caramel lists 1 active discount code for example.co.uk — voucher codes and promo codes refreshed as new codes are found and dead ones retired.',
+            "1 Example discount code for example.co.uk, up to 10% off. Copy it, or let Caramel's free extension try it at checkout.",
         )
         expect(metadata.openGraph?.title).toBe(metadata.title)
     })
@@ -569,11 +571,9 @@ describe('StoreCouponsPage generateMetadata — canonical normalization + thin-p
         expect(metadata.robots).toEqual({ index: false, follow: true })
         // The empty state keeps the generic title: it must never advertise a
         // code count it does not have.
-        expect(metadata.title).toBe(
-            'example.com Coupons & Promo Codes | Caramel',
-        )
+        expect(metadata.title).toBe('Example Coupons & Promo Codes | Caramel')
         expect(metadata.description).toBe(
-            'Find example.com coupon codes, promo codes, and discounts — refreshed as new codes are found.',
+            'Find Example coupon codes, promo codes and discounts for example.com, refreshed as new codes are found.',
         )
     })
 })
