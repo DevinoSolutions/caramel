@@ -481,17 +481,17 @@ than that:
 with a named error instead of breaking deep inside a request handler). The
 operationally load-bearing ones:
 
-| Var                                                    | Used for                                                                                                                                                                                                                             |
-| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `DATABASE_URL`                                         | auth_db + the app-owned coupon catalog (Prisma) — required                                                                                                                                                                           |
-| `COUPONS_DATABASE_URL`                                 | OPTIONAL, bridge-sync only — read-only external `caramel_coupons` connection string; unset in normal deploys                                                                                                                         |
-| `INGEST_API_KEY`                                       | bearer for `POST /api/ingest/catalog` (the coupons pipeline supplier push) — server-to-server, never a client                                                                                                                        |
-| `COUPONS_ADMIN_SECRET`                                 | bearer for `POST /api/coupons/expire` + rate-limit trust exemption                                                                                                                                                                   |
-| `UPKUMA_HEALTH_SECRET`                                 | bearer for `GET /api/health/db`                                                                                                                                                                                                      |
-| `OPENROUTER_API_KEY`                                   | extension cart classifier (`/api/classify-cart`) — unset throws a named `OpenRouterError`, not a silent no-op                                                                                                                        |
-| `NEXT_PUBLIC_SENTRY_DSN`                               | Sentry init (client + server) — unset means Sentry never initializes, production or not                                                                                                                                              |
-| `APPLE_TEAM_ID` / `APPLE_KEY_ID` / `APPLE_PRIVATE_KEY` | Sign in with Apple: the app signs its own client-secret JWT from these (required when `APPLE_CLIENT_ID` is set; `.p8` as one line with literal `\n`) — see "Apple sign-in fails" above                                               |
-| `COUPON_BOX_LEARNED_SALT`                              | salt for the learned coupon box's one-way reporter hashes (32+ characters; required when `COUPON_BOX_LEARNED_ENABLED=true`) — secret, never sent to a client; rotating it resets every install's identity (see "Learned coupon box") |
+| Var                                                    | Used for                                                                                                                                                                                                                                            |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`                                         | auth_db + the app-owned coupon catalog (Prisma) — required                                                                                                                                                                                          |
+| `COUPONS_DATABASE_URL`                                 | OPTIONAL, bridge-sync only — read-only external `caramel_coupons` connection string; unset in normal deploys                                                                                                                                        |
+| `INGEST_API_KEY`                                       | bearer for `POST /api/ingest/catalog` (the coupons pipeline supplier push) — server-to-server, never a client                                                                                                                                       |
+| `COUPONS_ADMIN_SECRET`                                 | bearer for `POST /api/coupons/expire` + rate-limit trust exemption                                                                                                                                                                                  |
+| `UPKUMA_HEALTH_SECRET`                                 | bearer for `GET /api/health/db`                                                                                                                                                                                                                     |
+| `OPENROUTER_API_KEY`                                   | extension cart classifier (`/api/classify-cart`) — unset throws a named `OpenRouterError`, not a silent no-op                                                                                                                                       |
+| `NEXT_PUBLIC_SENTRY_DSN`                               | Sentry init (client + server) — unset means Sentry never initializes, production or not                                                                                                                                                             |
+| `APPLE_TEAM_ID` / `APPLE_KEY_ID` / `APPLE_PRIVATE_KEY` | Sign in with Apple: the app signs its own client-secret JWT from these (required when `APPLE_CLIENT_ID` is set; `.p8` as one line with literal `\n`) — see "Apple sign-in fails" above                                                              |
+| `COUPON_BOX_LEARNED_SALT`                              | salt for the learned coupon box's per-store reporter hashes (32+ characters; required when `COUPON_BOX_LEARNED_ENABLED=true`) — secret, never sent to a client; rotating it makes every returning install a new reporter (see "Learned coupon box") |
 
 TODO(human): record where these are actually set/rotated in Dokploy (env
 var UI vs. secret store) and the rotation procedure for
@@ -599,8 +599,9 @@ reports the box to `POST /api/extension/coupon-box-learned` as `confirmed`; a
 learned box that did not work is reported `failed`. Once enough shoppers agree,
 `POST /api/extension/coupon-box-pick` answers with that box before the cache
 and the model: no model call, no budget spent, PostHog outcome `learned`. Code:
-`src/lib/couponBoxLearned.ts` (the one home of the rules below). Tables:
-`learned_coupon_boxes` and `learned_coupon_box_reporters`.
+`src/lib/couponBoxLearned.ts` (the one home of the rules below; every number
+is in `LEARNED_BOX_RULES`). Tables: `learned_coupon_boxes`,
+`learned_coupon_box_reporters` and `learned_coupon_box_handovers`.
 
 **Switch.** Learned boxes have their own switch, so the AI pick can run without
 the crowd-sourced write path. They work only while `COUPON_BOX_LEARNED_ENABLED=true`
@@ -616,60 +617,136 @@ and only then opts in.
   answers `{recorded:false, reason:'disabled'}` without reading the body, the
   pick ignores `acceptsLearned`, features says `couponBoxLearned: false`, and the
   AI pick keeps running. The rows stay; wipe them below if they are the problem.
-- Rotating the salt starts every install's identity over, so existing boxes stop
-  gaining distinct installs from returning reporters; do it only on purpose.
+- Rotating the salt: every hash is made under it, so after a rotation no
+  returning install or network matches its old row. Nothing is deleted. The
+  old rows keep counting toward serving until their last confirmation is 30
+  days old (they are deleted at 60), and each returning install comes back as
+  a NEW reporter, held to the per-network cap below. So for up to 30 days one
+  real install can count twice (old row and new row), old `failed` rows keep
+  suppressing their boxes, and a busy box regrows its reporters at most 2 per
+  network per week. For a clean reset instead, run
+  `DELETE FROM learned_coupon_box_reporters;`, which stops ALL serving until
+  each box is confirmed again from 3 networks. Rotate only on purpose, for
+  example after a leaked salt.
+
+**Who counts.** A reporter is one install on one box, keyed by
+`HMAC(salt, "install\n" + installId + "\n" + domain)`. Its network is
+`HMAC(salt, "network\n" + prefix + "\n" + domain)`, where the prefix is the
+/24 for IPv4 and the /48 for IPv6. Hashes are per store, so rows for two
+stores cannot be joined. A reporter is CONFIRMING when its latest counted
+report is `confirmed` and that confirmation is under 30 days old; a tie with a
+failure reads as failed. It is FAILING when its latest counted report is
+`failed` and under 30 days old. The client makes its own install ids, so one
+machine can forge many; the network rules are what bound it.
 
 **When a box is served.** All of:
 
-- at least 2 distinct installs AND at least 2 distinct networks (/24 IPv4, /48
-  IPv6) reported it. Install ids are client-made, so one client can forge many;
-  the network rule is what stops a single machine. One install's rows always
-  count as one network.
-- confirmations > failures (a tie stops serving).
-- fewer than 2 distinct installs whose latest counted report on the box is a
-  failure. This is what stops a box that broke quickly: a box served for months
-  can hold dozens of confirmations, so the majority rule alone would take as
-  many failures. An install that later confirms it again stops counting as
-  failing, so a store that fixes its page gets the box back.
-- a counted confirmation in the last 30 days.
+- at least 3 distinct confirming installs AND at least 3 distinct confirming
+  networks. Failing and stale reporters do not count.
+- more confirming networks than failing networks (a tie stops serving).
+  Failures count per network: ten failing installs on one network count once.
+- not suppressed. Once failing reporters span 2 or more networks, the box
+  stops until at least 2 networks that are NOT among the failing ones confirm
+  it AFTER the latest failure. An install that confirms again from a failing
+  network does not count toward that.
 - the store has no served config (`store_configs` with input + apply xpaths,
   matched on the host, its parent domains and the hyphen checkout hosts the
   extension accepts). Such a store is never read or written.
 - the request said `acceptsLearned: true` (older builds never get one).
 
-One install counts at most once per 24h per box and per outcome. A `failed`
-report for a box nobody confirmed creates nothing. At most 50 reporter rows are
-kept per box (the least recently seen is dropped).
+Known cost, accepted: two `failed` reports from two installs on two different
+networks are enough to suppress a box. That is cheap on purpose: a box that
+breaks must stop fast, and a wrong box costs a shopper more than a missing
+one. A suppressed box loses only the shortcut. The pick falls through to the
+cache and the AI model, exactly as for a store with no learned box, so
+shoppers still get an answer. Recovery takes 2 confirmations from 2 new
+networks after the last failure.
+
+**Caps.** All caps are per store, enforced under one per-store database lock,
+so parallel reports cannot race past them.
+
+- New reporters: at most 2 new installs per network per box in any 7 days.
+  More are answered `{recorded:false, reason:'ignored'}`.
+- Reporters per box: at most 50. To make room, the confirming reporter seen
+  longest ago is deleted. A reporter whose latest report is `failed` is never
+  deleted to make room. If every row left is failing, the new report is
+  ignored.
+- Boxes per store: at most 5. A 6th selector set is kept only by replacing a
+  box that is stale (no confirmation in 30 days) or confirmed from at most 1
+  network; otherwise it is ignored. One network cannot push out a box that
+  several networks confirmed.
+- One install counts at most once per 24h per box and per outcome. A `failed`
+  report for a box nobody confirmed creates nothing.
+- Domains must be plausible public hosts, meaning a registrable domain under
+  the public suffix list. Refused: single labels, IPs, `localhost`, internal
+  suffixes and broken punycode.
+- Selectors must fit the grammar in `src/lib/couponBoxSelector.ts`, the one
+  home of it, shared with the extension:
+    - at most 4 compounds, at most 3 attribute selectors, at most 256
+      characters;
+    - attributes limited to `id`, `name`, `type`, `aria-label`, `placeholder`
+      and `data-*`, with plain values;
+    - no `:has(`, no `:nth-last-*`, no selector lists.
+
+    Anything else is refused whole (400).
+
+**Retention.** A box with no confirmation for 60 days is deleted with its
+reporters, and a reporter row is deleted 60 days after that install last
+reported. The prune runs for the store on every report, and store-wide at boot
+and every 6 hours (`[boot] learned coupon box retention prune ENABLED`). It
+runs whatever the switch says, so rows written before a kill switch still age
+out.
 
 **Wipe one poisoned store.** Read-only first, then delete (the reporters go
 with the boxes, `ON DELETE CASCADE`):
 
 ```sql
-SELECT id, input_selector, apply_selector, toggle_selector, enter_only,
-       confirmations, failures, distinct_installs, distinct_networks,
-       first_source, last_confirmed_at
-FROM learned_coupon_boxes WHERE domain = 'shop.example';
+SELECT b.id, b.input_selector, b.apply_selector, b.toggle_selector,
+       b.enter_only, b.confirmations, b.failures, b.first_source,
+       b.last_confirmed_at, b.last_failed_at,
+       count(r.id) AS reporters,
+       count(DISTINCT r.network_hash) AS networks
+FROM learned_coupon_boxes b
+LEFT JOIN learned_coupon_box_reporters r ON r.box_id = b.id
+WHERE b.domain = 'shop.example'
+GROUP BY b.id;
 
 DELETE FROM learned_coupon_boxes WHERE domain = 'shop.example';
 ```
 
-The pick stops serving it on the next request (nothing is cached). One box
-only: `DELETE FROM learned_coupon_boxes WHERE id = '<id>';`. The same store
-can be learned again by new reports; if it keeps being poisoned, give it a
-store config (a served config shuts learned boxes off for it for good).
+The pick stops serving it on the next request (nothing is cached). To delete
+one box only: `DELETE FROM learned_coupon_boxes WHERE id = '<id>';`. New
+reports can teach the same store again. If it keeps being poisoned, give it a
+store config: a served config shuts learned boxes off for that store for good.
+The wipe leaves the store's hand-over marker, so it is not handed over again.
 
-**Hand-over to the store pipeline.** The first time a store has a servable
-box, it is recorded once in the site-suggestions inbox with
-`source = 'auto_detect'`, no user and no requester email, so the coupons
-pipeline picks it up like any other store request. With no email, no status
-the pipeline sets can ever mail a shopper; marking it `supported` still sends
-the operator's own "marked supported" summary. Find them:
+**Hand-over to the store pipeline.** A store is handed over at most once, ever,
+and only when one of its boxes meets the serving rule above. It is recorded in
+the site-suggestions inbox with `source = 'auto_detect'`, no user and no
+requester email, so the coupons pipeline picks it up like any other store
+request. `learned_coupon_box_handovers` holds one row per store handed over;
+that row is what makes it once ever, so deleting the suggestion or the boxes
+does not reopen it. At most 50 stores are handed over per 24 hours across all
+stores. A store refused by that cap is asked again on its next servable
+report, and the server logs `pipeline hand-over deferred: daily cap reached`.
+With no email, no status the pipeline sets can ever mail a shopper. Marking it
+`supported` still sends the operator's own "marked supported" summary. Find
+them:
 `SELECT domain, status, created_at FROM site_suggestions WHERE source = 'auto_detect' ORDER BY created_at DESC;`
 
-**What is stored (privacy).** Per box: the store's host, the CSS selectors of
-the code field, its apply button and the control that reveals it, whether it
-applies on Enter, counters, timestamps, and which finder first found it. Per
-reporter: an HMAC-SHA256 of the extension's anonymous install id and of the
-network prefix, under the server-only salt, plus that reporter's counters and
-timestamps. Never: page or outline text, codes, cart contents, IP addresses,
-install ids in the clear, or anything tied to an account.
+**What is stored (privacy).**
+
+- Per box: the store's host and the CSS selectors of the code field, its
+  apply button and the control that reveals it. The selectors are read from
+  the store's own page, so they can hold attribute text such as a
+  placeholder, but never anything the shopper typed. Also whether it applies
+  on Enter, counters, timestamps, and which finder first found it.
+- Per reporter: the two per-store HMAC-SHA256 hashes above, plus that
+  reporter's counters and timestamps.
+
+These hashes are not anonymous against the operator: we hold the salt, and
+install ids also reach the server, in the clear, with sign-in attribution. We
+could recompute the hash for a known install; we do not.
+
+Never stored here: page or outline text, codes, cart contents, IP addresses,
+install ids in the clear, or an account.

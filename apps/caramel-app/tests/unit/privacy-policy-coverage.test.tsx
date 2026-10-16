@@ -93,15 +93,33 @@ describe('privacy policy coverage', () => {
             'and the store responds to a code typed into it',
             'short technical descriptions (CSS selectors)',
             'the random install ID the extension created when it was installed',
-            'only as one-way hashes',
             'the same ID described under “How you first found Caramel” below',
-            'we do not link these reports to your account or to how you found Caramel',
-            'never include codes, your cart, page text, or your account',
+            'These records do not contain the install ID or your IP address, only salted hashes',
+            'made separately for each store with a secret key that we hold',
+            'cannot be joined with the records for another store in our database',
+            "they can contain text from that page's markup",
+            'but never anything you typed or anything about you',
+            'we could in principle recompute the hash for a known install ID; we do not do this.',
+            'Apart from what the selectors name, these reports never include page text, and they never include codes, your cart, or your account.',
             'Promo-code box locations',
-            'at most 50 per box',
+            'at most 5 boxes per store',
+            'At most 50 installs are kept per box',
+            'never one whose last report was a failure',
             'A box nobody has confirmed for 30 days is no longer used.',
+            'A box nobody has confirmed for 60 days is deleted with everything recorded about it',
+            '60 days after that install last reported on it',
         ]) {
             expect(normalized).toContain(claim)
+        }
+        // Claims the code cannot back: a hash under a key we hold is not
+        // unrecoverable, and the install ID can sit with an account.
+        for (const overclaim of [
+            'without being able to recover either',
+            'we do not link these reports to your account',
+            'they never contain what is in them',
+            'the oldest are deleted first',
+        ]) {
+            expect(normalized).not.toContain(overclaim)
         }
     })
 
