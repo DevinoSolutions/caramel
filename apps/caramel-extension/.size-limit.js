@@ -158,7 +158,11 @@ module.exports = [
         // the finder imports it only on a store with no config, to name a box
         // it may remember (stable selectors) and to save and report what a
         // run on that box showed (the per-install memory, LRU 200 domains).
-        limit: '3.8 KB',
+        // Same date, raised 3.8 -> 4.5 kB: the selector grammar every learned
+        // selector is built in and read through (a served or stored selector
+        // outside it is never queried), and the one-element lookup the finder
+        // reads a learned box with. Measured 3.55 -> 4.19 kB.
+        limit: '4.5 KB',
         brotli: false,
     },
 ]
