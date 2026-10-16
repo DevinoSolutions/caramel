@@ -569,6 +569,7 @@ function findButton(input) {
     const consider = (btn, level) => {
         if (seen.has(btn) || btn === input) return
         seen.add(btn)
+        if (spendsPoints(btn)) return
         const r = scoreButton(btn, input, level)
         if (r && r.s > 20 && (!best || r.s > best.score))
             best = { el: btn, score: r.s, reasons: r.reasons }
@@ -607,6 +608,93 @@ function findButton(input) {
                 consider(b, 1)
     }
     return best
+}
+
+/* ------------------------------------------------------ points and offers */
+// A click on "Apply discount" under "You have 500 points", on "Redeem points"
+// or on "Use my rewards" spends the shopper's points or picks an offer for
+// them, unasked, and no code is involved. The finder and the server's pick
+// never click one, as a reveal or as an apply button. Only a CLICKED control
+// is judged, by its own name and by the words beside it: a field labelled
+// "Promo or rewards code" is still a coupon box, and the plain "Apply" beside
+// it is still clicked, because those words name a code. A configured store
+// never reaches this: its own selectors are clicked as written.
+const LOYALTY_RE =
+    /\b(?:redeem(?:s|ed|ing)?|points?|rewards?|loyalty|memberships?)\b/i
+const CODE_WORD_RE = /\b(?:codes?|coupons?|vouchers?)\b/i
+// A reveal named only for offers or promotions opens a list of offers, not a
+// box to type a code into.
+const OFFERS_RE = /\b(?:offers?|promotions?|deals?)\b/i
+
+// Text with a space between every node: "You have 500 points" and "Apply
+// discount" in two elements must not read as "pointsApply".
+const wordsOf = el =>
+    Array.from(el.childNodes, n =>
+        n.nodeType === 3 ? n.data : n.nodeType === 1 ? wordsOf(n) : '',
+    ).join(' ')
+
+const controlWords = el =>
+    [
+        wordsOf(el),
+        ariaOf(el),
+        el.value,
+        el.title,
+        el.getAttribute('name'),
+        el.id,
+    ]
+        .join(' ')
+        .replace(/[-_]+/g, ' ')
+
+// The words a shopper reads beside a control: the small block around it, or,
+// once a block also holds a field, only its own neighbours. A neighbour that IS
+// a field speaks by its label (the box this button applies); one that holds a
+// field is another box and says nothing about this control.
+function wordsBeside(el) {
+    let words = ''
+    for (let n = el, k = 0; k < 3; n = n.parentElement, k++) {
+        const p = n.parentElement
+        if (!p || p === el.ownerDocument.body) break
+        if (p.querySelector(FIELDS)) {
+            for (const sib of [n.previousElementSibling, n.nextElementSibling])
+                if (sib?.matches(FIELDS)) words += ' ' + labelText(sib)
+                else if (sib && !sib.querySelector(FIELDS))
+                    words += ' ' + wordsOf(sib)
+            break
+        }
+        if (norm(p.textContent).length > 160) break
+        words = wordsOf(p)
+    }
+    return words
+}
+
+// Called for every control the finder or the pick might click. A control
+// that names points or rewards itself is refused unless it also names a code;
+// a bare "Redeem", or "Apply discount" under a points balance, is judged with
+// the words beside it.
+function spendsPoints(el) {
+    const own = controlWords(el)
+    if (LOYALTY_RE.test(own.replace(/\bredeem\w*/gi, '')))
+        return !CODE_WORD_RE.test(own)
+    const words = own + ' ' + wordsBeside(el)
+    return LOYALTY_RE.test(words) && !CODE_WORD_RE.test(words)
+}
+
+// A field that takes points rather than a code ("Points to redeem"). Pressing
+// Enter in it is the same as clicking its "Redeem" button.
+const pointsField = el => {
+    const words = [
+        labelText(el),
+        el.placeholder,
+        ariaOf(el),
+        el.name,
+        el.id,
+    ].join(' ')
+    return LOYALTY_RE.test(words) && !CODE_WORD_RE.test(words)
+}
+
+const offersOnly = el => {
+    const own = controlWords(el)
+    return OFFERS_RE.test(own) && !CODE_WORD_RE.test(own)
 }
 
 /* --------------------------------------------------------------- toggles */
@@ -853,6 +941,7 @@ function findToggle(doc, input) {
         if (check && (!CODE_ENTRY_RE.test(t) || CONSENT_RE.test(t))) continue
         if (!t || t.length > 60) continue
         if (!visible(el)) continue
+        if (spendsPoints(el) || offersOnly(el)) continue
         const r = scoreToggle(el, t)
         if (!r) continue
         // Equal score: the INNERMOST element wins (an outer wrapper may not
@@ -1287,7 +1376,8 @@ function mark(el, kind) {
  * reveal never needs to submit; a submit posts the cart or, in a checkout
  * form, places the order behind an innocent label ("Have a promo code?"). */
 function toggleRefused(el) {
-    if (caramelIsForbiddenControl(el)) return true
+    if (caramelIsForbiddenControl(el) || spendsPoints(el) || offersOnly(el))
+        return true
     return (
         !!el.form &&
         ((el.tagName === 'BUTTON' && el.type === 'submit') ||
@@ -1555,7 +1645,11 @@ function clickable(el) {
     )
         return false
     const words = [textOf(el), ariaOf(el), el.value, el.title].join(' ')
-    return !caramelIsForbiddenControl(el) && !NEVER_CLICK.test(words)
+    return (
+        !caramelIsForbiddenControl(el) &&
+        !NEVER_CLICK.test(words) &&
+        !spendsPoints(el)
+    )
 }
 
 // Called from caramelDiscoveredRecord, after the rules found no box.
@@ -1634,7 +1728,8 @@ async function caramelPickedRecord(rec, doc) {
     // order control) never turns into an Enter press: that stays a miss.
     const usableBox = f =>
         !!f?.input &&
-        (!!f.button || (f.input === input && answer.button == null))
+        (!!f.button ||
+            (f.input === input && answer.button == null && !pointsField(input)))
 
     let found = null
     let opened = null

@@ -254,6 +254,7 @@ function freshPage(html, path = '/cart') {
     }
     for (const k of Object.keys(finderCalls)) delete finderCalls[k]
     getDomainRecord.cache = null
+    getDomainRecord.answered = false
     _caramelResetCachedCodes()
     _caramelResetDiscoveryFlag()
     sessionStorage.clear()
@@ -269,8 +270,12 @@ function freshPage(html, path = '/cart') {
 const asked = action => t.messages.filter(m => m?.action === action)
 const reported = outcome =>
     asked('reportOutcome').filter(m => m.outcome === outcome)
-const run = () =>
-    startApplyingCoupons(caramelConfiglessRecord(location.hostname))
+// The runner is reached from the prompt, so the store list has been read by
+// then (or failed to be).
+const run = async () => {
+    await getDomainRecord(location.hostname)
+    return startApplyingCoupons(caramelConfiglessRecord(location.hostname))
+}
 const lastModal = () => t.modals.at(-1)
 const handedOver = () => {
     expect(lastModal().amount).toBe(0)
@@ -587,5 +592,148 @@ describe('the store list could not be read: nothing is auto-detected, because th
         freshPage(RULES_BOX + TOTAL)
         await tryInitialize()
         expect(t.prompts).toEqual([location.hostname])
+    })
+})
+
+describe('a loyalty or offers control is never clicked by the finder or the pick', () => {
+    // "Apply discount" under "You have 500 points", "Redeem points", "Use my
+    // rewards": a click spends the shopper's points or picks an offer for
+    // them, and they never asked. No code is involved, so nothing the finder
+    // is for. Only CLICKED controls are judged: a box labelled "Promo or
+    // rewards code" is still a coupon box and its "Apply" is still clicked.
+    beforeEach(() => {
+        flags = { discovery: true, llm: true }
+    })
+    const POINTS =
+        '<div class="loyalty"><p>You have 500 points</p>' +
+        '<button id="spend" type="button">Apply discount</button></div>'
+    const watch = id =>
+        document
+            .getElementById(id)
+            .addEventListener('click', () => t.page.push('SPENT:' + id))
+    const spent = () => t.page.filter(e => e.startsWith('SPENT:'))
+
+    it('a points "Apply discount" and no coupon box: nothing clicked, the codes to copy', async () => {
+        freshPage(POINTS + TOTAL)
+        watch('spend')
+        await tryInitialize()
+        await run()
+        expect(spent()).toEqual([])
+        expect(t.savings).toEqual([])
+        expect(reported('worked')).toEqual([])
+        handedOver()
+    })
+
+    it('the rules never offer such a control as a reveal on their own', async () => {
+        freshPage(POINTS + TOTAL)
+        await tryInitialize()
+        // Nothing on this page is a coupon box: the prompt may still show
+        // (the server may be asked), but the rules saw no box behind it.
+        expect(document.querySelector('[data-caramel-found]')).toBeNull()
+    })
+
+    for (const [label, html] of [
+        ['"Apply discount" under a points balance', POINTS],
+        [
+            '"Use my rewards"',
+            '<div><button id="spend" type="button">Use my rewards</button></div>',
+        ],
+        [
+            '"See offers"',
+            '<div><button id="spend" type="button" aria-expanded="false">See offers</button></div>',
+        ],
+        [
+            '"Promotions"',
+            '<div><div id="spend" role="button" aria-expanded="false">Promotions</div></div>',
+        ],
+    ])
+        it(`the server names ${label} as the reveal: never clicked`, async () => {
+            freshPage(html + TOTAL)
+            watch('spend')
+            answer = req =>
+                pick(
+                    null,
+                    null,
+                    idx(
+                        req.outline,
+                        /Apply discount|Use my rewards|See offers|Promotions/,
+                    ),
+                )
+            await run()
+            expect(asked('couponBoxPick')).toHaveLength(1)
+            expect(spent()).toEqual([])
+            expect(t.savings).toEqual([])
+            handedOver()
+        })
+
+    for (const label of ['Redeem points', 'Use my rewards', 'Redeem'])
+        it(`the server names "${label}" beside a bare field as the apply button: never clicked, nothing typed`, async () => {
+            freshPage(
+                `<div class="f"><input id="x" name="field_7" type="text"><button id="spend" type="button">${label}</button></div>` +
+                    TOTAL,
+            )
+            watch('spend')
+            answer = req =>
+                pick(
+                    idx(req.outline, /textbox/),
+                    // The only button on the page (the outline may shorten
+                    // its name: "Redeem points" is outlined as "Redeem").
+                    idx(req.outline, /button "/),
+                )
+            await run()
+            expect(asked('couponBoxPick')).toHaveLength(1)
+            expect(spent()).toEqual([])
+            expect(document.getElementById('x').value).toBe('')
+            expect(t.savings).toEqual([])
+            handedOver()
+        })
+
+    it('the server names a "Points to redeem" field that applies on Enter: nothing typed, Enter never pressed', async () => {
+        freshPage(
+            '<div class="pts"><label for="pt">Points to redeem</label>' +
+                '<input id="pt" name="points_amount" type="text"></div>' +
+                TOTAL,
+        )
+        const keys = []
+        document
+            .getElementById('pt')
+            .addEventListener('keydown', e => keys.push(e.key))
+        answer = req => pick(idx(req.outline, /textbox/), null)
+        await run()
+        expect(asked('couponBoxPick')).toHaveLength(1)
+        expect(keys).toEqual([])
+        expect(document.getElementById('pt').value).toBe('')
+        expect(t.savings).toEqual([])
+        handedOver()
+    })
+
+    it('a points "Apply discount" beside a real promo box in the same panel: the code goes in the promo box, the points are left alone', async () => {
+        freshPage(
+            '<div class="sidebar"><div class="promo"><label for="dc">Discount code</label>' +
+                '<input id="dc" name="discount_code" type="text">' +
+                '<button id="ap" type="button">Apply</button></div>' +
+                POINTS +
+                '</div>' +
+                TOTAL,
+        )
+        watch('spend')
+        wireStore('dc', 'ap', 'drop')
+        await run()
+        expect(spent()).toEqual([])
+        expect(t.savings).toEqual([{ code: 'SAVE20', amount: 20 }])
+    })
+
+    it('a box labelled "Promo or rewards code" is still a coupon box, and its plain "Apply" is still clicked', async () => {
+        freshPage(
+            '<div class="promo"><label for="pr">Promo or rewards code</label>' +
+                '<input id="pr" name="promo_rewards_code" type="text">' +
+                '<button id="pa" type="button">Apply</button></div>' +
+                TOTAL,
+        )
+        wireStore('pr', 'pa', 'drop')
+        await run()
+        expect(t.page[0]).toBe('submit:pa:SAVE20')
+        expect(t.savings).toEqual([{ code: 'SAVE20', amount: 20 }])
+        expect(reported('worked')).toHaveLength(1)
     })
 })

@@ -323,6 +323,17 @@ describe('a configured store whose box the shopper can reach', () => {
             answer: 'win',
             config: MAGENTO,
         },
+        // Labels the finder and the pick refuse to click (a reveal named
+        // only for offers, an apply button that names points). A configured
+        // store's own selectors are clicked as written.
+        'offers reveal and a "Redeem points" apply button, named by the config':
+            {
+                html: FORM('display:none')
+                    .replace('Apply Promo Code', 'View offers')
+                    .replace('Apply Discount', 'Redeem points'),
+                answer: 'win',
+                config: MAGENTO,
+            },
         'box behind a closed <details> the config never named': {
             html: FORM(),
             answer: 'win',
@@ -353,6 +364,22 @@ describe('a configured store whose box the shopper can reach', () => {
                 expect(run.found).toBe(0)
             }
         })
+
+    it('a configured reveal and apply button the finder would refuse are still clicked, under every flag combination', async () => {
+        const html = FORM('display:none')
+            .replace('Apply Promo Code', 'View offers')
+            .replace('Apply Discount', 'Redeem points')
+        for (const f of FLAG_SETS) {
+            flags = f
+            const run = await shopperVisits({
+                html,
+                answer: 'win',
+                config: MAGENTO(),
+            })
+            expect(run.page.slice(0, 2)).toEqual(['toggle', 'apply:SAVE12'])
+            expect(run.savings).toEqual([{ code: 'SAVE12', amount: 12 }])
+        }
+    })
 
     it('the money is the same too: one $12 saving when the code worked, none when refused', async () => {
         for (const f of FLAG_SETS) {
