@@ -8,8 +8,10 @@ import SourceRefList from '@/components/seo/SourceRefs'
 import { faqPageJsonLd } from '@/lib/jsonLd'
 import {
     COMPARED_EXTENSIONS,
+    COMPARISON_CHECKED_ON,
     COMPARISON_FAQ,
     COMPARISON_SOURCES,
+    formatComparisonDate,
 } from '@/lib/seo/extensionComparison'
 import {
     CARAMEL_ROW,
@@ -106,6 +108,12 @@ describe('honeyExtensionGuide data', () => {
         )
         expect(item?.sources).toContain('honeyChrome')
         expect(item?.answer).toContain('Chrome Web Store')
+        expect(item?.answer).toContain(COMPARISON_SOURCES.honeyChrome.title)
+        expect(item?.answer).toContain('13,000,000')
+        expect(item?.answer).toContain('September 8, 2026')
+        expect(item?.answer).toContain(
+            formatComparisonDate(COMPARISON_CHECKED_ON),
+        )
     })
 
     it('keeps "alternative" out of the questions (the home page owns that query)', () => {
