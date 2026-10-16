@@ -10,13 +10,20 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 // asked, and whether they are asked at all, is what these tests measure.
 const { envMock, recordMock, servedMock, suggestMock } = vi.hoisted(() => ({
     envMock: {} as Record<string, unknown>,
-    recordMock: vi.fn(async (_input: unknown) => ({
-        recorded: true as const,
-        counted: true,
-        servable: false,
-    })),
+    recordMock: vi.fn(
+        async (
+            _input: unknown,
+        ): Promise<
+            | { recorded: true; counted: boolean; servable: boolean }
+            | { recorded: false; reason: 'unknown_box' | 'ignored' }
+        > => ({ recorded: true, counted: true, servable: false }),
+    ),
     servedMock: vi.fn(async (_host: string) => false),
-    suggestMock: vi.fn(async (_host: string) => ({ created: true })),
+    suggestMock: vi.fn(
+        async (_host: string): Promise<{ created: boolean }> => ({
+            created: true,
+        }),
+    ),
 }))
 vi.mock('@/lib/env', async importOriginal => {
     const actual = await importOriginal<typeof import('@/lib/env')>()
@@ -26,11 +33,9 @@ vi.mock('@/lib/env', async importOriginal => {
 vi.mock('@/lib/couponBoxLearned', async importOriginal => ({
     ...(await importOriginal<typeof import('@/lib/couponBoxLearned')>()),
     recordLearnedBoxReport: recordMock,
+    handOverLearnedStore: suggestMock,
 }))
 vi.mock('@/lib/couponsRepo', () => ({ hasServedStoreConfig: servedMock }))
-vi.mock('@/lib/siteSuggestions', () => ({
-    recordAutoDetectedStoreSuggestion: suggestMock,
-}))
 vi.mock('@sentry/nextjs', () => ({
     addBreadcrumb: vi.fn(),
     captureException: vi.fn(),
@@ -54,7 +59,7 @@ const INSTALL_ID = '3f0c6a52-6a1e-4b8e-9d1f-2b7c1e0a9f44'
 
 const goodReport = (overrides: Record<string, unknown> = {}) => ({
     installId: INSTALL_ID,
-    domain: 'shop.example',
+    domain: 'shop-example.com',
     box: {
         input: '#promo',
         apply: 'button[name="apply"]',
@@ -116,10 +121,14 @@ describe('POST /api/extension/coupon-box-learned', () => {
             installHash: string
             networkHash: string
         }
-        expect(call.installHash).toBe(hashInstallId(INSTALL_ID))
+        expect(call.installHash).toBe(
+            hashInstallId(INSTALL_ID, 'shop-example.com'),
+        )
         expect(call.installHash).toMatch(/^[0-9a-f]{64}$/)
         expect(call.installHash).not.toContain(INSTALL_ID)
-        expect(call.networkHash).toBe(hashNetwork('203.0.113.99'))
+        expect(call.networkHash).toBe(
+            hashNetwork('203.0.113.99', 'shop-example.com'),
+        )
     })
 
     it('forged origin: a non-extension Origin is refused (403) and records nothing', async () => {
@@ -155,6 +164,21 @@ describe('POST /api/extension/coupon-box-learned', () => {
         ['parenthesised XPath', '(//input)[1]'],
         ['an over-long selector', `#${'a'.repeat(300)}`],
         ['an empty selector', '   '],
+        [':has(', 'form:has(input)'],
+        [':not(:has(', 'input:not(:has(span))'],
+        [':nth-last-child', 'input:nth-last-child(1)'],
+        ['an attribute outside the list', 'a[href="/cart"]'],
+        ['a style attribute', 'input[style="x"]'],
+        ['a class attribute', 'input[class="promo"]'],
+        ['a selector list', '#promo, #code'],
+        ['a pseudo-element', 'input::before'],
+        ['five compounds', 'main form div label input'],
+        [
+            'four attribute selectors',
+            'input[id="a"][name="b"][type="text"][placeholder="c"]',
+        ],
+        ['a quote inside a value', `input[name="it's"]`],
+        ['a case flag', 'input[name="code" i]'],
     ])('bad selector (%s) in input is refused with 400', async (_, input) => {
         const res = await post(
             goodReport({
@@ -189,6 +213,12 @@ describe('POST /api/extension/coupon-box-learned', () => {
         ['no install id', goodReport({ installId: undefined })],
         ['a non-UUID install id', goodReport({ installId: 'abc' })],
         ['a bad domain', goodReport({ domain: 'shop example' })],
+        ['a single-label domain', goodReport({ domain: 'intranet' })],
+        ['localhost', goodReport({ domain: 'localhost' })],
+        ['an IPv4 address', goodReport({ domain: '203.0.113.5' })],
+        ['an unknown TLD', goodReport({ domain: 'shop.internal' })],
+        ['a bare public suffix', goodReport({ domain: 'co.uk' })],
+        ['broken punycode', goodReport({ domain: 'xn--garbage.com' })],
         ['an unknown source', goodReport({ source: 'magic' })],
         ['an unknown outcome', goodReport({ outcome: 'maybe' })],
         ['a confirmation without evidence', goodReport({ evidence: null })],
@@ -213,6 +243,16 @@ describe('POST /api/extension/coupon-box-learned', () => {
         expect(recordMock).not.toHaveBeenCalled()
     })
 
+    it('a cap refusal is passed through as ignored', async () => {
+        recordMock.mockImplementationOnce(async () => ({
+            recorded: false,
+            reason: 'ignored',
+        }))
+        const res = await post(goodReport())
+        expect(res.status).toBe(200)
+        expect(await res.json()).toEqual({ recorded: false, reason: 'ignored' })
+    })
+
     it('a failure needs no evidence', async () => {
         const res = await post(
             goodReport({ outcome: 'failed', evidence: undefined }),
@@ -227,7 +267,7 @@ describe('POST /api/extension/coupon-box-learned', () => {
             recorded: false,
             reason: 'served_config',
         })
-        expect(servedMock).toHaveBeenCalledWith('shop.example')
+        expect(servedMock).toHaveBeenCalledWith('shop-example.com')
         expect(recordMock).not.toHaveBeenCalled()
     })
 
@@ -267,7 +307,7 @@ describe('POST /api/extension/coupon-box-learned', () => {
             servable: true,
         }))
         await post(goodReport())
-        expect(suggestMock).toHaveBeenCalledWith('shop.example')
+        expect(suggestMock).toHaveBeenCalledWith('shop-example.com')
     })
 
     it('a failed pipeline hand-over does not fail the committed report', async () => {
@@ -303,17 +343,29 @@ describe('reporter identity', () => {
         expect(networkPrefix('999.1.1.1')).toBe('unknown')
     })
 
+    it('hashes are per store: the same install and network hash differently on two stores', () => {
+        expect(hashInstallId(INSTALL_ID, 'one-shop.com')).not.toBe(
+            hashInstallId(INSTALL_ID, 'two-shop.com'),
+        )
+        expect(hashNetwork('203.0.113.5', 'one-shop.com')).not.toBe(
+            hashNetwork('203.0.113.5', 'two-shop.com'),
+        )
+        expect(hashNetwork('203.0.113.5', 'one-shop.com')).toBe(
+            hashNetwork('203.0.113.250', 'one-shop.com'),
+        )
+    })
+
     it('hashes depend on the salt and never contain the input', () => {
-        const a = hashInstallId(INSTALL_ID)
+        const a = hashInstallId(INSTALL_ID, 'shop-example.com')
         envMock.COUPON_BOX_LEARNED_SALT =
             'another-salt-another-salt-another-salt'
-        expect(hashInstallId(INSTALL_ID)).not.toBe(a)
+        expect(hashInstallId(INSTALL_ID, 'shop-example.com')).not.toBe(a)
         expect(a).not.toContain(INSTALL_ID.slice(0, 8))
     })
 
     it('refuses to hash without a salt (never a quiet unsalted hash)', () => {
         envMock.COUPON_BOX_LEARNED_SALT = undefined
-        expect(() => hashInstallId(INSTALL_ID)).toThrow(
+        expect(() => hashInstallId(INSTALL_ID, 'shop-example.com')).toThrow(
             /COUPON_BOX_LEARNED_SALT/,
         )
     })

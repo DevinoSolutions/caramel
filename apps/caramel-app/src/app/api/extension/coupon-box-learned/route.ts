@@ -2,6 +2,7 @@ import { handleRouteError } from '@/lib/api/handleRouteError'
 import { preflight, withRoute } from '@/lib/api/withRoute'
 import {
     couponBoxLearnedEnabled,
+    handOverLearnedStore,
     hashInstallId,
     hashNetwork,
     learnedBoxReportSchema,
@@ -9,7 +10,6 @@ import {
 } from '@/lib/couponBoxLearned'
 import { hasServedStoreConfig } from '@/lib/couponsRepo'
 import { getClientIp } from '@/lib/rateLimit'
-import { recordAutoDetectedStoreSuggestion } from '@/lib/siteSuggestions'
 import * as Sentry from '@sentry/nextjs'
 import { NextResponse, type NextRequest } from 'next/server'
 
@@ -26,6 +26,9 @@ import { NextResponse, type NextRequest } from 'next/server'
 //   { recorded: false, reason: 'served_config' }  the store has a config
 //   { recorded: false, reason: 'unknown_box' }    a failure for a box nobody
 //                                                 confirmed: nothing to count
+//   { recorded: false, reason: 'ignored' }        a cap refused it (new
+//                                                 reporters per network, per
+//                                                 box, boxes per store)
 //   400 invalid · 413 too large · 403 non-extension Origin · 429 rate limit
 
 // A report is four short selectors and a few enums: 4 KiB is generous.
@@ -37,7 +40,7 @@ type LearnedAnswer =
     | { recorded: true }
     | {
           recorded: false
-          reason: 'disabled' | 'served_config' | 'unknown_box'
+          reason: 'disabled' | 'served_config' | 'unknown_box' | 'ignored'
       }
 
 function json(body: LearnedAnswer | { error: string }, status = 200) {
@@ -99,14 +102,14 @@ async function handleReport(req: NextRequest): Promise<NextResponse> {
         }
         const result = await recordLearnedBoxReport({
             report,
-            installHash: hashInstallId(report.installId),
-            networkHash: hashNetwork(getClientIp(req)),
+            installHash: hashInstallId(report.installId, report.domain),
+            networkHash: hashNetwork(getClientIp(req), report.domain),
         })
         if (!result.recorded) {
             return json({ recorded: false, reason: result.reason })
         }
-        // Idempotent (once per domain), so asking on every servable report
-        // also retries a feed that failed last time.
+        // Once per store ever and capped per day (handOverLearnedStore), so
+        // asking on every servable report also retries one refused by the cap.
         if (result.servable) await feedStorePipeline(report.domain)
         return json({ recorded: true })
     } catch (error) {
@@ -124,16 +127,21 @@ async function handleReport(req: NextRequest): Promise<NextResponse> {
     }
 }
 
-/** The box is servable: record the store once for the coupons pipeline
- * (siteSuggestions.ts). Its failure is reported, never allowed to
- * undo or fail the report that is already committed. */
+/** The box is servable: hand the store to the coupons pipeline
+ * (couponBoxLearned.handOverLearnedStore). Its failure is reported, never
+ * allowed to undo or fail the report that is already committed. */
 async function feedStorePipeline(domain: string): Promise<void> {
     try {
-        const { created } = await recordAutoDetectedStoreSuggestion(domain)
-        if (created) {
+        const result = await handOverLearnedStore(domain)
+        if (result.created) {
             console.info('[coupon-box-learned] store handed to the pipeline', {
                 domain,
             })
+        } else if (result.reason === 'daily_cap') {
+            console.warn(
+                '[coupon-box-learned] pipeline hand-over deferred: daily cap reached',
+                { domain },
+            )
         }
     } catch (error) {
         console.error(

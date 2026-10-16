@@ -29,7 +29,8 @@ export async function register() {
     // the pick on but COUPON_BOX_LEARNED_ENABLED off the learned path records
     // and serves nothing, and that must read as a decision, not as "no shopper
     // has confirmed a box yet".
-    const { couponBoxLearnedEnabled } = await import('@/lib/couponBoxLearned')
+    const { couponBoxLearnedEnabled, startLearnedCouponBoxPruner } =
+        await import('@/lib/couponBoxLearned')
     const { couponBoxLlmEnabled } = await import('@/lib/couponBoxPick')
     if (couponBoxLlmEnabled()) {
         console.log(
@@ -38,6 +39,12 @@ export async function register() {
                 : `[boot] coupon-box pick ON (mode ${env.COUPON_BOX_PICK_MODE}); learned coupon boxes DISABLED (COUPON_BOX_LEARNED_ENABLED off)`,
         )
     }
+
+    // Learned coupon boxes are deleted after 60 days without a confirmation
+    // (and their reporters after 60 days unseen) whatever the switch says, so
+    // rows written while it was on still age out after it is turned off.
+    startLearnedCouponBoxPruner()
+    console.log('[boot] learned coupon box retention prune ENABLED (every 6h)')
 
     // Sign in with Apple: prove the .p8 key really signs BEFORE serving. env.ts
     // already guarantees the vars are present; only signing proves the key is

@@ -442,46 +442,46 @@ model SiteSuggestion {
 
 // A coupon box the extension CONFIRMED on a store with no served config: it
 // typed a code into it and the store answered (the total dropped, or the store
-// showed a coupon reply). src/lib/couponBoxLearned.ts is the ONE home for this
-// table and its serving rule. Crowd-sourced, so nothing here is trusted until
-// several installs on several networks agree, and it holds ONLY selectors and
-// counters: never page text, outline text, codes, IPs or install ids.
+// showed a coupon reply). src/lib/couponBoxLearned.ts is the ONE home for these
+// tables, their serving rule and their retention. Crowd-sourced, so nothing
+// here is trusted until installs on several networks agree, and it holds ONLY
+// selectors and counters: never page text, outline text, codes, IPs or install
+// ids. At most 5 boxes per store; deleted after 60 days with no confirmation.
 model LearnedCouponBox {
-  id               String                     @id @default(cuid())
-  domain           String
-  // CSS selectors, validated on the way in (length-capped, CSS only).
-  inputSelector    String                     @map("input_selector")
+  id              String                     @id @default(cuid())
+  domain          String
+  // CSS selectors inside the grammar in src/lib/couponBoxSelector.ts.
+  inputSelector   String                     @map("input_selector")
   // '' = the box has none. NOT NULL on purpose: Postgres treats NULLs as
   // distinct, so a nullable column would let the unique key below hold the
   // same box twice.
-  applySelector    String                     @default("") @map("apply_selector")
-  toggleSelector   String                     @default("") @map("toggle_selector")
+  applySelector   String                     @default("") @map("apply_selector")
+  toggleSelector  String                     @default("") @map("toggle_selector")
   // The code is applied with Enter (the box has no apply button).
-  enterOnly        Boolean                    @map("enter_only")
-  // Counted reports, each install's weight capped (couponBoxLearned.ts).
-  confirmations    Int                        @default(0)
-  failures         Int                        @default(0)
-  // Rows in learned_coupon_box_reporters, and their distinct network hashes.
-  distinctInstalls Int                        @default(0) @map("distinct_installs")
-  distinctNetworks Int                        @default(0) @map("distinct_networks")
-  // Reporters whose latest counted report is a failure (2 stop serving).
-  failingInstalls  Int                        @default(0) @map("failing_installs")
+  enterOnly       Boolean                    @map("enter_only")
+  // Counted reports, for operators: serving reads the reporter rows.
+  confirmations   Int                        @default(0)
+  failures        Int                        @default(0)
   // Which finder produced the first confirmation: rules | llm | server_learned.
-  firstSource      String                     @map("first_source")
-  firstSeenAt      DateTime                   @default(now()) @map("first_seen_at")
-  lastConfirmedAt  DateTime?                  @map("last_confirmed_at")
-  lastFailedAt     DateTime?                  @map("last_failed_at")
-  reporters        LearnedCouponBoxReporter[]
+  firstSource     String                     @map("first_source")
+  firstSeenAt     DateTime                   @default(now()) @map("first_seen_at")
+  // A box is only ever created by a confirmation, so this is always set.
+  lastConfirmedAt DateTime                   @map("last_confirmed_at")
+  lastFailedAt    DateTime?                  @map("last_failed_at")
+  reporters       LearnedCouponBoxReporter[]
 
   // Leading `domain` also serves the per-store lookup the pick runs.
   @@unique([domain, inputSelector, applySelector, toggleSelector, enterOnly])
+  // The retention prune.
+  @@index([lastConfirmedAt])
   @@map("learned_coupon_boxes")
 }
 
-// Who reported a learned box, as one-way hashes only: HMAC-SHA256 under
-// COUPON_BOX_LEARNED_SALT of the extension's anonymous install id and of the
-// reporter's network prefix (/24 IPv4, /48 IPv6). Capped per box (the least
-// recently seen row is dropped first), so the table cannot grow without bound.
+// Who reported a learned box, as salted hashes only, PER STORE: HMAC-SHA256
+// under COUPON_BOX_LEARNED_SALT of (the extension's install id, the store's
+// domain) and of (the reporter's network prefix, /24 IPv4 or /48 IPv6, the
+// store's domain), so rows of two stores cannot be joined. At most 50 per box;
+// deleted after 60 days unseen.
 model LearnedCouponBoxReporter {
   id              String           @id @default(cuid())
   boxId           String           @map("box_id")
@@ -489,7 +489,8 @@ model LearnedCouponBoxReporter {
   installHash     String           @map("install_hash")
   networkHash     String           @map("network_hash")
   // This install's COUNTED reports for this box. An install counts at most
-  // once per 24h per outcome; the two timestamps are that clock.
+  // once per 24h per outcome; the two timestamps are that clock, and the
+  // later of them is this install's latest word on the box.
   confirmations   Int              @default(0)
   failures        Int              @default(0)
   lastConfirmedAt DateTime?        @map("last_confirmed_at")
@@ -498,9 +499,23 @@ model LearnedCouponBoxReporter {
   lastSeenAt      DateTime         @default(now()) @map("last_seen_at")
 
   @@unique([boxId, installHash])
-  // The cap's eviction order (oldest lastSeenAt first).
-  @@index([boxId, lastSeenAt])
+  // The per-network cap for new reporters on a box.
+  @@index([boxId, networkHash, firstSeenAt])
+  // The retention prune.
+  @@index([lastSeenAt])
   @@map("learned_coupon_box_reporters")
+}
+
+// Stores a learned box handed to the store pipeline (site_suggestions,
+// source 'auto_detect'). Never pruned: it is what makes the hand-over happen
+// at most once per store, ever, and it holds only the store's host.
+model LearnedCouponBoxHandover {
+  domain       String   @id
+  handedOverAt DateTime @default(now()) @map("handed_over_at")
+
+  // The daily cap.
+  @@index([handedOverAt])
+  @@map("learned_coupon_box_handovers")
 }
 
 enum UserStatus {
