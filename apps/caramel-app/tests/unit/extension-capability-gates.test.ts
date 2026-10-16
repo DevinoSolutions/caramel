@@ -1,5 +1,6 @@
 import { GET } from '@/app/api/extension/supported-stores/route'
 import {
+    CAPABILITY_PROOF_PARAM,
     EXTENSION_CAPABILITIES,
     EXTENSION_CAPABILITY_GATES,
     requiredCapabilityFor,
@@ -134,6 +135,20 @@ describe('app <-> extension capability contract', () => {
     it('the server lists exactly the capabilities the extension defines', () => {
         expect([...EXTENSION_CAPABILITIES].sort()).toEqual(
             [...extensionCapabilities].sort(),
+        )
+    })
+
+    it('the extension sends its proof under the param name GET /api/coupons reads', () => {
+        // Renaming either side alone would withhold the codes from every new
+        // build and still pass the route's own tests.
+        const background = fs.readFileSync(
+            path.resolve(__dirname, '../../../caramel-extension/background.js'),
+            'utf8',
+        )
+        expect(background).toMatch(
+            new RegExp(
+                String.raw`searchParams\.set\(\s*'${CAPABILITY_PROOF_PARAM}'`,
+            ),
         )
     })
 

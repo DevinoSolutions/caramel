@@ -31,7 +31,7 @@ import { createHash } from 'node:crypto'
 export const SUPPORTED_STORES_TTL_MS = 5 * 60 * 1000
 
 export interface SupportedStoresPayload {
-    /** Serialized `{ supported: [...] }` — the exact response body. */
+    /** Serialized `{ supported, gated }` — the exact response body. */
     body: string
     /** Strong ETag over `body` (quoted, ready for the header). */
     etag: string

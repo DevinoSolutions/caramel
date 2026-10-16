@@ -73,6 +73,35 @@ describe('GET /api/coupons — gated store (porkbun.com)', () => {
         expect((await res.json()).coupons).toEqual([])
     })
 
+    it.each([
+        'PORKBUN.COM',
+        'checkout.porkbun.com',
+        'porkbun.com.',
+        'https://www.porkbun.com/checkout/cart',
+        'porkbun.com:443',
+    ])('withholds however the site is spelled (%s)', async site => {
+        const res = await get(
+            `site=${encodeURIComponent(site)}`,
+            'chrome-extension://abcdefghijklmnop',
+        )
+        expect(res.status).toBe(200)
+        expect((await res.json()).coupons).toEqual([])
+        expect(listCouponsMock).not.toHaveBeenCalled()
+    })
+
+    it('treats Origin: null as no extension (the website sandbox case), not as one', async () => {
+        const res = await get('site=porkbun.com', 'null')
+        expect((await res.json()).coupons).toEqual(CODES)
+    })
+
+    it('a repeated caps param reads the first one', async () => {
+        const res = await get(
+            'site=porkbun.com&caps=nope&caps=alertShim',
+            'chrome-extension://abcdefghijklmnop',
+        )
+        expect((await res.json()).coupons).toEqual([])
+    })
+
     it('withholds when the proof names a capability the server does not know', async () => {
         const res = await get(
             `site=porkbun.com&${CAPABILITY_PROOF_PARAM}=somethingNew,%20,`,
