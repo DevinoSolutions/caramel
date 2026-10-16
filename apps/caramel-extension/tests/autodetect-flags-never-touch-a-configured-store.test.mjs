@@ -1,6 +1,14 @@
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+    afterEach,
+    beforeAll,
+    beforeEach,
+    describe,
+    expect,
+    it,
+    vi,
+} from 'vitest'
 import { initCaramelBase } from '../caramel-base.js'
 import { _caramelResetDiscoveryFlag } from '../coupon-box-discovery.js'
 import { startApplyingCoupons } from '../coupon-runner.js'
@@ -423,4 +431,136 @@ describe('where the promise ends today: a configured store whose selectors match
         )
         expect(trace.savings).toEqual([])
     })
+})
+
+describe('a stale config with the finder on: deliberate behaviour, pinned', () => {
+    // The store renamed its promo field; the config still names the old one
+    // and still names a toggle that exists. With the finder on, this page is
+    // allowed to fall through to it. Three things make that safe, and each is
+    // pinned here: the config's own selectors are always tried first, the
+    // finder starts only after they are proven to give no usable box, and a
+    // saving is recorded only when the total really drops.
+    const STALE_WITH_TOGGLE = () => ({
+        ...MAGENTO(),
+        couponInput: '#old_coupon_field',
+        showInput: '#old_toggle',
+    })
+    const PAGE = `
+<div class="grand totals"><span>Total</span><span class="price">$<span id="total-num">120.00</span></span></div>
+<div id="old_toggle" role="button">Apply Promo Code</div>
+<div class="promo"><label for="dc">Discount code</label>
+  <input id="dc" name="discount_code" type="text">
+  <button id="ap" type="button">Apply</button></div>
+<button id="place-order" type="button">Place Order</button>`
+
+    let seq
+    let realQsa
+    beforeEach(() => {
+        seq = []
+        realQsa = Document.prototype.querySelectorAll
+        Document.prototype.querySelectorAll = function (sel) {
+            if (String(sel).includes('#old_coupon_field'))
+                seq.push('config-box-lookup')
+            return realQsa.call(this, sel)
+        }
+    })
+    afterEach(() => {
+        Document.prototype.querySelectorAll = realQsa
+    })
+
+    // `answer`: 'drop' takes $12 off for SAVE12; 'says-yes' prints an
+    // accepted message for every code and the total never moves.
+    async function visit(answer) {
+        flags = FLAG_SETS[3]
+        trace = {
+            messages: [],
+            prompts: [],
+            modals: [],
+            savings: [],
+            page: [],
+            urls: [],
+        }
+        getDomainRecord.cache = []
+        _caramelResetCachedCodes()
+        _caramelResetDiscoveryFlag()
+        sessionStorage.clear()
+        window.history.replaceState({}, '', '/checkout/cart/')
+        document.body.innerHTML = PAGE
+        rec = STALE_WITH_TOGGLE()
+        document.getElementById('old_toggle').addEventListener('click', () => {
+            seq.push('config-toggle-clicked')
+        })
+        document.getElementById('place-order').addEventListener('click', () => {
+            trace.page.push('ORDER')
+        })
+        const btn = document.getElementById('ap')
+        btn.addEventListener('click', () => {
+            const code = document.getElementById('dc').value
+            trace.page.push('apply:' + code)
+            setTimeout(() => {
+                const msg = document.createElement('div')
+                msg.className = 'note'
+                if (answer === 'drop' && code === 'SAVE12') {
+                    document.getElementById('total-num').textContent = '108.00'
+                    msg.textContent = 'Discount applied'
+                } else {
+                    msg.textContent = `Coupon ${code} applied!`
+                }
+                btn.parentElement.appendChild(msg)
+            }, 5)
+        })
+        const send = chrome.runtime.sendMessage
+        chrome.runtime.sendMessage = (message, cb) => {
+            if (message?.action === 'couponBoxDiscoveryEnabled')
+                seq.push('finder-asked')
+            if (message?.action === 'couponBoxPick') seq.push('pick-asked')
+            return send(message, cb)
+        }
+        try {
+            await startApplyingCoupons(rec)
+        } finally {
+            chrome.runtime.sendMessage = send
+        }
+        return trace
+    }
+
+    it("(a) + (b): the config's box and toggle are tried, and proven useless, before the finder is asked", async () => {
+        const run = await visit('drop')
+        const finderAt = seq.indexOf('finder-asked')
+        expect(finderAt).toBeGreaterThan(-1)
+        const before = seq.slice(0, finderAt)
+        // Looked up, toggle clicked, looked up again after the toggle: all of
+        // it before the finder's flag is even asked.
+        expect(before[0]).toBe('config-box-lookup')
+        expect(before).toContain('config-toggle-clicked')
+        expect(before.lastIndexOf('config-box-lookup')).toBeGreaterThan(
+            before.indexOf('config-toggle-clicked'),
+        )
+        // The finder ran here, on the box the rules see, and the code the
+        // store took is the one recorded.
+        expect(run.page).toContain('apply:SAVE12')
+        expect(run.page).not.toContain('ORDER')
+    }, 20000)
+
+    it('(c) the total really drops: one $12 saving, reported as worked once', async () => {
+        const run = await visit('drop')
+        expect(run.savings).toEqual([{ code: 'SAVE12', amount: 12 }])
+        expect(
+            asked(run, 'reportOutcome').filter(m => m.outcome === 'worked'),
+        ).toHaveLength(1)
+    }, 20000)
+
+    it('(c) the store SAYS "applied" but the total never moves: no saving, nothing reported as worked', async () => {
+        const run = await visit('says-yes')
+        expect(
+            asked(run, 'reportOutcome').filter(m => m.outcome === 'worked'),
+        ).toEqual([])
+        expect(run.savings).toEqual([])
+        expect(run.modals.at(-1).amount).toBe(0)
+        // Both codes were really tried in the box the finder found.
+        expect(run.page.filter(e => e.startsWith('apply:'))).toEqual([
+            'apply:SAVE12',
+            'apply:SECOND10',
+        ])
+    }, 60000)
 })
