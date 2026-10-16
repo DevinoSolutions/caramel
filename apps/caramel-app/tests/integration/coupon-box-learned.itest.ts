@@ -29,6 +29,7 @@ const { envOverrides } = vi.hoisted(() => ({
     envOverrides: {
         COUPON_BOX_LLM_ENABLED: true,
         COUPON_BOX_PICK_MODEL: 'test/box-model',
+        COUPON_BOX_LEARNED_ENABLED: true,
         COUPON_BOX_LEARNED_SALT: 'itest-salt-itest-salt-itest-salt-0001',
     },
 }))

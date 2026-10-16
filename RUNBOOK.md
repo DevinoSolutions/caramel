@@ -481,17 +481,17 @@ than that:
 with a named error instead of breaking deep inside a request handler). The
 operationally load-bearing ones:
 
-| Var                                                    | Used for                                                                                                                                                                                                       |
-| ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DATABASE_URL`                                         | auth_db + the app-owned coupon catalog (Prisma) — required                                                                                                                                                     |
-| `COUPONS_DATABASE_URL`                                 | OPTIONAL, bridge-sync only — read-only external `caramel_coupons` connection string; unset in normal deploys                                                                                                   |
-| `INGEST_API_KEY`                                       | bearer for `POST /api/ingest/catalog` (the coupons pipeline supplier push) — server-to-server, never a client                                                                                                  |
-| `COUPONS_ADMIN_SECRET`                                 | bearer for `POST /api/coupons/expire` + rate-limit trust exemption                                                                                                                                             |
-| `UPKUMA_HEALTH_SECRET`                                 | bearer for `GET /api/health/db`                                                                                                                                                                                |
-| `OPENROUTER_API_KEY`                                   | extension cart classifier (`/api/classify-cart`) — unset throws a named `OpenRouterError`, not a silent no-op                                                                                                  |
-| `NEXT_PUBLIC_SENTRY_DSN`                               | Sentry init (client + server) — unset means Sentry never initializes, production or not                                                                                                                        |
-| `APPLE_TEAM_ID` / `APPLE_KEY_ID` / `APPLE_PRIVATE_KEY` | Sign in with Apple: the app signs its own client-secret JWT from these (required when `APPLE_CLIENT_ID` is set; `.p8` as one line with literal `\n`) — see "Apple sign-in fails" above                         |
-| `COUPON_BOX_LEARNED_SALT`                              | salt for the learned coupon box's one-way reporter hashes (32+ characters; unset = learned boxes off) — secret, never sent to a client; rotating it resets every install's identity (see "Learned coupon box") |
+| Var                                                    | Used for                                                                                                                                                                                                                             |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `DATABASE_URL`                                         | auth_db + the app-owned coupon catalog (Prisma) — required                                                                                                                                                                           |
+| `COUPONS_DATABASE_URL`                                 | OPTIONAL, bridge-sync only — read-only external `caramel_coupons` connection string; unset in normal deploys                                                                                                                         |
+| `INGEST_API_KEY`                                       | bearer for `POST /api/ingest/catalog` (the coupons pipeline supplier push) — server-to-server, never a client                                                                                                                        |
+| `COUPONS_ADMIN_SECRET`                                 | bearer for `POST /api/coupons/expire` + rate-limit trust exemption                                                                                                                                                                   |
+| `UPKUMA_HEALTH_SECRET`                                 | bearer for `GET /api/health/db`                                                                                                                                                                                                      |
+| `OPENROUTER_API_KEY`                                   | extension cart classifier (`/api/classify-cart`) — unset throws a named `OpenRouterError`, not a silent no-op                                                                                                                        |
+| `NEXT_PUBLIC_SENTRY_DSN`                               | Sentry init (client + server) — unset means Sentry never initializes, production or not                                                                                                                                              |
+| `APPLE_TEAM_ID` / `APPLE_KEY_ID` / `APPLE_PRIVATE_KEY` | Sign in with Apple: the app signs its own client-secret JWT from these (required when `APPLE_CLIENT_ID` is set; `.p8` as one line with literal `\n`) — see "Apple sign-in fails" above                                               |
+| `COUPON_BOX_LEARNED_SALT`                              | salt for the learned coupon box's one-way reporter hashes (32+ characters; required when `COUPON_BOX_LEARNED_ENABLED=true`) — secret, never sent to a client; rotating it resets every install's identity (see "Learned coupon box") |
 
 TODO(human): record where these are actually set/rotated in Dokploy (env
 var UI vs. secret store) and the rotation procedure for
@@ -602,16 +602,22 @@ and the model: no model call, no budget spent, PostHog outcome `learned`. Code:
 `src/lib/couponBoxLearned.ts` (the one home of the rules below). Tables:
 `learned_coupon_boxes` and `learned_coupon_box_reporters`.
 
-**Switch.** Learned boxes ride the pick's switch: they work only while the pick
-is on (`COUPON_BOX_LLM_ENABLED=true` + `COUPON_BOX_PICK_MODEL`) AND
-`COUPON_BOX_LEARNED_SALT` is set (32+ characters, e.g. `openssl rand -hex 32`).
-Boot logs `learned coupon boxes ENABLED` or `DISABLED (COUPON_BOX_LEARNED_SALT
-unset)`. Learned-only kill switch: unset the salt and redeploy (the report
-route answers `{recorded:false, reason:'disabled'}` and the pick stops reading
-the table; the rows stay). Rotating the salt starts every install's identity
-over, so existing boxes stop gaining distinct installs from returning
-reporters; do it only on purpose. Whether learned boxes should get a switch of
-their own, separate from the model pick, is an open owner decision.
+**Switch.** Learned boxes have their own switch, so the AI pick can run without
+the crowd-sourced write path. They work only while `COUPON_BOX_LEARNED_ENABLED=true`
+AND the pick is on (`COUPON_BOX_LLM_ENABLED=true` + `COUPON_BOX_PICK_MODEL`).
+`COUPON_BOX_LEARNED_ENABLED=true` also needs `COUPON_BOX_LEARNED_SALT` (32+
+characters, e.g. `openssl rand -hex 32`), or boot fails naming it. The extension
+reads the same condition as `couponBoxLearned` on `GET /api/extension/features`
+and only then opts in.
+
+- Switch on: set the salt, set `COUPON_BOX_LEARNED_ENABLED=true`, redeploy.
+  Boot logs `learned coupon boxes ENABLED`.
+- Kill switch: `COUPON_BOX_LEARNED_ENABLED=false` and redeploy. The report route
+  answers `{recorded:false, reason:'disabled'}` without reading the body, the
+  pick ignores `acceptsLearned`, features says `couponBoxLearned: false`, and the
+  AI pick keeps running. The rows stay; wipe them below if they are the problem.
+- Rotating the salt starts every install's identity over, so existing boxes stop
+  gaining distinct installs from returning reporters; do it only on purpose.
 
 **When a box is served.** All of:
 

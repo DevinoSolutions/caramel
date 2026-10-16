@@ -217,20 +217,30 @@ const serverObjectSchema = z.object({
         v => (typeof v === 'string' && v.trim() === '' ? undefined : v),
         z.enum(['rules_first', 'llm_first', 'llm_only']).default('rules_first'),
     ),
-    // Salt for the one-way hashes the learned coupon box keeps
-    // (couponBoxLearned.ts): the extension's anonymous install id and the
-    // reporter's network prefix are stored only as HMAC-SHA256 under this
-    // salt, never in the clear. Unset (or blank) = learned boxes are OFF:
-    // POST /api/extension/coupon-box-learned records nothing and the pick never
-    // answers from the table (logged once at boot). Set = at least 32
-    // characters, or boot fails. Changing it starts every install's identity
-    // over (old hashes no longer match), so rotate it only on purpose.
+    // The learned coupon box's own switch (couponBoxLearned.ts), separate from
+    // the pick so the AI pick can run without the crowd-sourced write path.
+    // Live only when this is 'true' AND the pick is on (COUPON_BOX_LLM_ENABLED
+    // + COUPON_BOX_PICK_MODEL); the extension reads the same condition as
+    // `couponBoxLearned` on GET /api/extension/features. Off = POST
+    // /api/extension/coupon-box-learned records nothing and the pick never
+    // answers from the table. Only 'true' or 'false'; 'true' without
+    // COUPON_BOX_LEARNED_SALT fails boot (superRefine below).
+    COUPON_BOX_LEARNED_ENABLED: z
+        .enum(['true', 'false'])
+        .default('false')
+        .transform(value => value === 'true'),
+    // Salt for the one-way hashes the learned coupon box keeps: the
+    // extension's anonymous install id and the reporter's network prefix are
+    // stored only as HMAC-SHA256 under this salt, never in the clear. Required
+    // when COUPON_BOX_LEARNED_ENABLED is 'true'; set = at least 32 characters,
+    // or boot fails. Changing it starts every install's identity over (old
+    // hashes no longer match), so rotate it only on purpose.
     COUPON_BOX_LEARNED_SALT: z.preprocess(
         v => (typeof v === 'string' && v.trim() === '' ? undefined : v),
         z
             .string()
             .min(32, {
-                error: 'COUPON_BOX_LEARNED_SALT must be at least 32 characters (or unset to keep learned coupon boxes off)',
+                error: 'COUPON_BOX_LEARNED_SALT must be at least 32 characters',
             })
             .optional(),
     ),
@@ -295,6 +305,19 @@ const serverSchema = serverObjectSchema
     .refine(data => Boolean(data.BETTER_AUTH_SECRET || data.JWT_SECRET), {
         error: 'At least one of BETTER_AUTH_SECRET or JWT_SECRET must be set',
         path: ['BETTER_AUTH_SECRET'],
+    })
+    .superRefine((data, ctx) => {
+        // The learned box hashes every reporter: switched on without a salt it
+        // could not record anything, so that is a boot failure, not a quiet
+        // "no shopper has confirmed a box yet".
+        if (data.COUPON_BOX_LEARNED_ENABLED && !data.COUPON_BOX_LEARNED_SALT) {
+            ctx.addIssue({
+                code: 'custom',
+                path: ['COUPON_BOX_LEARNED_SALT'],
+                message:
+                    'COUPON_BOX_LEARNED_SALT is required when COUPON_BOX_LEARNED_ENABLED is true',
+            })
+        }
     })
     .superRefine((data, ctx) => {
         // Truthiness, not `!== undefined`: .env.example ships APPLE_CLIENT_ID=

@@ -26,8 +26,8 @@ export async function register() {
     }
 
     // Learned coupon box posture (couponBoxLearned.ts), once per boot: with
-    // the pick on but no COUPON_BOX_LEARNED_SALT the learned path records and
-    // serves nothing, and that must read as a decision, not as "no shopper
+    // the pick on but COUPON_BOX_LEARNED_ENABLED off the learned path records
+    // and serves nothing, and that must read as a decision, not as "no shopper
     // has confirmed a box yet".
     const { couponBoxLearnedEnabled } = await import('@/lib/couponBoxLearned')
     const { couponBoxLlmEnabled } = await import('@/lib/couponBoxPick')
@@ -35,7 +35,7 @@ export async function register() {
         console.log(
             couponBoxLearnedEnabled()
                 ? `[boot] coupon-box pick ON (mode ${env.COUPON_BOX_PICK_MODE}); learned coupon boxes ENABLED`
-                : `[boot] coupon-box pick ON (mode ${env.COUPON_BOX_PICK_MODE}); learned coupon boxes DISABLED (COUPON_BOX_LEARNED_SALT unset)`,
+                : `[boot] coupon-box pick ON (mode ${env.COUPON_BOX_PICK_MODE}); learned coupon boxes DISABLED (COUPON_BOX_LEARNED_ENABLED off)`,
         )
     }
 

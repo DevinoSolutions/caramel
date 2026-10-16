@@ -1,4 +1,5 @@
 import { preflight, withRoute } from '@/lib/api/withRoute'
+import { couponBoxLearnedEnabled } from '@/lib/couponBoxLearned'
 import { couponBoxLlmEnabled } from '@/lib/couponBoxPick'
 import { env } from '@/lib/env'
 import { NextResponse } from 'next/server'
@@ -39,6 +40,12 @@ import { NextResponse } from 'next/server'
 // server would refuse. A store with a served config is never affected by it.
 // Older builds ignore the key.
 //
+// couponBoxLearned: may the extension use learned coupon boxes (send
+// `acceptsLearned: true` to the pick and report boxes to POST
+// /api/extension/coupon-box-learned)? True only when COUPON_BOX_LEARNED_ENABLED
+// AND couponBoxLlm are on (couponBoxLearnedEnabled), the same condition both
+// routes answer by. Older builds ignore the key.
+//
 // withRoute: public read like extension/supported-stores (rate-limited, no
 // auth/origin gate); cors 'extension' + the OPTIONS preflight mirror
 // extension/me, so a preflighted extension-origin fetch can read it.
@@ -67,6 +74,7 @@ export const GET = withRoute(
             couponBoxPickMode: couponBoxLlm
                 ? env.COUPON_BOX_PICK_MODE
                 : 'rules_first',
+            couponBoxLearned: couponBoxLearnedEnabled(),
         })
     },
 )

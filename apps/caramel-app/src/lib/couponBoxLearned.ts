@@ -33,8 +33,8 @@
 //   - A store with a served config never reads or writes this table (the
 //     route checks that first, couponsRepo.hasServedStoreConfig).
 //
-// Off unless the coupon-box pick is on (couponBoxLlmEnabled) AND a salt is
-// configured; RUNBOOK.md "learned coupon box" has the switch, the wipe and the
+// Off unless COUPON_BOX_LEARNED_ENABLED is on AND the coupon-box pick is on
+// (couponBoxLlmEnabled); env.ts refuses to boot with the switch on and no salt. RUNBOOK.md "learned coupon box" has the switch, the wipe and the
 // privacy statement.
 import { couponBoxDomainSchema, couponBoxLlmEnabled } from '@/lib/couponBoxPick'
 import { env } from '@/lib/env'
@@ -65,9 +65,15 @@ export const LEARNED_BOX_RULES = {
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
-/** On only with the pick on AND a salt to hash reporters with. */
+/** On only with its own switch on, the pick on, and a salt to hash reporters
+ * with (env.ts already fails boot on the switch without a salt; the salt
+ * check here keeps a test env from hashing with nothing). */
 export function couponBoxLearnedEnabled(): boolean {
-    return couponBoxLlmEnabled() && Boolean(env.COUPON_BOX_LEARNED_SALT)
+    return (
+        env.COUPON_BOX_LEARNED_ENABLED &&
+        couponBoxLlmEnabled() &&
+        Boolean(env.COUPON_BOX_LEARNED_SALT)
+    )
 }
 
 // ---------------------------------------------------------------------------

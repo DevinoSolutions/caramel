@@ -97,6 +97,7 @@ function post(
 beforeEach(() => {
     envMock.COUPON_BOX_LLM_ENABLED = true
     envMock.COUPON_BOX_PICK_MODEL = 'test/box-model'
+    envMock.COUPON_BOX_LEARNED_ENABLED = true
     envMock.COUPON_BOX_LEARNED_SALT = 'unit-salt-unit-salt-unit-salt-unit-salt'
     recordMock.mockClear()
     servedMock.mockReset()
@@ -227,6 +228,18 @@ describe('POST /api/extension/coupon-box-learned', () => {
             reason: 'served_config',
         })
         expect(servedMock).toHaveBeenCalledWith('shop.example')
+        expect(recordMock).not.toHaveBeenCalled()
+    })
+
+    it('its own switch off (the pick still on): answers disabled without reading the body', async () => {
+        envMock.COUPON_BOX_LEARNED_ENABLED = false
+        const res = await post('{nope')
+        expect(res.status).toBe(200)
+        expect(await res.json()).toEqual({
+            recorded: false,
+            reason: 'disabled',
+        })
+        expect(servedMock).not.toHaveBeenCalled()
         expect(recordMock).not.toHaveBeenCalled()
     })
 

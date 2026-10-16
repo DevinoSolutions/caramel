@@ -118,6 +118,7 @@ const lastOutcome = () =>
 beforeEach(() => {
     envMock.COUPON_BOX_LLM_ENABLED = true
     envMock.COUPON_BOX_PICK_MODEL = 'test/box-model'
+    envMock.COUPON_BOX_LEARNED_ENABLED = true
     envMock.COUPON_BOX_LEARNED_SALT = 'unit-salt-unit-salt-unit-salt-unit-salt'
     chatMock.mockClear()
     admitMock.mockClear()
@@ -162,6 +163,16 @@ describe('coupon-box pick: learned answer', () => {
         servedMock.mockImplementation(async () => true)
         const body = await (await pick(true)).json()
         expect(body.source).toBeUndefined()
+        expect(findMock).not.toHaveBeenCalled()
+        expect(chatMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('its own switch off (the pick on): acceptsLearned is ignored, the table is not read', async () => {
+        envMock.COUPON_BOX_LEARNED_ENABLED = false
+        const body = await (await pick(true)).json()
+        expect(body.source).toBeUndefined()
+        expect(body.input).toBe(1)
+        expect(servedMock).not.toHaveBeenCalled()
         expect(findMock).not.toHaveBeenCalled()
         expect(chatMock).toHaveBeenCalledTimes(1)
     })

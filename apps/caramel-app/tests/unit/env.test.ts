@@ -336,6 +336,37 @@ describe('parseServerEnv', () => {
         ).toThrow(/COUPON_BOX_LEARNED_SALT/)
     })
 
+    it('COUPON_BOX_LEARNED_ENABLED: off by default, only true/false, and on without a salt fails boot', () => {
+        expect(
+            parseServerEnv(validServerFixture).COUPON_BOX_LEARNED_ENABLED,
+        ).toBe(false)
+        const salt = 'b'.repeat(32)
+        expect(
+            parseServerEnv({
+                ...validServerFixture,
+                COUPON_BOX_LEARNED_ENABLED: 'true',
+                COUPON_BOX_LEARNED_SALT: salt,
+            }).COUPON_BOX_LEARNED_ENABLED,
+        ).toBe(true)
+        expect(() =>
+            parseServerEnv({
+                ...validServerFixture,
+                COUPON_BOX_LEARNED_ENABLED: 'true',
+            }),
+        ).toThrow(
+            /COUPON_BOX_LEARNED_SALT is required when COUPON_BOX_LEARNED_ENABLED is true/,
+        )
+        for (const bad of ['yes', '1', 'TRUE']) {
+            expect(() =>
+                parseServerEnv({
+                    ...validServerFixture,
+                    COUPON_BOX_LEARNED_ENABLED: bad,
+                    COUPON_BOX_LEARNED_SALT: salt,
+                }),
+            ).toThrow(/COUPON_BOX_LEARNED_ENABLED/)
+        }
+    })
+
     it('(g) the Playwright/CI-only read key present in app env throws (key hygiene)', () => {
         expect(() =>
             parseServerEnv({

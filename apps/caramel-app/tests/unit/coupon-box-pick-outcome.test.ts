@@ -334,6 +334,7 @@ describe('coupon_box_pick_outcome: one event per handler exit', () => {
     })
 
     it('learned: answered from the learned table, no cache, no model', async () => {
+        envMock.COUPON_BOX_LEARNED_ENABLED = true
         envMock.COUPON_BOX_LEARNED_SALT = 'x'.repeat(40)
         findLearnedMock.mockResolvedValueOnce({
             input: '#promo',
@@ -353,6 +354,7 @@ describe('coupon_box_pick_outcome: one event per handler exit', () => {
         expect(props.cached).toBeUndefined()
         expect(props.model_ms).toBeUndefined()
         expect(chatMock).not.toHaveBeenCalled()
+        envMock.COUPON_BOX_LEARNED_ENABLED = false
         envMock.COUPON_BOX_LEARNED_SALT = undefined
     })
 
