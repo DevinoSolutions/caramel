@@ -67,9 +67,10 @@ export function trackGrowthEvent(
 ): void {
     // Every install CTA reports the page it sat on, so the call sites stay
     // `{ store, placement }` and the vocabulary cannot drift per component.
+    // `path` goes last: a caller cannot override it.
     const withPath: GrowthEventProperties =
         name === 'install_cta_click' && typeof window !== 'undefined'
-            ? { path: window.location.pathname, ...properties }
+            ? { ...properties, path: window.location.pathname }
             : properties
     // Caller properties win over the first-touch ones (they never collide
     // today: first-touch keys are all `first_*`).
