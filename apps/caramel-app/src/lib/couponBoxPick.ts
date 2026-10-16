@@ -39,8 +39,9 @@ const SYSTEM_PROMPT = [
     '- "input": the field where a shopper types a coupon, promo, discount, voucher or gift-card-or-discount code. Never a search box, postcode, quantity, newsletter/email, gift message or loyalty-number field, and never a field that takes ONLY a gift card.',
     '- A hidden or disabled input can still be THE box (behind a "Have a promo code?" link, or disabled on an empty cart).',
     '- "button": the control that applies that code (Apply, Redeem, OK, Submit beside the box). Never checkout, pay, place-order, remove or sign-in.',
-    '- "toggle": the control that reveals a hidden box ("Have a promo code?", "Promo code +", "Add discount code"); else null.',
-    '- No coupon box and no toggle on the page: input null and toggle null. A wrong field is worse than none.',
+    '- "toggle": the control that reveals a hidden box ("Have a promo code?", "Promo code +", "Add discount code"); else null. A control whose own text names a coupon, promo, discount or offer code ("Promo Code", "Apply Promo Code", "Add coupon") IS the toggle when no code field is visible, and so is an order-summary button that opens the offers panel ("Available Offers").',
+    '- A control only for a gift card, gift code, gift certificate or gift voucher ("Have a gift code?", "Apply gift card") is not a coupon control: never answer it as input, button or toggle.',
+    '- No coupon box and no toggle on the page: input null and toggle null. A wrong field is worse than none. But a visible control that names a coupon, promo, discount or offer code (never a gift code) means the box is behind it: answer that control as the toggle, not no box.',
 ].join('\n')
 
 // A reasoning model's hidden reasoning counts against max_tokens (the F-017
@@ -148,15 +149,39 @@ export function scrubOutline(outline: string): string {
 interface OutlineNode {
     role: string
     name: string
+    /** Inside the page's own footer: a contentinfo nested in no other line,
+     * and not inside a dialog opened from it. */
+    inPageFooter: boolean
 }
 
+// Any outline line, node or container: its indent, its [n] index (nodes
+// only), its role and the rest of the line.
+const OUTLINE_LINE = /^(\s*)- (?:\[(\d{1,6})\] )?([a-z]+)\b(.*)$/
+const DIALOG_ROLES = new Set(['dialog', 'alertdialog'])
+
 /** Index -> the node line it names, read from the SCRUBBED outline (the one
- * the model saw). */
+ * the model saw). Nesting is read from the indent. */
 function outlineNodes(outline: string): Map<number, OutlineNode> {
     const nodes = new Map<number, OutlineNode>()
-    const lines = outline.matchAll(/^\s*- \[(\d{1,6})\] ([a-z]+)\b(.*)$/gm)
-    for (const m of Array.from(lines)) {
-        nodes.set(Number(m[1]), { role: m[2] ?? '', name: m[3] ?? '' })
+    // The lines that enclose the current one, outermost first.
+    const open: { indent: number; role: string }[] = []
+    for (const line of outline.split('\n')) {
+        const m = OUTLINE_LINE.exec(line)
+        if (!m) continue
+        const indent = (m[1] ?? '').length
+        const role = m[3] ?? ''
+        while (open.length && open[open.length - 1]!.indent >= indent)
+            open.pop()
+        if (m[2] !== undefined) {
+            nodes.set(Number(m[2]), {
+                role,
+                name: m[4] ?? '',
+                inPageFooter:
+                    open[0]?.role === 'contentinfo' &&
+                    !open.some(o => DIALOG_ROLES.has(o.role)),
+            })
+        }
+        open.push({ indent, role })
     }
     return nodes
 }
@@ -216,14 +241,20 @@ function parseAnswer(raw: string): Answer | null {
 }
 
 /** An index the outline does not contain is a hallucination, and an index of
- * the wrong kind of element is refused: both become null. With neither an
+ * the wrong kind of element, or a control to click in the page footer, is
+ * refused: each becomes null. With neither an
  * input nor a toggle left, the answer is "no box". */
 function toCachedAnswer(answer: Answer, outline: string): CachedAnswer {
     const nodes = outlineNodes(outline)
     const pick = (n: number | null, roles: Set<string>, clicked: boolean) => {
         const node = n === null ? undefined : nodes.get(n)
         if (!node || !roles.has(node.role)) return null
-        return clicked && NEVER_CLICK.test(node.name) ? null : n
+        // A control in the page footer links to another page ("Have A Code?"
+        // beside Gift Cards and Contact Us), never to the cart's own coupon
+        // box: clicking it would leave the cart.
+        if (clicked && (node.inPageFooter || NEVER_CLICK.test(node.name)))
+            return null
+        return n
     }
     const input = pick(answer.input, INPUT_ROLES, false)
     const toggle = pick(answer.toggle, CLICK_ROLES, true)

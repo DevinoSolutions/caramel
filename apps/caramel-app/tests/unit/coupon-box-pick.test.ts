@@ -376,6 +376,59 @@ describe('the pick', () => {
         ).toMatchObject({ outcome: 'box', input: 2, button: 3, toggle: 10 })
     })
 
+    // The page footer (a contentinfo nested in nothing) holds links to other
+    // pages; restaurant.com's footer has "Have A Code?" beside Gift Cards.
+    // A footer inside the cart, or a dialog opened from the page footer, is
+    // still part of the cart.
+    const FOOTERED = [
+        '- main:',
+        '  - form:',
+        '    - [2] textbox "Promo code"',
+        '    - [3] button "Apply"',
+        '  - contentinfo:',
+        '    - [4] button "Have a promo code?"',
+        '- contentinfo:',
+        '  - list:',
+        '    - [5] link "Have A Code?"',
+        '    - [6] button "Apply"',
+        '  - dialog:',
+        '    - [7] button "Add discount code"',
+        '- [8] link "Have a promo code?"',
+    ].join('\n')
+
+    it('never returns a page-footer link as the toggle', async () => {
+        chatMock.mockImplementation(async () =>
+            answer({ input: null, button: null, toggle: 5 }),
+        )
+        expect(
+            await pickCouponBox({ domain: freshDomain(), outline: FOOTERED }),
+        ).toMatchObject({ outcome: 'no_box' })
+    })
+
+    it('never returns a page-footer control as the apply button', async () => {
+        chatMock.mockImplementation(async () =>
+            answer({ input: 2, button: 6, toggle: null }),
+        )
+        expect(
+            await pickCouponBox({ domain: freshDomain(), outline: FOOTERED }),
+        ).toMatchObject({ outcome: 'box', input: 2, button: null })
+    })
+
+    it.each([4, 7, 8])(
+        'keeps toggle [%i]: a cart footer, a dialog, or a line after the page footer',
+        async n => {
+            chatMock.mockImplementation(async () =>
+                answer({ input: null, button: null, toggle: n }),
+            )
+            expect(
+                await pickCouponBox({
+                    domain: freshDomain(),
+                    outline: FOOTERED,
+                }),
+            ).toMatchObject({ outcome: 'box', input: null, toggle: n })
+        },
+    )
+
     it('reads the first JSON object out of a reply with prose around it', async () => {
         chatMock.mockImplementation(
             async () => `Sure: ${answer({ input: 7 })}\nHope that helps {}`,

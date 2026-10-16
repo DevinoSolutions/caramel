@@ -9,7 +9,7 @@
 // OPENROUTER_API_URL when the model lives behind another OpenAI-compatible
 // base) plus COUPON_BOX_PICK_MODEL — the model under test. With no model the
 // suite fails loudly instead of passing vacuously. Costs one short completion
-// per case (52), temperature 0.
+// per case (58), temperature 0.
 //
 // A case passes when:
 //   * the page has a box: the picked input is one of the labelled inputs, or
@@ -29,7 +29,7 @@ import { couponBoxCases, type CouponBoxCase } from './fixtures/coupon-box-cases'
 
 const PASS_RATE_THRESHOLD = 0.9
 // Cases run one at a time, as production calls arrive, so the latency figures
-// are not inflated by the suite's own load (52 calls: ~4 minutes measured).
+// are not inflated by the suite's own load (58 calls: ~2 minutes measured).
 const SUITE_TIMEOUT_MS = 12 * 60 * 1000
 
 interface Pick {
@@ -142,13 +142,14 @@ beforeAll(async () => {
     console.log(
         `[coupon-box-pick-eval] model=${env.COUPON_BOX_PICK_MODEL} cases=${outcomes.length} pass=${passed}/${outcomes.length} (${(passRate * 100).toFixed(1)}%) p50=${percentile(answered, 0.5)}ms p95=${percentile(answered, 0.95)}ms`,
     )
-    const byStore = new Map(couponBoxCases.map(c => [c.store, c]))
-    for (const o of outcomes) {
-        const c = byStore.get(o.store)!
+    // Paired by position, not by store: a store can have more than one case
+    // (two snapshots of its page), so its name does not pick out one label.
+    outcomes.forEach((o, i) => {
+        const c = couponBoxCases[i]!
         console.log(
             `[coupon-box-pick-eval] ${o.pass ? 'pass' : 'FAIL'} ${o.store} ${o.ms}ms: ${o.outcome}${o.detail ? ` (${o.detail})` : ''} picked ${fmtPick(o.picked)}; expected input=${fmtList(c.inputs)} toggle=${fmtList(c.toggles)}`,
         )
-    }
+    })
 }, SUITE_TIMEOUT_MS)
 
 it(`pass rate meets the >=${PASS_RATE_THRESHOLD} threshold gate`, () => {
