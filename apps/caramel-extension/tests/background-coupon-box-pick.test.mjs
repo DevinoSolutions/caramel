@@ -11,6 +11,7 @@ let handler
 let fetchCalls
 let responses // queue of fetch results, consumed in order
 let sessionData
+let localData
 
 function installWorkerRealm() {
     const cache = new WeakMap()
@@ -41,7 +42,7 @@ function installWorkerRealm() {
             cb?.()
         },
     })
-    const localData = {}
+    localData = {}
     const syncData = {}
     stub.storage.local = area(() => localData)
     stub.storage.sync = area(() => syncData)
@@ -148,6 +149,8 @@ describe('couponBoxPick', () => {
         expect(JSON.parse(call.opts.body)).toEqual({
             domain: PICK.domain,
             outline: PICK.outline,
+            // This build reads a learned answer (selectors under `box`).
+            acceptsLearned: true,
         })
     })
 
@@ -234,5 +237,115 @@ describe('couponBoxPick: one deadline for the whole ask', () => {
 
         expect(pickCalls()).toHaveLength(1)
         expect(pickTimeout()).toBe(3000)
+    })
+})
+
+describe('couponBoxLlmEnabled: the pick mode', () => {
+    it('passes the server mode on beside the flag', async () => {
+        responses.push(
+            ok({
+                shopperCodeCapture: false,
+                couponBoxDiscovery: true,
+                couponBoxLlm: true,
+                couponBoxPickMode: 'llm_only',
+            }),
+        )
+
+        expect(await invoke({ action: 'couponBoxLlmEnabled' })).toEqual({
+            enabled: true,
+            mode: 'llm_only',
+        })
+    })
+
+    it('a failed features read answers no mode at all (rules_first)', async () => {
+        responses.push(new TypeError('Failed to fetch'))
+
+        expect(await invoke({ action: 'couponBoxLlmEnabled' })).toStrictEqual({
+            enabled: false,
+        })
+    })
+})
+
+describe('couponBoxLearned', () => {
+    const LEARNED = {
+        action: 'couponBoxLearned',
+        domain: 'shop.test',
+        box: {
+            input: 'input[name="coupon"]',
+            apply: 'button#apply',
+            toggle: null,
+            enterOnly: false,
+        },
+        source: 'rules',
+        evidence: 'total_dropped',
+        outcome: 'confirmed',
+    }
+    const learnedCalls = () =>
+        fetchCalls.filter(c => c.url.includes('extension/coupon-box-learned'))
+    const IID = '0b6f4c1e-8d2a-4f3b-9c5d-7e1a2b3c4d5e'
+    beforeEach(() => {
+        localData.caramel_install_attribution = { iid: IID }
+    })
+
+    it('flag off: nothing is posted, and the answer says so', async () => {
+        responses.push(features(false))
+
+        expect(await invoke(LEARNED)).toEqual({ skipped: 'disabled' })
+        expect(learnedCalls()).toHaveLength(0)
+    })
+
+    it('posts the install id, the selectors and the outcome, nothing else', async () => {
+        responses.push(features(true), ok({ recorded: true }))
+
+        expect(await invoke(LEARNED)).toEqual({
+            ok: true,
+            recorded: true,
+            reason: null,
+        })
+        const [call] = learnedCalls()
+        expect(call.opts.method).toBe('POST')
+        expect(JSON.parse(call.opts.body)).toEqual({
+            installId: IID,
+            domain: 'shop.test',
+            box: LEARNED.box,
+            source: 'rules',
+            evidence: 'total_dropped',
+            outcome: 'confirmed',
+        })
+    })
+
+    it('a report the server declined to record says why', async () => {
+        responses.push(
+            features(true),
+            ok({ recorded: false, reason: 'served_config' }),
+        )
+
+        expect(await invoke(LEARNED)).toEqual({
+            ok: true,
+            recorded: false,
+            reason: 'served_config',
+        })
+    })
+
+    it('an install with no install id posts nothing, and says so', async () => {
+        delete localData.caramel_install_attribution
+        responses.push(features(true))
+
+        expect(await invoke(LEARNED)).toEqual({ skipped: 'no install id' })
+        expect(learnedCalls()).toHaveLength(0)
+    })
+
+    it('a refusal is answered with its status, a network failure as an error', async () => {
+        responses.push(features(true), {
+            ok: false,
+            status: 429,
+            json: async () => ({}),
+        })
+        expect(await invoke(LEARNED)).toEqual({ error: 'HTTP 429' })
+
+        responses.push(new TypeError('Failed to fetch'))
+        expect(await invoke(LEARNED)).toEqual({
+            error: 'TypeError: Failed to fetch',
+        })
     })
 })

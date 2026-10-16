@@ -36,10 +36,10 @@ import {
 } from './coupon-apply.js'
 import {
     caramelCouponBoxDiscoveryOn,
+    caramelFinderLearnResumed,
     caramelFinderMayAsk,
     caramelFinderReadTotal,
-    caramelFinderSeesBox,
-    caramelFinderSeesKeptPick,
+    caramelFinderSees,
 } from './coupon-box-discovery.js'
 import { fetchCoupons } from './coupon-fetch.js'
 import { reportOutcome, startApplyingCoupons } from './coupon-runner.js'
@@ -446,8 +446,10 @@ async function _platformCartUsable() {
  * difference between helping here and staying silent. */
 // Exported for tests/configless-store.test.mjs, which drives the apply flow
 // with exactly this record.
+// caramelNoConfig: the finder's pick modes and learned boxes apply only to a
+// store with no served config (coupon-box-discovery.js isServed).
 export function caramelConfiglessRecord(hostname) {
-    return { domain: hostname }
+    return { domain: hostname, caramelNoConfig: true }
 }
 
 // Exported for tests/cart-capability-gate.test.mjs,
@@ -487,7 +489,7 @@ export async function isCheckout() {
     if (!rec)
         return (
             (await _platformCartUsable()) ||
-            (await _finderMayOffer(location.hostname))
+            (await _finderMayOffer(location.hostname, false))
         )
     // VISIBLE, not merely present: themes ship hidden coupon markup on
     // non-checkout pages, and some configs point showInput at site-wide
@@ -526,7 +528,10 @@ export async function isCheckout() {
         })
         return true
     }
-    return (await _platformCartUsable()) || (await _finderMayOffer(rec.domain))
+    return (
+        (await _platformCartUsable()) ||
+        (await _finderMayOffer(rec.domain, true))
+    )
 }
 
 /* No config describes a promo box here, but a shopper could still see one.
@@ -537,14 +542,15 @@ export async function isCheckout() {
  * still requires codes for the domain before the prompt appears. Detection
  * never clicks anything: opening a folded box waits for the shopper's tap.
  * A box the server picked earlier in this tab counts too, found again by name
- * (caramelFinderSeesKeptPick): a cart that reloads to show each answer. */
-async function _finderSeesBox(domain) {
+ * (caramelFinderSeesKeptPick): a cart that reloads to show each answer. So
+ * does, on a store with no config (served false), a box this install saw the
+ * store answer through before; in llm_only the rules' box does not count
+ * (caramelFinderSees). */
+async function _finderSeesBox(domain, served) {
     if (!_caramelCartIntentSignal()) return false
     if (!(await caramelCouponBoxDiscoveryOn())) return false
     try {
-        return (
-            caramelFinderSeesBox() || (await caramelFinderSeesKeptPick(domain))
-        )
+        return await caramelFinderSees(domain, served)
     } catch (e) {
         log('FINDER_FAILED', { error: String(e) })
         return false
@@ -557,8 +563,8 @@ async function _finderSeesBox(domain) {
  * keeps asking _finderSeesBox alone: the server is asked once per store per
  * tab session, so a page after the ask continues only on a box the rules see
  * or the pick it kept. */
-async function _finderMayOffer(domain) {
-    if (await _finderSeesBox(domain)) return true
+async function _finderMayOffer(domain, served) {
+    if (await _finderSeesBox(domain, served)) return true
     if (!_caramelCartIntentSignal()) return false
     if (!(await caramelCouponBoxDiscoveryOn())) return false
     try {
@@ -669,7 +675,7 @@ async function _caramelContinueRun(rec, finder = false) {
     }
     if (!runRec) return stop('no record')
     if (finder) {
-        if (!(await _finderSeesBox(runRec.domain))) return stop('no box')
+        if (!(await _finderSeesBox(runRec.domain, !!rec))) return stop('no box')
     } else {
         const box = pickBestMatch(rec.couponInput)
         const toggle = rec.showInput ? pickBestMatch(rec.showInput) : null
@@ -733,6 +739,9 @@ async function _resumePendingSubmit() {
     if (measured) {
         // Won — the chain has its answer and must not continue.
         caramelEndRun()
+        // A finder box the store answered through: remembered (store with
+        // no config only; the run left its box for this page).
+        if (pending.finder) caramelFinderLearnResumed(location.hostname)
         reportOutcome(pending.id, 'worked')
         caramelRecordSaving({
             domain: location.hostname,

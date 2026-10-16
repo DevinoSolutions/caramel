@@ -238,6 +238,10 @@ async function _fetchFeatures() {
         couponBoxDiscovery: json.couponBoxDiscovery === true,
         // The same rule for the server pick (POST coupon-box-pick).
         couponBoxLlm: json.couponBoxLlm === true,
+        // The pick's order (rules_first, llm_first, llm_only), passed on as
+        // sent: the content script reads anything it does not know, or any
+        // mode while couponBoxLlm is off, as rules_first.
+        couponBoxPickMode: json.couponBoxPickMode,
         ts: Date.now(),
     }
     _writeFeaturesSession(_featuresMemo)
@@ -282,15 +286,67 @@ async function couponBoxDiscoveryEnabled() {
     }
 }
 
-// Answers the content script's couponBoxLlmEnabled message, the same way.
-async function couponBoxLlmEnabled() {
+// Answers the content script's couponBoxLlmEnabled message, the same way,
+// with the server's pick mode (judged by the content script).
+async function couponBoxLlmFlags() {
     try {
-        return (await _features()).couponBoxLlm === true
+        const f = await _features()
+        return { enabled: f.couponBoxLlm === true, mode: f.couponBoxPickMode }
     } catch (err) {
         logError('features', err)
-        return false
+        return { enabled: false }
     }
 }
+const couponBoxLlmEnabled = async () => (await couponBoxLlmFlags()).enabled
+
+/* Reports what a coupon box did (coupon-box-discovery.js learnOutcome): the
+ * store answered a code typed into it ('confirmed'), or a remembered box got
+ * no answer at all ('failed'). Selectors, the outcome and the anonymous
+ * install id only: the server counts a box as confirmed by several installs,
+ * never by one install reporting it twice. Sent only while the couponBoxLlm
+ * flag is on, as the server reads it only then, and only with an install id
+ * (installs older than the id have none: their reports are skipped, and their
+ * own memory of the box still works). The answer says whether it landed:
+ * { ok, recorded, reason } or { error } / { skipped }. */
+async function couponBoxLearned({ domain, box, source, evidence, outcome }) {
+    if (!(await couponBoxLlmEnabled())) return { skipped: 'disabled' }
+    const installId = await storedInstallId()
+    if (!installId) return { skipped: 'no install id' }
+    const r = await fetchWithTimeout(
+        caramelUrl('api/extension/coupon-box-learned'),
+        {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                installId,
+                domain,
+                box,
+                source,
+                evidence,
+                outcome,
+            }),
+        },
+    )
+    if (!r.ok) return { error: `HTTP ${r.status}` }
+    const j = await r.json().catch(() => ({}))
+    return { ok: true, recorded: j.recorded === true, reason: j.reason ?? null }
+}
+
+// The anonymous install id the install saved ({ iid } under this key), or
+// null. TODO(caramel#349): once this branch is on main, import
+// INSTALL_ATTRIBUTION_KEY from install-attribution.js instead of naming the
+// key here; this branch was cut before that module landed.
+const INSTALL_ATTRIBUTION_KEY = 'caramel_install_attribution'
+const storedInstallId = () =>
+    new Promise(resolve =>
+        currentBrowser.storage.local.get([INSTALL_ATTRIBUTION_KEY], items =>
+            resolve(
+                currentBrowser.runtime.lastError
+                    ? null
+                    : items?.[INSTALL_ATTRIBUTION_KEY]?.iid || null,
+            ),
+        ),
+    )
 
 /* Asks the server which element of a page outline is the promo box (see
  * coupon-box-outline.js and the finder's caramelPickedRecord). The outline is
@@ -324,7 +380,7 @@ async function couponBoxPick({ domain, outline }) {
             {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ domain, outline }),
+                body: JSON.stringify({ domain, outline, acceptsLearned: true }),
             },
             token,
         ),
@@ -767,7 +823,15 @@ export function initBackground() {
                 )
                 return true
             } else if (message.action === 'couponBoxLlmEnabled') {
-                couponBoxLlmEnabled().then(enabled => sendResponse({ enabled }))
+                couponBoxLlmFlags().then(sendResponse)
+                return true
+            } else if (message.action === 'couponBoxLearned') {
+                couponBoxLearned(message)
+                    .then(sendResponse)
+                    .catch(err => {
+                        logError('couponBoxLearned', err)
+                        sendResponse({ error: String(err) })
+                    })
                 return true
             } else if (message.action === 'couponBoxPick') {
                 couponBoxPick(message)
