@@ -1,8 +1,10 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { initCaramelBase } from '../caramel-base.js'
+import { fetchCouponsPage } from '../coupon-fetch.js'
 import {
     CARAMEL_CAPABILITY_MARKERS,
     caramelCapabilityHeld,
+    caramelHeldCapabilities,
 } from '../extension-capabilities.js'
 import {
     caramelStoreWithheld,
@@ -103,6 +105,46 @@ describe('caramelCapabilityHeld', () => {
         stamp()
         expect(caramelCapabilityHeld('somethingNew')).toBe(false)
         expect(caramelCapabilityHeld(undefined)).toBe(false)
+    })
+})
+
+describe('caramelHeldCapabilities', () => {
+    it('lists exactly the capabilities whose marker this page carries', () => {
+        expect(caramelHeldCapabilities()).toEqual([])
+        stamp()
+        expect(caramelHeldCapabilities()).toEqual(['alertShim'])
+    })
+
+    it('is empty, not a throw, where there is no document', () => {
+        expect(caramelHeldCapabilities(undefined)).toEqual([])
+    })
+})
+
+describe('fetchCouponsPage proof', () => {
+    // Builds that predate this file send nothing and are withheld by the
+    // server; this build must say what its page proves, or it is withheld too.
+    async function sentMessage() {
+        const sent = []
+        const real = globalThis.chrome.runtime.sendMessage
+        globalThis.chrome.runtime.sendMessage = (message, cb) => {
+            sent.push(message)
+            cb({ coupons: [] })
+        }
+        try {
+            await fetchCouponsPage('porkbun.com', '', '', 1)
+        } finally {
+            globalThis.chrome.runtime.sendMessage = real
+        }
+        return sent[0]
+    }
+
+    it('carries no capability until the page proves one', async () => {
+        expect((await sentMessage()).capabilities).toEqual([])
+    })
+
+    it('carries alertShim once the marker is stamped', async () => {
+        stamp()
+        expect((await sentMessage()).capabilities).toEqual(['alertShim'])
     })
 })
 

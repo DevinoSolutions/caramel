@@ -21,6 +21,7 @@
 import { caramelSendMessage, log, recordTiming } from './caramel-base.js'
 import { CARAMEL_ENV } from './caramel-env.js'
 import { CaramelCoupons } from './coupon-constants.generated.js'
+import { caramelHeldCapabilities } from './extension-capabilities.js'
 import { getCachedCodes } from './store-detect.js'
 
 /* --------------------------------------------------  coupon list */
@@ -57,6 +58,9 @@ export async function fetchCouponsPage(site, kw, category, page) {
             kw,
             category,
             page,
+            // The server withholds a gated store's codes (porkbun.com) from an
+            // extension that cannot say the page-side helper is running.
+            capabilities: caramelHeldCapabilities(),
         })
         if (resp?.error) {
             log('fetchCoupons background error', resp.error)

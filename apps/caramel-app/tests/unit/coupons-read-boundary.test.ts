@@ -358,6 +358,9 @@ describe('GET /api/extension/supported-stores (StoreConfigRow)', () => {
                     couponRemove: '//remove',
                 },
             ],
+            // No store here is capability-gated, so the bucket exists but is
+            // empty (extensionCapabilityGates.ts).
+            gated: [],
         })
     })
 })

@@ -72,6 +72,27 @@ cache above). Newer builds use a gated row only while the page proves the
 capability (`apps/caramel-extension/extension-capabilities.js`). The supplier
 row is unchanged; gating is a read-side rule, not a catalog write.
 
+**Gated stores on `GET /api/coupons`.** The payload split above only protects
+builds that read `gated`. Installed 1.4.13/1.4.14 have a generic promo-box
+finder that needs no store config, so on porkbun.com they fetch codes by domain
+from `/api/coupons` and drive the checkout. That endpoint therefore withholds a
+gated store's codes (`coupons: []`, `total: 0`, header
+`X-Caramel-Capability-Withheld: alertShim`) from a request that carries an
+extension Origin (`chrome-/moz-/safari-web-extension://`) and no `?caps=<capability>`
+proof; builds that ship `extension-capabilities.js` send `caps=alertShim` only
+while the page marker is stamped. Requests without an extension Origin (the
+website, curl) still get the full list. Gated-site responses are
+`Cache-Control: private, no-store` because the Cloudflare rule keys on the URL,
+not the Origin. Nothing lifts the withhold except a build that proves the
+capability; removing the store from `EXTENSION_CAPABILITY_GATES` lifts it for
+everyone. Verify on prod:
+
+```
+curl -s 'https://grabcaramel.com/api/coupons?site=porkbun.com&limit=3'   # website view: coupons present
+curl -s -H 'Origin: chrome-extension://x' 'https://grabcaramel.com/api/coupons?site=porkbun.com&limit=3'                 # old build: coupons [] + total 0
+curl -s -H 'Origin: chrome-extension://x' 'https://grabcaramel.com/api/coupons?site=porkbun.com&limit=3&caps=alertShim'  # new build: coupons present
+```
+
 ## Health checks
 
 `GET /api/health` — container **liveness** (`src/app/api/health/route.ts`),

@@ -755,9 +755,19 @@ export function initBackground() {
 
                 return true
             } else if (message.action === 'fetchCoupons') {
-                const { site, kw, category, page } = message
+                const { site, kw, category, page, capabilities } = message
                 const url = new URL(caramelUrl('api/coupons'))
                 url.searchParams.set('site', site)
+                // Proof of the page-side helpers this page runs (see
+                // extension-capabilities.js): the server withholds a gated
+                // store's codes without it. Absent when none is held.
+                if (Array.isArray(capabilities) && capabilities.length)
+                    url.searchParams.set(
+                        'caps',
+                        capabilities
+                            .filter(c => typeof c === 'string')
+                            .join(','),
+                    )
                 url.searchParams.set('key_words', kw || '')
                 url.searchParams.set('limit', String(COUPON_PAGE_SIZE))
                 if (category) url.searchParams.set('category', category)
