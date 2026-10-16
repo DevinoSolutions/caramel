@@ -163,6 +163,49 @@ export async function recordSiteSuggestion(
     return { id: row.id }
 }
 
+/** The `source` of a suggestion nobody typed: the extension found and
+ * confirmed a store's coupon box itself (couponBoxLearned.ts), so the store is
+ * worth a real config. Deliberately NOT in SiteSuggestionSourceSchema, so no
+ * client can submit a row under it. */
+export const AUTO_DETECT_SUGGESTION_SOURCE = 'auto_detect'
+
+/**
+ * Hand a store whose coupon box the extension learned to the store pipeline,
+ * through this same inbox, ONCE per domain. The row has no user and no
+ * requester email, so no status the pipeline later sets on it can ever mail a
+ * shopper (notices go only to rows with an email); the operator's own
+ * "marked supported" summary is the only mail it can appear in.
+ *
+ * Returns whether a row was created: false when the domain already has an
+ * auto-detect row, or does not normalize to a real store host. "Once" is a
+ * read-then-insert, so two reports landing in the same instant can both
+ * insert; the pipeline folds every suggestion for a store into one store row,
+ * so a rare duplicate costs nothing.
+ */
+export async function recordAutoDetectedStoreSuggestion(
+    host: string,
+): Promise<{ created: boolean }> {
+    const domain = normalizeSuggestedDomain(host)
+    if (!domain) return { created: false }
+    const existing = await prisma.siteSuggestion.findFirst({
+        where: { domain, source: AUTO_DETECT_SUGGESTION_SOURCE },
+        select: { id: true },
+    })
+    if (existing) return { created: false }
+    await prisma.siteSuggestion.create({
+        data: {
+            domain,
+            rawUrl: `https://${domain}/`,
+            userId: null,
+            requesterEmail: null,
+            source: AUTO_DETECT_SUGGESTION_SOURCE,
+            userAgent: null,
+        },
+        select: { id: true },
+    })
+    return { created: true }
+}
+
 // ---------------------------------------------------------------------------
 // Pipeline-facing contract (GET /api/ingest/site-suggestions + .../ack).
 //

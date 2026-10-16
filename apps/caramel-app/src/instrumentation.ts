@@ -25,6 +25,20 @@ export async function register() {
         )
     }
 
+    // Learned coupon box posture (couponBoxLearned.ts), once per boot: with
+    // the pick on but no COUPON_BOX_LEARNED_SALT the learned path records and
+    // serves nothing, and that must read as a decision, not as "no shopper
+    // has confirmed a box yet".
+    const { couponBoxLearnedEnabled } = await import('@/lib/couponBoxLearned')
+    const { couponBoxLlmEnabled } = await import('@/lib/couponBoxPick')
+    if (couponBoxLlmEnabled()) {
+        console.log(
+            couponBoxLearnedEnabled()
+                ? `[boot] coupon-box pick ON (mode ${env.COUPON_BOX_PICK_MODE}); learned coupon boxes ENABLED`
+                : `[boot] coupon-box pick ON (mode ${env.COUPON_BOX_PICK_MODE}); learned coupon boxes DISABLED (COUPON_BOX_LEARNED_SALT unset)`,
+        )
+    }
+
     // Sign in with Apple: prove the .p8 key really signs BEFORE serving. env.ts
     // already guarantees the vars are present; only signing proves the key is
     // a valid P-256 PKCS#8 PEM. Without this a malformed APPLE_PRIVATE_KEY

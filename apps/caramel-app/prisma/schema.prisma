@@ -440,6 +440,67 @@ model SiteSuggestion {
   @@map("site_suggestions")
 }
 
+// A coupon box the extension CONFIRMED on a store with no served config: it
+// typed a code into it and the store answered (the total dropped, or the store
+// showed a coupon reply). src/lib/couponBoxLearned.ts is the ONE home for this
+// table and its serving rule. Crowd-sourced, so nothing here is trusted until
+// several installs on several networks agree, and it holds ONLY selectors and
+// counters: never page text, outline text, codes, IPs or install ids.
+model LearnedCouponBox {
+  id               String                     @id @default(cuid())
+  domain           String
+  // CSS selectors, validated on the way in (length-capped, CSS only).
+  inputSelector    String                     @map("input_selector")
+  // '' = the box has none. NOT NULL on purpose: Postgres treats NULLs as
+  // distinct, so a nullable column would let the unique key below hold the
+  // same box twice.
+  applySelector    String                     @default("") @map("apply_selector")
+  toggleSelector   String                     @default("") @map("toggle_selector")
+  // The code is applied with Enter (the box has no apply button).
+  enterOnly        Boolean                    @map("enter_only")
+  // Counted reports, each install's weight capped (couponBoxLearned.ts).
+  confirmations    Int                        @default(0)
+  failures         Int                        @default(0)
+  // Rows in learned_coupon_box_reporters, and their distinct network hashes.
+  distinctInstalls Int                        @default(0) @map("distinct_installs")
+  distinctNetworks Int                        @default(0) @map("distinct_networks")
+  // Which finder produced the first confirmation: rules | llm | server_learned.
+  firstSource      String                     @map("first_source")
+  firstSeenAt      DateTime                   @default(now()) @map("first_seen_at")
+  lastConfirmedAt  DateTime?                  @map("last_confirmed_at")
+  lastFailedAt     DateTime?                  @map("last_failed_at")
+  reporters        LearnedCouponBoxReporter[]
+
+  // Leading `domain` also serves the per-store lookup the pick runs.
+  @@unique([domain, inputSelector, applySelector, toggleSelector, enterOnly])
+  @@map("learned_coupon_boxes")
+}
+
+// Who reported a learned box, as one-way hashes only: HMAC-SHA256 under
+// COUPON_BOX_LEARNED_SALT of the extension's anonymous install id and of the
+// reporter's network prefix (/24 IPv4, /48 IPv6). Capped per box (the least
+// recently seen row is dropped first), so the table cannot grow without bound.
+model LearnedCouponBoxReporter {
+  id              String           @id @default(cuid())
+  boxId           String           @map("box_id")
+  box             LearnedCouponBox @relation(fields: [boxId], references: [id], onDelete: Cascade)
+  installHash     String           @map("install_hash")
+  networkHash     String           @map("network_hash")
+  // This install's COUNTED reports for this box. An install counts at most
+  // once per 24h per outcome; the two timestamps are that clock.
+  confirmations   Int              @default(0)
+  failures        Int              @default(0)
+  lastConfirmedAt DateTime?        @map("last_confirmed_at")
+  lastFailedAt    DateTime?        @map("last_failed_at")
+  firstSeenAt     DateTime         @default(now()) @map("first_seen_at")
+  lastSeenAt      DateTime         @default(now()) @map("last_seen_at")
+
+  @@unique([boxId, installHash])
+  // The cap's eviction order (oldest lastSeenAt first).
+  @@index([boxId, lastSeenAt])
+  @@map("learned_coupon_box_reporters")
+}
+
 enum UserStatus {
   ACTIVE_USER
   DELETE_REQUESTED_BY_USER

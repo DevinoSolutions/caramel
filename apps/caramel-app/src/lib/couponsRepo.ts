@@ -52,6 +52,7 @@ import {
     RecentStoreRowSchema,
     type RecentlyWorkedCouponRow,
     RecentlyWorkedCouponRowSchema,
+    ServedStoreConfigRowSchema,
     type SiteAggregateRow,
     SiteAggregateRowSchema,
     type SiteCountRow,
@@ -957,6 +958,74 @@ export async function isKnownStore(
         throw new Error('isKnownStore: known-store query returned no row')
     }
     return row.known
+}
+
+// The hyphen-joined checkout prefixes the extension's own host match accepts
+// (store-detect.js HYPHEN_CHECKOUT_PREFIXES: `secure-athleta.gap.com` serves
+// `athleta.gap.com`).
+const SERVED_HYPHEN_PREFIXES = ['secure', 'checkout', 'www', 'shop', 'store']
+const SHOPIFY_HOST_SUFFIX = '.myshopify.com'
+
+/**
+ * Store names whose served config the extension would apply on `host`: the
+ * host itself and every parent domain of 2+ labels (www./checkout.<domain>),
+ * plus the domain behind a hyphen checkout prefix. Over-inclusive on purpose:
+ * a false "served" only means a learned box is not used.
+ */
+function servedConfigCandidates(host: string): string[] {
+    const labels = host.split('.')
+    const out = new Set<string>()
+    for (let i = 0; i <= labels.length - 2; i++) {
+        out.add(labels.slice(i).join('.'))
+    }
+    const [first = '', ...rest] = labels
+    const dash = first.indexOf('-')
+    if (dash > 0 && SERVED_HYPHEN_PREFIXES.includes(first.slice(0, dash))) {
+        out.add([first.slice(dash + 1), ...rest].join('.'))
+    }
+    return Array.from(out)
+}
+
+/**
+ * Does `host` have a SERVED store config: a `store_configs` row with the
+ * coupon input and apply xpaths, i.e. exactly what GET
+ * /api/extension/supported-stores lists (listSupportedStoreConfigs' filter)?
+ * The learned coupon box never reads or writes for such a store, so the
+ * extension keeps behaving byte-for-byte on it. A `<shop>.myshopify.com` host
+ * counts as served when any served store's first label is `<shop>` (the
+ * extension's own Shopify-host rule). `host` must be a clean lowercase
+ * hostname (throws a plain Error otherwise).
+ */
+export async function hasServedStoreConfig(host: string): Promise<boolean> {
+    const lowered = host.toLowerCase()
+    if (!SHOPPER_STORE_BASE_PATTERN.test(lowered)) {
+        throw new Error(
+            `hasServedStoreConfig: invalid host "${host.slice(0, 64)}"`,
+        )
+    }
+    const shop = lowered.endsWith(SHOPIFY_HOST_SUFFIX)
+        ? lowered.slice(0, -SHOPIFY_HOST_SUFFIX.length)
+        : ''
+    const shopLabel = shop && !shop.includes('.') ? shop : null
+    const [row] = parseCouponRows(
+        ServedStoreConfigRowSchema,
+        await prisma.$queryRaw(Prisma.sql`
+            SELECT EXISTS (
+                SELECT 1 FROM store_configs
+                WHERE coupon_input_xpath IS NOT NULL
+                  AND apply_button_xpath IS NOT NULL
+                  AND (
+                      store_name = ANY(${servedConfigCandidates(lowered)}::text[])
+                      OR split_part(store_name, '.', 1) = ${shopLabel}
+                  )
+            ) AS served
+        `),
+        'coupon-box-learned.served-config',
+    )
+    if (!row) {
+        throw new Error('hasServedStoreConfig: query returned no row')
+    }
+    return row.served
 }
 
 export type SubmitShopperCouponArgs = {
