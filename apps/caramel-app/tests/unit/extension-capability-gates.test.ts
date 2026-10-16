@@ -112,6 +112,18 @@ describe('app <-> extension capability contract', () => {
         m => m[1] as string,
     )
 
+    // The extension's own host -> capability table (CARAMEL_HOST_CAPABILITY_REQUIREMENTS).
+    const hostTable =
+        /CARAMEL_HOST_CAPABILITY_REQUIREMENTS = Object\.freeze\(\{([^}]*)\}\)/.exec(
+            source,
+        )?.[1] ?? ''
+    const extensionHostRequirements = Object.fromEntries(
+        Array.from(hostTable.matchAll(/'([^']+)'\s*:\s*'(\w+)'/g), m => [
+            m[1] as string,
+            m[2] as string,
+        ]),
+    )
+
     it('every capability the server can require is one the extension knows', () => {
         expect(extensionCapabilities.length).toBeGreaterThan(0)
         for (const capability of Object.values(EXTENSION_CAPABILITY_GATES)) {
@@ -123,5 +135,12 @@ describe('app <-> extension capability contract', () => {
         expect([...EXTENSION_CAPABILITIES].sort()).toEqual(
             [...extensionCapabilities].sort(),
         )
+    })
+
+    it('the extension withholds exactly the stores the server gates', () => {
+        expect(Object.keys(extensionHostRequirements).length).toBeGreaterThan(0)
+        expect(extensionHostRequirements).toEqual({
+            ...EXTENSION_CAPABILITY_GATES,
+        })
     })
 })

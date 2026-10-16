@@ -4,7 +4,11 @@ import {
     CARAMEL_CAPABILITY_MARKERS,
     caramelCapabilityHeld,
 } from '../extension-capabilities.js'
-import { getDomainRecord } from '../store-detect.js'
+import {
+    caramelStoreWithheld,
+    getDomainRecord,
+    isCheckout,
+} from '../store-detect.js'
 
 // porkbun.com's apply config reaches the extension in the server's `gated`
 // bucket (apps/caramel-app/src/lib/extensionCapabilityGates.ts), tagged with
@@ -19,6 +23,7 @@ const PORKBUN_ROW = {
     couponSubmit: '#modal_applyCouponCode .btn-porkbun',
     requires: 'alertShim',
 }
+const PORKBUN_ROW_UNGATED = { ...PORKBUN_ROW, requires: undefined }
 const PLAIN_ROW = { domain: 'example.com', couponInput: '#promo' }
 
 let storedEntry
@@ -153,5 +158,54 @@ describe('getDomainRecord with a gated store', () => {
         stamp()
         expect(await getDomainRecord('example.com')).toEqual(PLAIN_ROW)
         expect(await getDomainRecord('porkbun.com')).toBeUndefined()
+    })
+})
+
+describe('a row that reached `supported` anyway (server change not live yet, or a cached old payload)', () => {
+    it('is still withheld while the marker is absent, and served once it is present', async () => {
+        apiResponse = { supported: [PORKBUN_ROW_UNGATED, PLAIN_ROW] }
+        expect(await getDomainRecord('porkbun.com')).toBeUndefined()
+        stamp()
+        expect(await getDomainRecord('porkbun.com')).toEqual(
+            PORKBUN_ROW_UNGATED,
+        )
+    })
+
+    it('covers a subdomain and a www host, and never a look-alike', async () => {
+        apiResponse = { supported: [PORKBUN_ROW_UNGATED, PLAIN_ROW] }
+        expect(await getDomainRecord('www.porkbun.com')).toBeUndefined()
+        expect(caramelStoreWithheld('www.porkbun.com')).toBe(true)
+        expect(caramelStoreWithheld('notporkbun.com')).toBe(false)
+        expect(caramelStoreWithheld('porkbun.com.evil.example')).toBe(false)
+    })
+})
+
+describe('caramelStoreWithheld / isCheckout', () => {
+    it('answers without any server data: the local table is enough', () => {
+        expect(caramelStoreWithheld('porkbun.com')).toBe(true)
+        stamp()
+        expect(caramelStoreWithheld('porkbun.com')).toBe(false)
+        expect(caramelStoreWithheld('example.com')).toBe(false)
+    })
+
+    it('isCheckout says no on a withheld store BEFORE the config-less routes (platform cart, finder) get a say', async () => {
+        const original = window.location
+        Object.defineProperty(window, 'location', {
+            value: new URL('https://porkbun.com/checkout/cart'),
+            writable: true,
+            configurable: true,
+        })
+        try {
+            // No config at all: the only way isCheckout could say yes is a
+            // config-less route, which is exactly what must stay off.
+            apiResponse = { supported: [] }
+            expect(await isCheckout()).toBe(false)
+        } finally {
+            Object.defineProperty(window, 'location', {
+                value: original,
+                writable: true,
+                configurable: true,
+            })
+        }
     })
 })

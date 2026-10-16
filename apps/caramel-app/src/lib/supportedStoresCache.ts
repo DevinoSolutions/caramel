@@ -9,6 +9,10 @@
 // its cache rule for the path is in place (RUNBOOK §Edge cache); this cache
 // makes origin cheap regardless of what sits in front of it.
 //
+// The body is `{ supported, gated }` (extensionCapabilityGates.ts): `supported`
+// is the legacy list every build reads, `gated` the stores only a build that
+// proves a page-side capability may use.
+//
 // What is cached is the FINAL bytes (the serialized body) plus a strong
 // ETag, so a warm hit is a Map lookup and a Response construction — no
 // mapping, no stringify. TTL matches the route's `s-maxage=300`: the catalog
