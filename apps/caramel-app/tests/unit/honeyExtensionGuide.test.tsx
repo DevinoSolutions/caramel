@@ -99,6 +99,15 @@ describe('honeyExtensionGuide data', () => {
         }
     })
 
+    it('answers the "Honey Chrome extension" query from the Chrome listing it cites', () => {
+        const item = HONEY_GUIDE_FAQ.find(
+            candidate =>
+                candidate.question === 'Is there a Honey Chrome extension?',
+        )
+        expect(item?.sources).toContain('honeyChrome')
+        expect(item?.answer).toContain('Chrome Web Store')
+    })
+
     it('keeps "alternative" out of the questions (the home page owns that query)', () => {
         for (const item of HONEY_GUIDE_FAQ) {
             expect(item.question.toLowerCase()).not.toContain('alternative')

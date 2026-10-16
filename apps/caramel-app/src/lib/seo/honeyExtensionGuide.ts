@@ -131,6 +131,11 @@ export const HONEY_GUIDE_FAQ: ReadonlyArray<HoneyGuideFaqItem> = [
         sources: ['honeyChrome', 'honeyFirefox', 'honeyHelpWhat'],
     },
     {
+        question: 'Is there a Honey Chrome extension?',
+        answer: 'Yes. PayPal Honey has a Chrome extension, listed on the Chrome Web Store as "Honey: Automated Coupons & Rewards". When checked on September 26, 2026, the listing showed 13,000,000 users and a September 8, 2026 update. Caramel also ships as a Chrome extension.',
+        sources: ['honeyChrome', 'caramelSource'],
+    },
+    {
         question: 'Do you need an account to use Honey?',
         answer: "Signing up is the first step in Honey's own help guide for getting the extension. Caramel, by comparison, needs no account at all.",
         sources: ['honeyHelpWhat', 'caramelSource'],
