@@ -623,6 +623,32 @@ describe('a learned box', () => {
         expect(appliedWith).toHaveLength(0)
     })
 
+    it('llm_first: a server learned box that finds nothing here is a no-pick, and the rules go on', async () => {
+        mode = 'llm_first'
+        document.body.innerHTML = RULES_BOX + TOTAL
+        answer = {
+            outcome: 'box',
+            source: 'learned',
+            input: null,
+            button: null,
+            toggle: null,
+            box: {
+                input: 'input[name="gone"]',
+                apply: 'button#gone',
+                toggle: null,
+                enterOnly: false,
+            },
+        }
+
+        await run()
+
+        expect(pickCalls).toHaveLength(1)
+        expect(drivenInput()).toBe('dc')
+        // Nothing was typed into it: that says nothing about the store.
+        await new Promise(r => setTimeout(r, 20))
+        expect(reported.filter(r => r.outcome === 'failed')).toEqual([])
+    })
+
     it('with the finder off nothing is read or saved', async () => {
         flagOn = false
         remember(LEARNED_BARE)

@@ -299,54 +299,21 @@ async function couponBoxLlmFlags() {
 }
 const couponBoxLlmEnabled = async () => (await couponBoxLlmFlags()).enabled
 
-/* Reports what a coupon box did (coupon-box-discovery.js learnOutcome): the
- * store answered a code typed into it ('confirmed'), or a remembered box got
- * no answer at all ('failed'). Selectors, the outcome and the anonymous
- * install id only: the server counts a box as confirmed by several installs,
- * never by one install reporting it twice. Sent only while the couponBoxLlm
- * flag is on, as the server reads it only then, and only with an install id
- * (installs older than the id have none: their reports are skipped, and their
- * own memory of the box still works). The answer says whether it landed:
- * { ok, recorded, reason } or { error } / { skipped }. */
-async function couponBoxLearned({ domain, box, source, evidence, outcome }) {
-    if (!(await couponBoxLlmEnabled())) return { skipped: 'disabled' }
-    const installId = await storedInstallId()
-    if (!installId) return { skipped: 'no install id' }
-    const r = await fetchWithTimeout(
-        caramelUrl('api/extension/coupon-box-learned'),
-        {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                installId,
-                domain,
-                box,
-                source,
-                evidence,
-                outcome,
-            }),
-        },
-    )
-    if (!r.ok) return { error: `HTTP ${r.status}` }
-    const j = await r.json().catch(() => ({}))
-    return { ok: true, recorded: j.recorded === true, reason: j.reason ?? null }
+/* What a coupon box did (coupon-box-discovery.js learnOutcome) is NOT sent
+ * to the server yet. The report route (POST /api/extension/coupon-box-learned)
+ * requires the install's anonymous install id, so it can count a box as
+ * confirmed by several installs, and the privacy policy discloses that id
+ * only as sent with an extension sign-in, for attribution. Sending it from
+ * every install with these reports is a new use the policy does not cover.
+ * TODO(learned-box-report): once the policy covers it, post
+ * { installId, domain, box, source, evidence, outcome } here (installId from
+ * install-attribution.js, behind the couponBoxLlm flag, no install id = no
+ * post) and answer { ok, recorded, reason } / { error }. Until then the
+ * answer says why nothing was sent, and the finder logs it; this install's
+ * own memory of the box is unaffected. */
+const COUPON_BOX_LEARNED_NOT_SENT = {
+    skipped: 'not sent: the install id is not disclosed for this use',
 }
-
-// The anonymous install id the install saved ({ iid } under this key), or
-// null. TODO(caramel#349): once this branch is on main, import
-// INSTALL_ATTRIBUTION_KEY from install-attribution.js instead of naming the
-// key here; this branch was cut before that module landed.
-const INSTALL_ATTRIBUTION_KEY = 'caramel_install_attribution'
-const storedInstallId = () =>
-    new Promise(resolve =>
-        currentBrowser.storage.local.get([INSTALL_ATTRIBUTION_KEY], items =>
-            resolve(
-                currentBrowser.runtime.lastError
-                    ? null
-                    : items?.[INSTALL_ATTRIBUTION_KEY]?.iid || null,
-            ),
-        ),
-    )
 
 /* Asks the server which element of a page outline is the promo box (see
  * coupon-box-outline.js and the finder's caramelPickedRecord). The outline is
@@ -826,13 +793,7 @@ export function initBackground() {
                 couponBoxLlmFlags().then(sendResponse)
                 return true
             } else if (message.action === 'couponBoxLearned') {
-                couponBoxLearned(message)
-                    .then(sendResponse)
-                    .catch(err => {
-                        logError('couponBoxLearned', err)
-                        sendResponse({ error: String(err) })
-                    })
-                return true
+                sendResponse(COUPON_BOX_LEARNED_NOT_SENT)
             } else if (message.action === 'couponBoxPick') {
                 couponBoxPick(message)
                     .then(resp => sendResponse(resp))

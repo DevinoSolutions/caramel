@@ -134,11 +134,12 @@ module.exports = [
         // 2026-10-13, raised 10.7 -> 11.3 kB: the coupon-box pick request (its
         // flag, its message route, and one deadline over the flag read, the
         // token read and the request). Measured 10.52 kB.
-        // 2026-10-16, raised 11.3 -> 12.4 kB: the learned coupon box report
-        // route (flag, install id read, the POST and what the server
-        // recorded) and the pick mode beside the flag. Measured 10.68 ->
-        // 11.56 kB.
-        limit: '12.4 KB',
+        // 2026-10-16, raised 11.3 -> 11.8 kB: the pick mode beside the flag,
+        // the learned-answer opt-in, and the learned coupon box route, which
+        // answers why nothing is sent (the report POST is not shipped yet).
+        // Measured 10.68 -> 10.92 kB; raised rather than left at 3.4%
+        // headroom.
+        limit: '11.8 KB',
         brotli: false,
     },
     {
@@ -154,7 +155,7 @@ module.exports = [
     {
         name: 'coupon-box-learned.js (loaded on demand, minified)',
         path: '.size-cache/coupon-box-learned.min.js',
-        // 2026-10-16 — measured 3.49 kB minified. Not injected on every page:
+        // 2026-10-16 — measured 3.55 kB minified. Not injected on every page:
         // the finder imports it only on a store with no config, to name a box
         // it may remember (stable selectors) and to save and report what a
         // run on that box showed (the per-install memory, LRU 200 domains).

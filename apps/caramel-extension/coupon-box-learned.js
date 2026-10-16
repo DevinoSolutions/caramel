@@ -42,18 +42,25 @@ const TEST_IDS = [
     'data-automation-id',
 ]
 const PLAIN_ID = /^[A-Za-z][\w-]*$/
+// What the server refuses in a selector (it is stored and served to other
+// installs as CSS): anything that reads as XPath, script or a style
+// expression, the characters { } ; < \ and control characters. A name that
+// would need one of these, or a quote (escaping it takes a backslash), is no
+// name; a selector holding one is never built.
+const REFUSED = /^[./(]|javascript:|url\s*\(|expression|[{};<\\]|\p{Cc}/iu
 
-const quote = v => '"' + v.replace(/["\\]/g, '\\$&') + '"'
+const quote = v => '"' + v + '"'
 const usable = v =>
     typeof v === 'string' &&
     v.trim() !== '' &&
     v.length <= 80 &&
-    !/[\n\r]/.test(v) &&
+    !v.includes('"') &&
+    !REFUSED.test(v) &&
     !PRIVATE.test(v)
 
 // The selector, when it finds exactly `el` in its document and nothing else.
 function only(el, css) {
-    if (!css || css.length > MAX_SELECTOR) return null
+    if (!css || css.length > MAX_SELECTOR || REFUSED.test(css)) return null
     try {
         const m = el.ownerDocument.querySelectorAll(css)
         return m.length === 1 && m[0] === el ? css : null

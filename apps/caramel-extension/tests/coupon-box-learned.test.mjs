@@ -77,6 +77,44 @@ describe('caramelStableSelector', () => {
         expect(caramelStableSelector($('input'))).toBeNull()
     })
 
+    // The server refuses these in a selector (it serves them to other
+    // installs as CSS), so a name holding one is never used.
+    it.each([
+        ['a quote', 'say "hi"'],
+        ['a backslash', 'a\\b'],
+        ['a brace', 'a{b'],
+        ['a semicolon', 'a;b'],
+        ['an angle bracket', 'a<b'],
+        ['a newline', 'a\nb'],
+        ['a tab', 'a\tb'],
+        ['script', 'javascript:go'],
+        ['url(', 'url (x)'],
+        ['expression', 'Expression'],
+    ])('a value holding %s is never part of a selector', (_what, v) => {
+        page('<input>')
+        $('input').setAttribute('placeholder', v)
+        expect(caramelStableSelector($('input'))).toBeNull()
+    })
+
+    it('every selector it builds is one the server accepts', () => {
+        const REFUSED_BY_SERVER =
+            /javascript:|url\s*\(|expression|[{};<\\]|\p{Cc}/iu
+        page(
+            '<form id="f"><div><input name="a" aria-label="x;y">' +
+                '<input name="b"><button id="go.now">Go</button>' +
+                '<button>Apply</button><button>Apply</button></div></form>',
+        )
+        const built = [...document.querySelectorAll('input,button')]
+            .map(caramelStableSelector)
+            .filter(Boolean)
+        expect(built.length).toBeGreaterThan(3)
+        for (const css of built) {
+            expect(css).not.toMatch(REFUSED_BY_SERVER)
+            expect(css).not.toMatch(/^[./(]/)
+            expect(css.length).toBeLessThanOrEqual(256)
+        }
+    })
+
     it('a name two elements share is not used: the next one that is unique is', () => {
         page(
             '<input name="code" aria-label="Gift card">' +
