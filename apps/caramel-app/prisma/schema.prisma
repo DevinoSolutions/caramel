@@ -464,6 +464,8 @@ model LearnedCouponBox {
   // Rows in learned_coupon_box_reporters, and their distinct network hashes.
   distinctInstalls Int                        @default(0) @map("distinct_installs")
   distinctNetworks Int                        @default(0) @map("distinct_networks")
+  // Reporters whose latest counted report is a failure (2 stop serving).
+  failingInstalls  Int                        @default(0) @map("failing_installs")
   // Which finder produced the first confirmation: rules | llm | server_learned.
   firstSource      String                     @map("first_source")
   firstSeenAt      DateTime                   @default(now()) @map("first_seen_at")

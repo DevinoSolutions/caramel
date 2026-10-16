@@ -18,6 +18,7 @@ CREATE TABLE "public"."learned_coupon_boxes" (
     "failures" INTEGER NOT NULL DEFAULT 0,
     "distinct_installs" INTEGER NOT NULL DEFAULT 0,
     "distinct_networks" INTEGER NOT NULL DEFAULT 0,
+    "failing_installs" INTEGER NOT NULL DEFAULT 0,
     "first_source" TEXT NOT NULL,
     "first_seen_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "last_confirmed_at" TIMESTAMP(3),

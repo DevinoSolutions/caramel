@@ -94,6 +94,8 @@ describe('privacy policy coverage', () => {
             'short technical descriptions (CSS selectors)',
             'the random install ID the extension created when it was installed',
             'only as one-way hashes',
+            'the same ID described under “How you first found Caramel” below',
+            'we do not link these reports to your account or to how you found Caramel',
             'never include codes, your cart, page text, or your account',
             'Promo-code box locations',
             'at most 50 per box',

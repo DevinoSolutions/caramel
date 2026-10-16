@@ -260,16 +260,48 @@ describe('learned coupon box: who counts (real Postgres)', () => {
         await record(report(domain), 'two', 'net-b', now)
         expect(await findServableLearnedBox(domain, now)).not.toBeNull()
 
+        // ONE install failing on two days: the failing-installs rule does not
+        // fire (1 < 2), so this pins the majority rule on its own.
         const failed = report(domain, { outcome: 'failed', evidence: null })
         await record(failed, 'three', 'net-c', now)
         // 2 confirmations vs 1 failure: still served.
         expect(await findServableLearnedBox(domain, now)).not.toBeNull()
-        await record(failed, 'four', 'net-d', now)
+        const later = new Date(now.getTime() + 24 * HOUR)
+        await record(failed, 'three', 'net-c', later)
         // 2 vs 2: confirmations must OUTNUMBER failures.
         const row = await boxRow(domain)
         expect(row.failures).toBe(2)
-        expect(isServableLearnedBox(row, now)).toBe(false)
-        expect(await findServableLearnedBox(domain, now)).toBeNull()
+        expect(row.failingInstalls).toBe(1)
+        expect(isServableLearnedBox(row, later)).toBe(false)
+        expect(await findServableLearnedBox(domain, later)).toBeNull()
+    })
+
+    it('a long-served box that breaks stops being served once 2 installs fail, despite many confirmations', async () => {
+        const domain = freshDomain()
+        const now = new Date()
+        for (let i = 0; i < 10; i++) {
+            await record(report(domain), `ok-${i}`, `net-${i}`, now)
+        }
+        const later = new Date(now.getTime() + HOUR)
+        const failed = report(domain, { outcome: 'failed', evidence: null })
+        // A shopper who confirmed it earlier now sees it fail.
+        await record(failed, 'ok-0', 'net-0', later)
+        expect(await findServableLearnedBox(domain, later)).not.toBeNull()
+        const second = await record(failed, 'fresh', 'net-x', later)
+        expect(second).toMatchObject({ counted: true, servable: false })
+        const row = await boxRow(domain)
+        // 10 confirmations vs 2 failures: the majority rule alone still serves.
+        expect(row.confirmations).toBe(10)
+        expect(row.failures).toBe(2)
+        expect(row.failingInstalls).toBe(2)
+        expect(isServableLearnedBox(row, later)).toBe(false)
+        expect(await findServableLearnedBox(domain, later)).toBeNull()
+
+        // One of them confirming it again (the store fixed it) brings it back.
+        const fixedAt = new Date(later.getTime() + 25 * HOUR)
+        await record(report(domain), 'ok-0', 'net-0', fixedAt)
+        expect((await boxRow(domain)).failingInstalls).toBe(1)
+        expect(await findServableLearnedBox(domain, fixedAt)).not.toBeNull()
     })
 
     it('stale: no counted confirmation in the last 30 days stops serving', async () => {

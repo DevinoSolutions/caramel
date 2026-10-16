@@ -620,6 +620,11 @@ their own, separate from the model pick, is an open owner decision.
   the network rule is what stops a single machine. One install's rows always
   count as one network.
 - confirmations > failures (a tie stops serving).
+- fewer than 2 distinct installs whose latest counted report on the box is a
+  failure. This is what stops a box that broke quickly: a box served for months
+  can hold dozens of confirmations, so the majority rule alone would take as
+  many failures. An install that later confirms it again stops counting as
+  failing, so a store that fixes its page gets the box back.
 - a counted confirmation in the last 30 days.
 - the store has no served config (`store_configs` with input + apply xpaths,
   matched on the host, its parent domains and the hyphen checkout hosts the

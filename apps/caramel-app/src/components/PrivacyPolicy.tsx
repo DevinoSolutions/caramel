@@ -146,19 +146,22 @@ const PrivacyPolicy = () => {
                                 code field, its apply button and the control
                                 that reveals it, whether it worked, and the
                                 random install ID the extension created when it
-                                was installed. The descriptions locate page
-                                elements; they never contain what is in them.
-                                Our server keeps the install ID and the network
-                                part of your IP address (its first three parts)
-                                only as one-way hashes, so it can count how many
-                                different installs confirmed a box without being
-                                able to recover either. Once several installs on
-                                different networks have confirmed a box, the
-                                extension may use it on that store without
-                                asking the AI model, and the store may be added
-                                to our list of stores to support. These reports
-                                never include codes, your cart, page text, or
-                                your account.
+                                was installed (the same ID described under “How
+                                you first found Caramel” below). The
+                                descriptions locate page elements; they never
+                                contain what is in them. Our server keeps the
+                                install ID and the network part of your IP
+                                address (its first three parts) only as one-way
+                                hashes, so it can count how many different
+                                installs confirmed a box without being able to
+                                recover either, and we do not link these reports
+                                to your account or to how you found Caramel.
+                                Once several installs on different networks have
+                                confirmed a box, the extension may use it on
+                                that store without asking the AI model, and the
+                                store may be added to our list of stores to
+                                support. These reports never include codes, your
+                                cart, page text, or your account.
                             </>,
                             <>
                                 <strong>Coupon results.</strong> Which codes

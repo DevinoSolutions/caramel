@@ -26,8 +26,10 @@
 //     a single client cannot pump the counters.
 //   - A `failed` report for a box nobody confirmed creates nothing.
 //   - Serving (LEARNED_BOX_RULES): at least 2 distinct installs, at least 2
-//     distinct networks, confirmations > failures, and a counted confirmation
-//     in the last 30 days. A failure majority or 30 quiet days stops it.
+//     distinct networks, confirmations > failures, fewer than 2 installs
+//     whose latest counted report is a failure, and a counted confirmation in
+//     the last 30 days. Two installs failing, a failure majority or 30 quiet
+//     days stops it.
 //   - A store with a served config never reads or writes this table (the
 //     route checks that first, couponsRepo.hasServedStoreConfig).
 //
@@ -48,6 +50,11 @@ export const LEARNED_BOX_RULES = {
     minInstalls: 2,
     /** Distinct network-prefix hashes among those reporters. */
     minNetworks: 2,
+    /** Served only while FEWER than this many distinct installs' latest
+     * counted report on the box is a failure. This is what stops a box that
+     * broke quickly: a long-served box can hold dozens of confirmations, and
+     * the failure majority alone would need as many failures to stop it. */
+    maxFailingInstalls: 2,
     /** A counted confirmation must be at most this old. */
     maxAgeDays: 30,
     /** Reporter rows kept per box; the least recently seen is dropped. */
@@ -193,6 +200,7 @@ type ServingFields = Pick<
     | 'distinctNetworks'
     | 'confirmations'
     | 'failures'
+    | 'failingInstalls'
     | 'lastConfirmedAt'
 >
 
@@ -208,6 +216,7 @@ export function isServableLearnedBox(box: ServingFields, now: Date): boolean {
         box.distinctInstalls >= LEARNED_BOX_RULES.minInstalls &&
         box.distinctNetworks >= LEARNED_BOX_RULES.minNetworks &&
         box.confirmations > box.failures &&
+        box.failingInstalls < LEARNED_BOX_RULES.maxFailingInstalls &&
         box.lastConfirmedAt !== null &&
         box.lastConfirmedAt >= freshnessCutoff(now)
     )
@@ -257,6 +266,7 @@ export async function findServableLearnedBox(
             distinctInstalls: { gte: LEARNED_BOX_RULES.minInstalls },
             distinctNetworks: { gte: LEARNED_BOX_RULES.minNetworks },
             confirmations: { gt: prisma.learnedCouponBox.fields.failures },
+            failingInstalls: { lt: LEARNED_BOX_RULES.maxFailingInstalls },
             lastConfirmedAt: { gte: freshnessCutoff(now) },
         },
         orderBy: [{ confirmations: 'desc' }, { lastConfirmedAt: 'desc' }],
@@ -401,11 +411,28 @@ async function recordOnce({
             distinct: ['networkHash'],
             select: { networkHash: true },
         })
+        // Installs whose latest counted word on this box is "failed": a
+        // failure with no confirmation, or one newer than its confirmation.
+        const failingInstalls = await tx.learnedCouponBoxReporter.count({
+            where: {
+                boxId: box.id,
+                OR: [
+                    { lastConfirmedAt: null, lastFailedAt: { not: null } },
+                    {
+                        lastFailedAt: {
+                            gt: prisma.learnedCouponBoxReporter.fields
+                                .lastConfirmedAt,
+                        },
+                    },
+                ],
+            },
+        })
         const updated = await tx.learnedCouponBox.update({
             where: { id: box.id },
             data: {
                 distinctInstalls,
                 distinctNetworks: networks.length,
+                failingInstalls,
                 ...(counted
                     ? confirmed
                         ? {
