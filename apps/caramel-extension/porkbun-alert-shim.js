@@ -12,19 +12,26 @@
 // N times and wait for the shopper each time. Worse, apply-flow submits by
 // click AND by an Enter keydown (coupon-apply.js applyCoupon), and Porkbun's
 // modal wires both to processApplyCartCoupon, so every attempt POSTs twice and
-// a refused code raises TWO dialogs; a code that WORKS can raise one too, when
-// the second POST finds the coupon already on the cart.
+// a refused code raises TWO dialogs. For a code that WORKS the second POST
+// finds the coupon already on the cart and is refused: its message must not be
+// read as the verdict on a code the first POST accepted.
 //
-// WHAT IT DOES: while the submission came from a script (an untrusted click or
-// keydown inside the coupon modal), that one message is written into the modal
-// as visible text instead of opening a dialog. The store config's
-// errorIndicator then points at `#caramel-porkbun-coupon-rejection`, and the
-// ordinary verdict path reads the refusal like any other store's error text.
+// WHAT IT DOES, for a submission a script made (an untrusted click inside the
+// coupon modal):
+//   1. drops the duplicate Enter keydown the apply flow sends right after its
+//      click, so the attempt POSTs once and a working code is never answered
+//      by a second, refusing POST;
+//   2. writes that one refusal message into the modal as visible text instead
+//      of opening a dialog. The store config's errorIndicator then points at
+//      `#caramel-porkbun-coupon-rejection`, and the ordinary verdict path reads
+//      the refusal like any other store's error text.
 //
 // WHAT IT DELIBERATELY DOES NOT DO: touch a shopper's own submission (trusted
 // events never arm it, and any trusted click/keydown in the modal disarms it),
 // touch any other alert on the site, or stay armed (it lapses after
-// PORKBUN_ARM_WINDOW_MS, longer than the store's POST ever takes).
+// PORKBUN_ARM_WINDOW_MS, longer than the store's POST ever takes). Only a
+// shopper's click or Enter in the modal counts as them taking over; a Tab or a
+// held modifier does not disturb a run in flight.
 
 const PORKBUN_MODAL_SELECTOR = '#modal_applyCouponCode'
 export const PORKBUN_REJECTION_ID = 'caramel-porkbun-coupon-rejection'
@@ -32,6 +39,9 @@ export const PORKBUN_REJECTION_ID = 'caramel-porkbun-coupon-rejection'
 // status != 1. Anything else (a session expiry, a network alert) stays native.
 const PORKBUN_REJECTION_RE = /unable to apply the coupon/i
 export const PORKBUN_ARM_WINDOW_MS = 20000
+// The apply flow dispatches its Enter in the same tick as its click; this is
+// slack for a slow main thread, not a window anyone else's Enter falls into.
+export const PORKBUN_DUPLICATE_ENTER_MS = 1500
 
 /* Intercepts `win.alert` for scripted coupon submissions. Returns a function
  * that restores the page's own alert and removes the listeners (tests; the
@@ -40,18 +50,43 @@ export function installPorkbunAlertShim(win) {
     const doc = win.document
     const nativeAlert = win.alert
     let armedAt = null
+    let scriptedClickAt = null
 
     function inModal(event) {
-        const target = event.target
-        return !!target?.closest?.(PORKBUN_MODAL_SELECTOR)
+        return !!event.target?.closest?.(PORKBUN_MODAL_SELECTOR)
+    }
+
+    function clearRejection() {
+        doc.getElementById(PORKBUN_REJECTION_ID)?.remove()
     }
 
     // Capture phase: runs before the page's inline onclick/onkeydown, so the
     // stale message is gone before this attempt's POST can answer.
     function onSubmitIntent(event) {
         if (!inModal(event)) return
-        doc.getElementById(PORKBUN_REJECTION_ID)?.remove()
-        armedAt = event.isTrusted ? null : Date.now()
+        const isClick = event.type === 'click'
+        if (event.isTrusted) {
+            // The shopper takes over only by submitting; a Tab or a modifier
+            // must not wipe a verdict the apply flow has not read yet.
+            if (isClick || event.key === 'Enter') {
+                clearRejection()
+                armedAt = null
+            }
+            return
+        }
+        if (
+            !isClick &&
+            scriptedClickAt !== null &&
+            Date.now() - scriptedClickAt < PORKBUN_DUPLICATE_ENTER_MS
+        ) {
+            // Same submission, second trigger: let the click's POST stand alone.
+            event.stopImmediatePropagation()
+            event.preventDefault()
+            return
+        }
+        clearRejection()
+        armedAt = Date.now()
+        scriptedClickAt = isClick ? armedAt : null
     }
 
     function showRejection(message) {

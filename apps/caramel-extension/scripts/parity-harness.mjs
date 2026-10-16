@@ -169,6 +169,36 @@ for (const [browser, { golden, outDir }] of Object.entries(BUILDS)) {
     }
 }
 
+/* The MAIN-world content script (porkbun.com's alert shim) hides inside the
+ * allowlisted /content_scripts diff above, which compares that array as one
+ * unit — so a build that dropped it, widened its match, or leaked it into the
+ * Firefox build would still read as the same expected diff. Pin it by name:
+ * Chrome ships exactly one MAIN-world script, on porkbun.com's checkout only;
+ * Firefox ships none (Safari is derived from the Chrome build by
+ * release-extension.yml and so carries the Chrome one). */
+for (const [browser, { outDir }] of Object.entries(BUILDS)) {
+    const manifest = JSON.parse(
+        readFileSync(join(outDir, 'manifest.json'), 'utf8'),
+    )
+    const mainWorld = (manifest.content_scripts ?? []).filter(
+        cs => cs.world === 'MAIN',
+    )
+    if (browser === 'chrome') {
+        check(
+            mainWorld.length === 1 &&
+                JSON.stringify(mainWorld[0].matches) ===
+                    JSON.stringify(['https://porkbun.com/checkout/*']) &&
+                mainWorld[0].run_at === 'document_start',
+            `chrome: exactly one MAIN-world content script, porkbun.com/checkout/* at document_start (found ${JSON.stringify(mainWorld)})`,
+        )
+    } else {
+        check(
+            mainWorld.length === 0,
+            `${browser}: no MAIN-world content script (found ${mainWorld.length})`,
+        )
+    }
+}
+
 /* ------------------------------------------------------- 2. file inventory */
 
 const walk = dir =>

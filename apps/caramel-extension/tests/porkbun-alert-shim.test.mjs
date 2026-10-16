@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { caramelIsForbiddenControl } from '../dom-utils.js'
 import {
     PORKBUN_ARM_WINDOW_MS,
+    PORKBUN_DUPLICATE_ENTER_MS,
     PORKBUN_REJECTION_ID,
     installPorkbunAlertShim,
 } from '../porkbun-alert-shim.js'
@@ -73,23 +74,50 @@ describe('scripted submission inside the coupon modal', () => {
         ).toBe(true)
     })
 
-    it('swallows the second dialog of a click-plus-Enter double submit and keeps ONE message', () => {
+    it('drops the duplicate Enter the apply flow sends right after its click', () => {
         const input = document.getElementById('cartCouponCode')
+        const reachedStore = vi.fn()
+        input.addEventListener('keydown', reachedStore)
         scriptedClick(document.getElementById('update'))
-        input.dispatchEvent(
+        const enter = new KeyboardEvent('keydown', {
+            key: 'Enter',
+            keyCode: 13,
+            bubbles: true,
+            cancelable: true,
+        })
+        input.dispatchEvent(enter)
+
+        // The store's own onkeydown (here a stand-in listener) never saw it,
+        // so the attempt POSTs once.
+        expect(reachedStore).not.toHaveBeenCalled()
+        expect(enter.defaultPrevented).toBe(true)
+        // Still armed by the click: the one refusal is shown as text.
+        storeRefuses()
+        expect(nativeAlert).not.toHaveBeenCalled()
+        expect(rejectionText()).toBe(REFUSAL)
+    })
+
+    it('an Enter that comes alone, or long after the click, is a submission of its own', () => {
+        vi.useFakeTimers()
+        const input = document.getElementById('cartCouponCode')
+        const reachedStore = vi.fn()
+        input.addEventListener('keydown', reachedStore)
+        const enter = () =>
             new KeyboardEvent('keydown', {
                 key: 'Enter',
-                keyCode: 13,
                 bubbles: true,
-            }),
-        )
-        storeRefuses()
-        storeRefuses()
+                cancelable: true,
+            })
 
+        input.dispatchEvent(enter())
+        expect(reachedStore).toHaveBeenCalledTimes(1)
+        storeRefuses()
         expect(nativeAlert).not.toHaveBeenCalled()
-        expect(
-            document.querySelectorAll(`#${PORKBUN_REJECTION_ID}`),
-        ).toHaveLength(1)
+
+        scriptedClick(document.getElementById('update'))
+        vi.advanceTimersByTime(PORKBUN_DUPLICATE_ENTER_MS + 1)
+        input.dispatchEvent(enter())
+        expect(reachedStore).toHaveBeenCalledTimes(2)
     })
 
     it('clears the previous code’s refusal when the next attempt starts', () => {
@@ -136,15 +164,88 @@ describe('what it must not touch', () => {
         expect(rejectionText()).toBeNull()
     })
 
-    // The trusted-event branch (a shopper's own click or Enter disarms the
-    // shim) cannot be driven here: isTrusted is an unforgeable own property and
-    // jsdom mints no trusted events. It is exercised with real input in the
-    // browser check recorded on the PR.
-
-    it('uninstall restores the page’s own alert', () => {
+    it('uninstall restores the page’s own alert and removes the listeners', () => {
         uninstall()
         expect(window.alert).toBe(nativeAlert)
-        // afterEach calls uninstall again; it must be idempotent.
+
+        scriptedClick(document.getElementById('update'))
+        storeRefuses()
+        expect(nativeAlert).toHaveBeenCalledTimes(1)
+        expect(rejectionText()).toBeNull()
+    })
+})
+
+// jsdom mints no trusted events and isTrusted cannot be redefined, so the
+// shopper-takes-over branch is driven by calling the registered capture
+// handlers directly with trusted-shaped events. (A real trusted click is
+// exercised against the live site and recorded on the PR.)
+describe('a shopper’s own input', () => {
+    let handlers
+    let uninstallFake
+
+    beforeEach(() => {
+        uninstall()
+        handlers = []
+        const spy = vi
+            .spyOn(document, 'addEventListener')
+            .mockImplementation((type, fn) => handlers.push([type, fn]))
+        uninstallFake = installPorkbunAlertShim(window)
+        spy.mockRestore()
+    })
+
+    afterEach(() => {
+        uninstallFake()
+        // The outer afterEach calls the first uninstall again; keep it valid.
+        uninstall = () => {}
+    })
+
+    function fire(type, init) {
+        const event = {
+            type,
+            target: document.getElementById('update'),
+            isTrusted: false,
+            ...init,
+        }
+        for (const [t, fn] of handlers) if (t === type) fn(event)
+    }
+
+    it('a trusted click disarms the shim and clears the old message, keeping the dialog', () => {
+        fire('click', { isTrusted: false })
+        storeRefuses()
+        expect(rejectionText()).toBe(REFUSAL)
+
+        fire('click', { isTrusted: true })
+        storeRefuses()
+
+        expect(nativeAlert).toHaveBeenCalledTimes(1)
+        expect(rejectionText()).toBeNull()
+    })
+
+    it('a trusted Enter takes over too', () => {
+        fire('click', { isTrusted: false })
+        fire('keydown', { isTrusted: true, key: 'Enter' })
+        storeRefuses()
+
+        expect(nativeAlert).toHaveBeenCalledTimes(1)
+    })
+
+    it('a trusted Tab or modifier does not wipe a run in flight', () => {
+        fire('click', { isTrusted: false })
+        storeRefuses()
+        fire('keydown', { isTrusted: true, key: 'Tab' })
+        fire('keydown', { isTrusted: true, key: 'Shift' })
+
+        expect(rejectionText()).toBe(REFUSAL)
+        storeRefuses()
+        expect(nativeAlert).not.toHaveBeenCalled()
+    })
+
+    it('a scripted Enter alone arms the shim (the keydown listener is live)', () => {
+        fire('keydown', { isTrusted: false, key: 'Enter' })
+        storeRefuses()
+
+        expect(nativeAlert).not.toHaveBeenCalled()
+        expect(rejectionText()).toBe(REFUSAL)
     })
 })
 

@@ -7,12 +7,14 @@
  * content realm has to stay isolated. Narrowest match that works: the
  * checkout pages on the bare domain, where the coupon modal lives.
  *
- * Chromium builds only. Manifest `world: 'MAIN'` is what Chrome/Edge honour;
- * where it is unsupported the entry is left out rather than shipped as an
- * isolated script that would silently do nothing. Firefox and Safari keep
- * Porkbun's native dialogs until `world: 'MAIN'` is verified there.
- * TODO: verify Firefox (128+) and Safari manifest MAIN-world support, then
- * widen `include`.
+ * Not in the Firefox build (`include: ['chrome']`). Safari has no WXT target:
+ * the release workflow derives its package from the Chrome build, so Safari
+ * DOES ship this entry. If Safari ignores `world: 'MAIN'` the script runs in the
+ * isolated world, where wrapping `window.alert` and the capture listeners change
+ * nothing the page can see; if it honours it, the shim behaves as on Chrome.
+ * Either way Porkbun's native dialog is the fallback.
+ * TODO: verify on Safari and on Firefox (128+ has `world: 'MAIN'`), then decide
+ * whether Firefox joins.
  */
 import { installPorkbunAlertShim } from '../porkbun-alert-shim.js'
 
