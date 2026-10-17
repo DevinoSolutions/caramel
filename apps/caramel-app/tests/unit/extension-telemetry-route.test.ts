@@ -15,7 +15,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 //   - the body is strict (an unknown key anywhere is refused, so a `code` can
 //     never ride along),
 //   - the emitted properties are EXACTLY the allowlist,
-//   - the distinct id is the random per-install telemetry id, never a user.
+//   - the distinct id is the random per-device telemetry id, never a user.
 
 interface CapturedEvent {
     event: string

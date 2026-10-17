@@ -106,7 +106,7 @@ describe('parseUsageDiagnosticsConsent', () => {
 })
 
 describe('writeUsageDiagnosticsConsent and the telemetry id', () => {
-    it('accepting stores the record and mints a random per-install UUID in storage.local', async () => {
+    it('accepting stores the record and mints a random per-device UUID in storage.local', async () => {
         const written = await writeUsageDiagnosticsConsent(browser, 'accepted')
 
         expect(written.choice).toBe('accepted')
@@ -156,6 +156,26 @@ describe('writeUsageDiagnosticsConsent and the telemetry id', () => {
                 await readUsageDiagnosticsConsent(browser),
             ),
         ).toBe(false)
+
+        await writeUsageDiagnosticsConsent(browser, 'accepted')
+        expect(localData[USAGE_DIAGNOSTICS_ID_KEY]).not.toBe(first)
+    })
+
+    it('a decline whose id delete fails rejects loudly, and the leftover id is never reused by the next accept', async () => {
+        await writeUsageDiagnosticsConsent(browser, 'accepted')
+        const first = localData[USAGE_DIAGNOSTICS_ID_KEY]
+
+        const realRemove = browser.storage.local.remove
+        browser.storage.local.remove = (keys, cb) => {
+            browser.runtime.lastError = { message: 'quota busy' }
+            cb()
+            browser.runtime.lastError = undefined
+        }
+        await expect(
+            writeUsageDiagnosticsConsent(browser, 'declined'),
+        ).rejects.toThrow(/usage-diagnostics id delete failed: quota busy/)
+        expect(localData[USAGE_DIAGNOSTICS_ID_KEY]).toBe(first)
+        browser.storage.local.remove = realRemove
 
         await writeUsageDiagnosticsConsent(browser, 'accepted')
         expect(localData[USAGE_DIAGNOSTICS_ID_KEY]).not.toBe(first)
