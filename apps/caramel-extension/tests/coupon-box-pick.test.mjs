@@ -11,6 +11,7 @@ import {
 } from '../coupon-box-discovery.js'
 import { startApplyingCoupons } from '../coupon-runner.js'
 import { caramelConfiglessRecord, getDomainRecord } from '../store-detect.js'
+import { FINDER_ASSET, FINDER_FILE } from './_finder-asset.mjs'
 
 // The server's pick: when the finder's rules see a total but no promo box, the
 // extension may ask the server which element is the box. These pin that:
@@ -104,6 +105,7 @@ function installChromeStub() {
     }
     stub.runtime.lastError = undefined
     stub.runtime.getURL = path => {
+        if (path === FINDER_ASSET) return FINDER_FILE
         if (path !== 'assets/coupon-box-outline.js')
             return 'chrome-extension://caramel/' + path
         outlineLoads++

@@ -39,10 +39,8 @@ import {
 } from './coupon-apply.js'
 import {
     caramelCouponBoxDiscoveryOn,
-    caramelFinderMayAsk,
-    caramelFinderReadTotal,
-    caramelFinderSeesBox,
-} from './coupon-box-discovery.js'
+    caramelLoadFinder,
+} from './coupon-box-finder-loader.js'
 import { fetchCoupons } from './coupon-fetch.js'
 import { reportOutcome, startApplyingCoupons } from './coupon-runner.js'
 import {
@@ -645,8 +643,12 @@ export async function isCheckout() {
 async function _finderSeesBox() {
     if (!caramelStoreListKnown() || !_caramelCartIntentSignal()) return false
     if (!(await caramelCouponBoxDiscoveryOn())) return false
+    // Loaded only here, with the flag on and no box a config describes. A
+    // finder that did not load sees nothing.
+    const finder = await caramelLoadFinder()
+    if (!finder) return false
     try {
-        return caramelFinderSeesBox()
+        return finder.caramelFinderSeesBox()
     } catch (e) {
         log('FINDER_FAILED', { error: String(e) })
         return false
@@ -663,8 +665,10 @@ async function _finderMayOffer(domain) {
     if (await _finderSeesBox()) return true
     if (!caramelStoreListKnown() || !_caramelCartIntentSignal()) return false
     if (!(await caramelCouponBoxDiscoveryOn())) return false
+    const finder = await caramelLoadFinder()
+    if (!finder) return false
     try {
-        return await caramelFinderMayAsk(domain)
+        return await finder.caramelFinderMayAsk(domain)
     } catch (e) {
         log('FINDER_FAILED', { error: String(e) })
         return false
@@ -812,8 +816,13 @@ async function _resumePendingSubmit() {
     const rec = await getDomainRecord(location.hostname)
     // A finder attempt's baseline came from the finder's total row; reading a
     // config's priceContainer here would compare two different numbers.
+    // A finder that does not load reads no total, so no saving is measured.
     const now = pending.finder
-        ? caramelFinderReadTotal(document, pending.finder, pending.finderRow)
+        ? ((await caramelLoadFinder())?.caramelFinderReadTotal(
+              document,
+              pending.finder,
+              pending.finderRow,
+          ) ?? NaN)
         : rec && rec.priceContainer
           ? getPrice(rec.priceContainer, { returnLargest: true })
           : NaN

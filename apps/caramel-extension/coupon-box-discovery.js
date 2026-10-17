@@ -1,7 +1,8 @@
 // owns: finding a store's promo box, apply button, reveal toggle and order
 // total when no config describes them (caramelDiscoverCouponBox,
-// caramelFindOrderTotal, caramelDiscoveredRecord, caramelFinderSeesBox,
-// caramelCouponBoxDiscoveryOn).
+// caramelFindOrderTotal, caramelDiscoveredRecord, caramelFinderSeesBox).
+// It is loaded on demand (coupon-box-finder-loader.js), never in the
+// content-script bundle.
 //
 // Most stores we hold codes for are reached through a config row: a set of
 // selectors someone wrote for that store. Two cases have no usable row: a
@@ -41,6 +42,7 @@ import {
     log,
     sleep,
 } from './caramel-base.js'
+import { _caramelResetDiscoveryOn } from './coupon-box-finder-loader.js'
 import {
     _isVisible,
     caramelFindMoney,
@@ -2188,23 +2190,6 @@ function readableTotal(el) {
     return caramelFindMoney(el.innerText || '').length > 0
 }
 
-/* Is the finder switched on? The background answers from its cached features
- * read; any failure to ask is answered as off. Asked once per page. */
-let _discoveryOn = null
-// Called from coupon-runner.js and store-detect.js.
-export function caramelCouponBoxDiscoveryOn() {
-    if (!_discoveryOn)
-        _discoveryOn = caramelSendMessage({
-            action: 'couponBoxDiscoveryEnabled',
-        })
-            .then(resp => resp?.enabled === true)
-            .catch(e => {
-                log('FINDER_FLAG_UNREADABLE', { error: String(e) })
-                return false
-            })
-    return _discoveryOn
-}
-
 /* May the finder ask the server to pick a box the rules missed? Read the same
  * way, from the couponBoxLlm flag: any failure to ask is off. */
 let _llmOn = null
@@ -2221,7 +2206,7 @@ function caramelCouponBoxLlmOn() {
 
 // Test seam: forget the per-page answers.
 export function _caramelResetDiscoveryFlag() {
-    _discoveryOn = null
+    _caramelResetDiscoveryOn()
     _llmOn = null
     _pickAsked.clear()
 }

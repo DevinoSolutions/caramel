@@ -80,7 +80,12 @@ module.exports = [
         // and never clicks "Next", "Proceed" or an orders link on the
         // server's word (the server's never-click list, byte for byte).
         // Measured 122.58 kB.
-        limit: '123 KB',
+        // 2026-10-17, lowered 123 -> 95.5 kB: the finder left this bundle. It
+        // ships as assets/coupon-box-finder.js (its own budget below) and is
+        // loaded only by a page that runs it; what stays is the flag read and
+        // the loader (coupon-box-finder-loader.js). Measured 122.58 -> 93.45
+        // kB, so the limit is measured + ~2 kB.
+        limit: '95.5 KB',
         brotli: false,
     },
     {
@@ -177,6 +182,17 @@ module.exports = [
         // box. About half of it is the word allowlist every name is filtered
         // through, which is data the server's eval was measured with.
         limit: '9.2 KB',
+        brotli: false,
+    },
+    {
+        name: 'coupon-box-finder.js (loaded on demand, minified)',
+        path: '.size-cache/coupon-box-finder.min.js',
+        // 2026-10-17 — measured 28.06 kB, built exactly as it ships
+        // (scripts/finder-bundle.mjs). Not injected on every page: the
+        // content script imports it only when the finder flag is on and the
+        // page has no box a config describes. The nine-language vocabularies
+        // and the field, button, toggle and total-row readers are most of it.
+        limit: '29 KB',
         brotli: false,
     },
     {

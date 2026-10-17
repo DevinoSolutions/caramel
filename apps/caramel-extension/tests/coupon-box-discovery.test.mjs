@@ -20,6 +20,7 @@ import {
     tryInitialize,
 } from '../store-detect.js'
 import { EXT_ROOT } from './_entry-modules.mjs'
+import { finderOnlyGetURL } from './_finder-asset.mjs'
 
 // The promo-box finder: when no config describes a store's promo box, it reads
 // the page the way a shopper does. These pin three things:
@@ -108,6 +109,7 @@ function installChromeStub() {
         }
     }
     stub.runtime.lastError = undefined
+    stub.runtime.getURL = finderOnlyGetURL
     stub.runtime.sendMessage = (message, cb) => {
         if (flagReadThrows && message?.action === 'couponBoxDiscoveryEnabled')
             throw new Error('Extension context invalidated')

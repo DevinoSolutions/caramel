@@ -11,12 +11,14 @@ import {
 } from 'vitest'
 import { initCaramelBase } from '../caramel-base.js'
 import { _caramelResetDiscoveryFlag } from '../coupon-box-discovery.js'
+import { _caramelResetFinderLoad } from '../coupon-box-finder-loader.js'
 import { startApplyingCoupons } from '../coupon-runner.js'
 import {
     _caramelResetCachedCodes,
     getDomainRecord,
     tryInitialize,
 } from '../store-detect.js'
+import { FINDER_ASSET, FINDER_FILE } from './_finder-asset.mjs'
 
 // The promo-box finder and the server's pick are switched by two server flags,
 // couponBoxDiscovery and couponBoxLlm. Both exist for stores we have NO usable
@@ -131,13 +133,14 @@ function installChromeStub() {
         }
     }
     stub.runtime.lastError = undefined
-    // The outline builder is loaded from the extension's own URL; map it onto
-    // the source file so a page that does ask really sends its outline.
+    // The outline builder and the finder are loaded from the extension's own
+    // URL; map them onto their source files so a page that does load them
+    // really runs them.
     stub.runtime.getURL = path => {
         trace.urls.push(path)
-        return path === 'assets/coupon-box-outline.js'
-            ? OUTLINE_FILE
-            : 'chrome-extension://caramel/' + path
+        if (path === 'assets/coupon-box-outline.js') return OUTLINE_FILE
+        if (path === FINDER_ASSET) return FINDER_FILE
+        return 'chrome-extension://caramel/' + path
     }
     stub.runtime.sendMessage = (message, cb) => {
         const { action, ...rest } = message || {}
@@ -270,6 +273,7 @@ async function shopperVisits({ html, answer, config, details = false }) {
     getDomainRecord.cache = null
     _caramelResetCachedCodes()
     _caramelResetDiscoveryFlag()
+    _caramelResetFinderLoad()
     sessionStorage.clear()
     window.history.replaceState({}, '', '/checkout/cart/')
     rec = config
@@ -356,10 +360,12 @@ describe('a configured store whose box the shopper can reach', () => {
             for (const run of runs) {
                 expect(run).toEqual(off)
                 // Not merely the same outcome: the flags were never asked,
-                // no outline was loaded, nothing was marked as found.
+                // neither the finder nor the outline was loaded, nothing was
+                // marked as found.
                 expect(asked(run, 'couponBoxDiscoveryEnabled')).toEqual([])
                 expect(asked(run, 'couponBoxLlmEnabled')).toEqual([])
                 expect(asked(run, 'couponBoxPick')).toEqual([])
+                expect(run.urls).not.toContain(FINDER_ASSET)
                 expect(run.urls).not.toContain('assets/coupon-box-outline.js')
                 expect(run.found).toBe(0)
             }
@@ -427,9 +433,11 @@ describe('where the promise ends today: a configured store whose selectors match
         // The list was read: this record is its row for this store.
         getDomainRecord.cache = [rec]
         _caramelResetDiscoveryFlag()
+        _caramelResetFinderLoad()
         sessionStorage.clear()
         await startApplyingCoupons(rec)
         expect(asked(trace, 'couponBoxPick')).toEqual([])
+        expect(trace.urls).not.toContain(FINDER_ASSET)
         expect(trace.urls).not.toContain('assets/coupon-box-outline.js')
         expect(trace.modals.at(-1).message).toMatch(
             /couldn't find the promo box/,
@@ -451,9 +459,11 @@ describe('where the promise ends today: a configured store whose selectors match
         // The list was read: this record is its row for this store.
         getDomainRecord.cache = [rec]
         _caramelResetDiscoveryFlag()
+        _caramelResetFinderLoad()
         sessionStorage.clear()
         await startApplyingCoupons(rec)
         expect(asked(trace, 'couponBoxPick')).toHaveLength(1)
+        expect(trace.urls.filter(u => u === FINDER_ASSET)).toHaveLength(1)
         // A "no box" answer still ends exactly where flags-off did.
         expect(trace.modals.at(-1).message).toMatch(
             /couldn't find the promo box/,
@@ -512,6 +522,7 @@ describe('a stale config with the finder on: deliberate behaviour, pinned', () =
         getDomainRecord.cache = []
         _caramelResetCachedCodes()
         _caramelResetDiscoveryFlag()
+        _caramelResetFinderLoad()
         sessionStorage.clear()
         window.history.replaceState({}, '', '/checkout/cart/')
         document.body.innerHTML = PAGE
