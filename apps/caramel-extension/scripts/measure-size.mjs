@@ -63,10 +63,15 @@ export const GROUPS = {
         'cart-signals.js',
         'caramel-base.js',
         'dom-utils.js',
+        'coupon-box-discovery.js',
+        'extension-capabilities.js',
         'store-detect.js',
         'coupon-apply.js',
         'code-capture.js',
         'coupon-fetch.js',
+        // Install attribution: bundled into the background, popup and content
+        // realms alike, weighed once here (it is imported by coupon-runner.js).
+        'install-attribution.js',
         'coupon-runner.js',
         'UI-helpers.js',
         'inject.js',
@@ -87,6 +92,14 @@ export const GROUPS = {
         ...(await tsSourcesUnder('../../packages/caramel-ui/src')),
     ],
     background: ['background.js'],
+    // Not injected: the build ships it as assets/coupon-box-outline.js and the
+    // finder imports it only when it is about to ask the server for a box
+    // (wxt.config.ts). Its own budget, so it can neither hide in nor inflate
+    // the per-page one.
+    'coupon-box-outline': ['coupon-box-outline.js'],
+    // Injected only on porkbun.com/checkout/* (entrypoints/porkbun-alert.content.ts,
+    // MAIN world), so it neither hides in nor inflates the per-page budget.
+    'porkbun-alert': ['extension-capabilities.js', 'porkbun-alert-shim.js'],
 }
 
 /** Minified bytes of one group, written as a single file for size-limit. */

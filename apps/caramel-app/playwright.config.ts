@@ -83,9 +83,15 @@ export default defineConfig({
                   // value in its own process.env for the Query API calls. The
                   // dataset switches (POSTHOG_DATASET / NEXT_PUBLIC_POSTHOG_*)
                   // are inherited from the parent env unchanged.
+                  // The paid-fallback vars are blanked too, so a key in a shell
+                  // can never make an e2e run spend on paid OpenRouter (pinned
+                  // by tests/unit/paid-fallback-settings-never-reach-evals-or-e2e-and-bad-ones-refuse-boot.test.ts).
                   env: {
                       POSTHOG_E2E_TEST_PROJECT_QUERY_READ_ONLY_PERSONAL_API_KEY:
                           '',
+                      OPENROUTER_FALLBACK_API_KEY: '',
+                      OPENROUTER_FALLBACK_MODEL: '',
+                      OPENROUTER_FALLBACK_AFTER_SECONDS: '',
                   },
               },
           }

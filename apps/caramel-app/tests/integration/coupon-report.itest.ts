@@ -1,4 +1,5 @@
 import { POST } from '@/app/api/coupons/[id]/report/route'
+import { resetFailedReportDedupeForTests } from '@/lib/couponFailureReportDedupe'
 import prisma from '@/lib/prisma'
 import { NextRequest } from 'next/server'
 import {
@@ -69,10 +70,13 @@ async function insertCoupon(id: string) {
     })
 }
 
-function reportRequest(id: string, body: unknown) {
+function reportRequest(id: string, body: unknown, ip = '203.0.113.1') {
     return new NextRequest(`http://localhost/api/coupons/${id}/report`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: {
+            'content-type': 'application/json',
+            'cf-connecting-ip': ip,
+        },
         body: JSON.stringify(body),
     })
 }
@@ -92,6 +96,7 @@ async function cleanup() {
 }
 
 beforeEach(async () => {
+    resetFailedReportDedupeForTests()
     await cleanup()
     const user = await prisma.user.create({ data: { email: USER_EMAIL } })
     userId = user.id
@@ -130,17 +135,32 @@ describe('POST /api/coupons/[id]/report — attribution against real pg :58005',
         expect(signal?.lastWorkedAt).toBeInstanceOf(Date)
     })
 
-    it('a same-day repeat adds no second row but DOES bump the aggregate again', async () => {
-        await POST(reportRequest(KNOWN_ID, { outcome: 'failed' }))
-        const res = await POST(reportRequest(KNOWN_ID, { outcome: 'failed' }))
-        expect(res.status).toBe(200)
+    it('a same-day repeat adds no second row and no second failure (the signed-in dedupe is per USER, whatever the IP); an anonymous report still counts once per IP', async () => {
+        await POST(
+            reportRequest(KNOWN_ID, { outcome: 'failed' }, '203.0.113.1'),
+        )
+        for (const ip of ['203.0.113.1', '203.0.113.2']) {
+            const repeat = await POST(
+                reportRequest(KNOWN_ID, { outcome: 'failed' }, ip),
+            )
+            expect(repeat.status).toBe(200)
+            expect(await repeat.json()).toEqual({ ok: true, deduped: true })
+        }
+
+        // An anonymous caller behind the same IP is a different reporter.
+        getSessionMock.mockImplementation(async () => null)
+        const anonymous = await POST(
+            reportRequest(KNOWN_ID, { outcome: 'failed' }, '203.0.113.1'),
+        )
+        expect(await anonymous.json()).toEqual({ ok: true })
+        const anonymousAgain = await POST(
+            reportRequest(KNOWN_ID, { outcome: 'failed' }, '203.0.113.1'),
+        )
+        expect(await anonymousAgain.json()).toEqual({ ok: true, deduped: true })
 
         expect(
             await prisma.couponReport.count({ where: { couponId: KNOWN_ID } }),
         ).toBe(1)
-        // Repeat ANONYMOUS reports have always each bumped failCount; the
-        // signed-in path matches that rather than silently weakening the
-        // aggregate for users who sign in.
         const signal = await prisma.couponSignal.findUnique({
             where: { couponId: KNOWN_ID },
         })

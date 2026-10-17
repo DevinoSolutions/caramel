@@ -2,6 +2,7 @@
 
 import InstallSurfaceGate from '@/components/growth/InstallSurfaceGate'
 import Loader from '@/components/Loader'
+import { trackGrowthEvent } from '@/lib/analytics/growthEvents'
 import { promptSupportOnFailure } from '@/lib/feedback/promptSupportOnFailure'
 import { storeLogoUrl } from '@/lib/storeLogo'
 import type { Coupon, CouponFilters } from '@/types/coupon'
@@ -9,12 +10,13 @@ import { MagnifyingGlassIcon } from '@heroicons/react/24/outline'
 import { AnimatePresence, motion } from 'framer-motion'
 import Image from 'next/image'
 import Link from 'next/link'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FaChrome, FaEdge, FaFirefox, FaSafari } from 'react-icons/fa'
 import InfiniteScroll from 'react-infinite-scroll-component'
 import { toast } from 'sonner'
 import CouponCard from './coupon-card'
 import CouponFiltersComponent from './coupon-filters'
+import FailingCodesDisclosure from './FailingCodesDisclosure'
 // Tabs temporarily hidden until backed by data
 // import CouponTabs from './coupon-tabs'
 
@@ -94,6 +96,37 @@ export default function CouponsSection({
     useEffect(() => {
         couponsLengthRef.current = coupons.length
     }, [coupons.length])
+
+    // Codes shoppers keep reporting as not working (coupons.ts keepsFailing,
+    // flagged server-side) are collapsed behind a disclosure at the END of a
+    // STORE's list instead of mixed into it (DESIGN.md §2(q)). Only a store-
+    // scoped list is ordered so they form its tail (couponsRepo
+    // storeRankingOrderSql); the site-less browse list keeps them in place.
+    //
+    // The collapsed codes loaded so far are ALWAYS rendered (inside the
+    // disclosure's hidden region, so they are in the server HTML too); while more
+    // pages remain its count reads "N+", exact once the last page is in. "Load
+    // more" runs off the unchanged `coupons`/`hasMore` state.
+    //
+    // Deduped by id first (first occurrence wins): the order depends on signals
+    // that can change between two page fetches, so a row can come back on page 2
+    // after page 1 already had it. That would duplicate a card and a React key.
+    const groupFailing = filters.site.trim() !== ''
+    const { mainCoupons, failingCoupons } = useMemo(() => {
+        const seen = new Set<string>()
+        const unique = coupons.filter(coupon => {
+            if (seen.has(coupon.id)) return false
+            seen.add(coupon.id)
+            return true
+        })
+        if (!groupFailing) {
+            return { mainCoupons: unique, failingCoupons: [] as Coupon[] }
+        }
+        return {
+            mainCoupons: unique.filter(coupon => !coupon.keepsFailing),
+            failingCoupons: unique.filter(coupon => coupon.keepsFailing),
+        }
+    }, [coupons, groupFailing])
 
     // Prefetch filter metadata (stores and discount types)
     useEffect(() => {
@@ -377,7 +410,7 @@ export default function CouponsSection({
                                     mode="popLayout"
                                     initial={false}
                                 >
-                                    {coupons.map((coupon, index) => (
+                                    {mainCoupons.map((coupon, index) => (
                                         <CouponCard
                                             key={`${coupon.id}-${index}`}
                                             coupon={coupon}
@@ -386,6 +419,14 @@ export default function CouponsSection({
                                     ))}
                                 </AnimatePresence>
                             </div>
+                            <FailingCodesDisclosure
+                                coupons={failingCoupons}
+                                startIndex={mainCoupons.length}
+                                moreToLoad={hasMore}
+                                allFlagged={
+                                    !hasMore && mainCoupons.length === 0
+                                }
+                            />
                             {isLoadingMore && hasMore ? (
                                 <div className="flex justify-center py-6">
                                     <Loader label="Loading more coupons..." />
@@ -463,6 +504,16 @@ export default function CouponsSection({
                                         href={browser.href}
                                         target="_blank"
                                         rel="noopener noreferrer"
+                                        onClick={() =>
+                                            trackGrowthEvent(
+                                                'install_cta_click',
+                                                {
+                                                    store: browser.name.toLowerCase(),
+                                                    placement:
+                                                        'coupons_section',
+                                                },
+                                            )
+                                        }
                                         className="inline-flex items-center gap-2 rounded-full bg-gray-50 px-6 py-3 text-center shadow-sm transition hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 dark:bg-white/5 dark:hover:bg-white/10 dark:focus-visible:ring-offset-darkSurface"
                                     >
                                         {browser.icon}

@@ -269,3 +269,89 @@ export function couponBadge(
     }
     return catalogMeta ? { ...catalogMeta, provenByRecentWork: false } : null
 }
+
+// ---------------------------------------------------------------------------
+// Recently-failing codes: SINK, never hide.
+//
+// The extension reports every auto-apply outcome (POST /api/coupons/[id]/report
+// → coupon_signals). A code that keeps failing is moved BELOW the codes that
+// are not, on store pages and in the store-scoped /api/coupons list the popup
+// reads. It stays listed: these are shopper/extension reports, not verification,
+// and anonymous reports are cheap to forge, so they may reorder but never remove
+// a code or change its status. A single later success resets it (the failure is
+// no longer newer than the last success). The window and the minimum count are
+// the ONLY definition; couponsRepo.failingSinkSql() composes the same numbers
+// into the ORDER BY, so SQL ordering and the card's hint cannot disagree.
+//
+// A code that KEEPS failing (keepsFailing, below) is collapsed by the store page
+// and the popup into a "reported not working" group at the end of the list. That
+// is still presentation only: the code is in the response and in the HTML, and
+// one later success un-collapses it.
+
+/** Failures needed before a code sinks: one failed attempt is noise (a flaky checkout, a minimum-spend miss). */
+export const FAILING_MIN_FAIL_COUNT = 2
+
+/** A failure older than this no longer counts: codes get fixed and stores change. */
+export const FAILING_WINDOW_DAYS = 30
+
+/** FAILING_WINDOW_DAYS in milliseconds. */
+export const FAILING_WINDOW_MS = FAILING_WINDOW_DAYS * 24 * 60 * 60 * 1000
+
+/** The coupon_signals fields isRecentlyFailing reads (attachSignals' output shape). */
+export type FailureSignal = {
+    failCount?: number | null
+    lastFailedAt?: string | Date | null
+    lastWorkedAt?: string | Date | null
+}
+
+function timestampMs(value: string | Date | null | undefined): number | null {
+    if (!value) return null
+    const ms = typeof value === 'string' ? Date.parse(value) : value.getTime()
+    return Number.isNaN(ms) ? null : ms
+}
+
+/**
+ * True when shoppers/the extension have reported this code failing repeatedly
+ * and recently: at least FAILING_MIN_FAIL_COUNT failures in total, the latest
+ * one within FAILING_WINDOW_MS, and no success reported since that latest
+ * failure (a success at or after it resets the code). Pure: absent or
+ * unparseable timestamps mean "no signal", never "failing".
+ */
+export function isRecentlyFailing(
+    signal: FailureSignal,
+    now: number = Date.now(),
+): boolean {
+    if ((signal.failCount ?? 0) < FAILING_MIN_FAIL_COUNT) return false
+    const failedAge = workedAgeMs(signal.lastFailedAt, now)
+    if (failedAge === null || failedAge > FAILING_WINDOW_MS) return false
+    const failedAt = timestampMs(signal.lastFailedAt)
+    const workedAt = timestampMs(signal.lastWorkedAt)
+    return failedAt !== null && (workedAt === null || failedAt > workedAt)
+}
+
+/**
+ * Failures needed before a code is COLLAPSED (not merely sunk): a third report
+ * on top of the two that sink it. Higher than FAILING_MIN_FAIL_COUNT because
+ * collapsing is the stronger presentation, and one forged pair of anonymous
+ * reports must not be enough to tuck a code away.
+ */
+export const KEEPS_FAILING_MIN_FAIL_COUNT = 3
+
+/**
+ * True when a code is recently failing (isRecentlyFailing: window and
+ * no-success-since rules included) AND has at least
+ * KEEPS_FAILING_MIN_FAIL_COUNT failures. The web store page and the extension
+ * popup collapse these behind a "N codes reported not working" disclosure. It
+ * is a presentation flag over shopper/extension reports: it never changes a
+ * catalog status, and one later success clears it (the failure is no longer
+ * newer than the last success).
+ */
+export function keepsFailing(
+    signal: FailureSignal,
+    now: number = Date.now(),
+): boolean {
+    return (
+        isRecentlyFailing(signal, now) &&
+        (signal.failCount ?? 0) >= KEEPS_FAILING_MIN_FAIL_COUNT
+    )
+}

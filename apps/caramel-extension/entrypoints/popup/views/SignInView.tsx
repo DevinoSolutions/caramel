@@ -4,7 +4,6 @@ import {
     afterLoginSuccess,
     caramelUrl,
     openWebsiteSignIn,
-    runSafariSocialSignIn,
     runSocialSignIn,
     signInStrategy,
 } from '../../../popup-core.js'
@@ -20,11 +19,12 @@ import type { AppApi } from '../types'
  * unavailable), the clicked one reads 'Redirecting...', and onError restores
  * both.
  *
- * WHICH wire runs is popup-core's signInStrategy(), and all three branches are
- * live: 'identity' (Chrome/Edge, launchWebAuthFlow in-popup), 'safari-poll'
- * (Safari, the tab + nonce poll shim — Safari has no launchWebAuthFlow), and
- * 'website' (Firefox, which ships no identity permission by design). Collapsing
- * Safari back into 'website' is the regression popup-oauth-safari-poll guards.
+ * WHICH wire runs is popup-core's signInStrategy(): 'identity' (Chrome/Edge,
+ * launchWebAuthFlow in-popup) or 'website' (Firefox AND Safari — neither can
+ * capture an in-popup OAuth redirect, so sign-in happens on grabcaramel.com
+ * with the provider preselected and the session relay carries it back). Safari
+ * previously had its own nonce + /poll shim; it was removed (2026-10) so a
+ * sign-in result is only ever delivered inside the user's own browser.
  *
  * Email login has no popup-core seam on purpose — it is a plain form POST with
  * no browser-API choreography to extract. Its copy is frozen by
@@ -45,39 +45,32 @@ export function SignInView({ api }: { api: AppApi }) {
     const [revealed, setRevealed] = useState(false)
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
-    // Safari's flow continues in another tab, so it has something to SAY while
-    // it waits. The other two strategies never set this.
-    const [notice, setNotice] = useState('')
 
-    // Read at paint AND again at click: the note explains the fallback the
-    // buttons will actually take.
+    // Read at paint AND again at click: the note explains where the buttons
+    // actually take the user (in-popup on Chrome/Edge, a website tab elsewhere).
     const strategy = signInStrategy()
 
     const signInWith = (provider: Provider) => {
-        // Firefox: no in-popup OAuth at all, and no poll shim either — the
-        // website relay is the whole flow, so there is no wire to run.
+        // Firefox AND Safari: no in-popup OAuth, so sign-in happens on the
+        // website with the provider preselected, and the content-script relay
+        // hands the session back to the extension. The clicked provider is
+        // forwarded so the tab goes straight to Google/Apple with no extra tap.
         if (signInStrategy() === 'website') {
-            openWebsiteSignIn()
+            openWebsiteSignIn(provider)
             return
         }
         const ui = {
             onPending: () => {
                 setPending(provider)
                 setError('')
-                setNotice('')
             },
             onError: (message: string) => {
                 setPending(null)
                 setError(message)
-                setNotice('')
             },
-            onNotice: (message: string) => setNotice(message),
         }
-        // Safari cannot capture an OAuth redirect (no launchWebAuthFlow), so it
-        // takes the tab + nonce poll shim instead of the identity wire.
-        void (signInStrategy() === 'safari-poll'
-            ? runSafariSocialSignIn(provider, ui)
-            : runSocialSignIn(provider, ui))
+        // Chrome/Edge: identity.launchWebAuthFlow, captured in the popup.
+        void runSocialSignIn(provider, ui)
     }
 
     const handleEmailLogin = async (event: FormEvent<HTMLFormElement>) => {
@@ -190,14 +183,6 @@ export function SignInView({ api }: { api: AppApi }) {
                 <p className="oauth-note">
                     Sign-in opens grabcaramel.com; the extension picks it up
                     automatically.
-                </p>
-            )}
-
-            {/* Safari's flow leaves the popup; role=status so a screen reader
-                hears where the sign-in went. */}
-            {notice && (
-                <p className="oauth-note" role="status">
-                    {notice}
                 </p>
             )}
 

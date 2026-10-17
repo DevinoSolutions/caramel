@@ -3,7 +3,7 @@
 import { socialButtonClasses } from '@/components/auth/authStyles'
 import { trackGrowthEvent } from '@/lib/analytics/growthEvents'
 import { signIn } from '@/lib/auth/client'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { FaApple } from 'react-icons/fa'
 import { FcGoogle } from 'react-icons/fc'
 import { toast } from 'sonner'
@@ -30,9 +30,15 @@ const PROVIDER_LABEL: Record<Provider, string> = {
 export default function SocialSignIn({
     verb = 'Sign in',
     callbackURL = '/',
+    autoStart,
 }: {
     verb?: 'Sign in' | 'Sign up'
     callbackURL?: string
+    // When set, immediately launch that provider on mount, as if the matching
+    // button were clicked. This is the extension deep-link: Safari/Firefox open
+    // /login?provider=apple in a tab so the sign-in goes straight to the
+    // provider with no extra tap. Only the two real providers are honored.
+    autoStart?: Provider
 }) {
     const [pending, setPending] = useState<Provider | null>(null)
 
@@ -60,6 +66,17 @@ export default function SocialSignIn({
             setPending(null)
         }
     }
+
+    // Fire the deep-linked provider exactly once. A ref, not state: React 18
+    // StrictMode double-invokes effects in dev, and signIn.social kicks off a
+    // navigation we must not start twice.
+    const autoStarted = useRef(false)
+    useEffect(() => {
+        if (autoStart && !autoStarted.current) {
+            autoStarted.current = true
+            void handle(autoStart)
+        }
+    }, [autoStart])
 
     return (
         <div className="space-y-3">

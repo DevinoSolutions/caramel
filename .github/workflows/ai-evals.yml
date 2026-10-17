@@ -1,7 +1,9 @@
-name: AI Evals – Cart Classifier
+name: AI Evals
 
-# F-012 — standing eval gate for the repo's only LLM surface (cartClassifier
-# -> openrouter -> /api/classify-cart). Mirrors checks-app.yml's setup
+# F-012 — standing eval gates for the app's LLM surfaces: the cart classifier
+# (cartClassifier -> openrouter -> /api/classify-cart) and the coupon-box pick
+# (couponBoxPick -> openrouter -> /api/extension/coupon-box-pick), one job
+# each. Mirrors checks-app.yml's setup
 # steps and coupons-schema-drift.yml's loud-secret-check convention (no
 # silent skip when a required secret is missing — see PLAN-F-012.md).
 #
@@ -17,9 +19,13 @@ on:
     branches: [main, dev, audit/dev-2026-07-10]
     paths:
       - 'apps/caramel-app/src/lib/cartClassifier.ts'
+      - 'apps/caramel-app/src/lib/couponBoxPick.ts'
+      - 'apps/caramel-app/src/lib/llmJson.ts'
+      - 'apps/caramel-app/src/lib/ttlLruCache.ts'
       - 'apps/caramel-app/src/lib/openrouter.ts'
       - 'apps/caramel-app/src/lib/env.ts'
       - 'apps/caramel-app/src/app/api/classify-cart/**'
+      - 'apps/caramel-app/src/app/api/extension/coupon-box-pick/**'
       - 'apps/caramel-app/evals/**'
       - 'apps/caramel-app/vitest.eval.config.ts'
       - 'apps/caramel-app/package.json'
@@ -121,7 +127,7 @@ jobs:
         # failure mode F-012 exists to catch). The optional repo variable
         # above exists only so CI can follow a deploy that pins its model by
         # env (the Devino proxy switch); set it to the same pin as prod.
-        run: pnpm exec vitest run --config vitest.eval.config.ts | tee eval-report.txt
+        run: pnpm exec vitest run --config vitest.eval.config.ts evals/cartClassifier.eval.ts | tee eval-report.txt
 
       - name: Upload eval report
         if: ${{ !cancelled() }}
@@ -131,9 +137,85 @@ jobs:
           path: apps/caramel-app/eval-report.txt
           retention-days: 14
 
+  eval-coupon-box-pick:
+    name: Coupon box pick eval
+    runs-on: ubuntu-latest
+    # Same reason as the cart job: the artifact upload authenticates with a
+    # GitHub OIDC token; a job-level block replaces the workflow-level one.
+    permissions:
+      id-token: write
+      contents: read
+    # 51 sequential live calls (~4 min measured) inside one vitest run.
+    timeout-minutes: 20
+    if: |
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The same key, base and loud-check convention as the cart job, plus
+      # the model under test. COUPON_BOX_PICK_MODEL has no code default on
+      # purpose (src/lib/env.ts), so the repo VARIABLE is required here: an
+      # unset one fails this step by name instead of the suite failing with
+      # no model. Set it to the same model id the deploy pins.
+      - name: Verify OPENROUTER_API_KEY secret and COUPON_BOX_PICK_MODEL variable
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          VAR_COUPON_BOX_PICK_MODEL: ${{ vars.COUPON_BOX_PICK_MODEL }}
+        run: |
+          if [ -z "$OPENROUTER_API_KEY" ]; then
+            echo "::error::OPENROUTER_API_KEY secret is not set on this repository. Add it under Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+          if [ -z "$VAR_COUPON_BOX_PICK_MODEL" ]; then
+            echo "::error::COUPON_BOX_PICK_MODEL repository variable is not set. Add it under Settings -> Secrets and variables -> Actions -> Variables (the model id the deploy pins)."
+            exit 1
+          fi
+          echo "COUPON_BOX_PICK_MODEL=$VAR_COUPON_BOX_PICK_MODEL" >> "$GITHUB_ENV"
+          echo "Eval model: $VAR_COUPON_BOX_PICK_MODEL (repo variable)"
+
+      - name: Apply optional OPENROUTER_API_URL repo variable
+        env:
+          VAR_OPENROUTER_API_URL: ${{ vars.OPENROUTER_API_URL }}
+        run: |
+          if [ -n "$VAR_OPENROUTER_API_URL" ]; then
+            echo "OPENROUTER_API_URL=$VAR_OPENROUTER_API_URL" >> "$GITHUB_ENV"
+            echo "Eval base: $VAR_OPENROUTER_API_URL (repo variable)"
+          else
+            echo "Eval base: env.ts default (OpenRouter)"
+          fi
+
+      - name: Run coupon-box pick evals
+        working-directory: ./apps/caramel-app
+        shell: bash
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: pnpm exec vitest run --config vitest.eval.config.ts --silent=false --reporter=verbose evals/couponBoxPick.eval.ts | tee eval-report.txt
+
+      - name: Upload eval report
+        if: ${{ !cancelled() }}
+        uses: DevinoSolutions/artifact/upload@v1
+        with:
+          name: coupon-box-pick-eval-report
+          path: apps/caramel-app/eval-report.txt
+          retention-days: 14
+
   notify-on-nightly-failure:
     name: Open issue on nightly failure
-    needs: eval
+    needs: [eval, eval-coupon-box-pick]
     if: failure() && github.event_name == 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -152,5 +234,5 @@ jobs:
         run: |
           gh issue create \
             --repo "${{ github.repository }}" \
-            --title "Nightly AI eval failed: cart classifier ($(date -u +%F))" \
-            --body "The nightly cart-classifier eval run failed on $(date -u +%F' '%T' UTC'). This can mean the OpenRouter model degraded/drifted, the OPENROUTER_API_KEY secret expired or was revoked, or a real regression landed in cartClassifier/openrouter. See the failed run: $RUN_URL"
+            --title "Nightly AI eval failed ($(date -u +%F))" \
+            --body "A nightly AI eval run (cart classifier and/or coupon-box pick) failed on $(date -u +%F' '%T' UTC'). This can mean a model degraded/drifted, the OPENROUTER_API_KEY secret expired or was revoked, a repo variable is missing, or a real regression landed in cartClassifier/couponBoxPick/openrouter. The run shows which job failed: $RUN_URL"

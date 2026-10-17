@@ -191,6 +191,100 @@ describe('parseServerEnv', () => {
         ).toThrow(/SHOPPER_CODE_CAPTURE_ENABLED/)
     })
 
+    it('(h) COUPON_BOX_DISCOVERY_ENABLED is a boolean defaulting to false, and a typo fails boot', () => {
+        expect(
+            parseServerEnv(validServerFixture).COUPON_BOX_DISCOVERY_ENABLED,
+        ).toBe(false)
+        expect(
+            parseServerEnv({
+                ...validServerFixture,
+                COUPON_BOX_DISCOVERY_ENABLED: 'true',
+            }).COUPON_BOX_DISCOVERY_ENABLED,
+        ).toBe(true)
+        expect(() =>
+            parseServerEnv({
+                ...validServerFixture,
+                COUPON_BOX_DISCOVERY_ENABLED: 'on',
+            }),
+        ).toThrow(/COUPON_BOX_DISCOVERY_ENABLED/)
+    })
+
+    it('COUPON_BOX_LLM_ENABLED is a strict boolean (default off) and a typo fails boot', () => {
+        expect(parseServerEnv(validServerFixture).COUPON_BOX_LLM_ENABLED).toBe(
+            false,
+        )
+        expect(
+            parseServerEnv({
+                ...validServerFixture,
+                COUPON_BOX_LLM_ENABLED: 'true',
+            }).COUPON_BOX_LLM_ENABLED,
+        ).toBe(true)
+        expect(() =>
+            parseServerEnv({
+                ...validServerFixture,
+                COUPON_BOX_LLM_ENABLED: 'yes',
+            }),
+        ).toThrow(/COUPON_BOX_LLM_ENABLED/)
+    })
+
+    it('COUPON_BOX_PICK_MODEL has no default: unset or blank reads as not configured', () => {
+        expect(
+            parseServerEnv(validServerFixture).COUPON_BOX_PICK_MODEL,
+        ).toBeUndefined()
+        expect(
+            parseServerEnv({
+                ...validServerFixture,
+                COUPON_BOX_PICK_MODEL: '  ',
+            }).COUPON_BOX_PICK_MODEL,
+        ).toBeUndefined()
+        expect(
+            parseServerEnv({
+                ...validServerFixture,
+                COUPON_BOX_PICK_MODEL: ' openai/gpt-oss-20b ',
+            }).COUPON_BOX_PICK_MODEL,
+        ).toBe('openai/gpt-oss-20b')
+    })
+
+    it('COUPON_BOX_PICK_DAILY_CAP defaults to 2000, accepts 0 (kill switch) and any non-negative integer', () => {
+        expect(
+            parseServerEnv(validServerFixture).COUPON_BOX_PICK_DAILY_CAP,
+        ).toBe(2000)
+        for (const [raw, expected] of [
+            ['0', 0],
+            ['500', 500],
+            [' 75 ', 75],
+        ] as const) {
+            expect(
+                parseServerEnv({
+                    ...validServerFixture,
+                    COUPON_BOX_PICK_DAILY_CAP: raw,
+                }).COUPON_BOX_PICK_DAILY_CAP,
+            ).toBe(expected)
+        }
+    })
+
+    it('COUPON_BOX_PICK_DAILY_CAP blank reads as unset (never as 0, which would silently kill the feature)', () => {
+        for (const blank of ['', '   ']) {
+            expect(
+                parseServerEnv({
+                    ...validServerFixture,
+                    COUPON_BOX_PICK_DAILY_CAP: blank,
+                }).COUPON_BOX_PICK_DAILY_CAP,
+            ).toBe(2000)
+        }
+    })
+
+    it('COUPON_BOX_PICK_DAILY_CAP rejects a negative, fractional or non-numeric value at boot, naming the variable', () => {
+        for (const bad of ['-1', '1.5', 'many']) {
+            expect(() =>
+                parseServerEnv({
+                    ...validServerFixture,
+                    COUPON_BOX_PICK_DAILY_CAP: bad,
+                }),
+            ).toThrow(/COUPON_BOX_PICK_DAILY_CAP/)
+        }
+    })
+
     it('(g) the Playwright/CI-only read key present in app env throws (key hygiene)', () => {
         expect(() =>
             parseServerEnv({

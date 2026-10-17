@@ -286,7 +286,7 @@ describe('submitShopperCode — consent gate (owner rule 2026-10-06)', () => {
 })
 
 describe('submitShopperCode — the submit and its answers', () => {
-    it('flag on: POSTs {site, code, source:"checkout"} with the bearer', async () => {
+    it('flag on: POSTs {site, code, source:"checkout", consent} with the bearer', async () => {
         responses.push(
             features(true),
             ok({
@@ -310,9 +310,34 @@ describe('submitShopperCode — the submit and its answers', () => {
             site: 'ebay.com',
             code: 'SAVE10',
             source: 'checkout',
+            // The server's consent gate reads exactly this proof, taken from
+            // the stored record the local gate just accepted.
+            consent: {
+                choice: 'accepted',
+                promptVersion: 1,
+                at: '2026-10-06T12:00:00.000Z',
+            },
         })
         // The flag fetch is anonymous: nothing user-scoped in the answer.
         expect(featureCalls()[0].opts?.headers?.Authorization).toBeUndefined()
+    })
+
+    it('403 consent-required (the server refused our consent proof): a quiet skip that is NOT no-consent (that one re-opens the consent card), not an error', async () => {
+        responses.push(
+            features(true),
+            refused(403, { error: 'consent-required' }),
+        )
+
+        expect(await invoke(CAPTURE)).toEqual({ skipped: 'consent-rejected' })
+        expect(localData.caramel_bg_errors).toBeUndefined()
+    })
+
+    it('the consent proof is never sent for a non-accepted record (nothing is submitted at all)', async () => {
+        syncData[CONSENT_KEY] = consent('declined')
+        responses.push(features(true))
+
+        expect(await invoke(CAPTURE)).toEqual({ skipped: 'no-consent' })
+        expect(submitCalls()).toHaveLength(0)
     })
 
     it('403 capture-disabled: skipped, and the cached flag is dropped', async () => {
@@ -379,5 +404,70 @@ describe('submitShopperCode — the submit and its answers', () => {
         const resp = await invoke({ action: 'submitShopperCode', site: 1 })
 
         expect(resp.error).toMatch(/must be strings/)
+    })
+})
+
+describe('couponBoxDiscoveryEnabled — the promo-box finder switch', () => {
+    const ASK = { action: 'couponBoxDiscoveryEnabled' }
+
+    it('an app that predates the flag (no key) answers off', async () => {
+        responses.push(features(true))
+
+        expect(await invoke(ASK)).toEqual({ enabled: false })
+    })
+
+    it('the flag on answers on', async () => {
+        responses.push(
+            ok({ shopperCodeCapture: false, couponBoxDiscovery: true }),
+        )
+
+        expect(await invoke(ASK)).toEqual({ enabled: true })
+    })
+
+    it('anything but a literal true is off ("true" the string included)', async () => {
+        responses.push(
+            ok({ shopperCodeCapture: false, couponBoxDiscovery: 'true' }),
+        )
+
+        expect(await invoke(ASK)).toEqual({ enabled: false })
+    })
+
+    it('a failed features read answers off instead of an error', async () => {
+        responses.push(refused(500, null))
+
+        expect(await invoke(ASK)).toEqual({ enabled: false })
+    })
+
+    it('shares the one cached features read with shopper capture', async () => {
+        responses.push(
+            ok({ shopperCodeCapture: true, couponBoxDiscovery: true }),
+            ok({ couponId: 'c1', created: true, status: 'active' }),
+        )
+
+        expect(await invoke(ASK)).toEqual({ enabled: true })
+        await invoke(CAPTURE)
+        expect(featureCalls()).toHaveLength(1)
+        expect(sessionData.caramel_features.couponBoxDiscovery).toBe(true)
+    })
+
+    it('while the finder is on, the cache lives 30 minutes even with capture on (the kill switch)', async () => {
+        const t0 = 1_800_000_000_000
+        const now = vi.spyOn(Date, 'now')
+        now.mockReturnValue(t0)
+        responses.push(
+            ok({ shopperCodeCapture: true, couponBoxDiscovery: true }),
+            ok({ shopperCodeCapture: true, couponBoxDiscovery: false }),
+        )
+
+        expect(await invoke(ASK)).toEqual({ enabled: true })
+        now.mockReturnValue(t0 + 29 * 60 * 1000)
+        expect(await invoke(ASK)).toEqual({ enabled: true })
+        expect(featureCalls()).toHaveLength(1)
+
+        // 31 minutes on: the owner switched it off, and the extension sees it.
+        now.mockReturnValue(t0 + 31 * 60 * 1000)
+        expect(await invoke(ASK)).toEqual({ enabled: false })
+        expect(featureCalls()).toHaveLength(2)
+        now.mockRestore()
     })
 })

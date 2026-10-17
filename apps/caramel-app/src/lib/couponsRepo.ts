@@ -35,6 +35,9 @@
 // headers, `hasMore`/`active` computed fields, and auth/rate-limit/origin
 // gates all stay in the calling route (`withRoute` config + the route body).
 import {
+    FAILING_MIN_FAIL_COUNT,
+    FAILING_WINDOW_DAYS,
+    KEEPS_FAILING_MIN_FAIL_COUNT,
     RESTRICTED_COUPON_STATUSES,
     VISIBLE_COUPON_STATUSES,
 } from '@/lib/coupons'
@@ -115,6 +118,54 @@ const visibleCouponsWhere = () =>
 const rankingOrderSql = () => Prisma.sql`rating DESC, created_at DESC, id DESC`
 
 /**
+ * SQL twin of coupons.ts's isRecentlyFailing(): true for a coupon whose
+ * coupon_signals row holds at least FAILING_MIN_FAIL_COUNT failures, the latest
+ * within FAILING_WINDOW_DAYS and newer than the last success (or no success
+ * ever). The numbers come from coupons.ts, so the ordering and the card's hint
+ * cannot drift apart.
+ *
+ * A hashed uncorrelated `id IN (SELECT ...)`, not a JOIN: coupon_signals has
+ * only a few hundred rows (one per coupon an extension ever reported on), so
+ * the subquery is built once and probed per row, and joining would make the
+ * unqualified `created_at`/`updated_at` columns of the surrounding queries
+ * ambiguous. The window compares against UTC because Prisma writes these
+ * timestamp-WITHOUT-time-zone columns as UTC.
+ */
+const failingSinkSql = () => failingSignalIdsSql(FAILING_MIN_FAIL_COUNT)
+
+/**
+ * SQL twin of coupons.ts's keepsFailing(): the same predicate at
+ * KEEPS_FAILING_MIN_FAIL_COUNT. A subset of failingSinkSql(), used as the
+ * SECOND ORDER BY key so the codes the web page and the popup collapse are the
+ * very last rows of the list, behind the merely-failing ones: the collapsed
+ * group is then one contiguous tail, however the list is paginated.
+ */
+const keepsFailingSql = () => failingSignalIdsSql(KEEPS_FAILING_MIN_FAIL_COUNT)
+
+const failingSignalIdsSql = (minFailCount: number) => Prisma.sql`(id IN (
+    SELECT s.coupon_id FROM coupon_signals s
+    WHERE s.fail_count >= ${minFailCount}
+      AND s.last_failed_at > (NOW() AT TIME ZONE 'UTC') - (${FAILING_WINDOW_DAYS}::int * INTERVAL '1 day')
+      AND (s.last_worked_at IS NULL OR s.last_failed_at > s.last_worked_at)
+))`
+
+/**
+ * The order of ONE store's codes: recently-failing codes sink below the rest
+ * (false sorts first), and the keeps-failing ones (collapsed by the page and the
+ * popup) sink below those, each group in rankingOrderSql() order. Sunk, never
+ * hidden: the visibility predicate is untouched. It lives in SQL, not as a
+ * post-fetch sort, because these lists are paginated (store page: first 20, then
+ * /api/coupons pages) and a sort after the fetch could only reorder one page —
+ * a failing code on page 1 would still outrank a good one on page 2.
+ *
+ * Store-scoped reads only. A site-less listing (the /coupons browse/search
+ * page) keeps rankingOrderSql() alone: the extra key would force a sort over
+ * the whole catalog for a page nobody uses to apply codes.
+ */
+const storeRankingOrderSql = () =>
+    Prisma.sql`${failingSinkSql()} ASC, ${keepsFailingSql()} ASC, ${rankingOrderSql()}`
+
+/**
  * coupons/stats/route.ts's census predicate. Deliberately NOT
  * visibleCouponsWhere(): stats reports a trust census (total vs. expired)
  * among *verified* ('valid') coupons specifically, so it must INCLUDE
@@ -151,12 +202,25 @@ const likeLiteral = (typed: string) => typed.replace(/[\\%_]/g, '\\$&')
 
 /**
  * A coupon belongs to a store when its `site` IS the store or one of its
- * subdomains. The suffix is compared as text with `right()`, so every character
- * of the store matches only itself. The `site LIKE '%.' || store` this replaced
- * read `_` and `%` as wildcards: `a_cd.com` owned shop.abcd.com's codes. The
- * callers bind resolveStoreDomain output, which cannot hold either character,
- * so that was never reachable. This keeps it so without relying on the callers
- * (2026-09-27, fleet ILIKE sweep).
+ * subdomains: `site` equals the store, or ends in `'.' || store`. Every
+ * character of the store matches only itself. The `site LIKE '%.' || store`
+ * this replaced read `_` and `%` as wildcards: `a_cd.com` owned
+ * shop.abcd.com's codes. The callers bind resolveStoreDomain output, which
+ * cannot hold either character, so that was never reachable. This keeps it so
+ * without relying on the callers (2026-09-27, fleet ILIKE sweep).
+ *
+ * The suffix arm is a PREFIX match on the reversed text:
+ * `reverse(site) LIKE reverse('.' || store) || '%'`, with the store's LIKE
+ * metacharacters (`\`, `%`, `_`) escaped in SQL (so it holds for a column
+ * `store` too) and an explicit ESCAPE clause. That form is what
+ * coupons_site_reverse_idx (`reverse(site) text_pattern_ops`) can answer, so a
+ * bound store makes Postgres BitmapOr coupons_site_idx (exact) with that index
+ * (subdomains). The `right(site, length(store) + 1) = '.' || store` this
+ * replaced was equivalent but unsargable: the OR forced a Parallel Seq Scan
+ * over every coupon on every store read (prod, 2026-10-10: ~40-65 ms x2 per
+ * store page). A mere suffix never matches: `notebay.com` does not end in
+ * `.ebay.com`. tests/integration/coupons-store-index.itest.ts pins both the
+ * semantics and the index use.
  *
  * Case-sensitive on purpose: `site` is stored lowercase, callers lowercase the
  * store, and plain equality keeps using coupons_site_idx. It is the ONE copy of
@@ -168,8 +232,12 @@ const likeLiteral = (typed: string) => typed.replace(/[\\%_]/g, '\\$&')
 const onStoreSql = (
     store: string | Prisma.Sql,
     site: Prisma.Sql = Prisma.sql`site`,
-) =>
-    Prisma.sql`(${site} = ${store} OR right(${site}, length(${store}) + 1) = '.' || ${store})`
+) => {
+    // Backslash first, so the escapes added for % and _ are not re-escaped.
+    // The doubled backslashes below are JS escapes: the SQL sees one.
+    const escapedReversedSuffix = Prisma.sql`replace(replace(replace(reverse('.' || ${store}), '\\', '\\\\'), '%', '\\%'), '_', '\\_')`
+    return Prisma.sql`(${site} = ${store} OR reverse(${site}) LIKE ${escapedReversedSuffix} || '%' ESCAPE '\\')`
+}
 
 // ---------------------------------------------------------------------------
 // Reads
@@ -247,7 +315,7 @@ export async function listCoupons(
                    status, verification_message AS "verificationMessage"
             FROM coupons
             WHERE ${whereClause}
-            ORDER BY ${rankingOrderSql()}
+            ORDER BY ${baseSite ? storeRankingOrderSql() : rankingOrderSql()}
             LIMIT ${limit} OFFSET ${skip}
         `),
         prisma.$queryRaw(
@@ -312,7 +380,7 @@ export async function listStoreCoupons(
             FROM coupons
             WHERE ${visible}
               AND ${onStoreSql(base)}
-            ORDER BY ${rankingOrderSql()}
+            ORDER BY ${storeRankingOrderSql()}
             LIMIT ${limit}
         `),
         // One aggregate: the count every store page needs, plus the facts

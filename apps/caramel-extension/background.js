@@ -16,10 +16,22 @@
 // registration. What is left at module scope is inert declarations, so WXT can
 // import this file in Node at build time to read the entrypoint's options.
 import { CARAMEL_BASE_URL, CARAMEL_ENV } from './caramel-env.js'
+import { buildFunnelEvent } from './code-share-funnel.js'
 import {
     codeSharingAccepted,
+    codeSharingPromptVersion,
     readCodeSharingConsent,
 } from './code-sharing-consent.js'
+import { saveInstallId } from './install-attribution.js'
+import {
+    USAGE_DIAGNOSTICS_CONSENT_KEY,
+    deleteTelemetryId,
+    parseUsageDiagnosticsConsent,
+    readTelemetryId,
+    readUsageDiagnosticsConsent,
+    resolveUsageDiagnostics,
+    usageDiagnosticsAccepted,
+} from './usage-diagnostics-consent.js'
 
 // Assigned by initBackground() instead of at module evaluation: the IIFE throws
 // when neither global exists, which is exactly the case in the Node import
@@ -146,16 +158,20 @@ function getStoredToken() {
 }
 
 async function fetchCaramelApi(url, opts = {}, timeoutMs = FETCH_TIMEOUT_MS) {
-    const token = await getStoredToken()
-    if (!token) return fetchWithTimeout(url, opts, timeoutMs)
     return fetchWithTimeout(
         url,
-        {
-            ...opts,
-            headers: { ...opts.headers, Authorization: `Bearer ${token}` },
-        },
+        withBearer(opts, await getStoredToken()),
         timeoutMs,
     )
+}
+
+// `opts` with the session bearer attached, or unchanged when signed out.
+function withBearer(opts, token) {
+    if (!token) return opts
+    return {
+        ...opts,
+        headers: { ...opts.headers, Authorization: `Bearer ${token}` },
+    }
 }
 
 /* --------------------------------------------------  shopper code sharing
@@ -180,8 +196,8 @@ async function fetchCaramelApi(url, opts = {}, timeoutMs = FETCH_TIMEOUT_MS) {
 const FEATURES_CACHE_KEY = 'caramel_features'
 const FEATURES_TTL_ON_MS = 6 * 60 * 60 * 1000
 const FEATURES_TTL_OFF_MS = 30 * 60 * 1000
-let _featuresInflight = null // Promise<boolean> while a fetch is running
-let _featuresMemo = null // { shopperCodeCapture, ts }
+let _featuresInflight = null // Promise<entry> while a fetch is running
+let _featuresMemo = null // { shopperCodeCapture, couponBoxDiscovery, couponBoxLlm, ts }
 
 function _readFeaturesSession() {
     return new Promise(resolve => {
@@ -208,7 +224,15 @@ function _writeFeaturesSession(entry) {
 
 function _featuresFresh(e) {
     if (!e || typeof e.shopperCodeCapture !== 'boolean') return false
-    const ttl = e.shopperCodeCapture ? FEATURES_TTL_ON_MS : FEATURES_TTL_OFF_MS
+    // While the promo-box finder or its server pick is on, the short lifetime:
+    // turning either OFF is the kill switch, and it must reach extensions
+    // within 30 minutes.
+    const ttl =
+        e.shopperCodeCapture &&
+        e.couponBoxDiscovery !== true &&
+        e.couponBoxLlm !== true
+            ? FEATURES_TTL_ON_MS
+            : FEATURES_TTL_OFF_MS
     return Date.now() - e.ts < ttl
 }
 
@@ -221,15 +245,22 @@ async function _fetchFeatures() {
         throw new Error('features: shopperCodeCapture is not a boolean')
     _featuresMemo = {
         shopperCodeCapture: json.shopperCodeCapture,
+        // Anything but a literal true is off: an app that predates the flag
+        // omits it, and the finder must never switch itself on.
+        couponBoxDiscovery: json.couponBoxDiscovery === true,
+        // The same rule for the server pick (POST coupon-box-pick).
+        couponBoxLlm: json.couponBoxLlm === true,
         ts: Date.now(),
     }
     _writeFeaturesSession(_featuresMemo)
-    return json.shopperCodeCapture
+    return _featuresMemo
 }
 
-function _shopperCaptureEnabled() {
-    if (_featuresFresh(_featuresMemo))
-        return Promise.resolve(_featuresMemo.shopperCodeCapture)
+/* The cached features entry. Lifetime (see _featuresFresh): 6 hours only while
+ * capture is on and the finder is off, 30 minutes otherwise, so switching the
+ * finder off reaches every extension within 30 minutes. */
+function _features() {
+    if (_featuresFresh(_featuresMemo)) return Promise.resolve(_featuresMemo)
     // One fetch for however many callers arrive while it is running; cleared
     // when it settles so a failure is retried by the next caller.
     if (!_featuresInflight) {
@@ -237,7 +268,7 @@ function _shopperCaptureEnabled() {
             const stored = await _readFeaturesSession()
             if (_featuresFresh(stored)) {
                 _featuresMemo = stored
-                return stored.shopperCodeCapture
+                return stored
             }
             return _fetchFeatures()
         })().finally(() => {
@@ -245,6 +276,74 @@ function _shopperCaptureEnabled() {
         })
     }
     return _featuresInflight
+}
+
+function _shopperCaptureEnabled() {
+    return _features().then(e => e.shopperCodeCapture)
+}
+
+// Answers the content script's couponBoxDiscoveryEnabled message. Any failure
+// to read the flag is answered as off: the finder is an addition, never a
+// requirement.
+async function couponBoxDiscoveryEnabled() {
+    try {
+        return (await _features()).couponBoxDiscovery === true
+    } catch (err) {
+        logError('features', err)
+        return false
+    }
+}
+
+// Answers the content script's couponBoxLlmEnabled message, the same way.
+async function couponBoxLlmEnabled() {
+    try {
+        return (await _features()).couponBoxLlm === true
+    } catch (err) {
+        logError('features', err)
+        return false
+    }
+}
+
+/* Asks the server which element of a page outline is the promo box (see
+ * coupon-box-outline.js and the finder's caramelPickedRecord). The outline is
+ * forwarded as built; the answer is passed back as the server sent it, and a
+ * refusal (429 over budget, 413 too large) as { error }. The flag is read
+ * again here, so a content script on a stale answer cannot spend a call.
+ *
+ * ONE deadline covers the whole ask: the flag read (which may refetch the
+ * features, up to FETCH_TIMEOUT_MS), the token read and the request. The
+ * request gets what is left of it, never more than its own cap, and is not
+ * sent at all with less than COUPON_BOX_PICK_MIN_MS left: a paid answer the
+ * page has stopped waiting for is money for nothing.
+ *
+ * Three numbers, each above the one before: the server gives the model 20s
+ * and then answers no_pick itself (measured p95 16-18s); this side allows the
+ * whole ask 24s, so the request can outwait the server's own limit; the page
+ * waits PICK_WAIT_MS, 29s (coupon-box-discovery.js), so an answer sent inside
+ * this deadline always reaches it. Raise one, raise the ones after it. */
+export const COUPON_BOX_PICK_DEADLINE_MS = 24000
+const COUPON_BOX_PICK_TIMEOUT_MS = 23000
+const COUPON_BOX_PICK_MIN_MS = 3000
+async function couponBoxPick({ domain, outline }) {
+    const deadline = Date.now() + COUPON_BOX_PICK_DEADLINE_MS
+    if (!(await couponBoxLlmEnabled())) return { error: 'disabled' }
+    const token = await getStoredToken()
+    const left = Math.min(COUPON_BOX_PICK_TIMEOUT_MS, deadline - Date.now())
+    if (left < COUPON_BOX_PICK_MIN_MS) return { error: 'out of time' }
+    const r = await fetchWithTimeout(
+        caramelUrl('api/extension/coupon-box-pick'),
+        withBearer(
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ domain, outline }),
+            },
+            token,
+        ),
+        left,
+    )
+    if (!r.ok) return { error: `HTTP ${r.status}` }
+    return r.json()
 }
 
 function _forgetFeatures() {
@@ -265,13 +364,25 @@ export async function submitShopperCode(message) {
     if (!(await _shopperCaptureEnabled())) return { skipped: 'disabled' }
     // A failed storage read rejects (loud, answered as `{ error }`): refusing
     // to send is the safe side, and it must not look like a plain "no".
-    if (!codeSharingAccepted(await readCodeSharingConsent(currentBrowser)))
-        return { skipped: 'no-consent' }
+    // The SAME record gates the send and is the proof sent with it: the server
+    // refuses a checkout submission without an accepted consent (403
+    // `consent-required`), so a build that omits the field can never capture.
+    const consentRecord = await readCodeSharingConsent(currentBrowser)
+    if (!codeSharingAccepted(consentRecord)) return { skipped: 'no-consent' }
 
     const r = await fetchCaramelApi(caramelUrl('api/coupons/submit'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ site, code, source: 'checkout' }),
+        body: JSON.stringify({
+            site,
+            code,
+            source: 'checkout',
+            consent: {
+                choice: consentRecord.choice,
+                promptVersion: consentRecord.promptVersion,
+                at: consentRecord.at,
+            },
+        }),
     })
     // On a refusal the body is only used to NAME it; one we cannot read just
     // falls back to the generic reason below.
@@ -292,6 +403,13 @@ export async function submitShopperCode(message) {
         _forgetFeatures()
         return { skipped: 'disabled' }
     }
+    // The server's own consent gate refused the proof we just sent (e.g. its
+    // prompt-version floor moved above ours). Quiet, nothing was stored. NOT
+    // `no-consent`: that answer is the page's cue to show the consent card
+    // (code-capture.js _submitWithConsent), and a shopper who already said yes
+    // must not be asked again because the server disagrees with the record.
+    if (r.status === 403 && body?.error === 'consent-required')
+        return { skipped: 'consent-rejected' }
     if (r.status === 422) {
         // Expected refusals (not a store we know, not a plausible code).
         if (CARAMEL_ENV.verbose)
@@ -308,6 +426,70 @@ export async function submitShopperCode(message) {
     throw new Error(
         `submit HTTP ${r.status}${body?.error ? ` ${body.error}` : ''}`,
     )
+}
+
+/* --------------------------------------------------  code-share funnel diagnostics
+ * code-capture.js reports each point where the code-sharing offer can stop
+ * (code-share-funnel.js has the steps). Whether anything may leave the browser
+ * is decided HERE: the shopper's usageDiagnosticsConsent must be accepted and,
+ * on Firefox, the browser's data-collection grant must be held
+ * (usage-diagnostics-consent.js). Otherwise the answer is `{ skipped }` and no
+ * request is made. The request is ANONYMOUS on purpose: no bearer, no cookies,
+ * the per-device telemetry id as the only identity (READ here, never minted: the
+ * accept path owns minting, so a missing id means skip), the consent record as the
+ * proof the server checks (403 consent-required), and a payload that only
+ * buildFunnelEvent's allowlist can produce — never a code, user, URL or cart.
+ *
+ * A malformed step, a failed storage/permission read, a non-2xx or an event the
+ * server did not capture THROWS (the handler logs it and answers `{ error }`);
+ * there is no retry queue: a lost diagnostic is acceptable, a silent one is not. */
+// Exported for tests/background-code-share-funnel.test.mjs.
+export async function reportCodeShareFunnel(message) {
+    const consent = await resolveUsageDiagnostics(currentBrowser)
+    if (!consent) return { skipped: 'no-diagnostics-consent' }
+    const event = buildFunnelEvent({
+        step: message.step,
+        reason: message.reason,
+        store: message.store,
+        extVersion: currentBrowser.runtime.getManifest().version,
+        browser: detectStoreChannel(
+            currentBrowser.runtime.getURL(''),
+            navigator.userAgent,
+        ),
+        sharingPromptVersion: codeSharingPromptVersion(),
+    })
+    const id = await readTelemetryId(currentBrowser)
+    if (!id) return { skipped: 'no-diagnostics-id' }
+    // The shopper may have withdrawn while the id was being read: the record is
+    // the gate, so look at it once more right before anything leaves.
+    const latest = await readUsageDiagnosticsConsent(currentBrowser)
+    if (!usageDiagnosticsAccepted(latest))
+        return { skipped: 'no-diagnostics-consent' }
+    const r = await fetchWithTimeout(caramelUrl('api/extension/telemetry'), {
+        method: 'POST',
+        credentials: 'omit',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            id,
+            event,
+            consent: {
+                choice: latest.choice,
+                promptVersion: latest.promptVersion,
+            },
+        }),
+    })
+    const body = await r.json().catch(() => null)
+    // The server's own consent floor moved above our record's version: quiet,
+    // nothing was emitted (same reading as the submit route's consent gate).
+    if (r.status === 403 && body?.error === 'consent-required')
+        return { skipped: 'consent-rejected' }
+    if (!r.ok)
+        throw new Error(
+            `telemetry HTTP ${r.status}${body?.error ? ` ${body.error}` : ''}`,
+        )
+    if (body?.captured !== true)
+        throw new Error('telemetry: the server did not capture the event')
+    return { sent: true }
 }
 
 function isServiceWorkerContext() {
@@ -439,6 +621,21 @@ export function initBackground() {
 
     keepAlive()
 
+    // Withdrawing diagnostics consent (the popup toggle or "No thanks") deletes
+    // the telemetry id: sends stop at once because the gate reads the record, and
+    // a later opt-in starts a new id that cannot be joined to this one. The
+    // record is device-local, so only this device's own changes arrive here.
+    currentBrowser.storage.onChanged.addListener((changes, area) => {
+        if (area !== 'local' || !changes[USAGE_DIAGNOSTICS_CONSENT_KEY]) return
+        const next = parseUsageDiagnosticsConsent(
+            changes[USAGE_DIAGNOSTICS_CONSENT_KEY].newValue,
+        )
+        if (usageDiagnosticsAccepted(next)) return
+        deleteTelemetryId(currentBrowser).catch(err =>
+            logError('usageDiagnosticsWithdraw', err),
+        )
+    })
+
     try {
         currentBrowser.action.setBadgeBackgroundColor({ color: '#ea6925' })
         if (currentBrowser.action.setBadgeTextColor)
@@ -484,13 +681,22 @@ export function initBackground() {
     currentBrowser.runtime.onInstalled.addListener(details => {
         if (details?.reason !== 'install') return
         try {
+            const iid = crypto.randomUUID()
+            // Keep the install id: the sign-in sends it to the server so the
+            // account joins this install's `extension_installed` event, and the
+            // /welcome page (content script) adds the first-touch record next
+            // to it. Not awaited: the tab does not depend on it, and storage
+            // answers long before a page has loaded. A refusal is recorded.
+            saveInstallId(currentBrowser, iid).catch(err =>
+                logError('onInstalledSaveInstallId', err),
+            )
             const url = welcomeUrl(
                 detectStoreChannel(
                     currentBrowser.runtime.getURL(''),
                     navigator.userAgent,
                 ),
                 currentBrowser.runtime.getManifest().version,
-                crypto.randomUUID(),
+                iid,
             )
             currentBrowser.tabs.create({ url }, () => {
                 if (currentBrowser.runtime.lastError)
@@ -549,9 +755,19 @@ export function initBackground() {
 
                 return true
             } else if (message.action === 'fetchCoupons') {
-                const { site, kw, category, page } = message
+                const { site, kw, category, page, capabilities } = message
                 const url = new URL(caramelUrl('api/coupons'))
                 url.searchParams.set('site', site)
+                // Proof of the page-side helpers this page runs (see
+                // extension-capabilities.js): the server withholds a gated
+                // store's codes without it. Absent when none is held.
+                if (Array.isArray(capabilities) && capabilities.length)
+                    url.searchParams.set(
+                        'caps',
+                        capabilities
+                            .filter(c => typeof c === 'string')
+                            .join(','),
+                    )
                 url.searchParams.set('key_words', kw || '')
                 url.searchParams.set('limit', String(COUPON_PAGE_SIZE))
                 if (category) url.searchParams.set('category', category)
@@ -605,12 +821,38 @@ export function initBackground() {
                 // Trust-loop signal from the apply flow (coupon-runner). Fire-and-forget:
                 // errors are logged, never surfaced — a report must not break checkout.
                 // A "worked" outcome also bumps the public usage counter.
-                const { id, outcome, storeReason } = message
-                fetchCaramelApi(caramelUrl(`api/coupons/${id}/report`), {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ outcome, storeReason }),
-                }).catch(err => logError('reportOutcome', err))
+                const { id, outcome, storeReason, awaitResult } = message
+                const report = fetchCaramelApi(
+                    caramelUrl(`api/coupons/${id}/report`),
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ outcome, storeReason }),
+                    },
+                )
+                if (awaitResult) {
+                    // The popup's "Did it work?" vote: the shopper is waiting on
+                    // the answer, so the real status goes back (a 429 reads
+                    // differently from a dead network) instead of a swallowed
+                    // failure. No usage bump — a vote is not an apply.
+                    report
+                        .then(r =>
+                            sendResponse(
+                                r.ok
+                                    ? { success: true }
+                                    : {
+                                          error: `HTTP ${r.status}`,
+                                          status: r.status,
+                                      },
+                            ),
+                        )
+                        .catch(err => {
+                            logError('reportOutcome', err)
+                            sendResponse({ error: String(err) })
+                        })
+                    return true
+                }
+                report.catch(err => logError('reportOutcome', err))
                 if (outcome === 'worked') {
                     fetchCaramelApi(caramelUrl('api/coupons/increment'), {
                         method: 'POST',
@@ -628,6 +870,31 @@ export function initBackground() {
                         sendResponse({ error: String(err) })
                     })
 
+                return true
+            } else if (message.action === 'reportCodeShareFunnel') {
+                reportCodeShareFunnel(message)
+                    .then(resp => sendResponse(resp))
+                    .catch(err => {
+                        logError('reportCodeShareFunnel', err)
+                        sendResponse({ error: String(err) })
+                    })
+
+                return true
+            } else if (message.action === 'couponBoxDiscoveryEnabled') {
+                couponBoxDiscoveryEnabled().then(enabled =>
+                    sendResponse({ enabled }),
+                )
+                return true
+            } else if (message.action === 'couponBoxLlmEnabled') {
+                couponBoxLlmEnabled().then(enabled => sendResponse({ enabled }))
+                return true
+            } else if (message.action === 'couponBoxPick') {
+                couponBoxPick(message)
+                    .then(resp => sendResponse(resp))
+                    .catch(err => {
+                        logError('couponBoxPick', err)
+                        sendResponse({ error: String(err) })
+                    })
                 return true
             } else if (message.action === 'getFavoriteStores') {
                 // The stores this account follows. fetchCaramelApi so the stored

@@ -63,6 +63,39 @@ serialized 1.2 MB body (`src/lib/supportedStoresCache.ts`, invalidated by
 an ingest push that upserts store_configs), so origin stays cheap even
 when the edge misses.
 
+**Capability-gated stores.** `/api/extension/supported-stores` answers
+`{ supported, gated }`. A store listed in `src/lib/extensionCapabilityGates.ts`
+(porkbun.com today) is served ONLY in `gated`, tagged with the capability it
+`requires`, so extension builds that predate the bucket cannot auto-apply on it
+(a per-request version/header gate would be ignored or poisoned by the edge
+cache above). No extension build reads `gated` yet (TODO 2026-10-16, see
+`supportedStoresCache.ts`): the reader belongs in `store-detect.js`, which is
+held back while other work owns that file. The supplier row is unchanged;
+gating is a read-side rule, not a catalog write.
+
+**Gated stores on `GET /api/coupons`.** Installed 1.4.13/1.4.14 have a generic promo-box
+finder that needs no store config, so on porkbun.com they fetch codes by domain
+from `/api/coupons` and drive the checkout. That endpoint therefore withholds a
+gated store's codes (`coupons: []`, `total: 0`, header
+`X-Caramel-Capability-Withheld: alertShim`) from a request that carries an
+extension Origin (`chrome-/moz-/safari-web-extension://`) and no `?caps=<capability>`
+proof; builds that ship `extension-capabilities.js` send `caps=alertShim` only
+while the page marker is stamped. Requests without an extension Origin (the
+website, curl) still get the full list. Gated-site responses are
+`Cache-Control: private, no-store` because the Cloudflare rule keys on the URL,
+not the Origin. Nothing lifts the withhold except a build that proves the
+capability; removing the store from `EXTENSION_CAPABILITY_GATES` lifts it for
+everyone. The Origin half of the check is a stopgap for builds before 1.4.15
+(see the dated TODO in `extensionCapabilityGates.ts`). The browser may also hold
+a pre-deploy copy of the full list (`max-age=14400` on the old response) for up
+to 4 h; nothing server-side can reach it. Verify on prod:
+
+```
+curl -s 'https://grabcaramel.com/api/coupons?site=porkbun.com&limit=3'   # website view: coupons present
+curl -s -H 'Origin: chrome-extension://x' 'https://grabcaramel.com/api/coupons?site=porkbun.com&limit=3'                 # old build: coupons [] + total 0
+curl -s -H 'Origin: chrome-extension://x' 'https://grabcaramel.com/api/coupons?site=porkbun.com&limit=3&caps=alertShim'  # new build: coupons present
+```
+
 ## Health checks
 
 `GET /api/health` — container **liveness** (`src/app/api/health/route.ts`),
@@ -463,3 +496,75 @@ TODO(human): record where these are actually set/rotated in Dokploy (env
 var UI vs. secret store) and the rotation procedure for
 `COUPONS_ADMIN_SECRET` / `UPKUMA_HEALTH_SECRET` — not derivable from this
 repo.
+
+## Paid fallback
+
+The optional server-only org key (`OPENROUTER_FALLBACK_API_KEY`) can only ever be sent to https://proxyai.devino.ca, with an 8-second default wait (`OPENROUTER_FALLBACK_AFTER_SECONDS`, at most 12) and boot validation that names a bad variable but never prints its value. Today no request sends it: both production AI surfaces (the 7-second cart classifier and the coupon-box pick) are guest-reachable, and guests never get the paid path, so setting the key changes nothing and the worst case is 0 paid requests per user per day and 0 per deployment. The canonical helper (`src/lib/proxy-fallback-headers.ts`) and env reader (`src/lib/proxy-fallback-env.ts`) stay so a future signed-in caller can wire in through the reader: its client deadline must be at least 20 seconds (`MIN_PAID_PATH_DEADLINE_SECONDS`: the longest 12-second wait plus 8 seconds for the paid answer), its request must use `fetchWithoutRedirects` so the key never follows a 3xx off the proxy, it must make one request with no retries, and it must come with wiring and trace tests through its real route. The reader logs one warning (without the value) when the key is set but the base URL is not the proxy. The key's $5/week limit, set in OpenRouter, is the only hard cap; the vars are blanked in evals and E2E.
+
+## coupon-box pick: switch on / kill switch
+
+`POST /api/extension/coupon-box-pick` (paid, LLM-backed; `couponBoxPick.ts`) is
+off by default. Spend is bounded by three in-memory buckets on uncached model
+calls only (cache hits are free): 20 calls / 10 min per client, 600 / hour for
+the process, and a per-day cap, `COUPON_BOX_PICK_DAILY_CAP` (default 2000).
+Past any of them the route answers `429` and the extension carries on as if the
+rules found nothing. A global or daily trip sends ONE Sentry warning per window
+(`coupon-box-pick global|daily model-call budget exhausted`).
+
+**Switch on.** Set `COUPON_BOX_PICK_MODEL` (an eval-gated model id) and
+`COUPON_BOX_LLM_ENABLED=true`, optionally `COUPON_BOX_PICK_DAILY_CAP=<n>`, then
+redeploy. The extension reads the same condition from `GET /api/extension/features`.
+
+**Kill switch.**
+
+- Hard kill: `COUPON_BOX_LLM_ENABLED=false` and redeploy. The route then answers
+  `200 {outcome:'no_pick', reason:'disabled'}` without reading the body or
+  calling a model, and the features endpoint stops advertising it.
+- Spend stop, feature still answering from cache: `COUPON_BOX_PICK_DAILY_CAP=0`
+  and redeploy. The first uncached model call is refused (`429`), so no model
+  call is made; cached answers still serve. A blank value reads as the default
+  (2000), not 0; a negative or non-integer value fails boot.
+- The buckets are per process (one web instance) and reset on restart, so a
+  redeploy also starts a fresh day's count.
+
+**Read it.** Every request that reaches the handler emits the PostHog event
+`coupon_box_pick_outcome` (properties: `outcome`, `cached`, `latency_ms`,
+`model_ms` when a model was called, `store`, `model`). Requests refused earlier
+by withRoute (non-extension Origin 403, generic rate limit 429) emit nothing.
+`outcome` is one of `box`, `no_box`, `no_pick:disabled`, `no_pick:model_error`,
+`no_pick:unparsable`, `budget_exceeded:client|global|daily`, `too_large`,
+`invalid`, `server_error` (`COUPON_BOX_PICK_OUTCOMES` in
+`src/lib/analytics/couponBoxPickOutcome.ts`).
+
+Outcome mix, last 24h:
+
+```sql
+SELECT properties.outcome AS outcome,
+       count() AS requests,
+       countIf(properties.cached = true) AS cache_hits
+FROM events
+WHERE event = 'coupon_box_pick_outcome'
+  AND timestamp >= now() - INTERVAL 24 HOUR
+GROUP BY outcome
+ORDER BY requests DESC
+```
+
+Latency, last 24h (`latency_ms` = whole request in the handler; `model_ms` =
+model call only, present on requests that made one):
+
+```sql
+SELECT count() AS requests,
+       quantile(0.5)(toFloat(properties.latency_ms)) AS latency_p50_ms,
+       quantile(0.95)(toFloat(properties.latency_ms)) AS latency_p95_ms,
+       countIf(properties.model_ms IS NOT NULL) AS model_calls,
+       quantileIf(0.5)(toFloat(properties.model_ms), properties.model_ms IS NOT NULL) AS model_p50_ms,
+       quantileIf(0.95)(toFloat(properties.model_ms), properties.model_ms IS NOT NULL) AS model_p95_ms
+FROM events
+WHERE event = 'coupon_box_pick_outcome'
+  AND timestamp >= now() - INTERVAL 24 HOUR
+```
+
+Reading it: many `budget_exceeded:daily` means the cap is too low for real
+traffic (re-size it) or someone is forging the extension Origin; a rising
+`no_pick:model_error` with a high `model_p95_ms` is the model timing out
+(`TIMEOUT_MS` is 20s).

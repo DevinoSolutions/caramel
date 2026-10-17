@@ -53,7 +53,7 @@ test.describe('home page store links', () => {
         await expect(
             page.getByRole('heading', {
                 level: 1,
-                name: 'Best amazon.com coupon codes today',
+                name: 'Best Amazon coupon codes today',
             }),
         ).toBeVisible()
     })

@@ -12,6 +12,11 @@
 // `next dev`/`next build` never brick on a feature the current environment
 // simply doesn't configure (social login, extension OAuth, email, the
 // coupons-bridge sync, ...).
+import {
+    isValidFallbackAfterSeconds,
+    isValidFallbackKey,
+    isValidFallbackModel,
+} from '@/lib/proxy-fallback-headers'
 import 'server-only'
 import { z } from 'zod'
 
@@ -131,16 +136,26 @@ const serverObjectSchema = z.object({
     // Global kill switch for shopper-typed codes CAPTURED AT CHECKOUT by the
     // extension (POST /api/coupons/submit with source 'checkout', and the
     // extension's GET /api/extension/features read of it). OFF by default in code;
-    // prod stays OFF until the extension build with the in-extension consent
-    // prompt (1.4.8) is live in the stores: capture is opt-in per shopper
-    // (owner rule 2026-10-06), so this flag is only the server's half and never
-    // consent by itself. It gates ONLY the automatic capture: the website's
-    // manual "Add a code" form (source 'manual') works with it off.
+    // prod stays OFF until a consent-carrying extension build (1.4.9+) is the
+    // LIVE version in every store that ships Caramel: capture is opt-in per
+    // shopper (owner rule 2026-10-06) and builds 1.4.3-1.4.7 would capture by
+    // default with no prompt. This flag is GLOBAL and only the server's half,
+    // never consent by itself: the submit route additionally refuses (403
+    // consent-required) a checkout submission without the extension's consent
+    // proof. It gates ONLY the automatic capture: the website's manual "Add a
+    // code" form (source 'manual') works with it off.
     // A strict two-value enum, like SITE_SUGGESTIONS_AUTO_NOTIFY: a typo
     // ('yes') fails boot with this variable's name rather than being read as
     // off (capture silently never ships) or on (capture silently ships).
     // Exposed to the app as a boolean.
     SHOPPER_CODE_CAPTURE_ENABLED: z
+        .enum(['true', 'false'])
+        .default('false')
+        .transform(value => value === 'true'),
+    // Served to the extension by GET /api/extension/features. On, the
+    // extension may find a store's promo box itself when no config describes
+    // it. Same strict two-value enum as SHOPPER_CODE_CAPTURE_ENABLED.
+    COUPON_BOX_DISCOVERY_ENABLED: z
         .enum(['true', 'false'])
         .default('false')
         .transform(value => value === 'true'),
@@ -159,6 +174,62 @@ const serverObjectSchema = z.object({
         )
         .pipe(z.url()),
     OPENROUTER_MODEL: z.string().default('anthropic/claude-haiku-4.5'),
+    // Coupon-box pick (POST /api/extension/coupon-box-pick): when the
+    // extension's rules cannot find a store's coupon box, it may send a
+    // trimmed page outline and a model picks the box. OFF by default; a strict
+    // two-value enum like SHOPPER_CODE_CAPTURE_ENABLED, so a typo fails boot
+    // instead of silently reading as on or off. The feature is live only when
+    // this is 'true' AND COUPON_BOX_PICK_MODEL names a model; the extension
+    // reads the same condition from GET /api/extension/features.
+    COUPON_BOX_LLM_ENABLED: z
+        .enum(['true', 'false'])
+        .default('false')
+        .transform(value => value === 'true'),
+    // The model id the coupon-box pick sends to OPENROUTER_API_URL (same base
+    // and key as the cart classifier). No default on purpose: the pick is
+    // eval-gated per model (evals/couponBoxPick.eval.ts), so an unset or
+    // blank value keeps the feature off rather than guessing a model.
+    COUPON_BOX_PICK_MODEL: z
+        .string()
+        .optional()
+        .transform(v => v?.trim() || undefined),
+    // Per-day ceiling on UNCACHED coupon-box model calls, process-wide
+    // (couponBoxPickBudget.ts). Non-negative integer; 0 = no model calls at
+    // all (the soft kill switch, RUNBOOK.md); unset = 2000. Garbage fails boot.
+    // A blank value reads as unset: z.coerce would turn '' into 0 and silently
+    // switch the feature off.
+    COUPON_BOX_PICK_DAILY_CAP: z.preprocess(
+        v => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+        z.coerce.number().int().min(0).default(2000),
+    ),
+    // Paid fallback through the Devino proxy (src/lib/proxy-fallback-headers.ts):
+    // the app's OWN OpenRouter org key, sent as X-ORF-Fallback-Key only to
+    // https://proxyai.devino.ca and only for a signed-in caller; no request
+    // sends it today (src/lib/proxy-fallback-env.ts). The wait before it goes
+    // paid is at most 12 s. Unset = no header, behaviour
+    // unchanged. Blank is fine; a malformed value refuses boot here (the
+    // message names the variable, never the value) because a key with a
+    // newline would otherwise make every LLM call throw. Server-only; CI,
+    // evals and e2e never set these (vitest.eval.config.ts and
+    // playwright.config.ts blank them).
+    OPENROUTER_FALLBACK_API_KEY: z
+        .string()
+        .optional()
+        .refine(isValidFallbackKey, {
+            error: 'OPENROUTER_FALLBACK_API_KEY must be blank or an OpenRouter sk-or-v1-... key',
+        }),
+    OPENROUTER_FALLBACK_MODEL: z
+        .string()
+        .optional()
+        .refine(isValidFallbackModel, {
+            error: 'OPENROUTER_FALLBACK_MODEL must be blank or an OpenRouter model id like vendor/model',
+        }),
+    OPENROUTER_FALLBACK_AFTER_SECONDS: z
+        .string()
+        .optional()
+        .refine(isValidFallbackAfterSeconds, {
+            error: 'OPENROUTER_FALLBACK_AFTER_SECONDS must be blank or a plain number of seconds in (0, 12]',
+        }),
     API_ENCRYPTION_ENABLED: z.string().optional(),
     // Which PostHog project this deploy's SERVER-side captures target (the
     // feedback+observability foundation). 'production' → the real project;

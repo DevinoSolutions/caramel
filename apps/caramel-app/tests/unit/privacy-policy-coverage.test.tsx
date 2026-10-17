@@ -63,6 +63,28 @@ describe('privacy policy coverage', () => {
         )
     })
 
+    it('discloses what the coupon-box finder and server pick send (wording delegated 2026-10-13)', () => {
+        const normalized = text.replace(/&quot;/g, '"').replace(/\s+/g, ' ')
+        for (const claim of [
+            'Finding the promo-code box on a cart page.',
+            "Nothing new is sent to Caramel for that, except that the extension reads Caramel's feature switches",
+            'only after you tap to apply codes',
+            "the store's hostname and a trimmed outline",
+            'every digit is replaced with "#"',
+            'email-shaped text is replaced with a placeholder',
+            'every word that is not on a fixed list',
+            'never contains text you typed into fields',
+            "Devino's own AI model proxy",
+            "which currently passes the request to NVIDIA's hosted model service (NIM)",
+            'The only other page content the extension sends is the trimmed cart-page outline described under “Finding the promo-code box on a cart page”, and only as described there.',
+            'Effective Date: October 14, 2026',
+            'for that store and page shape',
+            'Your IP address is used to rate-limit these requests.',
+        ]) {
+            expect(normalized).toContain(claim)
+        }
+    })
+
     it('carries the owner-approved checkout code sharing sentence verbatim (approved 2026-10-06)', () => {
         const normalized = text.replace(/&quot;/g, '"').replace(/\s+/g, ' ')
         expect(normalized).toContain(

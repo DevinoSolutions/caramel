@@ -150,3 +150,53 @@ describe('background.js caramel API calls — session bearer attachment', () => 
         expect(stores.opts.headers.Authorization).toBe('Bearer tok-123')
     })
 })
+
+describe('background.js fetchCoupons — capability proof for gated stores', () => {
+    let calls
+    beforeEach(() => {
+        calls = []
+        globalThis.chrome.storage.sync.get = (_keys, cb) => cb({})
+        globalThis.fetch = async url => {
+            calls.push(new URL(String(url)))
+            return {
+                ok: true,
+                status: 200,
+                json: async () => ({ coupons: [] }),
+            }
+        }
+    })
+
+    it('sends the capabilities the page holds as ?caps= (the server withholds a gated store without it)', async () => {
+        await invoke({
+            action: 'fetchCoupons',
+            site: 'porkbun.com',
+            capabilities: ['alertShim'],
+        })
+        await flush()
+        expect(calls[0].searchParams.get('caps')).toBe('alertShim')
+        expect(calls[0].searchParams.get('site')).toBe('porkbun.com')
+    })
+
+    it('sends no caps param when the page holds none, or the message predates the field', async () => {
+        await invoke({
+            action: 'fetchCoupons',
+            site: 'example.com',
+            capabilities: [],
+        })
+        await invoke({ action: 'fetchCoupons', site: 'example.com' })
+        await flush()
+        expect(calls).toHaveLength(2)
+        for (const url of calls)
+            expect(url.searchParams.has('caps')).toBe(false)
+    })
+
+    it('forwards only strings, never an arbitrary page-supplied value', async () => {
+        await invoke({
+            action: 'fetchCoupons',
+            site: 'porkbun.com',
+            capabilities: ['alertShim', { evil: 1 }, 7],
+        })
+        await flush()
+        expect(calls[0].searchParams.get('caps')).toBe('alertShim')
+    })
+})

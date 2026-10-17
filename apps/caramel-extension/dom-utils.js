@@ -429,6 +429,13 @@ if (typeof _caramelLastPrices === 'undefined') {
 // getPrice last parsed. (global-map.json misses this one: its regex looks for
 // column-0 declarations and this `var` sits inside the re-injection guard.)
 export { _caramelLastPrices }
+// The one other writer: a finder read that is not a single container's price
+// (a subtotal net of the summary's coupon lines) records the number it read,
+// so the before and after sets stay like for like.
+// Consumed by coupon-box-discovery.js (cross-file content-script call).
+export function caramelSetLastPrices(prices) {
+    _caramelLastPrices = prices.slice()
+}
 
 /* The tightest cart baseline consistent with an observed post-discount total:
  * the SMALLEST price seen in the container that is still >= `newTotal`.
@@ -585,7 +592,11 @@ export function caramelDisclosureFor(el) {
  */
 const CARAMEL_PENDING_KEY = 'caramel_pending_submit'
 // Consumed by coupon-runner.js (cross-file content-script call).
-export function caramelMarkPendingSubmit(code, id, prices) {
+// finder: false, or the row kind ('total' | 'subtotal') the baseline was read
+// from when the attempt ran on a box the promo-box finder picked
+// (coupon-box-discovery.js). The page after the reload is then read by the
+// finder's own reader on the same row kind, never by a config selector.
+export function caramelMarkPendingSubmit(code, id, prices, finder = false) {
     try {
         sessionStorage.setItem(
             CARAMEL_PENDING_KEY,
@@ -596,11 +607,28 @@ export function caramelMarkPendingSubmit(code, id, prices) {
                     p => typeof p === 'number' && !isNaN(p),
                 ),
                 t: Date.now(),
+                finder: _caramelFinderKind(finder),
+                finderRow: _caramelFinderRow(finder),
             }),
         )
     } catch {
         /* storage blocked — we lose only the post-navigation report */
     }
+}
+function _caramelFinderKind(v) {
+    // A finder record ({ kind, label, rows }) is a finder attempt even when
+    // it names no kind: reading the config's total instead would compare it
+    // against prices the finder captured.
+    if (v && typeof v === 'object') v = v.kind || 'total'
+    if (v === 'subtotal') return 'subtotal'
+    return v === 'total' || v === true ? 'total' : false
+}
+// The total row a finder attempt measured ({ label, rows }), so the page the
+// submit loads reads that row and not whichever "Total" renders first.
+function _caramelFinderRow(v) {
+    return v && typeof v.label === 'string' && v.rows > 0
+        ? { label: v.label, rows: v.rows }
+        : null
 }
 // Consumed by coupon-runner.js (cross-file content-script call).
 export function caramelClearPendingSubmit() {
@@ -637,6 +665,8 @@ export function caramelTakePendingSubmit(maxAgeMs = 120000) {
         code: st.code,
         id: st.id ?? null,
         prices: Array.isArray(st.prices) ? st.prices : [],
+        finder: _caramelFinderKind(st.finder),
+        finderRow: _caramelFinderRow(st.finderRow),
     }
 }
 

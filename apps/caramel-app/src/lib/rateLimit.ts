@@ -11,15 +11,19 @@
 //     traffic because of an internal bug)
 //
 // Limits are intentionally per-IP, not per-route, so a scraper pivoting
-// between endpoints doesn't get a fresh budget on each one.
+// between endpoints doesn't get a fresh budget on each one. The one exception
+// is 'telemetry' (below): a deliberately chatty, low-value, anonymous route
+// gets its OWN bucket, keyed ip+route, so its traffic can never spend the
+// budget real work (a code submission, a sign-in) depends on.
 import { reportRateLimitRejection } from '@/lib/abuseSignal'
+import { readClientIp } from '@/lib/clientIp'
 import { env } from '@/lib/env'
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { RateLimiterMemory, type RateLimiterRes } from 'rate-limiter-flexible'
 
-export type LimitKind = 'read' | 'mutation'
+export type LimitKind = 'read' | 'mutation' | 'telemetry'
 
 // Per-minute sustained rate. Burst = the full minute's budget.
 const LIMITS: Record<LimitKind, { points: number; duration: number }> = {
@@ -29,6 +33,12 @@ const LIMITS: Record<LimitKind, { points: number; duration: number }> = {
     // 30/min — /increment, /expire, /sources POST. Extension calls
     // /increment once per coupon copy, which is nowhere near this cap.
     mutation: { points: 30, duration: 60 },
+    // 60/min per ip+route, in its OWN bucket and exempt from the shared burst
+    // limiter below. The extension's opt-in funnel diagnostics report one
+    // step per call and a single checkout can legitimately emit half a dozen
+    // within a second; if that traffic drew on 'mutation' or on the shared
+    // per-IP burst it could 429 the shopper's actual code submission.
+    telemetry: { points: 60, duration: 60 },
 }
 
 // Short-window burst limiter catches rapid-fire attempts that would
@@ -38,39 +48,16 @@ const BURST = { points: 20, duration: 2 }
 const limiters: Record<LimitKind, RateLimiterMemory> = {
     read: new RateLimiterMemory(LIMITS.read),
     mutation: new RateLimiterMemory(LIMITS.mutation),
+    telemetry: new RateLimiterMemory(LIMITS.telemetry),
 }
 const burstLimiter = new RateLimiterMemory(BURST)
 
 export function getClientIp(req: NextRequest): string {
-    // CF-Connecting-IP FIRST, and this ordering is load-bearing.
-    //
-    // grabcaramel.com is proxied by Cloudflare, and Traefik behind it sets
-    // X-Real-IP to ITS OWN peer — the Cloudflare edge — not to the visitor.
-    // Preferring X-Real-IP therefore handed every visitor on earth the SAME
-    // rate-limit key, i.e. one global bucket. Measured on dev 2026-08-08 with
-    // a clean 75s window: a 30-request burst from a proxy exit returned 429s,
-    // and the very next request from a DIFFERENT machine that had been idle
-    // was also 429. Both directions of that are bad — 20 requests in 2s from
-    // one host could 429 the API for every real user (a trivial DoS), while a
-    // scraper rotating IPs got no per-client throttle at all.
-    //
-    // Cloudflare always sets CF-Connecting-IP to the true client and strips
-    // any client-supplied copy, so it is the only header here a caller cannot
-    // forge through the edge. X-Real-IP / X-Forwarded-For stay as fallbacks
-    // for topologies without Cloudflare (local dev, direct origin hits), where
-    // the old behaviour is unchanged.
-    const cfIp = req.headers.get('cf-connecting-ip')?.trim()
-    if (cfIp) return cfIp
-    const realIp = req.headers.get('x-real-ip')?.trim()
-    if (realIp) return realIp
-    const xff = req.headers.get('x-forwarded-for')
-    if (xff) {
-        const first = xff.split(',')[0]?.trim()
-        if (first) return first
-    }
+    // Header order (CF-Connecting-IP first) is load-bearing and lives with
+    // its explanation in clientIp.ts, shared with Better Auth's own limiter.
     // No headers at all (edge runtime, direct hits): a shared bucket is still
     // better than letting everything through unmetered.
-    return 'unknown'
+    return readClientIp(req.headers) ?? 'unknown'
 }
 
 /**
@@ -145,6 +132,18 @@ export async function checkRateLimit(
 
     const ip = getClientIp(req)
 
+    // 'telemetry' is isolated: its own bucket keyed ip+route, and it neither
+    // reads nor consumes the shared burst limiter or any other kind's budget.
+    if (kind === 'telemetry') {
+        const path = new URL(req.url).pathname
+        try {
+            await limiters.telemetry.consume(`${ip}|${path}`, 1)
+            return null
+        } catch (error) {
+            return tooManyRequests(req, ip, kind, error as RateLimiterRes, 60)
+        }
+    }
+
     // Burst first — cheaper to reject here than to touch the minute
     // limiter. A hit against the burst limiter does NOT consume the
     // minute budget so a brief hiccup doesn't penalise the user
@@ -188,6 +187,28 @@ export async function checkRateLimit(
             { status: 429, headers },
         )
     }
+}
+
+function tooManyRequests(
+    req: NextRequest,
+    ip: string,
+    kind: LimitKind,
+    res: RateLimiterRes | null,
+    fallbackRetrySec: number,
+): NextResponse {
+    const retryAfterSec = res
+        ? Math.max(1, Math.ceil(res.msBeforeNext / 1000))
+        : fallbackRetrySec
+    logAbuse(req, ip, kind, retryAfterSec)
+    const headers = buildHeaders(kind, res)
+    headers.set('Retry-After', String(retryAfterSec))
+    return NextResponse.json(
+        {
+            error: 'Too many requests. Please slow down.',
+            retryAfter: retryAfterSec,
+        },
+        { status: 429, headers },
+    )
 }
 
 function logAbuse(

@@ -1,4 +1,5 @@
 import { preflight, withRoute } from '@/lib/api/withRoute'
+import { couponBoxLlmEnabled } from '@/lib/couponBoxPick'
 import { env } from '@/lib/env'
 import { NextResponse } from 'next/server'
 
@@ -9,13 +10,27 @@ import { NextResponse } from 'next/server'
 // shopperCodeCapture: does the server accept codes the shopper typed at
 // checkout (POST /api/coupons/submit with source 'checkout')? Mirrors
 // SHOPPER_CODE_CAPTURE_ENABLED, which defaults to false in code. Prod keeps it
-// false until the extension build with the in-extension consent prompt (1.4.8)
-// is live in the stores (owner rule 2026-10-06: capture is OFF by default and
-// only ever happens after the shopper accepts that prompt, or switches the
-// setting on in the popup; the privacy-policy sentence alone is not consent).
-// This flag is the server's half; the shopper's consent is the extension's
-// (checkoutCodeSharingConsent). The extension must not even send a capture
-// while this is false.
+// false until a consent-carrying extension build (1.4.9+) is the LIVE version
+// in every store that ships Caramel (owner rule 2026-10-06: capture is OFF by
+// default and only ever happens after the shopper accepts the in-extension
+// prompt, or switches the setting on in the popup; the privacy-policy sentence
+// alone is not consent). This flag is GLOBAL and the server's half; the
+// shopper's consent is the extension's (checkoutCodeSharingConsent), sent as
+// proof with each checkout submission and enforced by POST /api/coupons/submit
+// (403 consent-required), which is what stops builds 1.4.3-1.4.7 (no prompt)
+// from capturing once the flag is on. The extension must not even send a
+// capture while this is false.
+//
+// couponBoxDiscovery: may the extension look for a promo box itself when a
+// store has no config row, or when the config's selectors match nothing on the
+// page? Mirrors COUPON_BOX_DISCOVERY_ENABLED, false by default. Off, the
+// extension behaves exactly as it did before the finder existed: it offers the
+// codes to copy. Older extension builds ignore this key.
+//
+// couponBoxLlm: may the extension ask POST /api/extension/coupon-box-pick to
+// find a coupon box its rules missed? The same condition that route answers
+// by (COUPON_BOX_LLM_ENABLED and a configured COUPON_BOX_PICK_MODEL), so the
+// extension never sends an outline to a route that would refuse it.
 //
 // withRoute: public read like extension/supported-stores (rate-limited, no
 // auth/origin gate); cors 'extension' + the OPTIONS preflight mirror
@@ -39,5 +54,7 @@ export const GET = withRoute(
     () =>
         NextResponse.json({
             shopperCodeCapture: env.SHOPPER_CODE_CAPTURE_ENABLED,
+            couponBoxDiscovery: env.COUPON_BOX_DISCOVERY_ENABLED,
+            couponBoxLlm: couponBoxLlmEnabled(),
         }),
 )

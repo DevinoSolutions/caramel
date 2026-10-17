@@ -169,6 +169,30 @@ for (const [browser, { golden, outDir }] of Object.entries(BUILDS)) {
     }
 }
 
+/* The MAIN-world content script (porkbun.com's alert shim) hides inside the
+ * allowlisted /content_scripts diff above, which compares that array as one
+ * unit — so a build that dropped it or widened its match would still read as
+ * the same expected diff. Pin it by name, per browser: exactly one MAIN-world
+ * script, porkbun.com's checkout only, at document_start. (Safari is derived
+ * from the Chrome build by release-extension.yml and so carries the same one.)
+ * Whether a browser honours `world` is decided at runtime by the capability
+ * marker, not here: see extension-capabilities.js. */
+for (const [browser, { outDir }] of Object.entries(BUILDS)) {
+    const manifest = JSON.parse(
+        readFileSync(join(outDir, 'manifest.json'), 'utf8'),
+    )
+    const mainWorld = (manifest.content_scripts ?? []).filter(
+        cs => cs.world === 'MAIN',
+    )
+    check(
+        mainWorld.length === 1 &&
+            JSON.stringify(mainWorld[0].matches) ===
+                JSON.stringify(['https://porkbun.com/checkout/*']) &&
+            mainWorld[0].run_at === 'document_start',
+        `${browser}: exactly one MAIN-world content script, porkbun.com/checkout/* at document_start (found ${JSON.stringify(mainWorld)})`,
+    )
+}
+
 /* ------------------------------------------------------- 2. file inventory */
 
 const walk = dir =>
@@ -219,6 +243,27 @@ for (const [browser, { outDir }] of Object.entries(BUILDS)) {
     refs.push(...Object.values(manifest.action?.default_icon ?? {}))
     for (const war of manifest.web_accessible_resources ?? [])
         refs.push(...(war.resources ?? []))
+
+    // The coupon-box outline builder is emitted by wxt.config.ts's
+    // build:publicAssets hook and loaded at runtime with
+    // import(runtime.getURL('assets/coupon-box-outline.js')) — no manifest
+    // entry names it (assets/* is a glob, satisfied by any asset), so a hook
+    // that stopped emitting it would pass every reference check above and only
+    // fail on a shopper's page, as a quiet miss. Pin the file itself, per
+    // browser: present, non-empty, and still the module the finder imports.
+    const OUTLINE_ASSET = 'assets/coupon-box-outline.js'
+    const outlineShips = files.includes(OUTLINE_ASSET)
+    check(
+        outlineShips,
+        `${browser}: ${OUTLINE_ASSET} is in the build (emitted by the build:publicAssets hook)`,
+    )
+    if (outlineShips) {
+        const outline = readFileSync(join(outDir, OUTLINE_ASSET), 'utf8')
+        check(
+            outline.length > 0 && /\bcaramelPageOutline\b/.test(outline),
+            `${browser}: ${OUTLINE_ASSET} is non-empty and still defines caramelPageOutline`,
+        )
+    }
 
     const allowedMissing = new Set(
         EXPECTED.missingReferences

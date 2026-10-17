@@ -70,8 +70,17 @@ describe('couponSignals (real prisma, live pg :58005)', () => {
             {
                 id: SEEDED_ID,
                 lastWorkedAt: seeded?.lastWorkedAt?.toISOString() ?? null,
+                lastFailedAt: null,
+                failCount: 0,
+                keepsFailing: false,
             },
-            { id: UNSEEDED_ID, lastWorkedAt: null },
+            {
+                id: UNSEEDED_ID,
+                lastWorkedAt: null,
+                lastFailedAt: null,
+                failCount: 0,
+                keepsFailing: false,
+            },
         ])
         // Sanity: the seeded id really resolved to a non-null ISO string, not
         // a vacuous null-equals-null match.

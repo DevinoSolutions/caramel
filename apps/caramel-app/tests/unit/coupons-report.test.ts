@@ -1,4 +1,5 @@
 import { POST } from '@/app/api/coupons/[id]/report/route'
+import { resetFailedReportDedupeForTests } from '@/lib/couponFailureReportDedupe'
 import { NextRequest } from 'next/server'
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -131,9 +132,15 @@ vi.mock('@/lib/rateLimit', async importOriginal => {
 
 const KNOWN_COUPON = '42'
 
-function reportRequest(id: string, body: unknown, bearer?: string) {
+function reportRequest(
+    id: string,
+    body: unknown,
+    bearer?: string,
+    ip = '203.0.113.1',
+) {
     const headers: Record<string, string> = {
         'content-type': 'application/json',
+        'cf-connecting-ip': ip,
     }
     if (bearer !== undefined) headers.authorization = bearer
     return new NextRequest(`http://localhost/api/coupons/${id}/report`, {
@@ -158,6 +165,7 @@ function anonymous() {
 }
 
 beforeEach(() => {
+    resetFailedReportDedupeForTests()
     prismaMock.couponSignal.upsert.mockClear()
     prismaMock.$transaction.mockClear()
     txMock.couponSignal.upsert.mockClear()
@@ -280,14 +288,154 @@ describe('POST /api/coupons/[id]/report — anonymous behavior (characterization
         expect(reportRows).toEqual([])
     })
 
-    it('repeat anonymous reports are NOT deduped — every one writes the signal again', async () => {
-        await POST(reportRequest(KNOWN_COUPON, { outcome: 'failed' }))
-        await POST(reportRequest(KNOWN_COUPON, { outcome: 'failed' }))
-        await POST(reportRequest(KNOWN_COUPON, { outcome: 'failed' }))
+    it('repeat WORKED reports are NOT deduped: every one writes the signal again', async () => {
+        await POST(reportRequest(KNOWN_COUPON, { outcome: 'worked' }))
+        await POST(reportRequest(KNOWN_COUPON, { outcome: 'worked' }))
+        await POST(reportRequest(KNOWN_COUPON, { outcome: 'worked' }))
 
-        // This is the semantics the signed-in path is measured against: the
-        // aggregate counter has always counted every report.
         expect(prismaMock.couponSignal.upsert).toHaveBeenCalledTimes(3)
+    })
+
+    it('repeat FAILED reports from distinct IPs each count', async () => {
+        for (const ip of ['198.51.100.1', '198.51.100.2', '198.51.100.3']) {
+            await POST(
+                reportRequest(
+                    KNOWN_COUPON,
+                    { outcome: 'failed' },
+                    undefined,
+                    ip,
+                ),
+            )
+        }
+
+        expect(prismaMock.couponSignal.upsert).toHaveBeenCalledTimes(3)
+    })
+
+    it('a second FAILED report from the SAME IP for the SAME coupon is a 2xx no-op ({ok:true, deduped:true}): nothing written, no error', async () => {
+        const first = await POST(
+            reportRequest(KNOWN_COUPON, { outcome: 'failed' }),
+        )
+        expect(await first.json()).toEqual({ ok: true })
+
+        for (let i = 0; i < 5; i++) {
+            const dup = await POST(
+                reportRequest(KNOWN_COUPON, { outcome: 'failed' }),
+            )
+            expect(dup.status).toBe(200)
+            expect(await dup.json()).toEqual({ ok: true, deduped: true })
+        }
+        expect(prismaMock.couponSignal.upsert).toHaveBeenCalledTimes(1)
+    })
+
+    it('the dedupe is per (IP, coupon): the same IP can still report a DIFFERENT coupon failing', async () => {
+        await POST(reportRequest(KNOWN_COUPON, { outcome: 'failed' }))
+        const other = await POST(reportRequest('43', { outcome: 'failed' }))
+
+        expect(await other.json()).toEqual({ ok: true })
+        expect(prismaMock.couponSignal.upsert).toHaveBeenCalledTimes(2)
+    })
+
+    it('a worked report from an IP that already reported failed is not blocked', async () => {
+        await POST(reportRequest(KNOWN_COUPON, { outcome: 'failed' }))
+        const worked = await POST(
+            reportRequest(KNOWN_COUPON, { outcome: 'worked' }),
+        )
+
+        expect(await worked.json()).toEqual({ ok: true })
+        expect(prismaMock.couponSignal.upsert).toHaveBeenCalledTimes(2)
+    })
+
+    it('a WORKED report does not consume the failed slot: worked first, then the first failed report from that IP still counts', async () => {
+        await POST(reportRequest(KNOWN_COUPON, { outcome: 'worked' }))
+        const failed = await POST(
+            reportRequest(KNOWN_COUPON, { outcome: 'failed' }),
+        )
+
+        expect(await failed.json()).toEqual({ ok: true })
+        expect(prismaMock.couponSignal.upsert).toHaveBeenCalledTimes(2)
+    })
+
+    it('a deduped signed-in failed report opens no transaction and writes nothing', async () => {
+        signedInAs('user-1')
+        await POST(
+            reportRequest(KNOWN_COUPON, { outcome: 'failed' }, 'Bearer good'),
+        )
+        prismaMock.$transaction.mockClear()
+        txMock.couponSignal.upsert.mockClear()
+
+        const dup = await POST(
+            reportRequest(KNOWN_COUPON, { outcome: 'failed' }, 'Bearer good'),
+        )
+
+        expect(await dup.json()).toEqual({ ok: true, deduped: true })
+        expect(prismaMock.$transaction).not.toHaveBeenCalled()
+        expect(txMock.couponSignal.upsert).not.toHaveBeenCalled()
+    })
+
+    it('signed-in reporters are keyed by USER, not IP: two users behind one IP both count and both keep their attribution row', async () => {
+        signedInAs('user-1')
+        const first = await POST(
+            reportRequest(KNOWN_COUPON, { outcome: 'failed' }, 'Bearer good'),
+        )
+        signedInAs('user-2')
+        const second = await POST(
+            reportRequest(KNOWN_COUPON, { outcome: 'failed' }, 'Bearer good'),
+        )
+
+        expect(await first.json()).toEqual({ ok: true })
+        expect(await second.json()).toEqual({ ok: true })
+        expect(reportRows.map(row => row.userId)).toEqual(['user-1', 'user-2'])
+        expect(txMock.couponSignal.upsert).toHaveBeenCalledTimes(2)
+    })
+
+    it('the same signed-in user is deduped even from a different IP', async () => {
+        signedInAs('user-1')
+        await POST(
+            reportRequest(
+                KNOWN_COUPON,
+                { outcome: 'failed' },
+                'Bearer good',
+                '198.51.100.1',
+            ),
+        )
+        const again = await POST(
+            reportRequest(
+                KNOWN_COUPON,
+                { outcome: 'failed' },
+                'Bearer good',
+                '198.51.100.2',
+            ),
+        )
+
+        expect(await again.json()).toEqual({ ok: true, deduped: true })
+        expect(txMock.couponSignal.upsert).toHaveBeenCalledTimes(1)
+    })
+
+    it('an anonymous report and a signed-in user behind the same IP do not share a slot', async () => {
+        await POST(reportRequest(KNOWN_COUPON, { outcome: 'failed' }))
+        signedInAs('user-1')
+        const res = await POST(
+            reportRequest(KNOWN_COUPON, { outcome: 'failed' }, 'Bearer good'),
+        )
+
+        expect(await res.json()).toEqual({ ok: true })
+        expect(prismaMock.couponSignal.upsert).toHaveBeenCalledTimes(1)
+        expect(txMock.couponSignal.upsert).toHaveBeenCalledTimes(1)
+    })
+
+    it('a failed write frees the slot: the retry from the same IP is NOT deduped', async () => {
+        prismaMock.couponSignal.upsert.mockRejectedValueOnce(
+            new Error('db down'),
+        )
+        const failed = await POST(
+            reportRequest(KNOWN_COUPON, { outcome: 'failed' }),
+        )
+        expect(failed.status).toBe(500)
+
+        const retry = await POST(
+            reportRequest(KNOWN_COUPON, { outcome: 'failed' }),
+        )
+        expect(await retry.json()).toEqual({ ok: true })
     })
 
     it('an id that is well-formed but absent from the catalog still writes the signal (coupon_signals has no FK)', async () => {

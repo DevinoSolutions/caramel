@@ -9,6 +9,10 @@
 // its cache rule for the path is in place (RUNBOOK §Edge cache); this cache
 // makes origin cheap regardless of what sits in front of it.
 //
+// The body is `{ supported, gated }` (extensionCapabilityGates.ts): `supported`
+// is the legacy list every build reads, `gated` the stores only a build that
+// proves a page-side capability may use.
+//
 // What is cached is the FINAL bytes (the serialized body) plus a strong
 // ETag, so a warm hit is a Map lookup and a Response construction — no
 // mapping, no stringify. TTL matches the route's `s-maxage=300`: the catalog
@@ -21,12 +25,13 @@
 // for the ingest route, which drops the entry after a store-config upsert
 // so a freshly pushed selector is served without waiting out the TTL.
 import { listSupportedStoreConfigs } from '@/lib/couponsRepo'
+import { requiredCapabilityFor } from '@/lib/extensionCapabilityGates'
 import { createHash } from 'node:crypto'
 
 export const SUPPORTED_STORES_TTL_MS = 5 * 60 * 1000
 
 export interface SupportedStoresPayload {
-    /** Serialized `{ supported: [...] }` — the exact response body. */
+    /** Serialized `{ supported, gated }` — the exact response body. */
     body: string
     /** Strong ETag over `body` (quoted, ready for the header). */
     etag: string
@@ -41,7 +46,7 @@ async function build(): Promise<SupportedStoresPayload> {
     // One row per store, highest-priority active config that has xpath
     // selectors (excludes API-only configs which the extension can't use).
     const rows = await listSupportedStoreConfigs()
-    const supported = rows.map(r => ({
+    const entries = rows.map(r => ({
         domain: r.store_name,
         couponInput: r.coupon_input_xpath,
         couponSubmit: r.apply_button_xpath,
@@ -51,8 +56,16 @@ async function build(): Promise<SupportedStoresPayload> {
         successIndicator: r.success_indicator_xpath ?? undefined,
         errorIndicator: r.error_indicator_xpath ?? undefined,
         couponRemove: r.coupon_remove_xpath ?? undefined,
+        requires: requiredCapabilityFor(r.store_name) ?? undefined,
     }))
-    const body = JSON.stringify({ supported })
+    // Gated stores leave `supported` entirely (extensionCapabilityGates.ts).
+    // TODO(2026-10-16): no extension build reads `gated` yet. Its reader belongs
+    // in store-detect.js (getDomainRecord), which is held back while other work
+    // owns that file; until then porkbun.com has no apply config on any build and
+    // only the promo-box finder, behind the /api/coupons proof, can drive it.
+    const supported = entries.filter(e => e.requires === undefined)
+    const gated = entries.filter(e => e.requires !== undefined)
+    const body = JSON.stringify({ supported, gated })
     const etag = `"${createHash('sha1').update(body).digest('base64url')}"`
     return { body, etag, builtAt: Date.now() }
 }

@@ -20,6 +20,9 @@ export interface Coupon {
     cartCategory?: string
     cartCategorySecondary?: string
     lastWorkedAt?: string
+    /** Server-computed (>= 3 recent failures, none worked since). An older
+     *  server omits it — absent means "not failing", never "unknown". */
+    keepsFailing?: boolean
 }
 
 /** The page-1 envelope resolvePopupState hands through (fetchCouponsPage). */

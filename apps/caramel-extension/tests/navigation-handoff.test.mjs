@@ -195,6 +195,8 @@ describe('dom-utils.js — the pending-submit record', () => {
             code: 'THEO20',
             id: 'c1',
             prices: [73.9, 59.12],
+            finder: false,
+            finderRow: null,
         })
     })
 
@@ -318,6 +320,125 @@ describe('store-detect.js — the page after the navigation', () => {
         await startCheckoutDetection()
 
         expect(document.getElementById('caramel-small-prompt')).toBeNull()
+    })
+
+    // A run on a box the promo-box finder picked took its baseline from the
+    // finder's own total row. The store's config (stale, which is why the
+    // finder ran) may still name another number, here a $100 subtotal under a
+    // $110 total; reading it after the reload would invent a $10 saving.
+    function mountFinderTotal(text) {
+        const row = document.createElement('div')
+        row.innerHTML = '<span>Order total</span> <span></span>'
+        row.lastChild.textContent = text
+        Object.defineProperty(row, 'innerText', {
+            value: 'Order total ' + text,
+            configurable: true,
+        })
+        document.body.appendChild(row)
+    }
+
+    it('a finder attempt is read by the finder total, never the stale config number', async () => {
+        caramelMarkPendingSubmit('THEO20', 'c1', [110], true)
+        setTotalText('$100.00')
+        mountFinderTotal('$110.00')
+
+        await startCheckoutDetection()
+
+        expect(recordedSavings).toHaveLength(0)
+        expect(reportedOutcomes).toEqual([])
+        expect(finalModalCalls[0][0]).toBe(0)
+    })
+
+    it('a finder attempt whose total row dropped is a measured win', async () => {
+        caramelMarkPendingSubmit('THEO20', 'c1', [110], true)
+        setTotalText('$100.00')
+        mountFinderTotal('$99.00')
+
+        await startCheckoutDetection()
+
+        expect(recordedSavings).toHaveLength(1)
+        expect(recordedSavings[0].amount).toBeCloseTo(11, 2)
+    })
+
+    it('a finder attempt measured on a subtotal is read on the subtotal after the reload', async () => {
+        caramelMarkPendingSubmit('THEO20', 'c1', [110], 'subtotal')
+        const row = document.createElement('div')
+        row.innerHTML = '<span>Subtotal</span> <span>$99.00</span>'
+        Object.defineProperty(row, 'innerText', {
+            value: 'Subtotal $99.00',
+            configurable: true,
+        })
+        document.body.appendChild(row)
+
+        await startCheckoutDetection()
+
+        expect(recordedSavings).toHaveLength(1)
+        expect(recordedSavings[0].amount).toBeCloseTo(11, 2)
+    })
+
+    /** A summary row whose innerText jsdom cannot compute on its own. */
+    function addRow(html, text) {
+        const row = document.createElement('div')
+        row.innerHTML = html
+        Object.defineProperty(row, 'innerText', {
+            value: text,
+            configurable: true,
+        })
+        document.body.appendChild(row)
+    }
+
+    it('a finder attempt never banks a $0.00 total the reloaded page shows first', async () => {
+        caramelMarkPendingSubmit('THEO20', 'c1', [100], 'total')
+        addRow(
+            '<span>Order total</span> <span>$0.00</span>',
+            'Order total $0.00',
+        )
+
+        await startCheckoutDetection()
+
+        expect(recordedSavings).toHaveLength(0)
+    })
+
+    it("a finder attempt never reads a line item's own total while the reloaded summary is still loading", async () => {
+        // The attempt measured "Order total" with two total rows on the page.
+        caramelMarkPendingSubmit('THEO20', 'c1', [100], {
+            kind: 'total',
+            label: 'order total',
+            rows: 2,
+        })
+        addRow('<span>Total</span> <span>$19.99</span>', 'Total $19.99')
+
+        await startCheckoutDetection()
+
+        expect(recordedSavings).toHaveLength(0)
+    })
+
+    it('a finder record that names no row kind is still read as a finder total', async () => {
+        caramelMarkPendingSubmit('THEO20', 'c1', [100], {
+            label: 'order total',
+            rows: 1,
+        })
+
+        expect(caramelTakePendingSubmit()?.finder).toBe('total')
+    })
+
+    it('a finder attempt reads the same total row after the reload', async () => {
+        caramelMarkPendingSubmit('THEO20', 'c1', [100], {
+            kind: 'total',
+            label: 'order total',
+            rows: 2,
+        })
+        addRow('<span>Total</span> <span>$19.99</span>', 'Total $19.99')
+        addRow(
+            '<span>Order total</span> <span>$90.00</span>',
+            'Order total $90.00',
+        )
+        addRow('<span>Total</span> <span>$5.00</span>', 'Total $5.00')
+
+        await startCheckoutDetection()
+
+        expect(recordedSavings).toHaveLength(1)
+        expect(recordedSavings[0].amount).toBeCloseTo(10, 2)
     })
 
     it('claims nothing when the total did not move', async () => {

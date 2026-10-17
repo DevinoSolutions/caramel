@@ -3,6 +3,7 @@ import { useScrollDirection } from '@/hooks/useScrollDirection'
 import { useWindowSize } from '@/hooks/useWindowSize'
 import { useSession } from '@/lib/auth/client'
 import { endClientSession } from '@/lib/auth/endClientSession'
+import { DISCORD_INVITE_URL } from '@/lib/brandLinks'
 import { canAdvertiseInstall } from '@/lib/surface/detectSurface'
 import { useSurface } from '@/lib/surface/SurfaceProvider'
 import { userInitial } from '@/lib/userInitial'
@@ -11,6 +12,7 @@ import Image from 'next/image'
 import L from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
+import { FaDiscord } from 'react-icons/fa'
 import { RiCloseFill, RiMenu3Fill } from 'react-icons/ri'
 
 interface HeaderProps {
@@ -244,6 +246,19 @@ export default function Header({ scrollRef }: HeaderProps) {
                                 </Link>
                             )
                         })}
+                        {/* Menu only: the desktop pill already fills its row
+                            at every width, so the Discord lives in the footer
+                            there. */}
+                        <a
+                            href={DISCORD_INVITE_URL}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={() => setIsMenuOpen(false)}
+                            className="inline-flex cursor-pointer items-center justify-center gap-2.5 whitespace-nowrap rounded-3xl px-[30px] py-2.5 text-caramel transition hover:bg-caramel/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/60"
+                        >
+                            <FaDiscord aria-hidden="true" className="text-sm" />
+                            Join our Discord
+                        </a>
                         {session?.user ? (
                             <>
                                 <Link

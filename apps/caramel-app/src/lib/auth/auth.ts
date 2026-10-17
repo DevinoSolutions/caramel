@@ -2,6 +2,7 @@ import ResetPasswordTemplate from '@/emails/ResetPasswordTemplate'
 import VerificationRequestTemplate from '@/emails/VerificationRequestTemplate'
 import { createAppleSocialProviderConfig } from '@/lib/auth/appleClientSecret'
 import { handleUserCreated } from '@/lib/auth/signupHook'
+import { CLIENT_IP_HEADERS } from '@/lib/clientIp'
 import { sendEmail } from '@/lib/email'
 import { env } from '@/lib/env'
 import { BASE_URL, clientEnv } from '@/lib/env.client'
@@ -200,6 +201,12 @@ export const auth = betterAuth({
     // turns every code into a notice (src/lib/auth/authErrors.ts).
     onAPIError: { errorURL: '/login' },
     advanced: {
+        // Better Auth's per-IP rate limit keys on the client IP it reads from
+        // these headers. Its default is `x-forwarded-for` alone, which behind
+        // Cloudflare + Traefik is a multi-hop list it refuses to parse, so
+        // every visitor shared ONE bucket per auth path (#256). Same trusted
+        // order as our own limiter (CF-Connecting-IP first): src/lib/clientIp.ts.
+        ipAddress: { ipAddressHeaders: [...CLIENT_IP_HEADERS] },
         // Enable secure cookies when using HTTPS (required for ngrok/tunnels)
         // This ensures cookies are properly sent during OAuth redirects
         useSecureCookies: useSecure,

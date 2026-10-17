@@ -31,6 +31,13 @@ import {
     readCodeSharingConsent,
     writeCodeSharingConsent,
 } from './code-sharing-consent.js'
+import {
+    readUsageDiagnosticsConsent,
+    requestUsageDiagnosticsPermission,
+    resolveUsageDiagnostics,
+    withdrawUsageDiagnosticsPermission,
+    writeUsageDiagnosticsConsent,
+} from './usage-diagnostics-consent.js'
 
 /********************************************************************
  * Caramel core logic – 2025-06-29  (speed-tuned)
@@ -446,6 +453,59 @@ export function caramelOnCodeSharingConsentChanged(onChange) {
             parseCodeSharingConsent(changes[CODE_SHARING_CONSENT_KEY].newValue),
         )
     })
+}
+
+/* --------------------------------------------------  usage-diagnostics consent */
+// The shopper's answer to "send anonymous usage diagnostics?" — see
+// usage-diagnostics-consent.js. The popup card and the Settings toggle are the
+// ONLY writers; background.js reads the same record to gate every send.
+
+// Resolves the record, or null when there is none / it is malformed (= NOT
+// allowed). Rejects if storage itself fails; callers report it and fail closed.
+export function caramelGetUsageDiagnosticsConsent() {
+    return readUsageDiagnosticsConsent(currentBrowser)
+}
+
+// Persists 'accepted' | 'declined' (an accept mints the telemetry id, a decline
+// deletes it and, on Firefox, hands the data-collection grant back). Rejects
+// when the record write did not land, or when a decline's id delete failed. A
+// failed id delete still hands the grant back (the record already says
+// "declined", so nothing is sent) and then rethrows. A failed grant removal does
+// NOT undo the withdrawal; it is reported instead.
+export async function caramelSetUsageDiagnosticsConsent(choice) {
+    let record
+    try {
+        record = await writeUsageDiagnosticsConsent(currentBrowser, choice)
+    } catch (err) {
+        if (choice === 'declined') {
+            const stored = await readUsageDiagnosticsConsent(currentBrowser)
+            if (stored?.choice === 'declined') await handBackGrant()
+        }
+        throw err
+    }
+    if (choice === 'declined') await handBackGrant()
+    return record
+}
+
+async function handBackGrant() {
+    try {
+        await withdrawUsageDiagnosticsPermission(currentBrowser)
+    } catch (err) {
+        logError('usageDiagnosticsPermissionRemove', err)
+    }
+}
+
+// Firefox: ask for its data-collection grant. Call straight out of a click.
+// Other browsers: resolves true. Resolves false when the shopper refuses.
+export function caramelRequestUsageDiagnosticsPermission() {
+    return requestUsageDiagnosticsPermission(currentBrowser)
+}
+
+// Are diagnostics actually ON right now (consent accepted AND, on Firefox, the
+// browser grant still held)? The Settings toggle shows this, so it never claims
+// "on" for a switch that would send nothing.
+export async function caramelUsageDiagnosticsActive() {
+    return (await resolveUsageDiagnostics(currentBrowser)) !== null
 }
 
 /* --------------------------------------------------  savings history */

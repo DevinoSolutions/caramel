@@ -14,6 +14,15 @@ export interface ChatOptions {
     maxTokens?: number
     responseFormat?: 'json_object' | 'text'
     timeoutMs?: number
+    /** How long a reasoning model may think before answering. Sent only when
+     * set, so every existing caller's request body is unchanged. */
+    reasoningEffort?: 'low' | 'medium' | 'high'
+    /** Extra request headers for this call only (none by default, so every
+     * existing caller sends exactly the headers it always did). Merged
+     * UNDER the fixed headers below: a caller can add a header but never
+     * replace Content-Type, Authorization, HTTP-Referer, X-Title or
+     * X-Request-Id. */
+    headers?: Record<string, string>
 }
 
 export class OpenRouterError extends Error {
@@ -54,6 +63,7 @@ export async function chat(
         if (opts.responseFormat === 'json_object') {
             body.response_format = { type: 'json_object' }
         }
+        if (opts.reasoningEffort) body.reasoning_effort = opts.reasoningEffort
 
         // env.OPENROUTER_API_URL defaults to https://openrouter.ai/api/v1 (no
         // trailing slash), so with it unset this is exactly the URL this file
@@ -63,6 +73,7 @@ export async function chat(
             method: 'POST',
             signal: controller.signal,
             headers: {
+                ...opts.headers,
                 'Content-Type': 'application/json',
                 Authorization: `Bearer ${key}`,
                 'HTTP-Referer': 'https://caramel.app',
