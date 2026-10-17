@@ -15,6 +15,7 @@
         // Loaded by URL (import of runtime.getURL) in coupon-box-discovery.js,
         // so no import statement names it.
         "coupon-box-outline.js",
+        "coupon-box-learned.js",
         "background.js",
         "popup-core.js",
         "entrypoints/*.ts",

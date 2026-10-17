@@ -98,6 +98,9 @@ const bytes = s => new TextEncoder().encode(s).length
 // The list is the one the server's pick was measured with: interface and
 // coupon vocabulary in the store languages the finder reads. It changes only
 // together with the server's eval.
+// 2026-10-17: point(s), member(s), military, student(s), teacher(s), verify
+// and verification. Shopping words, never the shopper's, so the pick can tell
+// a points, member or student discount from a promo code box.
 // Exported for the tests.
 export const ALLOWED_WORDS = new Set(
     `
@@ -131,13 +134,13 @@ export const ALLOWED_WORDS = new Set(
     join kampanjkod keep kids kitchen klarna know kod korting kortingscode
     label language last later learn leather left legal less light lighting
     like links list live living log login logo low loyalty made main manage
-    map mattresses me media membership men menu message method mini mirrors
+    map mattresses me media member members membership men menu message method military mini mirrors
     mobile modal modern more move my name navigate navigation necessary need
     new news next night no not notice notifications now number nursery of
     off offer offers office ok on one onetrust online only open opens
     optional options or order orders original our out outdoor outlet over
     pack page pants password pay payment paypal performance personal phone
-    photo pillows pinterest place play plus policies policy postal power
+    photo pillows pinterest place play plus point points policies policy postal power
     powered pre preference preferences presentkort press previous price
     privacy pro problem proceed product products program promo promos
     promotion promotional promotions protection province purchase qty
@@ -150,12 +153,12 @@ export const ALLOWED_WORDS = new Set(
     settings share ship shipping shoes shop shopping shorts show side
     sideboards sign site sitemap size skip sleep slide small social sofas
     space special start state statement status stools storage store stores
-    story street strictly style submenu submit subscribe subtotal suite
+    story street strictly student students style submenu submit subscribe subtotal suite
     summary summarytotal supplies support sustainability tab table tables
-    targeting tax team terms text that the there this tienes tiktok time
+    targeting tax teacher teachers team terms text that the there this tienes tiktok time
     tips to toepassen toggle tools top tops total track tracking trade
     traditional training travel trending tu twitter type un una under une
-    unionpay up update updates use used value view votre voucher vouchers
+    unionpay up update updates use used value verification verify view votre voucher vouchers
     vous wall warranty was water we website what window wishlist with women
     world wrap you your youtube zip zniżka
 `

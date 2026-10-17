@@ -60,7 +60,26 @@ module.exports = [
         // coupon-runner.js) — the cookie reader pinned to the website's
         // schema, the install-id/record storage and the bounded retry.
         // Measured 111.27 -> 114.55 kB (+3.3 kB): one new capability, not prose.
-        limit: '120 KB',
+        // 2026-10-16, raised 120 -> 122 kB: the server's pick mode
+        // (rules_first / llm_first / llm_only, and the prompt asking the same
+        // question per mode) and the remembered coupon box (read it first,
+        // check it like any pick, carry it across a reload, hand its outcome
+        // to the module that saves it). Measured 113.05 -> 116.66 kB at first
+        // push, 121.36 kB after the review fixes (the learned-apply gate, the
+        // leave-the-page rule on every path, the setting and section rules);
+        // naming a box ships on demand (coupon-box-learned.js, below), not
+        // here.
+        // 2026-10-17, raised 122 -> 125 kB: a submit that leaves the store
+        // (formaction/form target) is never the apply, a positional or
+        // whole-form wordless apply is refused, and the remembered box is
+        // asked of the background instead of read from page storage.
+        // Measured 122.14 kB; 122.4 kB once the finder's pick memory moved to
+        // the background too (the per-tab handoffs).
+        // 2026-10-17, raised 125 -> 130 kB: this branch merged main through
+        // #348, which brings in the notes above it dated 2026-10-15 (install
+        // attribution, the porkbun capability marker) and the handoff store's
+        // review fixes. Measured 128.46 kB.
+        limit: '130 KB',
         brotli: false,
     },
     {
@@ -155,7 +174,24 @@ module.exports = [
         // browser replaces, writes down a refused record, and gains the
         // compare-and-set replace that makes a cancel one step. Measured
         // 13.60 kB.
-        limit: '13.9 KB',
+        // On this branch, before it merged main through #348:
+        // 2026-10-16, raised 11.3 -> 12.7 kB: the pick mode beside the flag,
+        // the couponBoxLearned flag, and behind it the learned-answer opt-in
+        // and the learned coupon box report (install id read, the POST, what
+        // the server recorded). Measured 10.68 -> 11.77 kB.
+        // 2026-10-17, raised 12.7 -> 15 kB: the learned-box memory moved here
+        // from the page (a page can write its own storage): the background
+        // reads and writes it for the sender tab's own host through
+        // coupon-box-learned.js (validation and the selector grammar), holds
+        // the box a run used across a reload per tab, and serialises writes
+        // across tabs. Measured 13.57 kB.
+        // 2026-10-17, unchanged at 15 kB: the per-tab handoff store
+        // (tab-handoff.js) joined, and the box a run holds across a reload
+        // moved onto it in place of its own copy. Measured 13.97 kB.
+        // 2026-10-17, raised 15 -> 16.6 kB: main through #348 brings the
+        // code-sharing funnel diagnostics (dated 2026-10-15 above) and the
+        // handoff store's review fixes. Measured 16.2 kB.
+        limit: '16.6 KB',
         brotli: false,
     },
     {
@@ -177,6 +213,31 @@ module.exports = [
         // to 1.86 kB minified; the same module adds ~0.8 kB to the per-page
         // content-scripts group above (116.69 -> 117.49 kB, inside its limit).
         limit: '2 KB',
+        brotli: false,
+    },
+    {
+        name: 'coupon-box-learned.js (loaded on demand, minified)',
+        path: '.size-cache/coupon-box-learned.min.js',
+        // 2026-10-16 — measured 3.55 kB minified. Not injected on every page:
+        // the finder imports it only on a store with no config, to name a box
+        // it may remember (stable selectors) and to save and report what a
+        // run on that box showed (the per-install memory, LRU 200 domains).
+        // Same date, raised 3.8 -> 4.5 kB: the selector grammar every learned
+        // selector is built in and read through (a served or stored selector
+        // outside it is never queried), and the one-element lookup the finder
+        // reads a learned box with. Measured 3.55 -> 4.19 kB.
+        // 2026-10-17, raised 4.5 -> 4.8 kB: the server's two refusals,
+        // mirrored so a box it would refuse is never remembered nor sent (no
+        // personal-data shapes in any selector; no apply or toggle that names
+        // checkout, ordering, paying or removing). Measured 4.43 kB.
+        // 2026-10-17, raised 4.8 -> 5.1 kB: the server's final rules for
+        // both (long numbers only in attribute values other than id, even
+        // split by spaces, dashes or dots; risky words only in the clicked
+        // element, as whole words or pairs). Measured 4.88 kB.
+        // 2026-10-17, raised 5.1 -> 5.4 kB: `checkout` is not risky when the
+        // clicked element also names a coupon word (the cart's own coupon
+        // apply). Measured 5.11 kB.
+        limit: '5.4 KB',
         brotli: false,
     },
 ]
