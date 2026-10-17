@@ -1490,7 +1490,9 @@ function finderRecord(rec, found, totalRow, opened) {
 // that reloads to show the store's answer gets its box found again there.
 // Both are held by the background for this tab and site (tab-handoff.js),
 // never in the page's sessionStorage: the page could otherwise name the
-// fields the codes go into, or clear the memory and buy a second ask.
+// fields the codes go into, or clear the memory and buy a second ask. That
+// holds while the background answers. One that cannot (pickMemo then reads
+// nothing) leaves only this page's own memory, so the next page may ask again.
 const PICK_KEY = 'box_pick'
 // How long the page waits for the answer. The server gives the model 20s and
 // then answers no_pick itself; the background allows the whole ask (flag
