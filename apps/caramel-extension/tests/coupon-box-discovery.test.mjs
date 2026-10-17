@@ -390,6 +390,93 @@ describe('the finder never takes a control that is not a code', () => {
     })
 })
 
+describe("an apply button with no apply word is taken only in the box's own panel", () => {
+    // Seven button shapes a store puts beside a promo field, two of them
+    // labelled for a screen reader ("Submit", "Go"), the rest an icon or an
+    // arrow and nothing else.
+    const SHAPES = {
+        'svg, no name': '<button id="shape" type="button"><svg></svg></button>',
+        'svg, aria "Submit"':
+            '<button id="shape" type="button" aria-label="Submit"><svg></svg></button>',
+        'arrow, aria "Go"':
+            '<button id="shape" type="button" aria-label="Go">→</button>',
+        'bare arrow': '<button id="shape" type="button">›</button>',
+        'icon span, submit':
+            '<button id="shape" type="submit"><span class="icon icon-arrow"></span></button>',
+        'input submit "›"': '<input id="shape" type="submit" value="›">',
+        'svg, class cart-remove':
+            '<button id="shape" type="button" class="cart-remove"><svg></svg></button>',
+    }
+    const FIELD =
+        '<label for="dc">Discount code</label>' +
+        '<input id="dc" name="discount_code" type="text">'
+    const LINE = name =>
+        `<div class="line"><p>${name}, organic cotton, relaxed fit, machine ` +
+        'washable, ships in recycled packaging within two business days. Free ' +
+        'returns for thirty days.</p>' +
+        '<select name="updates[]"><option>1</option><option>2</option></select>' +
+        '<span>$49.00</span>'
+    // The box's own panel, its own small form, and a whole-cart form in which
+    // the button sits in a line item, away from the box.
+    const CONTAINERS = {
+        'small panel': shape =>
+            `<div class="promo">${FIELD}${shape}</div>${TOTAL}`,
+        'small form': shape =>
+            `<form class="promo">${FIELD}${shape}</form>${TOTAL}`,
+        'whole-cart form': shape =>
+            '<form id="cart" action="/cart" method="post"><div class="items">' +
+            `${LINE('Field jacket')}<div class="actions">${shape}</div></div>` +
+            `${LINE('Wool sweater')}</div>${LINE('Canvas tote')}</div></div>` +
+            `<div class="summary"><div class="promo">${FIELD}</div>${TOTAL}</div></form>`,
+    }
+    // The two with an apply word in their aria-label are labelled, and a
+    // labelled apply is taken wherever it sits, as before. The rest are taken
+    // only in the box's own panel or small form, and a remove icon nowhere.
+    const TAKEN = {
+        'small panel': [true, true, true, true, true, true, false],
+        'small form': [true, true, true, true, true, true, false],
+        'whole-cart form': [false, true, true, false, false, false, false],
+    }
+
+    for (const [where, build] of Object.entries(CONTAINERS))
+        Object.keys(SHAPES).forEach((shape, i) =>
+            it(`${shape}, in a ${where}: ${TAKEN[where][i] ? 'taken' : 'never taken'}`, () => {
+                document.body.innerHTML = build(SHAPES[shape])
+
+                const found = caramelDiscoverCouponBox()
+
+                expect(found.input?.id).toBe('dc')
+                expect(found.button?.id === 'shape').toBe(TAKEN[where][i])
+            }),
+        )
+
+    for (const attrs of [
+        'class="qty-plus"',
+        'id="removeItem"',
+        'name="checkout"',
+        'data-action="delete"',
+        'data-testid="cart-item-trash"',
+        'class="btn" data-role="quantity-down"',
+    ])
+        it(`an icon whose own attributes say so (${attrs}) is never the apply, even in the box's panel`, () => {
+            document.body.innerHTML = CONTAINERS['small panel'](
+                `<button type="button" ${attrs}><svg></svg></button>`,
+            )
+
+            expect(caramelDiscoverCouponBox().button).toBeNull()
+        })
+
+    it("an icon in the box's panel is taken over a remove icon in the same panel", () => {
+        document.body.innerHTML =
+            `<div class="promo">${FIELD}` +
+            '<button id="rm" type="button" class="cart-remove"><svg></svg></button>' +
+            '<button id="shape" type="submit" class="promo-submit"><svg></svg></button>' +
+            `</div>${TOTAL}`
+
+        expect(caramelDiscoverCouponBox().button?.id).toBe('shape')
+    })
+})
+
 describe('a product named like a loyalty program is not a rewards section', () => {
     // A cart <form> or <section> wraps the line items and the promo box, so
     // its first heading is a product title. A product called "Military Green

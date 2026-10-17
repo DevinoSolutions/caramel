@@ -456,6 +456,33 @@ const isDanger = text => DANGER.some(w => has(text, w))
 const FIELDS =
     'input:not([type=hidden]):not([type=checkbox]):not([type=radio]):not([type=submit]):not([type=button]):not([type=image]):not([type=reset]), textarea'
 
+// A button with no apply word on it, in its label, aria-label, title or value
+// (an icon, an arrow), is the box's apply only in the box's own small panel
+// (ownsBox): a whole-cart form also holds each line's remove icon and quantity
+// steppers, and a click on one moves the total the way a code would. Nor is it
+// one whose name, id, class or data-* attributes say it removes, changes a
+// quantity, checks out, pays or buys. A labelled apply is judged as before.
+const NOT_AN_APPLY_RE =
+    /\b(?:remove|delete|trash|qty|quantity|plus|minus|(?:in|de)cre(?:ase|ment)|check ?out|place ?order|pay(?:pal)?|buy|purchase)\b/i
+function wordlessApply(btn, input) {
+    if (!ownsBox(btn, input)) return false
+    for (const attr of [
+        btn.getAttribute('name'),
+        btn.id,
+        btn.getAttribute('class'),
+        ...Array.from(btn.attributes, a =>
+            a.name.startsWith('data-') ? a.name.slice(5) + ' ' + a.value : '',
+        ),
+    ])
+        if (
+            NOT_AN_APPLY_RE.test(
+                (attr || '').replace(/([a-z])(?=[A-Z])|[-_]+/g, '$1 '),
+            )
+        )
+            return false
+    return true
+}
+
 function scoreButton(btn, input, level) {
     const reasons = []
     const text = buttonLabel(btn)
@@ -470,6 +497,9 @@ function scoreButton(btn, input, level) {
     )
         return null
     if (isDanger(text) && !APPLY_VERBS.some(w => has(text, w))) return null
+    const said = norm([text, ariaOf(btn), btn.title, btn.value].join(' '))
+    if (!APPLY_WORDS.some(w => has(said, w)) && !wordlessApply(btn, input))
+        return null
     const applyHit = APPLY_WORDS.filter(w => has(text, w) || has(attrs, w))
     if (applyHit.length) {
         s += 40

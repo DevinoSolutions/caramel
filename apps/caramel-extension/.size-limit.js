@@ -67,7 +67,10 @@ module.exports = [
         // Measured 118.05 -> 120.89 kB; 121.47 kB once the finder also never
         // clicks a control that adds to the cart, buys, adds a gift extra,
         // updates the cart, subscribes or signs in (noCodeClick, the same
-        // words the server-pick checks use). The finder is ~28.5 kB of this
+        // words the server-pick checks use); 121.97 kB once an apply button
+        // with no apply word on it is taken only in the box's own panel and
+        // never when its attributes say remove, quantity, checkout or pay
+        // (wordlessApply). The finder is ~28.5 kB of this
         // bundle on every page; loading it on demand like
         // coupon-box-outline.js is the next step before this budget is raised
         // again.
