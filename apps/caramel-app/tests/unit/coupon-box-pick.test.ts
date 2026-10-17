@@ -612,7 +612,9 @@ describe('the pick', () => {
         'Voucher',
         'Gift card or discount code',
         'rabattkod',
-        'Bon de réduction',
+        // "Bon de réduction" as the outline prints it: "de" is not on the
+        // extension's word list.
+        'Bon réduction',
     ])(
         'keeps "Redeem" beside a "%s" field as the apply button',
         async field => {
@@ -933,6 +935,216 @@ describe('model-call budget', () => {
             ).toBe(200)
         }
         expect(chatMock).toHaveBeenCalledTimes(1)
+    })
+})
+
+// Names as the outline prints them: only words on the extension's word list
+// reach the server ("Complete order" arrives as "order").
+describe('controls that are not a coupon control', () => {
+    const pickOn = async (outline: string, a: object) => {
+        chatMock.mockImplementation(async () => answer(a))
+        return pickCouponBox({ domain: freshDomain(), outline })
+    }
+    const SUMMARY = (...lines: string[]) =>
+        [
+            '- main:',
+            '  - region "Order summary":',
+            ...lines.map(l => `    ${l}`),
+            '    - [9] button "Checkout"',
+        ].join('\n')
+    const BOX = (button: string, field = 'Promo code') =>
+        [
+            '- main:',
+            '  - form:',
+            `    - [1] textbox "${field}"`,
+            `    - [2] button "${button}"`,
+        ].join('\n')
+
+    // Store credit, a balance and a gift card are not a coupon: applying
+    // them drops the total, which reads as a saving that is not one.
+    it.each([
+        'Use store credit',
+        'Apply credit',
+        'Apply gift card',
+        'Have a gift card?',
+        'Check balance',
+        'Add protection',
+        'Add a gift message',
+        'Add to cart',
+        'Buy',
+    ])('"%s" is never the toggle', async name => {
+        expect(
+            await pickOn(SUMMARY(`- [5] button "${name}" [collapsed]`), {
+                toggle: 5,
+            }),
+        ).toMatchObject({ outcome: 'no_box' })
+    })
+
+    it('a discount reveal under a store credit balance is never the toggle', async () => {
+        expect(
+            await pickOn(
+                SUMMARY(
+                    '- heading "Store credit $#.##"',
+                    '- [5] button "Apply discount" [collapsed]',
+                ),
+                { toggle: 5 },
+            ),
+        ).toMatchObject({ outcome: 'no_box' })
+    })
+
+    it.each([
+        'Promo code or gift card',
+        'Gift card or discount code',
+        'Have a promo code?',
+    ])('"%s" is still the toggle', async name => {
+        expect(
+            await pickOn(SUMMARY(`- [5] button "${name}" [collapsed]`), {
+                toggle: 5,
+            }),
+        ).toMatchObject({ outcome: 'box', toggle: 5 })
+    })
+
+    it.each([
+        'Add to cart',
+        'Submit order',
+        'order',
+        'Buy',
+        'Proceed',
+        'Next',
+        'Apply credit',
+        'Add gift wrap',
+    ])('"%s" is never the apply button', async name => {
+        expect(await pickOn(BOX(name), { input: 1, button: 2 })).toEqual({
+            outcome: 'no_pick',
+            reason: 'refused_button',
+            cached: false,
+        })
+    })
+
+    it('refuses "Redeem" beside a field only for a gift card code', async () => {
+        expect(
+            await pickOn(BOX('Redeem', 'Gift card code'), {
+                input: 1,
+                button: 2,
+            }),
+        ).toMatchObject({ outcome: 'no_pick', reason: 'refused_button' })
+    })
+
+    it('keeps an Apply beside a credit card field heading', async () => {
+        expect(
+            await pickOn(
+                [
+                    '- main:',
+                    '  - region "Payment":',
+                    '    - heading "Credit card"',
+                    '    - [1] textbox "Promo code"',
+                    '    - [2] button "Apply"',
+                ].join('\n'),
+                { input: 1, button: 2 },
+            ),
+        ).toMatchObject({ outcome: 'box', input: 1, button: 2 })
+    })
+
+    // A switch or a radio is a setting, and so is a checkbox that does not
+    // speak of entering a code or that asks for consent.
+    it.each([
+        ['switch', 'Have a promo code?'],
+        ['checkbox', 'Gift wrap'],
+        ['checkbox', 'Email me promo codes and offers'],
+        ['checkbox', 'Use my voucher balance'],
+    ])('a %s "%s" is never the toggle', async (role, name) => {
+        expect(
+            await pickOn(SUMMARY(`- [5] ${role} "${name}"`), { toggle: 5 }),
+        ).toMatchObject({ outcome: 'no_box' })
+    })
+
+    it('a checkbox "Have a promo code?" is the toggle', async () => {
+        expect(
+            await pickOn(SUMMARY('- [5] checkbox "Have a promo code?"'), {
+                toggle: 5,
+            }),
+        ).toMatchObject({ outcome: 'box', toggle: 5 })
+    })
+})
+
+// A site footer's links ("Check out our blog") and a bare "total" do not make
+// it a cart summary: its "Have A Code?" link still leads off the page.
+describe('the page footer', () => {
+    const FOOTER = (...lines: string[]) =>
+        [
+            '- main:',
+            '  - [1] link "Classic"',
+            '- contentinfo:',
+            '  - list:',
+            ...lines.map(l => `    ${l}`),
+            '    - [5] link "Have A Code?"',
+        ].join('\n')
+
+    it.each([
+        ['a "Check out our blog" link', '- [3] link "Check out our blog"'],
+        ['a "Total" link', '- [3] link "Total"'],
+    ])('with %s is still the page footer', async (_, line) => {
+        chatMock.mockImplementation(async () => answer({ toggle: 5 }))
+        expect(
+            await pickCouponBox({
+                domain: freshDomain(),
+                outline: FOOTER(line),
+            }),
+        ).toMatchObject({ outcome: 'no_box' })
+    })
+
+    it.each([
+        ['a "Checkout" button', '- [3] button "Checkout"'],
+        ['a subtotal', '- heading "Subtotal $#.##"'],
+    ])('with %s is a cart summary', async (_, line) => {
+        chatMock.mockImplementation(async () => answer({ toggle: 5 }))
+        expect(
+            await pickCouponBox({
+                domain: freshDomain(),
+                outline: FOOTER(line),
+            }),
+        ).toMatchObject({ outcome: 'box', toggle: 5 })
+    })
+})
+
+// "Apply Promo Code" above a field heads (and folds) the box; its own "Apply"
+// after the field applies the code (onekingslane.com).
+describe('a code-naming control above the field', () => {
+    const BOX = (after: string) =>
+        [
+            '- main:',
+            '  - [45] button "Remove"',
+            '  - [46] button "Apply Promo Code"',
+            '  - [2] textbox',
+            `  - [47] button "${after}"`,
+            '  - [48] button',
+        ].join('\n')
+    const pick = async (outline: string, button: number) => {
+        chatMock.mockImplementation(async () => answer({ input: 2, button }))
+        return pickCouponBox({ domain: freshDomain(), outline })
+    }
+
+    it('is read as the "Apply" after the field', async () => {
+        expect(await pick(BOX('Apply'), 46)).toMatchObject({
+            outcome: 'box',
+            input: 2,
+            button: 47,
+        })
+    })
+
+    it('is kept when the control after the field is no apply verb', async () => {
+        expect(await pick(BOX('Gift wrap options'), 46)).toMatchObject({
+            outcome: 'box',
+            input: 2,
+            button: 46,
+        })
+    })
+
+    it('leaves a button after the field as the model named it', async () => {
+        expect(await pick(BOX('Apply'), 47)).toMatchObject({
+            outcome: 'box',
+            button: 47,
+        })
     })
 })
 

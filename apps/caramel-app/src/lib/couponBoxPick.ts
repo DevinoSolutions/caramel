@@ -130,7 +130,11 @@ export function couponBoxLlmEnabled(): boolean {
     return env.COUPON_BOX_LLM_ENABLED && Boolean(env.COUPON_BOX_PICK_MODEL)
 }
 
-const EMAIL_SHAPED = /[\w.+-]+@[\w-]+\.[\w.]+/g
+// Bounded runs: with open-ended ones, a long word with no "@" (an outline is
+// guest-written) makes every start scan to the end of the line, and a 40 KiB
+// line took seconds. An address's local part is at most 64 characters, a
+// domain at most 253.
+const EMAIL_SHAPED = /[\w.+-]{1,64}@[\w-]{1,253}\.[\w.]{1,253}/g
 // A node line's leading `- [n] role` head. Its index is the only number the
 // outline may keep, and only when a role word follows it: a line of page text
 // that happens to start like an index is scrubbed like any other text.
@@ -201,9 +205,17 @@ const SECTION_ROLES = new Set([
 ])
 // A price, as the outline prints one (every digit is "#").
 const MONEY = /[$€£¥₹]\s?#|#\s?[$€£]|#[.,]##\b/
-// A footer that holds these is the cart's own summary, not the page footer.
-const CART_CONTROL =
-    /check ?out|\btotal\b|subtotal|order summary|place (?:my |your )?order/i
+// A footer is the cart's own summary, not the page footer, when one of its
+// buttons checks out or places the order, or it names a subtotal or an order
+// summary. A link or a bare "total" is not enough: a site footer has "Check
+// out our blog" and "Total satisfaction".
+const CART_BUTTON = /check ?out|place (?:my |your )?order/i
+const CART_SUMMARY = /subtotal|order summary/i
+// The extension cuts a control's name at 80 characters, a heading's at 100
+// and a container's at 60 (coupon-box-outline.js). The rules read no more than
+// this of a name: the outline is guest-written, and every rule below then runs
+// on a bounded string, whatever a caller sends.
+const NAME_MAX_CHARS = 120
 // The extension drops whole lines past its cap (coupon-box-outline.js), so an
 // outline this close to MAX_OUTLINE_BYTES may have lost its real page footer.
 const NEAR_CAP_BYTES = 1024
@@ -229,7 +241,10 @@ class Outline {
             const index = m[2] === undefined ? null : Number(m[2])
             this.lines.push({
                 role: m[3] ?? '',
-                name: LINE_NAME.exec(m[4] ?? '')?.[1] ?? '',
+                name: (LINE_NAME.exec(m[4] ?? '')?.[1] ?? '').slice(
+                    0,
+                    NAME_MAX_CHARS,
+                ),
                 index,
                 parent,
                 children: [],
@@ -336,22 +351,35 @@ class Outline {
         return `${this.lines[box]!.name} ${head}`
     }
 
+    /** A cart's own summary, by its buttons and its words. */
+    cartSummary(at: number): boolean {
+        return (
+            CART_SUMMARY.test(this.words(at)) ||
+            this.below(at).some(
+                i =>
+                    this.lines[i]!.role === 'button' &&
+                    CART_BUTTON.test(this.lines[i]!.name),
+            )
+        )
+    }
+
     /** Inside the page's own footer: the LAST contentinfo nested in no other
-     * line that holds no cart control (a cart summary can be drawn as a
+     * line that is no cart summary (a cart summary can be drawn as a
      * <footer>, before or after the site footer), and not inside a dialog
      * opened from it. None in an outline that may have been cut at the cap:
      * its last footer may be a cart's. */
     inPageFooter(at: number, mayBeCut: boolean): boolean {
         if (mayBeCut) return false
         let footer = -1
-        this.lines.forEach((l, i) => {
+        for (let i = this.lines.length - 1; footer < 0 && i >= 0; i--) {
+            const l = this.lines[i]!
             if (
                 l.parent < 0 &&
                 l.role === 'contentinfo' &&
-                !CART_CONTROL.test(this.words(i))
+                !this.cartSummary(i)
             )
                 footer = i
-        })
+        }
         if (footer < 0) return false
         for (
             let p = this.lines[at]!.parent;
@@ -371,10 +399,42 @@ class Outline {
 const INPUT_ROLES = new Set(['textbox', 'combobox', 'searchbox'])
 const CLICK_ROLES = new Set(['button', 'link', 'tab', 'checkbox', 'switch'])
 // A control the extension must never click on the model's word, whatever its
-// role: it leaves the cart, spends money, removes items or signs in.
-// coupon-box-discovery.js carries the same list for the clicks it makes.
+// role: it leaves the cart, moves the checkout on a step, spends money,
+// removes items or signs in. coupon-box-discovery.js carries the same list for
+// the clicks it makes. A name that is only "order" is a "Complete order"
+// button: "complete" is not on the extension's word list, so the outline
+// prints what is left.
 const NEVER_CLICK =
-    /check ?out|place (?:my |your )?order|\bpay\b|pay ?pal|pay now|buy now|purchase|\bremove\b|\bdelete\b|empty (?:cart|basket|bag)|sign ?in|sign ?up|log ?in|register|create (?:an )?account|subscribe|continue/i
+    /check ?out|place (?:my |your )?order|\bpay\b|pay ?pal|pay now|buy now|purchase|\bremove\b|\bdelete\b|empty (?:cart|basket|bag)|sign ?in|sign ?up|log ?in|register|create (?:an )?account|subscribe|continue|\bproceed\b|\bnext\b|^\W*(?:(?:my|your|the)\s+)?orders?\W*$/i
+// The extension's guard on every click it makes (dom-utils.js
+// CARAMEL_FORBIDDEN_CONTROL_RE, byte-identical): placing, paying for or
+// confirming an order, emptying the cart, signing out.
+const FORBIDDEN_CONTROL =
+    /\b(place\s+(your\s+)?order|pay\s+(now|today)|complete\s+(your\s+)?(order|purchase)|submit\s+order|confirm\s+(and\s+pay|order|purchase)|buy\s+now|proceed\s+to\s+(pay|checkout)|checkout\s+now|delete\s+account)\b|\b(remove|delete)\s+(this\s+)?(item|product|line|all|address|card|everything|from\s+(bag|cart|basket|order))\b|\b(empty|clear)\s+(your\s+)?(cart|bag|basket|trolley)\b|\b(log|sign)\s*out\b|\b(jetzt\s+kaufen|kauf(en)?\s+abschlie(ss|ß)en|zahlungspflichtig\s+bestellen|bestellung\s+abschicken|commander(\s+et\s+payer)?|payer\s+maintenant|valider\s+(la\s+)?commande|realizar\s+(el\s+)?pedido|comprar\s+ahora|pagar\s+ahora|finalizar\s+(la\s+)?compra|acquista\s+ora|procedi\s+al\s+pagamento)\b/i
+// coupon-box-discovery.js noCodeClick, byte-identical: a control that adds to
+// the cart or buys, adds a gift extra, protection, a warranty, insurance or a
+// donation, saves or updates the cart, subscribes, or signs in or up. "Gift
+// card or discount code" names a code and is still a coupon control.
+const NO_CODE_CLICK_RE =
+    /\badd(?:ing)? (?:it )?to (?:my |your |the )?(?:cart|bag|basket|order)\b|\bbuy\b|\bprotection\b|\bwarrant(?:y|ies)\b|\binsurance\b|\bdonat(?:e|ion)s?\b|\bround(?:ing)? ?up\b|\b(?:save|update) (?:my |your |the )?(?:cart|bag|basket|qty|quantit(?:y|ies))\b|\bsave for later\b|\bsubscri(?:be|ption)s?\b|\bnewsletters?\b|\bsign(?:ing)? ?(?:in|up)\b|\blog ?in\b/i
+const GIFT_EXTRA_RE =
+    /\bgift ?(?:card|wrap\w*|message|note|receipt|box|bag)s?\b/i
+const PROMO_WORD_RE = /\b(?:promo\w*|coupons?|discounts?|vouchers?)\b/i
+const giftOnly = (t: string) => GIFT_EXTRA_RE.test(t) && !PROMO_WORD_RE.test(t)
+const noCodeClick = (t: string) => NO_CODE_CLICK_RE.test(t) || giftOnly(t)
+// coupon-box-discovery.js settingControl, byte-identical patterns: a switch or
+// a radio is a setting, never a fold, and so is a checkbox that does not speak
+// of entering a code or that asks for consent.
+const CODE_ENTRY_RE =
+    /\b(?:promo(?:tional)?|coupon|discount|voucher|offer|gift)\s+codes?\b|\b(?:have|got|enter|add|apply|use)\s+(?:a|an|your)?\s*(?:promo(?:tional)?|coupon|discount|voucher)\b(?!\s+(?:card|balance|points))/i
+const CONSENT_RE =
+    /\b(?:e-?mail|sms|text me|newsletter|subscri\w*|sign me up|send me|notif\w*|marketing)\b/i
+function settingControl(line: OutlineLine): boolean {
+    if (/^(?:switch|radio|menuitemradio|menuitemcheckbox)$/.test(line.role))
+        return true
+    if (line.role !== 'checkbox') return false
+    return !CODE_ENTRY_RE.test(line.name) || CONSENT_RE.test(line.name)
+}
 
 // Rewards are the shopper's own money: a control that redeems points or
 // rewards, or picks a member, student, military or teacher discount, is never
@@ -389,19 +449,35 @@ const NEVER_CLICK =
 // then the one that sees them.
 const LOYALTY =
     /\b(?:redeem(?:s|ed|ing)?|points?|rewards?|loyalty|memberships?|member pric(?:e|es|ing)|students?|military|teachers?|verif(?:y|ied|ication))\b/i
+// Store credit and a balance are the shopper's money too: applying them drops
+// the total and reads as a saving that is not one. "Credit card" is a payment
+// method. A gift card is judged by noCodeClick on the control's own name, as
+// "Promo code or gift card" still reveals the coupon box.
+const STORE_CREDIT =
+    /\bstore credits?\b|\bcredits?\b(?! ?cards?)|\bbalances?\b/i
 const REDEEM = /\bredeem/i
 const REDEEM_WORDS = /\bredeem\w*/gi
+// Every run is bounded: an open-ended one backtracks over a long word on
+// every start, and a 40 KiB word took over a second.
 const withoutCodePhrases = (t: string) =>
-    t.replace(/(?:[\w-]+\s+(?:or|and|&|\/)\s+)?[\w-]+\s+codes?\b/gi, ' ')
+    t.replace(
+        /(?:[\w-]{1,40}\s{1,8}(?:or|and|&|\/)\s{1,8})?[\w-]{1,40}\s{1,8}codes?\b/gi,
+        ' ',
+    )
 // "Redeem ### points for a $# discount code" spends points to get a code,
 // whatever it names. A toggle opens a box to type a code into; this buys one.
+// Bounded gaps: two open-ended ones made a long name cubic.
 const REDEEM_FOR_A_CODE =
-    /\bredeem\w*\b.*\bfor\b.*\b(?:codes?|coupons?|vouchers?)\b/i
+    /\bredeem\w{0,8}\b.{0,60}?\bfor\b.{0,40}?\b(?:codes?|coupons?|vouchers?)\b/i
 // Words that name a code, in the store languages the outline keeps. "kod"
 // also inside a word (Swedish "rabattkod", "kampanjkod"); "promo" only as a
-// word, so "promotions" is an offer, not a code.
+// word, so "promotions" is an offer, not a code. "de" is not on the
+// extension's word list, so "Bon de réduction" reaches the server as "Bon
+// réduction"; the extension reads the page, where it is still there.
 const NAMES_CODE =
-    /code|codice|código|kod|coupon|cup[oó]n|cupom|voucher|gutschein|\bpromo\b|\bbons? de r[ée]duction/i
+    /code|codice|código|kod|coupon|cup[oó]n|cupom|voucher|gutschein|\bpromo\b|\bbons?\b(?:\s+de)?\s+r[ée]duction/i
+// A code for a coupon, not one only for a gift card ("Gift card code").
+const namesCouponCode = (t: string) => NAMES_CODE.test(t) && !giftOnly(t)
 // A toggle opens a box to type a code into. One that offers deals without
 // naming a code ("View offers", "Available offers") applies an offer or opens
 // a list of them, and one about the small print ("Promo details") explains
@@ -418,16 +494,16 @@ const ABOUT_TERMS =
 // "Promo details" is the small print; "Coupon code details" opens a box.
 const CODE_WORD = /\b(?:codes?|coupons?|vouchers?)\b/i
 
-/** A clicked control that spends the shopper's rewards. "Redeem" is how some
- * stores name a code box's apply button: it is kept when the control itself
- * or the field beside it names a code. */
+/** A clicked control that spends the shopper's rewards or store credit.
+ * "Redeem" is how some stores name a code box's apply button: it is kept when
+ * the control itself or the field beside it names a coupon code. */
 function spendsPoints(tree: Outline, at: number): boolean {
     const own = tree.lines[at]!.name
-    if (LOYALTY.test(withoutCodePhrases(own).replace(REDEEM_WORDS, '')))
-        return true
+    const ownWords = withoutCodePhrases(own).replace(REDEEM_WORDS, '')
+    if (LOYALTY.test(ownWords) || STORE_CREDIT.test(ownWords)) return true
     if (REDEEM_FOR_A_CODE.test(own)) return true
     const beside = tree.beside(at)
-    if (REDEEM.test(own) && !NAMES_CODE.test(own) && !NAMES_CODE.test(beside))
+    if (REDEEM.test(own) && !namesCouponCode(own) && !namesCouponCode(beside))
         return true
     return LOYALTY.test(
         withoutCodePhrases(`${beside} ${tree.section(at)}`).replace(
@@ -438,7 +514,7 @@ function spendsPoints(tree: Outline, at: number): boolean {
 }
 
 /** A toggle that names no code: an offer, the small print, or a discount
- * beside points, rewards, a membership or a gift card. */
+ * beside points, rewards, a membership, a gift card or store credit. */
 function offersOnly(tree: Outline, at: number): boolean {
     const own = tree.lines[at]!.name
     if (ABOUT_TERMS.test(own) && !CODE_WORD.test(own)) return true
@@ -448,7 +524,47 @@ function offersOnly(tree: Outline, at: number): boolean {
     const near = withoutCodePhrases(
         `${own} ${tree.beside(at)} ${tree.section(at)}`,
     )
-    return LOYALTY.test(near) || MEMBER_OR_GIFT.test(near)
+    return (
+        LOYALTY.test(near) ||
+        MEMBER_OR_GIFT.test(near) ||
+        STORE_CREDIT.test(near)
+    )
+}
+
+// A short apply verb, the whole of a control's name.
+const APPLY_VERB =
+    /^(?:apply|redeem|submit|ok|go|use|add|anwenden|einlösen|aplicar|appliquer|applica|toepassen|canjear|resgatar)$/i
+
+/** The apply button for `input` when the model named a control ABOVE the
+ * field that names the code ("Apply Promo Code" heading a box, which folds
+ * it): the first control after the field in the same block, when it is a
+ * short apply verb ("Apply"). onekingslane.com: a click on the heading after
+ * typing folds the box instead of applying the code. Any other answer is
+ * returned as it is. */
+function applyAfterField(
+    tree: Outline,
+    button: number | null,
+    input: number | null,
+): number | null {
+    const b = button === null ? undefined : tree.byIndex.get(button)
+    const f = input === null ? undefined : tree.byIndex.get(input)
+    if (b === undefined || f === undefined) return button
+    if (
+        !CLICK_ROLES.has(tree.lines[b]!.role) ||
+        !NAMES_CODE.test(tree.lines[b]!.name) ||
+        tree.lines[b]!.parent !== tree.lines[f]!.parent
+    )
+        return button
+    const sibs = tree.siblings(f)
+    const fi = sibs.indexOf(f)
+    if (sibs.indexOf(b) >= fi) return button
+    const next = sibs
+        .slice(fi + 1)
+        .find(s => CLICK_ROLES.has(tree.lines[s]!.role))
+    if (next === undefined) return button
+    return APPLY_VERB.test(tree.lines[next]!.name.trim())
+        ? tree.lines[next]!.index
+        : button
 }
 
 interface Answer {
@@ -501,11 +617,15 @@ function parseAnswer(raw: string): Answer | null {
  * - An index the outline does not contain is a hallucination, and an index
  *   of the wrong kind of element is refused.
  * - A refused input or toggle becomes null. A toggle is refused when it is in
- *   the page footer, names no code (offersOnly), spends rewards
- *   (spendsPoints) or is a NEVER_CLICK control.
+ *   the page footer, names no code (offersOnly), is a setting
+ *   (settingControl), or fails the checks every clicked pick passes: it is
+ *   no NEVER_CLICK, FORBIDDEN_CONTROL or noCodeClick control and spends no
+ *   rewards or store credit (spendsPoints).
  * - With neither an input nor a toggle left, the answer is "no box".
- * - A named apply button that is refused (the same checks, bar the footer
- *   and the code rules) refuses the whole answer as `refused_button`. The
+ * - A named apply button above the field that names the code is read as the
+ *   field's own apply button after it (applyAfterField).
+ * - A named apply button that fails the checks every clicked pick passes
+ *   refuses the whole answer as `refused_button`, a toggle included. The
  *   extension reads a null button as "this box applies on Enter", and Enter
  *   in a field beside a checkout or rewards button can submit that control.
  */
@@ -519,7 +639,15 @@ function toCachedAnswer(
         const line = tree.line(n)
         if (!line || !CLICK_ROLES.has(line.role)) return false
         const at = tree.byIndex.get(n!)!
-        if (NEVER_CLICK.test(line.name) || spendsPoints(tree, at)) return false
+        // Hyphens and underscores read as spaces, as the extension reads them.
+        const name = line.name.replace(/[-_]+/g, ' ')
+        if (
+            NEVER_CLICK.test(name) ||
+            FORBIDDEN_CONTROL.test(name) ||
+            noCodeClick(name) ||
+            spendsPoints(tree, at)
+        )
+            return false
         // A toggle in the page footer ("Have A Code?" beside Gift Cards and
         // Contact Us) leads to another page, not to this cart's box. The
         // extension already refuses a link that leaves the page; this also
@@ -528,7 +656,9 @@ function toCachedAnswer(
         // Only the toggle: an apply button is never refused for where it sits.
         return !(
             toggle &&
-            (tree.inPageFooter(at, mayBeCut) || offersOnly(tree, at))
+            (tree.inPageFooter(at, mayBeCut) ||
+                offersOnly(tree, at) ||
+                settingControl(line))
         )
     }
     const inputLine = tree.line(answer.input)
@@ -542,12 +672,13 @@ function toCachedAnswer(
             why: answer.why,
         }
     }
-    if (answer.button !== null && !clickedOk(answer.button, false))
+    const button = applyAfterField(tree, answer.button, input)
+    if (button !== null && !clickedOk(button, false))
         return { outcome: 'no_pick', reason: 'refused_button' }
     return {
         outcome: 'box',
         input,
-        button: answer.button,
+        button,
         toggle,
         confidence: answer.confidence,
         why: answer.why,

@@ -536,6 +536,11 @@ by withRoute (non-extension Origin 403, generic rate limit 429) emit nothing.
 `budget_exceeded:client|global|daily`, `too_large`,
 `invalid`, `server_error` (`COUPON_BOX_PICK_OUTCOMES` in
 `src/lib/analytics/couponBoxPickOutcome.ts`).
+`no_pick:refused_button` is the whole answer refused, not only its button. An
+answer that names a good toggle and no input, but also names an apply button
+the server refuses (checkout, place order, a gift card or store credit
+control), is discarded with its toggle: the extension gets nothing for that
+page, though the toggle alone would have opened the box.
 
 Outcome mix, last 24h:
 

@@ -20,7 +20,8 @@
 // Anything else — a wrong field, a wrong apply button, a missed box, a pick on
 // a box-less page, a refused answer, a model error or an unusable reply —
 // fails the case. A case marked knownMiss still runs and is reported, but is
-// left out of the pass rate.
+// left out of the pass rate; one that passes fails the suite until its mark
+// is removed.
 import {
     CouponBoxOutlineTooLargeError,
     pickCouponBox,
@@ -177,4 +178,16 @@ it(`pass rate meets the >=${PASS_RATE_THRESHOLD} threshold gate`, () => {
             ? `pass_rate=${(passRate * 100).toFixed(1)}% (${scored.length} cases) — failing: ${failing.join(', ')}`
             : undefined,
     ).toBeGreaterThanOrEqual(PASS_RATE_THRESHOLD)
+})
+
+// A knownMiss that now passes has stopped being one: left marked, it stays out
+// of the pass rate, and a later regression on it would go unscored.
+it('no case marked knownMiss passes', () => {
+    const nowPassing = outcomes
+        .filter((o, i) => couponBoxCases[i]!.knownMiss && o.pass)
+        .map(o => o.store)
+    expect(
+        nowPassing,
+        'these cases now pass: remove knownMiss from them in evals/fixtures/coupon-box-cases.ts',
+    ).toEqual([])
 })
