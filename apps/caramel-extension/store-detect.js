@@ -53,6 +53,7 @@ import {
     caramelDisclosureFor,
     caramelEndRun,
     caramelSetCurrencySymbol,
+    caramelTakeAppliedWin,
     caramelTakePendingSubmit,
     getPrice,
     pickBestMatch,
@@ -681,7 +682,7 @@ async function _caramelContinueRun(rec, finder = false) {
     const tried = _getTriedCodes()
     const untried = (codes || []).filter(c => c && c.code && !(c.code in tried))
     if (!untried.length) return stop('all tried')
-    const hop = caramelClaimRunHop()
+    const hop = await caramelClaimRunHop()
     if (!hop) return stop('no hop')
     log('AUTO_INSERT_RUN_CONTINUES', {
         hop: hop.hops,
@@ -703,7 +704,7 @@ async function _caramelContinueRun(rec, finder = false) {
 }
 
 async function _resumePendingSubmit() {
-    const pending = caramelTakePendingSubmit()
+    const pending = await caramelTakePendingSubmit()
     if (!pending) return false
     const rec = await getDomainRecord(location.hostname)
     // A finder attempt's baseline came from the finder's total row; reading a
@@ -729,7 +730,7 @@ async function _resumePendingSubmit() {
 
     if (measured) {
         // Won — the chain has its answer and must not continue.
-        caramelEndRun()
+        await caramelEndRun()
         reportOutcome(pending.id, 'worked')
         caramelRecordSaving({
             domain: location.hostname,
@@ -779,7 +780,7 @@ async function _resumePendingSubmit() {
             finder: true,
         })
     else if (await _caramelContinueRun(rec, !!pending.finder)) return true
-    caramelEndRun()
+    await caramelEndRun()
 
     if (Number.isFinite(now)) {
         // We could read the total and it did not move.
@@ -831,57 +832,54 @@ export async function startCheckoutDetection() {
     // applied code; finish that flow on the fresh document by showing the
     // result modal instead of re-prompting.
     try {
-        const raw = sessionStorage.getItem('caramel_applied')
-        if (raw) {
-            sessionStorage.removeItem('caramel_applied')
-            const st = JSON.parse(raw)
-            if (st && st.code && Date.now() - (st.t || 0) < 120000) {
-                // Discount-link wins reload the page before extension
-                // storage can be written safely — record the saving here,
-                // on the fresh document, from the sessionStorage handoff.
-                caramelRecordSaving({
-                    domain: location.hostname,
-                    code: st.code,
-                    amount: st.saved || 0,
-                    currency: st.currency || 'USD',
-                    couponId: st.id || null,
-                })
-                let amount = st.saved || 0
-                let msg = null
-                if (st.currency && st.currency !== 'USD' && amount > 0) {
-                    // No price has been read on this freshly-reloaded page, so
-                    // tell the UI the currency the saving was recorded in.
-                    // Only then does the headline amount render as "£8.00".
-                    let symbolKnown = false
-                    try {
-                        const sym = new Intl.NumberFormat(undefined, {
-                            style: 'currency',
-                            currency: st.currency,
-                        })
-                            .formatToParts(amount)
-                            .find(p => p.type === 'currency')?.value
-                        symbolKnown = caramelSetCurrencySymbol(sym)
-                        if (!symbolKnown) {
-                            // Symbol we can't render in the headline (e.g.
-                            // "CA$", "R$"). Fall back to the applied-code
-                            // presentation, which states the formatted amount
-                            // in words rather than mislabelling it as "$".
-                            msg = `Code ${st.code} saved you ${new Intl.NumberFormat(
-                                undefined,
-                                { style: 'currency', currency: st.currency },
-                            ).format(amount)} — it's applied to your order.`
-                            amount = 0
-                        }
-                    } catch {
-                        /* unknown currency code — fall back to $ */
+        const st = await caramelTakeAppliedWin()
+        if (st) {
+            // Discount-link wins reload the page before the saving is
+            // recorded — record it here, on the fresh document, from the
+            // handoff the background held for this tab.
+            caramelRecordSaving({
+                domain: location.hostname,
+                code: st.code,
+                amount: st.saved || 0,
+                currency: st.currency || 'USD',
+                couponId: st.id || null,
+            })
+            let amount = st.saved || 0
+            let msg = null
+            if (st.currency && st.currency !== 'USD' && amount > 0) {
+                // No price has been read on this freshly-reloaded page, so
+                // tell the UI the currency the saving was recorded in.
+                // Only then does the headline amount render as "£8.00".
+                let symbolKnown = false
+                try {
+                    const sym = new Intl.NumberFormat(undefined, {
+                        style: 'currency',
+                        currency: st.currency,
+                    })
+                        .formatToParts(amount)
+                        .find(p => p.type === 'currency')?.value
+                    symbolKnown = caramelSetCurrencySymbol(sym)
+                    if (!symbolKnown) {
+                        // Symbol we can't render in the headline (e.g.
+                        // "CA$", "R$"). Fall back to the applied-code
+                        // presentation, which states the formatted amount
+                        // in words rather than mislabelling it as "$".
+                        msg = `Code ${st.code} saved you ${new Intl.NumberFormat(
+                            undefined,
+                            { style: 'currency', currency: st.currency },
+                        ).format(amount)} — it's applied to your order.`
+                        amount = 0
                     }
+                } catch {
+                    /* unknown currency code — fall back to $ */
                 }
-                showFinalModal(amount, st.code, msg)
-                return
             }
+            showFinalModal(amount, st.code, msg)
+            return
         }
-    } catch {
-        /* sessionStorage unavailable — continue with normal detection */
+    } catch (err) {
+        // A malformed handoff costs only the result modal; detection goes on.
+        log('APPLIED_WIN_UNREADABLE', { error: String(err?.message || err) })
     }
     // An attempt the store's own form POST cut short finishes here, on the page
     // that replaced it — before tryInitialize can re-prompt as if nothing had

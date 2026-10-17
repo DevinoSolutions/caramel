@@ -36,6 +36,10 @@ const stubs = vi.hoisted(() => ({
 
 vi.mock('../caramel-base.js', async importOriginal => {
     const actual = await importOriginal()
+    const { tabHandoffBackground } = await import(
+        './_tab-handoff-background.mjs'
+    )
+    stubs.handoffs = tabHandoffBackground()
     return {
         ...actual,
         // `currentBrowser` is an export the module REASSIGNS (initCaramelBase);
@@ -47,6 +51,10 @@ vi.mock('../caramel-base.js', async importOriginal => {
         },
         sleep: async () => {},
         caramelRecordSaving: () => {},
+        // The handoffs are answered by the background's own store: this file
+        // installs no extension messaging.
+        caramelTabHandoff: (op, key, value) =>
+            stubs.handoffs.reply({ op, key, value }),
     }
 })
 vi.mock('../coupon-fetch.js', async importOriginal => ({
@@ -104,6 +112,7 @@ beforeAll(() => {
 
 beforeEach(() => {
     sessionStorage.clear()
+    stubs.handoffs.reset()
     document.body.innerHTML = '<input id="promo" />'
     finalModalCalls = stubs.finalModalCalls = []
     // getDomainRecord answers out of the store-list cache the source keeps on
@@ -118,20 +127,20 @@ beforeEach(() => {
 })
 
 describe('reading the store’s answer off the page it sent us to', () => {
-    it('takes a rejection that names the code we submitted', () => {
+    it('takes a rejection that names the code we submitted', async () => {
         showAlert('Der Gutschein SALE20 wurde nicht angewendet')
 
         expect(caramelPostNavigationVerdict(REC, 'SALE20')).toMatch(/SALE20/)
     })
 
-    it('takes a rejection written in the vocabulary of one', () => {
+    it('takes a rejection written in the vocabulary of one', async () => {
         // The motoin banner, in German, naming no code.
         showAlert('Dieser Gutschein ist nicht mehr gültig')
 
         expect(caramelPostNavigationVerdict(REC, 'SALE20')).toMatch(/gültig/)
     })
 
-    it('leaves the page’s furniture alone', () => {
+    it('leaves the page’s furniture alone', async () => {
         // The mango failure arriving through the other door: a static label
         // that mentions neither our code nor a rejection.
         showAlert('Gutscheincode')
@@ -139,13 +148,13 @@ describe('reading the store’s answer off the page it sent us to', () => {
         expect(caramelPostNavigationVerdict(REC, 'SALE20')).toBeNull()
     })
 
-    it('says nothing when the store said nothing', () => {
+    it('says nothing when the store said nothing', async () => {
         expect(caramelPostNavigationVerdict(REC, 'SALE20')).toBeNull()
         showAlert('   ')
         expect(caramelPostNavigationVerdict(REC, 'SALE20')).toBeNull()
     })
 
-    it('survives a config with no error selector at all', () => {
+    it('survives a config with no error selector at all', async () => {
         expect(
             caramelPostNavigationVerdict({ domain: 'x.com' }, 'SALE20'),
         ).toBeNull()
@@ -157,7 +166,7 @@ describe('what the shopper is told after the reload', () => {
     it('repeats the store’s reason instead of sending them to look for it', async () => {
         // No readable total on this page — the case that used to end in
         // "check your order summary".
-        caramelMarkPendingSubmit('SALE20', 'c1', [])
+        await caramelMarkPendingSubmit('SALE20', 'c1', [])
         showAlert('Dieser Gutschein ist abgelaufen')
 
         await startCheckoutDetection()
@@ -169,7 +178,7 @@ describe('what the shopper is told after the reload', () => {
     })
 
     it('still hands over the other codes to try', async () => {
-        caramelMarkPendingSubmit('SALE20', 'c1', [])
+        await caramelMarkPendingSubmit('SALE20', 'c1', [])
         showAlert('Dieser Gutschein ist abgelaufen')
 
         await startCheckoutDetection()
@@ -178,7 +187,7 @@ describe('what the shopper is told after the reload', () => {
     })
 
     it('leads with the reason when the total is readable and flat', async () => {
-        caramelMarkPendingSubmit('SALE20', 'c1', [80])
+        await caramelMarkPendingSubmit('SALE20', 'c1', [80])
         setTotalText('Gesamt 80,00 €')
         showAlert('Dieser Gutschein ist abgelaufen')
 
@@ -190,7 +199,7 @@ describe('what the shopper is told after the reload', () => {
 
     it('still admits it cannot tell when the store said nothing', async () => {
         // The honest fallback has to survive: no verdict, no readable total.
-        caramelMarkPendingSubmit('SALE20', 'c1', [])
+        await caramelMarkPendingSubmit('SALE20', 'c1', [])
 
         await startCheckoutDetection()
 
@@ -200,7 +209,7 @@ describe('what the shopper is told after the reload', () => {
     it('never claims a saving off the store’s words alone', async () => {
         // A verdict is not a measurement. The amount stays zero and no code is
         // headlined as applied.
-        caramelMarkPendingSubmit('SALE20', 'c1', [])
+        await caramelMarkPendingSubmit('SALE20', 'c1', [])
         showAlert('Dieser Gutschein ist abgelaufen')
 
         await startCheckoutDetection()

@@ -543,7 +543,9 @@ ${noLoading ? '' : loadingHTML}`
         // both ends; a setter export was considered and rejected — no invented
         // API when the existing seam is behavior-identical to what ships.
         globalThis._caramelCancelled = true
-        caramelCancelRun()
+        caramelCancelRun().catch(err =>
+            log('RUN_CANCEL_FAILED', { error: String(err?.message || err) }),
+        )
         hideTestingModal()
     }
     const _close = root.querySelector('#caramel-testing-close')

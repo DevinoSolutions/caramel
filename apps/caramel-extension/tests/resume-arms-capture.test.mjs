@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { tabHandoffBackground } from './_tab-handoff-background.mjs'
+// The background's side of the per-tab handoffs (see the helper).
+const handoffs = tabHandoffBackground()
 
 /**
  * The page load that RESUMES a pending auto-apply submit must still watch for a
@@ -80,6 +83,7 @@ function installChromeStub() {
             lastError: undefined,
             onMessage: { addListener: () => {} },
             sendMessage: (message, cb) => {
+                if (handoffs.answers(message, cb)) return
                 if (message?.action === 'fetchCoupons') {
                     cb({ coupons: couponList })
                     return
@@ -178,6 +182,7 @@ beforeEach(async () => {
         { code: 'SPRING10', id: 'c2' },
     ]
     sessionStorage.clear()
+    handoffs.reset()
     document.body.innerHTML =
         '<input id="promo" /><button id="apply">Apply</button>' +
         '<div id="total"></div><div id="err"></div>'
@@ -342,7 +347,7 @@ describe('capture is armed on the resumed page', () => {
         // An open run with the code unresolved hands over to the runner exactly
         // as before; arming capture adds no second apply.
         const dom = await import('../dom-utils.js')
-        dom.caramelBeginRun()
+        await dom.caramelBeginRun()
         setText(document.getElementById('total'), 'Order Total $73.90')
         markPending('SALE20', 'c1', [73.9])
 

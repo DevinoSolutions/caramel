@@ -7,6 +7,9 @@ import {
     getDomainRecord,
     tryInitialize,
 } from '../store-detect.js'
+import { tabHandoffBackground } from './_tab-handoff-background.mjs'
+// The background's side of the per-tab handoffs (see the helper).
+const handoffs = tabHandoffBackground()
 
 // A store we hold codes for, that nobody has written a config for.
 //
@@ -148,6 +151,7 @@ function installChromeStub() {
     }
     stub.runtime.lastError = undefined
     stub.runtime.sendMessage = (message, cb) => {
+        if (handoffs.answers(message, cb)) return
         if (message?.action === 'fetchCoupons') {
             fetchedSites.push(message.site)
             cb(couponsForSite())
@@ -169,6 +173,7 @@ beforeAll(() => {
 
 beforeEach(() => {
     sessionStorage.clear()
+    handoffs.reset()
     document.body.innerHTML = ''
     setPath('/cart')
     finalModals = []
@@ -215,9 +220,9 @@ describe('a checkout on a store with no config row', () => {
 
         expect(appliedCodes.length).toBeGreaterThan(0)
         // A link win reloads the page so the store's own UI shows the discount,
-        // and hands the result to the fresh document through sessionStorage —
+        // and hands the result to the fresh document through the background —
         // so the proof of the win is the handoff, not a modal on this document.
-        const handoff = JSON.parse(sessionStorage.getItem('caramel_applied'))
+        const handoff = await handoffs.peek('applied')
         expect(handoff.code).toBe('SAVE20')
         // $100.00 cart, $90.00 after: a measured drop, config or no config.
         expect(handoff.saved).toBeCloseTo(10, 2)
