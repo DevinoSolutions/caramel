@@ -601,7 +601,8 @@ learned box that did not work is reported `failed`. Once enough shoppers agree,
 and the model: no model call, no budget spent, PostHog outcome `learned`. Code:
 `src/lib/couponBoxLearned.ts` (the one home of the rules below; every number
 is in `LEARNED_BOX_RULES`). Tables: `learned_coupon_boxes`,
-`learned_coupon_box_reporters` and `learned_coupon_box_handovers`.
+`learned_coupon_box_reporters`, `learned_coupon_box_stores`,
+`learned_coupon_box_network_events` and `learned_coupon_box_handovers`.
 
 **Before switching it on (owner).** Every rule below counts NETWORKS, read from
 the client address, and the app trusts `CF-Connecting-IP` first
@@ -615,6 +616,13 @@ Cloudflare's published IP ranges on 80/443, or Cloudflare Authenticated Origin
 Pulls is on and the origin refuses any TLS client without Cloudflare's
 certificate. Check it from outside: a request to the origin's own address with
 a forged `CF-Connecting-IP` must not reach the app.
+
+Also check the zone's **Network > Pseudo IPv4** setting: it must be **Off** or
+**Add header**, never **Overwrite headers**. Overwrite puts a made-up IPv4
+address from the reserved `240.0.0.0/4` range into `CF-Connecting-IP` for every
+IPv6 visitor, so every IPv6 shopper's "network" would be a slice of one
+reserved block, and the per-network and per-block caps below would count
+unrelated shoppers together.
 
 **Switch.** Learned boxes have their own switch, so the AI pick can run without
 the crowd-sourced write path. They work only while `COUPON_BOX_LEARNED_ENABLED=true`
@@ -673,8 +681,10 @@ configs.
 /24 for IPv4 and the /48 for IPv6. Hashes are per store, so rows for two
 stores cannot be joined. A reporter's network is the one it FIRST reported
 from and never changes, and an install counts only from that network. A report
-from any other network is recorded as seen and counts nothing: it neither
-confirms nor fails the box, and does not keep a confirmation fresh. So a few
+from any other network is answered `recorded` and writes nothing: it neither
+confirms nor fails the box, does not keep a confirmation fresh, and does not
+count as the install being seen (a reporter's `last_seen_at` is the time of
+its latest COUNTED report, so retention cannot be held off from elsewhere). So a few
 networks heard once cannot hand their installs to one machine elsewhere and
 keep a box alive, or keep failing it, from there; and moving installs between
 networks frees no slot. The cost: a shopper who first reported from home and
@@ -726,6 +736,15 @@ the box's next confirmation, from that shopper or another, counts as usual.
 The hand-over below works the same way: it never waits for its lock, and one
 that finds it taken is tried again on the store's next servable report.
 
+A report that would ADD a box also takes one lock shared by all stores
+(`learned-coupon-box:new-boxes`), so the caps kept across stores below hold
+under parallel reports. It waits for it at most 250 ms (`lock_timeout`); a
+report that cannot get it in time is answered `ignored` and writes nothing.
+The network's own counts are read BEFORE that lock, so a network already over
+its cap is answered without ever taking it, and the lock is taken only just
+before the new box is written. Reports on boxes that already exist never take
+it.
+
 - New reporters: at most 2 new installs per network per box in any 7 days.
   More are answered `{recorded:false, reason:'ignored'}`.
 - Reporters per box: at most 50. To make room, the reporter seen longest ago
@@ -754,24 +773,64 @@ that finds it taken is tried again on the store's next servable report.
     - Having more networks behind it alone protects a box no further, so 5
       boxes backed by 2 networks each still give way to a new box and cannot
       lock a store.
-    - There is no limit on how many boxes one network reports on, so
-      shoppers behind one shared address block (a mobile carrier, an office)
-      are never refused for reporting. The cost: when one network confirms
-      two different boxes, both are the first to go.
+    - Within a store there is no limit on how many boxes one network
+      reports on, so shoppers behind one shared address block (a mobile
+      carrier, an office) are not refused for reporting several boxes of one
+      store. The cost: when one network confirms two different boxes, both
+      are the first to go. Across stores they CAN be refused: see the
+      per-network day caps below.
 - One install counts at most once per 24h per box and per outcome, and only
   from the network it first reported from (see "Who counts"). A `failed`
   report for a box nobody confirmed creates nothing.
-- Across ALL stores, per rolling 24 hours: one network (the same /24 or /48
-  prefix, hashed with no store) may add at most 20 new boxes, and at most 500
-  stores may get their first box. Both are checked under one lock that no
-  report waits for, before a new box is created; a report over either cap is
-  answered `ignored`. Without them, one network could create boxes on every
-  registrable domain there is (the rate limiter counts single addresses, and an
-  IPv6 /64 holds billions) and the tables would grow without bound. A busy
-  carrier or office prefix can reach 20 in a day; its shoppers' later new boxes
-  that day are simply not learned, and confirmations of existing boxes are not
-  limited by it. These counts live in `learned_coupon_box_network_events` (see
-  "What is stored").
+- Across ALL stores, per day: one network (the same /24 or /48 prefix,
+  hashed with no store) may add at most 20 new boxes, and its wider block (the
+  same /16 IPv4 or /32 IPv6) at most 100. A report over either is answered
+  `ignored`. Without them, one network could create boxes on every
+  registrable domain there is (the rate limiter counts single addresses, and
+  an IPv6 /64 holds billions) and the tables would grow without bound. The
+  cost, accepted: shoppers behind one busy carrier or office prefix (a mobile
+  CGNAT /24 can carry thousands) share those 20. Once the prefix has added 20
+  new boxes in a day, its shoppers' later NEW boxes that day are refused and
+  simply not learned; their confirmations of boxes that already exist are not
+  limited by it. "A day" is counted from the hour: events are kept with their
+  time cut to the hour, and an event counts while its hour is less than 24
+  hours before the current hour, so an event counts for between 24 and 25
+  hours.
+- New stores (a store's first box): a store heard from ONE network only is
+  PROVISIONAL (`learned_coupon_box_stores.established_at` is null). At most
+  5000 provisional stores exist at once; a new store past that pushes out the
+  oldest provisional store whose lock is free and that is not already
+  confirmed from two networks (its boxes and reporters go with it). A store
+  becomes ESTABLISHED once boxes of it are confirmed from two different
+  networks, at most 500 stores a day across all stores; one past that cap
+  stays provisional (never refused, never pushed out, since it is confirmed
+  from two networks) and is tried again on its next counted confirmation.
+  Established stores are never pushed out by this rule. Why this shape and
+  not a plain "500 new stores a day": with a plain cap, about 25 networks (20
+  new boxes each) could spend the whole day's cap on made-up stores and no
+  real store could get its first box that day. Now made-up stores from a few
+  networks only push out each other and other single-network stores, and a
+  real store is safe as soon as a second network confirms it. What remains:
+  an attacker holding networks in many different /16 blocks can still churn
+  the provisional pool (a real store heard from only one network can be pushed
+  out before its second shopper arrives, and is learned again later), and
+  pairs of networks confirming each other's made-up stores can use up the
+  500 establishments of a day, which only delays real stores' establishment.
+  If the pool is ever full of stores confirmed from two networks, a new
+  store is refused (`ignored`) until establishments free it up.
+- Near-cap warnings: when a cap kept across all stores passes 80% (the
+  provisional pool, the day's establishments, the day's hand-overs), the
+  server logs `[learned-coupon-box] a global cap is nearly used up` with the
+  cap's name, how much is used and the cap, at most once an hour per cap.
+  Seeing it outside a launch is a sign of abuse: read the network events and
+  the newest provisional stores.
+- What an answer reveals: a report on a box that does not exist yet is
+  answered `ignored` once its network's cap is used up, while a report on a
+  box that exists is still answered `recorded`. A client over its cap can
+  therefore learn whether a given selector set is a learned box of a store
+  (a `failed` report already tells it the same way: `unknown_box`). That is
+  store data the server would serve to any shopper anyway once it is
+  servable, never data about another shopper, so it is left as is.
 - Domains must be plausible store hosts (see "Stores and hosts" above).
   Refused: single labels, IPs, `localhost`, internal suffixes, bare public
   suffixes, shared hosting suffixes and broken punycode.
@@ -782,23 +841,41 @@ that finds it taken is tried again on the store's next servable report.
     - attributes limited to `id`, `name`, `type`, `aria-label`, `placeholder`
       and `data-*`, with plain values;
     - no `:has(`, no `:nth-last-*`, no selector lists;
-    - nothing that looks like data about a person, anywhere in the selector:
-      no `@` (or `%40`), how an email address would appear, and no run of 6
-      or more digits, how a phone, card, order or account number would. A
-      store's markup can carry such data (`[data-customer-email="..."]`), and
-      the privacy policy promises a box location holds nothing about the
-      shopper.
+    - nothing that looks like data about a person: no `@` (or `%40`)
+      anywhere in the selector, how an email address would appear, and, in
+      an attribute VALUE other than `id`, no number of 6 or more digits, even
+      when its digits are split by spaces, dashes or dots
+      (`[data-phone="555-123-4567"]`, `[data-card="4111 1111 1111 1111"]`),
+      how a phone, card, order or account number would. A store's markup can
+      carry such data (`[data-customer-email="..."]`). Digit runs in `#id`
+      and `.class` tokens and in `[id=...]` are allowed: platforms build ids
+      from section and template numbers
+      (`#shopify-section-template--16712345678__main`), and refusing them
+      would refuse most Shopify stores. This is a filter for the common
+      shapes, not a guarantee: the privacy policy says what it refuses, and
+      no more.
 
     Anything else is refused whole (400). The apply and toggle selectors (the
-    ones the extension clicks) are also refused when they name a control that
-    could spend money or change the cart: `checkout`, `place order`,
-    `submit order`, `pay`, `buy`, `pay now`, `buy now`, `purchase`, `delete`
-    or `remove`, in any spelling (`place-order`, `place_order`, `placeOrder`).
-    `pay` and `buy` count only as whole words, so `display` or `buyer` pass.
-    This is defence in depth; the extension's own apply-control check is what
-    stops a wrong click. The cost: a store whose real apply button is named
-    after its checkout (`#checkout-apply`) is not learned, and keeps being
-    answered by the rules and the AI pick.
+    ones the extension clicks) are also refused when the element they CLICK
+    is named after a control that could spend money or change the cart:
+    `checkout`, `place order`, `submit order`, `pay`, `buy`, `pay now`,
+    `buy now`, `purchase`, `delete` or `remove`, as whole words in any
+    spelling (`place-order`, `place_order`, `placeOrder`, `check-out`). Only
+    the LAST compound is read (the element clicked, not the ones it sits
+    in), and only its ids, classes, tag and attribute VALUES, not attribute
+    names. So `form.checkout_coupon button[name=apply_coupon]` (WooCommerce's
+    own coupon form, inside a checkout form),
+    `.coupon .purchase-summary button`, `#PayPal-apply`,
+    `button[data-buy-box]` and `display`/`buyer` pass, while `button.checkout`, `button[name=place_order]` and
+    `#checkout-apply` are refused. What it does not catch, by design:
+    ancestors are not checked, so a checkout button whose own markup names
+    nothing (`.cart__footer button[type=submit]`) passes, and partial
+    attribute matches (`[aria-label*=heckout]`, `[id^=check][id$=out]`) are
+    not read as words. This is defence in depth, not the safety net: the
+    extension's own apply-control check, which reads the element itself
+    whatever selector reached it, is what stops a wrong click. The cost: a store whose real apply button
+    is named after its checkout (`#checkout-apply`) is not learned, and keeps
+    being answered by the rules and the AI pick.
 
 **What the server cannot promise.** Every rule above counts NETWORKS (/24
 IPv4, /48 IPv6), and networks are cheaper than they look: IPv6 /48s come free
@@ -822,13 +899,17 @@ reported. The prune runs for the store on every report, and store-wide at boot
 and every 6 hours (`[boot] learned coupon box retention prune ENABLED`). The
 store-wide prune takes each store's lock in turn, like a report, so it never
 deletes a box under a report that is adding to it. It waits at most 5 seconds
-for one store's lock; a store it cannot lock, or any other error on one store,
-is logged (`retention prune failed for one store; continuing`, also sent to
-Sentry) and left for the next run, and the other stores are still pruned. The
-store's own reports prune it in the meantime. The cross-store network records
-(`learned_coupon_box_network_events`) are deleted after 24 hours by the same
-prune. It runs whatever the switch says, so rows written before a kill switch
-still age out.
+for one store's lock; a store it cannot lock is logged and left for the next
+run, and the other stores are still pruned. Any other error on a store is
+logged and the run goes on, but after 3 such errors IN A ROW (a database that
+is down fails every store the same way) the run stops. Either way the run
+sends ONE Sentry event (the first error, with how many stores failed and
+whether it stopped), never one per store. The store's own reports prune it in
+the meantime. A store row (`learned_coupon_box_stores`) whose last box was
+deleted is deleted too. The cross-store network records
+(`learned_coupon_box_network_events`) are deleted once out of their window,
+within 25 hours, by the same prune. It runs whatever the switch says, so rows
+written before a kill switch still age out.
 
 **Wipe one poisoned store.** Read-only first, then delete (the reporters go
 with the boxes, `ON DELETE CASCADE`):
@@ -845,6 +926,7 @@ WHERE b.store_domain = 'shop.example'
 GROUP BY b.id;
 
 DELETE FROM learned_coupon_boxes WHERE store_domain = 'shop.example';
+DELETE FROM learned_coupon_box_stores WHERE store_domain = 'shop.example';
 ```
 
 (`store_domain` covers every host of the store; filter on `domain` to wipe a
@@ -863,13 +945,20 @@ the site-suggestions inbox with `source = 'auto_detect'`, no user and no
 requester email, so the coupons pipeline picks it up like any other store
 request. `learned_coupon_box_handovers` holds one row per store handed over;
 that row is what makes it once ever, so deleting the suggestion or the boxes
-does not reopen it. At most 50 stores are handed over per 24 hours across all
-stores, and at most 3 of them per network: the network of the report that made
-the box servable, so one network cannot spend the day's hand-overs on made-up
-stores. A store refused by either cap is asked again on its next servable
-report, and the server logs `pipeline hand-over deferred: daily cap reached`
-or `... this network reached its daily cap`. A hand-over that finds another
-one in progress answers `busy` and is likewise tried again.
+does not reopen it. Only a COUNTED report hands a store over (a report from an
+install's foreign network, which counts nothing, never does). At most 50
+stores are handed over per day across all stores, at most 3 per network (the
+network of that counted report) and at most 10 per wider block (/16 IPv4, /32
+IPv6). A store must already be servable, which takes 3 confirming networks,
+so spending the day's 50 takes about 17 networks spread over at least 5
+blocks, each confirming made-up stores; the result is that real stores are
+handed over a day later, nothing worse (the 80% warning above names it). A
+store refused by any cap is asked again on its next counted servable report,
+and the server logs `pipeline hand-over deferred: daily cap reached` or
+`... this network reached its daily cap`. Those refusals, and "already handed
+over", are read before the hand-over lock, so a refused report never takes
+it. A hand-over that finds another one in progress answers `busy` and is
+likewise tried again.
 With no email, no status the pipeline sets can ever mail a shopper. Marking it
 `supported` still sends the operator's own "marked supported" summary. Find
 them:
@@ -885,12 +974,20 @@ them:
   on Enter, counters, timestamps, and which finder first found it.
 - Per reporter: the two per-store HMAC-SHA256 hashes above, plus that
   reporter's counters and timestamps.
-- For the caps kept across stores (`learned_coupon_box_network_events`): one
-  row each time a report adds a new box or hands a store over, holding
-  `HMAC(salt, "network-any-store\n" + prefix + "\n")` (the network prefix
-  alone, with no store and no install), the kind of event and the time.
-  Deleted after 24 hours. It holds no store, so it joins with nothing in the
-  per-store tables.
+- Per store (`learned_coupon_box_stores`): the registrable domain, when its
+  first box was added and when it became established.
+- For the caps kept across stores (`learned_coupon_box_network_events`): two
+  rows each time a report adds a new box or hands a store over, one holding
+  `HMAC(salt, "network-any-store\n" + prefix + "\n")` (the /24 or /48 alone)
+  and one `HMAC(salt, "block-any-store\n" + block + "\n")` (the /16 or /32
+  alone), with no store and no install, the kind of event, a random id and
+  the time cut to the hour. Deleted within 25 hours. It holds no store, and
+  its time is never the exact time of a box, reporter, store or hand-over row,
+  so it is not joined to them by time. What remains, accepted: within one
+  hour, which rows were written in the same transaction can still be guessed
+  by someone reading the raw table pages (rows sit in insertion order), and
+  in a quiet hour with one new box the hour alone narrows it down. Both need
+  database access, and the rows are gone within 25 hours.
 
 These hashes are not anonymous against the operator: we hold the salt, and
 install ids also reach the server, in the clear, with sign-in attribution. We
