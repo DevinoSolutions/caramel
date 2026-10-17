@@ -14,7 +14,11 @@ import {
     startCheckoutDetection,
     tryInitialize,
 } from '../store-detect.js'
-import { FINDER_ASSET, FINDER_FILE } from './_finder-asset.mjs'
+import {
+    FINDER_ASSET,
+    FINDER_FILE,
+    FINDER_WITHOUT_HANDOVER,
+} from './_finder-asset.mjs'
 
 // A store with NO config row, driven through the real detection, the real
 // runner and the real apply flow (store-detect.js, coupon-runner.js,
@@ -36,8 +40,9 @@ import { FINDER_ASSET, FINDER_FILE } from './_finder-asset.mjs'
 const OUTLINE_FILE = pathToFileURL(
     resolve(import.meta.dirname, '../coupon-box-outline.js'),
 ).href
-// How the finder file loads: 'ok', 'missing' (the URL resolves to nothing) or
-// 'throws' (the URL cannot even be built, as in a torn-down extension).
+// How the finder file loads: 'ok', 'missing' (the URL resolves to nothing),
+// 'throws' (the URL cannot even be built, as in a torn-down extension) or
+// 'no-handover' (a module that cannot take the content script's helpers).
 let finderLoad
 const MISSING_FINDER = pathToFileURL(
     resolve(import.meta.dirname, '../no-such-finder.js'),
@@ -64,8 +69,10 @@ let t // the recording
 // Every finder entry point another module calls, counted: the finder's own
 // and the content script's share of it (the flag read and the on-demand
 // load). The real implementation still runs underneath.
-const { finderCalls, counted } = vi.hoisted(() => {
+// failing.name makes that one entry point throw instead.
+const { finderCalls, counted, countedModule, failing } = vi.hoisted(() => {
     const finderCalls = {}
+    const failing = { name: null }
     const counted = actual => {
         const out = {}
         for (const [name, value] of Object.entries(actual)) {
@@ -75,19 +82,33 @@ const { finderCalls, counted } = vi.hoisted(() => {
             }
             out[name] = (...args) => {
                 finderCalls[name] = (finderCalls[name] || 0) + 1
+                if (failing.name === name) throw new Error(`${name} failed`)
                 return value(...args)
             }
         }
         return out
     }
-    return { finderCalls, counted }
+    // The finder the loader hands out, counted the same way: the content
+    // script reaches the loaded finder only through the loader.
+    const countedModules = new WeakMap()
+    const countedModule = m => {
+        if (!m) return m
+        if (!countedModules.has(m)) countedModules.set(m, counted(m))
+        return countedModules.get(m)
+    }
+    return { finderCalls, counted, countedModule, failing }
 })
 vi.mock('../coupon-box-discovery.js', async importOriginal =>
     counted(await importOriginal()),
 )
-vi.mock('../coupon-box-finder-loader.js', async importOriginal =>
-    counted(await importOriginal()),
-)
+vi.mock('../coupon-box-finder-loader.js', async importOriginal => {
+    const out = counted(await importOriginal())
+    const load = out.caramelLoadFinder
+    const loaded = out.caramelLoadedFinder
+    out.caramelLoadFinder = (...args) => load(...args).then(countedModule)
+    out.caramelLoadedFinder = (...args) => countedModule(loaded(...args))
+    return out
+})
 vi.mock('../coupon-apply.js', async importOriginal => ({
     ...(await importOriginal()),
     probeCartJson: async () => platformCart,
@@ -167,6 +188,7 @@ function installChromeStub() {
         if (path === FINDER_ASSET) {
             if (finderLoad === 'throws')
                 throw new Error('Extension context invalidated.')
+            if (finderLoad === 'no-handover') return FINDER_WITHOUT_HANDOVER
             return finderLoad === 'missing' ? MISSING_FINDER : FINDER_FILE
         }
         return 'chrome-extension://caramel/' + path
@@ -321,6 +343,7 @@ beforeAll(() => {
 beforeEach(() => {
     flags = { discovery: false, llm: false }
     finderLoad = 'ok'
+    failing.name = null
     answer = { outcome: 'no_box', confidence: 80, why: 'none', cached: false }
     platformCart = null
     storeList = { supported: [OTHER_STORE] }
@@ -398,7 +421,7 @@ describe('the finder is loaded only where it is about to run, and a failed load 
         expect(t.urls.filter(u => u === FINDER_ASSET)).toHaveLength(1)
     })
 
-    for (const mode of ['missing', 'throws']) {
+    for (const mode of ['missing', 'throws', 'no-handover']) {
         it(`a finder that will not load (${mode}): no prompt, nothing asked of the server`, async () => {
             finderLoad = mode
             freshPage(RULES_BOX + TOTAL)
@@ -422,6 +445,19 @@ describe('the finder is loaded only where it is about to run, and a failed load 
             handedOver()
         })
     }
+
+    it('a finder that throws while finding the box: the codes are handed over, nothing typed, no saving', async () => {
+        freshPage(RULES_BOX + TOTAL)
+        wireStore('dc', 'ap', 'drop')
+        failing.name = 'caramelDiscoveredRecord'
+        await run()
+        expect(finderCalls.caramelDiscoveredRecord).toBe(1)
+        expect(t.page).toEqual([])
+        expect(t.savings).toEqual([])
+        expect(reported('worked')).toEqual([])
+        expect(lastModal().message).toMatch(/couldn't find the promo box/)
+        handedOver()
+    })
 })
 
 describe('flags on, no config: the money rule holds whatever box was used', () => {

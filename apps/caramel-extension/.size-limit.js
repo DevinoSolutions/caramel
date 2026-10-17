@@ -83,8 +83,10 @@ module.exports = [
         // 2026-10-17, lowered 123 -> 95.5 kB: the finder left this bundle. It
         // ships as assets/coupon-box-finder.js (its own budget below) and is
         // loaded only by a page that runs it; what stays is the flag read and
-        // the loader (coupon-box-finder-loader.js). Measured 122.58 -> 93.45
-        // kB, so the limit is measured + ~2 kB.
+        // the loader (coupon-box-finder-loader.js). Measured 122.58 -> 93.68
+        // kB (93.55 before the loader learned to report a failed load and to
+        // refuse a module without the hand-over), so the limit is measured +
+        // ~1.8 kB.
         limit: '95.5 KB',
         brotli: false,
     },
@@ -192,7 +194,9 @@ module.exports = [
         // content script imports it only when the finder flag is on and the
         // page has no box a config describes. The nine-language vocabularies
         // and the field, button, toggle and total-row readers are most of it.
-        limit: '29 KB',
+        // The limit is measured + ~2 kB, as for the content scripts. It is
+        // written only here: tests/finder-module-build.test.mjs reads it.
+        limit: '30 KB',
         brotli: false,
     },
     {

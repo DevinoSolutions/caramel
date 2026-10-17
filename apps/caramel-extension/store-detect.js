@@ -817,6 +817,8 @@ async function _resumePendingSubmit() {
     // A finder attempt's baseline came from the finder's total row; reading a
     // config's priceContainer here would compare two different numbers.
     // A finder that does not load reads no total, so no saving is measured.
+    // The finder is loaded here whatever the flag says now: pending.finder is
+    // set only when the page before this navigation ran the finder.
     const now = pending.finder
         ? ((await caramelLoadFinder())?.caramelFinderReadTotal(
               document,

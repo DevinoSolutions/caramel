@@ -820,9 +820,16 @@ export async function startApplyingCoupons(rec, options) {
         caramelStoreListKnown() &&
         (await caramelCouponBoxDiscoveryOn())
     ) {
-        // A finder that did not load found nothing: the codes to copy.
+        // A finder that did not load, or that fails, found nothing: the codes
+        // to copy.
         const finder = await caramelLoadFinder()
-        const found = finder ? await finder.caramelDiscoveredRecord(rec) : null
+        let found = null
+        if (finder)
+            try {
+                found = await finder.caramelDiscoveredRecord(rec)
+            } catch (e) {
+                log('FINDER_FAILED', { error: String(e) })
+            }
         if (found) {
             rec = found
             _box = pickBestMatch(rec.couponInput)

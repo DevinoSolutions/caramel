@@ -22,6 +22,7 @@ import {
     caramelSendMessage,
     currentBrowser,
     log,
+    logError,
     sleep,
 } from './caramel-base.js'
 import {
@@ -73,7 +74,11 @@ export function caramelLoadFinder() {
                     ),
             )
             .then(m => {
-                m.caramelProvideFinderHost?.({
+                // A finder that cannot take the content script's helpers
+                // would run with them undefined: treat it as not loaded.
+                if (typeof m?.caramelProvideFinderHost !== 'function')
+                    throw new Error('the finder module has no host hand-over')
+                m.caramelProvideFinderHost({
                     caramelSendMessage,
                     currentBrowser,
                     log,
@@ -89,9 +94,10 @@ export function caramelLoadFinder() {
                 return m
             })
             .catch(err => {
-                log('FINDER_LOAD_FAILED', {
-                    error: String(err?.message || err),
-                })
+                // Once per page (the failed load is kept), and never shown to
+                // the shopper: logError records it where a shipped build's
+                // failures are read, which log() does not.
+                logError('FINDER_LOAD_FAILED', err)
                 return null
             })
     return _finder

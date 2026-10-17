@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { buildFinderModule } from '../scripts/finder-bundle.mjs'
@@ -31,7 +32,7 @@ function namesCalledOnTheFinder() {
         'coupon-apply.js',
     ])
         for (const m of read(file).matchAll(
-            /(?:\bfinder|caramelLoadFinder\(\)\)|caramelLoadedFinder\(\))\??\.\s*(\w+)/g,
+            /(?:\bfinder|caramelLoadFinder\(\)\)|caramelLoadedFinder\(\))\??\.(\w+)/g,
         ))
             names.add(m[1])
     return [...names].sort()
@@ -40,7 +41,7 @@ function namesCalledOnTheFinder() {
 /** The keys the loader passes to caramelProvideFinderHost. */
 function namesTheLoaderHandsOver() {
     const src = read('coupon-box-finder-loader.js')
-    const body = /caramelProvideFinderHost\?\.\(\{([^}]*)\}\)/.exec(src)
+    const body = /caramelProvideFinderHost\(\{([^}]*)\}\)/.exec(src)
     expect(body, 'the loader hands the finder its host').not.toBeNull()
     return body[1]
         .split(',')
@@ -94,6 +95,17 @@ describe('the finder file the content script loads on demand', () => {
         // Names that live only in the shared modules' bodies.
         expect(text).not.toContain('initCaramelBase')
         expect(text).not.toContain('caramelBeginRun')
-        expect(text.length).toBeLessThan(29_000)
+    })
+
+    it('fits the budget .size-limit.js gives it', async () => {
+        // The budget is written once, in .size-limit.js; this reads it rather
+        // than repeating it. A bundle that grew because a shared module was
+        // copied in would be caught here before the size gate runs.
+        const budgets = createRequire(import.meta.url)('../.size-limit.js')
+        const entry = budgets.find(b =>
+            b.path.endsWith('coupon-box-finder.min.js'),
+        )
+        const [, kb] = /^([\d.]+) KB$/.exec(entry.limit)
+        expect(Buffer.byteLength(await build())).toBeLessThan(Number(kb) * 1000)
     })
 })
