@@ -1855,20 +1855,43 @@ const okButton = (b, input) =>
 // A learned box names its apply by a selector, and a selector can name
 // anything on the page (#place-order, button[name=checkout], an add-to-cart).
 // So its apply says apply (okButton), or it is an arrow or an icon with no
-// words, in the box's own form or container. Never one whose words, name, id
-// or data attributes speak of checkout, paying, continuing, buying or adding
-// to the cart.
+// words, in the box's own form or container. Never one whose label speaks of
+// checkout, paying, continuing, buying or adding to the cart. Its name, id and
+// data attributes refuse it the same way, with one exception: many real apply
+// buttons live in the checkout's own namespace (checkout_reduction_code,
+// checkout-coupon-apply, checkout_discount_btn). An attribute whose only
+// refusing word is that checkout or cart namespace passes when it also names
+// the coupon or the apply and the label says apply.
+const NAMES_COUPON_RE = /coupon|promo|discount|reduction|voucher|apply/
+// The cart words the danger list refuses on their own ("cart" itself is not).
+const CART_NAMESPACE_RE =
+    /check ?out|warenkorb|panier|carrito|carrello|winkelwagen|koszyk|cesta/g
+const refuses = words => NEVER_CLICK.test(words) || isDanger(words)
 function learnedApply(b, input) {
     if (!b || !input) return false
-    const words = norm(
-        [controlWords(b), ...Object.values(b.dataset || {})]
+    const text = norm([buttonLabel(b), ariaOf(b), b.title, b.value].join(' '))
+    const label = norm(
+        [wordsOf(b), b.tagName === 'INPUT' ? labelText(b) : '', text]
             .join(' ')
             .replace(/[-_]+/g, ' '),
     ).toLowerCase()
-    if (NEVER_CLICK.test(words) || isDanger(words) || noCodeClick(b))
-        return false
+    if (refuses(label) || noCodeClick(b)) return false
+    for (const attr of [
+        b.getAttribute('name'),
+        b.id,
+        ...Object.values(b.dataset || {}),
+    ]) {
+        const words = norm(
+            String(attr || '').replace(/[-_]+/g, ' '),
+        ).toLowerCase()
+        if (!refuses(words)) continue
+        const namespaced =
+            NAMES_COUPON_RE.test(words) &&
+            !NO_CODE_CLICK_RE.test(words) &&
+            !refuses(words.replace(CART_NAMESPACE_RE, ' '))
+        if (!namespaced || !applyLike(b)) return false
+    }
     if (okButton(b, input)) return true
-    const text = norm([buttonLabel(b), ariaOf(b), b.title, b.value].join(' '))
     return (
         ARROWS_RE.test(text) &&
         clickable(b) &&

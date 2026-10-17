@@ -801,6 +801,73 @@ describe('a learned box whose apply is not an apply button is refused whole', ()
                 expect(appliedWith).toHaveLength(0)
             })
 
+    // Many real apply buttons live in the checkout's own namespace: an id,
+    // name or data attribute that names the checkout AND the coupon, on a
+    // button that says Apply, is the box's apply.
+    for (const [id, attrs] of [
+        ['checkout_reduction_code', ''],
+        ['checkout-coupon-apply', ''],
+        ['checkout_discount_btn', ''],
+        ['b', 'name="checkout[reduction_code]"'],
+        ['b', 'data-testid="checkoutCouponApply"'],
+    ])
+        for (const [source, name] of LEARNED_SOURCES)
+            it(`${source}: an Apply named ${attrs || '#' + id} is used`, async () => {
+                document.body.innerHTML =
+                    '<div>' +
+                    PROMO_INPUT +
+                    `<button id="${id}" ${attrs} type="button">Apply</button></div>` +
+                    TOTAL
+                name({ input: 'x', button: id })
+
+                await run()
+
+                expect(drivenSubmit()).toBe(id)
+                expect(appliedWith[0]?.rec.caramelLearn?.learned).toBeTruthy()
+            })
+
+    // ...but the namespace lets off the checkout word only: the label must
+    // still say apply, and an attribute that also places the order or adds to
+    // the cart is still refused.
+    for (const [what, button] of [
+        [
+            'a coupon-named checkout id whose label says checkout',
+            '<button id="b" type="button" data-testid="checkout-coupon-apply">Checkout</button>',
+        ],
+        [
+            'a coupon-named checkout id whose label says nothing',
+            '<button id="b" type="button" data-testid="checkout_discount_btn">Details</button>',
+        ],
+        [
+            'a coupon-named checkout id on a wordless arrow',
+            '<button id="b" type="button" data-testid="checkout-coupon-apply">→</button>',
+        ],
+        [
+            'a promo-named place-order attribute',
+            '<button id="b" type="button" data-testid="place-order-promo">Apply</button>',
+        ],
+        [
+            'a coupon-named add-to-cart attribute',
+            '<button id="b" type="button" data-testid="add-to-cart-coupon">Apply</button>',
+        ],
+        [
+            'a coupon-named checkout-and-pay attribute',
+            '<button id="b" type="button" name="checkout_pay_discount">Apply</button>',
+        ],
+    ])
+        for (const [source, name] of LEARNED_SOURCES)
+            it(`${source}: ${what} is refused`, async () => {
+                document.body.innerHTML =
+                    '<div>' + PROMO_INPUT + button + '</div>' + TOTAL
+                name({ input: 'x', button: 'b' })
+                const clicks = watchClicks()
+
+                await run()
+
+                expect(clicks).toEqual([])
+                expect(appliedWith).toHaveLength(0)
+            })
+
     // An arrow or icon carries no words: it is the box's apply only when it
     // sits in the box's own form or container.
     for (const [source, name] of LEARNED_SOURCES) {
