@@ -603,6 +603,19 @@ and the model: no model call, no budget spent, PostHog outcome `learned`. Code:
 is in `LEARNED_BOX_RULES`). Tables: `learned_coupon_boxes`,
 `learned_coupon_box_reporters` and `learned_coupon_box_handovers`.
 
+**Before switching it on (owner).** Every rule below counts NETWORKS, read from
+the client address, and the app trusts `CF-Connecting-IP` first
+(`src/lib/clientIp.ts`). Cloudflare sets that header and overwrites any value a
+client sends, but only on traffic that passes through Cloudflare. If the origin
+can be reached directly, one machine can send any `CF-Connecting-IP` it likes
+and be as many "networks" as it wants, and every per-network rule here is void.
+So before `COUPON_BOX_LEARNED_ENABLED=true`, prove that the origin accepts
+connections only from Cloudflare: either the host's firewall admits only
+Cloudflare's published IP ranges on 80/443, or Cloudflare Authenticated Origin
+Pulls is on and the origin refuses any TLS client without Cloudflare's
+certificate. Check it from outside: a request to the origin's own address with
+a forged `CF-Connecting-IP` must not reach the app.
+
 **Switch.** Learned boxes have their own switch, so the AI pick can run without
 the crowd-sourced write path. They work only while `COUPON_BOX_LEARNED_ENABLED=true`
 AND the pick is on (`COUPON_BOX_LLM_ENABLED=true` + `COUPON_BOX_PICK_MODEL`).
@@ -643,14 +656,29 @@ which is its own store: a Shopify store's own checkout can live there, and the
 extension and the served-config check already treat that host as the store.
 `a.b.myshopify.com` and `myshopify.com` itself are refused.
 
+Known limit: a store is what the Public Suffix List says. A platform that
+hosts many shops under its own domain but is NOT on the list (so
+`shop-a.platform.example` and `shop-b.platform.example` both have the
+registrable domain `platform.example`) is treated as ONE store: its shops share
+one 5-box cap, one set of reporter hashes and one hand-over. Their boxes are
+still filed per host, so a box confirmed on one shop is served only for that
+host, but a busy shop on such a platform can crowd the others out of the 5
+slots. If that matters for a platform, add it to `STORE_PLATFORM_SUFFIXES` in
+`src/lib/couponBoxLearned.ts` (as `myshopify.com` is) or give its shops
+configs.
+
 **Who counts.** A reporter is one install on one box, keyed by
 `HMAC(salt, "install\n" + installId + "\n" + store)`. Its network is
 `HMAC(salt, "network\n" + prefix + "\n" + store)`, where the prefix is the
 /24 for IPv4 and the /48 for IPv6. Hashes are per store, so rows for two
 stores cannot be joined. A reporter's network is the one it FIRST reported
-from and never changes, so an install that later reports from another network
-still counts for the first one (moving installs between networks frees no
-slot). A reporter is CONFIRMING when its latest counted
+from and never changes, and an install counts only from that network. A report
+from any other network is recorded as seen and counts nothing: it neither
+confirms nor fails the box, and does not keep a confirmation fresh. So a few
+networks heard once cannot hand their installs to one machine elsewhere and
+keep a box alive, or keep failing it, from there; and moving installs between
+networks frees no slot. The cost: a shopper who first reported from home and
+later from their phone counts only from home. A reporter is CONFIRMING when its latest counted
 report is `confirmed` and that confirmation is under 30 days old; a tie with a
 failure reads as failed. It is FAILING when its latest counted report is
 `failed` and under 30 days old. The client makes its own install ids, so one
@@ -730,8 +758,20 @@ that finds it taken is tried again on the store's next servable report.
       shoppers behind one shared address block (a mobile carrier, an office)
       are never refused for reporting. The cost: when one network confirms
       two different boxes, both are the first to go.
-- One install counts at most once per 24h per box and per outcome. A `failed`
+- One install counts at most once per 24h per box and per outcome, and only
+  from the network it first reported from (see "Who counts"). A `failed`
   report for a box nobody confirmed creates nothing.
+- Across ALL stores, per rolling 24 hours: one network (the same /24 or /48
+  prefix, hashed with no store) may add at most 20 new boxes, and at most 500
+  stores may get their first box. Both are checked under one lock that no
+  report waits for, before a new box is created; a report over either cap is
+  answered `ignored`. Without them, one network could create boxes on every
+  registrable domain there is (the rate limiter counts single addresses, and an
+  IPv6 /64 holds billions) and the tables would grow without bound. A busy
+  carrier or office prefix can reach 20 in a day; its shoppers' later new boxes
+  that day are simply not learned, and confirmations of existing boxes are not
+  limited by it. These counts live in `learned_coupon_box_network_events` (see
+  "What is stored").
 - Domains must be plausible store hosts (see "Stores and hosts" above).
   Refused: single labels, IPs, `localhost`, internal suffixes, bare public
   suffixes, shared hosting suffixes and broken punycode.
@@ -741,9 +781,24 @@ that finds it taken is tried again on the store's next servable report.
       characters;
     - attributes limited to `id`, `name`, `type`, `aria-label`, `placeholder`
       and `data-*`, with plain values;
-    - no `:has(`, no `:nth-last-*`, no selector lists.
+    - no `:has(`, no `:nth-last-*`, no selector lists;
+    - nothing that looks like data about a person, anywhere in the selector:
+      no `@` (or `%40`), how an email address would appear, and no run of 6
+      or more digits, how a phone, card, order or account number would. A
+      store's markup can carry such data (`[data-customer-email="..."]`), and
+      the privacy policy promises a box location holds nothing about the
+      shopper.
 
-    Anything else is refused whole (400).
+    Anything else is refused whole (400). The apply and toggle selectors (the
+    ones the extension clicks) are also refused when they name a control that
+    could spend money or change the cart: `checkout`, `place order`,
+    `submit order`, `pay`, `buy`, `pay now`, `buy now`, `purchase`, `delete`
+    or `remove`, in any spelling (`place-order`, `place_order`, `placeOrder`).
+    `pay` and `buy` count only as whole words, so `display` or `buyer` pass.
+    This is defence in depth; the extension's own apply-control check is what
+    stops a wrong click. The cost: a store whose real apply button is named
+    after its checkout (`#checkout-apply`) is not learned, and keeps being
+    answered by the rules and the AI pick.
 
 **What the server cannot promise.** Every rule above counts NETWORKS (/24
 IPv4, /48 IPv6), and networks are cheaper than they look: IPv6 /48s come free
@@ -751,7 +806,9 @@ with tunnel brokers and some hosting plans, and the client address is the one
 the CDN reports in `CF-Connecting-IP`. A determined attacker with enough
 networks can still get a wrong box served, or keep a right one off the
 shortcut, for a store with little traffic. The server makes that slower and
-costlier; it cannot make it impossible. The real safety net is in the
+costlier; it cannot make it impossible (and nothing at all, if the origin can
+be reached without Cloudflare: see "Before switching it on"). The real safety
+net is in the
 extension: a served box is only a suggestion that must pass every check the
 extension runs on the page (the coupon-word and text-input checks, the
 apply-control check, the leave-the-page guard, the money check and the cart
@@ -764,8 +821,14 @@ reporters, and a reporter row is deleted 60 days after that install last
 reported. The prune runs for the store on every report, and store-wide at boot
 and every 6 hours (`[boot] learned coupon box retention prune ENABLED`). The
 store-wide prune takes each store's lock in turn, like a report, so it never
-deletes a box under a report that is adding to it. It runs whatever the switch
-says, so rows written before a kill switch still age out.
+deletes a box under a report that is adding to it. It waits at most 5 seconds
+for one store's lock; a store it cannot lock, or any other error on one store,
+is logged (`retention prune failed for one store; continuing`, also sent to
+Sentry) and left for the next run, and the other stores are still pruned. The
+store's own reports prune it in the meantime. The cross-store network records
+(`learned_coupon_box_network_events`) are deleted after 24 hours by the same
+prune. It runs whatever the switch says, so rows written before a kill switch
+still age out.
 
 **Wipe one poisoned store.** Read-only first, then delete (the reporters go
 with the boxes, `ON DELETE CASCADE`):
@@ -801,8 +864,12 @@ requester email, so the coupons pipeline picks it up like any other store
 request. `learned_coupon_box_handovers` holds one row per store handed over;
 that row is what makes it once ever, so deleting the suggestion or the boxes
 does not reopen it. At most 50 stores are handed over per 24 hours across all
-stores. A store refused by that cap is asked again on its next servable
-report, and the server logs `pipeline hand-over deferred: daily cap reached`.
+stores, and at most 3 of them per network: the network of the report that made
+the box servable, so one network cannot spend the day's hand-overs on made-up
+stores. A store refused by either cap is asked again on its next servable
+report, and the server logs `pipeline hand-over deferred: daily cap reached`
+or `... this network reached its daily cap`. A hand-over that finds another
+one in progress answers `busy` and is likewise tried again.
 With no email, no status the pipeline sets can ever mail a shopper. Marking it
 `supported` still sends the operator's own "marked supported" summary. Find
 them:
@@ -818,6 +885,12 @@ them:
   on Enter, counters, timestamps, and which finder first found it.
 - Per reporter: the two per-store HMAC-SHA256 hashes above, plus that
   reporter's counters and timestamps.
+- For the caps kept across stores (`learned_coupon_box_network_events`): one
+  row each time a report adds a new box or hands a store over, holding
+  `HMAC(salt, "network-any-store\n" + prefix + "\n")` (the network prefix
+  alone, with no store and no install), the kind of event and the time.
+  Deleted after 24 hours. It holds no store, so it joins with nothing in the
+  per-store tables.
 
 These hashes are not anonymous against the operator: we hold the salt, and
 install ids also reach the server, in the clear, with sign-in attribution. We
