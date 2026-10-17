@@ -5,6 +5,7 @@ import {
     handOverLearnedStore,
     hashInstallId,
     hashNetwork,
+    hashNetworkAcrossStores,
     learnedBoxReportSchema,
     recordLearnedBoxReport,
     reportStoreDomain,
@@ -106,17 +107,22 @@ async function handleReport(req: NextRequest): Promise<NextResponse> {
         // Reporters are hashed per STORE (the registrable domain), so one
         // install is one reporter on every host of the store.
         const store = reportStoreDomain(report)
+        const ip = getClientIp(req)
+        const anyStoreNetworkHash = hashNetworkAcrossStores(ip)
         const result = await recordLearnedBoxReport({
             report,
             installHash: hashInstallId(report.installId, store),
-            networkHash: hashNetwork(getClientIp(req), store),
+            networkHash: hashNetwork(ip, store),
+            anyStoreNetworkHash,
         })
         if (!result.recorded) {
             return json({ recorded: false, reason: result.reason })
         }
         // Once per store ever and capped per day (handOverLearnedStore), so
         // asking on every servable report also retries one refused by the cap.
-        if (result.servable) await feedStorePipeline(store)
+        if (result.servable) {
+            await feedStorePipeline(store, anyStoreNetworkHash)
+        }
         return json({ recorded: true })
     } catch (error) {
         console.error('[coupon-box-learned] report failed', error, {
@@ -137,9 +143,12 @@ async function handleReport(req: NextRequest): Promise<NextResponse> {
  * host) to the coupons pipeline (couponBoxLearned.handOverLearnedStore). Its
  * failure is reported, never allowed to undo or fail the report that is
  * already committed. */
-async function feedStorePipeline(domain: string): Promise<void> {
+async function feedStorePipeline(
+    domain: string,
+    anyStoreNetworkHash: string,
+): Promise<void> {
     try {
-        const result = await handOverLearnedStore(domain)
+        const result = await handOverLearnedStore(domain, anyStoreNetworkHash)
         if (result.created) {
             console.info('[coupon-box-learned] store handed to the pipeline', {
                 domain,
@@ -147,6 +156,11 @@ async function feedStorePipeline(domain: string): Promise<void> {
         } else if (result.reason === 'daily_cap') {
             console.warn(
                 '[coupon-box-learned] pipeline hand-over deferred: daily cap reached',
+                { domain },
+            )
+        } else if (result.reason === 'network_cap') {
+            console.warn(
+                '[coupon-box-learned] pipeline hand-over deferred: this network reached its daily cap',
                 { domain },
             )
         }

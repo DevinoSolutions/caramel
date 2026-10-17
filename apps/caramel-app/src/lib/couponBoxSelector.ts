@@ -30,6 +30,14 @@
 // `:not(...)` count), at most 256 characters, and never `javascript:`, `url(`
 // or `expression` anywhere. So no selector lists (`,`), no `:has(`, no
 // `:nth-last-*`, no pseudo-elements, no escapes, no comments.
+//
+// And nothing that looks like data about a person, anywhere in it (an
+// attribute value, an id, a class): no `@` (or `%40`), which is how an email
+// address would appear, and no run of 6 or more digits, which is how a phone,
+// card, order or account number would. A store's markup can carry such data
+// (`[data-customer-email="..."]`), and the privacy policy promises a box
+// location never holds anything about the shopper. A real coupon box is found
+// without them; a selector that needs them is refused whole.
 
 const MAX_CHARS = 256
 const MAX_COMPOUNDS = 4
@@ -49,6 +57,7 @@ const PLAIN_PSEUDO_RE =
     /^:(?:first-child|last-child|first-of-type|last-of-type|only-of-type)(?![A-Za-z0-9_(-])/
 const NTH_PSEUDO_RE = /^:(?:nth-child|nth-of-type)\([1-9][0-9]?\)/
 const FORBIDDEN_RE = /javascript:|url\s*\(|expression/i
+const PERSONAL_DATA_RE = /@|%40|[0-9]{6}/i
 
 interface Cursor {
     s: string
@@ -98,6 +107,7 @@ function compound(c: Cursor): boolean {
 export function isLearnedBoxSelector(selector: string): boolean {
     if (selector.length === 0 || selector.length > MAX_CHARS) return false
     if (FORBIDDEN_RE.test(selector)) return false
+    if (PERSONAL_DATA_RE.test(selector)) return false
     const c: Cursor = { s: selector, i: 0, attributes: 0 }
     let compounds = 0
     for (;;) {
@@ -111,4 +121,29 @@ export function isLearnedBoxSelector(selector: string): boolean {
         if (!spaces && !combinator) return false
         if (c.i === c.s.length) return false
     }
+}
+
+// Words that name a control that spends money or changes the cart, never one
+// that applies a code. Matched with the separators taken out, so
+// `place-order`, `place_order` and `placeOrder` are all `placeorder`.
+const RISKY_CONTROL_JOINED_RE =
+    /checkout|placeorder|submitorder|paynow|buynow|purchase|delete|remove/
+// Matched as whole words only: `pay` must not refuse `display`.
+const RISKY_CONTROL_WORDS = new Set(['pay', 'buy'])
+
+/**
+ * Whether an APPLY or TOGGLE selector names a control that could place an
+ * order, pay, or delete something: checkout, place order, submit order, pay,
+ * buy, purchase, delete, remove. The extension clicks these selectors, so the
+ * server refuses them outright. This is defence in depth: the extension's own
+ * apply-control check on the page is what actually stops a wrong click. The
+ * coupon field itself is not checked (typing into it clicks nothing).
+ */
+export function isRiskyControlSelector(selector: string): boolean {
+    const words = selector
+        .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+        .toLowerCase()
+        .split(/[^a-z0-9]+/)
+    if (words.some(w => RISKY_CONTROL_WORDS.has(w))) return true
+    return RISKY_CONTROL_JOINED_RE.test(words.join(''))
 }

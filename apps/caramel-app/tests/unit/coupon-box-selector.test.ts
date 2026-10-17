@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
-import { isLearnedBoxSelector } from '@/lib/couponBoxSelector'
+import {
+    isLearnedBoxSelector,
+    isRiskyControlSelector,
+} from '@/lib/couponBoxSelector'
 
 // The learned coupon box selector grammar (src/lib/couponBoxSelector.ts), the
 // contract the extension emits against: what it must accept, and what a
@@ -90,5 +93,67 @@ describe('learned coupon box selector grammar', () => {
         ['a comment', 'input/* x */'],
     ])('refuses %s', (_, selector) => {
         expect(isLearnedBoxSelector(selector)).toBe(false)
+    })
+
+    // A store's markup can carry the shopper's own data; a box location must
+    // never hold it (the privacy policy says so).
+    it.each([
+        [
+            'an email in a data attribute',
+            'input[data-customer-email="a@b.com"]',
+        ],
+        ['an email in aria-label', 'input[aria-label="Code for a@b.com"]'],
+        ['an encoded @', 'input[data-user="a%40b.com"]'],
+        ['a phone number in a value', 'input[data-phone="5551234567"]'],
+        ['a card or order number in an id', '#order-123456 input'],
+        ['an account number in a class', '.acct-0012345678 input'],
+        ['a long number in a placeholder', 'input[placeholder="Ref 1234567"]'],
+    ])('refuses personal data: %s', (_, selector) => {
+        expect(isLearnedBoxSelector(selector)).toBe(false)
+    })
+
+    it.each([
+        'input[data-step="12345"]',
+        '#promo-2024',
+        'li:nth-child(12) input',
+        'input[placeholder="Enter code (e.g. SAVE10)"]',
+    ])('still accepts short numbers: %s', selector => {
+        expect(isLearnedBoxSelector(selector)).toBe(true)
+    })
+})
+
+describe('apply and toggle selectors that name a risky control', () => {
+    it.each([
+        '#checkout-button',
+        'button[name="checkout"]',
+        '#place-order',
+        '.place_order',
+        'button[data-testid="placeOrder"]',
+        'button[data-action="submit-order"]',
+        '#submitOrder',
+        'button.pay',
+        'button[aria-label="Pay now"]',
+        '#paynow',
+        'button[name="buy"]',
+        '.buy-now',
+        '#purchase',
+        'button[data-action="delete"]',
+        'button[aria-label="Remove item"]',
+        '.remove-coupon',
+    ])('refuses %s', selector => {
+        expect(isRiskyControlSelector(selector)).toBe(true)
+    })
+
+    it.each([
+        'button[name="apply-promo"]',
+        '#apply-coupon',
+        'button[data-testid="apply-discount"]',
+        '.promo-toggle',
+        'button[aria-label="Apply"]',
+        'a.display-promo',
+        'button[data-action="payload-free"]',
+        'button.buyer-promo',
+    ])('accepts %s', selector => {
+        expect(isRiskyControlSelector(selector)).toBe(false)
     })
 })

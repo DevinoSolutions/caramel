@@ -125,6 +125,7 @@ function record(
         report: r,
         installHash: `install-${install}`,
         networkHash: `network-${network}`,
+        anyStoreNetworkHash: `any-${network}`,
         now,
     })
 }
@@ -218,6 +219,8 @@ function postPick(domain: string, acceptsLearned?: boolean) {
 }
 
 async function cleanup() {
+    // Holds no store, so it is cleared whole: only this file writes it.
+    await prisma.learnedCouponBoxNetworkEvent.deleteMany({})
     await prisma.learnedCouponBox.deleteMany({
         where: { domain: { endsWith: SUFFIX } },
     })
@@ -288,11 +291,18 @@ describe('learned coupon box: who counts (real Postgres)', () => {
         await record(report(domain), 'n1-a', 'N1', t0)
         await record(report(domain), 'n1-b', 'N1', t0)
         expect(await record(report(domain), 'n1-c', 'N1', t0)).toEqual(IGNORED)
-        // The two admitted installs report again, now from network N2...
-        const later = new Date(t0.getTime() + HOUR)
-        await record(report(domain), 'n1-a', 'N2', later)
-        await record(report(domain), 'n1-b', 'N2', later)
-        // ...which does not reopen N1's two slots for this week,
+        // The two admitted installs report again, a day later, now from
+        // network N2: recorded, but counted for nothing...
+        const later = new Date(t0.getTime() + DAY + HOUR)
+        for (const install of ['n1-a', 'n1-b']) {
+            expect(await record(report(domain), install, 'N2', later)).toEqual({
+                recorded: true,
+                counted: false,
+                servable: false,
+            })
+        }
+        expect((await boxRow(domain)).confirmations).toBe(2)
+        // ...do not reopen N1's two slots for this week,
         expect(await record(report(domain), 'n1-c', 'N1', later)).toEqual(
             IGNORED,
         )
@@ -311,6 +321,36 @@ describe('learned coupon box: who counts (real Postgres)', () => {
             'network-N1',
             'network-N1',
         ])
+    })
+
+    it('a report from another network than the install first used counts nothing: it neither keeps a box fresh nor fails it', async () => {
+        const domain = freshDomain()
+        const t0 = new Date()
+        const day = (n: number) => new Date(t0.getTime() + n * DAY)
+        await confirmOn(domain, ['a', 'b', 'c'], t0)
+        expect(await findServableLearnedBox(domain, t0)).toEqual(BOX)
+
+        // The three installs, now all behind one other network, fail it.
+        for (const net of ['a', 'b', 'c']) {
+            expect(
+                await record(
+                    failedReport(domain),
+                    `on-${net}`,
+                    'elsewhere',
+                    day(2),
+                ),
+            ).toEqual({ recorded: true, counted: false, servable: true })
+        }
+        expect(await findServableLearnedBox(domain, day(2))).toEqual(BOX)
+        expect((await boxRow(domain)).failures).toBe(0)
+
+        // ...and confirm it again from there before it goes stale: it still
+        // goes stale 30 days after the last confirmation from home.
+        for (const net of ['a', 'b', 'c']) {
+            await record(report(domain), `on-${net}`, 'elsewhere', day(29))
+        }
+        expect(await findServableLearnedBox(domain, day(31))).toBeNull()
+        expect((await boxRow(domain)).confirmations).toBe(3)
     })
 
     it('needs 3 confirming installs on 3 networks: 2 networks with any number of installs is not enough', async () => {
@@ -828,24 +868,89 @@ describe('learned coupon box: size and retention (real Postgres)', () => {
         expect(inputs).toContain(BOX.input)
     })
 
-    it('the box cap and the lock are per STORE: new boxes on 12 different hosts of one store, at once, never exceed 5', async () => {
+    it('the box cap is per STORE: 12 new boxes on 12 different hosts of one store, one after another, leave exactly 5', async () => {
         const store = freshDomain()
         const now = new Date()
-        await Promise.all(
-            Array.from({ length: 12 }, (_, n) =>
-                record(
+        for (let n = 0; n < 12; n++) {
+            expect(
+                await record(
                     report(`h${n}.${store}`, { box: boxN(n) }),
                     `c${n}`,
                     `c${n}`,
                     now,
                 ),
-            ),
-        )
+            ).toMatchObject({ recorded: true })
+        }
         expect(
             await prisma.learnedCouponBox.count({
                 where: { domain: { endsWith: `.${store}` } },
             }),
-        ).toBeLessThanOrEqual(LEARNED_BOX_RULES.maxBoxesPerDomain)
+        ).toBe(LEARNED_BOX_RULES.maxBoxesPerDomain)
+    })
+
+    it('one network adds at most newBoxesPerNetworkPerDay new boxes across ALL stores per 24 hours; other networks are unaffected', async () => {
+        const t0 = new Date()
+        const cap = LEARNED_BOX_RULES.newBoxesPerNetworkPerDay
+        const stores = Array.from({ length: cap + 1 }, () => freshDomain())
+        const results = []
+        for (let n = 0; n < stores.length; n++) {
+            results.push(
+                await record(report(stores[n] as string), `m${n}`, 'mint', t0),
+            )
+        }
+        expect(results.filter(r => r.recorded)).toHaveLength(cap)
+        expect(results[cap]).toEqual(IGNORED)
+        const last = stores[cap] as string
+        expect(
+            await prisma.learnedCouponBox.count({ where: { domain: last } }),
+        ).toBe(0)
+        // A shopper on another network still teaches that store a box...
+        expect(await record(report(last), 'shopper', 'home', t0)).toMatchObject(
+            { recorded: true },
+        )
+        // ...and the minting network may add boxes again a day later.
+        expect(
+            await record(
+                report(freshDomain()),
+                'm-later',
+                'mint',
+                new Date(t0.getTime() + DAY + 1),
+            ),
+        ).toMatchObject({ recorded: true })
+    })
+
+    it('at most newStoresPerDay stores get their first box per 24 hours overall; a store that already has one still takes new boxes', async () => {
+        const now = new Date()
+        const known = freshDomain()
+        await record(report(known, { box: boxN(0) }), 'k', 'k', now)
+        await prisma.learnedCouponBoxNetworkEvent.createMany({
+            data: Array.from(
+                { length: LEARNED_BOX_RULES.newStoresPerDay },
+                (_, n) => ({
+                    networkHash: `any-filler-${n}`,
+                    kind: 'box',
+                    newStore: true,
+                    createdAt: now,
+                }),
+            ),
+        })
+        const fresh = freshDomain()
+        expect(await record(report(fresh), 'f', 'f', now)).toEqual(IGNORED)
+        expect(
+            await prisma.learnedCouponBox.count({ where: { domain: fresh } }),
+        ).toBe(0)
+        expect(
+            await record(report(known, { box: boxN(1) }), 'k2', 'k2', now),
+        ).toMatchObject({ recorded: true })
+        // A day later new stores are taken again.
+        expect(
+            await record(
+                report(fresh),
+                'f',
+                'f',
+                new Date(now.getTime() + DAY + 1),
+            ),
+        ).toMatchObject({ recorded: true })
     })
 
     it('a report never waits for the store lock: one that finds it taken is ignored at once and writes nothing', async () => {
@@ -941,6 +1046,59 @@ describe('learned coupon box: size and retention (real Postgres)', () => {
         expect(
             await prisma.learnedCouponBox.count({ where: { domain: old } }),
         ).toBe(0)
+    })
+
+    it('one store the prune cannot lock does not stop the prune: it is reported and skipped, and every other store is still pruned', async () => {
+        const stuck = freshDomain()
+        const other = freshDomain()
+        const t0 = new Date()
+        const day = (n: number) => new Date(t0.getTime() + n * DAY)
+        await confirmOn(stuck, ['a', 'b', 'c'], t0)
+        await confirmOn(other, ['a', 'b', 'c'], t0)
+        const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+        const lock = await holdAdvisoryLock(`learned-coupon-box:${stuck}`)
+        try {
+            const result = await pruneLearnedCouponBoxes(day(61))
+            expect(result.failedStores).toBe(1)
+            expect(
+                await prisma.learnedCouponBox.count({
+                    where: { domain: other },
+                }),
+            ).toBe(0)
+            expect(
+                await prisma.learnedCouponBox.count({
+                    where: { domain: stuck },
+                }),
+            ).toBe(1)
+            expect(errors).toHaveBeenCalledWith(
+                expect.stringContaining('retention prune failed for one store'),
+                expect.anything(),
+                { storeDomain: stuck },
+            )
+        } finally {
+            errors.mockRestore()
+            await lock.release()
+        }
+    })
+
+    it('the cross-store network records are deleted after 24 hours', async () => {
+        const now = new Date()
+        await prisma.learnedCouponBoxNetworkEvent.createMany({
+            data: [
+                {
+                    networkHash: 'any-old',
+                    kind: 'box',
+                    createdAt: new Date(now.getTime() - DAY - 1),
+                },
+                { networkHash: 'any-new', kind: 'box', createdAt: now },
+            ],
+        })
+        expect((await pruneLearnedCouponBoxes(now)).networkEvents).toBe(1)
+        expect(
+            (await prisma.learnedCouponBoxNetworkEvent.findMany()).map(
+                e => e.networkHash,
+            ),
+        ).toEqual(['any-new'])
     })
 })
 
@@ -1083,7 +1241,7 @@ describe('the routes end to end (real Postgres)', () => {
         for (const ip of IPS) await postReport(report(domain), ip)
         expect(await findServableLearnedBox(domain)).not.toBeNull()
         expect(await prisma.siteSuggestion.count({ where: { domain } })).toBe(0)
-        expect(await handOverLearnedStore(domain)).toEqual({
+        expect(await handOverLearnedStore(domain, 'any-x')).toEqual({
             created: false,
             reason: 'already',
         })
@@ -1122,10 +1280,16 @@ describe('the routes end to end (real Postgres)', () => {
         const lock = await holdAdvisoryLock('learned-coupon-box:handover')
         try {
             expect(
-                await withinSeconds(2, handOverLearnedStore(domain, now)),
+                await withinSeconds(
+                    2,
+                    handOverLearnedStore(domain, 'any-x', now),
+                ),
             ).toEqual({ created: false, reason: 'busy' })
             expect(
-                await withinSeconds(2, handOverLearnedStore(done, now)),
+                await withinSeconds(
+                    2,
+                    handOverLearnedStore(done, 'any-x', now),
+                ),
             ).toEqual({ created: false, reason: 'already' })
             expect(
                 await prisma.siteSuggestion.count({ where: { domain } }),
@@ -1134,7 +1298,7 @@ describe('the routes end to end (real Postgres)', () => {
             await lock.release()
         }
         // The next servable report hands it over.
-        expect(await handOverLearnedStore(domain, now)).toEqual({
+        expect(await handOverLearnedStore(domain, 'any-x', now)).toEqual({
             created: true,
         })
     })
@@ -1148,7 +1312,7 @@ describe('the routes end to end (real Postgres)', () => {
             ),
         })
         const domain = freshDomain()
-        expect(await handOverLearnedStore(domain, now)).toEqual({
+        expect(await handOverLearnedStore(domain, 'any-x', now)).toEqual({
             created: false,
             reason: 'daily_cap',
         })
@@ -1157,6 +1321,33 @@ describe('the routes end to end (real Postgres)', () => {
         expect(
             await handOverLearnedStore(
                 domain,
+                'any-x',
+                new Date(now.getTime() + DAY + 1),
+            ),
+        ).toEqual({ created: true })
+    })
+
+    it('one network hands over at most handoversPerNetworkPerDay stores per 24 hours; another network is unaffected', async () => {
+        const now = new Date()
+        const cap = LEARNED_BOX_RULES.handoversPerNetworkPerDay
+        for (let n = 0; n < cap; n++) {
+            expect(
+                await handOverLearnedStore(freshDomain(), 'any-mint', now),
+            ).toEqual({ created: true })
+        }
+        const domain = freshDomain()
+        expect(await handOverLearnedStore(domain, 'any-mint', now)).toEqual({
+            created: false,
+            reason: 'network_cap',
+        })
+        expect(await prisma.siteSuggestion.count({ where: { domain } })).toBe(0)
+        expect(await handOverLearnedStore(domain, 'any-home', now)).toEqual({
+            created: true,
+        })
+        expect(
+            await handOverLearnedStore(
+                freshDomain(),
+                'any-mint',
                 new Date(now.getTime() + DAY + 1),
             ),
         ).toEqual({ created: true })

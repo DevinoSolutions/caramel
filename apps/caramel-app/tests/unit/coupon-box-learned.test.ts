@@ -50,6 +50,7 @@ import { POST } from '@/app/api/extension/coupon-box-learned/route'
 import {
     hashInstallId,
     hashNetwork,
+    hashNetworkAcrossStores,
     learnedBoxReportSchema,
     learnedStoreDomain,
     networkPrefix,
@@ -121,6 +122,7 @@ describe('POST /api/extension/coupon-box-learned', () => {
         const call = recordMock.mock.calls[0]?.[0] as {
             installHash: string
             networkHash: string
+            anyStoreNetworkHash: string
         }
         expect(call.installHash).toBe(
             hashInstallId(INSTALL_ID, 'shop-example.com'),
@@ -129,6 +131,9 @@ describe('POST /api/extension/coupon-box-learned', () => {
         expect(call.installHash).not.toContain(INSTALL_ID)
         expect(call.networkHash).toBe(
             hashNetwork('203.0.113.99', 'shop-example.com'),
+        )
+        expect(call.anyStoreNetworkHash).toBe(
+            hashNetworkAcrossStores('203.0.113.99'),
         )
     })
 
@@ -202,6 +207,37 @@ describe('POST /api/extension/coupon-box-learned', () => {
             )
             expect(res.status).toBe(400)
         }
+        expect(recordMock).not.toHaveBeenCalled()
+    })
+
+    it('an apply or toggle naming checkout, payment, an order or a delete is refused with 400; the code field is not checked', async () => {
+        for (const box of [
+            { ...goodReport().box, apply: '#place-order' },
+            { ...goodReport().box, apply: 'button[name="checkout"]' },
+            { ...goodReport().box, toggle: '.remove-coupon' },
+        ]) {
+            expect((await post(goodReport({ box }))).status).toBe(400)
+        }
+        expect(recordMock).not.toHaveBeenCalled()
+        const res = await post(
+            goodReport({
+                box: { ...goodReport().box, input: '#checkout_reduction_code' },
+            }),
+        )
+        expect(res.status).toBe(200)
+        expect(recordMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('a selector carrying personal data is refused with 400', async () => {
+        const res = await post(
+            goodReport({
+                box: {
+                    ...goodReport().box,
+                    input: 'input[data-customer-email="a@b.com"]',
+                },
+            }),
+        )
+        expect(res.status).toBe(400)
         expect(recordMock).not.toHaveBeenCalled()
     })
 
@@ -318,7 +354,10 @@ describe('POST /api/extension/coupon-box-learned', () => {
             servable: true,
         }))
         await post(goodReport())
-        expect(suggestMock).toHaveBeenCalledWith('shop-example.com')
+        expect(suggestMock).toHaveBeenCalledWith(
+            'shop-example.com',
+            hashNetworkAcrossStores('203.0.113.99'),
+        )
     })
 
     it('a failed pipeline hand-over does not fail the committed report', async () => {
@@ -396,7 +435,10 @@ describe('POST /api/extension/coupon-box-learned', () => {
         expect(call.installHash).toBe(
             hashInstallId(INSTALL_ID, 'mystore.myshopify.com'),
         )
-        expect(suggestMock).toHaveBeenCalledWith('mystore.myshopify.com')
+        expect(suggestMock).toHaveBeenCalledWith(
+            'mystore.myshopify.com',
+            expect.stringMatching(/^[0-9a-f]{64}$/),
+        )
     })
 
     it('a database error is a 500, never a quiet "recorded"', async () => {
@@ -427,6 +469,25 @@ describe('reporter identity', () => {
         )
         expect(hashNetwork('203.0.113.5', 'one-shop.com')).toBe(
             hashNetwork('203.0.113.250', 'one-shop.com'),
+        )
+    })
+
+    it('the cross-store network hash is per network PREFIX, not per address, and never equals a per-store hash', () => {
+        expect(hashNetworkAcrossStores('203.0.113.5')).toBe(
+            hashNetworkAcrossStores('203.0.113.250'),
+        )
+        expect(hashNetworkAcrossStores('203.0.113.5')).not.toBe(
+            hashNetworkAcrossStores('203.0.114.5'),
+        )
+        // Every address of one IPv6 /48 is one network...
+        expect(hashNetworkAcrossStores('2001:db8:abcd:1::1')).toBe(
+            hashNetworkAcrossStores('2001:db8:abcd:ffff:1:2:3:4'),
+        )
+        expect(hashNetworkAcrossStores('2001:db8:abcd::1')).not.toBe(
+            hashNetworkAcrossStores('2001:db8:abce::1'),
+        )
+        expect(hashNetworkAcrossStores('203.0.113.5')).not.toBe(
+            hashNetwork('203.0.113.5', ''),
         )
     })
 

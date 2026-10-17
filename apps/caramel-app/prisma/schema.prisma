@@ -524,6 +524,26 @@ model LearnedCouponBoxHandover {
   @@map("learned_coupon_box_handovers")
 }
 
+// The caps learned boxes keep ACROSS stores: one row each time a report adds
+// a new box (kind 'box', newStore when the store had none) or hands a store
+// to the pipeline (kind 'handover'). networkHash is HMAC-SHA256 under
+// COUPON_BOX_LEARNED_SALT of the reporter's network prefix alone, with no
+// store; the row holds no store, so it joins with nothing in the per-store
+// tables. Deleted after 24 hours.
+model LearnedCouponBoxNetworkEvent {
+  id          String   @id @default(cuid())
+  networkHash String   @map("network_hash")
+  kind        String
+  newStore    Boolean  @default(false) @map("new_store")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  // The per-network caps.
+  @@index([networkHash, kind, createdAt])
+  // The new-store cap and the 24-hour prune.
+  @@index([createdAt])
+  @@map("learned_coupon_box_network_events")
+}
+
 enum UserStatus {
   ACTIVE_USER
   DELETE_REQUESTED_BY_USER

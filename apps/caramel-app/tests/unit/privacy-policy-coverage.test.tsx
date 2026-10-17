@@ -108,6 +108,8 @@ describe('privacy policy coverage', () => {
             'A box nobody has confirmed for 30 days is no longer used.',
             'A box nobody has confirmed for 60 days is deleted with everything recorded about it',
             '60 days after that install last reported on it',
+            'we keep a salted hash of the network part of your IP address on its own, tied to no store and no install, with the time, and delete it after 24 hours',
+            'The network records kept to limit abuse are deleted after 24 hours.',
         ]) {
             expect(normalized).toContain(claim)
         }
