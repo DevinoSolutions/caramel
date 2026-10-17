@@ -59,10 +59,17 @@ module.exports = [
         // (rules_first / llm_first / llm_only, and the prompt asking the same
         // question per mode) and the remembered coupon box (read it first,
         // check it like any pick, carry it across a reload, hand its outcome
-        // to the module that saves it). Measured 113.05 -> 116.66 kB; naming,
-        // saving and reporting a box ship on demand (coupon-box-learned.js,
-        // below), not here.
-        limit: '122 KB',
+        // to the module that saves it). Measured 113.05 -> 116.66 kB at first
+        // push, 121.36 kB after the review fixes (the learned-apply gate, the
+        // leave-the-page rule on every path, the setting and section rules);
+        // naming a box ships on demand (coupon-box-learned.js, below), not
+        // here.
+        // 2026-10-17, raised 122 -> 125 kB: a submit that leaves the store
+        // (formaction/form target) is never the apply, a positional or
+        // whole-form wordless apply is refused, and the remembered box is
+        // asked of the background instead of read from page storage.
+        // Measured 122.14 kB.
+        limit: '125 KB',
         brotli: false,
     },
     {
@@ -138,7 +145,13 @@ module.exports = [
         // the couponBoxLearned flag, and behind it the learned-answer opt-in
         // and the learned coupon box report (install id read, the POST, what
         // the server recorded). Measured 10.68 -> 11.77 kB.
-        limit: '12.7 KB',
+        // 2026-10-17, raised 12.7 -> 15 kB: the learned-box memory moved here
+        // from the page (a page can write its own storage): the background
+        // reads and writes it for the sender tab's own host through
+        // coupon-box-learned.js (validation and the selector grammar), holds
+        // the box a run used across a reload per tab, and serialises writes
+        // across tabs. Measured 13.57 kB.
+        limit: '15 KB',
         brotli: false,
     },
     {
