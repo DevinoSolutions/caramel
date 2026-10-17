@@ -11,6 +11,9 @@ import {
     isCheckout,
 } from '../store-detect.js'
 import { LEARNED_ACTIONS, learnedBackground } from './_learned-background.mjs'
+import { tabHandoffBackground } from './_tab-handoff-background.mjs'
+// The background's side of the per-tab handoffs (see the helper).
+const handoffs = tabHandoffBackground()
 
 // The server's pick mode and the learned coupon box, on a store with no
 // config. These pin:
@@ -120,6 +123,7 @@ function installChromeStub() {
               ? OUTLINE_FILE
               : 'chrome-extension://caramel/' + path
     stub.runtime.sendMessage = (message, cb) => {
+        if (handoffs.answers(message, cb)) return
         const a = message?.action
         if (a === 'fetchCoupons')
             cb({
@@ -248,6 +252,7 @@ beforeAll(() => {
 
 beforeEach(() => {
     sessionStorage.clear()
+    handoffs.reset()
     document.body.innerHTML = ''
     window.history.replaceState({}, '', '/cart')
     finalModals = []
@@ -340,7 +345,9 @@ describe('pick mode', () => {
 
         // The same answer in llm_first: the rules may read what it revealed.
         mode = 'llm_first'
+        // A new tab session: the server may be asked again.
         sessionStorage.clear()
+        handoffs.reset()
         _caramelResetDiscoveryFlag()
         document.getElementById('panel').style.display = 'none'
         await run()
@@ -365,7 +372,9 @@ describe('pick mode', () => {
         expect(appliedWith).toHaveLength(0)
 
         mode = 'llm_first'
+        // A new tab session: the server may be asked again.
         sessionStorage.clear()
+        handoffs.reset()
         _caramelResetDiscoveryFlag()
         await run()
         expect(
@@ -412,12 +421,11 @@ describe('pick mode', () => {
 })
 
 describe('the prompt offers a run where the mode could find a box', () => {
-    const asked = () =>
-        sessionStorage.setItem('caramel_box_pick:' + location.hostname, '1')
+    const asked = () => handoffs.put('box_pick', { [location.hostname]: 1 })
 
     it('llm_only: a box only the rules see is no reason to offer', async () => {
         document.body.innerHTML = RULES_BOX + TOTAL
-        asked()
+        await asked()
 
         mode = 'rules_first'
         expect(await isCheckout()).toBe(true)
@@ -438,7 +446,7 @@ describe('the prompt offers a run where the mode could find a box', () => {
 
     it('a remembered box is offered when nothing else would be', async () => {
         document.body.innerHTML = BARE_BOX + TOTAL
-        asked()
+        await asked()
         expect(await isCheckout()).toBe(false)
 
         remember(LEARNED_BARE)
@@ -448,7 +456,7 @@ describe('the prompt offers a run where the mode could find a box', () => {
 
     it('llm_only does not offer a box the rules once found', async () => {
         document.body.innerHTML = BARE_BOX + TOTAL
-        asked()
+        await asked()
         remember({ ...LEARNED_BARE, source: 'rules' })
 
         mode = 'llm_only'
@@ -461,7 +469,7 @@ describe('the prompt offers a run where the mode could find a box', () => {
         ]
         mode = 'llm_only'
         document.body.innerHTML = RULES_BOX + TOTAL
-        asked()
+        await asked()
 
         expect(await isCheckout()).toBe(true)
     })
@@ -566,7 +574,9 @@ describe('a learned box', () => {
         })
 
         _caramelResetDiscoveryFlag()
+        // A new tab session: the server may be asked again.
         sessionStorage.clear()
+        handoffs.reset()
         await run()
         await vi.waitFor(() => expect(learned()).toBeUndefined())
         expect(local[LEARNED_KEY]).toEqual({})

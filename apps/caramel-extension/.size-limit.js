@@ -68,7 +68,8 @@ module.exports = [
         // (formaction/form target) is never the apply, a positional or
         // whole-form wordless apply is refused, and the remembered box is
         // asked of the background instead of read from page storage.
-        // Measured 122.14 kB.
+        // Measured 122.14 kB; 122.4 kB once the finder's pick memory moved to
+        // the background too (the per-tab handoffs).
         limit: '125 KB',
         brotli: false,
     },

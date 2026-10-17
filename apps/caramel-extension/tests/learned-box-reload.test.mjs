@@ -11,6 +11,9 @@ import {
     startCheckoutDetection,
 } from '../store-detect.js'
 import { LEARNED_ACTIONS, learnedBackground } from './_learned-background.mjs'
+import { tabHandoffBackground } from './_tab-handoff-background.mjs'
+// The background's side of the per-tab handoffs (see the helper).
+const handoffs = tabHandoffBackground()
 
 // A remembered coupon box on a cart that reloads per code. The box no rule
 // would find is still the one the run carries on with on the page the store
@@ -87,6 +90,7 @@ function installChromeStub() {
             ? LEARNED_FILE
             : 'chrome-extension://caramel/' + path
     stub.runtime.sendMessage = (message, cb) => {
+        if (handoffs.answers(message, cb)) return
         const a = message?.action
         if (a === 'fetchCoupons')
             cb({
@@ -148,8 +152,9 @@ beforeAll(() => {
     })
 })
 
-beforeEach(() => {
+beforeEach(async () => {
     sessionStorage.clear()
+    handoffs.reset()
     history.replaceState({}, '', '/cart')
     applyCalls = []
     reported = []
@@ -169,7 +174,7 @@ beforeEach(() => {
     _caramelResetDiscoveryFlag()
     // The server has already been asked on this tab: only the memory could
     // still see a box here.
-    sessionStorage.setItem('caramel_box_pick:' + location.hostname, '1')
+    await handoffs.put('box_pick', { [location.hostname]: 1 })
 })
 
 describe('a remembered box on a cart that reloads per code', () => {

@@ -24,6 +24,40 @@ import {
     caramelLearnedOutcome,
     caramelLearnedRead,
 } from './coupon-box-learned.js'
+import { caramelTabHandoffs } from './tab-handoff.js'
+
+/* What a content script leaves for the next document of its tab (the
+ * pending submit, the discount-link win, the run across reloads), held here
+ * where the store's page cannot write it (tab-handoff.js). The tab and the
+ * origin are the message sender's, never the message's. Answers { saved },
+ * { value } for get/take, { cleared }, or { error }. */
+let _tabHandoffs = null
+const tabHandoffs = () =>
+    (_tabHandoffs ??= caramelTabHandoffs(
+        currentBrowser.storage?.session ?? null,
+    ))
+function senderOrigin(sender) {
+    try {
+        const origin = new URL(sender?.url || sender?.tab?.url).origin
+        return origin === 'null' ? null : origin
+    } catch {
+        return null
+    }
+}
+async function tabHandoff({ op, key, value }, sender) {
+    const tabId = sender?.tab?.id
+    const origin = senderOrigin(sender)
+    if (!Number.isInteger(tabId) || !origin) return { error: 'no tab' }
+    const h = tabHandoffs()
+    if (op === 'set') return { saved: await h.set(tabId, origin, key, value) }
+    if (op === 'get') return { value: await h.get(tabId, origin, key) }
+    if (op === 'take') return { value: await h.take(tabId, origin, key) }
+    if (op === 'clear') {
+        await h.clear(tabId, origin, key)
+        return { cleared: true }
+    }
+    return { error: 'unknown op' }
+}
 
 // Assigned by initBackground() instead of at module evaluation: the IIFE throws
 // when neither global exists, which is exactly the case in the Node import
@@ -758,6 +792,13 @@ export function initBackground() {
 
     currentBrowser.tabs.onUpdated.addListener(_caramelOnTabUpdated)
 
+    // A closed tab's handoffs (tab-handoff.js) are never read again.
+    currentBrowser.tabs.onRemoved?.addListener(tabId =>
+        tabHandoffs()
+            .forgetTab(tabId)
+            .catch(err => logError('tabHandoffForget', err)),
+    )
+
     // The user granted us host access (permission-state.js requestAllSites, or
     // the browser's own permissions UI). The popup does not need telling — it
     // re-derives permission state on every open — so this records the fact and
@@ -995,6 +1036,14 @@ export function initBackground() {
                     .catch(err => {
                         logError('couponBoxLearnTake', err)
                         sendResponse({ l: null })
+                    })
+                return true
+            } else if (message.action === 'tabHandoff') {
+                tabHandoff(message, sender)
+                    .then(resp => sendResponse(resp))
+                    .catch(err => {
+                        logError('tabHandoff', err)
+                        sendResponse({ error: String(err) })
                     })
                 return true
             } else if (message.action === 'couponBoxPick') {

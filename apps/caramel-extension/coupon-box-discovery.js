@@ -37,6 +37,7 @@
 // flow as a rule pick, so every check after this point still runs.
 import {
     caramelSendMessage,
+    caramelTabHandoff,
     currentBrowser,
     log,
     sleep,
@@ -1568,7 +1569,7 @@ export function caramelFinderSeesBox(doc = document) {
 export async function caramelFinderMayAsk(domain, doc = document) {
     if (!(await caramelCouponBoxLlmOn())) return false
     if (ORDER_PLACED_PATH_RE.test(doc.location?.pathname || '')) return false
-    if (pickAsked(domain || doc.location?.hostname)) return false
+    if (await pickAsked(domain || doc.location?.hostname)) return false
     if (!shownPositiveTotal(doc)) return false
     log('FINDER_MAY_ASK', {})
     return true
@@ -1747,7 +1748,10 @@ function finderRecord(rec, found, totalRow, opened) {
 // At most one ask per store per tab session, whatever came back. A usable
 // pick is also kept, by name (keptPick), for the next page in the tab: a cart
 // that reloads to show the store's answer gets its box found again there.
-const PICK_KEY = 'caramel_box_pick:'
+// Both are held by the background for this tab and site (tab-handoff.js),
+// never in the page's sessionStorage: the page could otherwise name the
+// fields the codes go into, or clear the memory and buy a second ask.
+const PICK_KEY = 'box_pick'
 // How long the page waits for the answer. The server gives the model 20s and
 // then answers no_pick itself; the background allows the whole ask (flag
 // read, token read, request) COUPON_BOX_PICK_DEADLINE_MS, 24s (background.js);
@@ -1772,39 +1776,33 @@ const pickKey = domain =>
         .trim()
         .toLowerCase()
 
-function pickAsked(domain) {
+// What this tab holds for each store: 1 once asked, or the kept pick.
+const pickMemo = async () =>
+    (await caramelTabHandoff('get', PICK_KEY))?.value || {}
+
+async function pickAsked(domain) {
     domain = pickKey(domain)
     if (_pickAsked.has(domain)) return true
-    try {
-        return sessionStorage.getItem(PICK_KEY + domain) !== null
-    } catch (err) {
-        // Storage blocked: this page's own memory is all there is.
-        log('FINDER_PICK_STORAGE', { error: String(err) })
-        return false
-    }
+    // A background that could not answer leaves this page's own memory.
+    return Object.hasOwn(await pickMemo(), domain)
 }
 
-function rememberPick(domain, kept = '1') {
+async function rememberPick(domain, kept = 1) {
     domain = pickKey(domain)
     _pickAsked.add(domain)
-    try {
-        sessionStorage.setItem(PICK_KEY + domain, kept)
-    } catch (err) {
-        log('FINDER_PICK_STORAGE', { error: String(err) })
-    }
+    await caramelTabHandoff('set', PICK_KEY, {
+        ...(await pickMemo()),
+        [domain]: kept,
+    })
 }
 
 // The names a usable pick left for later pages in this tab, or null: the ask
-// found nothing usable, storage is blocked (pickAsked logs that), or this is
-// not the page the pick was made on. A form-POST cart comes back to its own
-// path; a checkout page with a "code" field of its own is not that page.
-function keptPick(domain, doc) {
-    try {
-        const k = JSON.parse(sessionStorage.getItem(PICK_KEY + pickKey(domain)))
-        return k?.i && k.p === doc.location?.pathname ? k : null
-    } catch {
-        return null
-    }
+// found nothing usable, or this is not the page the pick was made on. A
+// form-POST cart comes back to its own path; a checkout page with a "code"
+// field of its own is not that page.
+async function keptPick(domain, doc) {
+    const k = (await pickMemo())[pickKey(domain)]
+    return k?.i && k.p === doc.location?.pathname ? k : null
 }
 
 // What an element is and what it is called: its tag, then its stable name
@@ -1990,7 +1988,7 @@ export async function caramelFinderSeesKeptPick(
 ) {
     const k =
         (await caramelCouponBoxLlmOn()) &&
-        keptPick(domain || doc.location?.hostname, doc)
+        (await keptPick(domain || doc.location?.hostname, doc))
     if (!k || !shownPositiveTotal(doc)) return false
     const sees = boxShows(refindPick(doc, k), k.e, strict)
     if (sees) log('FINDER_SEES_KEPT', {})
@@ -2135,12 +2133,12 @@ async function caramelPickedRecord(rec, doc, mode) {
     if (!(await caramelCouponBoxLlmOn())) return null
     const domain = pickKey(rec.domain || doc.location?.hostname)
     if (!domain) return null
-    const kept = keptPick(domain, doc)
+    const kept = await keptPick(domain, doc)
     let picked
     if (kept) picked = { ...refindPick(doc, kept), enterOnly: !!kept.e }
     else {
-        if (pickAsked(domain)) return null
-        rememberPick(domain)
+        if (await pickAsked(domain)) return null
+        await rememberPick(domain)
         picked = await askPick(domain, doc, isServed(rec))
         if (!picked) return null
     }
@@ -2178,7 +2176,7 @@ async function caramelPickedRecord(rec, doc, mode) {
         again.button === (k.b ? found.button : null) &&
         again.toggle === (k.t ? opened : null)
     )
-        rememberPick(domain, JSON.stringify(k))
+        await rememberPick(domain, k)
     return learnable(
         finderRecord(rec, found, total, opened),
         learned ? 'server_learned' : 'llm',

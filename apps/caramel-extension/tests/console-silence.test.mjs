@@ -45,6 +45,7 @@ const SHIPPED_TO_STRANGERS = [
     // The service worker reads and writes the learned-box memory through it;
     // the finder also loads it on demand in the store's page.
     'coupon-box-learned.js',
+    'tab-handoff.js',
 ]
 // Not in any entrypoint's import graph, but shipped and run in the store's
 // page all the same: the build copies it beside the bundle and the finder
