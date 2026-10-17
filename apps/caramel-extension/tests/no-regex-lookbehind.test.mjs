@@ -24,9 +24,11 @@ const SHIPPED_SCRIPTS = [
         ...entryModuleClosure(
             'entrypoints/content.ts',
             'entrypoints/background.ts',
+            'entrypoints/porkbun-alert.content.ts',
         ),
         'entrypoints/content.ts',
         'entrypoints/background.ts',
+        'entrypoints/porkbun-alert.content.ts',
     ]),
 ].toSorted()
 

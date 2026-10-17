@@ -27,7 +27,10 @@ import {
     sleep,
 } from './caramel-base.js'
 import { CARAMEL_ENV } from './caramel-env.js'
-import { armCodeCapture } from './code-capture.js'
+import {
+    armCodeCapture,
+    caramelNoteCheckoutForCapture,
+} from './code-capture.js'
 import {
     _getTriedCodes,
     caramelPostNavigationVerdict,
@@ -919,6 +922,9 @@ export async function startCheckoutDetection() {
     let scheduled = false
     const recheck = () => {
         scheduled = false
+        // A promo box that only appears later (drawer carts) is the moment
+        // capture starts listening at a checkout: latched, so cheap per pass.
+        caramelNoteCheckoutForCapture(rec)
         // Don't re-prompt if the prompt is already up or we're mid-apply.
         if (
             document.getElementById('caramel-small-prompt') ||

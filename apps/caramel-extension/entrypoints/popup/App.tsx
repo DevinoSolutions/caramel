@@ -1,11 +1,8 @@
 import { Spinner } from 'caramel-ui'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import {
-    resolvePopupState,
-    resumeSafariOauthIfPending,
-    setAfterLoginRerender,
-} from '../../popup-core.js'
+import { resolvePopupState, setAfterLoginRerender } from '../../popup-core.js'
 import { ToastProvider } from './components/toast'
+import { UsageDiagnosticsCard } from './components/UsageDiagnosticsCard'
 import type { AppApi, ResolvedState } from './types'
 import { CouponsView } from './views/CouponsView'
 import { LoadErrorView } from './views/LoadErrorView'
@@ -72,14 +69,9 @@ export function App() {
         })
         void Promise.all([first, minDisplay]).then(() => setBooted(true))
 
-        // Safari finishes OAuth in a TAB, which closes this popup mid-flow —
-        // the token is waiting server-side under the stored nonce when the user
-        // reopens us. Deliberately NOT awaited into the boot gate: it can poll
-        // for up to 30s, and the popup must paint immediately. Resolves to
-        // 'idle' in every other runtime, so no other boot path changes.
-        void resumeSafariOauthIfPending().then(result => {
-            if (result.status === 'ok') refreshRef.current()
-        })
+        // Safari and Firefox finish OAuth on the website, which hands the
+        // session back through the content-script relay (it lands in storage
+        // directly); there is no popup-side result to resume at boot.
     }, [])
 
     const api: AppApi = {
@@ -160,6 +152,16 @@ export function App() {
                 </header>
 
                 <main id="mainContent">
+                    {/* The one-time diagnostics ask: only over a resolved view
+                        (never over sign-in, settings or an error), and it is
+                        gone for good once answered. */}
+                    {booted &&
+                        overlay === null &&
+                        (resolved?.view === 'coupons' ||
+                            resolved?.view === 'unsupported' ||
+                            resolved?.view === 'profile') && (
+                            <UsageDiagnosticsCard />
+                        )}
                     <div id="auth-container">
                         {overlay === 'signin' ? (
                             <SignInView api={api} />

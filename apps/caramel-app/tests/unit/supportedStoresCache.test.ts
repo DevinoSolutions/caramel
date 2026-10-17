@@ -55,6 +55,7 @@ describe('getSupportedStoresPayload', () => {
                     couponSubmit: '//button[@id="apply"]',
                 },
             ],
+            gated: [],
         })
         expect(first.etag).toMatch(/^"[A-Za-z0-9_-]+"$/)
     })
@@ -127,6 +128,7 @@ describe('GET /api/extension/supported-stores — served from the cache', () => 
                     couponSubmit: '//button[@id="apply"]',
                 },
             ],
+            gated: [],
         })
     })
 

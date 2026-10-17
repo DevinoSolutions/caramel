@@ -55,7 +55,12 @@ module.exports = [
         // builder is NOT in this bundle, it ships as assets/coupon-box-outline.js
         // and has its own budget below. 4.9% headroom over 111.27 kB, so the
         // next capability trips the ratchet.
-        // 2026-10-16, raised 117 -> 122 kB: the server's pick mode
+        // 2026-10-15, raised 117 -> 120 kB: install attribution
+        // (install-attribution.js plus the /welcome first-touch capture in
+        // coupon-runner.js) — the cookie reader pinned to the website's
+        // schema, the install-id/record storage and the bounded retry.
+        // Measured 111.27 -> 114.55 kB (+3.3 kB): one new capability, not prose.
+        // 2026-10-16, raised 120 -> 122 kB: the server's pick mode
         // (rules_first / llm_first / llm_only, and the prompt asking the same
         // question per mode) and the remembered coupon box (read it first,
         // check it like any pick, carry it across a reload, hand its outcome
@@ -70,7 +75,11 @@ module.exports = [
         // asked of the background instead of read from page storage.
         // Measured 122.14 kB; 122.4 kB once the finder's pick memory moved to
         // the background too (the per-tab handoffs).
-        limit: '125 KB',
+        // 2026-10-17, raised 125 -> 130 kB: this branch merged main through
+        // #348, which brings in the notes above it dated 2026-10-15 (install
+        // attribution, the porkbun capability marker) and the handoff store's
+        // review fixes. Measured 128.46 kB.
+        limit: '130 KB',
         brotli: false,
     },
     {
@@ -93,6 +102,9 @@ module.exports = [
         // every-website match pattern per runtime, the reachability probe that
         // tells "the browser refused us" apart from "you are offline", and the
         // gesture-safe request. Measured 10.04 kB.
+        // 2026-10-15: the sign-in sends the install's attribution (the exchange
+        // body fields, the Safari authorize query and the unreadable-storage
+        // report). Measured 10.81 kB, still under the unchanged 11 kB budget.
         limit: '11 KB',
         brotli: false,
     },
@@ -142,6 +154,27 @@ module.exports = [
         // 2026-10-13, raised 10.7 -> 11.3 kB: the coupon-box pick request (its
         // flag, its message route, and one deadline over the flag read, the
         // token read and the request). Measured 10.52 kB.
+        // 2026-10-15, raised 11.3 -> 13.4 kB: the opt-in code-sharing funnel
+        // diagnostics (1.4.14): reportCodeShareFunnel, the consent + telemetry
+        // id module (usage-diagnostics-consent.js), the payload allowlist
+        // (code-share-funnel.js) and the shared permissions wrapper
+        // (permissions-api.js) for the Firefox data-collection grant. Measured
+        // 12.24 kB.
+        // 2026-10-15 (review of PR #353), tightened 13.4 -> 12.7 kB: the 2 kB of
+        // slack the first raise left would have let the next unrelated growth
+        // through unnoticed. Measured 12.38 kB after the review fixes (id minted
+        // only on accept, the consent re-read, device-local consent), so the
+        // limit is measured + ~0.3 kB.
+        // 2026-10-17, raised 12.7 -> 13.6 kB: the per-tab handoffs
+        // (tab-handoff.js and its message route), which hold the pending
+        // submit, the discount-link win and the run where the store's page
+        // cannot write them. Measured 13.24 kB.
+        // 2026-10-17 (review of PR #369), raised 13.6 -> 13.9 kB: the handoff
+        // route answers only the tab's top, live document, forgets a tab the
+        // browser replaces, writes down a refused record, and gains the
+        // compare-and-set replace that makes a cancel one step. Measured
+        // 13.60 kB.
+        // On this branch, before it merged main through #348:
         // 2026-10-16, raised 11.3 -> 12.7 kB: the pick mode beside the flag,
         // the couponBoxLearned flag, and behind it the learned-answer opt-in
         // and the learned coupon box report (install id read, the POST, what
@@ -155,7 +188,10 @@ module.exports = [
         // 2026-10-17, unchanged at 15 kB: the per-tab handoff store
         // (tab-handoff.js) joined, and the box a run holds across a reload
         // moved onto it in place of its own copy. Measured 13.97 kB.
-        limit: '15 KB',
+        // 2026-10-17, raised 15 -> 16.6 kB: main through #348 brings the
+        // code-sharing funnel diagnostics (dated 2026-10-15 above) and the
+        // handoff store's review fixes. Measured 16.2 kB.
+        limit: '16.6 KB',
         brotli: false,
     },
     {
@@ -166,6 +202,17 @@ module.exports = [
         // box. About half of it is the word allowlist every name is filtered
         // through, which is data the server's eval was measured with.
         limit: '9.2 KB',
+        brotli: false,
+    },
+    {
+        name: 'porkbun-alert-shim.js (porkbun.com checkout only, minified)',
+        path: '.size-cache/porkbun-alert.min.js',
+        // 2026-10-15 (T-2480) — own MAIN-world content script for porkbun.com's
+        // native coupon-failure alert(). 2026-10-16: the page-world capability
+        // marker (extension-capabilities.js, bundled into it) took it from 1.18
+        // to 1.86 kB minified; the same module adds ~0.8 kB to the per-page
+        // content-scripts group above (116.69 -> 117.49 kB, inside its limit).
+        limit: '2 KB',
         brotli: false,
     },
     {

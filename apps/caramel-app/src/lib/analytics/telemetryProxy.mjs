@@ -56,7 +56,19 @@ function isPlaceholderHost(hostname) {
  *
  * Order matters (Next takes the first match): the static-asset and array
  * (remote-config + SDK bundle) routes MUST precede the catch-all, because
- * PostHog serves those from its asset path.
+ * PostHog serves those from its asset path. So must the `/s` rewrite.
+ *
+ * Why `/s` has its own rewrite (prod recordings were ZERO from 2026-10-06
+ * until this fix): posthog-js POSTs session recordings to `/_t/k3v/s/`, WITH
+ * the trailing slash. The catch-all's `:path*` capture drops it, so the request
+ * reached self-hosted PostHog as `/s`. PostHog serves `/s` from Django (a 403
+ * CSRF HTML page); only `/s/` reaches the capture service (a 400
+ * RecordingPayload for an empty body, i.e. alive). Events are unaffected
+ * because `/i/v0/e` accepts both forms. The explicit destination below keeps
+ * the slash. Next compiles the source `/_t/k3v/s` to a pattern that accepts an
+ * optional trailing slash, so it matches the request with or without it
+ * (skipTrailingSlashRedirect and the middleware leave the telemetry prefix's
+ * slash in place, see trailingSlash.ts).
  *
  * @param {{ dataset?: string, host?: string }} input
  * @returns {{ source: string, destination: string }[]}
@@ -91,6 +103,10 @@ export function buildTelemetryRewrites(input) {
         {
             source: `${TELEMETRY_PATH}/array/:path*`,
             destination: `${origin}/array/:path*`,
+        },
+        {
+            source: `${TELEMETRY_PATH}/s`,
+            destination: `${origin}/s/`,
         },
         {
             source: `${TELEMETRY_PATH}/:path*`,

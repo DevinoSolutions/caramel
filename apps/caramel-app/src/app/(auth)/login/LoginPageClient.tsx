@@ -19,9 +19,11 @@ import { toast } from 'sonner'
 export default function LoginPageClient({
     verified,
     error,
+    autoProvider,
 }: {
     verified?: string
     error?: string | string[]
+    autoProvider?: 'google' | 'apple'
 }) {
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
@@ -123,7 +125,7 @@ export default function LoginPageClient({
                 </div>
             )}
 
-            <SocialSignIn verb="Sign in" />
+            <SocialSignIn verb="Sign in" autoStart={autoProvider} />
             <AuthDivider />
 
             {/* No noValidate here, unlike signup: this form has no client-side

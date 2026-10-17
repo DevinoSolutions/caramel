@@ -2,6 +2,7 @@
 
 import InstallSurfaceGate from '@/components/growth/InstallSurfaceGate'
 import Loader from '@/components/Loader'
+import { trackGrowthEvent } from '@/lib/analytics/growthEvents'
 import { promptSupportOnFailure } from '@/lib/feedback/promptSupportOnFailure'
 import { storeLogoUrl } from '@/lib/storeLogo'
 import type { Coupon, CouponFilters } from '@/types/coupon'
@@ -503,6 +504,16 @@ export default function CouponsSection({
                                         href={browser.href}
                                         target="_blank"
                                         rel="noopener noreferrer"
+                                        onClick={() =>
+                                            trackGrowthEvent(
+                                                'install_cta_click',
+                                                {
+                                                    store: browser.name.toLowerCase(),
+                                                    placement:
+                                                        'coupons_section',
+                                                },
+                                            )
+                                        }
                                         className="inline-flex items-center gap-2 rounded-full bg-gray-50 px-6 py-3 text-center shadow-sm transition hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 dark:bg-white/5 dark:hover:bg-white/10 dark:focus-visible:ring-offset-darkSurface"
                                     >
                                         {browser.icon}

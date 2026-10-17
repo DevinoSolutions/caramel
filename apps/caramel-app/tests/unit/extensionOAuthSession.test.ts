@@ -171,9 +171,72 @@ describe('mintExtensionSession — google and apple produce the SAME shape (the 
                 headers: null,
                 method: provider,
                 surface: 'extension',
+                // No attribution passed (an old build): nothing to hand on.
+                firstTouch: null,
+                installId: null,
             })
         },
     )
+
+    it("hands the extension's install id and first-touch record to recordSignup when the mint creates the user", async () => {
+        const firstTouch = {
+            utm_source: 'reddit',
+            landing_path: '/',
+            captured_at: '2026-10-01T12:00:00.000Z',
+        }
+        await mintExtensionSession({
+            provider: 'google',
+            providerUser: {
+                id: 'google-id-2',
+                email: 'attributed@example.com',
+                name: 'Attributed',
+                emailVerified: true,
+            },
+            tokens: { accessToken: 'at', idToken: 'it' },
+            attribution: {
+                installId: '3f2b8c1e-5a47-4d6b-9e10-7c2d4a8b9f01',
+                firstTouch,
+            },
+        })
+
+        expect(recordSignupMock).toHaveBeenCalledTimes(1)
+        expect(recordSignupMock).toHaveBeenCalledWith({
+            user: expect.objectContaining({
+                id: 'new-user-id',
+                email: 'attributed@example.com',
+            }),
+            headers: null,
+            method: 'google',
+            surface: 'extension',
+            firstTouch,
+            installId: '3f2b8c1e-5a47-4d6b-9e10-7c2d4a8b9f01',
+        })
+    })
+
+    it('an existing user signing in is not a signup: attribution is ignored', async () => {
+        prismaState.existingUser = {
+            id: 'existing-user-id',
+            email: 'back@example.com',
+            name: 'Back',
+            username: null,
+            image: null,
+            emailVerified: true,
+        }
+        await mintExtensionSession({
+            provider: 'google',
+            providerUser: {
+                id: 'google-id-3',
+                email: 'back@example.com',
+                emailVerified: true,
+            },
+            tokens: {},
+            attribution: {
+                installId: '3f2b8c1e-5a47-4d6b-9e10-7c2d4a8b9f01',
+                firstTouch: null,
+            },
+        })
+        expect(recordSignupMock).not.toHaveBeenCalled()
+    })
 
     it.each(['google', 'apple'] as const)(
         '%s: existing account -> updates tokens instead of creating a new account link',

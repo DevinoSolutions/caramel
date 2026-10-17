@@ -64,10 +64,14 @@ export const GROUPS = {
         'caramel-base.js',
         'dom-utils.js',
         'coupon-box-discovery.js',
+        'extension-capabilities.js',
         'store-detect.js',
         'coupon-apply.js',
         'code-capture.js',
         'coupon-fetch.js',
+        // Install attribution: bundled into the background, popup and content
+        // realms alike, weighed once here (it is imported by coupon-runner.js).
+        'install-attribution.js',
         'coupon-runner.js',
         'UI-helpers.js',
         'inject.js',
@@ -93,6 +97,9 @@ export const GROUPS = {
     // (wxt.config.ts). Its own budget, so it can neither hide in nor inflate
     // the per-page one.
     'coupon-box-outline': ['coupon-box-outline.js'],
+    // Injected only on porkbun.com/checkout/* (entrypoints/porkbun-alert.content.ts,
+    // MAIN world), so it neither hides in nor inflates the per-page budget.
+    'porkbun-alert': ['extension-capabilities.js', 'porkbun-alert-shim.js'],
     // The same, for the learned-box memory: imported only on a store with no
     // config, when the finder is about to remember a box (wxt.config.ts).
     'coupon-box-learned': ['coupon-box-learned.js'],

@@ -21,7 +21,61 @@
 import { caramelSendMessage, log, recordTiming } from './caramel-base.js'
 import { CARAMEL_ENV } from './caramel-env.js'
 import { CaramelCoupons } from './coupon-constants.generated.js'
+import {
+    CARAMEL_CAPABILITY_MARKERS,
+    CARAMEL_HOST_CAPABILITY_REQUIREMENTS,
+    caramelCapabilityHeld,
+} from './extension-capabilities.js'
 import { getCachedCodes } from './store-detect.js'
+
+/* The capabilities this page holds right now, by name, sent with the request so
+ * the server will hand a gated store's codes (porkbun.com) to this build. A
+ * build that predates this sends nothing and is withheld. Lives here, not in
+ * extension-capabilities.js, because the porkbun-alert-shim bundle includes that
+ * file whole and has a 2 kB budget.
+ *
+ * On a gated store whose helper has not stamped its marker yet, the first fetch
+ * waits for the page's load event (the helper's last attempt, see
+ * porkbun-alert-shim.js) -- bounded, and only there, so no other store's fetch
+ * is ever delayed. Without it the first answer would be an empty list that
+ * store-detect.js caches for the page, and Caramel would stay silent on a page
+ * where the helper is in fact running. It keys on THIS page's host, so the
+ * popup (whose page is the extension's own, with no marker) never proves
+ * anything and gets no porkbun codes: intended, the same withhold the server
+ * applies to any extension request without proof. On a withheld, still-loading
+ * porkbun.com checkout the wait delays the prompt by up to the bound; fail
+ * closed, and no other store is affected. */
+const CAPABILITY_LOAD_WAIT_MS = 10000
+
+function pageNeedsCapability(host) {
+    return Object.keys(CARAMEL_HOST_CAPABILITY_REQUIREMENTS).some(
+        domain => host === domain || host.endsWith(`.${domain}`),
+    )
+}
+
+function waitForLoad() {
+    if (document.readyState === 'complete') return Promise.resolve()
+    return new Promise(resolve => {
+        const done = () => {
+            clearTimeout(timer)
+            window.removeEventListener('load', done)
+            resolve()
+        }
+        const timer = setTimeout(done, CAPABILITY_LOAD_WAIT_MS)
+        window.addEventListener('load', done)
+    })
+}
+
+async function heldCapabilities() {
+    const held = () =>
+        Object.keys(CARAMEL_CAPABILITY_MARKERS).filter(name =>
+            caramelCapabilityHeld(name),
+        )
+    if (held().length === 0 && pageNeedsCapability(location.hostname)) {
+        await waitForLoad()
+    }
+    return held()
+}
 
 /* --------------------------------------------------  coupon list */
 /* ONE page of the store's codes, envelope included.
@@ -57,6 +111,7 @@ export async function fetchCouponsPage(site, kw, category, page) {
             kw,
             category,
             page,
+            capabilities: await heldCapabilities(),
         })
         if (resp?.error) {
             log('fetchCoupons background error', resp.error)

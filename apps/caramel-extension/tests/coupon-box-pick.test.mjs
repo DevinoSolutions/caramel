@@ -1236,8 +1236,10 @@ describe('a pick is kept, by name, for the next page in the tab', () => {
 
 describe('the pick memory is the extension’s, never the page’s', () => {
     // The store's page can write its own sessionStorage. Writing a pick there
-    // must not choose the field the codes go into, and clearing it must not
-    // buy a second ask.
+    // must not choose the field the codes go into, and, while the background
+    // answers, clearing it must not buy a second ask. (A background that
+    // cannot answer leaves only the page's own memory: a new page may then ask
+    // again.)
     const GIFT =
         '<div class="g"><input id="gc" name="gift_card" type="text">' +
         '<button id="gb" type="button">Redeem</button></div>'

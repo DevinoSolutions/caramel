@@ -18,9 +18,19 @@ import { caramelTabHandoffs } from '../tab-handoff.js'
 export function tabHandoffBackground(tabId = 1) {
     let store = caramelTabHandoffs(null)
     const origin = () => location.origin
-    async function reply({ op, key, value }) {
+    async function reply({ op, key, value, expected }) {
         if (op === 'set')
             return { saved: await store.set(tabId, origin(), key, value) }
+        if (op === 'replace')
+            return {
+                saved: await store.replace(
+                    tabId,
+                    origin(),
+                    key,
+                    value,
+                    expected,
+                ),
+            }
         if (op === 'get')
             return { value: await store.get(tabId, origin(), key) }
         if (op === 'take')
