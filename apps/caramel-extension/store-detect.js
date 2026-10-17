@@ -742,9 +742,6 @@ async function _resumePendingSubmit() {
     if (measured) {
         // Won — the chain has its answer and must not continue.
         caramelEndRun()
-        // A finder box the store answered through: remembered (store with
-        // no config only; the run left its box for this page).
-        if (pending.finder) caramelFinderLearnResumed()
         reportOutcome(pending.id, 'worked')
         caramelRecordSaving({
             domain: location.hostname,
@@ -753,6 +750,9 @@ async function _resumePendingSubmit() {
             currency: caramelCurrencyCode(),
             couponId: pending.id,
         })
+        // A finder box the store answered through: remembered (store with
+        // no config only; the run left its box for this page).
+        if (pending.finder) caramelFinderLearnResumed()
         showFinalModal(saved, pending.code)
         return true
     }

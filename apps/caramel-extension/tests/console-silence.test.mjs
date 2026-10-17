@@ -34,6 +34,9 @@ const SHIPPED_TO_STRANGERS = [
     'caramel-base.js',
     'dom-utils.js',
     'coupon-box-discovery.js',
+    // The service worker reads and writes the learned-box memory through it;
+    // the finder also loads it on demand in the store's page.
+    'coupon-box-learned.js',
     'store-detect.js',
     'coupon-apply.js',
     'code-capture.js',
@@ -47,9 +50,6 @@ const SHIPPED_TO_STRANGERS = [
     'permissions-api.js',
     'usage-diagnostics-consent.js',
     'background.js',
-    // The service worker reads and writes the learned-box memory through it;
-    // the finder also loads it on demand in the store's page.
-    'coupon-box-learned.js',
     'tab-handoff.js',
 ]
 // Not in any entrypoint's import graph, but shipped and run in the store's
