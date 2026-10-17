@@ -104,11 +104,16 @@ export async function readTelemetryId(browser) {
     return typeof id === 'string' && id !== '' ? id : null
 }
 
-// The id for this device: the stored one, or a fresh random UUID persisted
-// first. ONLY the accept path (writeUsageDiagnosticsConsent) calls this.
-async function ensureTelemetryId(browser) {
-    const existing = await readTelemetryId(browser)
-    if (existing) return existing
+// The id for this device. ONLY the accept path (writeUsageDiagnosticsConsent)
+// calls this. `reuse` is true only while consent already stands: a stored id is
+// kept then. Coming from declined/absent, any stored id is a leftover from a
+// withdrawal whose delete failed, so it is overwritten with a fresh UUID: an id
+// is never reused after a deletion attempt, whether or not the delete worked.
+async function ensureTelemetryId(browser, reuse) {
+    if (reuse) {
+        const existing = await readTelemetryId(browser)
+        if (existing) return existing
+    }
     const id = crypto.randomUUID()
     await storageCall(
         browser,
@@ -135,8 +140,10 @@ export function deleteTelemetryId(browser) {
 // record is what every send reads, so the order is chosen to fail closed both
 // ways: an ACCEPT mints the id first and publishes the record second (a report
 // can never see "accepted" without an id to send under; a failed record write
-// leaves only an inert, unsent id that the next accept reuses), while a DECLINE
-// writes the record first and deletes the id second (sends stop at once).
+// leaves only an inert, unsent id), while a DECLINE writes the record first and
+// deletes the id second (sends stop at once). If that delete rejects, the caller
+// sees the rejection, and the leftover id is never reused: the next accept
+// (from a non-accepted record) mints a fresh one over it.
 export async function writeUsageDiagnosticsConsent(browser, choice) {
     if (choice !== 'accepted' && choice !== 'declined')
         throw new Error(`usage-diagnostics consent: unknown choice "${choice}"`)
@@ -145,7 +152,10 @@ export async function writeUsageDiagnosticsConsent(browser, choice) {
         at: new Date().toISOString(),
         promptVersion: USAGE_DIAGNOSTICS_PROMPT_VERSION,
     }
-    if (choice === 'accepted') await ensureTelemetryId(browser)
+    if (choice === 'accepted') {
+        const previous = await readUsageDiagnosticsConsent(browser)
+        await ensureTelemetryId(browser, usageDiagnosticsAccepted(previous))
+    }
     await storageCall(
         browser,
         'local',

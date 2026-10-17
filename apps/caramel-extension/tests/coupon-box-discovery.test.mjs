@@ -20,6 +20,9 @@ import {
     tryInitialize,
 } from '../store-detect.js'
 import { EXT_ROOT } from './_entry-modules.mjs'
+import { tabHandoffBackground } from './_tab-handoff-background.mjs'
+// The background's side of the per-tab handoffs (see the helper).
+const handoffs = tabHandoffBackground()
 
 // The promo-box finder: when no config describes a store's promo box, it reads
 // the page the way a shopper does. These pin three things:
@@ -109,6 +112,7 @@ function installChromeStub() {
     }
     stub.runtime.lastError = undefined
     stub.runtime.sendMessage = (message, cb) => {
+        if (handoffs.answers(message, cb)) return
         if (flagReadThrows && message?.action === 'couponBoxDiscoveryEnabled')
             throw new Error('Extension context invalidated')
         if (message?.action === 'fetchCoupons') cb({ coupons: COUPONS })
@@ -167,6 +171,7 @@ beforeAll(() => {
 
 beforeEach(() => {
     sessionStorage.clear()
+    handoffs.reset()
     document.body.innerHTML = ''
     setPath('/cart')
     finalModals = []
@@ -1202,7 +1207,7 @@ describe('the server pick needs a prompt to be reached', () => {
 
     it('pick flag on: a store already asked this tab session is not offered again', async () => {
         llmOn = true
-        sessionStorage.setItem('caramel_box_pick:' + location.hostname, '1')
+        await handoffs.put('box_pick', { [location.hostname]: 1 })
         document.body.innerHTML = NO_BOX + TOTAL
 
         await tryInitialize()

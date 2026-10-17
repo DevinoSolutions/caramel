@@ -243,6 +243,38 @@ export function caramelSendMessage(message, timeoutMs) {
     })
 }
 
+// How long a per-tab handoff may wait for the background. A worker that does
+// not answer costs only the handoff, never the attempt.
+const CARAMEL_HANDOFF_WAIT_MS = 3000
+
+/* One operation on what this tab leaves for its next document (tab-handoff.js,
+ * held by the background where the store's page cannot write it): 'set',
+ * 'get', 'take' (read once), 'clear', or 'replace' (write over a record that
+ * exists, and still holds `expected` when given, in one step) on one kind of
+ * record. Answers the background's reply ({ saved }, { value }, { cleared }),
+ * or null when it could not be reached or refused; both are logged. */
+// Called from content scripts; tab-handoff.js lists the kinds.
+export async function caramelTabHandoff(op, key, value, expected) {
+    try {
+        const r = await caramelSendMessage(
+            { action: 'tabHandoff', op, key, value, expected },
+            CARAMEL_HANDOFF_WAIT_MS,
+        )
+        if (r?.error) {
+            log('TAB_HANDOFF_FAILED', { op, key, error: r.error })
+            return null
+        }
+        return r ?? null
+    } catch (err) {
+        log('TAB_HANDOFF_FAILED', {
+            op,
+            key,
+            error: String(err?.message || err),
+        })
+        return null
+    }
+}
+
 // Origins trusted to inject a login token via window.postMessage — decided by
 // the build, and matching the deployment this build actually talks to.
 //
@@ -468,19 +500,31 @@ export function caramelGetUsageDiagnosticsConsent() {
 
 // Persists 'accepted' | 'declined' (an accept mints the telemetry id, a decline
 // deletes it and, on Firefox, hands the data-collection grant back). Rejects
-// when the record write did not land. A failed grant removal does NOT undo the
-// withdrawal (the record already says "declined", so nothing is sent); it is
-// reported instead.
+// when the record write did not land, or when a decline's id delete failed. A
+// failed id delete still hands the grant back (the record already says
+// "declined", so nothing is sent) and then rethrows. A failed grant removal does
+// NOT undo the withdrawal; it is reported instead.
 export async function caramelSetUsageDiagnosticsConsent(choice) {
-    const record = await writeUsageDiagnosticsConsent(currentBrowser, choice)
-    if (choice === 'declined') {
-        try {
-            await withdrawUsageDiagnosticsPermission(currentBrowser)
-        } catch (err) {
-            logError('usageDiagnosticsPermissionRemove', err)
+    let record
+    try {
+        record = await writeUsageDiagnosticsConsent(currentBrowser, choice)
+    } catch (err) {
+        if (choice === 'declined') {
+            const stored = await readUsageDiagnosticsConsent(currentBrowser)
+            if (stored?.choice === 'declined') await handBackGrant()
         }
+        throw err
     }
+    if (choice === 'declined') await handBackGrant()
     return record
+}
+
+async function handBackGrant() {
+    try {
+        await withdrawUsageDiagnosticsPermission(currentBrowser)
+    } catch (err) {
+        logError('usageDiagnosticsPermissionRemove', err)
+    }
 }
 
 // Firefox: ask for its data-collection grant. Call straight out of a click.

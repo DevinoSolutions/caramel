@@ -23,6 +23,7 @@ import {
     readCodeSharingConsent,
 } from './code-sharing-consent.js'
 import { saveInstallId } from './install-attribution.js'
+import { caramelTabHandoffs } from './tab-handoff.js'
 import {
     USAGE_DIAGNOSTICS_CONSENT_KEY,
     deleteTelemetryId,
@@ -32,6 +33,55 @@ import {
     resolveUsageDiagnostics,
     usageDiagnosticsAccepted,
 } from './usage-diagnostics-consent.js'
+
+/* What a content script leaves for the next document of its tab (the
+ * pending submit, the discount-link win, the run across reloads), held here
+ * where the store's page cannot write it (tab-handoff.js). The tab and the
+ * origin are the message sender's, never the message's, and only the tab's
+ * top document, while it is the live one, may hand anything off (a frame is
+ * another site's document, a prerendered or cached one is not the page the
+ * shopper is on). Answers { saved }, { value } for get/take, { cleared }, or
+ * { error }. */
+let _tabHandoffs = null
+const tabHandoffs = () =>
+    (_tabHandoffs ??= caramelTabHandoffs(
+        currentBrowser.storage?.session ?? null,
+    ))
+function senderOrigin(sender) {
+    try {
+        const origin = new URL(sender?.url || sender?.tab?.url).origin
+        return origin === 'null' ? null : origin
+    } catch {
+        return null
+    }
+}
+async function tabHandoff({ op, key, value, expected }, sender) {
+    const tabId = sender?.tab?.id
+    const origin = senderOrigin(sender)
+    if (!Number.isInteger(tabId) || !origin) return { error: 'no tab' }
+    if (sender.frameId !== 0) return { error: 'not the top document' }
+    // documentLifecycle is Chrome's; a browser without it is not asked.
+    if (
+        sender.documentLifecycle !== undefined &&
+        sender.documentLifecycle !== 'active'
+    )
+        return { error: 'not the live document' }
+    const h = tabHandoffs()
+    const refused = saved => {
+        if (saved === 'refused') logError('tabHandoffRefused', `${op} ${key}`)
+        return { saved }
+    }
+    if (op === 'set') return refused(await h.set(tabId, origin, key, value))
+    if (op === 'replace')
+        return refused(await h.replace(tabId, origin, key, value, expected))
+    if (op === 'get') return { value: await h.get(tabId, origin, key) }
+    if (op === 'take') return { value: await h.take(tabId, origin, key) }
+    if (op === 'clear') {
+        await h.clear(tabId, origin, key)
+        return { cleared: true }
+    }
+    return { error: 'unknown op' }
+}
 
 // Assigned by initBackground() instead of at module evaluation: the IIFE throws
 // when neither global exists, which is exactly the case in the Node import
@@ -653,6 +703,21 @@ export function initBackground() {
 
     currentBrowser.tabs.onUpdated.addListener(_caramelOnTabUpdated)
 
+    // A closed tab's handoffs (tab-handoff.js) are never read again.
+    currentBrowser.tabs.onRemoved?.addListener(tabId =>
+        tabHandoffs()
+            .forgetTab(tabId)
+            .catch(err => logError('tabHandoffForget', err)),
+    )
+    // A tab swapped for a prerendered one gets a new id. Its records are not
+    // moved to it: a run, a pending code or a win is let go rather than
+    // carried into a document that did not ask for it.
+    currentBrowser.tabs.onReplaced?.addListener((_added, removedTabId) =>
+        tabHandoffs()
+            .forgetTab(removedTabId)
+            .catch(err => logError('tabHandoffForget', err)),
+    )
+
     // The user granted us host access (permission-state.js requestAllSites, or
     // the browser's own permissions UI). The popup does not need telling — it
     // re-derives permission state on every open — so this records the fact and
@@ -998,6 +1063,14 @@ export function initBackground() {
                         sendResponse({ error: String(err) })
                     })
 
+                return true
+            } else if (message.action === 'tabHandoff') {
+                tabHandoff(message, sender)
+                    .then(resp => sendResponse(resp))
+                    .catch(err => {
+                        logError('tabHandoff', err)
+                        sendResponse({ error: String(err) })
+                    })
                 return true
             } else if (message.action === 'fetchSupportedStores') {
                 const url = caramelUrl('api/extension/supported-stores')
