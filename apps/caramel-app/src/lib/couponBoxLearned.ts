@@ -18,17 +18,31 @@
 //
 //   - Selectors only, inside the grammar in couponBoxSelector.ts. Never page
 //     text, outline text, codes, IPs or install ids.
+//   - A STORE is the registrable domain a host belongs to
+//     (learnedStoreDomain): `r1.shop.com` and `www.shop.com` are one store.
+//     A box is filed under the host it was found on (the pick is asked with
+//     the host), but every cap, the lock, the reporter hashes and the
+//     hand-over are keyed by the store, so inventing hosts under one store
+//     buys nothing. Hosts on a shared hosting suffix (vercel.app, github.io,
+//     ...) are refused; `<shop>.myshopify.com` is the one exception, and is
+//     its own store.
 //   - Who reported a box is kept only as two salted hashes, PER STORE: the
 //     extension's install id and the reporter's network prefix, each hashed
 //     together with the store's domain, so rows cannot be joined across
-//     stores into one install's store history.
+//     stores into one install's store history. A reporter's network is the
+//     one it FIRST reported from and never changes, so moving an install to
+//     another network cannot free a slot on the first.
 //   - One install counts at most once per 24 hours per box and per outcome.
 //     At most 2 NEW reporters per network per box per 7 days (more are
-//     ignored), at most 50 reporters per box (the oldest CONFIRMING reporter
-//     makes room; a reporter whose latest word is "failed" is never evicted).
-//   - At most 5 boxes per store; a new one is taken only by evicting a box
-//     that is stale (no confirmation for 30 days) or unproven (confirmed from
-//     at most one network).
+//     ignored). At most 50 reporters per box: room is made by deleting the
+//     longest-unseen reporter whose removal changes nothing the serving rule
+//     reads (a second voice of a network already heard), else the
+//     longest-unseen reporter that is not failing the box or whose failure is
+//     over 30 days old; a network's only fresh failing voice is kept.
+//   - At most 5 boxes per store, and one network may report on at most 3 of
+//     them. A new box replaces the weakest box that is not servable (fewest
+//     confirming networks, then oldest confirmation); a servable box is never
+//     replaced.
 //   - A `failed` report for a box nobody confirmed creates nothing.
 //   - Serving: assessLearnedBox below.
 //   - Retention: a box with no confirmation for 60 days, and a reporter not
@@ -58,6 +72,7 @@ import * as Sentry from '@sentry/nextjs'
 import { createHmac } from 'node:crypto'
 import { isIP } from 'node:net'
 import { domainToASCII, domainToUnicode } from 'node:url'
+import { parse as parseHost } from 'tldts'
 import { z } from 'zod'
 
 export const LEARNED_BOX_RULES = {
@@ -79,6 +94,8 @@ export const LEARNED_BOX_RULES = {
     maxReportersPerBox: 50,
     /** Boxes kept per store. */
     maxBoxesPerDomain: 5,
+    /** Boxes of one store a single network may report on. */
+    maxBoxesPerNetwork: 3,
     /** One install counts at most once per this window, per box and outcome. */
     countWindowHours: 24,
     /** A box with no confirmation, or a reporter not seen, for this long is
@@ -122,19 +139,59 @@ const selectorSchema = z
         error: 'not an accepted coupon box selector',
     })
 
+// Shared hosting suffixes (the private section of the Public Suffix List)
+// where the label in front IS a separate store we may learn about. Only
+// Shopify's: a store's own checkout can live on `<shop>.myshopify.com`, and
+// the extension and served configs already treat that host as the store
+// (store-detect.js, couponsRepo.hasServedStoreConfig). Every other private
+// suffix (vercel.app, github.io, netlify.app, herokuapp.com, ...) is anyone's
+// free hosting, not a store's checkout, so its hosts are refused.
+const STORE_PLATFORM_SUFFIXES: ReadonlySet<string> = new Set(['myshopify.com'])
+
 /**
- * A store host a learned box may be filed under: a registrable domain on the
- * Public Suffix List (no single label, no IP address, no localhost or other
- * unknown TLD, not a bare suffix like `co.uk`), and every punycode label must
- * decode and re-encode to itself.
+ * The store a host belongs to, or null when the host may not have learned
+ * boxes. For an ordinary host, the registrable domain on the Public Suffix
+ * List (`r1.walmart.com` -> `walmart.com`; no single label, no IP, no
+ * localhost or other unknown TLD, not a bare suffix like `co.uk`). For a
+ * host on a shared hosting suffix: `<shop>.myshopify.com` itself, and null
+ * for every other one. Every punycode label must decode and re-encode to
+ * itself.
  */
-export function isPlausibleLearnedDomain(domain: string): boolean {
-    if (!resolveStoreDomain(domain)) return false
-    return domain.split('.').every(label => {
+export function learnedStoreDomain(host: string): string | null {
+    const store = resolveStoreDomain(host)
+    if (!store) return null
+    const punycodeOk = host.split('.').every(label => {
         if (!label.startsWith('xn--')) return true
         const unicode = domainToUnicode(label)
         return unicode !== label && domainToASCII(unicode) === label
     })
+    if (!punycodeOk) return null
+    const parsed = parseHost(host, { allowPrivateDomains: true })
+    if (!parsed.isPrivate) return store
+    // On a shared suffix only `<shop>.<suffix>` itself names a store.
+    return parsed.publicSuffix &&
+        STORE_PLATFORM_SUFFIXES.has(parsed.publicSuffix) &&
+        parsed.domain === host
+        ? host
+        : null
+}
+
+/** A host a learned box may be filed under (learnedStoreDomain). */
+export function isPlausibleLearnedDomain(domain: string): boolean {
+    return learnedStoreDomain(domain) !== null
+}
+
+/** The store of an already-validated report. */
+export function reportStoreDomain(report: { domain: string }): string {
+    const store = learnedStoreDomain(report.domain)
+    if (!store) {
+        // learnedBoxReportSchema refuses such a host; reaching this is a
+        // wiring defect, never a report to file under a guessed store.
+        throw new Error(
+            `learned coupon box: "${report.domain.slice(0, 64)}" names no store`,
+        )
+    }
+    return store
 }
 
 const learnedBoxSchema = z
@@ -417,7 +474,7 @@ export type LearnedReportResult =
           recorded: false
           /** unknown_box: a failure for a box nobody confirmed.
            * ignored: a cap refused it (reporters per network, reporters per
-           * box, boxes per store). Neither is an error. */
+           * box, boxes per store, boxes per network). Neither is an error. */
           reason: 'unknown_box' | 'ignored'
       }
 
@@ -428,19 +485,27 @@ interface RecordInput {
     now?: Date
 }
 
-/** Reporter rows whose latest word is NOT "failed": the only ones the
- * reporter cap may evict. */
-function notFailingReporter(): Prisma.LearnedCouponBoxReporterWhereInput {
-    return {
-        OR: [
-            { lastFailedAt: null },
-            {
-                lastConfirmedAt: {
-                    gt: prisma.learnedCouponBoxReporter.fields.lastFailedAt,
-                },
-            },
-        ],
-    }
+/** The per-store transaction lock every write for one store queues behind. */
+async function lockStore(
+    tx: Prisma.TransactionClient,
+    storeDomain: string,
+): Promise<void> {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`learned-coupon-box:${storeDomain}`}, 0))`
+}
+
+/** Retention for one store. Call it holding the store's lock. */
+async function pruneStore(
+    tx: Prisma.TransactionClient,
+    storeDomain: string,
+    cutoff: Date,
+): Promise<{ boxes: number; reporters: number }> {
+    const boxes = await tx.learnedCouponBox.deleteMany({
+        where: { storeDomain, lastConfirmedAt: { lt: cutoff } },
+    })
+    const reporters = await tx.learnedCouponBoxReporter.deleteMany({
+        where: { box: { storeDomain }, lastSeenAt: { lt: cutoff } },
+    })
+    return { boxes: boxes.count, reporters: reporters.count }
 }
 
 /**
@@ -472,6 +537,7 @@ async function recordOnce({
     networkHash,
     now = new Date(),
 }: RecordInput): Promise<LearnedReportResult> {
+    const storeDomain = reportStoreDomain(report)
     const key = {
         domain: report.domain,
         inputSelector: report.box.input,
@@ -485,23 +551,11 @@ async function recordOnce({
 
     return prisma.$transaction(
         async (tx): Promise<LearnedReportResult> => {
-            // Every write for this store queues behind this lock until the
-            // transaction ends.
-            await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`learned-coupon-box:${key.domain}`}, 0))`
-
+            // Every write for this store, on any of its hosts, queues behind
+            // this lock until the transaction ends.
+            await lockStore(tx, storeDomain)
             // Retention for this store, before anything is counted.
-            await tx.learnedCouponBox.deleteMany({
-                where: {
-                    domain: key.domain,
-                    lastConfirmedAt: { lt: pruneCutoff },
-                },
-            })
-            await tx.learnedCouponBoxReporter.deleteMany({
-                where: {
-                    box: { domain: key.domain },
-                    lastSeenAt: { lt: pruneCutoff },
-                },
-            })
+            await pruneStore(tx, storeDomain, pruneCutoff)
 
             let box = await tx.learnedCouponBox.findUnique({
                 where: {
@@ -509,64 +563,56 @@ async function recordOnce({
                         key,
                 },
             })
-            if (!box) {
-                // Only a confirmation can introduce a box.
-                if (!confirmed)
-                    return { recorded: false, reason: 'unknown_box' }
-                if (!(await makeRoomForBox(tx, key.domain, now))) return ignored
-                box = await tx.learnedCouponBox.create({
-                    data: {
-                        ...key,
-                        firstSource: report.source,
-                        firstSeenAt: now,
-                        lastConfirmedAt: now,
-                    },
-                })
-            }
+            let reporter = box
+                ? await tx.learnedCouponBoxReporter.findUnique({
+                      where: {
+                          boxId_installHash: { boxId: box.id, installHash },
+                      },
+                  })
+                : null
 
-            let reporter = await tx.learnedCouponBoxReporter.findUnique({
-                where: { boxId_installHash: { boxId: box.id, installHash } },
-            })
             if (!reporter) {
-                const recentOnNetwork = await tx.learnedCouponBoxReporter.count(
-                    {
-                        where: {
-                            boxId: box.id,
-                            networkHash,
-                            firstSeenAt: {
-                                gte: daysBefore(
-                                    now,
-                                    LEARNED_BOX_RULES.newReporterWindowDays,
-                                ),
-                            },
-                        },
-                    },
-                )
+                // Only a confirmation can introduce a box.
+                if (!box && !confirmed) {
+                    return { recorded: false, reason: 'unknown_box' }
+                }
                 if (
-                    recentOnNetwork >= LEARNED_BOX_RULES.newReportersPerNetwork
+                    box &&
+                    !(await networkMayAddReporter(tx, box.id, networkHash, now))
                 ) {
                     return ignored
                 }
-                const kept = await tx.learnedCouponBoxReporter.count({
-                    where: { boxId: box.id },
-                })
-                if (kept >= LEARNED_BOX_RULES.maxReportersPerBox) {
-                    const evictable =
-                        await tx.learnedCouponBoxReporter.findFirst({
-                            where: { boxId: box.id, ...notFailingReporter() },
-                            orderBy: { lastSeenAt: 'asc' },
-                            select: { id: true },
-                        })
-                    // Every kept reporter is failing it: their evidence stays.
-                    if (!evictable) return ignored
-                    await tx.learnedCouponBoxReporter.delete({
-                        where: { id: evictable.id },
+                if (
+                    !(await networkMayJoinBox(
+                        tx,
+                        storeDomain,
+                        box?.id ?? null,
+                        networkHash,
+                    ))
+                ) {
+                    return ignored
+                }
+                if (!box) {
+                    if (!(await makeRoomForBox(tx, storeDomain, now))) {
+                        return ignored
+                    }
+                    box = await tx.learnedCouponBox.create({
+                        data: {
+                            ...key,
+                            storeDomain,
+                            firstSource: report.source,
+                            firstSeenAt: now,
+                            lastConfirmedAt: now,
+                        },
                     })
+                } else if (!(await makeRoomForReporter(tx, box.id, now))) {
+                    return ignored
                 }
                 reporter = await tx.learnedCouponBoxReporter.create({
                     data: {
                         boxId: box.id,
                         installHash,
+                        // Fixed for the life of the row: see the update below.
                         networkHash,
                         firstSeenAt: now,
                         lastSeenAt: now,
@@ -588,17 +634,21 @@ async function recordOnce({
                     : { failures: { increment: 1 }, lastFailedAt: now }
                 : {}
 
+            // The reporter's network is NOT rewritten: it stays the network
+            // the install first reported from. Rewriting it would let one
+            // network mint installs, move them to another network and mint
+            // again, past the per-network caps without end.
             await tx.learnedCouponBoxReporter.update({
                 where: { id: reporter.id },
-                data: { networkHash, lastSeenAt: now, ...outcomeUpdate },
+                data: { lastSeenAt: now, ...outcomeUpdate },
             })
             await tx.learnedCouponBox.update({
-                where: { id: box.id },
+                where: { id: reporter.boxId },
                 data: outcomeUpdate,
             })
 
             const reporters = await tx.learnedCouponBoxReporter.findMany({
-                where: { boxId: box.id },
+                where: { boxId: reporter.boxId },
                 select: REPORTER_EVIDENCE_SELECT,
             })
             return {
@@ -612,35 +662,134 @@ async function recordOnce({
     )
 }
 
+/** At most newReportersPerNetwork new reporters per network per box per
+ * newReporterWindowDays. */
+async function networkMayAddReporter(
+    tx: Prisma.TransactionClient,
+    boxId: string,
+    networkHash: string,
+    now: Date,
+): Promise<boolean> {
+    const recentOnNetwork = await tx.learnedCouponBoxReporter.count({
+        where: {
+            boxId,
+            networkHash,
+            firstSeenAt: {
+                gte: daysBefore(now, LEARNED_BOX_RULES.newReporterWindowDays),
+            },
+        },
+    })
+    return recentOnNetwork < LEARNED_BOX_RULES.newReportersPerNetwork
+}
+
 /**
- * At most maxBoxesPerDomain boxes per store. When full, the weakest box that
- * is stale (no confirmation in freshDays) or unproven (confirmed from at most
- * one network) is deleted to make room; a store whose boxes are all fresh and
- * confirmed from 2+ networks takes no new box. So boxes minted from one
- * network only ever displace each other, never a box several networks back.
+ * One network reports on at most maxBoxesPerNetwork of a store's boxes (a
+ * network already heard on this box is not joining a new one). Without this,
+ * two networks could back every one of the store's boxes and keep a real box
+ * from ever holding a slot.
+ */
+async function networkMayJoinBox(
+    tx: Prisma.TransactionClient,
+    storeDomain: string,
+    boxId: string | null,
+    networkHash: string,
+): Promise<boolean> {
+    const boxesOnNetwork = await tx.learnedCouponBox.findMany({
+        where: { storeDomain, reporters: { some: { networkHash } } },
+        select: { id: true },
+    })
+    if (boxId && boxesOnNetwork.some(b => b.id === boxId)) return true
+    return boxesOnNetwork.length < LEARNED_BOX_RULES.maxBoxesPerNetwork
+}
+
+/** What a reporter's removal must leave unchanged for it to be a spare
+ * voice. */
+function assessmentKey(a: LearnedBoxAssessment): string {
+    return [
+        a.servable,
+        a.confirmingNetworks,
+        a.failingNetworks,
+        a.suppressed,
+    ].join('|')
+}
+
+/**
+ * At most maxReportersPerBox reporter rows per box. When full, delete, in
+ * this order of preference and longest-unseen first within each:
+ *
+ *   1. a SPARE voice: a reporter whose removal leaves what the serving rule
+ *      reads unchanged (servable, confirming and failing networks,
+ *      suppression), typically a second install of a network already heard.
+ *      So filling a box with installs from a few networks only ever displaces
+ *      those networks' own extra installs;
+ *   2. a reporter whose latest word is not a failure, or whose failure is
+ *      older than freshDays.
+ *
+ * A network's only fresh failing voice is never deleted to make room: that
+ * failure is evidence, and deleting it would let a flood of new confirming
+ * installs erase it. Returns false when nothing may go.
+ */
+async function makeRoomForReporter(
+    tx: Prisma.TransactionClient,
+    boxId: string,
+    now: Date,
+): Promise<boolean> {
+    const rows = await tx.learnedCouponBoxReporter.findMany({
+        where: { boxId },
+        select: { id: true, lastSeenAt: true, ...REPORTER_EVIDENCE_SELECT },
+        orderBy: { lastSeenAt: 'asc' },
+    })
+    if (rows.length < LEARNED_BOX_RULES.maxReportersPerBox) return true
+
+    const whole = assessmentKey(assessLearnedBox(rows, now))
+    const spare = rows.find(
+        row =>
+            assessmentKey(
+                assessLearnedBox(
+                    rows.filter(r => r.id !== row.id),
+                    now,
+                ),
+            ) === whole,
+    )
+    const fresh = daysBefore(now, LEARNED_BOX_RULES.freshDays)
+    const victim =
+        spare ??
+        rows.find(
+            r =>
+                !latestIsFailure(r) ||
+                (r.lastFailedAt !== null && r.lastFailedAt < fresh),
+        )
+    if (!victim) return false
+    await tx.learnedCouponBoxReporter.delete({ where: { id: victim.id } })
+    return true
+}
+
+/**
+ * At most maxBoxesPerDomain boxes per store (across all its hosts). When
+ * full, the weakest box that is NOT servable (fewest confirming networks,
+ * then the oldest last confirmation) is deleted to make room; a store whose
+ * boxes are all servable takes no new box. A servable box needs 3 networks
+ * and one network backs at most maxBoxesPerNetwork boxes, so a reporter on a
+ * few networks can neither hold every slot nor push out a box the crowd
+ * already proved.
  */
 async function makeRoomForBox(
     tx: Prisma.TransactionClient,
-    domain: string,
+    storeDomain: string,
     now: Date,
 ): Promise<boolean> {
     const boxes = await tx.learnedCouponBox.findMany({
-        where: { domain },
+        where: { storeDomain },
         include: { reporters: { select: REPORTER_EVIDENCE_SELECT } },
     })
     if (boxes.length < LEARNED_BOX_RULES.maxBoxesPerDomain) return true
-    const fresh = daysBefore(now, LEARNED_BOX_RULES.freshDays)
     const weakest = boxes
-        .map(box => ({
-            box,
-            networks: assessLearnedBox(box.reporters, now).confirmingNetworks,
-        }))
-        .filter(
-            ({ box, networks }) => box.lastConfirmedAt < fresh || networks <= 1,
-        )
+        .map(box => ({ box, assessment: assessLearnedBox(box.reporters, now) }))
+        .filter(({ assessment }) => !assessment.servable)
         .sort(
             (a, b) =>
-                a.networks - b.networks ||
+                a.assessment.confirmingNetworks -
+                    b.assessment.confirmingNetworks ||
                 a.box.lastConfirmedAt.getTime() -
                     b.box.lastConfirmedAt.getTime(),
         )[0]
@@ -654,18 +803,33 @@ async function makeRoomForBox(
 // ---------------------------------------------------------------------------
 
 /** Delete every box with no confirmation, and every reporter not seen, for
- * pruneAfterDays. Returns what it deleted. */
+ * pruneAfterDays. Each store is pruned under its own lock, like a report, so
+ * a delete never races a report adding a reporter to the same box. Returns
+ * what it deleted. */
 export async function pruneLearnedCouponBoxes(
     now: Date = new Date(),
 ): Promise<{ boxes: number; reporters: number }> {
     const cutoff = daysBefore(now, LEARNED_BOX_RULES.pruneAfterDays)
-    const boxes = await prisma.learnedCouponBox.deleteMany({
-        where: { lastConfirmedAt: { lt: cutoff } },
+    const stores = await prisma.learnedCouponBox.findMany({
+        where: {
+            OR: [
+                { lastConfirmedAt: { lt: cutoff } },
+                { reporters: { some: { lastSeenAt: { lt: cutoff } } } },
+            ],
+        },
+        select: { storeDomain: true },
+        distinct: ['storeDomain'],
     })
-    const reporters = await prisma.learnedCouponBoxReporter.deleteMany({
-        where: { lastSeenAt: { lt: cutoff } },
-    })
-    return { boxes: boxes.count, reporters: reporters.count }
+    const total = { boxes: 0, reporters: 0 }
+    for (const { storeDomain } of stores) {
+        const deleted = await prisma.$transaction(async tx => {
+            await lockStore(tx, storeDomain)
+            return pruneStore(tx, storeDomain, cutoff)
+        })
+        total.boxes += deleted.boxes
+        total.reporters += deleted.reporters
+    }
+    return total
 }
 
 const PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000
@@ -706,7 +870,9 @@ export type HandoverResult =
     | { created: false; reason: 'already' | 'daily_cap' | 'not_a_store' }
 
 /**
- * Hand a store whose box just became servable to the store pipeline, as one
+ * Hand a store (its registrable domain, reportStoreDomain: never one of its
+ * hosts, so inventing hosts cannot hand one store over many times or spend
+ * the daily cap) whose box just became servable to the store pipeline, as one
  * site-suggestions row with no user and no requester email (so nothing the
  * pipeline later does to it can mail a shopper). At most ONCE per store ever
  * (learned_coupon_box_handovers is never pruned, and a wiped box does not

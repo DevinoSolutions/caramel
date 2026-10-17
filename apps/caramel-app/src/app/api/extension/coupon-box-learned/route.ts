@@ -7,6 +7,7 @@ import {
     hashNetwork,
     learnedBoxReportSchema,
     recordLearnedBoxReport,
+    reportStoreDomain,
 } from '@/lib/couponBoxLearned'
 import { hasServedStoreConfig } from '@/lib/couponsRepo'
 import { getClientIp } from '@/lib/rateLimit'
@@ -28,7 +29,8 @@ import { NextResponse, type NextRequest } from 'next/server'
 //                                                 confirmed: nothing to count
 //   { recorded: false, reason: 'ignored' }        a cap refused it (new
 //                                                 reporters per network, per
-//                                                 box, boxes per store)
+//                                                 box, boxes per store, boxes
+//                                                 per network)
 //   400 invalid · 413 too large · 403 non-extension Origin · 429 rate limit
 
 // A report is four short selectors and a few enums: 4 KiB is generous.
@@ -100,17 +102,20 @@ async function handleReport(req: NextRequest): Promise<NextResponse> {
         if (await hasServedStoreConfig(report.domain)) {
             return json({ recorded: false, reason: 'served_config' })
         }
+        // Reporters are hashed per STORE (the registrable domain), so one
+        // install is one reporter on every host of the store.
+        const store = reportStoreDomain(report)
         const result = await recordLearnedBoxReport({
             report,
-            installHash: hashInstallId(report.installId, report.domain),
-            networkHash: hashNetwork(getClientIp(req), report.domain),
+            installHash: hashInstallId(report.installId, store),
+            networkHash: hashNetwork(getClientIp(req), store),
         })
         if (!result.recorded) {
             return json({ recorded: false, reason: result.reason })
         }
         // Once per store ever and capped per day (handOverLearnedStore), so
         // asking on every servable report also retries one refused by the cap.
-        if (result.servable) await feedStorePipeline(report.domain)
+        if (result.servable) await feedStorePipeline(store)
         return json({ recorded: true })
     } catch (error) {
         console.error('[coupon-box-learned] report failed', error, {
@@ -127,9 +132,10 @@ async function handleReport(req: NextRequest): Promise<NextResponse> {
     }
 }
 
-/** The box is servable: hand the store to the coupons pipeline
- * (couponBoxLearned.handOverLearnedStore). Its failure is reported, never
- * allowed to undo or fail the report that is already committed. */
+/** The box is servable: hand the store (its registrable domain, not the
+ * host) to the coupons pipeline (couponBoxLearned.handOverLearnedStore). Its
+ * failure is reported, never allowed to undo or fail the report that is
+ * already committed. */
 async function feedStorePipeline(domain: string): Promise<void> {
     try {
         const result = await handOverLearnedStore(domain)

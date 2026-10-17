@@ -104,7 +104,7 @@ describe('privacy policy coverage', () => {
             'Promo-code box locations',
             'at most 5 boxes per store',
             'At most 50 installs are kept per box',
-            'never one whose last report was a failure',
+            'the only recent failure report from a network is never deleted',
             'A box nobody has confirmed for 30 days is no longer used.',
             'A box nobody has confirmed for 60 days is deleted with everything recorded about it',
             '60 days after that install last reported on it',
@@ -118,6 +118,9 @@ describe('privacy policy coverage', () => {
             'we do not link these reports to your account',
             'they never contain what is in them',
             'the oldest are deleted first',
+            // A failing install's record CAN be deleted to make room (a
+            // second install on a network already counted).
+            'never one whose last report was a failure',
         ]) {
             expect(normalized).not.toContain(overclaim)
         }

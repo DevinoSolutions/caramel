@@ -10,6 +10,7 @@
 CREATE TABLE "public"."learned_coupon_boxes" (
     "id" TEXT NOT NULL,
     "domain" TEXT NOT NULL,
+    "store_domain" TEXT NOT NULL,
     "input_selector" TEXT NOT NULL,
     "apply_selector" TEXT NOT NULL DEFAULT '',
     "toggle_selector" TEXT NOT NULL DEFAULT '',
@@ -47,6 +48,9 @@ CREATE TABLE "public"."learned_coupon_box_handovers" (
 
     CONSTRAINT "learned_coupon_box_handovers_pkey" PRIMARY KEY ("domain")
 );
+
+-- CreateIndex
+CREATE INDEX "learned_coupon_boxes_store_domain_idx" ON "public"."learned_coupon_boxes"("store_domain");
 
 -- CreateIndex
 CREATE INDEX "learned_coupon_boxes_last_confirmed_at_idx" ON "public"."learned_coupon_boxes"("last_confirmed_at");

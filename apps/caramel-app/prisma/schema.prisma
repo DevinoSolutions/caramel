@@ -449,7 +449,11 @@ model SiteSuggestion {
 // ids. At most 5 boxes per store; deleted after 60 days with no confirmation.
 model LearnedCouponBox {
   id              String                     @id @default(cuid())
+  // The host the box was found on: the pick is asked with it.
   domain          String
+  // The store the host belongs to (couponBoxLearned.learnedStoreDomain): the
+  // caps, the lock and the reporter hashes are per store, not per host.
+  storeDomain     String                     @map("store_domain")
   // CSS selectors inside the grammar in src/lib/couponBoxSelector.ts.
   inputSelector   String                     @map("input_selector")
   // '' = the box has none. NOT NULL on purpose: Postgres treats NULLs as
@@ -472,6 +476,8 @@ model LearnedCouponBox {
 
   // Leading `domain` also serves the per-store lookup the pick runs.
   @@unique([domain, inputSelector, applySelector, toggleSelector, enterOnly])
+  // The per-store caps.
+  @@index([storeDomain])
   // The retention prune.
   @@index([lastConfirmedAt])
   @@map("learned_coupon_boxes")
@@ -508,7 +514,7 @@ model LearnedCouponBoxReporter {
 
 // Stores a learned box handed to the store pipeline (site_suggestions,
 // source 'auto_detect'). Never pruned: it is what makes the hand-over happen
-// at most once per store, ever, and it holds only the store's host.
+// at most once per store, ever, and it holds only the store's domain.
 model LearnedCouponBoxHandover {
   domain       String   @id
   handedOverAt DateTime @default(now()) @map("handed_over_at")

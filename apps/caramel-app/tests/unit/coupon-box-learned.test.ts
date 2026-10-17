@@ -51,6 +51,7 @@ import {
     hashInstallId,
     hashNetwork,
     learnedBoxReportSchema,
+    learnedStoreDomain,
     networkPrefix,
 } from '@/lib/couponBoxLearned'
 
@@ -219,6 +220,16 @@ describe('POST /api/extension/coupon-box-learned', () => {
         ['an unknown TLD', goodReport({ domain: 'shop.internal' })],
         ['a bare public suffix', goodReport({ domain: 'co.uk' })],
         ['broken punycode', goodReport({ domain: 'xn--garbage.com' })],
+        [
+            'free hosting (vercel.app)',
+            goodReport({ domain: 'shop.vercel.app' }),
+        ],
+        ['free hosting (github.io)', goodReport({ domain: 'shop.github.io' })],
+        [
+            'a nested myshopify host',
+            goodReport({ domain: 'a.b.myshopify.com' }),
+        ],
+        ['myshopify.com itself', goodReport({ domain: 'myshopify.com' })],
         ['an unknown source', goodReport({ source: 'magic' })],
         ['an unknown outcome', goodReport({ outcome: 'maybe' })],
         ['a confirmation without evidence', goodReport({ evidence: null })],
@@ -324,6 +335,70 @@ describe('POST /api/extension/coupon-box-learned', () => {
         expect(await res.json()).toEqual({ recorded: true })
     })
 
+    it('keys reporters and the hand-over by the STORE, not the host: www., checkout. and the bare domain are one store', async () => {
+        recordMock.mockImplementation(async () => ({
+            recorded: true as const,
+            counted: true,
+            servable: true,
+        }))
+        try {
+            for (const domain of [
+                'www.shop-example.com',
+                'checkout.shop-example.com',
+                'shop-example.com',
+            ]) {
+                await post(goodReport({ domain }))
+            }
+        } finally {
+            recordMock.mockImplementation(async () => ({
+                recorded: true as const,
+                counted: true,
+                servable: false,
+            }))
+        }
+        const calls = recordMock.mock.calls.map(
+            c =>
+                c[0] as {
+                    report: { domain: string }
+                    installHash: string
+                    networkHash: string
+                },
+        )
+        // The box is still filed under the host it was found on...
+        expect(calls.map(c => c.report.domain)).toEqual([
+            'www.shop-example.com',
+            'checkout.shop-example.com',
+            'shop-example.com',
+        ])
+        // ...but the install and its network are one reporter on all of them.
+        expect(new Set(calls.map(c => c.installHash))).toEqual(
+            new Set([hashInstallId(INSTALL_ID, 'shop-example.com')]),
+        )
+        expect(new Set(calls.map(c => c.networkHash))).toEqual(
+            new Set([hashNetwork('203.0.113.5', 'shop-example.com')]),
+        )
+        expect(suggestMock.mock.calls.map(c => c[0])).toEqual([
+            'shop-example.com',
+            'shop-example.com',
+            'shop-example.com',
+        ])
+    })
+
+    it('a shop on myshopify.com is its own store, not every Shopify store', async () => {
+        recordMock.mockImplementationOnce(async () => ({
+            recorded: true as const,
+            counted: true,
+            servable: true,
+        }))
+        const res = await post(goodReport({ domain: 'mystore.myshopify.com' }))
+        expect(await res.json()).toEqual({ recorded: true })
+        const call = recordMock.mock.calls[0]?.[0] as { installHash: string }
+        expect(call.installHash).toBe(
+            hashInstallId(INSTALL_ID, 'mystore.myshopify.com'),
+        )
+        expect(suggestMock).toHaveBeenCalledWith('mystore.myshopify.com')
+    })
+
     it('a database error is a 500, never a quiet "recorded"', async () => {
         recordMock.mockImplementationOnce(async () => {
             throw new Error('db down')
@@ -368,6 +443,27 @@ describe('reporter identity', () => {
         expect(() => hashInstallId(INSTALL_ID, 'shop-example.com')).toThrow(
             /COUPON_BOX_LEARNED_SALT/,
         )
+    })
+
+    it('learnedStoreDomain: the registrable domain, a myshopify shop, and nothing on free hosting', () => {
+        expect(learnedStoreDomain('r1.walmart.com')).toBe('walmart.com')
+        expect(learnedStoreDomain('www.shop.co.uk')).toBe('shop.co.uk')
+        expect(learnedStoreDomain('mystore.myshopify.com')).toBe(
+            'mystore.myshopify.com',
+        )
+        for (const host of [
+            'a.b.myshopify.com',
+            'myshopify.com',
+            'shop.vercel.app',
+            'shop.github.io',
+            'shop.netlify.app',
+            'shop.pages.dev',
+            'shop.herokuapp.com',
+            'co.uk',
+            'localhost',
+        ]) {
+            expect(learnedStoreDomain(host)).toBeNull()
+        }
     })
 
     it('the report schema accepts the contract shape', () => {
