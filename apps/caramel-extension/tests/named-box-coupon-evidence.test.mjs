@@ -833,19 +833,6 @@ describe('a learned box whose apply is not an apply button is refused whole', ()
 
                 await run()
 
-                // The server refuses to learn an apply selector that names
-                // the checkout (couponBoxSelector.ts), and this install's
-                // memory refuses the same one (caramelRiskyControl): such a
-                // box is never read back from memory.
-                if (
-                    source === 'a box this install remembers' &&
-                    /checkout/i.test(id)
-                ) {
-                    expect(
-                        appliedWith.some(a => a.rec.caramelLearn?.learned),
-                    ).toBe(false)
-                    return
-                }
                 expect(drivenSubmit()).toBe(id)
                 expect(appliedWith[0]?.rec.caramelLearn?.learned).toBeTruthy()
             })

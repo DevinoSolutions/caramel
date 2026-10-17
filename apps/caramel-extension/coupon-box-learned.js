@@ -272,6 +272,25 @@ const RISKY_CONTROL_PAIRS = new Set([
     'pay now',
     'buy now',
 ])
+// Carts often put the coupon apply in the checkout's own namespace
+// (`#checkout-coupon-apply`, `button[name="checkout_reduction_code_apply"]`),
+// so `checkout` alone (or `check out`) is not risky when the same part also
+// names one of these. Every other risky word stays absolute:
+// `#checkout-coupon-remove` is still refused.
+const CHECKOUT_RISKY = new Set(['checkout', 'check out'])
+const COUPON_WORDS = new Set([
+    'coupon',
+    'coupons',
+    'discount',
+    'discounts',
+    'promo',
+    'promos',
+    'reduction',
+    'voucher',
+    'vouchers',
+    'code',
+    'codes',
+])
 
 /* Whether an APPLY or TOGGLE selector names a control that could place an
  * order, pay, or delete something (RISKY_CONTROL_WORDS). The same rule the
@@ -281,8 +300,10 @@ const RISKY_CONTROL_PAIRS = new Set([
  * Only the LAST part is read, the element that is clicked: its tag, id,
  * classes and attribute VALUES. Ancestors are not (WooCommerce's own apply
  * button sits in `form.checkout_coupon`), nor attribute names, which say what
- * data the element carries. A selector outside the grammar is read whole. The
- * coupon field itself is not checked (typing into it clicks nothing). */
+ * data the element carries. `checkout` alone does not make it risky when that
+ * part also names a coupon word (COUPON_WORDS). A selector outside the
+ * grammar is read whole. The coupon field itself is not checked (typing into
+ * it clicks nothing). */
 // Exported for tests/coupon-box-learned.test.mjs.
 export function caramelRiskyControl(css) {
     const parts = partsOf(css)
@@ -292,11 +313,16 @@ export function caramelRiskyControl(css) {
         .toLowerCase()
         .split(/[^a-z0-9]+/)
         .filter(Boolean)
-    return words.some(
-        (word, i) =>
-            RISKY_CONTROL_WORDS.has(word) ||
-            RISKY_CONTROL_PAIRS.has(`${word} ${words[i + 1] ?? ''}`),
-    )
+    const namesCoupon = words.some(word => COUPON_WORDS.has(word))
+    return words.some((word, i) => {
+        const pair = `${word} ${words[i + 1] ?? ''}`
+        const risky = RISKY_CONTROL_WORDS.has(word)
+            ? word
+            : RISKY_CONTROL_PAIRS.has(pair)
+              ? pair
+              : null
+        return risky !== null && !(namesCoupon && CHECKOUT_RISKY.has(risky))
+    })
 }
 
 // What the memory accepts, whoever asks: a domain, a box whose every

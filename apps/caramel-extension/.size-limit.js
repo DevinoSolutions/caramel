@@ -234,7 +234,10 @@ module.exports = [
         // both (long numbers only in attribute values other than id, even
         // split by spaces, dashes or dots; risky words only in the clicked
         // element, as whole words or pairs). Measured 4.88 kB.
-        limit: '5.1 KB',
+        // 2026-10-17, raised 5.1 -> 5.4 kB: `checkout` is not risky when the
+        // clicked element also names a coupon word (the cart's own coupon
+        // apply). Measured 5.11 kB.
+        limit: '5.4 KB',
         brotli: false,
     },
 ]

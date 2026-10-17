@@ -368,6 +368,11 @@ describe('apply and toggle selectors that name a risky control', () => {
         'button[data-action="delete"]',
         'button[aria-label="Remove item"]',
         '.remove-coupon',
+        // `checkout` with no coupon word, or beside another risky word.
+        '#checkout_submit',
+        'button[name=checkout]',
+        '#checkout-pay',
+        '#checkout-coupon-remove',
     ])('refuses %s', css => {
         expect(caramelRiskyControl(css)).toBe(true)
     })
@@ -392,6 +397,10 @@ describe('apply and toggle selectors that name a risky control', () => {
         'button[data-buy-box="1"]',
         // What `:not(...)` excludes is not what the element is.
         'button.apply:not(.checkout)',
+        // The coupon apply in the checkout's own namespace.
+        '#checkout-coupon-apply',
+        '#checkout_discount_btn',
+        'button[name="checkout_reduction_code_apply"]',
     ])('accepts %s', css => {
         expect(caramelRiskyControl(css)).toBe(false)
     })
