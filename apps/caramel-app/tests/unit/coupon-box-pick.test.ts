@@ -612,6 +612,7 @@ describe('the pick', () => {
         'Voucher',
         'Gift card or discount code',
         'rabattkod',
+        'Bon de réduction',
     ])(
         'keeps "Redeem" beside a "%s" field as the apply button',
         async field => {
@@ -620,6 +621,31 @@ describe('the pick', () => {
             ).toMatchObject({ outcome: 'box', input: 1, button: 2 })
         },
     )
+
+    it('keeps an apply button whose own name is a rewards code', async () => {
+        expect(
+            await pickOn(REDEEM_BOX('Promo code', 'Add rewards code'), {
+                input: 1,
+                button: 2,
+            }),
+        ).toMatchObject({ outcome: 'box', input: 1, button: 2 })
+    })
+
+    it('refuses an Apply that spends the points its section names', async () => {
+        expect(
+            await pickOn(
+                [
+                    '- main:',
+                    '  - region "Order summary":',
+                    '    - heading "Use your ### points"',
+                    '    - [5] textbox "Points"',
+                    '    - [6] button "Apply"',
+                    '    - [9] button "Checkout"',
+                ].join('\n'),
+                { input: 5, button: 6 },
+            ),
+        ).toMatchObject({ outcome: 'no_pick', reason: 'refused_button' })
+    })
 
     it('keeps a "Redeem code" button, whatever the field says', async () => {
         expect(
