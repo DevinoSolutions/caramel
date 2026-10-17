@@ -103,6 +103,79 @@ for (const [name, makeArea] of [
             expect(await h.get(1, A, 'pending_submit')).toBeNull()
         })
 
+        it('measures the 4 kB in bytes, not characters', async () => {
+            // 1,500 characters, 4,500 bytes once written as UTF-8.
+            const wide = '€'.repeat(1500)
+            expect(await h.set(1, A, 'pending_submit', { label: wide })).toBe(
+                'refused',
+            )
+            expect(
+                await h.set(1, A, 'pending_submit', {
+                    label: 'e'.repeat(1500),
+                }),
+            ).toBe('saved')
+        })
+
+        it('replaces a record only over the one the caller read', async () => {
+            await h.set(1, A, 'run', { hops: 1, t: 5 })
+
+            expect(
+                await h.replace(
+                    1,
+                    A,
+                    'run',
+                    { hops: 2, t: 5 },
+                    {
+                        hops: 1,
+                        t: 5,
+                    },
+                ),
+            ).toBe('saved')
+            expect(
+                await h.replace(
+                    1,
+                    A,
+                    'run',
+                    { hops: 2, t: 5 },
+                    {
+                        hops: 1,
+                        t: 5,
+                    },
+                ),
+            ).toBe('changed')
+            expect(await h.get(1, A, 'run')).toEqual({ hops: 2, t: 5 })
+        })
+
+        it('replaces whatever is there when the caller read nothing', async () => {
+            await h.set(1, A, 'run', { hops: 3, t: 5 })
+            expect(
+                await h.replace(1, A, 'run', { hops: 6, t: 0, cancelled: 1 }),
+            ).toBe('saved')
+            expect(await h.get(1, A, 'run')).toEqual({
+                hops: 6,
+                t: 0,
+                cancelled: 1,
+            })
+        })
+
+        it('never creates a record by replacing', async () => {
+            expect(await h.replace(1, A, 'run', { hops: 6 })).toBe('absent')
+            expect(await h.replace(1, B, 'run', { hops: 6 })).toBe('absent')
+            expect(await h.get(1, A, 'run')).toBeNull()
+            expect(await h.replace(1, A, 'unknown_kind', {})).toBe('refused')
+        })
+
+        it('lets nothing land between the read and the write of a replace', async () => {
+            await h.set(1, A, 'run', { hops: 1, t: 5 })
+            // Both start before either finishes: the second sees the first's
+            // write, not the record they both began from.
+            const [first, second] = await Promise.all([
+                h.replace(1, A, 'run', { hops: 2, t: 5 }, { hops: 1, t: 5 }),
+                h.replace(1, A, 'run', { hops: 2, t: 5 }, { hops: 1, t: 5 }),
+            ])
+            expect([first, second]).toEqual(['saved', 'changed'])
+        })
+
         it('refuses a missing tab or origin', async () => {
             expect(await h.set(undefined, A, 'run', {})).toBe('refused')
             expect(await h.set(-1, A, 'run', {})).toBe('refused')

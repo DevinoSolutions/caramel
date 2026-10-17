@@ -249,14 +249,15 @@ const CARAMEL_HANDOFF_WAIT_MS = 3000
 
 /* One operation on what this tab leaves for its next document (tab-handoff.js,
  * held by the background where the store's page cannot write it): 'set',
- * 'get', 'take' (read once) or 'clear' on one kind of record. Answers the
- * background's reply ({ saved }, { value }, { cleared }), or null when it
- * could not be reached or refused; both are logged. */
+ * 'get', 'take' (read once), 'clear', or 'replace' (write over a record that
+ * exists, and still holds `expected` when given, in one step) on one kind of
+ * record. Answers the background's reply ({ saved }, { value }, { cleared }),
+ * or null when it could not be reached or refused; both are logged. */
 // Called from dom-utils.js and coupon-box-discovery.js.
-export async function caramelTabHandoff(op, key, value) {
+export async function caramelTabHandoff(op, key, value, expected) {
     try {
         const r = await caramelSendMessage(
-            { action: 'tabHandoff', op, key, value },
+            { action: 'tabHandoff', op, key, value, expected },
             CARAMEL_HANDOFF_WAIT_MS,
         )
         if (r?.error) {
