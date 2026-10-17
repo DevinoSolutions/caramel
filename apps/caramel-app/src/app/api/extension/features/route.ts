@@ -1,4 +1,5 @@
 import { preflight, withRoute } from '@/lib/api/withRoute'
+import { couponBoxLearnedEnabled } from '@/lib/couponBoxLearned'
 import { couponBoxLlmEnabled } from '@/lib/couponBoxPick'
 import { env } from '@/lib/env'
 import { NextResponse } from 'next/server'
@@ -32,6 +33,19 @@ import { NextResponse } from 'next/server'
 // by (COUPON_BOX_LLM_ENABLED and a configured COUPON_BOX_PICK_MODEL), so the
 // extension never sends an outline to a route that would refuse it.
 //
+// couponBoxPickMode: which finder the extension runs first on a cart page with
+// no store config: 'rules_first' | 'llm_first' | 'llm_only'
+// (COUPON_BOX_PICK_MODE, env.ts). Always present; it is 'rules_first' whenever
+// couponBoxLlm is false, so a mode can never send the extension to a pick the
+// server would refuse. A store with a served config is never affected by it.
+// Older builds ignore the key.
+//
+// couponBoxLearned: may the extension use learned coupon boxes (send
+// `acceptsLearned: true` to the pick and report boxes to POST
+// /api/extension/coupon-box-learned)? True only when COUPON_BOX_LEARNED_ENABLED
+// AND couponBoxLlm are on (couponBoxLearnedEnabled), the same condition both
+// routes answer by. Older builds ignore the key.
+//
 // withRoute: public read like extension/supported-stores (rate-limited, no
 // auth/origin gate); cors 'extension' + the OPTIONS preflight mirror
 // extension/me, so a preflighted extension-origin fetch can read it.
@@ -51,10 +65,16 @@ export const GET = withRoute(
         rateLimit: 'read',
         cors: 'extension',
     },
-    () =>
-        NextResponse.json({
+    () => {
+        const couponBoxLlm = couponBoxLlmEnabled()
+        return NextResponse.json({
             shopperCodeCapture: env.SHOPPER_CODE_CAPTURE_ENABLED,
             couponBoxDiscovery: env.COUPON_BOX_DISCOVERY_ENABLED,
-            couponBoxLlm: couponBoxLlmEnabled(),
-        }),
+            couponBoxLlm,
+            couponBoxPickMode: couponBoxLlm
+                ? env.COUPON_BOX_PICK_MODE
+                : 'rules_first',
+            couponBoxLearned: couponBoxLearnedEnabled(),
+        })
+    },
 )
