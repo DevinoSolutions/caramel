@@ -2110,7 +2110,7 @@ async function checkedPick(doc, picked, own, strict) {
     // A learned box whose apply is not an apply button is refused whole: no
     // button of the rules' is swapped in, and normal detection runs instead.
     if (picked.learned && button && !learnedApply(button, input)) {
-        log('FINDER_LEARNED_APPLY_REFUSED', {})
+        log('FINDER_PICK_UNUSABLE', { input: !!input, apply: 'refused' })
         return null
     }
     if (!picked.learned && !okButton(button, input)) button = null
