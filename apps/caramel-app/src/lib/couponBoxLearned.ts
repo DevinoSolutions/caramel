@@ -33,11 +33,20 @@
 //     one it FIRST reported from and never changes, so moving an install to
 //     another network cannot free a slot on the first, and the install counts
 //     only from that network: a report from any other counts nothing.
-//   - Across all stores, per rolling 24 hours (mayAddBox): at most 20 new
-//     boxes from one network and at most 500 stores getting their first box;
-//     at most 3 hand-overs from one network (handOverLearnedStore). These are
-//     counted in learned_coupon_box_network_events, under a hash of the
-//     network prefix alone, with no store, deleted after 24 hours.
+//   - Across all stores, per day (networkMayAddBox): at most 20 new boxes
+//     from one network and 100 from its wider block (/16 IPv4, /32 IPv6);
+//     at most 3 hand-overs from one network and 10 from its block
+//     (handOverLearnedStore). Counted in learned_coupon_box_network_events
+//     under a hash of the prefix alone, with no store and the time cut to
+//     the hour (so a row's time matches no box, reporter or hand-over row),
+//     deleted after a day.
+//   - A store heard from ONE network is provisional (learned_coupon_box_stores,
+//     establishedAt null): at most 5000 such stores exist at once, and a new
+//     one pushes out the oldest (makeRoomForStore). A store is established
+//     once a second network confirms one of its boxes, at most 500 stores a
+//     day (establishStoreIfConfirmed); one waiting past that cap stays
+//     provisional, never refused. So made-up stores from a few networks
+//     cannot freeze real stores' first boxes.
 //   - Selectors may hold nothing that looks like personal data, and apply or
 //     toggle never names checkout, payment, an order or a delete
 //     (couponBoxSelector.ts).
@@ -48,7 +57,7 @@
 //     reads (a second voice of a network already heard), else the
 //     longest-unseen reporter that is not failing the box or whose failure is
 //     over 30 days old; a network's only fresh failing voice is kept.
-//   - At most 5 boxes per store (makeRoomForBox). A full store makes room by
+//   - At most 5 boxes per store (boxToReplace). A full store makes room by
 //     deleting its weakest box that is not servable, ranked by EXCLUSIVE
 //     confirming networks (ones that confirm no other box of the store), then
 //     all confirming networks, then the oldest confirmation. A servable box is
@@ -119,14 +128,24 @@ export const LEARNED_BOX_RULES = {
     pruneAfterDays: 60,
     /** Stores handed to the store pipeline per rolling 24 hours, overall. */
     handoverDailyCap: 50,
-    /** Of those, stores the reports of one network may hand over. */
+    /** Of those, stores the reports of one network may hand over, and of its
+     * wider block (/16 IPv4, /32 IPv6). */
     handoversPerNetworkPerDay: 3,
-    /** New boxes the reports of one network may add per rolling 24 hours,
-     * across every store. */
+    handoversPerBlockPerDay: 10,
+    /** New boxes the reports of one network may add per day across every
+     * store, and of its wider block. */
     newBoxesPerNetworkPerDay: 20,
-    /** Stores that may get their first box per rolling 24 hours, overall. */
-    newStoresPerDay: 500,
+    newBoxesPerBlockPerDay: 100,
+    /** Stores heard from one network only, kept at once (the oldest gives
+     * way to a new one). */
+    provisionalStores: 5000,
+    /** Stores that may become established (a second network confirms) per
+     * day, overall. */
+    storesEstablishedPerDay: 500,
 } as const
+
+/** Share of a global cap at which a warning is logged. */
+const NEAR_CAP_SHARE = 0.8
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const daysBefore = (now: Date, days: number) =>
@@ -274,7 +293,7 @@ export type LearnedBoxReport = z.infer<typeof learnedBoxReportSchema>
 // ---------------------------------------------------------------------------
 
 function saltedHash(
-    kind: 'install' | 'network' | 'network-any-store',
+    kind: 'install' | 'network' | 'network-any-store' | 'block-any-store',
     value: string,
     domain: string,
 ): string {
@@ -329,11 +348,34 @@ export function hashNetwork(ip: string, domain: string): string {
     return saltedHash('network', networkPrefix(ip), domain)
 }
 
-/** The network prefix hashed with no store, for the caps kept across stores
- * (learned_coupon_box_network_events). Its own kind, so it never equals a
- * per-store hash of the same prefix. */
-export function hashNetworkAcrossStores(ip: string): string {
-    return saltedHash('network-any-store', networkPrefix(ip), '')
+/** The wider block a network sits in: the first two octets of an IPv4
+ * address, the first two groups of an IPv6 one. Free IPv6 /48s come from a
+ * handful of /32s, so a cap on the block holds where one on the /48 does
+ * not. */
+export function networkBlock(ip: string): string {
+    const prefix = networkPrefix(ip)
+    if (prefix === 'unknown') return prefix
+    // `v4:a.b.c` or `v6:x:y:z`.
+    const family = prefix.slice(0, 2)
+    const rest = prefix.slice(3)
+    return family === 'v4'
+        ? `v4:${rest.split('.').slice(0, 2).join('.')}`
+        : `v6:${rest.split(':').slice(0, 2).join(':')}`
+}
+
+/** A reporter's network and its wider block, each hashed with no store, for
+ * the caps kept across stores (learned_coupon_box_network_events). Their own
+ * kinds, so neither ever equals a per-store hash of the same prefix. */
+export interface CrossStoreNetwork {
+    network: string
+    block: string
+}
+
+export function hashNetworkAcrossStores(ip: string): CrossStoreNetwork {
+    return {
+        network: saltedHash('network-any-store', networkPrefix(ip), ''),
+        block: saltedHash('block-any-store', networkBlock(ip), ''),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -522,19 +564,22 @@ export async function findServableLearnedBox(
 export type LearnedReportResult =
     | {
           recorded: true
-          /** This report changed the box's counters (not inside the
-           * install's 24h window). */
+          /** This report changed the box's counters (from the install's
+           * first network, outside its 24h window). A report that did not
+           * writes nothing. */
           counted: boolean
-          /** The box meets the serving rule after this report (the route
-           * then hands the store to the pipeline, once per domain ever). */
+          /** The box meets the serving rule after this report (when the
+           * report also counted, the route hands the store to the pipeline,
+           * once per store ever). */
           servable: boolean
       }
     | {
           recorded: false
           /** unknown_box: a failure for a box nobody confirmed.
            * ignored: a cap refused it (reporters per network, reporters per
-           * box, boxes per store), or another report for the store held its
-           * lock. Neither is an error. */
+           * box, boxes per store, new boxes per network or block, the
+           * provisional-store pool), or a lock it needed was taken. Neither
+           * is an error. */
           reason: 'unknown_box' | 'ignored'
       }
 
@@ -543,14 +588,24 @@ interface RecordInput {
     installHash: string
     /** hashNetwork: the reporter's network, for this store. */
     networkHash: string
-    /** hashNetworkAcrossStores: the same network, for the caps kept across
-     * stores. */
-    anyStoreNetworkHash: string
+    /** hashNetworkAcrossStores: the same network and its wider block, for the
+     * caps kept across stores. */
+    anyStoreNetwork: CrossStoreNetwork
     now?: Date
 }
 
+const IGNORED = { recorded: false, reason: 'ignored' } as const
+
 const storeLockKey = (storeDomain: string) =>
     `learned-coupon-box:${storeDomain}`
+
+/** Serialises the caps shared by every store: new boxes (per network and
+ * block), the provisional-store pool and the stores established per day. */
+const NEW_BOXES_LOCK_KEY = 'learned-coupon-box:new-boxes'
+
+/** How long a report adding a new box waits for NEW_BOXES_LOCK_KEY before it
+ * is answered `ignored`. Short: the lock is held only for a few inserts. */
+const NEW_BOXES_LOCK_TIMEOUT = '250ms'
 
 /** Wait for the per-store transaction lock. Only the store-wide prune waits:
  * it runs one store at a time on one connection. */
@@ -561,18 +616,46 @@ async function lockStore(
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${storeLockKey(storeDomain)}, 0))`
 }
 
+/** Take a transaction lock if it is free, without waiting. */
+async function tryLock(
+    tx: Prisma.TransactionClient,
+    key: string,
+): Promise<boolean> {
+    const [row] = await tx.$queryRaw<
+        { locked: boolean }[]
+    >`SELECT pg_try_advisory_xact_lock(hashtextextended(${key}, 0)) AS locked`
+    return row?.locked === true
+}
+
 /** Take the per-store transaction lock if it is free, without waiting. A
  * report that waited would hold a pooled connection for as long as the lock
  * stays taken, so a few clients sending reports for one store in parallel
  * could use up the pool. */
-async function tryLockStore(
+function tryLockStore(
     tx: Prisma.TransactionClient,
     storeDomain: string,
 ): Promise<boolean> {
-    const [row] = await tx.$queryRaw<
-        { locked: boolean }[]
-    >`SELECT pg_try_advisory_xact_lock(hashtextextended(${storeLockKey(storeDomain)}, 0)) AS locked`
-    return row?.locked === true
+    return tryLock(tx, storeLockKey(storeDomain))
+}
+
+/** Take NEW_BOXES_LOCK_KEY, waiting at most NEW_BOXES_LOCK_TIMEOUT. When the
+ * wait runs out Postgres aborts the transaction (lock_not_available), so
+ * nothing the report did is kept and recordLearnedBoxReport answers
+ * `ignored`. */
+async function lockNewBoxes(tx: Prisma.TransactionClient): Promise<void> {
+    await tx.$executeRawUnsafe(
+        `SET LOCAL lock_timeout = '${NEW_BOXES_LOCK_TIMEOUT}'`,
+    )
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${NEW_BOXES_LOCK_KEY}, 0))`
+    await tx.$executeRawUnsafe('SET LOCAL lock_timeout = DEFAULT')
+}
+
+/** A bounded lock wait ran out (Postgres lock_not_available, 55P03). */
+function isLockTimeout(error: unknown): boolean {
+    return (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        (error.meta as { code?: unknown } | undefined)?.code === '55P03'
+    )
 }
 
 /** Retention for one store. Call it holding the store's lock. */
@@ -587,6 +670,13 @@ async function pruneStore(
     const reporters = await tx.learnedCouponBoxReporter.deleteMany({
         where: { box: { storeDomain }, lastSeenAt: { lt: cutoff } },
     })
+    // A store with no box left is forgotten: it starts provisional again.
+    if (
+        boxes.count > 0 &&
+        (await tx.learnedCouponBox.count({ where: { storeDomain } })) === 0
+    ) {
+        await tx.learnedCouponBoxStore.deleteMany({ where: { storeDomain } })
+    }
     return { boxes: boxes.count, reporters: reporters.count }
 }
 
@@ -594,23 +684,29 @@ async function pruneStore(
  * Record one report. Runs in one transaction holding a per-store advisory
  * lock, so every cap and count below is read and written atomically. A report
  * that finds the lock taken is answered `ignored` at once rather than waiting
- * (tryLockStore). Retried once when two first reports race on the same unique
- * key. Throws on any other database error: the route turns that into a
- * reported 500, never a quiet "recorded".
+ * (tryLockStore); one adding a new box waits at most NEW_BOXES_LOCK_TIMEOUT
+ * for the lock shared by every store, and is answered `ignored` with nothing
+ * written when that runs out. Retried once when two first reports race on the
+ * same unique key. Throws on any other database error: the route turns that
+ * into a reported 500, never a quiet "recorded".
  */
 export async function recordLearnedBoxReport(
     input: RecordInput,
 ): Promise<LearnedReportResult> {
-    try {
-        return await recordOnce(input)
-    } catch (error) {
-        if (
-            error instanceof Prisma.PrismaClientKnownRequestError &&
-            error.code === 'P2002'
-        ) {
-            return recordOnce(input)
+    for (let attempt = 0; ; attempt += 1) {
+        try {
+            return await recordOnce(input)
+        } catch (error) {
+            if (isLockTimeout(error)) return IGNORED
+            if (
+                attempt === 0 &&
+                error instanceof Prisma.PrismaClientKnownRequestError &&
+                error.code === 'P2002'
+            ) {
+                continue
+            }
+            throw error
         }
-        throw error
     }
 }
 
@@ -618,7 +714,7 @@ async function recordOnce({
     report,
     installHash,
     networkHash,
-    anyStoreNetworkHash,
+    anyStoreNetwork,
     now = new Date(),
 }: RecordInput): Promise<LearnedReportResult> {
     const storeDomain = reportStoreDomain(report)
@@ -631,14 +727,13 @@ async function recordOnce({
     }
     const confirmed = report.outcome === 'confirmed'
     const pruneCutoff = daysBefore(now, LEARNED_BOX_RULES.pruneAfterDays)
-    const ignored = { recorded: false, reason: 'ignored' } as const
 
     return prisma.$transaction(
         async (tx): Promise<LearnedReportResult> => {
             // Every write for this store, on any of its hosts, holds this
             // lock until the transaction ends. A report that finds it taken
             // is dropped, never queued.
-            if (!(await tryLockStore(tx, storeDomain))) return ignored
+            if (!(await tryLockStore(tx, storeDomain))) return IGNORED
             // Retention for this store, before anything is counted.
             await pruneStore(tx, storeDomain, pruneCutoff)
 
@@ -665,48 +760,20 @@ async function recordOnce({
                     box &&
                     !(await networkMayAddReporter(tx, box.id, networkHash, now))
                 ) {
-                    return ignored
+                    return IGNORED
                 }
                 if (!box) {
-                    const newStore =
-                        (await tx.learnedCouponBox.count({
-                            where: { storeDomain },
-                        })) === 0
-                    if (
-                        !(await mayAddBox(
-                            tx,
-                            anyStoreNetworkHash,
-                            newStore,
-                            now,
-                        )) ||
-                        !(await makeRoomForBox(
-                            tx,
-                            storeDomain,
-                            networkHash,
-                            now,
-                        ))
-                    ) {
-                        return ignored
-                    }
-                    await tx.learnedCouponBoxNetworkEvent.create({
-                        data: {
-                            networkHash: anyStoreNetworkHash,
-                            kind: 'box',
-                            newStore,
-                            createdAt: now,
-                        },
+                    box = await addBox(tx, {
+                        key,
+                        storeDomain,
+                        networkHash,
+                        anyStoreNetwork,
+                        firstSource: report.source,
+                        now,
                     })
-                    box = await tx.learnedCouponBox.create({
-                        data: {
-                            ...key,
-                            storeDomain,
-                            firstSource: report.source,
-                            firstSeenAt: now,
-                            lastConfirmedAt: now,
-                        },
-                    })
+                    if (!box) return IGNORED
                 } else if (!(await makeRoomForReporter(tx, box.id, now))) {
-                    return ignored
+                    return IGNORED
                 }
                 reporter = await tx.learnedCouponBoxReporter.create({
                     data: {
@@ -733,24 +800,30 @@ async function recordOnce({
                 (lastCounted === null ||
                     now.getTime() - lastCounted.getTime() >=
                         LEARNED_BOX_RULES.countWindowHours * 60 * 60 * 1000)
-            const outcomeUpdate = counted
-                ? confirmed
+
+            // A report that counts nothing writes nothing, lastSeenAt
+            // included: lastSeenAt is the reporter's latest COUNTED report,
+            // which retention and eviction read, so reports from another
+            // network cannot keep a row alive. The reporter's network is
+            // never rewritten either: it stays the network the install first
+            // reported from, or one network could mint installs, move them
+            // and mint again, past the per-network caps without end.
+            if (counted) {
+                const outcomeUpdate = confirmed
                     ? { confirmations: { increment: 1 }, lastConfirmedAt: now }
                     : { failures: { increment: 1 }, lastFailedAt: now }
-                : {}
-
-            // The reporter's network is NOT rewritten: it stays the network
-            // the install first reported from. Rewriting it would let one
-            // network mint installs, move them to another network and mint
-            // again, past the per-network caps without end.
-            await tx.learnedCouponBoxReporter.update({
-                where: { id: reporter.id },
-                data: { lastSeenAt: now, ...outcomeUpdate },
-            })
-            await tx.learnedCouponBox.update({
-                where: { id: reporter.boxId },
-                data: outcomeUpdate,
-            })
+                await tx.learnedCouponBoxReporter.update({
+                    where: { id: reporter.id },
+                    data: { lastSeenAt: now, ...outcomeUpdate },
+                })
+                await tx.learnedCouponBox.update({
+                    where: { id: reporter.boxId },
+                    data: outcomeUpdate,
+                })
+                if (confirmed) {
+                    await establishStoreIfConfirmed(tx, storeDomain, now)
+                }
+            }
 
             const reporters = await tx.learnedCouponBoxReporter.findMany({
                 where: { boxId: reporter.boxId },
@@ -762,46 +835,257 @@ async function recordOnce({
                 servable: assessLearnedBox(reporters, now).servable,
             }
         },
-        // Nothing in here waits for another report (tryLockStore).
+        // Nothing in here waits for another report for long (tryLockStore,
+        // lockNewBoxes).
         { timeout: 15_000 },
     )
 }
 
-const NETWORK_EVENT_WINDOW_MS = 24 * 60 * 60 * 1000
-
 /**
- * The caps kept across stores, checked before a report adds a new box: at
- * most newBoxesPerNetworkPerDay new boxes from one network, and at most
- * newStoresPerDay stores getting their first box, per rolling 24 hours.
- * Without them one network could create boxes on every registrable domain
- * there is, and the tables would grow without bound. Taken under one lock for
- * every store's new boxes, which a report never waits for (busy answers
- * false, so the report is ignored).
+ * Add a new box, or answer null (the report is ignored) when a cap refuses
+ * it. In this order, so that a network over its cap never touches the lock
+ * every store's new boxes share, and that lock is held only for the inserts:
+ *
+ *   1. the network's and its block's new boxes today (networkMayAddBox), read
+ *      without the shared lock;
+ *   2. the store's own 5-box cap (boxToReplace), under the store's lock;
+ *   3. the shared lock (lockNewBoxes), then 1 again (exact now) and, for a
+ *      store not seen before, room in the provisional pool
+ *      (makeRoomForStore);
+ *   4. the writes: the replaced box goes, the store row, the two network
+ *      events and the box are created.
  */
-async function mayAddBox(
+async function addBox(
     tx: Prisma.TransactionClient,
-    anyStoreNetworkHash: string,
-    newStore: boolean,
-    now: Date,
-): Promise<boolean> {
-    const [lock] = await tx.$queryRaw<
-        { locked: boolean }[]
-    >`SELECT pg_try_advisory_xact_lock(hashtextextended(${'learned-coupon-box:new-boxes'}, 0)) AS locked`
-    if (lock?.locked !== true) return false
-    const since = new Date(now.getTime() - NETWORK_EVENT_WINDOW_MS)
-    const fromNetwork = await tx.learnedCouponBoxNetworkEvent.count({
-        where: {
-            networkHash: anyStoreNetworkHash,
-            kind: 'box',
-            createdAt: { gt: since },
+    {
+        key,
+        storeDomain,
+        networkHash,
+        anyStoreNetwork,
+        firstSource,
+        now,
+    }: {
+        key: {
+            domain: string
+            inputSelector: string
+            applySelector: string
+            toggleSelector: string
+            enterOnly: boolean
+        }
+        storeDomain: string
+        networkHash: string
+        anyStoreNetwork: CrossStoreNetwork
+        firstSource: string
+        now: Date
+    },
+) {
+    if (!(await networkMayAddBox(tx, anyStoreNetwork, now))) return null
+    const room = await boxToReplace(tx, storeDomain, networkHash, now)
+    if (!room.ok) return null
+
+    await lockNewBoxes(tx)
+    // Read again under the lock: parallel reports for other stores may have
+    // added boxes from the same network since.
+    if (!(await networkMayAddBox(tx, anyStoreNetwork, now))) return null
+    const known = await tx.learnedCouponBoxStore.findUnique({
+        where: { storeDomain },
+        select: { storeDomain: true },
+    })
+    if (!known && !(await makeRoomForStore(tx))) return null
+
+    if (room.replace) {
+        await tx.learnedCouponBox.delete({ where: { id: room.replace } })
+    }
+    if (!known) {
+        await tx.learnedCouponBoxStore.create({
+            data: { storeDomain, firstSeenAt: now },
+        })
+    }
+    await recordNetworkEvent(tx, anyStoreNetwork, 'box', now)
+    return tx.learnedCouponBox.create({
+        data: {
+            ...key,
+            storeDomain,
+            firstSource,
+            firstSeenAt: now,
+            lastConfirmedAt: now,
         },
     })
-    if (fromNetwork >= LEARNED_BOX_RULES.newBoxesPerNetworkPerDay) return false
-    if (!newStore) return true
-    const newStores = await tx.learnedCouponBoxNetworkEvent.count({
-        where: { kind: 'box', newStore: true, createdAt: { gt: since } },
+}
+
+// ---------------------------------------------------------------------------
+// Caps kept across stores.
+// ---------------------------------------------------------------------------
+
+const HOUR_MS = 60 * 60 * 1000
+
+/** A network event's time: `now` cut to the hour, so it equals no box,
+ * reporter, store or hand-over timestamp and cannot be joined to one. */
+function eventHour(now: Date): Date {
+    return new Date(Math.floor(now.getTime() / HOUR_MS) * HOUR_MS)
+}
+
+/** The oldest event hour still counted. Events are kept for at least 24
+ * hours and at most 25, since their time is cut to the hour. */
+function eventWindowStart(now: Date): Date {
+    return new Date(eventHour(now).getTime() - DAY_MS)
+}
+
+type NetworkEventKind = 'box' | 'handover'
+
+async function recordNetworkEvent(
+    tx: Prisma.TransactionClient,
+    net: CrossStoreNetwork,
+    kind: NetworkEventKind,
+    now: Date,
+): Promise<void> {
+    const createdAt = eventHour(now)
+    await tx.learnedCouponBoxNetworkEvent.createMany({
+        data: [
+            { networkHash: net.network, kind, createdAt },
+            { networkHash: net.block, kind, createdAt },
+        ],
     })
-    return newStores < LEARNED_BOX_RULES.newStoresPerDay
+}
+
+/** The network's and its block's `kind` events still in the window. */
+async function networkEventCounts(
+    db: Prisma.TransactionClient,
+    net: CrossStoreNetwork,
+    kind: NetworkEventKind,
+    now: Date,
+): Promise<{ network: number; block: number }> {
+    const since = eventWindowStart(now)
+    const network = await db.learnedCouponBoxNetworkEvent.count({
+        where: { networkHash: net.network, kind, createdAt: { gte: since } },
+    })
+    const block = await db.learnedCouponBoxNetworkEvent.count({
+        where: { networkHash: net.block, kind, createdAt: { gte: since } },
+    })
+    return { network, block }
+}
+
+/** At most newBoxesPerNetworkPerDay new boxes from one network, and
+ * newBoxesPerBlockPerDay from its block, across every store per day. Without
+ * them one network could create boxes on every registrable domain there is,
+ * and the tables would grow without bound. */
+async function networkMayAddBox(
+    tx: Prisma.TransactionClient,
+    net: CrossStoreNetwork,
+    now: Date,
+): Promise<boolean> {
+    const today = await networkEventCounts(tx, net, 'box', now)
+    return (
+        today.network < LEARNED_BOX_RULES.newBoxesPerNetworkPerDay &&
+        today.block < LEARNED_BOX_RULES.newBoxesPerBlockPerDay
+    )
+}
+
+/** A store's boxes have been confirmed from at least two networks. */
+async function confirmedByTwoNetworks(
+    tx: Prisma.TransactionClient,
+    storeDomain: string,
+): Promise<boolean> {
+    const networks = await tx.learnedCouponBoxReporter.findMany({
+        where: { box: { storeDomain }, lastConfirmedAt: { not: null } },
+        select: { networkHash: true },
+        distinct: ['networkHash'],
+        take: 2,
+    })
+    return networks.length >= 2
+}
+
+/**
+ * At most provisionalStores stores heard from one network only. When the pool
+ * is full, a new store pushes out the oldest provisional one that is not
+ * already confirmed from two networks (one waiting for the daily cap) and
+ * whose lock is free: all its boxes and the store row are deleted. Answers
+ * false (the report is ignored) when there is none. A provisional store is
+ * never servable (that needs 3 networks), so nothing served is lost, and made-
+ * up stores cannot shut real ones out: they only push each other out.
+ */
+async function makeRoomForStore(
+    tx: Prisma.TransactionClient,
+): Promise<boolean> {
+    const provisional = await tx.learnedCouponBoxStore.count({
+        where: { establishedAt: null },
+    })
+    warnNearCap(
+        'provisional stores',
+        provisional,
+        LEARNED_BOX_RULES.provisionalStores,
+    )
+    if (provisional < LEARNED_BOX_RULES.provisionalStores) return true
+    const oldest = await tx.learnedCouponBoxStore.findMany({
+        where: { establishedAt: null },
+        orderBy: { firstSeenAt: 'asc' },
+        take: 20,
+        select: { storeDomain: true },
+    })
+    for (const { storeDomain } of oldest) {
+        if (await confirmedByTwoNetworks(tx, storeDomain)) continue
+        if (!(await tryLockStore(tx, storeDomain))) continue
+        await tx.learnedCouponBox.deleteMany({ where: { storeDomain } })
+        await tx.learnedCouponBoxStore.delete({ where: { storeDomain } })
+        return true
+    }
+    return false
+}
+
+/**
+ * After a counted confirmation: a provisional store whose boxes are now
+ * confirmed from two networks becomes established, at most
+ * storesEstablishedPerDay stores per day overall. One past the cap, or whose
+ * report finds the shared lock taken (this never waits), stays provisional
+ * and is tried again on its next counted confirmation; its report is
+ * recorded either way.
+ */
+async function establishStoreIfConfirmed(
+    tx: Prisma.TransactionClient,
+    storeDomain: string,
+    now: Date,
+): Promise<void> {
+    const store = await tx.learnedCouponBoxStore.findUnique({
+        where: { storeDomain },
+        select: { establishedAt: true },
+    })
+    if (!store || store.establishedAt) return
+    if (!(await confirmedByTwoNetworks(tx, storeDomain))) return
+    if (!(await tryLock(tx, NEW_BOXES_LOCK_KEY))) return
+    const today = await tx.learnedCouponBoxStore.count({
+        where: { establishedAt: { gt: daysBefore(now, 1) } },
+    })
+    warnNearCap(
+        'stores established today',
+        today,
+        LEARNED_BOX_RULES.storesEstablishedPerDay,
+    )
+    if (today >= LEARNED_BOX_RULES.storesEstablishedPerDay) return
+    await tx.learnedCouponBoxStore.update({
+        where: { storeDomain },
+        data: { establishedAt: now },
+    })
+}
+
+const nearCapWarnedAt = new Map<string, number>()
+
+/** Log (at most once an hour per cap) that a cap shared by every store is
+ * past NEAR_CAP_SHARE: either real growth, or someone filling it. */
+function warnNearCap(what: string, used: number, cap: number): void {
+    if (used < cap * NEAR_CAP_SHARE) return
+    const last = nearCapWarnedAt.get(what)
+    if (last !== undefined && Date.now() - last < HOUR_MS) return
+    nearCapWarnedAt.set(what, Date.now())
+    console.warn('[learned-coupon-box] a global cap is nearly used up', {
+        what,
+        used,
+        cap,
+    })
+}
+
+/** Test-only: forget which caps were warned about. */
+export function resetNearCapWarningsForTests(): void {
+    nearCapWarnedAt.clear()
 }
 
 /** At most newReportersPerNetwork new reporters per network per box per
@@ -895,7 +1179,9 @@ async function makeRoomForReporter(
  *   2. all its confirming networks.
  *
  * When the store is full, its weakest box that is NOT servable (then the
- * oldest last confirmation) is deleted to make room. A servable box is never
+ * oldest last confirmation) gives way: this answers which (`replace`), and
+ * the caller deletes it only once every other cap has passed, so a refused
+ * report deletes nothing. A servable box is never
  * replaced. A box with at least one exclusive network gives way only to a new
  * box whose network confirms no box of the store yet; a new box from a network
  * that already confirms one is refused instead.
@@ -912,17 +1198,19 @@ async function makeRoomForReporter(
  * the store. The cost: two different boxes confirmed from one shared network
  * (an office or carrier /24) are both the first to go.
  */
-async function makeRoomForBox(
+async function boxToReplace(
     tx: Prisma.TransactionClient,
     storeDomain: string,
     networkHash: string,
     now: Date,
-): Promise<boolean> {
+): Promise<{ ok: false } | { ok: true; replace: string | null }> {
     const boxes = await tx.learnedCouponBox.findMany({
         where: { storeDomain },
         include: { reporters: { select: REPORTER_EVIDENCE_SELECT } },
     })
-    if (boxes.length < LEARNED_BOX_RULES.maxBoxesPerDomain) return true
+    if (boxes.length < LEARNED_BOX_RULES.maxBoxesPerDomain) {
+        return { ok: true, replace: null }
+    }
 
     const networksOf = boxes.map(box =>
         confirmingNetworksOf(box.reporters, now),
@@ -960,10 +1248,9 @@ async function makeRoomForBox(
     // protect it further: otherwise 5 boxes backed by 2 such networks each
     // would hold the store's every slot for as long as they keep confirming.
     if (!weakest || Math.min(weakest.exclusive, 1) > newcomerExclusive) {
-        return false
+        return { ok: false }
     }
-    await tx.learnedCouponBox.delete({ where: { id: weakest.box.id } })
-    return true
+    return { ok: true, replace: weakest.box.id }
 }
 
 // ---------------------------------------------------------------------------
@@ -974,32 +1261,46 @@ async function makeRoomForBox(
  * that store up until the next run. */
 const PRUNE_LOCK_TIMEOUT = '5s'
 
+/** After this many stores in a row fail for a reason other than a held lock
+ * (the database is likely down), the prune stops until its next run. */
+const PRUNE_MAX_CONSECUTIVE_ERRORS = 3
+
 export interface LearnedPruneResult {
     boxes: number
     reporters: number
     networkEvents: number
-    /** Stores whose prune failed (reported, then skipped until the next run;
+    /** Store rows left with no box (only a hand-run wipe leaves one). */
+    stores: number
+    /** Stores whose prune failed (logged, then skipped until the next run;
      * each report on the store also prunes it). */
     failedStores: number
+    /** The run gave up after PRUNE_MAX_CONSECUTIVE_ERRORS failures in a
+     * row. */
+    stopped: boolean
 }
 
 /** Delete every box with no confirmation, and every reporter not seen, for
- * pruneAfterDays, and every cross-store network event over 24 hours old.
- * Each store is pruned under its own lock, like a report, so a delete never
- * races a report adding a reporter to the same box. A store that fails (its
- * lock held past PRUNE_LOCK_TIMEOUT, or any database error) is reported and
- * skipped; the others are still pruned. Returns what it deleted. */
+ * pruneAfterDays, every cross-store network event out of its window, and
+ * every store row with no box left. Each store is pruned under its own lock,
+ * like a report, so a delete never races a report adding a reporter to the
+ * same box. A store that fails (its lock held past PRUNE_LOCK_TIMEOUT, or any
+ * database error) is logged and skipped, and the others are still pruned;
+ * after PRUNE_MAX_CONSECUTIVE_ERRORS failures in a row that are not a held
+ * lock, the run stops. Failures reach Sentry ONCE per run, not once per
+ * store. Returns what it deleted. */
 export async function pruneLearnedCouponBoxes(
     now: Date = new Date(),
 ): Promise<LearnedPruneResult> {
     const cutoff = daysBefore(now, LEARNED_BOX_RULES.pruneAfterDays)
     const events = await prisma.learnedCouponBoxNetworkEvent.deleteMany({
-        where: {
-            createdAt: {
-                lt: new Date(now.getTime() - NETWORK_EVENT_WINDOW_MS),
-            },
-        },
+        where: { createdAt: { lt: eventWindowStart(now) } },
     })
+    const orphans = await prisma.$executeRaw`
+        DELETE FROM "learned_coupon_box_stores" s
+        WHERE NOT EXISTS (
+            SELECT 1 FROM "learned_coupon_boxes" b
+            WHERE b."store_domain" = s."store_domain"
+        )`
     const stores = await prisma.learnedCouponBox.findMany({
         where: {
             OR: [
@@ -1014,8 +1315,12 @@ export async function pruneLearnedCouponBoxes(
         boxes: 0,
         reporters: 0,
         networkEvents: events.count,
+        stores: orphans,
         failedStores: 0,
+        stopped: false,
     }
+    let inARow = 0
+    let firstError: unknown = null
     for (const { storeDomain } of stores) {
         try {
             const deleted = await prisma.$transaction(
@@ -1030,18 +1335,36 @@ export async function pruneLearnedCouponBoxes(
             )
             total.boxes += deleted.boxes
             total.reporters += deleted.reporters
+            inARow = 0
         } catch (error) {
             total.failedStores += 1
+            firstError ??= error
             console.error(
                 '[learned-coupon-box] retention prune failed for one store; continuing',
                 error,
                 { storeDomain },
             )
-            Sentry.captureException(error, {
-                tags: { area: 'learned_coupon_box', operation: 'prune_store' },
-                extra: { storeDomain },
-            })
+            // A held lock says nothing about the database; anything else,
+            // several times running, says it is down.
+            if (!isLockTimeout(error)) inARow += 1
+            if (inARow >= PRUNE_MAX_CONSECUTIVE_ERRORS) {
+                total.stopped = true
+                console.error(
+                    '[learned-coupon-box] retention prune stopped: too many stores failed in a row',
+                    { failedStores: total.failedStores },
+                )
+                break
+            }
         }
+    }
+    if (firstError) {
+        Sentry.captureException(firstError, {
+            tags: { area: 'learned_coupon_box', operation: 'prune_store' },
+            extra: {
+                failedStores: total.failedStores,
+                stopped: total.stopped,
+            },
+        })
     }
     return total
 }
@@ -1056,6 +1379,7 @@ async function pruneAndReport(): Promise<void> {
             deleted.boxes ||
             deleted.reporters ||
             deleted.networkEvents ||
+            deleted.stores ||
             deleted.failedStores
         ) {
             console.log('[learned-coupon-box] retention prune', deleted)
@@ -1096,71 +1420,72 @@ export type HandoverResult =
               | 'busy'
       }
 
+const HANDOVER_LOCK_KEY = 'learned-coupon-box:handover'
+
+type HandoverRefusal = 'already' | 'daily_cap' | 'network_cap'
+
+/** Why `domain` may not be handed over now, or null. */
+async function handoverRefusal(
+    db: Prisma.TransactionClient,
+    domain: string,
+    net: CrossStoreNetwork,
+    now: Date,
+): Promise<HandoverRefusal | null> {
+    const existing = await db.learnedCouponBoxHandover.findUnique({
+        where: { domain },
+        select: { domain: true },
+    })
+    if (existing) return 'already'
+    const today = await db.learnedCouponBoxHandover.count({
+        where: { handedOverAt: { gte: daysBefore(now, 1) } },
+    })
+    warnNearCap('hand-overs today', today, LEARNED_BOX_RULES.handoverDailyCap)
+    if (today >= LEARNED_BOX_RULES.handoverDailyCap) return 'daily_cap'
+    const fromNetwork = await networkEventCounts(db, net, 'handover', now)
+    if (
+        fromNetwork.network >= LEARNED_BOX_RULES.handoversPerNetworkPerDay ||
+        fromNetwork.block >= LEARNED_BOX_RULES.handoversPerBlockPerDay
+    ) {
+        return 'network_cap'
+    }
+    return null
+}
+
 /**
  * Hand a store (its registrable domain, reportStoreDomain: never one of its
  * hosts, so inventing hosts cannot hand one store over many times or spend
- * the daily cap) whose box just became servable to the store pipeline, as one
- * site-suggestions row with no user and no requester email (so nothing the
- * pipeline later does to it can mail a shopper). At most ONCE per store ever
- * (learned_coupon_box_handovers is never pruned, and a wiped box does not
- * reopen it), and at most handoverDailyCap stores per rolling 24 hours
- * overall, of which at most handoversPerNetworkPerDay may come from the
- * reports of one network (`anyStoreNetworkHash`, the network of the report
- * that made the box servable), so one network cannot use up the day's
- * hand-overs with made-up stores. A store refused by either cap is handed
- * over on a later servable report. Serialised by its own advisory lock, which it never waits for: an
- * already handed-over store is answered without the lock, and a hand-over that
- * finds the lock taken answers `busy` and is retried on the next servable
- * report, so reports on a served store cannot queue connections behind it.
+ * the daily cap) whose box a COUNTED report just found servable to the store
+ * pipeline, as one site-suggestions row with no user and no requester email
+ * (so nothing the pipeline later does to it can mail a shopper). At most ONCE
+ * per store ever (learned_coupon_box_handovers is never pruned, and a wiped
+ * box does not reopen it), and at most handoverDailyCap stores per rolling 24
+ * hours overall, of which at most handoversPerNetworkPerDay may come from the
+ * reports of one network and handoversPerBlockPerDay from its block
+ * (`anyStoreNetwork`, the network of that counted report), so a few networks
+ * cannot use up the day's hand-overs with made-up stores. A store refused by
+ * a cap is handed over on a later counted servable report. Every refusal is
+ * checked first WITHOUT the lock, so repeated reports on a store already
+ * handed over or over a cap never touch it; the lock, which it never waits
+ * for, then serialises the check and the writes (`busy` when taken, retried
+ * on the next report).
  */
 export async function handOverLearnedStore(
     domain: string,
-    anyStoreNetworkHash: string,
+    anyStoreNetwork: CrossStoreNetwork,
     now: Date = new Date(),
 ): Promise<HandoverResult> {
     const suggested = normalizeSuggestedDomain(domain)
     if (!suggested) return { created: false, reason: 'not_a_store' }
-    const handedOver = await prisma.learnedCouponBoxHandover.findUnique({
-        where: { domain },
-        select: { domain: true },
-    })
-    if (handedOver) return { created: false, reason: 'already' }
+    const refused = await handoverRefusal(prisma, domain, anyStoreNetwork, now)
+    if (refused) return { created: false, reason: refused }
     return prisma.$transaction(async (tx): Promise<HandoverResult> => {
-        const [lock] = await tx.$queryRaw<
-            { locked: boolean }[]
-        >`SELECT pg_try_advisory_xact_lock(hashtextextended(${'learned-coupon-box:handover'}, 0)) AS locked`
-        if (lock?.locked !== true) return { created: false, reason: 'busy' }
-        // Read again under the lock: the read above may have raced another.
-        const existing = await tx.learnedCouponBoxHandover.findUnique({
-            where: { domain },
-            select: { domain: true },
-        })
-        if (existing) return { created: false, reason: 'already' }
-        const today = await tx.learnedCouponBoxHandover.count({
-            where: { handedOverAt: { gte: daysBefore(now, 1) } },
-        })
-        if (today >= LEARNED_BOX_RULES.handoverDailyCap) {
-            return { created: false, reason: 'daily_cap' }
+        if (!(await tryLock(tx, HANDOVER_LOCK_KEY))) {
+            return { created: false, reason: 'busy' }
         }
-        const fromNetwork = await tx.learnedCouponBoxNetworkEvent.count({
-            where: {
-                networkHash: anyStoreNetworkHash,
-                kind: 'handover',
-                createdAt: {
-                    gt: new Date(now.getTime() - NETWORK_EVENT_WINDOW_MS),
-                },
-            },
-        })
-        if (fromNetwork >= LEARNED_BOX_RULES.handoversPerNetworkPerDay) {
-            return { created: false, reason: 'network_cap' }
-        }
-        await tx.learnedCouponBoxNetworkEvent.create({
-            data: {
-                networkHash: anyStoreNetworkHash,
-                kind: 'handover',
-                createdAt: now,
-            },
-        })
+        // Read again under the lock: the reads above may have raced another.
+        const again = await handoverRefusal(tx, domain, anyStoreNetwork, now)
+        if (again) return { created: false, reason: again }
+        await recordNetworkEvent(tx, anyStoreNetwork, 'handover', now)
         await tx.learnedCouponBoxHandover.create({
             data: { domain, handedOverAt: now },
         })

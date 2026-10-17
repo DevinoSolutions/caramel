@@ -9,6 +9,7 @@ import {
     learnedBoxReportSchema,
     recordLearnedBoxReport,
     reportStoreDomain,
+    type CrossStoreNetwork,
 } from '@/lib/couponBoxLearned'
 import { hasServedStoreConfig } from '@/lib/couponsRepo'
 import { getClientIp } from '@/lib/rateLimit'
@@ -30,9 +31,11 @@ import { NextResponse, type NextRequest } from 'next/server'
 //                                                 confirmed: nothing to count
 //   { recorded: false, reason: 'ignored' }        a cap refused it (new
 //                                                 reporters per network, per
-//                                                 box, boxes per store), or
-//                                                 another report for the
-//                                                 store held its lock
+//                                                 box, boxes per store, new
+//                                                 boxes per network or block,
+//                                                 the provisional-store
+//                                                 pool), or a lock it needed
+//                                                 was taken
 //   400 invalid · 413 too large · 403 non-extension Origin · 429 rate limit
 
 // A report is four short selectors and a few enums: 4 KiB is generous.
@@ -108,20 +111,23 @@ async function handleReport(req: NextRequest): Promise<NextResponse> {
         // install is one reporter on every host of the store.
         const store = reportStoreDomain(report)
         const ip = getClientIp(req)
-        const anyStoreNetworkHash = hashNetworkAcrossStores(ip)
+        const anyStoreNetwork = hashNetworkAcrossStores(ip)
         const result = await recordLearnedBoxReport({
             report,
             installHash: hashInstallId(report.installId, store),
             networkHash: hashNetwork(ip, store),
-            anyStoreNetworkHash,
+            anyStoreNetwork,
         })
         if (!result.recorded) {
             return json({ recorded: false, reason: result.reason })
         }
         // Once per store ever and capped per day (handOverLearnedStore), so
-        // asking on every servable report also retries one refused by the cap.
-        if (result.servable) {
-            await feedStorePipeline(store, anyStoreNetworkHash)
+        // asking on every counted servable report also retries one refused
+        // by a cap. Only a COUNTED report: one that changed nothing (another
+        // network, or inside its 24h window) cannot spend the hand-over caps
+        // in its network's name.
+        if (result.servable && result.counted) {
+            await feedStorePipeline(store, anyStoreNetwork)
         }
         return json({ recorded: true })
     } catch (error) {
@@ -145,10 +151,10 @@ async function handleReport(req: NextRequest): Promise<NextResponse> {
  * already committed. */
 async function feedStorePipeline(
     domain: string,
-    anyStoreNetworkHash: string,
+    anyStoreNetwork: CrossStoreNetwork,
 ): Promise<void> {
     try {
-        const result = await handOverLearnedStore(domain, anyStoreNetworkHash)
+        const result = await handOverLearnedStore(domain, anyStoreNetwork)
         if (result.created) {
             console.info('[coupon-box-learned] store handed to the pipeline', {
                 domain,

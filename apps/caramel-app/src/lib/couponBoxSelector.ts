@@ -31,13 +31,15 @@
 // or `expression` anywhere. So no selector lists (`,`), no `:has(`, no
 // `:nth-last-*`, no pseudo-elements, no escapes, no comments.
 //
-// And nothing that looks like data about a person, anywhere in it (an
-// attribute value, an id, a class): no `@` (or `%40`), which is how an email
-// address would appear, and no run of 6 or more digits, which is how a phone,
-// card, order or account number would. A store's markup can carry such data
-// (`[data-customer-email="..."]`), and the privacy policy promises a box
-// location never holds anything about the shopper. A real coupon box is found
-// without them; a selector that needs them is refused whole.
+// And nothing that looks like data about a person (holdsPersonalData): no
+// `@` (or `%40`) anywhere, which is how an email address would appear, and in
+// an attribute value (other than `id`) no number of 6 or more digits, even
+// split by spaces, dashes or dots, which is how a phone, card, order or
+// account number would (`[data-phone="555-123-4567"]`). A store's markup can
+// carry such data (`[data-customer-email="..."]`). Ids and classes may hold
+// long numbers: stores generate them (`#shopify-section-template--1671...`),
+// and they name an element rather than carry a value. A real coupon box is
+// found without such values; a selector that needs one is refused whole.
 
 const MAX_CHARS = 256
 const MAX_COMPOUNDS = 4
@@ -57,7 +59,11 @@ const PLAIN_PSEUDO_RE =
     /^:(?:first-child|last-child|first-of-type|last-of-type|only-of-type)(?![A-Za-z0-9_(-])/
 const NTH_PSEUDO_RE = /^:(?:nth-child|nth-of-type)\([1-9][0-9]?\)/
 const FORBIDDEN_RE = /javascript:|url\s*\(|expression/i
-const PERSONAL_DATA_RE = /@|%40|[0-9]{6}/i
+const EMAIL_SIGN_RE = /@|%40/i
+// 6 or more digits, which a page may group with spaces, dashes or dots.
+const LONG_NUMBER_RE = /[0-9](?:[ .-]*[0-9]){5,}/
+// An attribute selector with a value, once the grammar has accepted it.
+const ATTR_VALUE_RE = /\[([a-z0-9-]+)[$^*]?=("[^"]*"|[A-Za-z0-9_-]+)\]/
 
 interface Cursor {
     s: string
@@ -103,47 +109,100 @@ function compound(c: Cursor): boolean {
     return c.i > start
 }
 
-/** Whether `selector` is inside the learned coupon box grammar above. */
-export function isLearnedBoxSelector(selector: string): boolean {
-    if (selector.length === 0 || selector.length > MAX_CHARS) return false
-    if (FORBIDDEN_RE.test(selector)) return false
-    if (PERSONAL_DATA_RE.test(selector)) return false
+/** The selector's compounds in order (`form.a button[x]` -> `form.a`,
+ * `button[x]`), or null when it is outside the grammar above. */
+function compoundsOf(selector: string): string[] | null {
+    if (selector.length === 0 || selector.length > MAX_CHARS) return null
+    if (FORBIDDEN_RE.test(selector)) return null
     const c: Cursor = { s: selector, i: 0, attributes: 0 }
-    let compounds = 0
+    const compounds: string[] = []
     for (;;) {
-        if (!compound(c)) return false
-        compounds += 1
-        if (compounds > MAX_COMPOUNDS) return false
-        if (c.attributes > MAX_ATTRIBUTES) return false
-        if (c.i === c.s.length) return true
+        const start = c.i
+        if (!compound(c)) return null
+        compounds.push(selector.slice(start, c.i))
+        if (compounds.length > MAX_COMPOUNDS) return null
+        if (c.attributes > MAX_ATTRIBUTES) return null
+        if (c.i === c.s.length) return compounds
         const spaces = take(c, /^ +/)
         const combinator = take(c, /^[>+~] */)
-        if (!spaces && !combinator) return false
-        if (c.i === c.s.length) return false
+        if (!spaces && !combinator) return null
+        if (c.i === c.s.length) return null
     }
 }
 
+/** An `@` anywhere, or a long number in an attribute value other than `id`.
+ * Call it on a selector inside the grammar. */
+function holdsPersonalData(selector: string): boolean {
+    if (EMAIL_SIGN_RE.test(selector)) return true
+    const values = new RegExp(ATTR_VALUE_RE.source, 'g')
+    for (let m = values.exec(selector); m; m = values.exec(selector)) {
+        if (m[1] !== 'id' && LONG_NUMBER_RE.test(m[2] ?? '')) return true
+    }
+    return false
+}
+
+/** Whether `selector` is inside the learned coupon box grammar above and
+ * holds nothing that looks like personal data. */
+export function isLearnedBoxSelector(selector: string): boolean {
+    return compoundsOf(selector) !== null && !holdsPersonalData(selector)
+}
+
 // Words that name a control that spends money or changes the cart, never one
-// that applies a code. Matched with the separators taken out, so
-// `place-order`, `place_order` and `placeOrder` are all `placeorder`.
-const RISKY_CONTROL_JOINED_RE =
-    /checkout|placeorder|submitorder|paynow|buynow|purchase|delete|remove/
-// Matched as whole words only: `pay` must not refuse `display`.
-const RISKY_CONTROL_WORDS = new Set(['pay', 'buy'])
+// that applies a code. Matched as whole words of the lower-cased name, split
+// on anything not a letter or digit: `place-order` and `place_order` are the
+// pair `place order`, `placeOrder` is the word `placeorder`. Never inside a
+// word: `display`, `buyer` and `PayPal` are not `pay` or `buy`.
+const RISKY_CONTROL_WORDS: ReadonlySet<string> = new Set([
+    'checkout',
+    'pay',
+    'buy',
+    'purchase',
+    'delete',
+    'remove',
+    'paynow',
+    'buynow',
+    'placeorder',
+    'submitorder',
+])
+const RISKY_CONTROL_PAIRS: ReadonlySet<string> = new Set([
+    'check out',
+    'place order',
+    'submit order',
+    'pay now',
+    'buy now',
+])
 
 /**
  * Whether an APPLY or TOGGLE selector names a control that could place an
- * order, pay, or delete something: checkout, place order, submit order, pay,
- * buy, purchase, delete, remove. The extension clicks these selectors, so the
- * server refuses them outright. This is defence in depth: the extension's own
- * apply-control check on the page is what actually stops a wrong click. The
- * coupon field itself is not checked (typing into it clicks nothing).
+ * order, pay, or delete something (RISKY_CONTROL_WORDS). The extension clicks
+ * these selectors, so the server refuses them outright.
+ *
+ * Only the LAST compound is read, the element that is clicked: its type, id,
+ * classes and attribute VALUES. Ancestors are not (WooCommerce's own apply
+ * button is `form.checkout_coupon button[name=apply_coupon]`), nor attribute
+ * names (`button[data-buy-box]` says what data the element carries), nor what
+ * `:not(...)` excludes. This is defence in depth and can be bypassed: a
+ * substring or position selector (`[aria-label*=heckout]`,
+ * `[id^=check][id$=out]`, `.cart__footer button[type=submit]`) names no risky
+ * word, and neither does a joined camelCase word like `checkoutButton`. The
+ * extension's own apply-control check on the page is what actually stops a
+ * wrong click. The coupon field itself is not checked (typing into it clicks
+ * nothing).
  */
 export function isRiskyControlSelector(selector: string): boolean {
-    const words = selector
-        .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    const compounds = compoundsOf(selector)
+    const clicked = compounds
+        ? (compounds[compounds.length - 1] ?? '')
+        : selector
+    const words = clicked
+        .replace(/:not\([^)]*\)/g, ' ')
+        .replace(/\[[a-z0-9-]+/gi, ' ')
         .toLowerCase()
         .split(/[^a-z0-9]+/)
-    if (words.some(w => RISKY_CONTROL_WORDS.has(w))) return true
-    return RISKY_CONTROL_JOINED_RE.test(words.join(''))
+        .filter(Boolean)
+    return words.some(
+        (word, i) =>
+            RISKY_CONTROL_WORDS.has(word) ||
+            RISKY_CONTROL_PAIRS.has(`${word} ${words[i + 1] ?? ''}`),
+    )
 }

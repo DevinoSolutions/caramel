@@ -151,34 +151,42 @@ const PrivacyPolicy = () => {
                                 descriptions are read from the store&apos;s own
                                 page, so they can contain text from that
                                 page&apos;s markup, such as a field&apos;s label
-                                or placeholder, but never anything you typed or
-                                anything about you. These records do not contain
-                                the install ID or your IP address, only salted
-                                hashes of the install ID and of the network part
-                                of your IP address (its first three parts), made
-                                separately for each store with a secret key that
-                                we hold, so the records for one store cannot be
-                                joined with the records for another store in our
-                                database. We use them only to count how many
-                                different installs and networks confirmed a box
-                                or reported it failing. Separately, to limit
-                                abuse, when a report adds a new box or leads to
-                                a store being added to our list of stores to
-                                support, we keep a salted hash of the network
-                                part of your IP address on its own, tied to no
-                                store and no install, with the time, and delete
-                                it after 24 hours. The reports carry no account.
-                                Because we hold the key and may hold your
-                                install ID with your account, we could in
-                                principle recompute the hash for a known install
-                                ID; we do not do this. Once installs on several
-                                different networks have confirmed a box, the
-                                extension may use it on that store without
-                                asking the AI model, and the store may be added
-                                to our list of stores to support. Apart from
-                                what the selectors name, these reports never
-                                include page text, and they never include codes,
-                                your cart, or your account.
+                                or placeholder, but never anything you typed. A
+                                store&apos;s markup can also carry details about
+                                you, so our server refuses a description with an
+                                @ sign in it, or with a number of six or more
+                                digits (even split by spaces, dashes or dots) in
+                                a value such as a label or placeholder, which is
+                                how an email address or a phone, card or order
+                                number would appear there. These records do not
+                                contain the install ID or your IP address, only
+                                salted hashes of the install ID and of the
+                                network part of your IP address (its first three
+                                parts), made separately for each store with a
+                                secret key that we hold, so the records for one
+                                store cannot be joined with the records for
+                                another store in our database. We use them only
+                                to count how many different installs and
+                                networks confirmed a box or reported it failing.
+                                Separately, to limit abuse, when a report adds a
+                                new box or leads to a store being added to our
+                                list of stores to support, we keep salted hashes
+                                of the network part of your IP address and of a
+                                wider part of it (its first two parts), with no
+                                store and no install in them, and only the hour,
+                                not the exact time; we delete them within 25
+                                hours. The reports carry no account. Because we
+                                hold the key and may hold your install ID with
+                                your account, we could in principle recompute
+                                the hash for a known install ID; we do not do
+                                this. Once installs on several different
+                                networks have confirmed a box, the extension may
+                                use it on that store without asking the AI
+                                model, and the store may be added to our list of
+                                stores to support. Apart from what the selectors
+                                name, these reports never include page text, and
+                                they never include codes, your cart, or your
+                                account.
                             </>,
                             <>
                                 <strong>Coupon results.</strong> Which codes
@@ -359,7 +367,7 @@ const PrivacyPolicy = () => {
                             'Sign-in sessions expire after 7 days (website sessions are extended while you stay active); signing out ends the session and deletes its record immediately. Records of sessions that expire without signing out, including their IP address and browser type, are kept until you delete your account.',
                             'Cart page summaries are not stored in our database. They are processed to classify your cart, and the result is kept in temporary memory for up to 24 hours so the same cart is not processed twice.',
                             'Cart-page outlines (see “Finding the promo-code box” above) are not stored in our database. The model’s answer, which control is the code box, is kept in temporary memory for up to 24 hours for that store and page shape so the same page is not processed twice, looked up by a one-way hash of the store and outline rather than by the outline itself. Your IP address is used to rate-limit these requests. The outcome event described above is kept in our self-hosted analytics.',
-                            'Promo-code box locations (see “Remembering a promo-code box that worked” above) are kept while shoppers keep confirming them: the store’s hostname and domain, the CSS selectors, at most 5 boxes per store, and for each install that reported on a box, the per-store salted hashes described there, whether it last confirmed the box or reported it failing, and when. At most 50 installs are kept per box; to make room, the record of an install that adds nothing to the counts is deleted first (for example a second install on a network already counted), and the only recent failure report from a network is never deleted. A box nobody has confirmed for 30 days is no longer used. A box nobody has confirmed for 60 days is deleted with everything recorded about it, and an install’s record on a box is deleted 60 days after that install last reported on it. The network records kept to limit abuse are deleted after 24 hours.',
+                            'Promo-code box locations (see “Remembering a promo-code box that worked” above) are kept while shoppers keep confirming them: the store’s hostname and domain, the CSS selectors, at most 5 boxes per store, and for each install that reported on a box, the per-store salted hashes described there, whether it last confirmed the box or reported it failing, and when. At most 50 installs are kept per box; to make room, the record of an install that adds nothing to the counts is deleted first (for example a second install on a network already counted), and the only recent failure report from a network is never deleted. A box nobody has confirmed for 30 days is no longer used. A box nobody has confirmed for 60 days is deleted with everything recorded about it, and an install’s record on a box is deleted 60 days after that install last reported on it. The network records kept to limit abuse are deleted within 25 hours.',
                             'Coupon results without an account are kept only as anonymous per-code totals (when a code last worked or failed, and the store’s last error message).',
                             'Shared codes stay published while they are valid; deleting your account removes the link between a shared code and you.',
                             'Server logs, which can include IP addresses and browser type, are kept for up to 90 days for security and troubleshooting.',
@@ -536,7 +544,7 @@ const PrivacyPolicy = () => {
             >
                 <div className="mb-6 inline-flex items-center gap-3 rounded-full bg-caramel/10 px-6 py-3 text-sm font-semibold text-caramel">
                     <FaShieldAlt className="h-4 w-4" />
-                    Effective Date: October 16, 2026
+                    Effective Date: October 17, 2026
                 </div>
                 <p className="mx-auto max-w-4xl text-lg leading-relaxed text-gray-600 dark:text-gray-300">
                     Welcome to{' '}

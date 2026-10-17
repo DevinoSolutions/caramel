@@ -78,7 +78,7 @@ describe('privacy policy coverage', () => {
             "Devino's own AI model proxy",
             "which currently passes the request to NVIDIA's hosted model service (NIM)",
             'The only other page content the extension sends is the trimmed cart-page outline described under “Finding the promo-code box on a cart page” and the promo-code box locations described under “Remembering a promo-code box that worked”, and only as described there.',
-            'Effective Date: October 16, 2026',
+            'Effective Date: October 17, 2026',
             'for that store and page shape',
             'Your IP address is used to rate-limit these requests.',
         ]) {
@@ -98,7 +98,8 @@ describe('privacy policy coverage', () => {
             'made separately for each store with a secret key that we hold',
             'cannot be joined with the records for another store in our database',
             "they can contain text from that page's markup",
-            'but never anything you typed or anything about you',
+            'but never anything you typed.',
+            'our server refuses a description with an @ sign in it, or with a number of six or more digits (even split by spaces, dashes or dots) in a value such as a label or placeholder',
             'we could in principle recompute the hash for a known install ID; we do not do this.',
             'Apart from what the selectors name, these reports never include page text, and they never include codes, your cart, or your account.',
             'Promo-code box locations',
@@ -108,8 +109,8 @@ describe('privacy policy coverage', () => {
             'A box nobody has confirmed for 30 days is no longer used.',
             'A box nobody has confirmed for 60 days is deleted with everything recorded about it',
             '60 days after that install last reported on it',
-            'we keep a salted hash of the network part of your IP address on its own, tied to no store and no install, with the time, and delete it after 24 hours',
-            'The network records kept to limit abuse are deleted after 24 hours.',
+            'we keep salted hashes of the network part of your IP address and of a wider part of it (its first two parts), with no store and no install in them, and only the hour, not the exact time; we delete them within 25 hours.',
+            'The network records kept to limit abuse are deleted within 25 hours.',
         ]) {
             expect(normalized).toContain(claim)
         }
@@ -117,6 +118,10 @@ describe('privacy policy coverage', () => {
         // unrecoverable, and the install ID can sit with an account.
         for (const overclaim of [
             'without being able to recover either',
+            // The server refuses only what looks like an email address or a
+            // long number, so it cannot promise nothing about you gets in.
+            'anything you typed or anything about you',
+            'tied to no store',
             'we do not link these reports to your account',
             'they never contain what is in them',
             'the oldest are deleted first',

@@ -53,6 +53,7 @@ import {
     hashNetworkAcrossStores,
     learnedBoxReportSchema,
     learnedStoreDomain,
+    networkBlock,
     networkPrefix,
 } from '@/lib/couponBoxLearned'
 
@@ -112,6 +113,10 @@ beforeEach(() => {
     suggestMock.mockClear()
 })
 
+/** The cross-store network and block hashes of one address. */
+const net = (ip: string) => hashNetworkAcrossStores(ip).network
+const block = (ip: string) => hashNetworkAcrossStores(ip).block
+
 describe('POST /api/extension/coupon-box-learned', () => {
     it('records a valid report with the salted hashes, never the raw install id or IP', async () => {
         const res = await post(goodReport())
@@ -122,7 +127,7 @@ describe('POST /api/extension/coupon-box-learned', () => {
         const call = recordMock.mock.calls[0]?.[0] as {
             installHash: string
             networkHash: string
-            anyStoreNetworkHash: string
+            anyStoreNetwork: { network: string; block: string }
         }
         expect(call.installHash).toBe(
             hashInstallId(INSTALL_ID, 'shop-example.com'),
@@ -132,7 +137,7 @@ describe('POST /api/extension/coupon-box-learned', () => {
         expect(call.networkHash).toBe(
             hashNetwork('203.0.113.99', 'shop-example.com'),
         )
-        expect(call.anyStoreNetworkHash).toBe(
+        expect(call.anyStoreNetwork).toEqual(
             hashNetworkAcrossStores('203.0.113.99'),
         )
     })
@@ -348,6 +353,15 @@ describe('POST /api/extension/coupon-box-learned', () => {
     it('hands the store to the pipeline only when the box is servable', async () => {
         await post(goodReport())
         expect(suggestMock).not.toHaveBeenCalled()
+        // A report that counted nothing (another network, or inside its
+        // window) never hands a store over, servable or not.
+        recordMock.mockImplementationOnce(async () => ({
+            recorded: true as const,
+            counted: false,
+            servable: true,
+        }))
+        await post(goodReport())
+        expect(suggestMock).not.toHaveBeenCalled()
         recordMock.mockImplementationOnce(async () => ({
             recorded: true as const,
             counted: true,
@@ -435,10 +449,10 @@ describe('POST /api/extension/coupon-box-learned', () => {
         expect(call.installHash).toBe(
             hashInstallId(INSTALL_ID, 'mystore.myshopify.com'),
         )
-        expect(suggestMock).toHaveBeenCalledWith(
-            'mystore.myshopify.com',
-            expect.stringMatching(/^[0-9a-f]{64}$/),
-        )
+        expect(suggestMock).toHaveBeenCalledWith('mystore.myshopify.com', {
+            network: expect.stringMatching(/^[0-9a-f]{64}$/),
+            block: expect.stringMatching(/^[0-9a-f]{64}$/),
+        })
     })
 
     it('a database error is a 500, never a quiet "recorded"', async () => {
@@ -473,22 +487,30 @@ describe('reporter identity', () => {
     })
 
     it('the cross-store network hash is per network PREFIX, not per address, and never equals a per-store hash', () => {
-        expect(hashNetworkAcrossStores('203.0.113.5')).toBe(
-            hashNetworkAcrossStores('203.0.113.250'),
-        )
-        expect(hashNetworkAcrossStores('203.0.113.5')).not.toBe(
-            hashNetworkAcrossStores('203.0.114.5'),
-        )
+        expect(net('203.0.113.5')).toBe(net('203.0.113.250'))
+        expect(net('203.0.113.5')).not.toBe(net('203.0.114.5'))
         // Every address of one IPv6 /48 is one network...
-        expect(hashNetworkAcrossStores('2001:db8:abcd:1::1')).toBe(
-            hashNetworkAcrossStores('2001:db8:abcd:ffff:1:2:3:4'),
+        expect(net('2001:db8:abcd:1::1')).toBe(
+            net('2001:db8:abcd:ffff:1:2:3:4'),
         )
-        expect(hashNetworkAcrossStores('2001:db8:abcd::1')).not.toBe(
-            hashNetworkAcrossStores('2001:db8:abce::1'),
-        )
-        expect(hashNetworkAcrossStores('203.0.113.5')).not.toBe(
-            hashNetwork('203.0.113.5', ''),
-        )
+        expect(net('2001:db8:abcd::1')).not.toBe(net('2001:db8:abce::1'))
+        expect(net('203.0.113.5')).not.toBe(hashNetwork('203.0.113.5', ''))
+    })
+
+    it('the block hash is per /16 IPv4 and per /32 IPv6, and never equals a network hash', () => {
+        expect(networkBlock('203.0.113.5')).toBe('v4:203.0')
+        expect(networkBlock('::ffff:203.0.113.5')).toBe('v4:203.0')
+        expect(networkBlock('2001:db8:abcd:1::1')).toBe('v6:2001:db8')
+        expect(networkBlock('2001:0db8::1')).toBe('v6:2001:db8')
+        expect(networkBlock('not an ip')).toBe('unknown')
+        // Different /24s, and different /48s, of one block share it...
+        expect(block('203.0.113.5')).toBe(block('203.0.200.9'))
+        expect(block('2001:db8:abcd::1')).toBe(block('2001:db8:1234::1'))
+        // ...and the next block over does not.
+        expect(block('203.0.113.5')).not.toBe(block('203.1.113.5'))
+        expect(block('2001:db8:abcd::1')).not.toBe(block('2001:db9:abcd::1'))
+        const both = hashNetworkAcrossStores('203.0.113.5')
+        expect(both.block).not.toBe(both.network)
     })
 
     it('hashes depend on the salt and never contain the input', () => {

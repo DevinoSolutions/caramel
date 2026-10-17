@@ -105,8 +105,13 @@ describe('learned coupon box selector grammar', () => {
         ['an email in aria-label', 'input[aria-label="Code for a@b.com"]'],
         ['an encoded @', 'input[data-user="a%40b.com"]'],
         ['a phone number in a value', 'input[data-phone="5551234567"]'],
-        ['a card or order number in an id', '#order-123456 input'],
-        ['an account number in a class', '.acct-0012345678 input'],
+        ['a phone number split by dashes', 'input[data-phone="555-123-4567"]'],
+        ['a phone number split by dots', 'input[data-phone="555.123.4567"]'],
+        [
+            'a card number split by spaces',
+            'input[data-card="4111 1111 1111 1111"]',
+        ],
+        ['a number in an unquoted value', 'input[data-order=n-555-123-4567]'],
         ['a long number in a placeholder', 'input[placeholder="Ref 1234567"]'],
     ])('refuses personal data: %s', (_, selector) => {
         expect(isLearnedBoxSelector(selector)).toBe(false)
@@ -114,12 +119,21 @@ describe('learned coupon box selector grammar', () => {
 
     it.each([
         'input[data-step="12345"]',
+        'input[data-price="19.99"]',
         '#promo-2024',
         'li:nth-child(12) input',
         'input[placeholder="Enter code (e.g. SAVE10)"]',
-    ])('still accepts short numbers: %s', selector => {
-        expect(isLearnedBoxSelector(selector)).toBe(true)
-    })
+        // Ids and classes name an element; stores generate long numbers in
+        // them, and they carry no value about the shopper.
+        '#shopify-section-template--16712345678__main input',
+        '.acct-0012345678 input',
+        'input[id="field-123456789"]',
+    ])(
+        'accepts short numbers, and long ones in ids and classes: %s',
+        selector => {
+            expect(isLearnedBoxSelector(selector)).toBe(true)
+        },
+    )
 })
 
 describe('apply and toggle selectors that name a risky control', () => {
@@ -153,7 +167,29 @@ describe('apply and toggle selectors that name a risky control', () => {
         'a.display-promo',
         'button[data-action="payload-free"]',
         'button.buyer-promo',
+        // Only the element that is clicked is read, never its ancestors:
+        // WooCommerce's own apply button, inside its checkout_coupon form.
+        'form.checkout_coupon button[name=apply_coupon]',
+        '.coupon .purchase-summary button',
+        '#checkout > div > button.apply',
+        // Whole words only: PayPal is not `pay`.
+        '#PayPal-apply',
+        // An attribute's NAME says what data it carries, not what it does.
+        'button[data-buy-box]',
+        // What `:not(...)` excludes is not what the element is.
+        'button.apply:not(.checkout)',
     ])('accepts %s', selector => {
         expect(isRiskyControlSelector(selector)).toBe(false)
     })
+
+    it.each([
+        // The clicked element still names it, whatever its ancestors are.
+        'form.coupon button.checkout',
+        '.promo > button[name="place_order"]',
+    ])(
+        'refuses a risky last compound behind a harmless ancestor: %s',
+        selector => {
+            expect(isRiskyControlSelector(selector)).toBe(true)
+        },
+    )
 })
