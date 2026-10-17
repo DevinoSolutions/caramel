@@ -200,7 +200,7 @@ describe('writeUsageDiagnosticsConsent and the telemetry id', () => {
         expect(localData).toEqual({})
     })
 
-    it('REJECTS when storage refuses the record: no consent is recorded, so nothing can send (the id left behind is inert and reused by the next accept)', async () => {
+    it('REJECTS when storage refuses the record: no consent is recorded, so nothing can send (the id left behind is inert and overwritten by a fresh one on the next accept)', async () => {
         browser.storage.local.set = (_items, cb) => {
             browser.runtime.lastError = { message: 'quota exceeded' }
             cb()
