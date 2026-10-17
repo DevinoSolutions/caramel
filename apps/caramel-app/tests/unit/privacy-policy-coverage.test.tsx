@@ -68,6 +68,7 @@ describe('privacy policy coverage', () => {
         for (const claim of [
             'Finding the promo-code box on a cart page.',
             "Nothing new is sent to Caramel for that, except that the extension reads Caramel's feature switches",
+            'if the box it found works, reports where the box is',
             'only after you tap to apply codes',
             "the store's hostname and a trimmed outline",
             'every digit is replaced with "#"',
@@ -76,12 +77,59 @@ describe('privacy policy coverage', () => {
             'never contains text you typed into fields',
             "Devino's own AI model proxy",
             "which currently passes the request to NVIDIA's hosted model service (NIM)",
-            'The only other page content the extension sends is the trimmed cart-page outline described under “Finding the promo-code box on a cart page”, and only as described there.',
-            'Effective Date: October 14, 2026',
+            'The only other page content the extension sends is the trimmed cart-page outline described under “Finding the promo-code box on a cart page” and the promo-code box locations described under “Remembering a promo-code box that worked”, and only as described there.',
+            'Effective Date: October 17, 2026',
             'for that store and page shape',
             'Your IP address is used to rate-limit these requests.',
         ]) {
             expect(normalized).toContain(claim)
+        }
+    })
+
+    it('discloses what a learned promo-code box report sends and keeps', () => {
+        const normalized = text.replace(/&quot;/g, '"').replace(/\s+/g, ' ')
+        for (const claim of [
+            'Remembering a promo-code box that worked.',
+            'and the store responds to a code typed into it',
+            'short technical descriptions (CSS selectors)',
+            'the random install ID the extension created when it was installed',
+            'the same ID described under “How you first found Caramel” below',
+            'These records do not contain the install ID or your IP address, only salted hashes',
+            'made separately for each store with a secret key that we hold',
+            'cannot be joined with the records for another store in our database',
+            "they can contain text from that page's markup",
+            'but never anything you typed.',
+            'our server refuses a description with an @ sign in it, or with a number of six or more digits (even split by spaces, dashes or dots) in a value such as a label or placeholder',
+            'we could in principle recompute the hash for a known install ID; we do not do this.',
+            'Apart from what the selectors name, these reports never include page text, and they never include codes, your cart, or your account.',
+            'Promo-code box locations',
+            'at most 5 boxes per store',
+            'At most 50 installs are kept per box',
+            'the only recent failure report from a network is never deleted',
+            'A box nobody has confirmed for 30 days is no longer used.',
+            'A box nobody has confirmed for 60 days is deleted with everything recorded about it',
+            '60 days after that install last reported on it',
+            'we keep salted hashes of the network part of your IP address and of a wider part of it (its first two parts), with no store and no install in them, and only the hour, not the exact time; we delete them within 25 hours.',
+            'The network records kept to limit abuse are deleted within 25 hours.',
+        ]) {
+            expect(normalized).toContain(claim)
+        }
+        // Claims the code cannot back: a hash under a key we hold is not
+        // unrecoverable, and the install ID can sit with an account.
+        for (const overclaim of [
+            'without being able to recover either',
+            // The server refuses only what looks like an email address or a
+            // long number, so it cannot promise nothing about you gets in.
+            'anything you typed or anything about you',
+            'tied to no store',
+            'we do not link these reports to your account',
+            'they never contain what is in them',
+            'the oldest are deleted first',
+            // A failing install's record CAN be deleted to make room (a
+            // second install on a network already counted).
+            'never one whose last report was a failure',
+        ]) {
+            expect(normalized).not.toContain(overclaim)
         }
     })
 

@@ -202,6 +202,48 @@ const serverObjectSchema = z.object({
         v => (typeof v === 'string' && v.trim() === '' ? undefined : v),
         z.coerce.number().int().min(0).default(2000),
     ),
+    // Which finder goes first on a cart page with no store config, advertised
+    // to the extension as `couponBoxPickMode` on GET /api/extension/features
+    // (only while the pick is on; otherwise always 'rules_first').
+    //   rules_first  the rules find the box; the pick is asked only when they
+    //                find nothing (the default, today's behaviour)
+    //   llm_first    the pick is asked first; any miss or error falls back to
+    //                the rules
+    //   llm_only     the pick is the only finder (battle tests and deliberate
+    //                experiments, never a default)
+    // Every safety check on the extension side runs in every mode. A blank
+    // value reads as the default; anything else outside the three fails boot.
+    COUPON_BOX_PICK_MODE: z.preprocess(
+        v => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+        z.enum(['rules_first', 'llm_first', 'llm_only']).default('rules_first'),
+    ),
+    // The learned coupon box's own switch (couponBoxLearned.ts), separate from
+    // the pick so the AI pick can run without the crowd-sourced write path.
+    // Live only when this is 'true' AND the pick is on (COUPON_BOX_LLM_ENABLED
+    // + COUPON_BOX_PICK_MODEL); the extension reads the same condition as
+    // `couponBoxLearned` on GET /api/extension/features. Off = POST
+    // /api/extension/coupon-box-learned records nothing and the pick never
+    // answers from the table. Only 'true' or 'false'; 'true' without
+    // COUPON_BOX_LEARNED_SALT fails boot (superRefine below).
+    COUPON_BOX_LEARNED_ENABLED: z
+        .enum(['true', 'false'])
+        .default('false')
+        .transform(value => value === 'true'),
+    // Salt for the one-way hashes the learned coupon box keeps: the
+    // extension's anonymous install id and the reporter's network prefix are
+    // stored only as HMAC-SHA256 under this salt, never in the clear. Required
+    // when COUPON_BOX_LEARNED_ENABLED is 'true'; set = at least 32 characters,
+    // or boot fails. Changing it starts every install's identity over (old
+    // hashes no longer match), so rotate it only on purpose.
+    COUPON_BOX_LEARNED_SALT: z.preprocess(
+        v => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+        z
+            .string()
+            .min(32, {
+                error: 'COUPON_BOX_LEARNED_SALT must be at least 32 characters',
+            })
+            .optional(),
+    ),
     // Paid fallback through the Devino proxy (src/lib/proxy-fallback-headers.ts):
     // the app's OWN OpenRouter org key, sent as X-ORF-Fallback-Key only to
     // https://proxyai.devino.ca and only for a signed-in caller; no request
@@ -263,6 +305,19 @@ const serverSchema = serverObjectSchema
     .refine(data => Boolean(data.BETTER_AUTH_SECRET || data.JWT_SECRET), {
         error: 'At least one of BETTER_AUTH_SECRET or JWT_SECRET must be set',
         path: ['BETTER_AUTH_SECRET'],
+    })
+    .superRefine((data, ctx) => {
+        // The learned box hashes every reporter: switched on without a salt it
+        // could not record anything, so that is a boot failure, not a quiet
+        // "no shopper has confirmed a box yet".
+        if (data.COUPON_BOX_LEARNED_ENABLED && !data.COUPON_BOX_LEARNED_SALT) {
+            ctx.addIssue({
+                code: 'custom',
+                path: ['COUPON_BOX_LEARNED_SALT'],
+                message:
+                    'COUPON_BOX_LEARNED_SALT is required when COUPON_BOX_LEARNED_ENABLED is true',
+            })
+        }
     })
     .superRefine((data, ctx) => {
         // Truthiness, not `!== undefined`: .env.example ships APPLE_CLIENT_ID=

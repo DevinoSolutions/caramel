@@ -285,6 +285,88 @@ describe('parseServerEnv', () => {
         }
     })
 
+    it('COUPON_BOX_PICK_MODE defaults to rules_first (also when blank), accepts the three modes, and a typo fails boot', () => {
+        expect(parseServerEnv(validServerFixture).COUPON_BOX_PICK_MODE).toBe(
+            'rules_first',
+        )
+        expect(
+            parseServerEnv({ ...validServerFixture, COUPON_BOX_PICK_MODE: ' ' })
+                .COUPON_BOX_PICK_MODE,
+        ).toBe('rules_first')
+        for (const mode of ['rules_first', 'llm_first', 'llm_only']) {
+            expect(
+                parseServerEnv({
+                    ...validServerFixture,
+                    COUPON_BOX_PICK_MODE: mode,
+                }).COUPON_BOX_PICK_MODE,
+            ).toBe(mode)
+        }
+        for (const bad of ['llm', 'LLM_FIRST', 'true']) {
+            expect(() =>
+                parseServerEnv({
+                    ...validServerFixture,
+                    COUPON_BOX_PICK_MODE: bad,
+                }),
+            ).toThrow(/COUPON_BOX_PICK_MODE/)
+        }
+    })
+
+    it('COUPON_BOX_LEARNED_SALT: unset or blank = off, 32+ characters accepted, a short salt fails boot naming the variable', () => {
+        expect(
+            parseServerEnv(validServerFixture).COUPON_BOX_LEARNED_SALT,
+        ).toBeUndefined()
+        expect(
+            parseServerEnv({
+                ...validServerFixture,
+                COUPON_BOX_LEARNED_SALT: '   ',
+            }).COUPON_BOX_LEARNED_SALT,
+        ).toBeUndefined()
+        const salt = 'a'.repeat(32)
+        expect(
+            parseServerEnv({
+                ...validServerFixture,
+                COUPON_BOX_LEARNED_SALT: salt,
+            }).COUPON_BOX_LEARNED_SALT,
+        ).toBe(salt)
+        expect(() =>
+            parseServerEnv({
+                ...validServerFixture,
+                COUPON_BOX_LEARNED_SALT: 'short-salt',
+            }),
+        ).toThrow(/COUPON_BOX_LEARNED_SALT/)
+    })
+
+    it('COUPON_BOX_LEARNED_ENABLED: off by default, only true/false, and on without a salt fails boot', () => {
+        expect(
+            parseServerEnv(validServerFixture).COUPON_BOX_LEARNED_ENABLED,
+        ).toBe(false)
+        const salt = 'b'.repeat(32)
+        expect(
+            parseServerEnv({
+                ...validServerFixture,
+                COUPON_BOX_LEARNED_ENABLED: 'true',
+                COUPON_BOX_LEARNED_SALT: salt,
+            }).COUPON_BOX_LEARNED_ENABLED,
+        ).toBe(true)
+        expect(() =>
+            parseServerEnv({
+                ...validServerFixture,
+                COUPON_BOX_LEARNED_ENABLED: 'true',
+            }),
+        ).toThrow(
+            /COUPON_BOX_LEARNED_SALT is required when COUPON_BOX_LEARNED_ENABLED is true/,
+        )
+        for (const bad of ['yes', '1', 'TRUE']) {
+            expect(() =>
+                parseServerEnv({
+                    ...validServerFixture,
+                    COUPON_BOX_LEARNED_ENABLED: bad,
+                    COUPON_BOX_LEARNED_SALT: salt,
+                }),
+            ).toThrow(/COUPON_BOX_LEARNED_ENABLED/)
+        }
+    })
+
     it('(g) the Playwright/CI-only read key present in app env throws (key hygiene)', () => {
         expect(() =>
             parseServerEnv({

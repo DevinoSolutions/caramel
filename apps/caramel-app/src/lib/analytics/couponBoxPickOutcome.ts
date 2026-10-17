@@ -36,6 +36,8 @@ export const COUPON_BOX_PICK_OUTCOMES = [
     'box',
     /** 200: the model answered that the page has no coupon box. */
     'no_box',
+    /** 200: answered from a learned coupon box (couponBoxLearned.ts): no model call, no budget. */
+    'learned',
     /** 200 no_pick: COUPON_BOX_LLM_ENABLED is off or no model is configured (body never read). */
     'no_pick:disabled',
     /** 200 no_pick: the model call threw or timed out (already in Sentry). */

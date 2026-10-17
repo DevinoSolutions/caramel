@@ -440,6 +440,131 @@ model SiteSuggestion {
   @@map("site_suggestions")
 }
 
+// A coupon box the extension CONFIRMED on a store with no served config: it
+// typed a code into it and the store answered (the total dropped, or the store
+// showed a coupon reply). src/lib/couponBoxLearned.ts is the ONE home for these
+// tables, their serving rule and their retention. Crowd-sourced, so nothing
+// here is trusted until installs on several networks agree, and it holds ONLY
+// selectors and counters: never page text, outline text, codes, IPs or install
+// ids. At most 5 boxes per store; deleted after 60 days with no confirmation.
+model LearnedCouponBox {
+  id              String                     @id @default(cuid())
+  // The host the box was found on: the pick is asked with it.
+  domain          String
+  // The store the host belongs to (couponBoxLearned.learnedStoreDomain): the
+  // caps, the lock and the reporter hashes are per store, not per host.
+  storeDomain     String                     @map("store_domain")
+  // CSS selectors inside the grammar in src/lib/couponBoxSelector.ts.
+  inputSelector   String                     @map("input_selector")
+  // '' = the box has none. NOT NULL on purpose: Postgres treats NULLs as
+  // distinct, so a nullable column would let the unique key below hold the
+  // same box twice.
+  applySelector   String                     @default("") @map("apply_selector")
+  toggleSelector  String                     @default("") @map("toggle_selector")
+  // The code is applied with Enter (the box has no apply button).
+  enterOnly       Boolean                    @map("enter_only")
+  // Counted reports, for operators: serving reads the reporter rows.
+  confirmations   Int                        @default(0)
+  failures        Int                        @default(0)
+  // Which finder produced the first confirmation: rules | llm | server_learned.
+  firstSource     String                     @map("first_source")
+  firstSeenAt     DateTime                   @default(now()) @map("first_seen_at")
+  // A box is only ever created by a confirmation, so this is always set.
+  lastConfirmedAt DateTime                   @map("last_confirmed_at")
+  lastFailedAt    DateTime?                  @map("last_failed_at")
+  reporters       LearnedCouponBoxReporter[]
+
+  // Leading `domain` also serves the per-store lookup the pick runs.
+  @@unique([domain, inputSelector, applySelector, toggleSelector, enterOnly])
+  // The per-store caps.
+  @@index([storeDomain])
+  // The retention prune.
+  @@index([lastConfirmedAt])
+  @@map("learned_coupon_boxes")
+}
+
+// Who reported a learned box, as salted hashes only, PER STORE: HMAC-SHA256
+// under COUPON_BOX_LEARNED_SALT of (the extension's install id, the store's
+// domain) and of (the reporter's network prefix, /24 IPv4 or /48 IPv6, the
+// store's domain), so rows of two stores cannot be joined. At most 50 per box;
+// deleted after 60 days unseen.
+model LearnedCouponBoxReporter {
+  id              String           @id @default(cuid())
+  boxId           String           @map("box_id")
+  box             LearnedCouponBox @relation(fields: [boxId], references: [id], onDelete: Cascade)
+  installHash     String           @map("install_hash")
+  networkHash     String           @map("network_hash")
+  // This install's COUNTED reports for this box. An install counts at most
+  // once per 24h per outcome; the two timestamps are that clock, and the
+  // later of them is this install's latest word on the box.
+  confirmations   Int              @default(0)
+  failures        Int              @default(0)
+  lastConfirmedAt DateTime?        @map("last_confirmed_at")
+  lastFailedAt    DateTime?        @map("last_failed_at")
+  firstSeenAt     DateTime         @default(now()) @map("first_seen_at")
+  // This install's latest COUNTED report: a report that counts nothing (from
+  // another network, or inside the 24h window) does not move it, so it cannot
+  // keep a row alive. Retention and eviction read it.
+  lastSeenAt      DateTime         @default(now()) @map("last_seen_at")
+
+  @@unique([boxId, installHash])
+  // The per-network cap for new reporters on a box.
+  @@index([boxId, networkHash, firstSeenAt])
+  // The retention prune.
+  @@index([lastSeenAt])
+  @@map("learned_coupon_box_reporters")
+}
+
+// Stores a learned box handed to the store pipeline (site_suggestions,
+// source 'auto_detect'). Never pruned: it is what makes the hand-over happen
+// at most once per store, ever, and it holds only the store's domain.
+model LearnedCouponBoxHandover {
+  domain       String   @id
+  handedOverAt DateTime @default(now()) @map("handed_over_at")
+
+  // The daily cap.
+  @@index([handedOverAt])
+  @@map("learned_coupon_box_handovers")
+}
+
+// The caps learned boxes keep ACROSS stores: two rows each time a report adds
+// a new box (kind 'box') or hands a store to the pipeline (kind 'handover'),
+// one for the reporter's network prefix (/24 IPv4, /48 IPv6) and one for its
+// wider block (/16, /32). networkHash is HMAC-SHA256 under
+// COUPON_BOX_LEARNED_SALT of that prefix alone, with no store. Nothing here
+// can be joined to the per-store tables: no store, a random id (not a cuid,
+// which carries its creation time), and createdAt cut to the hour, so it
+// equals no box, reporter, store or hand-over timestamp (couponBoxLearned
+// writes it; there is no database default). Deleted once out of the day's
+// window.
+model LearnedCouponBoxNetworkEvent {
+  id          String   @id @default(uuid())
+  networkHash String   @map("network_hash")
+  kind        String
+  createdAt   DateTime @map("created_at")
+
+  // The per-network caps.
+  @@index([networkHash, kind, createdAt])
+  // The prune.
+  @@index([createdAt])
+  @@map("learned_coupon_box_network_events")
+}
+
+// One row per store that has learned boxes. establishedAt is null while the
+// store is PROVISIONAL (its boxes confirmed from one network only): at most
+// 5000 such stores exist at once and a new one pushes out the oldest. It is
+// set once a second network confirms one of its boxes, for at most 500
+// stores a day. Deleted with the store's last box.
+model LearnedCouponBoxStore {
+  storeDomain   String    @id @map("store_domain")
+  firstSeenAt   DateTime  @map("first_seen_at")
+  establishedAt DateTime? @map("established_at")
+
+  // The provisional pool (oldest first) and the stores established per day.
+  @@index([establishedAt, firstSeenAt])
+  @@map("learned_coupon_box_stores")
+}
+
 enum UserStatus {
   ACTIVE_USER
   DELETE_REQUESTED_BY_USER

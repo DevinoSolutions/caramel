@@ -58,6 +58,19 @@ vi.mock('next/server', async importOriginal => ({
         void task()
     },
 }))
+// MOCK (announced): the learned table's two reads (the serving rule runs on
+// real Postgres in tests/integration/coupon-box-learned.itest.ts). Only the
+// `learned` case below makes a box servable.
+const { findLearnedMock } = vi.hoisted(() => ({
+    findLearnedMock: vi.fn(async (_domain: string): Promise<unknown> => null),
+}))
+vi.mock('@/lib/couponBoxLearned', async importOriginal => ({
+    ...(await importOriginal<typeof import('@/lib/couponBoxLearned')>()),
+    findServableLearnedBox: findLearnedMock,
+}))
+vi.mock('@/lib/couponsRepo', () => ({
+    hasServedStoreConfig: vi.fn(async () => false),
+}))
 vi.mock('@/lib/couponBoxPick', async importOriginal => {
     const actual = await importOriginal<typeof import('@/lib/couponBoxPick')>()
     pickMock.mockImplementation(actual.pickCouponBox)
@@ -318,6 +331,31 @@ describe('coupon_box_pick_outcome: one event per handler exit', () => {
         const res = await POST(req)
         expect(res.status).toBe(500)
         expectOutcome('server_error')
+    })
+
+    it('learned: answered from the learned table, no cache, no model', async () => {
+        envMock.COUPON_BOX_LEARNED_ENABLED = true
+        envMock.COUPON_BOX_LEARNED_SALT = 'x'.repeat(40)
+        findLearnedMock.mockResolvedValueOnce({
+            input: '#promo',
+            apply: null,
+            toggle: null,
+            enterOnly: true,
+        })
+        const domain = freshDomain()
+        const res = await post({
+            domain,
+            outline: OUTLINE,
+            acceptsLearned: true,
+        })
+        expect(await res.json()).toMatchObject({ source: 'learned' })
+        const props = expectOutcome('learned')
+        expect(props.store).toBe(domain)
+        expect(props.cached).toBeUndefined()
+        expect(props.model_ms).toBeUndefined()
+        expect(chatMock).not.toHaveBeenCalled()
+        envMock.COUPON_BOX_LEARNED_ENABLED = false
+        envMock.COUPON_BOX_LEARNED_SALT = undefined
     })
 
     it('covers every name in COUPON_BOX_PICK_OUTCOMES', () => {
