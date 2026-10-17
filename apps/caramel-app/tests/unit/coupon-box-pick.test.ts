@@ -633,6 +633,57 @@ describe('the pick', () => {
         ).toMatchObject({ outcome: 'box', input: 1, button: 2 })
     })
 
+    // A code word on the control wins, as in the extension's spendsPoints:
+    // "rewards code" names a code to type, not points to spend.
+    it('keeps "Apply rewards code" as the apply button', async () => {
+        expect(
+            await pickOn(REDEEM_BOX('Promo code', 'Apply rewards code'), {
+                input: 1,
+                button: 2,
+            }),
+        ).toMatchObject({ outcome: 'box', input: 1, button: 2 })
+    })
+
+    const IN_SUMMARY = (line: string) =>
+        [
+            '- main:',
+            '  - region "Order summary":',
+            '    - heading "Order summary"',
+            `    ${line}`,
+            '    - [9] button "Checkout"',
+        ].join('\n')
+
+    it('keeps "Have a promo or rewards code?" as the toggle', async () => {
+        expect(
+            await pickOn(
+                IN_SUMMARY(
+                    '- [5] button "Have a promo or rewards code?" [collapsed]',
+                ),
+                { toggle: 5 },
+            ),
+        ).toMatchObject({ outcome: 'box', toggle: 5 })
+    })
+
+    it.each(['Redeem ### points for a $# code', 'Use your points'])(
+        'still refuses "%s" as the toggle',
+        async name => {
+            expect(
+                await pickOn(IN_SUMMARY(`- [5] button "${name}" [collapsed]`), {
+                    toggle: 5,
+                }),
+            ).toMatchObject({ outcome: 'no_box' })
+        },
+    )
+
+    it('still refuses "Redeem ### points for a $# code" as the apply button', async () => {
+        expect(
+            await pickOn(
+                REDEEM_BOX('Promo code', 'Redeem ### points for a $# code'),
+                { input: 1, button: 2 },
+            ),
+        ).toMatchObject({ outcome: 'no_pick', reason: 'refused_button' })
+    })
+
     it('refuses an Apply that spends the points its section names', async () => {
         expect(
             await pickOn(
