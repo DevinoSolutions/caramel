@@ -48,6 +48,7 @@ const SHIPPED_TO_STRANGERS = [
     'permissions-api.js',
     'usage-diagnostics-consent.js',
     'background.js',
+    'tab-handoff.js',
 ]
 // Not in any entrypoint's import graph, but shipped and run in the store's
 // page all the same: the build copies them beside the bundle, and the content

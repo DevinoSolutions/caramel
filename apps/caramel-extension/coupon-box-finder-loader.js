@@ -20,6 +20,7 @@
 // can come of it.
 import {
     caramelSendMessage,
+    caramelTabHandoff,
     currentBrowser,
     log,
     logError,
@@ -80,6 +81,7 @@ export function caramelLoadFinder() {
                     throw new Error('the finder module has no host hand-over')
                 m.caramelProvideFinderHost({
                     caramelSendMessage,
+                    caramelTabHandoff,
                     currentBrowser,
                     log,
                     sleep,

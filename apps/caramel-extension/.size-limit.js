@@ -80,13 +80,16 @@ module.exports = [
         // and never clicks "Next", "Proceed" or an orders link on the
         // server's word (the server's never-click list, byte for byte).
         // Measured 122.58 kB.
-        // 2026-10-17, lowered 123 -> 95.5 kB: the finder left this bundle. It
+        // 2026-10-17, raised 123 -> 125 kB: stacked on the per-tab pick
+        // memory (a cart that reloads to show each answer keeps the server's
+        // box, found again by name). Measured 124.35 kB.
+        // 2026-10-17, lowered 125 -> 95.5 kB: the finder left this bundle. It
         // ships as assets/coupon-box-finder.js (its own budget below) and is
         // loaded only by a page that runs it; what stays is the flag read and
-        // the loader (coupon-box-finder-loader.js). Measured 122.58 -> 93.68
-        // kB (93.55 before the loader learned to report a failed load and to
-        // refuse a module without the hand-over), so the limit is measured +
-        // ~1.8 kB.
+        // the loader (coupon-box-finder-loader.js). Measured 124.35 -> 94.22
+        // kB (93.68 before the per-tab pick memory, 93.55 before the loader
+        // learned to report a failed load and to refuse a module without the
+        // hand-over), so the limit is measured + ~1.3 kB.
         limit: '95.5 KB',
         brotli: false,
     },
@@ -173,7 +176,16 @@ module.exports = [
         // through unnoticed. Measured 12.38 kB after the review fixes (id minted
         // only on accept, the consent re-read, device-local consent), so the
         // limit is measured + ~0.3 kB.
-        limit: '12.7 KB',
+        // 2026-10-17, raised 12.7 -> 13.6 kB: the per-tab handoffs
+        // (tab-handoff.js and its message route), which hold the pending
+        // submit, the discount-link win and the run where the store's page
+        // cannot write them. Measured 13.24 kB.
+        // 2026-10-17 (review of PR #369), raised 13.6 -> 13.9 kB: the handoff
+        // route answers only the tab's top, live document, forgets a tab the
+        // browser replaces, writes down a refused record, and gains the
+        // compare-and-set replace that makes a cancel one step. Measured
+        // 13.60 kB.
+        limit: '13.9 KB',
         brotli: false,
     },
     {
@@ -200,9 +212,12 @@ module.exports = [
         // credit, gift cards and balances and bounded what each rule reads,
         // 29.65 kB before it refused the server's whole never-click list).
         // The limit is measured + ~0.75 kB.
+        // 2026-10-17, raised 30.5 -> 32 kB: the per-tab pick memory (a cart
+        // that reloads to show each answer keeps the server's box, found again
+        // by name) ships in the finder. Measured 30.98 kB.
         // It is written only here: tests/finder-module-build.test.mjs reads
         // it.
-        limit: '30.5 KB',
+        limit: '32 KB',
         brotli: false,
     },
     {
