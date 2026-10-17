@@ -1178,14 +1178,6 @@ export function initBackground() {
                         sendResponse({ l: null })
                     })
                 return true
-            } else if (message.action === 'tabHandoff') {
-                tabHandoff(message, sender)
-                    .then(resp => sendResponse(resp))
-                    .catch(err => {
-                        logError('tabHandoff', err)
-                        sendResponse({ error: String(err) })
-                    })
-                return true
             } else if (message.action === 'couponBoxPick') {
                 couponBoxPick(message)
                     .then(resp => sendResponse(resp))
@@ -1296,6 +1288,14 @@ export function initBackground() {
                         sendResponse({ error: String(err) })
                     })
 
+                return true
+            } else if (message.action === 'tabHandoff') {
+                tabHandoff(message, sender)
+                    .then(resp => sendResponse(resp))
+                    .catch(err => {
+                        logError('tabHandoff', err)
+                        sendResponse({ error: String(err) })
+                    })
                 return true
             } else if (message.action === 'fetchSupportedStores') {
                 const url = caramelUrl('api/extension/supported-stores')

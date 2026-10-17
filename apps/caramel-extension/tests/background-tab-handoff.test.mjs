@@ -1,4 +1,7 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { EXT_ROOT } from './_entry-modules.mjs'
 
 /**
  * background.js — the per-tab handoffs (tab-handoff.js). The tab and the site
@@ -281,5 +284,18 @@ describe('tabHandoff', () => {
                 message: 'set pending_submit',
             }),
         ])
+    })
+})
+
+describe('the message router', () => {
+    // Routes are added side by side by separate changes, and a merge of two of
+    // them can leave two identical `else if` arms. The second one never runs.
+    it('routes each message action once', () => {
+        const src = readFileSync(join(EXT_ROOT, 'background.js'), 'utf8')
+        const actions = [
+            ...src.matchAll(/message\.action === '([A-Za-z]+)'/g),
+        ].map(m => m[1])
+        expect(actions).toContain('tabHandoff')
+        expect(actions.filter((a, i) => actions.indexOf(a) !== i)).toEqual([])
     })
 })

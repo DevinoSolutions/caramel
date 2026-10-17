@@ -32,6 +32,7 @@ export const TAB_HANDOFFS = {
     // That the server was asked for a store's box in this tab, and the names
     // of a usable pick for the next page: kept for a shopping session.
     box_pick: 12 * 60 * 60 * 1000,
+    // The box a run used, until the page its submit reloads to confirms it.
     box_learn: 2 * 60 * 1000,
 }
 // Measured in UTF-8 bytes, not characters.
