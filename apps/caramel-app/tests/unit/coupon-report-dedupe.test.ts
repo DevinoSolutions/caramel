@@ -178,3 +178,45 @@ describe('failed-report dedupe key cap (fail open)', () => {
         expect(Sentry.captureMessage).not.toHaveBeenCalled()
     })
 })
+
+describe('each kind has its own key cap', () => {
+    it('a table full of WORKED keys does not switch off the FAILED dedupe', () => {
+        resetReportDedupeForTests({ maxKeys: 3 })
+        // Honest success traffic fills the worked table to its cap…
+        for (let n = 1; n <= 10; n++) admitReport('worked', ip(n), '7', T0)
+        // …and the failed table still tracks: a repeat failed report is deduped.
+        expect(admitReport('failed', ip(50), '7', T0)).toBe(true)
+        expect(admitReport('failed', ip(50), '7', T0 + 1)).toBe(false)
+    })
+
+    it('a table full of USE keys does not switch off the FAILED dedupe either', () => {
+        resetReportDedupeForTests({ maxKeys: 3 })
+        for (let n = 1; n <= 10; n++) admitReport('used', ip(n), '7', T0)
+        expect(admitReport('failed', ip(50), '7', T0)).toBe(true)
+        expect(admitReport('failed', ip(50), '7', T0 + 1)).toBe(false)
+    })
+
+    it('a cap hit names the route that sends that kind', () => {
+        resetReportDedupeForTests({ maxKeys: 1 })
+        admitReport('used', ip(1), '7', T0)
+        admitReport('used', ip(2), '7', T0)
+        admitReport('worked', ip(1), '7', T0)
+        admitReport('worked', ip(2), '7', T0)
+
+        const tags = vi
+            .mocked(Sentry.captureMessage)
+            .mock.calls.map(call => (call[1] as { tags: unknown }).tags)
+        expect(tags).toEqual([
+            {
+                route: 'coupons/increment',
+                budget: 'report-dedupe',
+                reportKind: 'used',
+            },
+            {
+                route: 'coupons/report',
+                budget: 'report-dedupe',
+                reportKind: 'worked',
+            },
+        ])
+    })
+})

@@ -27,8 +27,8 @@ vi.mock('@/lib/auth/auth', () => ({
     auth: { api: { getSession: getSessionMock } },
 }))
 
-// Keep the origin gate real (isExtensionOrigin: the Origin must be present and
-// an extension origin); make the rate-limit round-trip controllable so a 429
+// Keep the origin gate real (withRoute's allowlist, then the route's own
+// "a present Origin must be an extension origin" check); make the rate-limit round-trip controllable so a 429
 // can be exercised without a real limiter.
 const { checkRateLimitMock } = vi.hoisted(() => ({
     checkRateLimitMock: vi.fn(async () => null as NextResponse | null),
@@ -51,6 +51,10 @@ function incrementRequest(opts: {
     const headers: Record<string, string> = {
         'content-type': 'application/json',
         'cf-connecting-ip': opts.ip ?? '203.0.113.1',
+        // The site's own host, so an Origin of http://localhost is SAME-HOST and
+        // passes withRoute's allowlist: the route's own extension check is then
+        // the only thing that can refuse it.
+        host: 'localhost',
     }
     const origin = opts.origin === undefined ? EXTENSION_ORIGIN : opts.origin
     if (origin) headers.origin = origin
@@ -125,14 +129,42 @@ describe('POST /api/coupons/increment — app-owned usage counter (W4-D2)', () =
         expect(recordUsageMock).not.toHaveBeenCalled()
     })
 
-    it('a request with no Origin, or a site Origin, is refused 403: only the extension sends uses', async () => {
-        for (const origin of [null, 'http://localhost']) {
-            const res = await POST(
-                incrementRequest({ query: '?id=42', origin }),
-            )
-            expect(res.status).toBe(403)
-        }
+    it('a site Origin (the Caramel site itself, same host) is refused 403: only the extension sends uses', async () => {
+        const res = await POST(
+            incrementRequest({ query: '?id=42', origin: 'http://localhost' }),
+        )
+        expect(res.status).toBe(403)
+        expect(await res.json()).toEqual({ error: 'Forbidden origin' })
         expect(recordUsageMock).not.toHaveBeenCalled()
+    })
+
+    it('an extension Origin is counted', async () => {
+        const cases: Array<[string, string]> = [
+            ['41', EXTENSION_ORIGIN],
+            ['42', 'moz-extension://8f2c0e1a-0000-4000-8000-000000000000'],
+            [
+                '43',
+                'safari-web-extension://8F2C0E1A-0000-4000-8000-000000000000',
+            ],
+        ]
+        for (const [id, origin] of cases) {
+            const res = await POST(
+                incrementRequest({ query: `?id=${id}`, origin }),
+            )
+            expect(res.status).toBe(200)
+            expect(await res.json()).toEqual({ ok: true })
+        }
+        expect(recordUsageMock).toHaveBeenCalledTimes(3)
+    })
+
+    it('a MISSING Origin is counted: a background fetch may omit it, and the call is fire-and-forget', async () => {
+        const res = await POST(
+            incrementRequest({ query: '?id=42', origin: null }),
+        )
+        expect(res.status).toBe(200)
+        expect(await res.json()).toEqual({ ok: true })
+        expect(recordUsageMock).toHaveBeenCalledTimes(1)
+        expect(recordUsageMock).toHaveBeenCalledWith('42')
     })
 
     it('a repeated use from the SAME reporter counts once in 24h; a repeat is a 2xx no-op', async () => {

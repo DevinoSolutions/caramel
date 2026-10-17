@@ -5,6 +5,7 @@ import {
     reporterFor,
 } from '@/lib/couponReportDedupe'
 import { recordUsage } from '@/lib/couponSignals'
+import { isExtensionOrigin } from '@/lib/rateLimit'
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 
@@ -28,27 +29,40 @@ const IncrementBodySchema = z.object({
 // independently of catalog-row existence, so the upsert always succeeds: there
 // is no "coupon not found" case, hence no 404 (the extension fire-and-forgets
 // this call and reads nothing from the response — the HTTP contract stays POST
-// / 200 / JSON, same auth + rate-limit + origin). DB errors are NOT swallowed:
+// / 200 / JSON, same rate limit). DB errors are NOT swallowed:
 // a throw from recordUsage propagates to withRoute's try/catch → handleRouteError
 // → Sentry (same as coupons/[id]/report).
 //
-// Only the extension sends this (background.js, after an apply), so the origin
-// gate is the strict extension one (`'extension'`: the Origin must be present
-// and a browser-extension origin), not the site allowlist. That is a browser
-// rule: any HTTP client can send such a header, so the per-reporter dedupe
-// below is what actually bounds the counter.
+// Only the extension sends this (background.js, after an apply), so the same
+// origin rule as a checkout submission on coupons/submit: withRoute's
+// `origin: true` refuses other cross-origin pages, and the handler then refuses
+// any PRESENT Origin that is not a browser-extension origin (the Caramel site
+// included) with 403. A MISSING Origin is let through, because a background
+// fetch under host_permissions may omit it (Firefox/Safari are not proven to
+// send one) and the extension's call is fire-and-forget, so a refusal there
+// would silently drop real uses. Origin is a browser rule, not authentication:
+// any HTTP client can send or drop it, so the per-reporter dedupe below is what
+// actually bounds the counter.
 export const POST = withRoute(
     {
         method: 'POST',
         routeName: 'coupons/increment',
         rateLimit: 'mutation',
-        origin: 'extension',
+        origin: true,
         // Resolve-but-never-gate, as on coupons/[id]/report: a session only
         // picks the reporter the dedupe keys on.
         auth: 'optional',
         body: IncrementBodySchema,
     },
     async ({ req, body, session }) => {
+        if (req.headers.get('origin') !== null && !isExtensionOrigin(req)) {
+            // Same body withRoute answers a refused cross-origin page with.
+            return NextResponse.json(
+                { error: 'Forbidden origin' },
+                { status: 403 },
+            )
+        }
+
         const url = new URL(req.url)
         let idRaw = url.searchParams.get('id') || ''
         if (!idRaw) {

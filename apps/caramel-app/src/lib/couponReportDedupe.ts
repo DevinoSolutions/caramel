@@ -32,10 +32,15 @@
 // BOUNDED: a Map entry per (reporter, coupon) must not grow without limit across
 // rotating addresses (an IPv6 /64 is 2^64 of them), because this app has had
 // memory/slowness outages. There are no per-key timers: entries are plain
-// expiries, swept lazily. At MAX_KEYS the dedupe FAILS OPEN: the report is
+// expiries, swept lazily. At the cap the dedupe FAILS OPEN: the report is
 // accepted without being tracked (a forger gets no throttle while the table is
 // full, but no honest report is ever refused), and one throttled Sentry warning
-// per hour says the cap is being hit.
+// per hour per kind says the cap is being hit.
+//
+// ONE TABLE PER KIND, each with its own cap. Every successful apply sends a
+// 'worked' report and a use, so honest success traffic is the bulk of the keys;
+// in one shared table it could fill the cap and switch off the 'failed' dedupe,
+// which is the one that stops a code being flagged by a single reporter.
 import { getClientIp } from '@/lib/rateLimit'
 import * as Sentry from '@sentry/nextjs'
 import type { NextRequest } from 'next/server'
@@ -45,21 +50,35 @@ const WINDOW_MS = 24 * 60 * 60 * 1000
 /** What a report says. Each kind has its own slot per (reporter, coupon). */
 export type ReportKind = 'worked' | 'failed' | 'used'
 
-const KIND_PREFIX: Record<ReportKind, string> = {
-    worked: 'w',
-    failed: 'f',
-    used: 'n',
+/** Sentry route tag for a cap hit: the route that sends this kind. */
+const ROUTE_OF_KIND: Record<ReportKind, string> = {
+    worked: 'coupons/report',
+    failed: 'coupons/report',
+    used: 'coupons/increment',
 }
-const DEFAULT_MAX_KEYS = 50_000
+/** Per kind, so the three tables together hold at most 3x this. */
+const DEFAULT_MAX_KEYS_PER_KIND = 50_000
 /** A full table is re-swept for expired keys at most this often (a sweep is O(n)). */
 const SWEEP_MIN_INTERVAL_MS = 60 * 1000
 const CAP_REPORT_INTERVAL_MS = 60 * 60 * 1000
 
-let maxKeys = DEFAULT_MAX_KEYS
-const expiryByKey = new Map<string, number>()
-let lastSweepAt = 0
-/** A sustained cap-hit is ONE Sentry event per hour, not one per request. */
-let nextCapReportAt = 0
+interface KindTable {
+    expiryByKey: Map<string, number>
+    lastSweepAt: number
+    /** A sustained cap-hit is ONE Sentry event per hour, not one per request. */
+    nextCapReportAt: number
+}
+
+function emptyTable(): KindTable {
+    return { expiryByKey: new Map(), lastSweepAt: 0, nextCapReportAt: 0 }
+}
+
+let maxKeysPerKind = DEFAULT_MAX_KEYS_PER_KIND
+const tables: Record<ReportKind, KindTable> = {
+    worked: emptyTable(),
+    failed: emptyTable(),
+    used: emptyTable(),
+}
 
 export type ReportReporter =
     | { kind: 'user'; userId: string }
@@ -79,33 +98,33 @@ export function reporterFor(
         : { kind: 'ip', ip: getClientIp(req) }
 }
 
-/** Short key: report kind, reporter kind + id, then the coupon id. */
-function keyOf(
-    kind: ReportKind,
-    reporter: ReportReporter,
-    couponId: string,
-): string {
+/** Short key within a kind's table: reporter kind + id, then the coupon id. */
+function keyOf(reporter: ReportReporter, couponId: string): string {
     const who =
         reporter.kind === 'user' ? `u${reporter.userId}` : `i${reporter.ip}`
-    return `${KIND_PREFIX[kind]}|${who}|${couponId}`
+    return `${who}|${couponId}`
 }
 
-function sweepExpired(now: number): void {
+function sweepExpired(table: KindTable, now: number): void {
     // forEach, not for-of: the tsconfig target cannot iterate a Map, and deleting
     // the visited key mid-forEach is well defined.
-    expiryByKey.forEach((expiresAt, key) => {
-        if (expiresAt <= now) expiryByKey.delete(key)
+    table.expiryByKey.forEach((expiresAt, key) => {
+        if (expiresAt <= now) table.expiryByKey.delete(key)
     })
-    lastSweepAt = now
+    table.lastSweepAt = now
 }
 
-function reportCapHit(now: number): void {
-    if (now < nextCapReportAt) return
-    nextCapReportAt = now + CAP_REPORT_INTERVAL_MS
+function reportCapHit(kind: ReportKind, table: KindTable, now: number): void {
+    if (now < table.nextCapReportAt) return
+    table.nextCapReportAt = now + CAP_REPORT_INTERVAL_MS
     Sentry.captureMessage('coupon report dedupe table is full: failing open', {
         level: 'warning',
-        tags: { route: 'coupons/report', budget: 'report-dedupe' },
-        extra: { maxKeys, windowMs: WINDOW_MS },
+        tags: {
+            route: ROUTE_OF_KIND[kind],
+            budget: 'report-dedupe',
+            reportKind: kind,
+        },
+        extra: { maxKeys: maxKeysPerKind, windowMs: WINDOW_MS },
     })
 }
 
@@ -120,22 +139,23 @@ export function admitReport(
     couponId: string,
     now: number = Date.now(),
 ): boolean {
-    const key = keyOf(kind, reporter, couponId)
-    const expiresAt = expiryByKey.get(key)
+    const table = tables[kind]
+    const key = keyOf(reporter, couponId)
+    const expiresAt = table.expiryByKey.get(key)
     if (expiresAt !== undefined && expiresAt > now) return false
 
     if (
-        expiryByKey.size >= maxKeys &&
-        now - lastSweepAt >= SWEEP_MIN_INTERVAL_MS
+        table.expiryByKey.size >= maxKeysPerKind &&
+        now - table.lastSweepAt >= SWEEP_MIN_INTERVAL_MS
     ) {
-        sweepExpired(now)
+        sweepExpired(table, now)
     }
-    if (expiryByKey.size >= maxKeys && expiresAt === undefined) {
-        reportCapHit(now)
+    if (table.expiryByKey.size >= maxKeysPerKind && expiresAt === undefined) {
+        reportCapHit(kind, table, now)
         return true
     }
     // An expired entry for this very key is overwritten in place.
-    expiryByKey.set(key, now + WINDOW_MS)
+    table.expiryByKey.set(key, now + WINDOW_MS)
     return true
 }
 
@@ -143,21 +163,28 @@ export function admitReport(
  * Give an admitted report's slot back: the signal write that followed it
  * failed, so the (retrying) client must not be deduped against a report that
  * never landed.
+ *
+ * Known and accepted: the delete does not check WHICH request set the slot. A
+ * request admitted untracked while the table was full, whose write then fails,
+ * can free a slot that a later request from the same reporter took and whose
+ * write did land, so one more report from that reporter would count. That needs
+ * a full table plus failing writes, and costs at most one extra count per failed
+ * write. The extension sends each report once and never retries.
  */
 export function releaseReport(
     kind: ReportKind,
     reporter: ReportReporter,
     couponId: string,
 ): void {
-    expiryByKey.delete(keyOf(kind, reporter, couponId))
+    tables[kind].expiryByKey.delete(keyOf(reporter, couponId))
 }
 
-/** Test-only: clear the table and optionally lower the cap. */
+/** Test-only: clear every table and optionally lower the per-kind cap. */
 export function resetReportDedupeForTests(
     options: { maxKeys?: number } = {},
 ): void {
-    expiryByKey.clear()
-    maxKeys = options.maxKeys ?? DEFAULT_MAX_KEYS
-    lastSweepAt = 0
-    nextCapReportAt = 0
+    for (const kind of Object.keys(tables) as ReportKind[]) {
+        tables[kind] = emptyTable()
+    }
+    maxKeysPerKind = options.maxKeys ?? DEFAULT_MAX_KEYS_PER_KIND
 }
