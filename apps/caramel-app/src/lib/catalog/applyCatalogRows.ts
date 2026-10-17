@@ -21,12 +21,22 @@
 // through a multi-row push (e.g. a value that overflows a column) rolls back
 // everything, so the catalog is never left half-written.
 //
+// Values are stored RAW, with ONE deliberate exception besides `site` below:
+// personal referral codes (coupons.ts isReferralCoupon: "refer a friend",
+// "code in the link", ...) benefit a stranger and often only work for new
+// accounts, so the owner wants them out of the catalog (T-2956). A referral row
+// whose id is not stored yet is NOT inserted (counted `skippedReferral`); one
+// already stored is written with `expired = true`, so it leaves the catalog
+// through the ordinary per-row tombstone path (counted in `tombstoned` and
+// measured by the 20% gate like any other tombstone). Only `expired` is forced:
+// status and every other column stay raw.
+//
 // Safety gate: a single push that would tombstone/expire more than 20% of the
 // currently-visible catalog is REFUSED (409, `gated`) unless `force: true`.
 // This guards against a broken producer wiping the catalog with one bad push;
 // a genuinely large expiry is still possible by resending with force.
 import type { IngestCatalogPayload } from '@/lib/catalog/ingestSchemas'
-import { VISIBLE_COUPON_STATUSES } from '@/lib/coupons'
+import { VISIBLE_COUPON_STATUSES, isReferralCoupon } from '@/lib/coupons'
 import prisma from '@/lib/prisma'
 import { Prisma } from '@prisma/client'
 
@@ -42,12 +52,15 @@ export interface CatalogGate {
 
 /** Per-coupon outcome tally. inserted+updated are rows actually written;
  * skippedOlder are rows dropped by the only-if-newer rule; tombstoned counts
- * how many of the applied rows flipped a visible coupon to non-visible. */
+ * how many of the applied rows flipped a visible coupon to non-visible;
+ * skippedReferral are personal referral codes (isReferralCoupon) that were not
+ * in the catalog yet and so were never inserted. */
 export interface CatalogCounts {
     inserted: number
     updated: number
     skippedOlder: number
     tombstoned: number
+    skippedReferral: number
 }
 
 // Discriminated on `gated` so callers (the route) can read `.gate` after a
@@ -263,6 +276,7 @@ export async function applyCatalogRows(
                     updated: 0,
                     skippedOlder: 0,
                     tombstoned: 0,
+                    skippedReferral: 0,
                 }
 
                 if (coupons.length > 0) {
@@ -309,12 +323,23 @@ export async function applyCatalogRows(
                     // only an applying row can tombstone (a skipped older row
                     // changes nothing).
                     const toWrite: typeof coupons = []
-                    for (const row of coupons) {
-                        const cur = current.get(row.id)
+                    for (const pushed of coupons) {
+                        const cur = current.get(pushed.id)
+                        const isReferral = isReferralCoupon(pushed)
+                        // A referral row never enters the catalog; an already
+                        // stored one is expired (the only forced value) so the
+                        // tombstone path below removes it.
+                        const row = isReferral
+                            ? { ...pushed, expired: true }
+                            : pushed
                         const willApply =
                             !cur || row.updated_at >= cur.updated_at
                         if (!willApply) {
                             couponCounts.skippedOlder++
+                            continue
+                        }
+                        if (isReferral && !cur) {
+                            couponCounts.skippedReferral++
                             continue
                         }
                         if (cur) couponCounts.updated++
@@ -460,6 +485,7 @@ export async function applyCatalogRows(
                     updated: 0,
                     skippedOlder: 0,
                     tombstoned: 0,
+                    skippedReferral: 0,
                 },
                 storeConfigs: { upserted: 0 },
                 sources: { upserted: 0 },

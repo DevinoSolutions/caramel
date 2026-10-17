@@ -355,3 +355,36 @@ export function keepsFailing(
         (signal.failCount ?? 0) >= KEEPS_FAILING_MIN_FAIL_COUNT
     )
 }
+
+/**
+ * Phrases that mark a PERSONAL referral code: a code that pays out to the
+ * stranger who shared it and often only works for a brand-new account, so it is
+ * not a coupon for the shopper looking at the store page. Matched
+ * case-insensitively against title + description by isReferralCoupon.
+ *
+ * Every pattern is WORD-BOUNDED on purpose. Substring matching would catch
+ * "Avis Preferred members" (a loyalty tier), "Musician's Friend code" (a store
+ * name), "Zazzle invitations" and "Evite" (what the store sells), none of which
+ * are referral codes. Measured on prod 2026-10-17: this set matches 44 visible
+ * coupons on 24 sites, and no store loses all of its codes.
+ */
+export const REFERRAL_COUPON_PATTERNS: readonly RegExp[] = [
+    /\breferrals?\b/i,
+    /\brefer[\s-]+a[\s-]+friend\b/i,
+    /\bcode in the link\b/i,
+    /\binvited by\b/i,
+    /\binvite code\b/i,
+]
+
+/**
+ * True when a coupon is a personal referral code (see
+ * REFERRAL_COUPON_PATTERNS). The ingest write engine (applyCatalogRows) keeps
+ * such rows out of the catalog; this is the single definition of "referral".
+ */
+export function isReferralCoupon(row: {
+    title: string
+    description: string | null
+}): boolean {
+    const text = `${row.title} ${row.description ?? ''}`
+    return REFERRAL_COUPON_PATTERNS.some(pattern => pattern.test(text))
+}

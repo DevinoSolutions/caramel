@@ -192,7 +192,8 @@ A non-gated `200` returns:
         "inserted": 0,
         "updated": 0,
         "skippedOlder": 0,
-        "tombstoned": 0
+        "tombstoned": 0,
+        "skippedReferral": 0
     },
     "storeConfigs": { "upserted": 0 },
     "sources": { "upserted": 0 }
@@ -200,7 +201,12 @@ A non-gated `200` returns:
 ```
 
 `skippedOlder` counts rows dropped by the only-if-newer rule; `tombstoned`
-counts applied rows that flipped a visible coupon to non-visible. For
+counts applied rows that flipped a visible coupon to non-visible;
+`skippedReferral` counts personal referral codes (`isReferralCoupon` in
+`src/lib/coupons.ts`: "refer a friend", "code in the link", ...) that were not
+in the catalog yet and so were not inserted. A referral row that IS already
+stored is written with `expired = true` (the one value the engine forces, so it
+leaves via the normal tombstone path and counts toward the 20% gate). For
 `storeConfigs`/`sources`, `upserted` is the number of rows offered after dedupe
 (an idempotent re-affirmation of unchanged rows is not a failure).
 

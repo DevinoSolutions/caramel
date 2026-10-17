@@ -17,7 +17,8 @@ import { NextResponse } from 'next/server'
 // each row applied only-if-newer by its own updated_at (idempotent, retry- and
 // out-of-order-safe), the whole push transaction-atomic, and a push that would
 // tombstone/expire >20% of the visible catalog is refused (409) unless the body
-// carries force:true. A 1-row push and a 23k-row push take the identical path.
+// carries force:true. Personal referral codes are kept out of the catalog (new
+// ones skipped, stored ones expired; `skippedReferral` in the response). A 1-row push and a 23k-row push take the identical path.
 //
 // NO CORS / NO OPTIONS / NO rate-limit: this is server-to-server (no browser
 // Origin, no preflight), the bearer gate is the access control, and the trusted
