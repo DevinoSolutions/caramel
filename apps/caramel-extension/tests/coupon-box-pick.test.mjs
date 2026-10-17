@@ -12,6 +12,9 @@ import {
 } from '../coupon-box-discovery.js'
 import { startApplyingCoupons } from '../coupon-runner.js'
 import { caramelConfiglessRecord } from '../store-detect.js'
+import { tabHandoffBackground } from './_tab-handoff-background.mjs'
+// The background's side of the per-tab handoffs (see the helper).
+const handoffs = tabHandoffBackground()
 
 // The server's pick: when the finder's rules see a total but no promo box, the
 // extension may ask the server which element is the box. These pin that:
@@ -111,6 +114,7 @@ function installChromeStub() {
         return outlineUrl
     }
     stub.runtime.sendMessage = (message, cb) => {
+        if (handoffs.answers(message, cb)) return
         const a = message?.action
         if (a === 'fetchCoupons') cb({ coupons: COUPONS })
         else if (a === 'couponBoxDiscoveryEnabled') cb({ enabled: flagOn })
@@ -193,6 +197,7 @@ beforeAll(() => {
 
 beforeEach(() => {
     sessionStorage.clear()
+    handoffs.reset()
     document.body.innerHTML = ''
     window.history.replaceState({}, '', '/cart')
     finalModals = []
@@ -1086,8 +1091,8 @@ describe('a pick is kept, by name, for the next page in the tab', () => {
         )
     })
 
-    it('a store asked before this change ("1" in the session) is not asked again and has nothing kept', async () => {
-        sessionStorage.setItem('caramel_box_pick:shop.test', '1')
+    it('a store asked in this tab with nothing usable is not asked again and has nothing kept', async () => {
+        await handoffs.put('box_pick', { 'shop.test': 1 })
         document.body.innerHTML = BARE_BOX + TOTAL
         pickBareBox()
 
@@ -1201,5 +1206,42 @@ describe('a pick is kept, by name, for the next page in the tab', () => {
             reload(BARE_BOX)
             expect(await caramelFinderSeesKeptPick('shop.test')).toBe(false)
         })
+    })
+})
+
+describe('the pick memory is the extension’s, never the page’s', () => {
+    // The store's page can write its own sessionStorage. Writing a pick there
+    // must not choose the field the codes go into, and clearing it must not
+    // buy a second ask.
+    const GIFT =
+        '<div class="g"><input id="gc" name="gift_card" type="text">' +
+        '<button id="gb" type="button">Redeem</button></div>'
+
+    it('a pick the page wrote is not used', async () => {
+        sessionStorage.setItem(
+            'caramel_box_pick:shop.test',
+            JSON.stringify({
+                p: '/cart',
+                i: 'INPUT n:gift_card',
+                b: 'BUTTON i:gb',
+            }),
+        )
+        document.body.innerHTML = GIFT + TOTAL
+
+        expect(await caramelFinderSeesKeptPick('shop.test')).toBe(false)
+        expect(await caramelDiscoveredRecord({ domain: 'shop.test' })).toBe(
+            null,
+        )
+    })
+
+    it('a page that clears its storage does not buy a second ask', async () => {
+        document.body.innerHTML = BARE_BOX + TOTAL
+        await caramelDiscoveredRecord({ domain: 'shop.test' })
+
+        sessionStorage.clear()
+        _caramelResetDiscoveryFlag()
+        await caramelDiscoveredRecord({ domain: 'shop.test' })
+
+        expect(pickCalls).toHaveLength(1)
     })
 })

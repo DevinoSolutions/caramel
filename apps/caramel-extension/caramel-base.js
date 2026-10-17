@@ -252,7 +252,7 @@ const CARAMEL_HANDOFF_WAIT_MS = 3000
  * 'get', 'take' (read once) or 'clear' on one kind of record. Answers the
  * background's reply ({ saved }, { value }, { cleared }), or null when it
  * could not be reached or refused; both are logged. */
-// Called from dom-utils.js.
+// Called from dom-utils.js and coupon-box-discovery.js.
 export async function caramelTabHandoff(op, key, value) {
     try {
         const r = await caramelSendMessage(
