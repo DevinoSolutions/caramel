@@ -429,6 +429,24 @@ for (const [source, name] of Object.entries(SOURCES))
                 'rewards',
                 '<button id="tg" type="button">Redeem rewards</button>',
             ],
+            // A reveal that offers a discount without naming a code applies
+            // an offer or lists them; the server reads toggles the same way.
+            [
+                'a discount with no code',
+                '<button id="tg" type="button">Apply discount</button>',
+            ],
+            [
+                'a discount in another language',
+                '<button id="tg" type="button">Rabatt anzeigen</button>',
+            ],
+            [
+                'savings',
+                '<button id="tg" type="button">See your savings</button>',
+            ],
+            [
+                'the small print',
+                '<button id="tg" type="button">Promo details</button>',
+            ],
             [
                 'consent to mail',
                 '<button id="tg" type="button">Email me a promo code</button>',
@@ -498,6 +516,159 @@ describe('the rules never click a control that is not a code', () => {
 
         expect(clicks).toEqual([])
         expect(appliedWith).toHaveLength(0)
+    })
+})
+
+// Every path that names an apply button: the three named sources (llm_only,
+// so the rules never stand in) and the rules on their own.
+const PATHS = {
+    ...Object.fromEntries(
+        Object.entries(SOURCES).map(([source, name]) => [
+            source,
+            ids => {
+                mode = 'llm_only'
+                name(ids)
+            },
+        ]),
+    ),
+    'the rules': () => {
+        mode = 'rules_first'
+    },
+}
+
+// An apply button that names no code is judged by the words beside it and by
+// its section's name and heading: points, rewards, member prices, student,
+// military or teacher discounts, and verification are never a code's apply.
+describe('an apply button among points or member words is never clicked', () => {
+    for (const [what, html] of [
+        [
+            'in a section named for rewards',
+            '<section aria-label="Your rewards"><div>' +
+                PROMO_INPUT +
+                APPLY +
+                '</div></section>',
+        ],
+        [
+            'under a member prices heading',
+            '<section><h3>Member prices</h3><div>' +
+                PROMO_INPUT +
+                APPLY +
+                '</div></section>',
+        ],
+        [
+            'beside a military check',
+            '<div>' +
+                PROMO_INPUT +
+                '<div><span>Verify your military status</span>' +
+                APPLY +
+                '</div></div>',
+        ],
+        [
+            'beside a teacher discount',
+            '<div>' +
+                PROMO_INPUT +
+                '<div><span>Teacher discount</span>' +
+                APPLY +
+                '</div></div>',
+        ],
+        [
+            'beside a student discount',
+            '<div>' +
+                PROMO_INPUT +
+                '<div><span>Students save 10%</span>' +
+                APPLY +
+                '</div></div>',
+        ],
+    ])
+        for (const [path, name] of Object.entries(PATHS))
+            it(`${path}: ${what}`, async () => {
+                document.body.innerHTML = html + TOTAL
+                name({ input: 'x', button: 'b' })
+                const clicks = watchClicks()
+
+                await run()
+
+                expect(drivenSubmit()).not.toBe('b')
+                expect(clicks).toEqual([])
+            })
+
+    // "Rewards & promo codes" names a code: its plain Apply is still clicked.
+    for (const [path, name] of Object.entries(PATHS))
+        it(`${path}: a section named for rewards and promo codes keeps its Apply (the control case)`, async () => {
+            document.body.innerHTML =
+                '<section><h3>Rewards &amp; promo codes</h3><div>' +
+                PROMO_INPUT +
+                APPLY +
+                '</div></section>' +
+                TOTAL
+            name({ input: 'x', button: 'b' })
+
+            await run()
+
+            expect(drivenSubmit()).toBe('b')
+        })
+})
+
+// The rules' own reveals: a switch or a radio is a setting, never a fold; a
+// checkbox is clicked only when it speaks of entering a code.
+describe('the rules never click a setting as a reveal', () => {
+    beforeEach(() => {
+        mode = 'rules_first'
+    })
+    // The reveal and the box share one small panel, as a fold does.
+    const folded = toggle =>
+        '<div class="promo">' +
+        toggle +
+        '<div id="panel" style="display:none"><label for="dc">Discount code</label>' +
+        '<input id="dc" name="discount_code" type="text">' +
+        APPLY +
+        '</div></div>' +
+        TOTAL
+    const opens = () =>
+        $('tg').addEventListener('click', () => {
+            $('panel').style.display = ''
+        })
+
+    for (const [what, html] of [
+        [
+            'a switch',
+            '<button id="tg" type="button" role="switch" aria-checked="false">Have a promo code?</button>',
+        ],
+        [
+            'a radio',
+            '<div id="tg" role="radio" aria-checked="false" tabindex="0">Have a promo code?</div>',
+        ],
+        [
+            'a checkbox that asks for mail',
+            '<label>Email me promo codes <input id="tg" type="checkbox"></label>',
+        ],
+        [
+            'a checkbox that does not speak of entering a code',
+            '<label>Use my discount card <input id="tg" type="checkbox"></label>',
+        ],
+    ])
+        it(`${what} is never clicked`, async () => {
+            document.body.innerHTML = folded(html)
+            opens()
+            const clicks = watchClicks()
+
+            await run()
+
+            expect(clicks).not.toContain('tg')
+            expect(appliedWith).toHaveLength(0)
+        })
+
+    it('a checkbox that speaks of entering a code is clicked (the control case)', async () => {
+        document.body.innerHTML = folded(
+            '<label>Have a promo code? <input id="tg" type="checkbox"></label>',
+        )
+        opens()
+        const clicks = watchClicks()
+
+        await run()
+
+        expect(clicks).toContain('tg')
+        expect(drivenInput()).toBe('dc')
     })
 })
 
