@@ -43,13 +43,13 @@ const freshDomain = () => `shop-${randomUUID().slice(0, 8)}.example`
 function cartPage(carousel: number, extra: string[] = []): string {
     const links = Array.from(
         { length: carousel },
-        (_, i) => `    - [${3 + i}] link "Recommended item"`,
+        (_, i) => `    - [${3 + i}] link`,
     )
     const at = 3 + carousel
     return [
         '- main:',
         '  - [0] link "Cart"',
-        '  - list "Recommended":',
+        '  - list:',
         ...links,
         ...extra,
         '  - form:',
@@ -63,13 +63,13 @@ function cartPage(carousel: number, extra: string[] = []): string {
 function productPage(carousel: number): string {
     const links = Array.from(
         { length: carousel },
-        (_, i) => `    - [${2 + i}] link "Recommended item"`,
+        (_, i) => `    - [${2 + i}] link`,
     )
     return [
         '- main:',
         '  - [0] link "Cart"',
         '  - heading "Reviews"',
-        '  - list "Recommended":',
+        '  - list:',
         ...links,
         `  - [${2 + carousel}] button "Add to cart"`,
     ].join('\n')
@@ -222,6 +222,67 @@ describe('createCouponBoxAnswerCache', () => {
     it('normalises the store key', () => {
         expect(couponBoxStoreKey(' WWW.Amazon.de ')).toBe('amazon.de')
         expect(couponBoxStoreKey('amazon.com')).toBe('amazon.com')
+    })
+
+    it('the fingerprint sees the coupon and apply vocabulary in every store language, and text fields', () => {
+        const base = '- [0] link "Cart"'
+        const withLine = (line: string) => [base, `- [1] ${line}`].join('\n')
+        // Every one of these changes what the model may answer: a miss.
+        const flavoured = [
+            'link "Gift card"',
+            'button "Have a code?"',
+            'button "Apply"',
+            'button "Redeem"',
+            'link "Promo"',
+            'link "Discount"',
+            'link "Coupon"',
+            'link "Voucher"',
+            'link "Cupón"',
+            'link "Cupom"',
+            'link "Codice"',
+            'link "Kod"',
+            'link "Bon"',
+            'link "Rabatt"',
+            'link "Descuento"',
+            'link "Desconto"',
+            'link "Sconto"',
+            'link "Korting"',
+            'link "Remise"',
+            'link "Réduction"',
+            'link "Zniżka"',
+            'button "Gutschein einlösen"',
+            'button "Anwenden"',
+            'button "Aplicar"',
+            'button "Appliquer"',
+            'button "Applica"',
+            'button "Toepassen"',
+            'button "Canjear"',
+            'button "Resgatar"',
+            'button "Saisir"',
+            'button "Inserisci"',
+            'button "Invoeren"',
+            'button "Eingeben"',
+            'button "Enter"',
+            'textbox',
+            'searchbox "Search"',
+            'combobox',
+        ]
+        // Allowlist-stripped controls with no such word: the same page.
+        const plain = [
+            'link',
+            'link "Shopping cart"',
+            'button "Add to cart"',
+            'link "Sign in"',
+        ]
+        const cache = createCouponBoxAnswerCache<string>({
+            ttlMs: 60_000,
+            maxStores: 10,
+        })
+        cache.set('a.example', base, [], 'no_box')
+        for (const line of flavoured)
+            expect(cache.get('a.example', withLine(line)), line).toBeNull()
+        for (const line of plain)
+            expect(cache.get('a.example', withLine(line)), line).toBe('no_box')
     })
 
     it('keeps at most four answers per store, newest first', () => {

@@ -23,6 +23,7 @@
 // In-memory, like the cache it replaces (ttlLruCache.ts): a redeploy empties
 // it. TODO: move to a shared store if the app is ever scaled past one instance.
 import { createTtlLruCache } from '@/lib/ttlLruCache'
+import crypto from 'node:crypto'
 
 /** Answers kept per store; the newest first. */
 const ENTRIES_PER_STORE = 4
@@ -54,7 +55,8 @@ interface PickedLine {
 interface Entry<V> {
     /** Picked index -> the line it named. */
     picked: Map<number, PickedLine>
-    /** The page's coupon-flavoured and text-entry lines, index-free, sorted. */
+    /** sha256 of the page's coupon-flavoured and text-entry lines (index-free,
+     * sorted): constant size however long the outline, compared by equality. */
     fingerprint: string
     /** When it was cached (ms), so each entry expires on its own clock. */
     at: number
@@ -90,7 +92,13 @@ function parseOutline(outline: string): ParsedOutline {
         if (COUPON_FLAVOURED.test(l.text) || TEXT_ENTRY.test(l.text))
             fingerprint.push(l.text)
     })
-    return { byIndex, fingerprint: fingerprint.sort().join('\n') }
+    return {
+        byIndex,
+        fingerprint: crypto
+            .createHash('sha256')
+            .update(fingerprint.sort().join('\n'))
+            .digest('hex'),
+    }
 }
 
 const samePicked = (a: PickedLine | undefined, b: PickedLine): boolean =>
