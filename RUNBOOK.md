@@ -617,23 +617,40 @@ and only then opts in.
   answers `{recorded:false, reason:'disabled'}` without reading the body, the
   pick ignores `acceptsLearned`, features says `couponBoxLearned: false`, and the
   AI pick keeps running. The rows stay; wipe them below if they are the problem.
-- Rotating the salt: every hash is made under it, so after a rotation no
-  returning install or network matches its old row. Nothing is deleted. The
-  old rows keep counting toward serving until their last confirmation is 30
-  days old (they are deleted at 60), and each returning install comes back as
-  a NEW reporter, held to the per-network cap below. So for up to 30 days one
-  real install can count twice (old row and new row), old `failed` rows keep
-  suppressing their boxes, and a busy box regrows its reporters at most 2 per
-  network per week. For a clean reset instead, run
-  `DELETE FROM learned_coupon_box_reporters;`, which stops ALL serving until
-  each box is confirmed again from 3 networks. Rotate only on purpose, for
-  example after a leaked salt.
+- Rotating the salt: every install AND network hash is made under it. Left
+  alone, a rotation would let every install and every network count twice:
+  old rows keep counting for up to 30 days next to the new rows the same
+  installs and networks write under the new salt, so one real network could
+  supply two of the 3 networks a box needs, and the per-network caps would
+  start again from zero. The ONLY supported rotation is therefore: set the
+  new salt, redeploy, and in the same window run
+  `DELETE FROM learned_coupon_box_reporters;`. That stops ALL serving until
+  each box is confirmed again from 3 networks under the new salt (the boxes
+  themselves stay, and still count toward the 5-per-store cap until they
+  age out). Rotate only on purpose, for example after a leaked salt.
+
+**Stores and hosts.** A box is filed under the host it was found on (the
+extension asks the pick with the host), but everything that limits or
+identifies reporters is keyed by the STORE: the registrable domain of that
+host (`r1.shop.com`, `www.shop.com` and `shop.com` are one store,
+`store_domain` on the row). So the caps, the lock, the reporter hashes and the
+hand-over cannot be multiplied by inventing hosts. Hosts on a shared hosting
+suffix (the private section of the Public Suffix List: `vercel.app`,
+`github.io`, `netlify.app`, `herokuapp.com`, ...) are refused with 400: those
+are anyone's free hosting, and their "registrable domain" would put every site
+on the platform into one store. The one exception is `<shop>.myshopify.com`,
+which is its own store: a Shopify store's own checkout can live there, and the
+extension and the served-config check already treat that host as the store.
+`a.b.myshopify.com` and `myshopify.com` itself are refused.
 
 **Who counts.** A reporter is one install on one box, keyed by
-`HMAC(salt, "install\n" + installId + "\n" + domain)`. Its network is
-`HMAC(salt, "network\n" + prefix + "\n" + domain)`, where the prefix is the
+`HMAC(salt, "install\n" + installId + "\n" + store)`. Its network is
+`HMAC(salt, "network\n" + prefix + "\n" + store)`, where the prefix is the
 /24 for IPv4 and the /48 for IPv6. Hashes are per store, so rows for two
-stores cannot be joined. A reporter is CONFIRMING when its latest counted
+stores cannot be joined. A reporter's network is the one it FIRST reported
+from and never changes, so an install that later reports from another network
+still counts for the first one (moving installs between networks frees no
+slot). A reporter is CONFIRMING when its latest counted
 report is `confirmed` and that confirmation is under 30 days old; a tie with a
 failure reads as failed. It is FAILING when its latest counted report is
 `failed` and under 30 days old. The client makes its own install ids, so one
@@ -662,24 +679,40 @@ cache and the AI model, exactly as for a store with no learned box, so
 shoppers still get an answer. Recovery takes 2 confirmations from 2 new
 networks after the last failure.
 
+Known cost, accepted: a low-traffic store can be kept off the shortcut by
+little effort. Four failing installs on two networks (two per network), each
+re-reporting `failed` once a day, keep their failures fresh, so the box stays
+suppressed unless 2 other networks confirm it after each day's latest failure.
+A busy store recovers on its own; a store with a few shoppers a week does not,
+and keeps being answered by the cache and the AI model instead. The server
+cannot tell such failures from real ones (it never sees the cart), so this is
+left as is. If it bites a store that matters, give the store a config.
+
 **Caps.** All caps are per store, enforced under one per-store database lock,
 so parallel reports cannot race past them.
 
 - New reporters: at most 2 new installs per network per box in any 7 days.
   More are answered `{recorded:false, reason:'ignored'}`.
-- Reporters per box: at most 50. To make room, the confirming reporter seen
-  longest ago is deleted. A reporter whose latest report is `failed` is never
-  deleted to make room. If every row left is failing, the new report is
-  ignored.
-- Boxes per store: at most 5. A 6th selector set is kept only by replacing a
-  box that is stale (no confirmation in 30 days) or confirmed from at most 1
-  network; otherwise it is ignored. One network cannot push out a box that
-  several networks confirmed.
+- Reporters per box: at most 50. To make room, the reporter seen longest ago
+  whose removal changes nothing the serving rule reads (servable, confirming
+  and failing networks, suppression) is deleted: in practice a second install
+  of a network that is already heard. If there is none, the reporter seen
+  longest ago that is not failing the box, or whose failure is over 30 days
+  old, is deleted. A network's only fresh `failed` voice is never deleted to
+  make room. If nothing may go, the new report is ignored. So filling a box
+  with installs from a few networks only ever pushes out those networks' own
+  extra installs, and cannot lock real shoppers out.
+- Boxes per store: at most 5, across all the store's hosts. A 6th selector
+  set replaces the weakest box that is NOT servable (fewest confirming
+  networks, then the oldest last confirmation); a store whose 5 boxes are all
+  servable takes no new one. One network may report on at most 3 of a store's
+  boxes (more are ignored), so a reporter on two networks can back at most 3
+  boxes and cannot keep a real box from a slot.
 - One install counts at most once per 24h per box and per outcome. A `failed`
   report for a box nobody confirmed creates nothing.
-- Domains must be plausible public hosts, meaning a registrable domain under
-  the public suffix list. Refused: single labels, IPs, `localhost`, internal
-  suffixes and broken punycode.
+- Domains must be plausible store hosts (see "Stores and hosts" above).
+  Refused: single labels, IPs, `localhost`, internal suffixes, bare public
+  suffixes, shared hosting suffixes and broken punycode.
 - Selectors must fit the grammar in `src/lib/couponBoxSelector.ts`, the one
   home of it, shared with the extension:
     - at most 4 compounds, at most 3 attribute selectors, at most 256
@@ -693,9 +726,10 @@ so parallel reports cannot race past them.
 **Retention.** A box with no confirmation for 60 days is deleted with its
 reporters, and a reporter row is deleted 60 days after that install last
 reported. The prune runs for the store on every report, and store-wide at boot
-and every 6 hours (`[boot] learned coupon box retention prune ENABLED`). It
-runs whatever the switch says, so rows written before a kill switch still age
-out.
+and every 6 hours (`[boot] learned coupon box retention prune ENABLED`). The
+store-wide prune takes each store's lock in turn, like a report, so it never
+deletes a box under a report that is adding to it. It runs whatever the switch
+says, so rows written before a kill switch still age out.
 
 **Wipe one poisoned store.** Read-only first, then delete (the reporters go
 with the boxes, `ON DELETE CASCADE`):
@@ -708,11 +742,14 @@ SELECT b.id, b.input_selector, b.apply_selector, b.toggle_selector,
        count(DISTINCT r.network_hash) AS networks
 FROM learned_coupon_boxes b
 LEFT JOIN learned_coupon_box_reporters r ON r.box_id = b.id
-WHERE b.domain = 'shop.example'
+WHERE b.store_domain = 'shop.example'
 GROUP BY b.id;
 
-DELETE FROM learned_coupon_boxes WHERE domain = 'shop.example';
+DELETE FROM learned_coupon_boxes WHERE store_domain = 'shop.example';
 ```
+
+(`store_domain` covers every host of the store; filter on `domain` to wipe a
+single host.)
 
 The pick stops serving it on the next request (nothing is cached). To delete
 one box only: `DELETE FROM learned_coupon_boxes WHERE id = '<id>';`. New
@@ -720,8 +757,9 @@ reports can teach the same store again. If it keeps being poisoned, give it a
 store config: a served config shuts learned boxes off for that store for good.
 The wipe leaves the store's hand-over marker, so it is not handed over again.
 
-**Hand-over to the store pipeline.** A store is handed over at most once, ever,
-and only when one of its boxes meets the serving rule above. It is recorded in
+**Hand-over to the store pipeline.** A store (its registrable domain, never one
+of its hosts) is handed over at most once, ever, and only when one of its boxes
+meets the serving rule above. It is recorded in
 the site-suggestions inbox with `source = 'auto_detect'`, no user and no
 requester email, so the coupons pipeline picks it up like any other store
 request. `learned_coupon_box_handovers` holds one row per store handed over;
@@ -736,7 +774,8 @@ them:
 
 **What is stored (privacy).**
 
-- Per box: the store's host and the CSS selectors of the code field, its
+- Per box: the host it was found on, the store's registrable domain, and the
+  CSS selectors of the code field, its
   apply button and the control that reveals it. The selectors are read from
   the store's own page, so they can hold attribute text such as a
   placeholder, but never anything the shopper typed. Also whether it applies
