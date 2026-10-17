@@ -496,7 +496,14 @@ async function couponBoxLearnedMessage(message, sender) {
  * dropped). Held here, per tab and for the host the tab was on, never in the
  * page's own storage, which the page can write: one of the tab's handoffs
  * (tab-handoff.js), taken once, within its lifetime. */
+// The tab's own live top document, as every handoff requires (tabHandoff):
+// a store's iframe or a prerendered page shares the tab id.
+const fromLiveTopDocument = sender =>
+    sender?.frameId === 0 &&
+    (sender.documentLifecycle === undefined ||
+        sender.documentLifecycle === 'active')
 async function couponBoxLearnHold({ l }, sender) {
+    if (!fromLiveTopDocument(sender)) return { held: false }
     if (!l?.box || !(await couponBoxRememberOn())) return { held: false }
     const saved = await tabHandoffs().set(
         sender?.tab?.id,
@@ -507,6 +514,7 @@ async function couponBoxLearnHold({ l }, sender) {
     return { held: saved === 'saved' }
 }
 async function couponBoxLearnTake(sender) {
+    if (!fromLiveTopDocument(sender)) return { l: null }
     const l = await tabHandoffs().take(
         sender?.tab?.id,
         senderOrigin(sender),

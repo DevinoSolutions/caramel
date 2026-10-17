@@ -500,7 +500,10 @@ describe('couponBoxLearned', () => {
         ['an apply that places the order', { ...BOX, apply: '#place-order' }],
         ['a toggle that removes', { ...BOX, toggle: 'button.remove-coupon' }],
         ['an email in the input', { ...BOX, input: 'input[data-e="a@b.com"]' }],
-        ['a long number', { ...BOX, apply: 'button#apply-1234567' }],
+        [
+            'a phone number',
+            { ...BOX, apply: 'button[data-ref="555-123-4567"]' },
+        ],
     ])
         it(`${what}: refused here, never remembered nor posted`, async () => {
             responses.push(features(true, true))
@@ -569,12 +572,18 @@ describe('the box a run holds across a reload', () => {
         source: 'rules',
         learned: false,
     }
-    const send = (action, url, id = 7, extra = {}) =>
+    const send = (action, url, id = 7, extra = {}, frame = { frameId: 0 }) =>
         new Promise(resolve =>
-            handler({ action, ...extra }, { tab: { id, url } }, resolve),
+            handler(
+                { action, ...extra },
+                { tab: { id, url }, url, ...frame },
+                resolve,
+            ),
         )
-    const hold = (url, id) => send('couponBoxLearnHold', url, id, { l: L })
-    const take = (url, id) => send('couponBoxLearnTake', url, id)
+    const hold = (url, id, frame) =>
+        send('couponBoxLearnHold', url, id, { l: L }, frame)
+    const take = (url, id, frame) =>
+        send('couponBoxLearnTake', url, id, {}, frame)
     afterEach(() => vi.restoreAllMocks())
 
     it('is taken once, by the same tab on the same host', async () => {
@@ -618,6 +627,31 @@ describe('the box a run holds across a reload', () => {
 
         onRemoved(7)
         expect(await take('https://shop.test/cart')).toEqual({ l: null })
+    })
+
+    it('is held and taken only by the tab’s live top document', async () => {
+        responses.push(features(true, true))
+        const frame = { frameId: 2 }
+        const prerendered = { frameId: 0, documentLifecycle: 'prerender' }
+
+        expect(await hold('https://shop.test/cart', 7, frame)).toEqual({
+            held: false,
+        })
+        expect(await hold('https://shop.test/cart', 7, prerendered)).toEqual({
+            held: false,
+        })
+        expect(await take('https://shop.test/cart')).toEqual({ l: null })
+
+        await hold('https://shop.test/cart')
+        expect(await take('https://shop.test/cart', 7, frame)).toEqual({
+            l: null,
+        })
+        expect(await take('https://shop.test/cart', 7, prerendered)).toEqual({
+            l: null,
+        })
+        expect(await take('https://shop.test/cart')).toMatchObject({
+            l: { box: L.box },
+        })
     })
 
     it('nothing is held while remembering is off', async () => {

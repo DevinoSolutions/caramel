@@ -230,7 +230,11 @@ module.exports = [
         // mirrored so a box it would refuse is never remembered nor sent (no
         // personal-data shapes in any selector; no apply or toggle that names
         // checkout, ordering, paying or removing). Measured 4.43 kB.
-        limit: '4.8 KB',
+        // 2026-10-17, raised 4.8 -> 5.1 kB: the server's final rules for
+        // both (long numbers only in attribute values other than id, even
+        // split by spaces, dashes or dots; risky words only in the clicked
+        // element, as whole words or pairs). Measured 4.88 kB.
+        limit: '5.1 KB',
         brotli: false,
     },
 ]

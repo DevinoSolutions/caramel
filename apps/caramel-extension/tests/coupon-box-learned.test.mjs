@@ -301,15 +301,19 @@ describe('the learned-box selector grammar', () => {
             'input[data-phone="55512"]',
         ],
         [
-            'a card or order number in an id',
-            '#order-123456 input',
-            '#order-12345 input',
+            'a phone number split by dashes',
+            'input[data-phone="555-123-4567"]',
+            'input[data-phone="555-12"]',
         ],
         [
-            // On a tag: this grammar refuses a leading "." on its own.
-            'an account number in a class',
-            'div.acct-0012345678 input',
-            'div.acct-00123 input',
+            'a phone number split by dots',
+            'input[data-phone="555.123.4567"]',
+            'input[data-phone="555.12"]',
+        ],
+        [
+            'a card number split by spaces',
+            'input[data-card="4111 1111 1111 1111"]',
+            'input[data-card="4111 1"]',
         ],
         [
             'a long number in a placeholder',
@@ -328,10 +332,18 @@ describe('the learned-box selector grammar', () => {
 
     it.each([
         'input[data-step="12345"]',
+        'input[data-price="19.99"]',
         '#promo-2024',
         'li:nth-of-type(12) input',
         'input[placeholder="Enter code (e.g. SAVE10)"]',
-    ])('still accepts short numbers: %s', css => {
+        // Ids and classes name an element; stores generate long numbers in
+        // them, and they carry no value about the shopper. (On a tag: this
+        // grammar refuses a leading "." on its own.)
+        '#shopify-section-template--16712345678__main input',
+        'div.acct-0012345678 input',
+        'input[id="field-123456789"]',
+        '#order-123456 input',
+    ])('accepts short numbers, and long ones in ids and classes: %s', css => {
         expect(caramelSelectorAllowed(css)).toBe(true)
     })
 })
@@ -369,8 +381,27 @@ describe('apply and toggle selectors that name a risky control', () => {
         'a.display-promo',
         'button[data-action="payload-free"]',
         'button.buyer-promo',
+        // Only the element that is clicked is read, never its ancestors:
+        // WooCommerce's own apply button, inside its checkout_coupon form.
+        'form.checkout_coupon button[name="apply_coupon"]',
+        'div.coupon div.purchase-summary button',
+        '#checkout > div > button.apply',
+        // Whole words only: PayPal is not `pay`.
+        '#PayPal-apply',
+        // An attribute's NAME says what data it carries, not what it does.
+        'button[data-buy-box="1"]',
+        // What `:not(...)` excludes is not what the element is.
+        'button.apply:not(.checkout)',
     ])('accepts %s', css => {
         expect(caramelRiskyControl(css)).toBe(false)
+    })
+
+    it.each([
+        // The clicked element still names it, whatever its ancestors are.
+        'form.coupon button.checkout',
+        'div.promo > button[name="place_order"]',
+    ])('refuses a risky last part behind a harmless ancestor: %s', css => {
+        expect(caramelRiskyControl(css)).toBe(true)
     })
 })
 
@@ -478,7 +509,10 @@ describe('caramelLearnedOutcome', () => {
         ['a toggle that removes', { toggle: '.remove-coupon' }],
         ['a toggle that pays', { toggle: 'button[aria-label="Pay now"]' }],
         ['an input holding an email', { input: 'input[data-e="a@b.com"]' }],
-        ['an apply holding a long number', { apply: '#apply-1234567' }],
+        [
+            'an apply holding a phone number',
+            { apply: 'button[data-ref="555-123-4567"]' },
+        ],
     ])('%s is refused: never remembered', async (_what, change) => {
         expect(await learn('confirmed', { ...BOX, ...change })).toBe('refused')
         expect(data).toBeUndefined()

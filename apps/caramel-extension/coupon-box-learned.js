@@ -51,11 +51,24 @@ const PLAIN_ID = /^[A-Za-z][\w-]*$/
 // would need one of these, or a quote (escaping it takes a backslash), is no
 // name; a selector holding one is never built.
 const REFUSED = /^[./(]|javascript:|url\s*\(|expression|[{};<\\]|\p{Cc}/iu
-// Nothing that looks like data about a person, anywhere in a selector: no
-// `@` (or `%40`), which is how an email address would appear, and no run of
-// 6 or more digits, which is how a phone, card, order or account number
-// would. The server refuses such a selector whole (couponBoxSelector.ts).
-const PERSONAL_DATA = /@|%40|[0-9]{6}/i
+// Nothing that looks like data about a person: no `@` (or `%40`) anywhere,
+// which is how an email address would appear, and in an attribute value
+// other than `id` no number of 6 or more digits, even split by spaces, dashes
+// or dots, which is how a phone, card, order or account number would. Ids and
+// classes may hold long numbers: stores generate them, and they name an
+// element rather than carry a value. The server refuses such a selector whole
+// (couponBoxSelector.ts holdsPersonalData); the patterns are its own.
+const EMAIL_SIGN = /@|%40/i
+// 6 or more digits, which a page may group with spaces, dashes or dots.
+const LONG_NUMBER = /[0-9](?:[ .-]*[0-9]){5,}/
+// An attribute selector with a value, once the grammar has accepted it.
+const ATTR_VALUE = /\[([a-z0-9-]+)[$^*]?=("[^"]*"|[A-Za-z0-9_-]+)\]/g
+function holdsPersonalData(css) {
+    if (EMAIL_SIGN.test(css)) return true
+    for (const m of css.matchAll(ATTR_VALUE))
+        if (m[1] !== 'id' && LONG_NUMBER.test(m[2])) return true
+    return false
+}
 
 const quote = v => '"' + v + '"'
 const usable = v =>
@@ -73,7 +86,7 @@ const usable = v =>
  * An attribute value is 1-100 characters with no quote, backslash, bracket,
  * brace, ";", "<" or control character. At most four parts, three attribute
  * tests and MAX_READ_SELECTOR characters, and nothing that looks like personal
- * data (PERSONAL_DATA). This is a subset of the grammar the server accepts and
+ * data (holdsPersonalData). This is a subset of the grammar the server accepts and
  * serves, so nothing built here is refused there. Anything
  * else (:has(), any other pseudo-class, a wildcard, a sibling combinator, an
  * unquoted or escaped value) is refused before any query runs: a selector
@@ -86,19 +99,19 @@ const SIMPLE_RE =
     /#[A-Za-z_][\w-]*|\.-?[A-Za-z_][\w-]*|\[(?:id|name|type|aria-label|placeholder|data-[a-z0-9-]+)="[^"'\\[\]{};<\p{Cc}]{1,100}"\]|:first-of-type|:nth-of-type\([1-9]\d?\)/uy
 const JOIN_RE = / *> *| +/y
 
-// Exported for tests/coupon-box-learned.test.mjs.
-export function caramelSelectorAllowed(css) {
+// The selector's parts in order (`form.a > button#b` -> `form.a`,
+// `button#b`), or null when it is outside the grammar above.
+function partsOf(css) {
     if (
         typeof css !== 'string' ||
         !css ||
         css.length > MAX_READ_SELECTOR ||
-        REFUSED.test(css) ||
-        PERSONAL_DATA.test(css)
+        REFUSED.test(css)
     )
-        return false
+        return null
     let at = 0
-    let parts = 0
     let attrs = 0
+    const parts = []
     // The next token of `re` at `at`, consumed; '' when there is none.
     const take = re => {
         re.lastIndex = at
@@ -107,12 +120,20 @@ export function caramelSelectorAllowed(css) {
         return m
     }
     for (;;) {
+        const start = at
         let any = !!take(TAG_RE)
         for (let s; (s = take(SIMPLE_RE)); any = true) if (s[0] === '[') attrs++
-        if (!any || ++parts > 4 || attrs > 3) return false
-        if (at === css.length) return true
-        if (!take(JOIN_RE) || at === css.length) return false
+        if (!any || attrs > 3) return null
+        parts.push(css.slice(start, at))
+        if (parts.length > 4) return null
+        if (at === css.length) return parts
+        if (!take(JOIN_RE) || at === css.length) return null
     }
+}
+
+// Exported for tests/coupon-box-learned.test.mjs.
+export function caramelSelectorAllowed(css) {
+    return partsOf(css) !== null && !holdsPersonalData(css)
 }
 
 /* The one element `css` finds in `doc`, or null: a selector outside the
@@ -228,27 +249,54 @@ export function caramelLearnable(domain, box, source, learned) {
 }
 
 // Words that name a control that spends money or changes the cart, never one
-// that applies a code. Matched with the separators taken out, so
-// `place-order`, `place_order` and `placeOrder` are all `placeorder`.
-const RISKY_CONTROL_JOINED =
-    /checkout|placeorder|submitorder|paynow|buynow|purchase|delete|remove/
-// Matched as whole words only: `pay` must not refuse `display`.
-const RISKY_CONTROL_WORDS = new Set(['pay', 'buy'])
+// that applies a code. Matched as whole words of the lower-cased name, split
+// on anything not a letter or digit: `place-order` and `place_order` are the
+// pair `place order`, `placeOrder` is the word `placeorder`. Never inside a
+// word: `display`, `buyer` and `PayPal` are not `pay` or `buy`.
+const RISKY_CONTROL_WORDS = new Set([
+    'checkout',
+    'pay',
+    'buy',
+    'purchase',
+    'delete',
+    'remove',
+    'paynow',
+    'buynow',
+    'placeorder',
+    'submitorder',
+])
+const RISKY_CONTROL_PAIRS = new Set([
+    'check out',
+    'place order',
+    'submit order',
+    'pay now',
+    'buy now',
+])
 
 /* Whether an APPLY or TOGGLE selector names a control that could place an
- * order, pay, or delete something: checkout, place order, submit order, pay,
- * buy, purchase, delete, remove. The same rule the server refuses a report
- * with (couponBoxSelector.ts isRiskyControlSelector), so such a box is never
- * remembered here nor sent. The coupon field itself is not checked (typing
- * into it clicks nothing). */
+ * order, pay, or delete something (RISKY_CONTROL_WORDS). The same rule the
+ * server refuses a report with (couponBoxSelector.ts isRiskyControlSelector),
+ * so such a box is never remembered here nor sent.
+ *
+ * Only the LAST part is read, the element that is clicked: its tag, id,
+ * classes and attribute VALUES. Ancestors are not (WooCommerce's own apply
+ * button sits in `form.checkout_coupon`), nor attribute names, which say what
+ * data the element carries. A selector outside the grammar is read whole. The
+ * coupon field itself is not checked (typing into it clicks nothing). */
 // Exported for tests/coupon-box-learned.test.mjs.
 export function caramelRiskyControl(css) {
-    const words = css
-        .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    const parts = partsOf(css)
+    const words = (parts ? parts[parts.length - 1] : String(css))
+        .replace(/:not\([^)]*\)/g, ' ')
+        .replace(/\[[a-z0-9-]+/gi, ' ')
         .toLowerCase()
         .split(/[^a-z0-9]+/)
-    if (words.some(w => RISKY_CONTROL_WORDS.has(w))) return true
-    return RISKY_CONTROL_JOINED.test(words.join(''))
+        .filter(Boolean)
+    return words.some(
+        (word, i) =>
+            RISKY_CONTROL_WORDS.has(word) ||
+            RISKY_CONTROL_PAIRS.has(`${word} ${words[i + 1] ?? ''}`),
+    )
 }
 
 // What the memory accepts, whoever asks: a domain, a box whose every
