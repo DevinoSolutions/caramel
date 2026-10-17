@@ -691,7 +691,7 @@ describe('the pick', () => {
                     '- main:',
                     '  - region "Order summary":',
                     '    - heading "Use your ### points"',
-                    '    - [5] textbox "Points"',
+                    '    - [5] textbox',
                     '    - [6] button "Apply"',
                     '    - [9] button "Checkout"',
                 ].join('\n'),
@@ -709,7 +709,7 @@ describe('the pick', () => {
         ).toMatchObject({ outcome: 'box', input: 1, button: 2 })
     })
 
-    it.each(['Points to redeem', 'Gift message', 'Enter here'])(
+    it.each(['Gift message', 'Enter here'])(
         'refuses "Redeem" beside a "%s" field, which names no code',
         async field => {
             expect(
@@ -1197,6 +1197,200 @@ describe('a code-naming control above the field', () => {
             button: 47,
         })
     })
+})
+
+// The extension's spendsPoints and pointsField (coupon-box-discovery.js), on
+// the outline: the server keeps and refuses the same controls and fields.
+describe('points, store credit and gift cards around the box', () => {
+    const pickOn = async (outline: string, a: object) => {
+        chatMock.mockImplementation(async () => answer(a))
+        return pickCouponBox({ domain: freshDomain(), outline })
+    }
+    const REWARDS = (...lines: string[]) =>
+        [
+            '- main:',
+            '  - region "Rewards":',
+            '    - heading "Rewards"',
+            ...lines.map(l => `    ${l}`),
+            '  - [9] button "Checkout"',
+        ].join('\n')
+
+    // A control that names a code is a code's control wherever it sits.
+    it('keeps an "Apply code" button in a Rewards section', async () => {
+        expect(
+            await pickOn(
+                REWARDS(
+                    '- [1] textbox "Promo code"',
+                    '- [2] button "Apply code"',
+                ),
+                { input: 1, button: 2 },
+            ),
+        ).toMatchObject({ outcome: 'box', input: 1, button: 2 })
+    })
+
+    it('keeps a "Have a promo code?" toggle in a Rewards section', async () => {
+        expect(
+            await pickOn(
+                REWARDS('- [5] button "Have a promo code?" [collapsed]'),
+                { toggle: 5 },
+            ),
+        ).toMatchObject({ outcome: 'box', toggle: 5 })
+    })
+
+    it.each(['Redeem ### points for a $# code', 'Apply store credit', 'Apply'])(
+        'still refuses "%s" in a Rewards section',
+        async name => {
+            expect(
+                await pickOn(
+                    REWARDS('- [1] textbox', `- [2] button "${name}"`),
+                    { input: 1, button: 2 },
+                ),
+            ).toMatchObject({ outcome: 'no_pick', reason: 'refused_button' })
+        },
+    )
+
+    // A plain "Apply" spends a balance when store credit or a gift card's
+    // number is what sits around it.
+    it.each([
+        [
+            'under a store credit heading',
+            [
+                '- main:',
+                '  - region "Order summary":',
+                '    - heading "Store credit $#.##"',
+                '    - [1] textbox',
+                '    - [2] button "Apply"',
+            ],
+        ],
+        [
+            'beside "Check balance", the field naming no code',
+            [
+                '- main:',
+                '  - form:',
+                '    - [1] textbox',
+                '    - [2] button "Apply"',
+                '    - [3] button "Check balance"',
+            ],
+        ],
+        [
+            'beside a gift card number field',
+            [
+                '- main:',
+                '  - form:',
+                '    - [1] textbox "Gift card number"',
+                '    - [2] button "Apply"',
+            ],
+        ],
+    ])('refuses a plain "Apply" %s', async (_, lines) => {
+        expect(
+            await pickOn(lines.join('\n'), { input: 1, button: 2 }),
+        ).toMatchObject({ outcome: 'no_pick', reason: 'refused_button' })
+    })
+
+    it.each([
+        [
+            'beside "Check balance" in a promo box',
+            [
+                '- main:',
+                '  - form:',
+                '    - [1] textbox "Promo code"',
+                '    - [2] button "Apply"',
+                '    - [3] button "Check balance"',
+            ],
+        ],
+        [
+            'under a store credit heading beside a promo code field',
+            [
+                '- main:',
+                '  - region "Order summary":',
+                '    - heading "Store credit $#.##"',
+                '    - [1] textbox "Promo code"',
+                '    - [2] button "Apply"',
+            ],
+        ],
+    ])('keeps a plain "Apply" %s', async (_, lines) => {
+        expect(
+            await pickOn(lines.join('\n'), { input: 1, button: 2 }),
+        ).toMatchObject({ outcome: 'box', input: 1, button: 2 })
+    })
+
+    // The extension reads at most 1000 characters of the words beside a
+    // control (RULE_WORDS_MAX); a word past them is not read here either.
+    it('reads no more of the words beside a control than the extension does', async () => {
+        const links = Array.from(
+            { length: 40 },
+            (_, i) =>
+                `      - [${100 + i}] link "Shop all new arrivals and sale"`,
+        )
+        const outline = (last: string) =>
+            [
+                '- main:',
+                '  - form:',
+                '    - [1] textbox',
+                '    - [2] button "Apply"',
+                '    - list:',
+                ...(last === 'first' ? [] : links),
+                '      - [99] link "Use your points"',
+                ...(last === 'first' ? links : []),
+            ].join('\n')
+        expect(
+            await pickOn(outline('last'), { input: 1, button: 2 }),
+        ).toMatchObject({ outcome: 'box', input: 1, button: 2 })
+        expect(
+            await pickOn(outline('first'), { input: 1, button: 2 }),
+        ).toMatchObject({ outcome: 'no_pick', reason: 'refused_button' })
+    })
+
+    // Underscores read as spaces, as the extension reads a control's words.
+    it('reads "Use_member_discount" as a member discount, never the toggle', async () => {
+        expect(
+            await pickOn(
+                [
+                    '- main:',
+                    '  - region "Order summary":',
+                    '    - [5] button "Use_member_discount" [collapsed]',
+                    '    - [9] button "Checkout"',
+                ].join('\n'),
+                { toggle: 5 },
+            ),
+        ).toMatchObject({ outcome: 'no_box' })
+    })
+
+    // Typing a code into a points or store credit field and pressing Enter
+    // spends them.
+    it.each(['Points to redeem', 'Store credit', 'Rewards number', 'Balance'])(
+        'refuses a "%s" field',
+        async field => {
+            expect(
+                await pickOn(
+                    [
+                        '- main:',
+                        '  - form:',
+                        `    - [1] textbox "${field}"`,
+                        '  - [9] button "Checkout"',
+                    ].join('\n'),
+                    { input: 1 },
+                ),
+            ).toMatchObject({ outcome: 'no_box' })
+        },
+    )
+
+    it.each(['Promo or rewards code', 'Credit card or promo code', 'Voucher'])(
+        'keeps a "%s" field',
+        async field => {
+            expect(
+                await pickOn(
+                    [
+                        '- main:',
+                        '  - form:',
+                        `    - [1] textbox "${field}"`,
+                        '  - [9] button "Checkout"',
+                    ].join('\n'),
+                    { input: 1 },
+                ),
+            ).toMatchObject({ outcome: 'box', input: 1 })
+        },
+    )
 })
 
 // Every label in the live eval's fixtures, handed back as the model's answer,

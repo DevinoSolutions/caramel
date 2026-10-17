@@ -216,6 +216,11 @@ const CART_SUMMARY = /subtotal|order summary/i
 // this of a name: the outline is guest-written, and every rule below then runs
 // on a bounded string, whatever a caller sends.
 const NAME_MAX_CHARS = 120
+// The words beside a control and its section's name, at most this long, as
+// coupon-box-discovery.js reads them (RULE_WORDS_MAX): no block a shopper
+// reads beside a control is longer.
+const RULE_WORDS_MAX = 1000
+const ruleWords = (t: string) => t.slice(0, RULE_WORDS_MAX)
 // The extension drops whole lines past its cap (coupon-box-outline.js), so an
 // outline this close to MAX_OUTLINE_BYTES may have lost its real page footer.
 const NEAR_CAP_BYTES = 1024
@@ -310,7 +315,7 @@ class Outline {
             words = this.words(p)
             n = p
         }
-        return words
+        return ruleWords(words)
     }
 
     /** The section a line sits in, by its own name: the section's name, and
@@ -348,7 +353,7 @@ class Outline {
                     head = this.lines[h]!.name
             }
         }
-        return `${this.lines[box]!.name} ${head}`
+        return ruleWords(`${this.lines[box]!.name} ${head}`)
     }
 
     /** A cart's own summary, by its buttons and its words. */
@@ -494,29 +499,50 @@ const ABOUT_TERMS =
 // "Promo details" is the small print; "Coupon code details" opens a box.
 const CODE_WORD = /\b(?:codes?|coupons?|vouchers?)\b/i
 
+/** A control's own name as the rules read it: hyphens and underscores as
+ * spaces, as coupon-box-discovery.js controlWords reads them. */
+const controlWords = (line: OutlineLine) => line.name.replace(/[-_]+/g, ' ')
+
 /** A clicked control that spends the shopper's rewards or store credit.
- * "Redeem" is how some stores name a code box's apply button: it is kept when
- * the control itself or the field beside it names a coupon code. */
+ * coupon-box-discovery.js spendsPoints, on the outline. One whose own name,
+ * the phrases that name a code taken out, speaks of points, rewards, a
+ * membership or store credit is refused, and so is one that redeems points for
+ * a code. One that names a code ("Apply code") is then kept wherever it sits,
+ * a Rewards section included. Any other is judged by the words beside it and
+ * its section's name: "Redeem" is kept only when it or the field beside it
+ * names a coupon code, and a plain "Apply" is refused under points, under
+ * store credit, or beside a gift card's field, unless something beside it
+ * names a coupon code. */
 function spendsPoints(tree: Outline, at: number): boolean {
-    const own = tree.lines[at]!.name
+    const own = controlWords(tree.lines[at]!)
     const ownWords = withoutCodePhrases(own).replace(REDEEM_WORDS, '')
     if (LOYALTY.test(ownWords) || STORE_CREDIT.test(ownWords)) return true
     if (REDEEM_FOR_A_CODE.test(own)) return true
+    if (CODE_WORD.test(own)) return false
     const beside = tree.beside(at)
     if (REDEEM.test(own) && !namesCouponCode(own) && !namesCouponCode(beside))
         return true
-    return LOYALTY.test(
-        withoutCodePhrases(`${beside} ${tree.section(at)}`).replace(
-            REDEEM_WORDS,
-            '',
-        ),
+    const near = withoutCodePhrases(`${beside} ${tree.section(at)}`).replace(
+        REDEEM_WORDS,
+        '',
+    )
+    if (LOYALTY.test(near)) return true
+    return (
+        !namesCouponCode(beside) &&
+        (STORE_CREDIT.test(near) || giftOnly(beside))
     )
 }
+
+/** A field that takes points or store credit rather than a code ("Points to
+ * redeem"): typing a code there and pressing Enter spends them. The same rule
+ * as coupon-box-discovery.js pointsField, on the field's outline name. */
+const pointsField = (name: string) =>
+    (LOYALTY.test(name) || STORE_CREDIT.test(name)) && !CODE_WORD.test(name)
 
 /** A toggle that names no code: an offer, the small print, or a discount
  * beside points, rewards, a membership, a gift card or store credit. */
 function offersOnly(tree: Outline, at: number): boolean {
-    const own = tree.lines[at]!.name
+    const own = controlWords(tree.lines[at]!)
     if (ABOUT_TERMS.test(own) && !CODE_WORD.test(own)) return true
     if (NAMES_CODE.test(own)) return false
     if (SAYS_OFFER.test(own)) return true
@@ -616,7 +642,9 @@ function parseAnswer(raw: string): Answer | null {
  *
  * - An index the outline does not contain is a hallucination, and an index
  *   of the wrong kind of element is refused.
- * - A refused input or toggle becomes null. A toggle is refused when it is in
+ * - A refused input or toggle becomes null. An input is refused when its name
+ *   is for points or store credit, not a code (pointsField). A toggle is
+ *   refused when it is in
  *   the page footer, names no code (offersOnly), is a setting
  *   (settingControl), or fails the checks every clicked pick passes: it is
  *   no NEVER_CLICK, FORBIDDEN_CONTROL or noCodeClick control and spends no
@@ -639,8 +667,7 @@ function toCachedAnswer(
         const line = tree.line(n)
         if (!line || !CLICK_ROLES.has(line.role)) return false
         const at = tree.byIndex.get(n!)!
-        // Hyphens and underscores read as spaces, as the extension reads them.
-        const name = line.name.replace(/[-_]+/g, ' ')
+        const name = controlWords(line)
         if (
             NEVER_CLICK.test(name) ||
             FORBIDDEN_CONTROL.test(name) ||
@@ -663,7 +690,11 @@ function toCachedAnswer(
     }
     const inputLine = tree.line(answer.input)
     const input =
-        inputLine && INPUT_ROLES.has(inputLine.role) ? answer.input : null
+        inputLine &&
+        INPUT_ROLES.has(inputLine.role) &&
+        !pointsField(inputLine.name)
+            ? answer.input
+            : null
     const toggle = clickedOk(answer.toggle, true) ? answer.toggle : null
     if (input === null && toggle === null) {
         return {
