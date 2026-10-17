@@ -21,6 +21,7 @@ import { resolve } from 'node:path'
 import { defineConfig } from 'wxt'
 
 import { ENVIRONMENTS, stampFor } from './scripts/environments.mjs'
+import { buildFinderModule, FINDER_ASSET } from './scripts/finder-bundle.mjs'
 import { FIREFOX_NAME, NAME, SUMMARY } from './scripts/store-listing.mjs'
 
 // React is POPUP-ONLY by doctrine (content scripts stay React-free — the
@@ -82,6 +83,14 @@ export default defineConfig({
             files.push({
                 contents: code,
                 relativeDest: 'assets/coupon-box-outline.js',
+            })
+            // The promo-box finder ships the same way, and is loaded only by a
+            // page about to run it (coupon-box-finder-loader.js). Its imports
+            // of the content script's own modules are not bundled: see
+            // scripts/finder-bundle.mjs.
+            files.push({
+                contents: await buildFinderModule(wxt.config.root),
+                relativeDest: FINDER_ASSET,
             })
         },
     },

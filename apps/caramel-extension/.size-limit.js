@@ -83,7 +83,14 @@ module.exports = [
         // 2026-10-17, raised 123 -> 125 kB: stacked on the per-tab pick
         // memory (a cart that reloads to show each answer keeps the server's
         // box, found again by name). Measured 124.35 kB.
-        limit: '125 KB',
+        // 2026-10-17, lowered 125 -> 95.5 kB: the finder left this bundle. It
+        // ships as assets/coupon-box-finder.js (its own budget below) and is
+        // loaded only by a page that runs it; what stays is the flag read and
+        // the loader (coupon-box-finder-loader.js). Measured 124.35 -> 94.22
+        // kB (93.68 before the per-tab pick memory, 93.55 before the loader
+        // learned to report a failed load and to refuse a module without the
+        // hand-over), so the limit is measured + ~1.3 kB.
+        limit: '95.5 KB',
         brotli: false,
     },
     {
@@ -189,6 +196,28 @@ module.exports = [
         // box. About half of it is the word allowlist every name is filtered
         // through, which is data the server's eval was measured with.
         limit: '9.2 KB',
+        brotli: false,
+    },
+    {
+        name: 'coupon-box-finder.js (loaded on demand, minified)',
+        path: '.size-cache/coupon-box-finder.min.js',
+        // 2026-10-17 — measured 29.74 kB, built exactly as it ships
+        // (scripts/finder-bundle.mjs). Not injected on every page: the
+        // content script imports it only when the finder flag is on and the
+        // page has no box a config describes. The nine-language vocabularies
+        // and the field, button, toggle and total-row readers are most of it
+        // (28.06 kB before it learned never to click a control that is not a
+        // code, 28.64 kB before an apply button with no apply word was
+        // limited to the box's own panel, 29.18 kB before it refused store
+        // credit, gift cards and balances and bounded what each rule reads,
+        // 29.65 kB before it refused the server's whole never-click list).
+        // The limit is measured + ~0.75 kB.
+        // 2026-10-17, raised 30.5 -> 32 kB: the per-tab pick memory (a cart
+        // that reloads to show each answer keeps the server's box, found again
+        // by name) ships in the finder. Measured 30.98 kB.
+        // It is written only here: tests/finder-module-build.test.mjs reads
+        // it.
+        limit: '32 KB',
         brotli: false,
     },
     {

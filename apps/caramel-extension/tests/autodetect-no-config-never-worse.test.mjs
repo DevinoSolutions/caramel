@@ -4,6 +4,7 @@ import { pathToFileURL } from 'node:url'
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { initCaramelBase } from '../caramel-base.js'
 import { _caramelResetDiscoveryFlag } from '../coupon-box-discovery.js'
+import { _caramelResetFinderLoad } from '../coupon-box-finder-loader.js'
 import { startApplyingCoupons } from '../coupon-runner.js'
 import {
     _caramelResetCachedCodes,
@@ -13,6 +14,11 @@ import {
     startCheckoutDetection,
     tryInitialize,
 } from '../store-detect.js'
+import {
+    FINDER_ASSET,
+    FINDER_FILE,
+    FINDER_WITHOUT_HANDOVER,
+} from './_finder-asset.mjs'
 
 // A store with NO config row, driven through the real detection, the real
 // runner and the real apply flow (store-detect.js, coupon-runner.js,
@@ -34,6 +40,13 @@ import {
 const OUTLINE_FILE = pathToFileURL(
     resolve(import.meta.dirname, '../coupon-box-outline.js'),
 ).href
+// How the finder file loads: 'ok', 'missing' (the URL resolves to nothing),
+// 'throws' (the URL cannot even be built, as in a torn-down extension) or
+// 'no-handover' (a module that cannot take the content script's helpers).
+let finderLoad
+const MISSING_FINDER = pathToFileURL(
+    resolve(import.meta.dirname, '../no-such-finder.js'),
+).href
 
 const COUPONS = [
     {
@@ -53,22 +66,47 @@ let storeList // what the supported-stores request answers
 const OTHER_STORE = { domain: 'some-other-store.example', couponInput: '#c' }
 let t // the recording
 
-// Every finder entry point another module calls, counted. The real
-// implementation still runs underneath.
-const finderCalls = {}
-vi.mock('../coupon-box-discovery.js', async importOriginal => {
-    const actual = await importOriginal()
-    const out = {}
-    for (const [name, value] of Object.entries(actual)) {
-        if (typeof value !== 'function' || name.startsWith('_')) {
-            out[name] = value
-            continue
+// Every finder entry point another module calls, counted: the finder's own
+// and the content script's share of it (the flag read and the on-demand
+// load). The real implementation still runs underneath.
+// failing.name makes that one entry point throw instead.
+const { finderCalls, counted, countedModule, failing } = vi.hoisted(() => {
+    const finderCalls = {}
+    const failing = { name: null }
+    const counted = actual => {
+        const out = {}
+        for (const [name, value] of Object.entries(actual)) {
+            if (typeof value !== 'function' || name.startsWith('_')) {
+                out[name] = value
+                continue
+            }
+            out[name] = (...args) => {
+                finderCalls[name] = (finderCalls[name] || 0) + 1
+                if (failing.name === name) throw new Error(`${name} failed`)
+                return value(...args)
+            }
         }
-        out[name] = (...args) => {
-            finderCalls[name] = (finderCalls[name] || 0) + 1
-            return value(...args)
-        }
+        return out
     }
+    // The finder the loader hands out, counted the same way: the content
+    // script reaches the loaded finder only through the loader.
+    const countedModules = new WeakMap()
+    const countedModule = m => {
+        if (!m) return m
+        if (!countedModules.has(m)) countedModules.set(m, counted(m))
+        return countedModules.get(m)
+    }
+    return { finderCalls, counted, countedModule, failing }
+})
+vi.mock('../coupon-box-discovery.js', async importOriginal =>
+    counted(await importOriginal()),
+)
+vi.mock('../coupon-box-finder-loader.js', async importOriginal => {
+    const out = counted(await importOriginal())
+    const load = out.caramelLoadFinder
+    const loaded = out.caramelLoadedFinder
+    out.caramelLoadFinder = (...args) => load(...args).then(countedModule)
+    out.caramelLoadedFinder = (...args) => countedModule(loaded(...args))
     return out
 })
 vi.mock('../coupon-apply.js', async importOriginal => ({
@@ -146,9 +184,14 @@ function installChromeStub() {
     stub.runtime.lastError = undefined
     stub.runtime.getURL = path => {
         t.urls.push(path)
-        return path === 'assets/coupon-box-outline.js'
-            ? OUTLINE_FILE
-            : 'chrome-extension://caramel/' + path
+        if (path === 'assets/coupon-box-outline.js') return OUTLINE_FILE
+        if (path === FINDER_ASSET) {
+            if (finderLoad === 'throws')
+                throw new Error('Extension context invalidated.')
+            if (finderLoad === 'no-handover') return FINDER_WITHOUT_HANDOVER
+            return finderLoad === 'missing' ? MISSING_FINDER : FINDER_FILE
+        }
+        return 'chrome-extension://caramel/' + path
     }
     stub.runtime.sendMessage = (message, cb) => {
         const { action } = message || {}
@@ -265,6 +308,7 @@ function freshPage(html, path = '/cart') {
     getDomainRecord.cache = null
     _caramelResetCachedCodes()
     _caramelResetDiscoveryFlag()
+    _caramelResetFinderLoad()
     sessionStorage.clear()
     window.__caramel_checkout_observer?.disconnect?.()
     window.__caramel_checkout_observer = null
@@ -298,6 +342,8 @@ beforeAll(() => {
 
 beforeEach(() => {
     flags = { discovery: false, llm: false }
+    finderLoad = 'ok'
+    failing.name = null
     answer = { outcome: 'no_box', confidence: 80, why: 'none', cached: false }
     platformCart = null
     storeList = { supported: [OTHER_STORE] }
@@ -318,10 +364,12 @@ describe('flags off (production today): a store with no config is exactly as bef
             expect(asked('couponBoxLlmEnabled')).toEqual([])
             expect(t.urls).not.toContain('assets/coupon-box-outline.js')
             expect(document.querySelector('[data-caramel-found]')).toBeNull()
-            // The only finder code that ran is the question "is it on?".
+            // The only finder code that ran is the question "is it on?": the
+            // finder itself was never even requested.
             expect(Object.keys(finderCalls)).toEqual([
                 'caramelCouponBoxDiscoveryOn',
             ])
+            expect(t.urls).not.toContain(FINDER_ASSET)
         })
 
     it('a readable platform cart still gets its prompt and the discount-link path, finder untouched', async () => {
@@ -343,6 +391,7 @@ describe('flags off (production today): a store with no config is exactly as bef
         expect(Object.keys(finderCalls)).toEqual([
             'caramelCouponBoxDiscoveryOn',
         ])
+        expect(t.urls).not.toContain(FINDER_ASSET)
         expect(t.page).toEqual([])
         expect(t.savings).toEqual([])
         expect(lastModal().message).toMatch(/couldn't find the promo box/)
@@ -354,6 +403,60 @@ describe('flags off (production today): a store with no config is exactly as bef
         await tryInitialize()
         expect(t.prompts).toEqual([])
         expect(Object.keys(finderCalls)).toEqual([])
+    })
+})
+
+describe('the finder is loaded only where it is about to run, and a failed load is no box', () => {
+    beforeEach(() => {
+        flags = { discovery: true, llm: true }
+    })
+
+    it('flags on, a cart with no config: the finder is requested once for the whole visit', async () => {
+        freshPage(RULES_BOX + TOTAL)
+        wireStore('dc', 'ap', 'drop')
+        await tryInitialize()
+        expect(t.prompts).toEqual([location.hostname])
+        await run()
+        expect(t.savings).toEqual([{ code: 'SAVE20', amount: 20 }])
+        expect(t.urls.filter(u => u === FINDER_ASSET)).toHaveLength(1)
+    })
+
+    for (const mode of ['missing', 'throws', 'no-handover']) {
+        it(`a finder that will not load (${mode}): no prompt, nothing asked of the server`, async () => {
+            finderLoad = mode
+            freshPage(RULES_BOX + TOTAL)
+            wireStore('dc', 'ap', 'drop')
+            await tryInitialize()
+            expect(t.prompts).toEqual([])
+            expect(asked('couponBoxPick')).toEqual([])
+            expect(t.urls).not.toContain('assets/coupon-box-outline.js')
+        })
+
+        it(`a finder that will not load (${mode}): the codes are handed over, nothing typed, no saving`, async () => {
+            finderLoad = mode
+            freshPage(RULES_BOX + TOTAL)
+            wireStore('dc', 'ap', 'drop')
+            await run()
+            expect(t.page).toEqual([])
+            expect(t.savings).toEqual([])
+            expect(reported('worked')).toEqual([])
+            expect(document.querySelector('[data-caramel-found]')).toBeNull()
+            expect(lastModal().message).toMatch(/couldn't find the promo box/)
+            handedOver()
+        })
+    }
+
+    it('a finder that throws while finding the box: the codes are handed over, nothing typed, no saving', async () => {
+        freshPage(RULES_BOX + TOTAL)
+        wireStore('dc', 'ap', 'drop')
+        failing.name = 'caramelDiscoveredRecord'
+        await run()
+        expect(finderCalls.caramelDiscoveredRecord).toBe(1)
+        expect(t.page).toEqual([])
+        expect(t.savings).toEqual([])
+        expect(reported('worked')).toEqual([])
+        expect(lastModal().message).toMatch(/couldn't find the promo box/)
+        handedOver()
     })
 })
 

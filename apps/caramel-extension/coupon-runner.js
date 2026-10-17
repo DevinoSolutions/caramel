@@ -34,8 +34,8 @@ import {
 } from './coupon-apply.js'
 import {
     caramelCouponBoxDiscoveryOn,
-    caramelDiscoveredRecord,
-} from './coupon-box-discovery.js'
+    caramelLoadFinder,
+} from './coupon-box-finder-loader.js'
 import {
     _caramelCleanCodes,
     caramelRankByValue,
@@ -820,7 +820,16 @@ export async function startApplyingCoupons(rec, options) {
         caramelStoreListKnown() &&
         (await caramelCouponBoxDiscoveryOn())
     ) {
-        const found = await caramelDiscoveredRecord(rec)
+        // A finder that did not load, or that fails, found nothing: the codes
+        // to copy.
+        const finder = await caramelLoadFinder()
+        let found = null
+        if (finder)
+            try {
+                found = await finder.caramelDiscoveredRecord(rec)
+            } catch (e) {
+                log('FINDER_FAILED', { error: String(e) })
+            }
         if (found) {
             rec = found
             _box = pickBestMatch(rec.couponInput)

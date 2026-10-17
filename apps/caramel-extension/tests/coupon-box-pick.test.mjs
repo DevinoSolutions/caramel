@@ -12,6 +12,7 @@ import {
 } from '../coupon-box-discovery.js'
 import { startApplyingCoupons } from '../coupon-runner.js'
 import { caramelConfiglessRecord, getDomainRecord } from '../store-detect.js'
+import { FINDER_ASSET, FINDER_FILE } from './_finder-asset.mjs'
 import { tabHandoffBackground } from './_tab-handoff-background.mjs'
 // The background's side of the per-tab handoffs (see the helper).
 const handoffs = tabHandoffBackground()
@@ -108,6 +109,7 @@ function installChromeStub() {
     }
     stub.runtime.lastError = undefined
     stub.runtime.getURL = path => {
+        if (path === FINDER_ASSET) return FINDER_FILE
         if (path !== 'assets/coupon-box-outline.js')
             return 'chrome-extension://caramel/' + path
         outlineLoads++

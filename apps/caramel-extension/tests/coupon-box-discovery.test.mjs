@@ -20,6 +20,7 @@ import {
     tryInitialize,
 } from '../store-detect.js'
 import { EXT_ROOT } from './_entry-modules.mjs'
+import { finderOnlyGetURL } from './_finder-asset.mjs'
 import { tabHandoffBackground } from './_tab-handoff-background.mjs'
 // The background's side of the per-tab handoffs (see the helper).
 const handoffs = tabHandoffBackground()
@@ -111,6 +112,7 @@ function installChromeStub() {
         }
     }
     stub.runtime.lastError = undefined
+    stub.runtime.getURL = finderOnlyGetURL
     stub.runtime.sendMessage = (message, cb) => {
         if (handoffs.answers(message, cb)) return
         if (flagReadThrows && message?.action === 'couponBoxDiscoveryEnabled')
