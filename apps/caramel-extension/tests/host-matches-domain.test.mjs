@@ -37,6 +37,18 @@ describe('_hostMatchesDomain', () => {
         )
     })
 
+    it("www.myshopify.com is Shopify's own site, not the shop of a www. row", () => {
+        // A www. row's first label is "www", which names no shop.
+        expect(_hostMatchesDomain('www.myshopify.com', 'www.toms.com')).toBe(
+            false,
+        )
+        expect(
+            _hostMatchesDomain('www.myshopify.com', 'www.usa.canon.com'),
+        ).toBe(false)
+        // The row's real label still matches its shop.
+        expect(_hostMatchesDomain('toms.myshopify.com', 'toms.com')).toBe(true)
+    })
+
     it('does not match bare myshopify.com against anything', () => {
         expect(_hostMatchesDomain('myshopify.com', 'toms.com')).toBe(false)
         expect(_hostMatchesDomain('.myshopify.com', 'toms.com')).toBe(false)

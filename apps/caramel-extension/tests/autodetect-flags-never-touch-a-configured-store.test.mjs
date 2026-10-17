@@ -424,7 +424,8 @@ describe('where the promise ends today: a configured store whose selectors match
             page: [],
             urls: [],
         }
-        getDomainRecord.cache = null
+        // The list was read: this record is its row for this store.
+        getDomainRecord.cache = [rec]
         _caramelResetDiscoveryFlag()
         sessionStorage.clear()
         await startApplyingCoupons(rec)
@@ -447,7 +448,8 @@ describe('where the promise ends today: a configured store whose selectors match
             page: [],
             urls: [],
         }
-        getDomainRecord.cache = null
+        // The list was read: this record is its row for this store.
+        getDomainRecord.cache = [rec]
         _caramelResetDiscoveryFlag()
         sessionStorage.clear()
         await startApplyingCoupons(rec)

@@ -118,7 +118,6 @@ export async function getDomainRecord(domain) {
         // leaves the cache unpoisoned so a later call can still succeed.
         if (!getDomainRecord.cache) {
             let failure = null
-            getDomainRecord.answered = false
             for (let attempt = 0; attempt < STORE_FETCH_ATTEMPTS; attempt++) {
                 if (attempt > 0) await sleep(STORE_FETCH_RETRY_DELAY_MS)
                 try {
@@ -133,13 +132,14 @@ export async function getDomainRecord(domain) {
                         continue
                     }
                     failure = null
-                    // Only a real list makes the store list known (see
-                    // caramelStoreListKnown): an empty or malformed answer
-                    // says nothing about which stores have a config.
-                    getDomainRecord.answered =
+                    // Only a real list is kept, and only a kept list makes
+                    // the store list known (see caramelStoreListKnown): an
+                    // empty or malformed answer says nothing about which
+                    // stores have a config.
+                    if (
                         Array.isArray(resp?.supported) &&
                         resp.supported.length > 0
-                    if (getDomainRecord.answered) {
+                    ) {
                         getDomainRecord.cache = resp.supported
                         currentBrowser.storage.local.set({
                             [STORE_CACHE_KEY]: {
@@ -217,7 +217,7 @@ getDomainRecord.cache = null
  * not a list, and nothing is cached) that cannot be known, and every
  * configured store would read as one with none, so neither runs. */
 export function caramelStoreListKnown() {
-    return Array.isArray(getDomainRecord.cache) || !!getDomainRecord.answered
+    return Array.isArray(getDomainRecord.cache)
 }
 
 // Match the active hostname to a supported-store domain. Accept an exact match,
