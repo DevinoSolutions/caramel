@@ -164,7 +164,7 @@ describe('UI-helpers.js — Shadow DOM hosts (Phase 3)', () => {
     })
 
     it('escapes the message — a hostile page cannot inject markup via the handoff', async () => {
-        // `message` arrives from sessionStorage, which the HOST PAGE can write.
+        // `message` can quote the store's own words, which the HOST PAGE writes.
         await showFinalModal(
             0,
             null,
