@@ -430,7 +430,7 @@ const noCodeClick = (t: string) => NO_CODE_CLICK_RE.test(t) || giftOnly(t)
 // a radio is a setting, never a fold, and so is a checkbox that does not speak
 // of entering a code or that asks for consent.
 const CODE_ENTRY_RE =
-    /\b(?:promo(?:tional)?|coupon|discount|voucher|offer|gift)\s+codes?\b|\b(?:have|got|enter|add|apply|use)\s+(?:a|an|your)?\s*(?:promo(?:tional)?|coupon|discount|voucher)\b(?!\s+(?:card|balance|points))/i
+    /\b(?:promo(?:tional)?|coupon|discount|voucher|offer|gift)\s+codes?\b|\b(?:have|got|enter|add|apply|use)\s{1,8}(?:a|an|your)?\s{0,8}(?:promo(?:tional)?|coupon|discount|voucher)\b(?!\s+(?:card|balance|points))/i
 const CONSENT_RE =
     /\b(?:e-?mail|sms|text me|newsletter|subscri\w*|sign me up|send me|notif\w*|marketing)\b/i
 function settingControl(line: OutlineLine): boolean {

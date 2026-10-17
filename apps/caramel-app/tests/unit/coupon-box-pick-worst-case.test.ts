@@ -44,14 +44,15 @@ const fill = (unit: string, head = '', room = (MAX_OUTLINE_BYTES - 400) / 3) =>
     head + unit.repeat(Math.floor((room - head.length) / unit.length))
 
 /** The crafted name on every line the answer names, so the input, toggle and
- * button checks all read it. */
-const oneNameOutline = (name: string) =>
+ * button checks all read it. A checkbox toggle is also read by the checks
+ * that tell a fold from a setting. */
+const oneNameOutline = (name: string, toggleRole = 'button') =>
     [
         '- main:',
         '  - region "Order summary":',
         `    - [1] textbox "${name}"`,
         `    - [2] button "${name}"`,
-        `    - [3] button "${name}"`,
+        `    - [3] ${toggleRole} "${name}"`,
     ].join('\n')
 
 // A name made of one repeated piece: the shape each kind of pattern
@@ -73,6 +74,7 @@ const NAMES: [string, string][] = [
     ['place order spellings', fill('place my ')],
     ['prices', fill('$#.## ')],
     ['code words', fill('promo code ')],
+    ['a code-entry verb, then spaces with no code word', fill(' ', 'have')],
     ['loyalty words', fill('points rewards ')],
 ]
 
@@ -150,6 +152,15 @@ describe('a crafted outline cannot block the server', () => {
         `a name of %s is read in under ${LIMIT_MS}ms`,
         async (_, name) => {
             expect(await timed(oneNameOutline(name))).toBeLessThan(LIMIT_MS)
+        },
+    )
+
+    it.each(NAMES)(
+        `a checkbox toggle named %s is read in under ${LIMIT_MS}ms`,
+        async (_, name) => {
+            expect(await timed(oneNameOutline(name, 'checkbox'))).toBeLessThan(
+                LIMIT_MS,
+            )
         },
     )
 
