@@ -369,21 +369,29 @@ async function couponBoxLearned({ domain, box, source, evidence, outcome }) {
     if (!EVIDENCE.includes(evidence)) evidence = null
     const installId = await storedInstallId()
     if (!installId) return { skipped: 'no install id' }
-    const r = await fetchWithTimeout(
-        caramelUrl('api/extension/coupon-box-learned'),
-        {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                installId,
-                domain,
-                box,
-                source,
-                evidence,
-                outcome,
-            }),
-        },
-    )
+    // Sent once and never retried: a refusal (400 for a box the server will
+    // not keep) or a network failure is answered as an { error } the finder
+    // logs, and the shopper's run never waits on it.
+    let r
+    try {
+        r = await fetchWithTimeout(
+            caramelUrl('api/extension/coupon-box-learned'),
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    installId,
+                    domain,
+                    box,
+                    source,
+                    evidence,
+                    outcome,
+                }),
+            },
+        )
+    } catch (err) {
+        return { error: String(err) }
+    }
     if (!r.ok) return { error: `HTTP ${r.status}` }
     const j = await r.json().catch(() => ({}))
     return { ok: true, recorded: j.recorded === true, reason: j.reason ?? null }

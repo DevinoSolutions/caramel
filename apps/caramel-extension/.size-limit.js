@@ -179,7 +179,11 @@ module.exports = [
         // selector is built in and read through (a served or stored selector
         // outside it is never queried), and the one-element lookup the finder
         // reads a learned box with. Measured 3.55 -> 4.19 kB.
-        limit: '4.5 KB',
+        // 2026-10-17, raised 4.5 -> 4.8 kB: the server's two refusals,
+        // mirrored so a box it would refuse is never remembered nor sent (no
+        // personal-data shapes in any selector; no apply or toggle that names
+        // checkout, ordering, paying or removing). Measured 4.43 kB.
+        limit: '4.8 KB',
         brotli: false,
     },
 ]

@@ -474,9 +474,43 @@ describe('couponBoxLearned', () => {
 
         responses.push(new TypeError('Failed to fetch'))
         expect(await from(LEARNED)).toEqual({
+            saved: 'saved',
             error: 'TypeError: Failed to fetch',
         })
     })
+
+    it('a box the server refuses (400) is posted once, never again, and stays remembered', async () => {
+        responses.push(features(true, true), {
+            ok: false,
+            status: 400,
+            json: async () => ({ error: 'invalid' }),
+        })
+
+        expect(await from(LEARNED)).toEqual({
+            saved: 'saved',
+            error: 'HTTP 400',
+        })
+        // Give any retry the time to show itself.
+        await new Promise(r => setTimeout(r, 30))
+        expect(learnedCalls()).toHaveLength(1)
+        expect(Object.keys(memory())).toEqual(['shop.test'])
+    })
+
+    for (const [what, box] of [
+        ['an apply that places the order', { ...BOX, apply: '#place-order' }],
+        ['a toggle that removes', { ...BOX, toggle: 'button.remove-coupon' }],
+        ['an email in the input', { ...BOX, input: 'input[data-e="a@b.com"]' }],
+        ['a long number', { ...BOX, apply: 'button#apply-1234567' }],
+    ])
+        it(`${what}: refused here, never remembered nor posted`, async () => {
+            responses.push(features(true, true))
+
+            expect(await from({ ...LEARNED, box })).toEqual({
+                saved: 'refused',
+            })
+            expect(memory()).toEqual({})
+            expect(learnedCalls()).toHaveLength(0)
+        })
 })
 
 describe('couponBoxLearnedBox', () => {

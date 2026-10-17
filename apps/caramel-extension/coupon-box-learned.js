@@ -51,6 +51,11 @@ const PLAIN_ID = /^[A-Za-z][\w-]*$/
 // would need one of these, or a quote (escaping it takes a backslash), is no
 // name; a selector holding one is never built.
 const REFUSED = /^[./(]|javascript:|url\s*\(|expression|[{};<\\]|\p{Cc}/iu
+// Nothing that looks like data about a person, anywhere in a selector: no
+// `@` (or `%40`), which is how an email address would appear, and no run of
+// 6 or more digits, which is how a phone, card, order or account number
+// would. The server refuses such a selector whole (couponBoxSelector.ts).
+const PERSONAL_DATA = /@|%40|[0-9]{6}/i
 
 const quote = v => '"' + v + '"'
 const usable = v =>
@@ -67,8 +72,9 @@ const usable = v =>
  * :first-of-type and :nth-of-type(n) (n up to 99), joined by spaces or ">".
  * An attribute value is 1-100 characters with no quote, backslash, bracket,
  * brace, ";", "<" or control character. At most four parts, three attribute
- * tests and MAX_READ_SELECTOR characters. This is a subset of the grammar the
- * server accepts and serves, so nothing built here is refused there. Anything
+ * tests and MAX_READ_SELECTOR characters, and nothing that looks like personal
+ * data (PERSONAL_DATA). This is a subset of the grammar the server accepts and
+ * serves, so nothing built here is refused there. Anything
  * else (:has(), any other pseudo-class, a wildcard, a sibling combinator, an
  * unquoted or escaped value) is refused before any query runs: a selector
  * served by the server, or read back from storage, is data, and an expensive
@@ -86,7 +92,8 @@ export function caramelSelectorAllowed(css) {
         typeof css !== 'string' ||
         !css ||
         css.length > MAX_READ_SELECTOR ||
-        REFUSED.test(css)
+        REFUSED.test(css) ||
+        PERSONAL_DATA.test(css)
     )
         return false
     let at = 0
@@ -220,15 +227,41 @@ export function caramelLearnable(domain, box, source, learned) {
     }
 }
 
+// Words that name a control that spends money or changes the cart, never one
+// that applies a code. Matched with the separators taken out, so
+// `place-order`, `place_order` and `placeOrder` are all `placeorder`.
+const RISKY_CONTROL_JOINED =
+    /checkout|placeorder|submitorder|paynow|buynow|purchase|delete|remove/
+// Matched as whole words only: `pay` must not refuse `display`.
+const RISKY_CONTROL_WORDS = new Set(['pay', 'buy'])
+
+/* Whether an APPLY or TOGGLE selector names a control that could place an
+ * order, pay, or delete something: checkout, place order, submit order, pay,
+ * buy, purchase, delete, remove. The same rule the server refuses a report
+ * with (couponBoxSelector.ts isRiskyControlSelector), so such a box is never
+ * remembered here nor sent. The coupon field itself is not checked (typing
+ * into it clicks nothing). */
+// Exported for tests/coupon-box-learned.test.mjs.
+export function caramelRiskyControl(css) {
+    const words = css
+        .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+        .toLowerCase()
+        .split(/[^a-z0-9]+/)
+    if (words.some(w => RISKY_CONTROL_WORDS.has(w))) return true
+    return RISKY_CONTROL_JOINED.test(words.join(''))
+}
+
 // What the memory accepts, whoever asks: a domain, a box whose every
 // selector is in the grammar (caramelSelectorAllowed, so at most
-// MAX_READ_SELECTOR characters each), a source the finder writes, and an
-// outcome. Anything else is refused before storage is read: a value that
-// reached here from a page never lands in the memory.
+// MAX_READ_SELECTOR characters each) and whose apply and toggle name no
+// control that pays, orders or removes (caramelRiskyControl), a source the
+// finder writes, and an outcome. Anything else is refused before storage is
+// read: a value that reached here from a page never lands in the memory.
 const SOURCES = ['rules', 'llm', 'server_learned']
 const OUTCOMES = ['confirmed', 'failed']
 const DOMAIN_RE = /^[a-z0-9.-]{1,253}$/
-const optional = css => css == null || caramelSelectorAllowed(css)
+const optional = css =>
+    css == null || (caramelSelectorAllowed(css) && !caramelRiskyControl(css))
 // Exported for tests/coupon-box-learned.test.mjs.
 export const caramelLearnedValid = (domain, box, source, outcome) =>
     typeof domain === 'string' &&

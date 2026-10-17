@@ -45,6 +45,10 @@ let pickCalls
 // The background's per-tab hold of the box a run used.
 let holds = new Map()
 let reported // couponBoxLearned messages
+// How the background answers a couponBoxLearned report: null (as it does),
+// 'refused' (the server said 400) or 'gone' (the worker cannot be reached).
+let learnedFails
+let learnedSent
 let local // storage.local
 let localReads
 
@@ -137,6 +141,11 @@ function installChromeStub() {
         else if (a === 'couponBoxPick') {
             pickCalls.push(message)
             cb(typeof answer === 'function' ? answer(message) : answer)
+        } else if (a === 'couponBoxLearned' && learnedFails) {
+            learnedSent++
+            if (learnedFails === 'gone')
+                throw new Error('Extension context invalidated.')
+            cb({ saved: 'saved', error: 'HTTP 400' })
         } else if (LEARNED_ACTIONS.includes(a))
             learnedBackground(
                 stub.storage.local,
@@ -260,6 +269,8 @@ beforeEach(() => {
     applyResult = {}
     pickCalls = []
     reported = []
+    learnedFails = null
+    learnedSent = 0
     holds = new Map()
     local = {}
     localReads = []
@@ -727,4 +738,43 @@ describe('a learned box', () => {
         expect(localReads).not.toContain(LEARNED_KEY)
         expect(reported).toEqual([])
     })
+})
+
+describe('a report that fails never touches the shopper', () => {
+    // The same run, answered three ways: what the shopper sees, and the codes
+    // tried, do not depend on the report.
+    const shopperSees = async fails => {
+        document.body.innerHTML = RULES_BOX + TOTAL
+        applyResult = code =>
+            code === 'SAVE20'
+                ? { errorMsg: 'This code is invalid.', errorIsNew: true }
+                : { success: true, newTotal: 80, committed: true }
+        finalModals = []
+        appliedWith = []
+        local = {}
+        holds = new Map()
+        // A fresh visit: no codes already tried here.
+        sessionStorage.clear()
+        handoffs.reset()
+        learnedFails = fails
+        learnedSent = 0
+        _caramelResetDiscoveryFlag()
+        await run()
+        await new Promise(r => setTimeout(r, 30))
+        return {
+            modal: finalModals.at(-1),
+            tried: appliedWith.map(a => a.code),
+        }
+    }
+
+    for (const fails of ['refused', 'gone'])
+        it(`${fails}: the run ends as it does when the report goes through, and nothing is sent twice`, async () => {
+            const asItIs = await shopperSees(null)
+            await vi.waitFor(() => expect(reported).toHaveLength(2))
+
+            expect(await shopperSees(fails)).toEqual(asItIs)
+            // One report per answer the store gave, as when it goes through:
+            // a failure is never sent again.
+            expect(learnedSent).toBe(2)
+        })
 })

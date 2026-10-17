@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
     caramelBoxSelectors,
     caramelLearnedOutcome,
+    caramelLearnedRead,
     caramelOne,
+    caramelRiskyControl,
     caramelSelectorAllowed,
     caramelStableSelector,
     LEARNED_KEY,
@@ -273,6 +275,103 @@ describe('the learned-box selector grammar', () => {
         expect(built.length).toBeGreaterThan(3)
         for (const css of built) expect(caramelSelectorAllowed(css)).toBe(true)
     })
+
+    // The server's personal-data rule (couponBoxSelector.ts), case for case.
+    // Each selector is in the grammar once the personal data is taken out, so
+    // it is that data alone that refuses it.
+    it.each([
+        [
+            'an email in a data attribute',
+            'input[data-customer-email="a@b.com"]',
+            'input[data-customer-email="ab.com"]',
+        ],
+        [
+            'an email in aria-label',
+            'input[aria-label="Code for a@b.com"]',
+            'input[aria-label="Code for ab.com"]',
+        ],
+        [
+            'an encoded @',
+            'input[data-user="a%40b.com"]',
+            'input[data-user="ab.com"]',
+        ],
+        [
+            'a phone number in a value',
+            'input[data-phone="5551234567"]',
+            'input[data-phone="55512"]',
+        ],
+        [
+            'a card or order number in an id',
+            '#order-123456 input',
+            '#order-12345 input',
+        ],
+        [
+            // On a tag: this grammar refuses a leading "." on its own.
+            'an account number in a class',
+            'div.acct-0012345678 input',
+            'div.acct-00123 input',
+        ],
+        [
+            'a long number in a placeholder',
+            'input[placeholder="Ref 1234567"]',
+            'input[placeholder="Ref 12345"]',
+        ],
+    ])('refuses personal data: %s', (_what, css, clean) => {
+        expect(caramelSelectorAllowed(clean)).toBe(true)
+        expect(caramelSelectorAllowed(css)).toBe(false)
+        page('<div><input></div>')
+        const spy = vi.spyOn(document, 'querySelectorAll')
+        expect(caramelOne(document, css)).toBeNull()
+        expect(spy).not.toHaveBeenCalled()
+        spy.mockRestore()
+    })
+
+    it.each([
+        'input[data-step="12345"]',
+        '#promo-2024',
+        'li:nth-of-type(12) input',
+        'input[placeholder="Enter code (e.g. SAVE10)"]',
+    ])('still accepts short numbers: %s', css => {
+        expect(caramelSelectorAllowed(css)).toBe(true)
+    })
+})
+
+// The server's rule for an apply or toggle selector (couponBoxSelector.ts
+// isRiskyControlSelector), case for case.
+describe('apply and toggle selectors that name a risky control', () => {
+    it.each([
+        '#checkout-button',
+        'button[name="checkout"]',
+        '#place-order',
+        '.place_order',
+        'button[data-testid="placeOrder"]',
+        'button[data-action="submit-order"]',
+        '#submitOrder',
+        'button.pay',
+        'button[aria-label="Pay now"]',
+        '#paynow',
+        'button[name="buy"]',
+        '.buy-now',
+        '#purchase',
+        'button[data-action="delete"]',
+        'button[aria-label="Remove item"]',
+        '.remove-coupon',
+    ])('refuses %s', css => {
+        expect(caramelRiskyControl(css)).toBe(true)
+    })
+
+    it.each([
+        'button[name="apply-promo"]',
+        '#apply-coupon',
+        'button[data-testid="apply-discount"]',
+        '.promo-toggle',
+        'button[aria-label="Apply"]',
+        'a.display-promo',
+        'button[data-action="payload-free"]',
+        'button.buyer-promo',
+    ])('accepts %s', css => {
+        expect(caramelRiskyControl(css)).toBe(false)
+    })
 })
 
 describe('caramelBoxSelectors', () => {
@@ -371,6 +470,40 @@ describe('caramelLearnedOutcome', () => {
         await learn('confirmed', BOX, 'new.test', 1000)
         expect(Object.keys(data)).toContain('s5.test')
         expect(Object.keys(data)).not.toContain('s6.test')
+    })
+
+    it.each([
+        ['an apply that names checkout', { apply: 'button#checkout-button' }],
+        ['an apply that places the order', { apply: '#place-order' }],
+        ['a toggle that removes', { toggle: '.remove-coupon' }],
+        ['a toggle that pays', { toggle: 'button[aria-label="Pay now"]' }],
+        ['an input holding an email', { input: 'input[data-e="a@b.com"]' }],
+        ['an apply holding a long number', { apply: '#apply-1234567' }],
+    ])('%s is refused: never remembered', async (_what, change) => {
+        expect(await learn('confirmed', { ...BOX, ...change })).toBe('refused')
+        expect(data).toBeUndefined()
+    })
+
+    it('a coupon field whose name says checkout is still remembered', async () => {
+        const box = { ...BOX, input: 'input#checkout_reduction_code' }
+        expect(await learn('confirmed', box)).toBe('saved')
+        expect(data['shop.test'].input).toBe('input#checkout_reduction_code')
+    })
+
+    it('a risky box saved before this rule is never read back', async () => {
+        data = {
+            'shop.test': {
+                v: 1,
+                ...BOX,
+                apply: '#place-order',
+                source: 'rules',
+                confirmedAt: 1,
+                failures: 0,
+            },
+        }
+        expect(await caramelLearnedRead(area, 'shop.test')).toBeNull()
+        data['shop.test'].apply = 'button#apply'
+        expect(await caramelLearnedRead(area, 'shop.test')).toMatchObject(BOX)
     })
 
     it('a storage refusal is thrown, so the caller can say so', async () => {
