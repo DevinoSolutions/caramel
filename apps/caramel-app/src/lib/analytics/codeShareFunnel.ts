@@ -16,7 +16,7 @@
 // (403 `consent-required`) without it, exactly like POST /api/coupons/submit.
 // The event carries NO code value, user id, email, URL, path or cart: the only
 // free-form-looking field is the store's bare hostname. The distinct id is a
-// random per-install telemetry id minted at opt-in (NOT the install id `iid`,
+// random per-device telemetry id minted at opt-in (NOT the install id `iid`,
 // never a user id), and `$process_person_profile: false` keeps PostHog from
 // minting a person for it.
 //
@@ -113,7 +113,7 @@ export const MIN_USAGE_DIAGNOSTICS_CONSENT_PROMPT_VERSION = 1
 export const FUNNEL_STORE_PATTERN =
     /^(?=.{3,253}$)[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/
 
-/** `crypto.randomUUID()`: the per-install telemetry id. Any UUID version, like INSTALL_ID_PATTERN. */
+/** `crypto.randomUUID()`: the per-device telemetry id. Any UUID version, like INSTALL_ID_PATTERN. */
 const TELEMETRY_ID = z.string().uuid()
 
 /**
