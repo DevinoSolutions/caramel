@@ -573,6 +573,9 @@ describe('the record the apply flow runs on', () => {
 
         expect(document.querySelector(rec.couponInput)?.id).toBe('pc')
         expect(document.querySelector(rec.showInput)?.id).toBe('tg')
+        // The "+" that opened the box would fold it again: the box's own
+        // Apply is its button.
+        expect(document.querySelector(rec.couponSubmit)?.id).toBe('pa')
     })
 })
 

@@ -536,6 +536,56 @@ const PATHS = {
     },
 }
 
+// A link elsewhere is a way out of the cart, whatever it says: never the apply
+// button, on any path.
+describe('an apply link that leaves the page is never the apply button', () => {
+    for (const [what, link] of [
+        [
+            'a link to another page',
+            '<a id="b" href="/cart/checkout" class="btn">Apply</a>',
+        ],
+        [
+            'a link to another site',
+            '<a id="b" href="https://pay.example/apply" class="btn">Apply</a>',
+        ],
+        [
+            'a link to this page with another query',
+            '<a id="b" href="/cart?step=payment" class="btn">Apply</a>',
+        ],
+        [
+            'a button inside a link to another page',
+            '<a href="/checkout"><button id="b" type="button">Apply</button></a>',
+        ],
+    ])
+        for (const [path, name] of Object.entries(PATHS))
+            it(`${path}: ${what}`, async () => {
+                document.body.innerHTML =
+                    '<div>' + PROMO_INPUT + link + '</div>' + TOTAL
+                name({ input: 'x', button: 'b' })
+                const clicks = watchClicks()
+
+                await run()
+
+                expect(drivenSubmit()).not.toBe('b')
+                expect(clicks).not.toContain('b')
+            })
+
+    // An in-page link is how plenty of stores apply.
+    for (const [path, name] of Object.entries(PATHS))
+        it(`${path}: an in-page "#" link is used (the control case)`, async () => {
+            document.body.innerHTML =
+                '<div>' +
+                PROMO_INPUT +
+                '<a id="b" href="#" class="btn">Apply</a></div>' +
+                TOTAL
+            name({ input: 'x', button: 'b' })
+
+            await run()
+
+            expect(drivenSubmit()).toBe('b')
+        })
+})
+
 // An apply button that names no code is judged by the words beside it and by
 // its section's name and heading: points, rewards, member prices, student,
 // military or teacher discounts, and verification are never a code's apply.

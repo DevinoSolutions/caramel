@@ -569,14 +569,18 @@ function scoreButton(btn, input, level) {
 const BTN =
     'button, input[type="submit"], input[type="button"], [role="button"], a[href^="#"], a[href^="javascript:" i], a:not([href])'
 
-function findButton(input) {
+// `reveal`: the toggle that opened this box. Clicking it again folds the box,
+// so it is never the box's apply button.
+function findButton(input, reveal = null) {
     const seen = new Set()
     let best = null
     const consider = (btn, level) => {
-        if (seen.has(btn) || btn === input) return
+        if (seen.has(btn) || btn === input || btn === reveal) return
         seen.add(btn)
         if (spendsPoints(btn)) return
         if (noCodeClick(btn)) return
+        // A link elsewhere is a way out of the cart, whatever it says.
+        if (navigatesAway(btn)) return
         const r = scoreButton(btn, input, level)
         if (r && r.s > 20 && (!best || r.s > best.score))
             best = { el: btn, score: r.s, reasons: r.reasons }
@@ -1412,10 +1416,11 @@ export function caramelFindOrderTotal(doc = document) {
 
 /* ---------------------------------------------------------------- decide */
 // Exported for tests/coupon-box-discovery.test.mjs.
-export function caramelDiscoverCouponBox(doc = document) {
+// `reveal`: the toggle clicked to open the box, never its button.
+export function caramelDiscoverCouponBox(doc = document, reveal = null) {
     const candidates = scoreInputs(doc)
     const top = candidates[0] || null
-    const button = top ? findButton(top.el) : null
+    const button = top ? findButton(top.el, reveal) : null
     const toggle = !top || !top.visible ? findToggle(doc, top?.el) : null
     return {
         input: top?.el || null,
@@ -1598,7 +1603,7 @@ export async function caramelDiscoveredRecord(rec, doc = document) {
         toggle.click()
         for (let waited = 0; waited < 2500; waited += 250) {
             await sleep(250)
-            found = caramelDiscoverCouponBox(doc)
+            found = caramelDiscoverCouponBox(doc, toggle)
             if (found.inputVisible) break
         }
         // A checkbox that opened no box we can use was not its fold, or not
@@ -1852,12 +1857,14 @@ const okButton = (b, input) =>
 // box's own: in its form, or in its small panel. A page that re-drew the box
 // beside a gift-card form must not lend it that form's button.
 // strict (llm_only): the named button only, never one the rules find.
-function applyButtonFor(input, button, kept, strict) {
+// reveal: the toggle that opened the box, never its button.
+function applyButtonFor(input, button, kept, strict, reveal = null) {
     const ok = b =>
         b &&
+        b !== reveal &&
         !navigatesAway(b) &&
         (!kept || (b.form ? b.form === input.form : ownsBox(b, input)))
-    return [button, !strict && findButton(input)?.el].find(ok) || null
+    return [button, !strict && findButton(input, reveal)?.el].find(ok) || null
 }
 
 /* The rules see no box, but this tab's kept pick names one here: the cart
@@ -2074,7 +2081,7 @@ async function checkedPick(doc, picked, own, strict) {
     if (!typeableInput(input) || !couponInput(input)) input = null
     if (!okButton(button, input)) button = null
     if (!okToggle(toggle)) toggle = null
-    const buttonFor = el => applyButtonFor(el, button, own, strict)
+    const buttonFor = el => applyButtonFor(el, button, own, strict, toggle)
 
     // A usable pick: an input with its button, or the named input when no
     // button was named (a box that applies on Enter). A button that was named
@@ -2098,17 +2105,10 @@ async function checkedPick(doc, picked, own, strict) {
             if (input && visible(input) && typeableInput(input))
                 found = { input, button: buttonFor(input) }
             else if (!strict) {
-                const rules = caramelDiscoverCouponBox(doc)
-                // Same guard as buttonFor: a button that leaves the page is
-                // never the apply button on this path.
-                if (rules.inputVisible && confident(rules))
-                    found = {
-                        ...rules,
-                        button:
-                            rules.button && !navigatesAway(rules.button)
-                                ? rules.button
-                                : null,
-                    }
+                // The rules never take a link that leaves the page
+                // (findButton), nor the toggle just clicked as the button.
+                const rules = caramelDiscoverCouponBox(doc, toggle)
+                if (rules.inputVisible && confident(rules)) found = rules
             }
         }
         opened = toggle
