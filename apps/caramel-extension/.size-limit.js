@@ -146,7 +146,11 @@ module.exports = [
         // through unnoticed. Measured 12.38 kB after the review fixes (id minted
         // only on accept, the consent re-read, device-local consent), so the
         // limit is measured + ~0.3 kB.
-        limit: '12.7 KB',
+        // 2026-10-17, raised 12.7 -> 13.6 kB: the per-tab handoffs
+        // (tab-handoff.js and its message route), which hold the pending
+        // submit, the discount-link win and the run where the store's page
+        // cannot write them. Measured 13.24 kB.
+        limit: '13.6 KB',
         brotli: false,
     },
     {
