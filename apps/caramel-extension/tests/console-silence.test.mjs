@@ -42,6 +42,7 @@ const SHIPPED_TO_STRANGERS = [
     'UI-helpers.js',
     'inject.js',
     'background.js',
+    'tab-handoff.js',
 ]
 // Not in any entrypoint's import graph, but shipped and run in the store's
 // page all the same: the build copies it beside the bundle and the finder

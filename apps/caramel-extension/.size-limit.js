@@ -127,7 +127,10 @@ module.exports = [
         // 2026-10-13, raised 10.7 -> 11.3 kB: the coupon-box pick request (its
         // flag, its message route, and one deadline over the flag read, the
         // token read and the request). Measured 10.52 kB.
-        limit: '11.3 KB',
+        // 2026-10-17, raised 11.3 -> 11.8 kB: the per-tab handoffs
+        // (tab-handoff.js and its message route), which hold the finder's
+        // server pick where the store's page cannot write it. Measured 11.41 kB.
+        limit: '11.8 KB',
         brotli: false,
     },
     {
