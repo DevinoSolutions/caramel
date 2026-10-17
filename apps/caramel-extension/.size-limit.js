@@ -189,14 +189,17 @@ module.exports = [
     {
         name: 'coupon-box-finder.js (loaded on demand, minified)',
         path: '.size-cache/coupon-box-finder.min.js',
-        // 2026-10-17 — measured 28.06 kB, built exactly as it ships
+        // 2026-10-17 — measured 29.18 kB, built exactly as it ships
         // (scripts/finder-bundle.mjs). Not injected on every page: the
         // content script imports it only when the finder flag is on and the
         // page has no box a config describes. The nine-language vocabularies
-        // and the field, button, toggle and total-row readers are most of it.
-        // The limit is measured + ~2 kB, as for the content scripts. It is
-        // written only here: tests/finder-module-build.test.mjs reads it.
-        limit: '30 KB',
+        // and the field, button, toggle and total-row readers are most of it
+        // (28.06 kB before it learned never to click a control that is not a
+        // code, 28.64 kB before an apply button with no apply word was
+        // limited to the box's own panel). The limit is measured + ~1.3 kB.
+        // It is written only here: tests/finder-module-build.test.mjs reads
+        // it.
+        limit: '30.5 KB',
         brotli: false,
     },
     {
