@@ -1,21 +1,27 @@
-// src/lib/couponFailureReportDedupe.ts
+// src/lib/couponReportDedupe.ts
 //
-// At most ONE 'failed' report per reporter per coupon per 24h.
+// At most ONE report of each kind per reporter per coupon per 24h, for the three
+// anonymous trust signals a shopper's extension (or the website card) sends:
 //
-// POST /api/coupons/[id]/report is anonymous (the extension reports without a
-// session) and each failure bumps coupon_signals.fail_count, which sinks a code
-// at 2 and collapses it at 3 (coupons.ts isRecentlyFailing / keepsFailing). With
-// no per-reporter dedupe a `curl` loop from ONE address flags any code in a
-// second. With this, forging the collapse needs 3 distinct reporters per code,
-// and what those can do is still only reorder/collapse: never a status change, a
-// catalog write or a deletion, and one success clears it (DESIGN.md §2(q)).
+//   'failed' — POST /api/coupons/[id]/report {failed}: bumps fail_count, which
+//              sinks a code at 2 and collapses it at 3 (coupons.ts
+//              isRecentlyFailing / keepsFailing).
+//   'worked' — POST /api/coupons/[id]/report {worked}: stamps last_worked_at,
+//              which shows the code as Verified for 24h, lists it in "Codes that
+//              just worked", and clears a code's failing state.
+//   'used'   — POST /api/coupons/increment: bumps work_count.
+//
+// Without a per-reporter dedupe one reporter repeating a report could move any
+// of these alone. With it, each kind needs a distinct reporter per count. The
+// three kinds have separate slots: a successful apply sends both 'worked' and
+// 'used', and a shopper who reports a code worked can still report it failed
+// later (and the reverse).
 //
 // The reporter is the signed-in USER when there is a session and the client IP
 // only for anonymous callers: two users behind one NAT must each keep their own
-// report (and their coupon_reports attribution row).
-//
-// 'worked' reports are NOT limited here and never consume a slot: they never
-// hide anything.
+// report (and their coupon_reports attribution row). Two ANONYMOUS shoppers
+// behind one IP share a slot per coupon per kind: the second one's repeat of the
+// same report within 24h is not counted.
 //
 // STATE: an in-memory Map<key, expiry>, per process. It resets on every deploy
 // and restart (a reporter can re-report once after one), and a multi-instance
@@ -30,9 +36,20 @@
 // accepted without being tracked (a forger gets no throttle while the table is
 // full, but no honest report is ever refused), and one throttled Sentry warning
 // per hour says the cap is being hit.
+import { getClientIp } from '@/lib/rateLimit'
 import * as Sentry from '@sentry/nextjs'
+import type { NextRequest } from 'next/server'
 
 const WINDOW_MS = 24 * 60 * 60 * 1000
+
+/** What a report says. Each kind has its own slot per (reporter, coupon). */
+export type ReportKind = 'worked' | 'failed' | 'used'
+
+const KIND_PREFIX: Record<ReportKind, string> = {
+    worked: 'w',
+    failed: 'f',
+    used: 'n',
+}
 const DEFAULT_MAX_KEYS = 50_000
 /** A full table is re-swept for expired keys at most this often (a sweep is O(n)). */
 const SWEEP_MIN_INTERVAL_MS = 60 * 1000
@@ -44,15 +61,33 @@ let lastSweepAt = 0
 /** A sustained cap-hit is ONE Sentry event per hour, not one per request. */
 let nextCapReportAt = 0
 
-export type FailedReportReporter =
+export type ReportReporter =
     | { kind: 'user'; userId: string }
     | { kind: 'ip'; ip: string }
 
-/** Short key: reporter kind + id, then the coupon id. */
-function keyOf(reporter: FailedReportReporter, couponId: string): string {
+/**
+ * The reporter a request counts as: its signed-in user, else its client IP
+ * (getClientIp, the same address the rate limiter uses). Both report routes
+ * call this, so a shopper is one reporter on both.
+ */
+export function reporterFor(
+    userId: string | null,
+    req: NextRequest,
+): ReportReporter {
+    return userId
+        ? { kind: 'user', userId }
+        : { kind: 'ip', ip: getClientIp(req) }
+}
+
+/** Short key: report kind, reporter kind + id, then the coupon id. */
+function keyOf(
+    kind: ReportKind,
+    reporter: ReportReporter,
+    couponId: string,
+): string {
     const who =
         reporter.kind === 'user' ? `u${reporter.userId}` : `i${reporter.ip}`
-    return `${who}|${couponId}`
+    return `${KIND_PREFIX[kind]}|${who}|${couponId}`
 }
 
 function sweepExpired(now: number): void {
@@ -67,27 +102,25 @@ function sweepExpired(now: number): void {
 function reportCapHit(now: number): void {
     if (now < nextCapReportAt) return
     nextCapReportAt = now + CAP_REPORT_INTERVAL_MS
-    Sentry.captureMessage(
-        'coupon failed-report dedupe table is full: failing open',
-        {
-            level: 'warning',
-            tags: { route: 'coupons/report', budget: 'failed-report-dedupe' },
-            extra: { maxKeys, windowMs: WINDOW_MS },
-        },
-    )
+    Sentry.captureMessage('coupon report dedupe table is full: failing open', {
+        level: 'warning',
+        tags: { route: 'coupons/report', budget: 'report-dedupe' },
+        extra: { maxKeys, windowMs: WINDOW_MS },
+    })
 }
 
 /**
- * True when this report should be recorded: the first 'failed' report for
+ * True when this report should be recorded: the first report of `kind` for
  * (reporter, couponId) in the window (it takes the slot), or ANY report while the
  * table is full (fail open, untracked). False only for a tracked duplicate.
  */
-export function admitFailedReport(
-    reporter: FailedReportReporter,
+export function admitReport(
+    kind: ReportKind,
+    reporter: ReportReporter,
     couponId: string,
     now: number = Date.now(),
 ): boolean {
-    const key = keyOf(reporter, couponId)
+    const key = keyOf(kind, reporter, couponId)
     const expiresAt = expiryByKey.get(key)
     if (expiresAt !== undefined && expiresAt > now) return false
 
@@ -111,15 +144,16 @@ export function admitFailedReport(
  * failed, so the (retrying) client must not be deduped against a report that
  * never landed.
  */
-export function releaseFailedReport(
-    reporter: FailedReportReporter,
+export function releaseReport(
+    kind: ReportKind,
+    reporter: ReportReporter,
     couponId: string,
 ): void {
-    expiryByKey.delete(keyOf(reporter, couponId))
+    expiryByKey.delete(keyOf(kind, reporter, couponId))
 }
 
 /** Test-only: clear the table and optionally lower the cap. */
-export function resetFailedReportDedupeForTests(
+export function resetReportDedupeForTests(
     options: { maxKeys?: number } = {},
 ): void {
     expiryByKey.clear()
