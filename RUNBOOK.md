@@ -689,7 +689,14 @@ cannot tell such failures from real ones (it never sees the cart), so this is
 left as is. If it bites a store that matters, give the store a config.
 
 **Caps.** All caps are per store, enforced under one per-store database lock,
-so parallel reports cannot race past them.
+so parallel reports cannot race past them. A report never waits for that lock:
+one that arrives while another report for the same store is being written is
+answered `{recorded:false, reason:'ignored'}` at once, so a few clients sending
+reports for one store in parallel cannot tie up database connections. A
+shopper's report is rarely lost that way (writing one takes milliseconds), and
+the box's next confirmation, from that shopper or another, counts as usual.
+The hand-over below works the same way: it never waits for its lock, and one
+that finds it taken is tried again on the store's next servable report.
 
 - New reporters: at most 2 new installs per network per box in any 7 days.
   More are answered `{recorded:false, reason:'ignored'}`.
@@ -702,12 +709,27 @@ so parallel reports cannot race past them.
   make room. If nothing may go, the new report is ignored. So filling a box
   with installs from a few networks only ever pushes out those networks' own
   extra installs, and cannot lock real shoppers out.
-- Boxes per store: at most 5, across all the store's hosts. A 6th selector
-  set replaces the weakest box that is NOT servable (fewest confirming
-  networks, then the oldest last confirmation); a store whose 5 boxes are all
-  servable takes no new one. One network may report on at most 3 of a store's
-  boxes (more are ignored), so a reporter on two networks can back at most 3
-  boxes and cannot keep a real box from a slot.
+- Boxes per store: at most 5, across all the store's hosts. A network
+  stands behind a box ALONE when it confirms that box and no other box of the
+  store. A 6th selector set replaces the weakest box that is NOT servable:
+  fewest networks standing behind it alone, then fewest confirming networks,
+  then the oldest last confirmation. A box that some network stands behind
+  alone gives way only to a new box whose network confirms nothing in the
+  store yet; a new box from a network that already confirms one is refused
+  instead (`ignored`). A store whose 5 boxes are all servable takes no new
+  one. What that buys:
+    - A network stands behind one box alone at a time, so a few networks
+      churning junk boxes, every hour, cannot push out a young real box a
+      shopper's network confirmed while its next shoppers arrive. Pushing it
+      out takes roughly one network per slot the real boxes do not fill,
+      kept confirming daily, plus a new network for every box pushed out.
+    - Having more networks behind it alone protects a box no further, so 5
+      boxes backed by 2 networks each still give way to a new box and cannot
+      lock a store.
+    - There is no limit on how many boxes one network reports on, so
+      shoppers behind one shared address block (a mobile carrier, an office)
+      are never refused for reporting. The cost: when one network confirms
+      two different boxes, both are the first to go.
 - One install counts at most once per 24h per box and per outcome. A `failed`
   report for a box nobody confirmed creates nothing.
 - Domains must be plausible store hosts (see "Stores and hosts" above).
@@ -722,6 +744,20 @@ so parallel reports cannot race past them.
     - no `:has(`, no `:nth-last-*`, no selector lists.
 
     Anything else is refused whole (400).
+
+**What the server cannot promise.** Every rule above counts NETWORKS (/24
+IPv4, /48 IPv6), and networks are cheaper than they look: IPv6 /48s come free
+with tunnel brokers and some hosting plans, and the client address is the one
+the CDN reports in `CF-Connecting-IP`. A determined attacker with enough
+networks can still get a wrong box served, or keep a right one off the
+shortcut, for a store with little traffic. The server makes that slower and
+costlier; it cannot make it impossible. The real safety net is in the
+extension: a served box is only a suggestion that must pass every check the
+extension runs on the page (the coupon-word and text-input checks, the
+apply-control check, the leave-the-page guard, the money check and the cart
+re-read), so a wrong box costs a failed attempt, never a claimed saving. Keep
+`COUPON_BOX_LEARNED_ENABLED` off until the extension's apply-control check has
+shipped.
 
 **Retention.** A box with no confirmation for 60 days is deleted with its
 reporters, and a reporter row is deleted 60 days after that install last
