@@ -1052,6 +1052,75 @@ describe('an apply far from the box is never its button', () => {
         })
 })
 
+// Many stores ship only an icon or an arrow beside the field. A plain pick
+// (llm_only, so the rules never stand in) uses one in the box's own small
+// panel, but never one across a whole-cart form, and never one whose name,
+// class or data attributes say it removes, checks out or places the order.
+describe("a plain pick's wordless apply", () => {
+    const pick = () => SOURCES['the server pick']({ input: 'x', button: 'b' })
+    for (const [what, html] of [
+        [
+            'an icon in the box',
+            '<div class="promo">' +
+                PROMO_INPUT +
+                '<button id="b" type="button"><svg></svg></button></div>',
+        ],
+        [
+            'an arrow in the box form',
+            '<form class="promo" onsubmit="return false">' +
+                PROMO_INPUT +
+                '<button id="b" type="button">→</button></form>',
+        ],
+        [
+            'a submit showing only a chevron',
+            '<div class="promo">' +
+                PROMO_INPUT +
+                '<input id="b" type="submit" value="›"></div>',
+        ],
+    ])
+        it(`${what} is used`, async () => {
+            document.body.innerHTML = html + TOTAL
+            pick()
+
+            await run()
+
+            expect(drivenSubmit()).toBe('b')
+        })
+
+    for (const [what, html] of [
+        [
+            'an icon elsewhere in a whole-cart form',
+            '<form class="cart" onsubmit="return false"><div class="promo">' +
+                PROMO_INPUT +
+                '</div><p>' +
+                'Organic cotton tee, size M, qty 1. '.repeat(14) +
+                '</p><div class="line"><button id="b" type="button"><svg></svg></button></div></form>',
+        ],
+        [
+            'a cart-remove icon in the box',
+            '<div class="promo">' +
+                PROMO_INPUT +
+                '<button id="b" type="button" class="cart-remove"><svg></svg></button></div>',
+        ],
+        [
+            'a place-order arrow in the box',
+            '<div class="promo">' +
+                PROMO_INPUT +
+                '<button id="b" type="button" data-place-order>→</button></div>',
+        ],
+    ])
+        it(`${what} is refused`, async () => {
+            document.body.innerHTML = html + TOTAL
+            pick()
+            const clicks = watchClicks()
+
+            await run()
+
+            expect(clicks).toEqual([])
+            expect(appliedWith).toHaveLength(0)
+        })
+})
+
 // A form that posts somewhere else, or opens another window, takes the
 // shopper off the cart: its submit is never the apply, on any path.
 describe('a submit that leaves the store is never the apply button', () => {

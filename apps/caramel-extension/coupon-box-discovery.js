@@ -1905,7 +1905,8 @@ const okButton = (b, input) =>
 // A learned box names its apply by a selector, and a selector can name
 // anything on the page (#place-order, button[name=checkout], an add-to-cart).
 // So its apply says apply (okButton), or it is an arrow or an icon with no
-// words, in the box's own form or container. Never one whose label speaks of
+// words in the box's own small panel (ownsBox): sharing the field's form is not
+// enough, a form can hold the whole cart. Never one whose label speaks of
 // checkout, paying, continuing, buying or adding to the cart. Its name, id and
 // data attributes refuse it the same way, with one exception: many real apply
 // buttons live in the checkout's own namespace (checkout_reduction_code,
@@ -1954,6 +1955,12 @@ function learnedApply(b, input, positional = false) {
         ownsBox(b, input)
     )
 }
+
+// A plain pick's button (the server named it by its place in this page's
+// outline): one that says apply, or, as for a learned box, a wordless arrow or
+// icon in the box's own small panel whose name, id, class and data attributes
+// refuse nothing. Many stores ship only an icon beside the field.
+const pickApply = (b, input) => okButton(b, input) || learnedApply(b, input)
 
 // The apply button for `input`: the one named, else the one the rules see
 // beside it. With `own` (every named box: a pick, a kept pick, a learned box)
@@ -2022,7 +2029,7 @@ function boxShows(
             couponInput(input) &&
             (!!applyButtonFor(
                 input,
-                (learned || okButton(button, input)) && button,
+                (learned || pickApply(button, input)) && button,
                 true,
                 strict,
             ) ||
@@ -2208,7 +2215,7 @@ async function checkedPick(doc, picked, own, strict) {
         log('FINDER_PICK_UNUSABLE', { input: !!input, apply: 'refused' })
         return null
     }
-    if (!picked.learned && !okButton(button, input)) button = null
+    if (!picked.learned && !pickApply(button, input)) button = null
     if (!okToggle(toggle)) toggle = null
     const buttonFor = el => applyButtonFor(el, button, own, strict, toggle)
 
