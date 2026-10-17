@@ -457,6 +457,10 @@ describe("an apply button with no apply word is taken only in the box's own pane
         'data-action="delete"',
         'data-testid="cart-item-trash"',
         'class="btn" data-role="quantity-down"',
+        'class="signup-icon"',
+        'data-action="subscribe"',
+        'class="icon wishlist"',
+        'data-testid="logIn"',
     ])
         it(`an icon whose own attributes say so (${attrs}) is never the apply, even in the box's panel`, () => {
             document.body.innerHTML = CONTAINERS['small panel'](

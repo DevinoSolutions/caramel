@@ -461,9 +461,10 @@ const FIELDS =
 // (ownsBox): a whole-cart form also holds each line's remove icon and quantity
 // steppers, and a click on one moves the total the way a code would. Nor is it
 // one whose name, id, class or data-* attributes say it removes, changes a
-// quantity, checks out, pays or buys. A labelled apply is judged as before.
+// quantity, checks out, pays, buys, signs in or up, subscribes or keeps a
+// wishlist. A labelled apply is judged as before.
 const NOT_AN_APPLY_RE =
-    /\b(?:remove|delete|trash|qty|quantity|plus|minus|(?:in|de)cre(?:ase|ment)|check ?out|place ?order|pay(?:pal)?|buy|purchase)\b/i
+    /\b(?:remove|delete|trash|qty|quantity|plus|minus|(?:in|de)cre(?:ase|ment)|check ?out|place ?order|pay(?:pal)?|buy|purchase|sign ?(?:in|up)|log ?in|subscribe|wishlist)\b/i
 function wordlessApply(btn, input) {
     if (!ownsBox(btn, input)) return false
     for (const attr of [

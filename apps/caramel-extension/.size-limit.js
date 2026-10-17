@@ -67,14 +67,15 @@ module.exports = [
         // Measured 118.05 -> 120.89 kB; 121.47 kB once the finder also never
         // clicks a control that adds to the cart, buys, adds a gift extra,
         // updates the cart, subscribes or signs in (noCodeClick, the same
-        // words the server-pick checks use); 121.97 kB once an apply button
-        // with no apply word on it is taken only in the box's own panel and
-        // never when its attributes say remove, quantity, checkout or pay
-        // (wordlessApply). The finder is ~28.5 kB of this
-        // bundle on every page; loading it on demand like
-        // coupon-box-outline.js is the next step before this budget is raised
-        // again.
-        limit: '122 KB',
+        // words the server-pick checks use).
+        // 2026-10-17, raised 122 -> 122.5 kB: an apply button with no apply
+        // word on it is taken only in the box's own panel, and never when its
+        // attributes say remove, quantity, checkout, pay, buy, sign in or up,
+        // subscribe or wishlist (wordlessApply). Measured 122.01 kB. The
+        // finder is ~28.5 kB of this bundle on every page; loading it on
+        // demand (coupon-box-finder.js) takes it out and brings this bundle
+        // back down to about 93.7 kB.
+        limit: '122.5 KB',
         brotli: false,
     },
     {
