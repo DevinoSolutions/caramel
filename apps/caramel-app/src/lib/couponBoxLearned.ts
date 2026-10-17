@@ -39,17 +39,23 @@
 //     reads (a second voice of a network already heard), else the
 //     longest-unseen reporter that is not failing the box or whose failure is
 //     over 30 days old; a network's only fresh failing voice is kept.
-//   - At most 5 boxes per store, and one network may report on at most 3 of
-//     them. A new box replaces the weakest box that is not servable (fewest
-//     confirming networks, then oldest confirmation); a servable box is never
-//     replaced.
+//   - At most 5 boxes per store (makeRoomForBox). A full store makes room by
+//     deleting its weakest box that is not servable, ranked by EXCLUSIVE
+//     confirming networks (ones that confirm no other box of the store), then
+//     all confirming networks, then the oldest confirmation. A servable box is
+//     never replaced, and a box some network alone stands behind gives way
+//     only to a new box whose network confirms nothing else in the store.
+//     There is no cap on the boxes one network reports on: a network's second
+//     box makes both of its boxes the first to go.
 //   - A `failed` report for a box nobody confirmed creates nothing.
 //   - Serving: assessLearnedBox below.
 //   - Retention: a box with no confirmation for 60 days, and a reporter not
 //     seen for 60 days, are deleted (at every report for its store, and by
 //     the pruner instrumentation.ts starts).
 //   - Every write for a store runs under one per-store transaction lock, so
-//     the caps and the 24-hour window hold under concurrent reports.
+//     the caps and the 24-hour window hold under concurrent reports. A report
+//     never waits for that lock: one that finds it taken is answered
+//     `ignored`, so parallel reports cannot hold database connections.
 //   - A store with a served config never reads or writes these tables (the
 //     routes check that first, couponsRepo.hasServedStoreConfig).
 //
@@ -94,8 +100,6 @@ export const LEARNED_BOX_RULES = {
     maxReportersPerBox: 50,
     /** Boxes kept per store. */
     maxBoxesPerDomain: 5,
-    /** Boxes of one store a single network may report on. */
-    maxBoxesPerNetwork: 3,
     /** One install counts at most once per this window, per box and outcome. */
     countWindowHours: 24,
     /** A box with no confirmation, or a reporter not seen, for this long is
@@ -317,6 +321,30 @@ function latestIsFailure(r: ReporterEvidence): boolean {
     )
 }
 
+/** The reporter's latest word is a confirmation from the last freshDays. */
+function isConfirming(r: ReporterEvidence, fresh: Date): boolean {
+    return (
+        !latestIsFailure(r) &&
+        r.lastConfirmedAt !== null &&
+        r.lastConfirmedAt >= fresh
+    )
+}
+
+/** The distinct networks that confirm a box (isConfirming). */
+function confirmingNetworksOf(
+    reporters: readonly ReporterEvidence[],
+    now: Date,
+): string[] {
+    const fresh = daysBefore(now, LEARNED_BOX_RULES.freshDays)
+    return Array.from(
+        new Set(
+            reporters
+                .filter(r => isConfirming(r, fresh))
+                .map(r => r.networkHash),
+        ),
+    )
+}
+
 export interface LearnedBoxAssessment {
     servable: boolean
     confirmingInstalls: number
@@ -342,12 +370,7 @@ export function assessLearnedBox(
     now: Date,
 ): LearnedBoxAssessment {
     const fresh = daysBefore(now, LEARNED_BOX_RULES.freshDays)
-    const confirming = reporters.filter(
-        r =>
-            !latestIsFailure(r) &&
-            r.lastConfirmedAt !== null &&
-            r.lastConfirmedAt >= fresh,
-    )
+    const confirming = reporters.filter(r => isConfirming(r, fresh))
     const failing = reporters.filter(
         r =>
             latestIsFailure(r) &&
@@ -474,7 +497,8 @@ export type LearnedReportResult =
           recorded: false
           /** unknown_box: a failure for a box nobody confirmed.
            * ignored: a cap refused it (reporters per network, reporters per
-           * box, boxes per store, boxes per network). Neither is an error. */
+           * box, boxes per store), or another report for the store held its
+           * lock. Neither is an error. */
           reason: 'unknown_box' | 'ignored'
       }
 
@@ -485,12 +509,30 @@ interface RecordInput {
     now?: Date
 }
 
-/** The per-store transaction lock every write for one store queues behind. */
+const storeLockKey = (storeDomain: string) =>
+    `learned-coupon-box:${storeDomain}`
+
+/** Wait for the per-store transaction lock. Only the store-wide prune waits:
+ * it runs one store at a time on one connection. */
 async function lockStore(
     tx: Prisma.TransactionClient,
     storeDomain: string,
 ): Promise<void> {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`learned-coupon-box:${storeDomain}`}, 0))`
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${storeLockKey(storeDomain)}, 0))`
+}
+
+/** Take the per-store transaction lock if it is free, without waiting. A
+ * report that waited would hold a pooled connection for as long as the lock
+ * stays taken, so a few clients sending reports for one store in parallel
+ * could use up the pool. */
+async function tryLockStore(
+    tx: Prisma.TransactionClient,
+    storeDomain: string,
+): Promise<boolean> {
+    const [row] = await tx.$queryRaw<
+        { locked: boolean }[]
+    >`SELECT pg_try_advisory_xact_lock(hashtextextended(${storeLockKey(storeDomain)}, 0)) AS locked`
+    return row?.locked === true
 }
 
 /** Retention for one store. Call it holding the store's lock. */
@@ -510,10 +552,11 @@ async function pruneStore(
 
 /**
  * Record one report. Runs in one transaction holding a per-store advisory
- * lock, so concurrent reports for a store run one after another and every
- * cap and count below is read and written atomically. Retried once when two
- * first reports race on the same unique key. Throws on any other database
- * error: the route turns that into a reported 500, never a quiet "recorded".
+ * lock, so every cap and count below is read and written atomically. A report
+ * that finds the lock taken is answered `ignored` at once rather than waiting
+ * (tryLockStore). Retried once when two first reports race on the same unique
+ * key. Throws on any other database error: the route turns that into a
+ * reported 500, never a quiet "recorded".
  */
 export async function recordLearnedBoxReport(
     input: RecordInput,
@@ -551,9 +594,10 @@ async function recordOnce({
 
     return prisma.$transaction(
         async (tx): Promise<LearnedReportResult> => {
-            // Every write for this store, on any of its hosts, queues behind
-            // this lock until the transaction ends.
-            await lockStore(tx, storeDomain)
+            // Every write for this store, on any of its hosts, holds this
+            // lock until the transaction ends. A report that finds it taken
+            // is dropped, never queued.
+            if (!(await tryLockStore(tx, storeDomain))) return ignored
             // Retention for this store, before anything is counted.
             await pruneStore(tx, storeDomain, pruneCutoff)
 
@@ -582,18 +626,15 @@ async function recordOnce({
                 ) {
                     return ignored
                 }
-                if (
-                    !(await networkMayJoinBox(
-                        tx,
-                        storeDomain,
-                        box?.id ?? null,
-                        networkHash,
-                    ))
-                ) {
-                    return ignored
-                }
                 if (!box) {
-                    if (!(await makeRoomForBox(tx, storeDomain, now))) {
+                    if (
+                        !(await makeRoomForBox(
+                            tx,
+                            storeDomain,
+                            networkHash,
+                            now,
+                        ))
+                    ) {
                         return ignored
                     }
                     box = await tx.learnedCouponBox.create({
@@ -657,7 +698,7 @@ async function recordOnce({
                 servable: assessLearnedBox(reporters, now).servable,
             }
         },
-        // Reports for one store wait for each other on the lock above.
+        // Nothing in here waits for another report (tryLockStore).
         { timeout: 15_000 },
     )
 }
@@ -680,26 +721,6 @@ async function networkMayAddReporter(
         },
     })
     return recentOnNetwork < LEARNED_BOX_RULES.newReportersPerNetwork
-}
-
-/**
- * One network reports on at most maxBoxesPerNetwork of a store's boxes (a
- * network already heard on this box is not joining a new one). Without this,
- * two networks could back every one of the store's boxes and keep a real box
- * from ever holding a slot.
- */
-async function networkMayJoinBox(
-    tx: Prisma.TransactionClient,
-    storeDomain: string,
-    boxId: string | null,
-    networkHash: string,
-): Promise<boolean> {
-    const boxesOnNetwork = await tx.learnedCouponBox.findMany({
-        where: { storeDomain, reporters: { some: { networkHash } } },
-        select: { id: true },
-    })
-    if (boxId && boxesOnNetwork.some(b => b.id === boxId)) return true
-    return boxesOnNetwork.length < LEARNED_BOX_RULES.maxBoxesPerNetwork
 }
 
 /** What a reporter's removal must leave unchanged for it to be a spare
@@ -765,17 +786,35 @@ async function makeRoomForReporter(
 }
 
 /**
- * At most maxBoxesPerDomain boxes per store (across all its hosts). When
- * full, the weakest box that is NOT servable (fewest confirming networks,
- * then the oldest last confirmation) is deleted to make room; a store whose
- * boxes are all servable takes no new box. A servable box needs 3 networks
- * and one network backs at most maxBoxesPerNetwork boxes, so a reporter on a
- * few networks can neither hold every slot nor push out a box the crowd
- * already proved.
+ * At most maxBoxesPerDomain boxes per store (across all its hosts). A box's
+ * strength is, in order:
+ *
+ *   1. its EXCLUSIVE confirming networks: networks that confirm it and no
+ *      other box of the store;
+ *   2. all its confirming networks.
+ *
+ * When the store is full, its weakest box that is NOT servable (then the
+ * oldest last confirmation) is deleted to make room. A servable box is never
+ * replaced. A box with at least one exclusive network gives way only to a new
+ * box whose network confirms no box of the store yet; a new box from a network
+ * that already confirms one is refused instead.
+ *
+ * A network stands behind one box alone at a time, so an attacker with k
+ * networks has at most k boxes that resist; every other box they hold is the
+ * first to go. A young real box that a shopper's own network confirmed is
+ * pushed out only when every other slot holds such a box and yet another
+ * network that confirms nothing in the store arrives, and it is then the
+ * oldest: about one network per slot, plus a fresh one per box pushed out.
+ * Two or three networks churning junk cannot do it, however many boxes they
+ * create. Extra exclusive networks give no further protection, so 5 boxes
+ * backed by 2 such networks each still give way to a new one and cannot hold
+ * the store. The cost: two different boxes confirmed from one shared network
+ * (an office or carrier /24) are both the first to go.
  */
 async function makeRoomForBox(
     tx: Prisma.TransactionClient,
     storeDomain: string,
+    networkHash: string,
     now: Date,
 ): Promise<boolean> {
     const boxes = await tx.learnedCouponBox.findMany({
@@ -783,17 +822,45 @@ async function makeRoomForBox(
         include: { reporters: { select: REPORTER_EVIDENCE_SELECT } },
     })
     if (boxes.length < LEARNED_BOX_RULES.maxBoxesPerDomain) return true
+
+    const networksOf = boxes.map(box =>
+        confirmingNetworksOf(box.reporters, now),
+    )
+    const boxesConfirmedBy = new Map<string, number>()
+    for (const networks of networksOf) {
+        for (const net of networks) {
+            boxesConfirmedBy.set(net, (boxesConfirmedBy.get(net) ?? 0) + 1)
+        }
+    }
+    const newcomerExclusive = boxesConfirmedBy.has(networkHash) ? 0 : 1
+
     const weakest = boxes
-        .map(box => ({ box, assessment: assessLearnedBox(box.reporters, now) }))
-        .filter(({ assessment }) => !assessment.servable)
+        .map((box, i) => {
+            const networks = networksOf[i] ?? []
+            return {
+                box,
+                servable: assessLearnedBox(box.reporters, now).servable,
+                networks: networks.length,
+                exclusive: networks.filter(
+                    net => boxesConfirmedBy.get(net) === 1,
+                ).length,
+            }
+        })
+        .filter(candidate => !candidate.servable)
         .sort(
             (a, b) =>
-                a.assessment.confirmingNetworks -
-                    b.assessment.confirmingNetworks ||
+                a.exclusive - b.exclusive ||
+                a.networks - b.networks ||
                 a.box.lastConfirmedAt.getTime() -
                     b.box.lastConfirmedAt.getTime(),
         )[0]
-    if (!weakest) return false
+    // A box some network stands behind alone gives way only to a new box a
+    // network stands behind alone. How many such networks it has does not
+    // protect it further: otherwise 5 boxes backed by 2 such networks each
+    // would hold the store's every slot for as long as they keep confirming.
+    if (!weakest || Math.min(weakest.exclusive, 1) > newcomerExclusive) {
+        return false
+    }
     await tx.learnedCouponBox.delete({ where: { id: weakest.box.id } })
     return true
 }
@@ -867,7 +934,10 @@ export function startLearnedCouponBoxPruner(): void {
 
 export type HandoverResult =
     | { created: true }
-    | { created: false; reason: 'already' | 'daily_cap' | 'not_a_store' }
+    | {
+          created: false
+          reason: 'already' | 'daily_cap' | 'not_a_store' | 'busy'
+      }
 
 /**
  * Hand a store (its registrable domain, reportStoreDomain: never one of its
@@ -878,7 +948,10 @@ export type HandoverResult =
  * (learned_coupon_box_handovers is never pruned, and a wiped box does not
  * reopen it), and at most handoverDailyCap stores per rolling 24 hours
  * overall; a store refused by the cap is handed over on a later servable
- * report. Serialised by its own advisory lock.
+ * report. Serialised by its own advisory lock, which it never waits for: an
+ * already handed-over store is answered without the lock, and a hand-over that
+ * finds the lock taken answers `busy` and is retried on the next servable
+ * report, so reports on a served store cannot queue connections behind it.
  */
 export async function handOverLearnedStore(
     domain: string,
@@ -886,8 +959,17 @@ export async function handOverLearnedStore(
 ): Promise<HandoverResult> {
     const suggested = normalizeSuggestedDomain(domain)
     if (!suggested) return { created: false, reason: 'not_a_store' }
+    const handedOver = await prisma.learnedCouponBoxHandover.findUnique({
+        where: { domain },
+        select: { domain: true },
+    })
+    if (handedOver) return { created: false, reason: 'already' }
     return prisma.$transaction(async (tx): Promise<HandoverResult> => {
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${'learned-coupon-box:handover'}, 0))`
+        const [lock] = await tx.$queryRaw<
+            { locked: boolean }[]
+        >`SELECT pg_try_advisory_xact_lock(hashtextextended(${'learned-coupon-box:handover'}, 0)) AS locked`
+        if (lock?.locked !== true) return { created: false, reason: 'busy' }
+        // Read again under the lock: the read above may have raced another.
         const existing = await tx.learnedCouponBoxHandover.findUnique({
             where: { domain },
             select: { domain: true },

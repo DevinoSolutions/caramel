@@ -129,6 +129,43 @@ function record(
     })
 }
 
+/** Hold a transaction advisory lock, the way an in-flight report holds its
+ * store's lock, until release() is awaited. */
+async function holdAdvisoryLock(key: string) {
+    let locked!: () => void
+    let release!: () => void
+    const isLocked = new Promise<void>(r => (locked = r))
+    const released = new Promise<void>(r => (release = r))
+    const holder = prisma.$transaction(
+        async tx => {
+            await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`
+            locked()
+            await released
+        },
+        { timeout: 20_000 },
+    )
+    await isLocked
+    return {
+        release: async () => {
+            release()
+            await holder
+        },
+    }
+}
+
+/** The promise's value, or 'timed out' after `seconds`. */
+function withinSeconds<T>(
+    seconds: number,
+    promise: Promise<T>,
+): Promise<T | 'timed out'> {
+    return Promise.race([
+        promise,
+        new Promise<'timed out'>(r =>
+            setTimeout(() => r('timed out'), seconds * 1000),
+        ),
+    ])
+}
+
 /** One confirming install on each of `networks`. */
 async function confirmOn(domain: string, networks: string[], now: Date) {
     for (const net of networks) {
@@ -681,29 +718,114 @@ describe('learned coupon box: size and retention (real Postgres)', () => {
         ).toBe(LEARNED_BOX_RULES.maxBoxesPerDomain)
     })
 
-    it('slot squatting from 2 networks: one network backs at most 3 boxes, so a real box still gets a slot and is served', async () => {
+    it('slot squatting from 2 networks: 5 boxes backed by both networks give way to a real box, which is then served', async () => {
         const domain = freshDomain()
         const t0 = new Date()
-        const results = []
         for (let n = 0; n < 5; n++) {
             for (const net of ['A', 'B']) {
-                results.push(
-                    await record(
-                        report(domain, { box: boxN(n) }),
-                        `att-${n}-${net}`,
-                        net,
-                        t0,
-                    ),
+                await record(
+                    report(domain, { box: boxN(n) }),
+                    `att-${n}-${net}`,
+                    net,
+                    t0,
                 )
             }
         }
-        // Each attacker network was heard on 3 boxes; the rest was refused.
-        expect(results.filter(r => r.recorded)).toHaveLength(
-            2 * LEARNED_BOX_RULES.maxBoxesPerNetwork,
-        )
         const later = new Date(t0.getTime() + HOUR)
         await confirmOn(domain, ['r1', 'r2', 'r3'], later)
         expect(await findServableLearnedBox(domain, later)).toEqual(BOX)
+    })
+
+    it('slot churn from 2 networks cannot push out a young real box: it keeps its slot while its shoppers arrive hours apart, and is served', async () => {
+        const domain = freshDomain()
+        const t0 = new Date()
+        const at = (hours: number) => new Date(t0.getTime() + hours * HOUR)
+        const realBoxInstalls = async () =>
+            (
+                await prisma.learnedCouponBoxReporter.findMany({
+                    where: { box: { domain, inputSelector: BOX.input } },
+                    select: { installHash: true },
+                })
+            )
+                .map(r => r.installHash)
+                .sort()
+
+        // Two attacker networks hold four junk boxes, two each.
+        for (let n = 1; n <= 4; n++) {
+            await record(
+                report(domain, { box: boxN(n) }),
+                `att-${n}`,
+                n <= 2 ? 'A' : 'B',
+                at(0),
+            )
+        }
+        // The real box arrives from one shopper's network: the 5th slot.
+        await record(report(domain), 'shopper-1', 'r1', at(1))
+
+        // Every hour the attackers add five more junk boxes; a second and a
+        // third shopper, each on their own network, confirm hours apart.
+        const shoppers: Record<number, string> = { 3: 'r2', 6: 'r3' }
+        let junk = 5
+        for (let hour = 2; hour <= 6; hour++) {
+            for (let k = 0; k < 5; k++, junk++) {
+                await record(
+                    report(domain, { box: boxN(junk) }),
+                    `att-${junk}`,
+                    junk % 2 ? 'A' : 'B',
+                    at(hour),
+                )
+            }
+            const shopper = shoppers[hour]
+            if (shopper) {
+                expect(
+                    await record(
+                        report(domain),
+                        `shopper-${shopper}`,
+                        shopper,
+                        at(hour),
+                    ),
+                ).toMatchObject({ recorded: true, counted: true })
+            }
+            // The real box, and every shopper who confirmed it, is still there.
+            expect(await realBoxInstalls()).toEqual(
+                [
+                    'shopper-1',
+                    ...Object.entries(shoppers)
+                        .filter(([h]) => Number(h) <= hour)
+                        .map(([, s]) => `shopper-${s}`),
+                ]
+                    .map(i => `install-${i}`)
+                    .sort(),
+            )
+        }
+        expect(await prisma.learnedCouponBox.count({ where: { domain } })).toBe(
+            LEARNED_BOX_RULES.maxBoxesPerDomain,
+        )
+        expect(await findServableLearnedBox(domain, at(6))).toEqual(BOX)
+    })
+
+    it('a shared network (an office /24) can confirm every box of a store: nothing is refused, and its boxes give way to one a network alone backs', async () => {
+        const domain = freshDomain()
+        const now = new Date()
+        for (let n = 0; n < LEARNED_BOX_RULES.maxBoxesPerDomain; n++) {
+            expect(
+                await record(
+                    report(domain, { box: boxN(n) }),
+                    `colleague-${n}`,
+                    'office',
+                    now,
+                ),
+            ).toMatchObject({ recorded: true })
+        }
+        // A shopper elsewhere confirms a 6th box: it takes a slot.
+        expect(
+            await record(report(domain), 'elsewhere', 'home', now),
+        ).toMatchObject({ recorded: true })
+        const inputs = (
+            await prisma.learnedCouponBox.findMany({ where: { domain } })
+        ).map(b => b.inputSelector)
+        expect(inputs).toHaveLength(LEARNED_BOX_RULES.maxBoxesPerDomain)
+        expect(inputs).toContain(BOX.input)
     })
 
     it('the box cap and the lock are per STORE: new boxes on 12 different hosts of one store, at once, never exceed 5', async () => {
@@ -724,6 +846,30 @@ describe('learned coupon box: size and retention (real Postgres)', () => {
                 where: { domain: { endsWith: `.${store}` } },
             }),
         ).toBeLessThanOrEqual(LEARNED_BOX_RULES.maxBoxesPerDomain)
+    })
+
+    it('a report never waits for the store lock: one that finds it taken is ignored at once and writes nothing', async () => {
+        const domain = freshDomain()
+        const lock = await holdAdvisoryLock(`learned-coupon-box:${domain}`)
+        try {
+            const started = Date.now()
+            expect(
+                await withinSeconds(
+                    2,
+                    record(report(domain), 'one', 'net-a', new Date()),
+                ),
+            ).toEqual(IGNORED)
+            expect(Date.now() - started).toBeLessThan(2_000)
+            expect(
+                await prisma.learnedCouponBox.count({ where: { domain } }),
+            ).toBe(0)
+        } finally {
+            await lock.release()
+        }
+        // Once the lock is free the same report is recorded.
+        expect(
+            await record(report(domain), 'one', 'net-a', new Date()),
+        ).toMatchObject({ recorded: true })
     })
 
     it('concurrent new boxes on one store never exceed the cap', async () => {
@@ -964,6 +1110,33 @@ describe('the routes end to end (real Postgres)', () => {
                 select: { domain: true },
             }),
         ).toEqual([{ domain: store }])
+    })
+
+    it('a hand-over never waits for its lock: it answers busy at once, and a store already handed over still answers already', async () => {
+        const now = new Date()
+        const done = freshDomain()
+        await prisma.learnedCouponBoxHandover.create({
+            data: { domain: done, handedOverAt: now },
+        })
+        const domain = freshDomain()
+        const lock = await holdAdvisoryLock('learned-coupon-box:handover')
+        try {
+            expect(
+                await withinSeconds(2, handOverLearnedStore(domain, now)),
+            ).toEqual({ created: false, reason: 'busy' })
+            expect(
+                await withinSeconds(2, handOverLearnedStore(done, now)),
+            ).toEqual({ created: false, reason: 'already' })
+            expect(
+                await prisma.siteSuggestion.count({ where: { domain } }),
+            ).toBe(0)
+        } finally {
+            await lock.release()
+        }
+        // The next servable report hands it over.
+        expect(await handOverLearnedStore(domain, now)).toEqual({
+            created: true,
+        })
     })
 
     it('hands over at most handoverDailyCap stores per 24 hours overall', async () => {

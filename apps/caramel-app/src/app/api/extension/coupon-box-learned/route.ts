@@ -29,8 +29,9 @@ import { NextResponse, type NextRequest } from 'next/server'
 //                                                 confirmed: nothing to count
 //   { recorded: false, reason: 'ignored' }        a cap refused it (new
 //                                                 reporters per network, per
-//                                                 box, boxes per store, boxes
-//                                                 per network)
+//                                                 box, boxes per store), or
+//                                                 another report for the
+//                                                 store held its lock
 //   400 invalid · 413 too large · 403 non-extension Origin · 429 rate limit
 
 // A report is four short selectors and a few enums: 4 KiB is generous.
