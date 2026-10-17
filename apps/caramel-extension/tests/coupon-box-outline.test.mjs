@@ -251,7 +251,7 @@ describe('no shopper detail leaves the browser', () => {
 
 describe('the word allowlist', () => {
     it('is the measured list', () => {
-        expect(ALLOWED_WORDS.size).toBe(574)
+        expect(ALLOWED_WORDS.size).toBe(585)
         for (const w of ['buy', 'delete', 'place', 'voucher', 'zniżka'])
             expect(ALLOWED_WORDS.has(w)).toBe(true)
         for (const w of ALLOWED_WORDS) expect(w).toMatch(/^\p{Ll}+$/u)
@@ -266,4 +266,50 @@ describe('the word allowlist', () => {
         )
         expect(caramelAllowedWords('Avery Sample')).toBe('')
     })
+
+    // The pick must see what kind of discount a control offers: points, a
+    // member or student price, or a code.
+    it('keeps the words that tell a points or member discount from a code', () => {
+        document.body.innerHTML =
+            '<section aria-label="Your points"><p>You have 1,250 points</p>' +
+            '<button type="button">Apply discount</button></section>' +
+            '<button type="button">Verify student or military status</button>' +
+            '<button type="button">Members save more</button>'
+
+        expect(caramelPageOutline(document.body).outline).toBe(
+            [
+                '- region "Your points":',
+                '  - [0] button "Apply discount"',
+                '- [1] button "Verify student or military status"',
+                '- [2] button "Members save more"',
+            ].join('\n'),
+        )
+    })
+
+    // Every word that tells a coupon box from a points, rewards, member,
+    // student, military, teacher, verification, offers, gift or cart control.
+    const CONTEXT_WORDS = [
+        'points',
+        'rewards',
+        'loyalty',
+        'membership',
+        'member',
+        'student',
+        'military',
+        'teacher',
+        'verify',
+        'offers',
+        'gift',
+        'redeem',
+        'cart',
+        'bag',
+    ]
+    for (const word of CONTEXT_WORDS)
+        it(`keeps "${word}" in a control's name`, () => {
+            document.body.innerHTML = `<button type="button">Apply ${word}</button>`
+
+            expect(caramelPageOutline(document.body).outline).toBe(
+                `- [0] button "Apply ${word}"`,
+            )
+        })
 })
