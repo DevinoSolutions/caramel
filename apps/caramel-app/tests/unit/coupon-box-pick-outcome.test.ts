@@ -209,6 +209,25 @@ describe('coupon_box_pick_outcome: one event per handler exit', () => {
         expect(props.model_ms).toEqual(expect.any(Number))
     })
 
+    it('no_pick:refused_button carries model_ms, and the answer is cached', async () => {
+        chatMock.mockImplementation(async () =>
+            answer({ input: 7, button: 9, toggle: null }),
+        )
+        const domain = freshDomain()
+        const outline = `${OUTLINE}
+    - [9] button "Checkout"`
+        await post({ domain, outline })
+        const props = expectOutcome('no_pick:refused_button')
+        expect(props).toMatchObject({ cached: false })
+        expect(props.model_ms).toEqual(expect.any(Number))
+        captureMock.mockClear()
+        await post({ domain, outline })
+        expect(onlyEvent().properties).toMatchObject({
+            outcome: 'no_pick:refused_button',
+            cached: true,
+        })
+    })
+
     it('no_pick:unparsable', async () => {
         chatMock.mockImplementation(async () => 'sorry, no idea')
         await post({ domain: freshDomain(), outline: OUTLINE })

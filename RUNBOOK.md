@@ -532,7 +532,8 @@ redeploy. The extension reads the same condition from `GET /api/extension/featur
 `model_ms` when a model was called, `store`, `model`). Requests refused earlier
 by withRoute (non-extension Origin 403, generic rate limit 429) emit nothing.
 `outcome` is one of `box`, `no_box`, `no_pick:disabled`, `no_pick:model_error`,
-`no_pick:unparsable`, `budget_exceeded:client|global|daily`, `too_large`,
+`no_pick:unparsable`, `no_pick:refused_button`,
+`budget_exceeded:client|global|daily`, `too_large`,
 `invalid`, `server_error` (`COUPON_BOX_PICK_OUTCOMES` in
 `src/lib/analytics/couponBoxPickOutcome.ts`).
 

@@ -38,11 +38,11 @@ const SYSTEM_PROMPT = [
     'Answer JSON only, no prose: {"input": <n or null>, "button": <n or null>, "toggle": <n or null>, "confidence": 0-100, "why": "<10 words>"}',
     '- "input": the field where a shopper types a coupon, promo, discount, voucher or gift-card-or-discount code. Never a search box, postcode, quantity, newsletter/email, gift message or loyalty-number field, and never a field that takes ONLY a gift card.',
     '- A hidden or disabled input can still be THE box (behind a "Have a promo code?" link, or disabled on an empty cart).',
-    '- "button": the control that applies that code (Apply, Redeem, OK, Submit beside the box). Never checkout, pay, place-order, remove or sign-in.',
-    '- "toggle": the control that reveals a hidden field to TYPE a code into ("Have a promo code?", "Promo code +", "Add discount code"); else null. Its own text must say code or coupon: "Promo Code", "Apply Promo Code" or "Add coupon" IS the toggle when no code field is visible; a control that does not say code or coupon ("Apply discount", "Use discount", "View offers") is never the toggle.',
-    '- Never the toggle: details about a promotion ("Promo details"); a rewards, points, loyalty or membership control, or one that redeems them for a code; a link to verify a student, military or teacher discount; a control under a points or credit balance.',
+    '- "button": the control that applies that code (Apply, Redeem, OK, Submit beside the box), or null when the box has none and applies on Enter. Redeem only beside a field that names a code. Never checkout, pay, place-order, remove, sign-in or a rewards control.',
+    '- "toggle": the control that reveals a hidden field to TYPE a code into ("Have a promo code?", "Promo code +", "Add discount code", "Have a discount?"); else null. Its own text must say code, coupon or discount: "Promo Code", "Apply Promo Code", "Add coupon" or "Add discount" IS the toggle when no code field is visible. A control that offers deals but names no code ("View offers", "Available offers", "Promotions") is never the toggle.',
+    '- Never the toggle: details about a promotion ("Promo details"); a rewards, points, loyalty or membership control, or one that redeems them for a code; a member, student, military or teacher discount, or a link to verify one; a discount control beside a points or credit balance.',
     '- A control only for a gift card, gift code, gift certificate or gift voucher ("Have a gift code?", "Apply gift card") is not a coupon control: never answer it as input, button or toggle.',
-    '- No coupon box and no toggle on the page: input null and toggle null. A wrong field is worse than none. But a visible control whose own text says code or coupon (never a gift code, never a rewards redemption) means the box is behind it: answer that control as the toggle, not no box.',
+    '- No coupon box and no toggle on the page: input null and toggle null. A wrong field is worse than none. But a visible control whose own text says code, coupon or discount (never a gift code, never a rewards redemption) means the box is behind it: answer that control as the toggle, not no box.',
 ].join('\n')
 
 // A reasoning model's hidden reasoning counts against max_tokens (the F-017
@@ -93,14 +93,27 @@ interface CouponBoxNoPick {
     reason: 'disabled' | 'model_error' | 'unparsable'
 }
 
+/** The model answered, but named an apply button the server refuses: an
+ * order, pay, sign-in or rewards control, or an index of no clickable line.
+ * Not the same as naming no button, which the extension reads as "this box
+ * applies on Enter": Enter in a field beside that control can submit it. The
+ * extension uses nothing from this answer, like `no_pick`. */
+interface CouponBoxRefusedButton {
+    outcome: 'no_pick'
+    reason: 'refused_button'
+    cached: boolean
+}
+
 export type CouponBoxPickResult =
     | CouponBoxFound
     | CouponBoxAbsent
     | CouponBoxNoPick
+    | CouponBoxRefusedButton
 
 type CachedAnswer =
     | Omit<CouponBoxFound, 'cached'>
     | Omit<CouponBoxAbsent, 'cached'>
+    | Omit<CouponBoxRefusedButton, 'cached'>
 
 export class CouponBoxOutlineTooLargeError extends Error {
     constructor(readonly bytes: number) {
@@ -147,55 +160,209 @@ export function scrubOutline(outline: string): string {
         .join('\n')
 }
 
-interface OutlineNode {
+interface OutlineLine {
     role: string
+    /** The accessible name between the quotes, '' when the line has none. */
     name: string
-    /** Inside the page's own footer: the LAST contentinfo nested in no other
-     * line (an earlier one can be a cart summary drawn as a <footer>), and
-     * not inside a dialog opened from it. */
-    inPageFooter: boolean
+    /** The `[n]` index, on interactive lines only. */
+    index: number | null
+    /** The enclosing line's position in the list, -1 at the top level. */
+    parent: number
+    children: number[]
 }
 
 // Any outline line, node or container: its indent, its [n] index (nodes
 // only), its role and the rest of the line.
 const OUTLINE_LINE = /^(\s*)- (?:\[(\d{1,6})\] )?([a-z]+)\b(.*)$/
+// The rest of a line: ` "name"`, then a state (` [collapsed]`), then the
+// container colon. A name can itself hold a quote, so it runs to the last one.
+const LINE_NAME = /^ "(.*)"(?: \[[a-z, ]+\])?:?$/
 const DIALOG_ROLES = new Set(['dialog', 'alertdialog'])
+// A field a shopper types into: a box beside a control says what it is for.
+const FIELD_ROLES = new Set(['textbox', 'searchbox', 'spinbutton'])
+// What a section holds besides a heading that marks it as a block of the cart
+// (a line item), not the section's own title.
+const LINE_ITEM_ROLES = new Set([
+    'textbox',
+    'searchbox',
+    'spinbutton',
+    'combobox',
+])
+// The containers that name a section of the page ("Rewards", "Order
+// summary"): the outline prints a <section> only when it is named, and a
+// <form> counts only when named, as a cart form wrapping the line items is no
+// section of its own.
+const SECTION_ROLES = new Set([
+    'region',
+    'group',
+    'complementary',
+    'dialog',
+    'alertdialog',
+])
+// A price, as the outline prints one (every digit is "#").
+const MONEY = /[$€£¥₹]\s?#|#\s?[$€£]|#[.,]##\b/
+// A footer that holds these is the cart's own summary, not the page footer.
+const CART_CONTROL =
+    /check ?out|\btotal\b|subtotal|order summary|place (?:my |your )?order/i
+// The extension drops whole lines past its cap (coupon-box-outline.js), so an
+// outline this close to MAX_OUTLINE_BYTES may have lost its real page footer.
+const NEAR_CAP_BYTES = 1024
 
-/** Index -> the node line it names, read from the SCRUBBED outline (the one
- * the model saw). Nesting is read from the indent. */
-function outlineNodes(outline: string): Map<number, OutlineNode> {
-    const nodes = new Map<number, OutlineNode>()
-    // Each node's top-level contentinfo (its line number), when it sits in
-    // one and outside any dialog.
-    const footerOf = new Map<number, number>()
-    let lastTopFooter = -1
-    // The lines that enclose the current one, outermost first.
-    const open: { indent: number; role: string; at: number }[] = []
-    outline.split('\n').forEach((line, at) => {
-        const m = OUTLINE_LINE.exec(line)
-        if (!m) return
-        const indent = (m[1] ?? '').length
-        const role = m[3] ?? ''
-        while (open.length && open[open.length - 1]!.indent >= indent)
-            open.pop()
-        if (!open.length && role === 'contentinfo') lastTopFooter = at
-        if (m[2] !== undefined) {
-            const n = Number(m[2])
-            nodes.set(n, { role, name: m[4] ?? '', inPageFooter: false })
-            const top = open[0]
-            if (
-                top?.role === 'contentinfo' &&
-                !open.some(o => DIALOG_ROLES.has(o.role))
-            )
-                footerOf.set(n, top.at)
-            else footerOf.delete(n)
+/** The outline as a tree, read from the SCRUBBED outline (the one the model
+ * saw). Nesting is read from the indent. */
+class Outline {
+    readonly lines: OutlineLine[] = []
+    /** Index -> its line's position. */
+    readonly byIndex = new Map<number, number>()
+
+    constructor(outline: string) {
+        // The lines that enclose the current one, innermost last.
+        const open: { indent: number; at: number }[] = []
+        for (const raw of outline.split('\n')) {
+            const m = OUTLINE_LINE.exec(raw)
+            if (!m) continue
+            const indent = (m[1] ?? '').length
+            while (open.length && open[open.length - 1]!.indent >= indent)
+                open.pop()
+            const parent = open.length ? open[open.length - 1]!.at : -1
+            const at = this.lines.length
+            const index = m[2] === undefined ? null : Number(m[2])
+            this.lines.push({
+                role: m[3] ?? '',
+                name: LINE_NAME.exec(m[4] ?? '')?.[1] ?? '',
+                index,
+                parent,
+                children: [],
+            })
+            if (parent >= 0) this.lines[parent]!.children.push(at)
+            if (index !== null) this.byIndex.set(index, at)
+            open.push({ indent, at })
         }
-        open.push({ indent, role, at })
-    })
-    footerOf.forEach((at, n) => {
-        if (at === lastTopFooter) nodes.get(n)!.inPageFooter = true
-    })
-    return nodes
+    }
+
+    line(index: number | null): OutlineLine | undefined {
+        if (index === null) return undefined
+        const at = this.byIndex.get(index)
+        return at === undefined ? undefined : this.lines[at]
+    }
+
+    /** Every line under `at`, in reading order. */
+    below(at: number): number[] {
+        return this.lines[at]!.children.flatMap(c => [c, ...this.below(c)])
+    }
+
+    /** The words of a line and everything under it. */
+    words(at: number): string {
+        return [at, ...this.below(at)]
+            .map(i => this.lines[i]!.name)
+            .filter(Boolean)
+            .join(' ')
+    }
+
+    holds(at: number, roles: Set<string>): boolean {
+        return this.below(at).some(i => roles.has(this.lines[i]!.role))
+    }
+
+    siblings(at: number): number[] {
+        const parent = this.lines[at]!.parent
+        return parent < 0
+            ? this.lines.flatMap((l, i) => (l.parent < 0 ? [i] : []))
+            : this.lines[parent]!.children
+    }
+
+    /** The words a shopper reads beside a line: the small block around it,
+     * or, once a block also holds a field, only its own neighbours (a field
+     * by its name, any other neighbour by its words unless it holds a field
+     * of its own). coupon-box-discovery.js wordsBeside, on the outline. */
+    beside(at: number): string {
+        let words = ''
+        for (let n = at, k = 0; k < 3; k++) {
+            const p = this.lines[n]!.parent
+            if (p < 0) break
+            if (this.holds(p, FIELD_ROLES)) {
+                const sibs = this.siblings(n)
+                const i = sibs.indexOf(n)
+                for (const s of [sibs[i - 1], sibs[i + 1]]) {
+                    if (s === undefined) continue
+                    if (FIELD_ROLES.has(this.lines[s]!.role))
+                        words += ' ' + this.lines[s]!.name
+                    else if (!this.holds(s, FIELD_ROLES))
+                        words += ' ' + this.words(s)
+                }
+                break
+            }
+            if (this.words(p).length > 160) break
+            words = this.words(p)
+            n = p
+        }
+        return words
+    }
+
+    /** The section a line sits in, by its own name: the section's name, and
+     * the nearest heading before the line that heads the section rather than
+     * a line item in it (a block holding a field or a price).
+     * coupon-box-discovery.js sectionWords, on the outline. */
+    section(at: number): string {
+        let box = this.lines[at]!.parent
+        while (box >= 0) {
+            const l = this.lines[box]!
+            if (SECTION_ROLES.has(l.role) || (l.role === 'form' && l.name))
+                break
+            box = l.parent
+        }
+        if (box < 0) return ''
+        let head = ''
+        for (let n = at; !head && n !== box; n = this.lines[n]!.parent) {
+            const sibs = this.siblings(n)
+            for (let i = sibs.indexOf(n) - 1; !head && i >= 0; i--) {
+                const s = sibs[i]!
+                const h =
+                    this.lines[s]!.role === 'heading'
+                        ? s
+                        : this.below(s).find(
+                              j => this.lines[j]!.role === 'heading',
+                          )
+                if (
+                    h !== undefined &&
+                    (h === s ||
+                        !(
+                            this.holds(s, LINE_ITEM_ROLES) ||
+                            MONEY.test(this.words(s))
+                        ))
+                )
+                    head = this.lines[h]!.name
+            }
+        }
+        return `${this.lines[box]!.name} ${head}`
+    }
+
+    /** Inside the page's own footer: the LAST contentinfo nested in no other
+     * line that holds no cart control (a cart summary can be drawn as a
+     * <footer>, before or after the site footer), and not inside a dialog
+     * opened from it. None in an outline that may have been cut at the cap:
+     * its last footer may be a cart's. */
+    inPageFooter(at: number, mayBeCut: boolean): boolean {
+        if (mayBeCut) return false
+        let footer = -1
+        this.lines.forEach((l, i) => {
+            if (
+                l.parent < 0 &&
+                l.role === 'contentinfo' &&
+                !CART_CONTROL.test(this.words(i))
+            )
+                footer = i
+        })
+        if (footer < 0) return false
+        for (
+            let p = this.lines[at]!.parent;
+            p >= 0;
+            p = this.lines[p]!.parent
+        ) {
+            if (DIALOG_ROLES.has(this.lines[p]!.role)) return false
+            if (p === footer) return true
+        }
+        return false
+    }
 }
 
 // The roles each pick may have. The extension types into the input and
@@ -204,21 +371,85 @@ function outlineNodes(outline: string): Map<number, OutlineNode> {
 const INPUT_ROLES = new Set(['textbox', 'combobox', 'searchbox'])
 const CLICK_ROLES = new Set(['button', 'link', 'tab', 'checkbox', 'switch'])
 // A control the extension must never click on the model's word, whatever its
-// role: it leaves the cart, spends money or the shopper's rewards, removes
-// items or signs in. Read for clicked picks only, so a "Promo or rewards
-// code" field is still a valid input.
+// role: it leaves the cart, spends money, removes items or signs in.
+// coupon-box-discovery.js carries the same list for the clicks it makes.
 const NEVER_CLICK =
-    /check ?out|place (?:my |your )?order|\bpay\b|pay ?pal|pay now|buy now|purchase|\bremove\b|\bdelete\b|empty (?:cart|basket|bag)|sign ?in|sign ?up|log ?in|register|create (?:an )?account|subscribe|continue|\bredeem|\bpoints?\b|\brewards?\b|\bloyalty\b/i
-// A toggle reveals a field to type a code into, so its own text names one.
-// A control that offers a discount without naming a code ("Apply discount"
-// under a points balance, "View offers") can apply the shopper's rewards or
-// open a list of promotions; it is never clicked as the toggle. The
-// extension drops "points" from the outline (not on its word list), so the
-// rewards words above cannot catch that button.
+    /check ?out|place (?:my |your )?order|\bpay\b|pay ?pal|pay now|buy now|purchase|\bremove\b|\bdelete\b|empty (?:cart|basket|bag)|sign ?in|sign ?up|log ?in|register|create (?:an )?account|subscribe|continue/i
+
+// Rewards are the shopper's own money: a control that redeems points or
+// rewards, or picks a member, student, military or teacher discount, is never
+// clicked on the model's word, as the toggle or as the apply button. Judged by
+// the control's own name and by the words around it, with the phrases that
+// name a code taken out first ("Promo or rewards code"), so a code box's own
+// label never refuses its button. The same rule as coupon-box-discovery.js
+// (LOYALTY_RE, withoutCodePhrases, spendsPoints), which sees the page; the
+// server sees only the outline's words. An extension older than the
+// 2026-10-17 word list drops "points", "member", "student", "military",
+// "teacher" and "verify" from the outline, and the extension's own check is
+// then the one that sees them.
+const LOYALTY =
+    /\b(?:redeem(?:s|ed|ing)?|points?|rewards?|loyalty|memberships?|member pric(?:e|es|ing)|students?|military|teachers?|verif(?:y|ied|ication))\b/i
+const REDEEM = /\bredeem/i
+const REDEEM_WORDS = /\bredeem\w*/gi
+const withoutCodePhrases = (t: string) =>
+    t.replace(/(?:[\w-]+\s+(?:or|and|&|\/)\s+)?[\w-]+\s+codes?\b/gi, ' ')
+// "Redeem ### points for a $# discount code" spends points to get a code,
+// whatever it names. A toggle opens a box to type a code into; this buys one.
+const REDEEM_FOR_A_CODE =
+    /\bredeem\w*\b.*\bfor\b.*\b(?:codes?|coupons?|vouchers?)\b/i
+// Words that name a code, in the store languages the outline keeps. "kod"
+// also inside a word (Swedish "rabattkod", "kampanjkod"); "promo" only as a
+// word, so "promotions" is an offer, not a code.
+const NAMES_CODE =
+    /code|codice|código|kod|coupon|cup[oó]n|cupom|voucher|gutschein|\bpromo\b|\bbons? de r[ée]duction/i
+// A toggle opens a box to type a code into. One that offers deals without
+// naming a code ("View offers", "Available offers") applies an offer or opens
+// a list of them, and one about the small print ("Promo details") explains
+// one. One that says only "discount" ("Have a discount?", "Add discount") is
+// a code box's fold, unless it or the words around it speak of points,
+// rewards, membership, a gift card or a group discount ("Apply discount"
+// under a points balance). coupon-box-discovery.js offersOnly, on the outline.
+const SAYS_OFFER = /offer|\bdeals?\b|saving|\bsave\b|promotions?\b/i
 const SAYS_DISCOUNT =
-    /discount|offer|\bdeals?\b|saving|rabatt|descuento|desconto|sconto|remise|réduction|korting|zniżka/i
-const SAYS_CODE =
-    /code|codice|código|\bkod|coupon|cup[oó]n|cupom|voucher|gutschein|promo/i
+    /discount|rabatt|descuento|desconto|sconto|remise|réduction|korting|zniżka/i
+const MEMBER_OR_GIFT = /\bmembers?\b|\bgift[\s-]*cards?\b/i
+const ABOUT_TERMS =
+    /\b(?:details|terms|conditions|exclusions|restrictions|learn more)\b/i
+// "Promo details" is the small print; "Coupon code details" opens a box.
+const CODE_WORD = /\b(?:codes?|coupons?|vouchers?)\b/i
+
+/** A clicked control that spends the shopper's rewards. "Redeem" is how some
+ * stores name a code box's apply button: it is kept when the control itself
+ * or the field beside it names a code. */
+function spendsPoints(tree: Outline, at: number): boolean {
+    const own = tree.lines[at]!.name
+    if (LOYALTY.test(withoutCodePhrases(own).replace(REDEEM_WORDS, '')))
+        return true
+    if (REDEEM_FOR_A_CODE.test(own)) return true
+    const beside = tree.beside(at)
+    if (REDEEM.test(own) && !NAMES_CODE.test(own) && !NAMES_CODE.test(beside))
+        return true
+    return LOYALTY.test(
+        withoutCodePhrases(`${beside} ${tree.section(at)}`).replace(
+            REDEEM_WORDS,
+            '',
+        ),
+    )
+}
+
+/** A toggle that names no code: an offer, the small print, or a discount
+ * beside points, rewards, a membership or a gift card. */
+function offersOnly(tree: Outline, at: number): boolean {
+    const own = tree.lines[at]!.name
+    if (ABOUT_TERMS.test(own) && !CODE_WORD.test(own)) return true
+    if (NAMES_CODE.test(own)) return false
+    if (SAYS_OFFER.test(own)) return true
+    if (!SAYS_DISCOUNT.test(own)) return false
+    const near = withoutCodePhrases(
+        `${own} ${tree.beside(at)} ${tree.section(at)}`,
+    )
+    return LOYALTY.test(near) || MEMBER_OR_GIFT.test(near)
+}
 
 interface Answer {
     input: number | null
@@ -264,33 +495,46 @@ function parseAnswer(raw: string): Answer | null {
     return toAnswer(parsed as Record<string, unknown>)
 }
 
-/** An index the outline does not contain is a hallucination, and an index of
- * the wrong kind of element, a toggle in the page footer, or a toggle that
- * offers a discount without naming a code, is refused: each becomes null. With neither an input nor a toggle left, the answer is
- * "no box". */
-function toCachedAnswer(answer: Answer, outline: string): CachedAnswer {
-    const nodes = outlineNodes(outline)
-    const pick = (n: number | null, roles: Set<string>, clicked: boolean) => {
-        const node = n === null ? undefined : nodes.get(n)
-        if (!node || !roles.has(node.role)) return null
-        return clicked && NEVER_CLICK.test(node.name) ? null : n
+/**
+ * The model's answer, checked against the outline it was given.
+ *
+ * - An index the outline does not contain is a hallucination, and an index
+ *   of the wrong kind of element is refused.
+ * - A refused input or toggle becomes null. A toggle is refused when it is in
+ *   the page footer, names no code (offersOnly), spends rewards
+ *   (spendsPoints) or is a NEVER_CLICK control.
+ * - With neither an input nor a toggle left, the answer is "no box".
+ * - A named apply button that is refused (the same checks, bar the footer
+ *   and the code rules) refuses the whole answer as `refused_button`. The
+ *   extension reads a null button as "this box applies on Enter", and Enter
+ *   in a field beside a checkout or rewards button can submit that control.
+ */
+function toCachedAnswer(
+    answer: Answer,
+    outline: string,
+    mayBeCut: boolean,
+): CachedAnswer {
+    const tree = new Outline(outline)
+    const clickedOk = (n: number | null, toggle: boolean) => {
+        const line = tree.line(n)
+        if (!line || !CLICK_ROLES.has(line.role)) return false
+        const at = tree.byIndex.get(n!)!
+        if (NEVER_CLICK.test(line.name) || spendsPoints(tree, at)) return false
+        // A toggle in the page footer ("Have A Code?" beside Gift Cards and
+        // Contact Us) leads to another page, not to this cart's box. The
+        // extension already refuses a link that leaves the page; this also
+        // covers a footer control drawn as a script button, and keeps the
+        // answer honest for the eval, which scores what the server returns.
+        // Only the toggle: an apply button is never refused for where it sits.
+        return !(
+            toggle &&
+            (tree.inPageFooter(at, mayBeCut) || offersOnly(tree, at))
+        )
     }
-    const input = pick(answer.input, INPUT_ROLES, false)
-    // A toggle in the page footer ("Have A Code?" beside Gift Cards and
-    // Contact Us) leads to another page, not to this cart's box. The
-    // extension already refuses a link that leaves the page; this also
-    // covers a footer control drawn as a script button, and keeps the answer
-    // honest for the eval, which scores what the server returns. Only the
-    // toggle: an apply button is never refused for where it sits.
-    const toggleNode =
-        answer.toggle === null ? undefined : nodes.get(answer.toggle)
-    const toggle =
-        toggleNode &&
-        (toggleNode.inPageFooter ||
-            (SAYS_DISCOUNT.test(toggleNode.name) &&
-                !SAYS_CODE.test(toggleNode.name)))
-            ? null
-            : pick(answer.toggle, CLICK_ROLES, true)
+    const inputLine = tree.line(answer.input)
+    const input =
+        inputLine && INPUT_ROLES.has(inputLine.role) ? answer.input : null
+    const toggle = clickedOk(answer.toggle, true) ? answer.toggle : null
     if (input === null && toggle === null) {
         return {
             outcome: 'no_box',
@@ -298,10 +542,12 @@ function toCachedAnswer(answer: Answer, outline: string): CachedAnswer {
             why: answer.why,
         }
     }
+    if (answer.button !== null && !clickedOk(answer.button, false))
+        return { outcome: 'no_pick', reason: 'refused_button' }
     return {
         outcome: 'box',
         input,
-        button: pick(answer.button, CLICK_ROLES, true),
+        button: answer.button,
         toggle,
         confidence: answer.confidence,
         why: answer.why,
@@ -409,7 +655,11 @@ export async function pickCouponBox(
         return { outcome: 'no_pick', reason: 'unparsable' }
     }
 
-    const value = toCachedAnswer(answer, outline)
+    const value = toCachedAnswer(
+        answer,
+        outline,
+        bytes > MAX_OUTLINE_BYTES - NEAR_CAP_BYTES,
+    )
     cache.set(key, value)
     return { ...value, cached: false }
 }

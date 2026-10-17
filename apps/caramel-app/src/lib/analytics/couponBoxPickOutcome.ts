@@ -42,6 +42,8 @@ export const COUPON_BOX_PICK_OUTCOMES = [
     'no_pick:model_error',
     /** 200 no_pick: the model replied with something unusable (already in Sentry). */
     'no_pick:unparsable',
+    /** 200 no_pick: the model named an apply button the server refuses (an order, pay or rewards control), so the answer is not used. */
+    'no_pick:refused_button',
     /** 429: the per-client model-call bucket (20 / 10 min). */
     'budget_exceeded:client',
     /** 429: the process-wide hourly model-call bucket (600 / hour). */
