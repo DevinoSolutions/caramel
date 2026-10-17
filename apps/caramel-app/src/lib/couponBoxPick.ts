@@ -19,12 +19,11 @@
 // Eval-gated: evals/couponBoxPick.eval.ts runs THIS module (prompt, parsing,
 // index validation — imported, never copied) against labelled real cart pages.
 // Change the prompt or the model only through that suite (evals/README.md).
+import { createCouponBoxAnswerCache } from '@/lib/couponBoxPickAnswerCache'
 import { env } from '@/lib/env'
 import { firstJsonObject } from '@/lib/llmJson'
 import { chat } from '@/lib/openrouter'
-import { createTtlLruCache } from '@/lib/ttlLruCache'
 import * as Sentry from '@sentry/nextjs'
-import crypto from 'node:crypto'
 import { z } from 'zod'
 
 /** Largest outline the pick accepts, in UTF-8 bytes. The route caps the whole
@@ -716,17 +715,12 @@ function toCachedAnswer(
     }
 }
 
-const cache = createTtlLruCache<CachedAnswer>({
+// Keyed by store and checked against the page (couponBoxPickAnswerCache.ts),
+// not by a hash of the whole outline: that never repeated on a real store.
+const cache = createCouponBoxAnswerCache<CachedAnswer>({
     ttlMs: 24 * 60 * 60 * 1000,
-    maxEntries: 2000,
+    maxStores: 2000,
 })
-
-function cacheKey(domain: string, outline: string): string {
-    return crypto
-        .createHash('sha256')
-        .update(`${domain}\n${outline}`)
-        .digest('hex')
-}
 
 /**
  * Pick the coupon box on one page outline.
@@ -752,8 +746,7 @@ export async function pickCouponBox(
     if (!model) return { outcome: 'no_pick', reason: 'disabled' }
 
     const outline = scrubOutline(request.outline)
-    const key = cacheKey(request.domain, outline)
-    const hit = cache.get(key)
+    const hit = cache.get(request.domain, outline)
     if (hit) return { ...hit, cached: true }
 
     await admitModelCall?.()
@@ -822,6 +815,15 @@ export async function pickCouponBox(
         outline,
         bytes > MAX_OUTLINE_BYTES - NEAR_CAP_BYTES,
     )
-    cache.set(key, value)
+    cache.set(
+        request.domain,
+        outline,
+        value.outcome === 'box'
+            ? [value.input, value.button, value.toggle].filter(
+                  (n): n is number => n !== null,
+              )
+            : [],
+        value,
+    )
     return { ...value, cached: false }
 }
