@@ -10,6 +10,7 @@ import {
     getDomainRecord,
     isCheckout,
 } from '../store-detect.js'
+import { LEARNED_ACTIONS, learnedBackground } from './_learned-background.mjs'
 
 // The server's pick mode and the learned coupon box, on a store with no
 // config. These pin:
@@ -38,6 +39,8 @@ let llmOn
 let mode
 let answer
 let pickCalls
+// The background's per-tab hold of the box a run used.
+let holds = new Map()
 let reported // couponBoxLearned messages
 let local // storage.local
 let localReads
@@ -46,7 +49,13 @@ vi.mock('../coupon-apply.js', async importOriginal => ({
     ...(await importOriginal()),
     applyCoupon: async (code, rec) => {
         appliedWith.push({ code, rec })
-        return { success: false, applied: false, ...applyResult }
+        return {
+            success: false,
+            applied: false,
+            ...(typeof applyResult === 'function'
+                ? applyResult(code)
+                : applyResult),
+        }
     },
     probeCartJson: async () => null,
 }))
@@ -124,10 +133,13 @@ function installChromeStub() {
         else if (a === 'couponBoxPick') {
             pickCalls.push(message)
             cb(typeof answer === 'function' ? answer(message) : answer)
-        } else if (a === 'couponBoxLearned') {
-            reported.push(message)
-            cb({ ok: true })
-        } else cb?.({})
+        } else if (LEARNED_ACTIONS.includes(a))
+            learnedBackground(
+                stub.storage.local,
+                reported,
+                holds,
+            )(message).then(cb)
+        else cb?.({})
     }
     globalThis.chrome = stub
     globalThis.browser = undefined
@@ -243,6 +255,7 @@ beforeEach(() => {
     applyResult = {}
     pickCalls = []
     reported = []
+    holds = new Map()
     local = {}
     localReads = []
     flagOn = true
@@ -559,6 +572,37 @@ describe('a learned box', () => {
         expect(local[LEARNED_KEY]).toEqual({})
         await vi.waitFor(() => expect(reported).toHaveLength(2))
         expect(reported[1].outcome).toBe('failed')
+    })
+
+    it('a reply, then a code that dropped the total: the drop is reported too', async () => {
+        document.body.innerHTML = RULES_BOX + TOTAL
+        applyResult = code =>
+            code === 'SAVE20'
+                ? { errorMsg: 'This code is invalid.', errorIsNew: true }
+                : { success: true, newTotal: 80, committed: true }
+
+        await run()
+        await vi.waitFor(() => expect(reported).toHaveLength(2))
+
+        expect(reported.map(r => r.evidence)).toEqual([
+            'store_answered',
+            'total_dropped',
+        ])
+    })
+
+    it('a page with nothing in the total is not a use of the remembered box', async () => {
+        remember(LEARNED_BARE)
+        // The total reads $0.00 (an empty order, or not the cart at all), and
+        // the box is not on this page: nothing was tried, nothing counts.
+        document.body.innerHTML =
+            '<div class="row"><span>Total</span><span>$0.00</span></div>'
+
+        await run()
+        await new Promise(r => setTimeout(r, 20))
+
+        expect(appliedWith).toHaveLength(0)
+        expect(learned()?.failures).toBe(0)
+        expect(reported).toEqual([])
     })
 
     it('one that no longer fits the page is a failed use, and detection goes on', async () => {

@@ -20,6 +20,10 @@ import {
     codeSharingAccepted,
     readCodeSharingConsent,
 } from './code-sharing-consent.js'
+import {
+    caramelLearnedOutcome,
+    caramelLearnedRead,
+} from './coupon-box-learned.js'
 
 // Assigned by initBackground() instead of at module evaluation: the IIFE throws
 // when neither global exists, which is exactly the case in the Node import
@@ -328,6 +332,7 @@ async function couponBoxLearnedOn() {
  * whether it landed: { ok, recorded, reason } or { error } / { skipped }. */
 async function couponBoxLearned({ domain, box, source, evidence, outcome }) {
     if (!(await couponBoxLearnedOn())) return { skipped: 'disabled' }
+    if (!EVIDENCE.includes(evidence)) evidence = null
     const installId = await storedInstallId()
     if (!installId) return { skipped: 'no install id' }
     const r = await fetchWithTimeout(
@@ -348,6 +353,115 @@ async function couponBoxLearned({ domain, box, source, evidence, outcome }) {
     if (!r.ok) return { error: `HTTP ${r.status}` }
     const j = await r.json().catch(() => ({}))
     return { ok: true, recorded: j.recorded === true, reason: j.reason ?? null }
+}
+
+const EVIDENCE = ['total_dropped', 'store_answered']
+
+// The host of the tab a message came from: the one store a content script
+// may speak for. null for a message from no tab.
+function senderHost(sender) {
+    try {
+        return new URL(sender?.tab?.url).hostname.toLowerCase() || null
+    } catch {
+        return null
+    }
+}
+
+// This install's memory of coupon boxes (storage.local) has its own switch:
+// the finder on AND the server's learned-box flag. Turning the finder on
+// alone never turns remembering on. Any failure to read them is off.
+async function couponBoxRememberOn() {
+    try {
+        const f = await _features()
+        return f.couponBoxDiscovery === true && f.couponBoxLearned === true
+    } catch (err) {
+        logError('features', err)
+        return false
+    }
+}
+
+// The box this install remembers for the sender's own host, or null.
+async function couponBoxLearnedBox(sender) {
+    const host = senderHost(sender)
+    if (!host || !(await couponBoxRememberOn())) return { box: null }
+    return {
+        box: await caramelLearnedRead(currentBrowser.storage.local, host),
+    }
+}
+
+// One read-modify-write of the memory at a time, so two tabs answering at
+// once never lose either update.
+let _learnedWrites = Promise.resolve()
+function saveLearned(host, { box, source, outcome }) {
+    const run = _learnedWrites.then(() =>
+        caramelLearnedOutcome(
+            currentBrowser.storage.local,
+            host,
+            box,
+            source,
+            outcome,
+            Date.now(),
+        ),
+    )
+    _learnedWrites = run.catch(() => {})
+    return run
+}
+
+/* What a coupon box did (coupon-box-discovery.js learnOutcome): saved in this
+ * install's memory for the sender's own host, then, with `report`, reported
+ * to the server (couponBoxLearned). The message names no store: a page
+ * cannot speak for another. Answers { saved, ...the report's answer } or
+ * { skipped }. */
+async function couponBoxLearnedMessage(message, sender) {
+    const host = senderHost(sender)
+    if (!host) return { skipped: 'no tab' }
+    if (!(await couponBoxRememberOn())) return { skipped: 'disabled' }
+    const saved = await saveLearned(host, message)
+    if (saved === 'refused' || message.report !== true) return { saved }
+    return { saved, ...(await couponBoxLearned({ ...message, domain: host })) }
+}
+
+/* The box a run on a tab is using, held for the page a submit reloads to
+ * (store-detect.js resumes the run there and confirms the box when the total
+ * dropped). Held here, per tab and for the host the tab was on, never in the
+ * page's own storage, which the page can write. Taken once, within
+ * LEARN_HOLD_MS. */
+const LEARN_HOLD_KEY = 'caramel_learn_hold:'
+const LEARN_HOLD_MS = 120000
+// Where storage.session is missing (an older browser): this worker's memory.
+const _learnHolds = new Map()
+async function couponBoxLearnHold({ l }, sender) {
+    const tab = sender?.tab?.id
+    const host = senderHost(sender)
+    if (tab == null || !host || !l?.box || !(await couponBoxRememberOn()))
+        return { held: false }
+    const entry = {
+        host,
+        l: { box: l.box, source: l.source, learned: l.learned === true },
+        t: Date.now(),
+    }
+    const area = currentBrowser.storage?.session
+    if (area)
+        await new Promise(r => area.set({ [LEARN_HOLD_KEY + tab]: entry }, r))
+    else _learnHolds.set(LEARN_HOLD_KEY + tab, entry)
+    return { held: true }
+}
+async function couponBoxLearnTake(sender) {
+    const tab = sender?.tab?.id
+    const host = senderHost(sender)
+    if (tab == null || !host) return { l: null }
+    const key = LEARN_HOLD_KEY + tab
+    const area = currentBrowser.storage?.session
+    let entry = _learnHolds.get(key)
+    _learnHolds.delete(key)
+    if (area) {
+        entry = await new Promise(r =>
+            area.get([key], items => r(items?.[key])),
+        )
+        area.remove([key])
+    }
+    const fresh = entry?.host === host && Date.now() - entry.t < LEARN_HOLD_MS
+    return { l: fresh ? entry.l : null }
 }
 
 // The anonymous install id the install saved ({ iid } under this key), or
@@ -386,11 +500,13 @@ const storedInstallId = () =>
 export const COUPON_BOX_PICK_DEADLINE_MS = 24000
 const COUPON_BOX_PICK_TIMEOUT_MS = 23000
 const COUPON_BOX_PICK_MIN_MS = 3000
-async function couponBoxPick({ domain, outline }) {
+async function couponBoxPick({ domain, outline, served }) {
     const deadline = Date.now() + COUPON_BOX_PICK_DEADLINE_MS
     if (!(await couponBoxLlmEnabled())) return { error: 'disabled' }
-    // A learned answer only from a server that has learned boxes on.
-    const acceptsLearned = await couponBoxLearnedOn()
+    // A learned answer only from a server that has learned boxes on, and
+    // never for a store with a served config (one whose selectors went
+    // stale asks too): a store with a config never uses a learned box.
+    const acceptsLearned = served !== true && (await couponBoxLearnedOn())
     const token = await getStoredToken()
     const left = Math.min(COUPON_BOX_PICK_TIMEOUT_MS, deadline - Date.now())
     if (left < COUPON_BOX_PICK_MIN_MS) return { error: 'out of time' }
@@ -850,11 +966,35 @@ export function initBackground() {
                 couponBoxLlmFlags().then(sendResponse)
                 return true
             } else if (message.action === 'couponBoxLearned') {
-                couponBoxLearned(message)
+                couponBoxLearnedMessage(message, sender)
                     .then(sendResponse)
                     .catch(err => {
                         logError('couponBoxLearned', err)
                         sendResponse({ error: String(err) })
+                    })
+                return true
+            } else if (message.action === 'couponBoxLearnedBox') {
+                couponBoxLearnedBox(sender)
+                    .then(sendResponse)
+                    .catch(err => {
+                        logError('couponBoxLearnedBox', err)
+                        sendResponse({ box: null })
+                    })
+                return true
+            } else if (message.action === 'couponBoxLearnHold') {
+                couponBoxLearnHold(message, sender)
+                    .then(sendResponse)
+                    .catch(err => {
+                        logError('couponBoxLearnHold', err)
+                        sendResponse({ held: false })
+                    })
+                return true
+            } else if (message.action === 'couponBoxLearnTake') {
+                couponBoxLearnTake(sender)
+                    .then(sendResponse)
+                    .catch(err => {
+                        logError('couponBoxLearnTake', err)
+                        sendResponse({ l: null })
                     })
                 return true
             } else if (message.action === 'couponBoxPick') {

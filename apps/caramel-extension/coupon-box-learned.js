@@ -9,6 +9,9 @@
 // ships it as assets/coupon-box-learned.js (wxt.config.ts) and the finder
 // imports it only on a store with no config, when it is about to remember
 // something. No imports of its own, so the shipped file is the measured one.
+// The memory itself is read and written only by the background
+// (caramelLearnedRead, caramelLearnedOutcome), for the host of the tab that
+// asks: a page cannot name another store, nor write the memory at all.
 //
 // What is saved is CSS selectors, the form store configs use, built from what
 // a store's markup calls the element: an id that is not generated, its name,
@@ -217,52 +220,35 @@ export function caramelLearnable(domain, box, source, learned) {
     }
 }
 
-/* Save what one use of a box taught us, then (when `send` is given) report
- * it to the server through the background (action couponBoxLearned). Each
- * result is logged; nothing here throws, so the shopper's run never sees it.
- * evidence: 'total_dropped' | 'store_answered' for a confirmed box, else null. */
-// Called from coupon-box-discovery.js.
-export async function caramelLearnOutcome(
-    { area, send, log },
-    l,
-    outcome,
-    evidence,
-) {
-    const why = err => String(err?.message || err)
-    try {
-        const result = await caramelLearnedOutcome(
-            area,
-            l.domain,
-            l.box,
-            l.source,
-            outcome,
-            Date.now(),
-        )
-        log('FINDER_LEARNED_SAVED', { outcome, result })
-    } catch (err) {
-        log('FINDER_LEARNED_SAVE_FAILED', { outcome, error: why(err) })
-    }
-    if (!send) return
-    try {
-        const resp = await send({
-            action: 'couponBoxLearned',
-            domain: l.domain,
-            box: l.box,
-            source: l.source,
-            evidence,
-            outcome,
-        })
-        log('FINDER_LEARNED_REPORTED', {
-            outcome,
-            ok: resp?.ok === true,
-            recorded: resp?.recorded === true,
-            error: resp?.ok
-                ? resp.reason || null
-                : resp?.error || resp?.skipped || null,
-        })
-    } catch (err) {
-        log('FINDER_LEARNED_REPORTED', { outcome, ok: false, error: why(err) })
-    }
+// What the memory accepts, whoever asks: a domain, a box whose every
+// selector is in the grammar (caramelSelectorAllowed, so at most
+// MAX_READ_SELECTOR characters each), a source the finder writes, and an
+// outcome. Anything else is refused before storage is read: a value that
+// reached here from a page never lands in the memory.
+const SOURCES = ['rules', 'llm', 'server_learned']
+const OUTCOMES = ['confirmed', 'failed']
+const DOMAIN_RE = /^[a-z0-9.-]{1,253}$/
+const optional = css => css == null || caramelSelectorAllowed(css)
+// Exported for tests/coupon-box-learned.test.mjs.
+export const caramelLearnedValid = (domain, box, source, outcome) =>
+    typeof domain === 'string' &&
+    DOMAIN_RE.test(domain) &&
+    !!box &&
+    typeof box === 'object' &&
+    caramelSelectorAllowed(box.input) &&
+    optional(box.apply) &&
+    optional(box.toggle) &&
+    SOURCES.includes(source) &&
+    OUTCOMES.includes(outcome)
+
+/* The box saved for `domain` in `area` (storage.local), or null. Only an
+ * entry the memory could have written is returned. */
+// Called from background.js.
+export async function caramelLearnedRead(area, domain) {
+    const b = (await read(area))[domain]
+    return b?.v === 1 && caramelLearnedValid(domain, b, b.source, 'confirmed')
+        ? b
+        : null
 }
 
 const same = (a, b) =>
@@ -296,9 +282,11 @@ const write = (area, map) =>
  *              the second it is forgotten. A failure of some other box says
  *              nothing about the saved one, which is left as it was.
  * Past MAX_DOMAINS, the least recently used domains are forgotten.
- * Returns what happened: 'saved' | 'failed' | 'dropped' | 'kept'. Throws when
- * storage refuses, so the caller can say so. */
-// Called from coupon-box-discovery.js.
+ * Returns what happened: 'saved' | 'failed' | 'dropped' | 'kept', or
+ * 'refused' for anything caramelLearnedValid does not accept. Throws when
+ * storage refuses, so the caller can say so. The background is the one
+ * writer, one write at a time (background.js saveLearned). */
+// Called from background.js.
 export async function caramelLearnedOutcome(
     area,
     domain,
@@ -307,6 +295,7 @@ export async function caramelLearnedOutcome(
     outcome,
     now,
 ) {
+    if (!caramelLearnedValid(domain, box, source, outcome)) return 'refused'
     const map = await read(area)
     const was = map[domain]
     let result = 'kept'

@@ -164,6 +164,14 @@ describe('couponBoxPick', () => {
         })
     })
 
+    it('a store with a served config never asks for a learned answer', async () => {
+        responses.push(features(true, true), ok({ outcome: 'no_box' }))
+        await invoke({ ...PICK, served: true })
+        expect(JSON.parse(pickCalls()[0].opts.body)).not.toHaveProperty(
+            'acceptsLearned',
+        )
+    })
+
     it('a learned-box flag that is not a literal true does not ask', async () => {
         responses.push(
             ok({
@@ -293,21 +301,29 @@ describe('couponBoxLlmEnabled: the pick mode', () => {
 })
 
 describe('couponBoxLearned', () => {
+    // The tab the message came from: the one store it may speak for.
+    const SHOP = { tab: { id: 7, url: 'https://shop.test/cart' } }
+    const from = (message, sender = SHOP) =>
+        new Promise(resolve => handler(message, sender, resolve))
+    const BOX = {
+        input: 'input[name="coupon"]',
+        apply: 'button#apply',
+        toggle: null,
+        enterOnly: false,
+    }
     const LEARNED = {
         action: 'couponBoxLearned',
-        domain: 'shop.test',
-        box: {
-            input: 'input[name="coupon"]',
-            apply: 'button#apply',
-            toggle: null,
-            enterOnly: false,
-        },
+        // Never read: the store is the sender's own host.
+        domain: 'victim.test',
+        box: BOX,
         source: 'rules',
         evidence: 'total_dropped',
         outcome: 'confirmed',
+        report: true,
     }
     const learnedCalls = () =>
         fetchCalls.filter(c => c.url.includes('extension/coupon-box-learned'))
+    const memory = () => localData.caramel_learned_boxes || {}
     const IID = '0b6f4c1e-8d2a-4f3b-9c5d-7e1a2b3c4d5e'
     beforeEach(() => {
         localData.caramel_install_attribution = { iid: IID }
@@ -316,19 +332,31 @@ describe('couponBoxLearned', () => {
     for (const [what, flags] of [
         ['a server with no learned-box flag', [true, undefined]],
         ['the learned-box flag off', [true, false]],
-        ['the pick flag off', [false, true]],
     ])
-        it(`${what}: nothing is posted, and the answer says so`, async () => {
+        it(`${what}: nothing is remembered or posted, and the answer says so`, async () => {
             responses.push(features(...flags))
 
-            expect(await invoke(LEARNED)).toEqual({ skipped: 'disabled' })
+            expect(await from(LEARNED)).toEqual({ skipped: 'disabled' })
+            expect(memory()).toEqual({})
             expect(learnedCalls()).toHaveLength(0)
         })
 
-    it('posts the install id, the selectors and the outcome, nothing else', async () => {
+    it('the pick flag off: remembered here, never posted', async () => {
+        responses.push(features(false, true))
+
+        expect(await from(LEARNED)).toEqual({
+            saved: 'saved',
+            skipped: 'disabled',
+        })
+        expect(Object.keys(memory())).toEqual(['shop.test'])
+        expect(learnedCalls()).toHaveLength(0)
+    })
+
+    it("posts for the sender's own host, never the domain the message names", async () => {
         responses.push(features(true, true), ok({ recorded: true }))
 
-        expect(await invoke(LEARNED)).toEqual({
+        expect(await from(LEARNED)).toEqual({
+            saved: 'saved',
             ok: true,
             recorded: true,
             reason: null,
@@ -338,11 +366,69 @@ describe('couponBoxLearned', () => {
         expect(JSON.parse(call.opts.body)).toEqual({
             installId: IID,
             domain: 'shop.test',
-            box: LEARNED.box,
+            box: BOX,
             source: 'rules',
             evidence: 'total_dropped',
             outcome: 'confirmed',
         })
+        expect(Object.keys(memory())).toEqual(['shop.test'])
+    })
+
+    it('a use that is not reported is remembered only', async () => {
+        responses.push(features(true, true))
+
+        expect(
+            await from({ ...LEARNED, outcome: 'failed', report: false }),
+        ).toEqual({ saved: 'kept' })
+        expect(learnedCalls()).toHaveLength(0)
+    })
+
+    for (const [what, change] of [
+        ['a 100 kB selector', { box: { ...BOX, input: 'a'.repeat(100000) } }],
+        [
+            'a selector outside the grammar',
+            { box: { ...BOX, apply: 'button:has(svg)' } },
+        ],
+        ['a source the finder never writes', { source: 'page' }],
+        ['no box at all', { box: null }],
+    ])
+        it(`${what} is refused: nothing remembered, nothing posted`, async () => {
+            responses.push(features(true, true))
+
+            expect(await from({ ...LEARNED, ...change })).toEqual({
+                saved: 'refused',
+            })
+            expect(memory()).toEqual({})
+            expect(learnedCalls()).toHaveLength(0)
+        })
+
+    it('evidence the finder never writes is posted as none', async () => {
+        responses.push(features(true, true), ok({ recorded: true }))
+
+        await from({ ...LEARNED, evidence: 'page_said_so' })
+        expect(JSON.parse(learnedCalls()[0].opts.body).evidence).toBeNull()
+    })
+
+    it('a message from no tab is skipped', async () => {
+        responses.push(features(true, true))
+
+        expect(await from(LEARNED, {})).toEqual({ skipped: 'no tab' })
+        expect(memory()).toEqual({})
+    })
+
+    it('two tabs answering at once keep both stores', async () => {
+        responses.push(features(true, true))
+        const other = { tab: { id: 8, url: 'https://other.test/bag' } }
+
+        await Promise.all([
+            from({ ...LEARNED, report: false }),
+            from({ ...LEARNED, report: false }, other),
+        ])
+
+        expect(Object.keys(memory()).sort()).toEqual([
+            'other.test',
+            'shop.test',
+        ])
     })
 
     it('a report the server declined to record says why', async () => {
@@ -351,7 +437,8 @@ describe('couponBoxLearned', () => {
             ok({ recorded: false, reason: 'served_config' }),
         )
 
-        expect(await invoke(LEARNED)).toEqual({
+        expect(await from(LEARNED)).toEqual({
+            saved: 'saved',
             ok: true,
             recorded: false,
             reason: 'served_config',
@@ -362,7 +449,10 @@ describe('couponBoxLearned', () => {
         delete localData.caramel_install_attribution
         responses.push(features(true, true))
 
-        expect(await invoke(LEARNED)).toEqual({ skipped: 'no install id' })
+        expect(await from(LEARNED)).toEqual({
+            saved: 'saved',
+            skipped: 'no install id',
+        })
         expect(learnedCalls()).toHaveLength(0)
     })
 
@@ -372,11 +462,110 @@ describe('couponBoxLearned', () => {
             status: 429,
             json: async () => ({}),
         })
-        expect(await invoke(LEARNED)).toEqual({ error: 'HTTP 429' })
+        expect(await from(LEARNED)).toEqual({
+            saved: 'saved',
+            error: 'HTTP 429',
+        })
 
         responses.push(new TypeError('Failed to fetch'))
-        expect(await invoke(LEARNED)).toEqual({
+        expect(await from(LEARNED)).toEqual({
             error: 'TypeError: Failed to fetch',
         })
+    })
+})
+
+describe('couponBoxLearnedBox', () => {
+    const SAVED = {
+        v: 1,
+        input: 'input#promo',
+        apply: 'button#apply',
+        toggle: null,
+        enterOnly: false,
+        source: 'llm',
+        confirmedAt: 1,
+        failures: 0,
+    }
+    const from = (url, id = 7) =>
+        new Promise(resolve =>
+            handler(
+                { action: 'couponBoxLearnedBox', domain: 'shop.test' },
+                { tab: { id, url } },
+                resolve,
+            ),
+        )
+    beforeEach(() => {
+        localData.caramel_learned_boxes = {
+            'shop.test': SAVED,
+            'forged.test': { ...SAVED, input: 'x'.repeat(5000) },
+        }
+    })
+
+    it("answers the box remembered for the sender's own host only", async () => {
+        responses.push(features(true, true))
+
+        expect(await from('https://shop.test/cart')).toEqual({ box: SAVED })
+        expect(await from('https://other.test/cart')).toEqual({ box: null })
+    })
+
+    it('an entry the memory could not have written is never answered', async () => {
+        responses.push(features(true, true))
+
+        expect(await from('https://forged.test/cart')).toEqual({ box: null })
+    })
+
+    for (const [what, learned] of [
+        ['no learned-box flag', undefined],
+        ['the learned-box flag off', false],
+    ])
+        it(`${what}: no box, though the finder is on`, async () => {
+            responses.push(features(true, learned))
+
+            expect(await from('https://shop.test/cart')).toEqual({ box: null })
+        })
+})
+
+describe('the box a run holds across a reload', () => {
+    const L = {
+        box: { input: 'input#promo', apply: null, toggle: null },
+        source: 'rules',
+        learned: false,
+    }
+    const send = (action, url, id = 7, extra = {}) =>
+        new Promise(resolve =>
+            handler({ action, ...extra }, { tab: { id, url } }, resolve),
+        )
+    const hold = (url, id) => send('couponBoxLearnHold', url, id, { l: L })
+    const take = (url, id) => send('couponBoxLearnTake', url, id)
+
+    it('is taken once, by the same tab on the same host', async () => {
+        responses.push(features(true, true))
+        await hold('https://shop.test/cart')
+
+        expect(await take('https://shop.test/cart?x=1')).toEqual({
+            l: { box: L.box, source: 'rules', learned: false },
+        })
+        expect(await take('https://shop.test/cart')).toEqual({ l: null })
+    })
+
+    it('another host, or another tab, takes nothing', async () => {
+        responses.push(features(true, true))
+        await hold('https://shop.test/cart')
+
+        expect(await take('https://victim.test/cart')).toEqual({ l: null })
+        await hold('https://shop.test/cart')
+        expect(await take('https://shop.test/cart', 9)).toEqual({ l: null })
+    })
+
+    it('a page that held nothing takes nothing', async () => {
+        responses.push(features(true, true))
+
+        expect(await take('https://shop.test/cart')).toEqual({ l: null })
+    })
+
+    it('nothing is held while remembering is off', async () => {
+        responses.push(features(true, false))
+
+        expect(await hold('https://shop.test/cart')).toEqual({ held: false })
+        expect(await take('https://shop.test/cart')).toEqual({ l: null })
     })
 })

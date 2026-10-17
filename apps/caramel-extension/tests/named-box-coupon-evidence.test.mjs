@@ -10,6 +10,7 @@ import { LEARNED_KEY } from '../coupon-box-learned.js'
 import { caramelPageOutline } from '../coupon-box-outline.js'
 import { startApplyingCoupons } from '../coupon-runner.js'
 import { caramelConfiglessRecord, getDomainRecord } from '../store-detect.js'
+import { LEARNED_ACTIONS, learnedBackground } from './_learned-background.mjs'
 
 // A box someone else named: the server's pick (by its place in the outline),
 // a box the server learned from other installs (by selectors), and a box this
@@ -38,6 +39,8 @@ let appliedWith
 let mode
 let answer
 let pickCalls
+// The background's per-tab hold of the box a run used.
+let holds = new Map()
 let reported
 let local
 
@@ -116,10 +119,13 @@ function installChromeStub() {
         else if (a === 'couponBoxPick') {
             pickCalls.push(message)
             cb(typeof answer === 'function' ? answer(message) : answer)
-        } else if (a === 'couponBoxLearned') {
-            reported.push(message)
-            cb({ ok: true })
-        } else cb?.({})
+        } else if (LEARNED_ACTIONS.includes(a))
+            learnedBackground(
+                stub.storage.local,
+                reported,
+                holds,
+            )(message).then(cb)
+        else cb?.({})
     }
     globalThis.chrome = stub
     globalThis.browser = undefined
@@ -236,6 +242,7 @@ beforeEach(() => {
     appliedWith = []
     pickCalls = []
     reported = []
+    holds = new Map()
     local = {}
     mode = 'llm_only'
     answer = { outcome: 'no_box', confidence: 80, why: 'none', cached: false }
@@ -919,7 +926,180 @@ describe('a learned box whose apply is not an apply button is refused whole', ()
             expect(clicks).toEqual([])
             expect(appliedWith).toHaveLength(0)
         })
+
+        // A form can hold the whole cart: sharing the field's form is not
+        // being its button.
+        it(`${source}: an icon elsewhere in a whole-cart form is refused`, async () => {
+            document.body.innerHTML =
+                '<form class="cart" onsubmit="return false">' +
+                '<div class="promo">' +
+                PROMO_INPUT +
+                '</div>' +
+                '<p>' +
+                'Organic cotton tee, size M, qty 1. '.repeat(14) +
+                '</p>' +
+                '<div class="line"><button id="b" type="button"><svg></svg></button></div>' +
+                '</form>' +
+                TOTAL
+            name({ input: 'x', button: 'b' })
+            const clicks = watchClicks()
+
+            await run()
+
+            expect(clicks).toEqual([])
+            expect(appliedWith).toHaveLength(0)
+        })
+
+        for (const [what, attrs] of [
+            ['a place-order data attribute', 'data-place-order'],
+            ['a remove class', 'class="cart-remove"'],
+        ])
+            it(`${source}: a wordless arrow with ${what} is refused`, async () => {
+                document.body.innerHTML =
+                    '<div class="promo">' +
+                    PROMO_INPUT +
+                    `<button id="b" type="button" ${attrs}>→</button></div>` +
+                    TOTAL
+                name({ input: 'x', button: 'b' })
+                const clicks = watchClicks()
+
+                await run()
+
+                expect(clicks).toEqual([])
+                expect(appliedWith).toHaveLength(0)
+            })
     }
+
+    // A selector that names the apply by its place among its siblings names
+    // another element once the cart gains a line: a wordless one is never
+    // trusted, a labelled one still is.
+    const POSITIONAL = {
+        'a box the server learned': apply => {
+            answer = {
+                outcome: 'box',
+                source: 'learned',
+                input: null,
+                button: null,
+                toggle: null,
+                box: { input: '#x', apply, toggle: null, enterOnly: false },
+            }
+        },
+        'a box this install remembers': apply => {
+            local[LEARNED_KEY] = {
+                [location.hostname]: {
+                    v: 1,
+                    input: '#x',
+                    apply,
+                    toggle: null,
+                    enterOnly: false,
+                    source: 'llm',
+                    confirmedAt: 1,
+                    failures: 0,
+                },
+            }
+        },
+    }
+    for (const [source, name] of Object.entries(POSITIONAL)) {
+        it(`${source}: a wordless apply named by its place is refused`, async () => {
+            document.body.innerHTML =
+                '<div class="promo">' +
+                PROMO_INPUT +
+                '<button id="b" type="button">→</button></div>' +
+                TOTAL
+            name('div.promo > button:nth-of-type(1)')
+            const clicks = watchClicks()
+
+            await run()
+
+            expect(clicks).toEqual([])
+            expect(appliedWith).toHaveLength(0)
+        })
+
+        it(`${source}: an Apply named by its place is used (the control case)`, async () => {
+            document.body.innerHTML =
+                '<div class="promo">' + PROMO_INPUT + APPLY + '</div>' + TOTAL
+            name('div.promo > button:nth-of-type(1)')
+
+            await run()
+
+            expect(drivenSubmit()).toBe('b')
+        })
+    }
+})
+
+// Every box's apply is its own: in the field's form or its small panel. An
+// Apply across the page belongs to something else, whoever named it.
+describe('an apply far from the box is never its button', () => {
+    for (const [source, name] of Object.entries(SOURCES))
+        it(`${source}: an Apply in another section is refused`, async () => {
+            mode = 'llm_only'
+            document.body.innerHTML =
+                '<div class="promo">' +
+                PROMO_INPUT +
+                '</div>' +
+                '<p>' +
+                'Free shipping on every order over fifty. '.repeat(12) +
+                '</p>' +
+                '<div class="other"><button id="b" type="button">Apply</button></div>' +
+                TOTAL
+            name({ input: 'x', button: 'b' })
+            const clicks = watchClicks()
+
+            await run()
+
+            expect(clicks).not.toContain('b')
+            expect(drivenSubmit()).not.toBe('b')
+        })
+})
+
+// A form that posts somewhere else, or opens another window, takes the
+// shopper off the cart: its submit is never the apply, on any path.
+describe('a submit that leaves the store is never the apply button', () => {
+    for (const [what, form, button] of [
+        [
+            'a form posting to another site',
+            '<form action="https://pay.example/apply" method="post">',
+            '<button id="b" type="submit">Apply</button>',
+        ],
+        [
+            'a submit whose formaction is another site',
+            '<form action="/cart" method="post">',
+            '<button id="b" type="submit" formaction="https://pay.example/x">Apply</button>',
+        ],
+        [
+            'a form that opens a new window',
+            '<form action="/cart/coupon" method="post" target="_blank">',
+            '<button id="b" type="submit">Apply</button>',
+        ],
+    ])
+        for (const [path, name] of Object.entries(PATHS))
+            it(`${path}: ${what}`, async () => {
+                document.body.innerHTML =
+                    form + PROMO_INPUT + button + '</form>' + TOTAL
+                name({ input: 'x', button: 'b' })
+                const clicks = watchClicks()
+
+                await run()
+
+                expect(drivenSubmit()).not.toBe('b')
+                expect(clicks).not.toContain('b')
+            })
+
+    // Posting to the store itself and reloading the cart is how many stores
+    // apply a code.
+    for (const [path, name] of Object.entries(PATHS))
+        it(`${path}: a form posting to this store is used (the control case)`, async () => {
+            document.body.innerHTML =
+                '<form action="/cart/coupon" method="post">' +
+                PROMO_INPUT +
+                '<button id="b" type="submit">Apply</button></form>' +
+                TOTAL
+            name({ input: 'x', button: 'b' })
+
+            await run()
+
+            expect(drivenSubmit()).toBe('b')
+        })
 })
 
 // A served or stored selector is data: one outside the learned-box grammar

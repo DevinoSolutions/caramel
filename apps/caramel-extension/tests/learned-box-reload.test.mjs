@@ -10,6 +10,7 @@ import {
     getDomainRecord,
     startCheckoutDetection,
 } from '../store-detect.js'
+import { LEARNED_ACTIONS, learnedBackground } from './_learned-background.mjs'
 
 // A remembered coupon box on a cart that reloads per code. The box no rule
 // would find is still the one the run carries on with on the page the store
@@ -21,6 +22,8 @@ const LEARNED_FILE = pathToFileURL(
 ).href
 
 let applyCalls
+// The background's per-tab hold of the box a run used.
+let holds = new Map()
 let reported
 let local
 
@@ -95,10 +98,13 @@ function installChromeStub() {
         else if (a === 'couponBoxDiscoveryEnabled') cb({ enabled: true })
         else if (a === 'couponBoxLlmEnabled')
             cb({ enabled: true, mode: 'llm_first' })
-        else if (a === 'couponBoxLearned') {
-            reported.push(message)
-            cb({ ok: true })
-        } else cb?.({})
+        else if (LEARNED_ACTIONS.includes(a))
+            learnedBackground(
+                stub.storage.local,
+                reported,
+                holds,
+            )(message).then(cb)
+        else cb?.({})
     }
     globalThis.chrome = stub
     globalThis.browser = undefined
@@ -147,6 +153,7 @@ beforeEach(() => {
     history.replaceState({}, '', '/cart')
     applyCalls = []
     reported = []
+    holds = new Map()
     local = {}
     Element.prototype.checkVisibility = () => true
     Element.prototype.getBoundingClientRect = () => ({
@@ -190,20 +197,17 @@ describe('a remembered box on a cart that reloads per code', () => {
 
     it('a code that dropped the total across the reload confirms the box it went through', async () => {
         // What the run's find left for the page the store sends us to.
-        sessionStorage.setItem(
-            'caramel_box_learn:' + location.hostname,
-            JSON.stringify({
-                domain: location.hostname,
-                box: {
-                    input: REMEMBERED.input,
-                    apply: REMEMBERED.apply,
-                    toggle: null,
-                    enterOnly: false,
-                },
-                source: 'llm',
-                learned: true,
-            }),
-        )
+        holds.set(location.hostname, {
+            domain: location.hostname,
+            box: {
+                input: REMEMBERED.input,
+                apply: REMEMBERED.apply,
+                toggle: null,
+                enterOnly: false,
+            },
+            source: 'llm',
+            learned: true,
+        })
         local[LEARNED_KEY] = { [location.hostname]: REMEMBERED }
         document.body.innerHTML = BARE_BOX + TOTAL('90.00')
         caramelBeginRun()
@@ -221,21 +225,48 @@ describe('a remembered box on a cart that reloads per code', () => {
             input: REMEMBERED.input,
             failures: 0,
         })
-        expect(
-            sessionStorage.getItem('caramel_box_learn:' + location.hostname),
-        ).toBeNull()
+        expect(holds.has(location.hostname)).toBe(false)
+    })
+
+    it('a box the page wrote into its own storage confirms nothing', async () => {
+        // The page's sessionStorage is the page's to write: a box planted
+        // there, for this store or another, is never taken as the run's.
+        for (const domain of [location.hostname, 'victim.test'])
+            sessionStorage.setItem(
+                'caramel_box_learn:' + domain,
+                JSON.stringify({
+                    domain,
+                    box: {
+                        input: REMEMBERED.input,
+                        apply: REMEMBERED.apply,
+                        toggle: null,
+                        enterOnly: false,
+                    },
+                    source: 'llm',
+                    learned: true,
+                }),
+            )
+        local[LEARNED_KEY] = { [location.hostname]: REMEMBERED }
+        document.body.innerHTML = BARE_BOX + TOTAL('90.00')
+        caramelBeginRun()
+        caramelMarkPendingSubmit('SAVE10', 'c2', [100], ROW)
+
+        await startCheckoutDetection()
+        await new Promise(r => setTimeout(r, 20))
+
+        expect(reported).toEqual([])
+        expect(local[LEARNED_KEY]).toEqual({
+            [location.hostname]: REMEMBERED,
+        })
     })
 
     it('a reload where the total did not move confirms nothing', async () => {
-        sessionStorage.setItem(
-            'caramel_box_learn:' + location.hostname,
-            JSON.stringify({
-                domain: location.hostname,
-                box: { input: REMEMBERED.input, apply: REMEMBERED.apply },
-                source: 'llm',
-                learned: true,
-            }),
-        )
+        holds.set(location.hostname, {
+            domain: location.hostname,
+            box: { input: REMEMBERED.input, apply: REMEMBERED.apply },
+            source: 'llm',
+            learned: true,
+        })
         local[LEARNED_KEY] = { [location.hostname]: REMEMBERED }
         document.body.innerHTML = BARE_BOX + TOTAL('100.00')
         caramelBeginRun()
