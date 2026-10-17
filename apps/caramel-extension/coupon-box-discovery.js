@@ -211,13 +211,13 @@ const TOGGLE_RE =
 // eingeben"). The whole label, so a sentence that merely mentions a voucher is
 // not a toggle.
 const TOGGLE_OBJ_RE =
-    /^\s*(gutschein(code)?|rabatt(code)?|aktionscode|promo-?code|kortingscode|actiecode|codice (sconto|promozionale|promo)|buono sconto)\s*(eingeben|einl[oö]sen|hinzuf[üu]gen|invoeren|toevoegen|inserisci|aggiungi|inserire)\s*[+▾▼›>→]?\s*$/i
+    /^(gutschein(code)?|rabatt(code)?|aktionscode|promo-?code|kortingscode|actiecode|codice (sconto|promozionale|promo)|buono sconto) ?(eingeben|einl[oö]sen|hinzuf[üu]gen|invoeren|toevoegen|inserisci|aggiungi|inserire) ?[+▾▼›>→]?$/i
 // A bare row title: "Coupon/Gift Certificate", "Promo code", "Coupon:".
 const TOGGLE_BARE_RE =
-    /^\s*(promo(tion(al)?)?|coupon|discount|voucher|gift card)\s*(code)?s?\s*((or|\/|&|and)\s*(gift\s+(card|certificate)|coupon|promo(\s+code)?)s?)?\s*[?:]?\s*[+▾▼›>]?\s*$/i
+    /^(promo(tion(al)?)?|coupon|discount|voucher|gift card) ?(code)?s? ?((or|\/|&|and) ?(gift (card|certificate)|coupon|promo( code)?)s?)? ?[?:]? ?[+▾▼›>]?$/i
 // The noun as a row title with the verb AFTER it ("Coupon  View →").
 const TOGGLE_TAIL_RE =
-    /^\s*(promo(tion(al)?)?|coupon|discount|voucher)\s*(code)?s?\s*(view|show|open|add|see|enter)( all| code| it)?\s*[+▾▼›>→]?\s*$/i
+    /^(promo(tion(al)?)?|coupon|discount|voucher) ?(code)?s? ?(view|show|open|add|see|enter)( all| code| it)? ?[+▾▼›>→]?$/i
 
 /* --------------------------------------------------------------- helpers */
 const norm = s => (s || '').toString().toLowerCase().replace(/\s+/g, ' ').trim()
@@ -656,12 +656,34 @@ function findButton(input) {
 // drops "points", "student", "military", "teacher" and "verify".
 const LOYALTY_RE =
     /\b(?:redeem(?:s|ed|ing)?|points?|rewards?|loyalty|memberships?|member pric(?:e|es|ing)|students?|military|teachers?|verif(?:y|ied|ication))\b/i
+// Store credit and a balance are the shopper's money too: applying them drops
+// the total and reads as a saving that is not one. "Credit card" is a payment
+// method. A gift card is judged by noCodeClick on the control's own name, as
+// "Promo code or gift card" still reveals the coupon box.
+const STORE_CREDIT_RE =
+    /\bstore credits?\b|\bcredits?\b(?! ?cards?)|\bbalances?\b/i
 const CODE_WORD_RE = /\b(?:codes?|coupons?|vouchers?)\b/i
+const REDEEM_RE = /\bredeem/i
+const REDEEM_WORDS_RE = /\bredeem\w*/gi
 // "Promo or rewards code", "Rewards & Promo codes": words that name a code.
 // Taken out of the surrounding words before they are read for points, so a
-// coupon box's own label never refuses its button.
+// coupon box's own label never refuses its button. Every run is bounded: an
+// open-ended one backtracks over a long word on every start, and a 40 KiB
+// word took over a second.
 const withoutCodePhrases = t =>
-    t.replace(/(?:[\w-]+\s+(?:or|and|&|\/)\s+)?[\w-]+\s+codes?\b/gi, ' ')
+    t.replace(
+        /(?:[\w-]{1,40}\s{1,8}(?:or|and|&|\/)\s{1,8})?[\w-]{1,40}\s{1,8}codes?\b/gi,
+        ' ',
+    )
+// "Redeem ### points for a $# discount code" spends points to get a code,
+// whatever it names. A toggle opens a box to type a code into; this buys one.
+// Bounded gaps: two open-ended ones made a long name cubic.
+const REDEEM_FOR_A_CODE_RE =
+    /\bredeem\w{0,8}\b.{0,60}?\bfor\b.{0,40}?\b(?:codes?|coupons?|vouchers?)\b/i
+// The words a rule reads, at most this long: no control, label or heading a
+// shopper reads is longer, and every rule then runs in bounded time.
+const RULE_WORDS_MAX = 1000
+const ruleWords = t => String(t || '').slice(0, RULE_WORDS_MAX)
 // A reveal opens a box to type a code into. One that offers deals without
 // naming a code ("View offers", "Promotions") applies an offer or opens a list
 // of them. One that says only "discount" ("Have a discount?", "Add discount")
@@ -673,8 +695,11 @@ const SAYS_OFFER_RE = /offer|\bdeals?\b|saving|\bsave\b|promotions?\b/i
 const SAYS_DISCOUNT_RE =
     /discount|rabatt|descuento|desconto|sconto|remise|réduction|korting|zniżka/i
 const MEMBER_OR_GIFT_RE = /\bmembers?\b|\bgift[\s-]*cards?\b/i
+// Words that name a code. "kod" also inside a word (Swedish "rabattkod",
+// "kampanjkod"); "promo" only as a word, so "promotions" is an offer, not a
+// code. The server's pick reads its toggles by the same words.
 const NAMES_CODE_RE =
-    /code|codice|código|\bkod|coupon|cup[oó]n|cupom|voucher|gutschein|\bpromo\b/i
+    /code|codice|código|kod|coupon|cup[oó]n|cupom|voucher|gutschein|\bpromo\b|\bbons?\b(?:\s+de)?\s+r[ée]duction/i
 // ...nor is a reveal of the small print ("Promo details", "Offer terms").
 const ABOUT_TERMS_RE =
     /\b(?:details|terms|conditions|exclusions|restrictions|learn more)\b/i
@@ -697,6 +722,7 @@ const controlWords = el =>
         el.id,
     ]
         .join(' ')
+        .slice(0, RULE_WORDS_MAX)
         .replace(/[-_]+/g, ' ')
 
 // The words a shopper reads beside a control: the small block around it, or,
@@ -718,7 +744,7 @@ function wordsBeside(el) {
         if (norm(p.textContent).length > 160) break
         words = wordsOf(p)
     }
-    return words
+    return ruleWords(words)
 }
 
 // The section a control sits in, by its own name: "Rewards", "Member prices",
@@ -753,40 +779,60 @@ function sectionWords(el) {
             )
                 head = wordsOf(h)
         }
-    return [ariaOf(box), ...named, head].join(' ')
+    return ruleWords([ariaOf(box), ...named, head].join(' '))
 }
 
-// Called for every control the finder or the pick might click. A control
-// that names a code is never refused here. One that names points, rewards,
-// membership, a student, military or teacher discount, or verification is.
-// Any other ("Apply discount", "Apply", a bare "Redeem") is judged by the
-// words beside it and by its section's name, codes taken out.
+// Called for every control the finder or the pick might click. One whose own
+// name, the phrases that name a code taken out, speaks of points, rewards,
+// membership, a student, military or teacher discount, verification or store
+// credit is refused ("Use my rewards", "Apply credit"), and so is one that
+// redeems points for a code. One that names a code ("Apply code") is then
+// kept wherever it sits. Any other ("Apply discount", "Apply", a bare
+// "Redeem") is judged by the words beside it and by its section's name, codes
+// taken out. The server's pick judges the controls it names by the same rule.
 function spendsPoints(el) {
     const own = controlWords(el)
+    const ownWords = withoutCodePhrases(own).replace(REDEEM_WORDS_RE, '')
+    if (LOYALTY_RE.test(ownWords) || STORE_CREDIT_RE.test(ownWords)) return true
+    if (REDEEM_FOR_A_CODE_RE.test(own)) return true
     if (CODE_WORD_RE.test(own)) return false
-    if (LOYALTY_RE.test(own.replace(/\bredeem\w*/gi, ''))) return true
     const beside = wordsBeside(el)
-    // "Redeem" is how some stores name a voucher box's button: only beside a
-    // field that names a code.
-    if (/\bredeem/i.test(own) && !CODE_WORD_RE.test(beside)) return true
-    return LOYALTY_RE.test(withoutCodePhrases(beside + ' ' + sectionWords(el)))
+    // "Redeem" is how some stores name a voucher box's button: only when it
+    // or the field beside it names a coupon code.
+    if (
+        REDEEM_RE.test(own) &&
+        !namesCouponCode(own) &&
+        !namesCouponCode(beside)
+    )
+        return true
+    const near = withoutCodePhrases(`${beside} ${sectionWords(el)}`).replace(
+        REDEEM_WORDS_RE,
+        '',
+    )
+    if (LOYALTY_RE.test(near)) return true
+    // A plain "Apply" under "Store credit $25.00", or beside a gift card's
+    // number, spends the shopper's balance. Only where nothing beside it names
+    // a coupon code: a promo box keeps its "Apply" beside "Check balance".
+    return (
+        !namesCouponCode(beside) &&
+        (STORE_CREDIT_RE.test(near) || giftOnly(beside))
+    )
 }
 
-// A field that takes points rather than a code ("Points to redeem"). Pressing
-// Enter in it is the same as clicking its "Redeem" button.
+// A field that takes points or store credit rather than a code ("Points to
+// redeem"). Pressing Enter in it is the same as clicking its "Redeem" button.
 const pointsField = el => {
-    const words = [
-        labelText(el),
-        el.placeholder,
-        ariaOf(el),
-        el.name,
-        el.id,
-    ].join(' ')
-    return LOYALTY_RE.test(words) && !CODE_WORD_RE.test(words)
+    const words = ruleWords(
+        [labelText(el), el.placeholder, ariaOf(el), el.name, el.id].join(' '),
+    )
+    return (
+        (LOYALTY_RE.test(words) || STORE_CREDIT_RE.test(words)) &&
+        !CODE_WORD_RE.test(words)
+    )
 }
 
-// A reveal that names no code: an offer, a points or member discount, or the
-// small print.
+// A reveal that names no code: an offer, a points, member or store-credit
+// discount, or the small print.
 const offersOnly = el => {
     const own = controlWords(el)
     if (ABOUT_TERMS_RE.test(own) && !CODE_WORD_RE.test(own)) return true
@@ -796,7 +842,11 @@ const offersOnly = el => {
     const near = withoutCodePhrases(
         [own, wordsBeside(el), sectionWords(el)].join(' '),
     )
-    return LOYALTY_RE.test(near) || MEMBER_OR_GIFT_RE.test(near)
+    return (
+        LOYALTY_RE.test(near) ||
+        MEMBER_OR_GIFT_RE.test(near) ||
+        STORE_CREDIT_RE.test(near)
+    )
 }
 
 /* ------------------------------------------------- never a code's click */
@@ -813,12 +863,14 @@ const GIFT_EXTRA_RE =
     /\bgift ?(?:card|wrap\w*|message|note|receipt|box|bag)s?\b/i
 const PROMO_WORD_RE = /\b(?:promo\w*|coupons?|discounts?|vouchers?)\b/i
 
+// Words about a gift card and nothing about a coupon ("Gift card number").
+const giftOnly = t => GIFT_EXTRA_RE.test(t) && !PROMO_WORD_RE.test(t)
+// A code for a coupon, not one only for a gift card ("Gift card code").
+const namesCouponCode = t => NAMES_CODE_RE.test(t) && !giftOnly(t)
+
 function noCodeClick(el) {
     const words = controlWords(el)
-    return (
-        NO_CODE_CLICK_RE.test(words) ||
-        (GIFT_EXTRA_RE.test(words) && !PROMO_WORD_RE.test(words))
-    )
+    return NO_CODE_CLICK_RE.test(words) || giftOnly(words)
 }
 
 // A switch or a radio is a setting, never a fold: a radio picks one option of
@@ -1115,19 +1167,27 @@ const SIGN = '[$£€¥₹₩₺₱₪₫฿₦]'
 // ...and the currency codes written beside an amount.
 const CODES =
     'USD|CAD|AUD|NZD|EUR|GBP|CHF|SEK|NOK|DKK|PLN|AED|SAR|INR|JPY|HKD|SGD|MXN|ZAR|kr'
-// An amount: a currency mark beside digits, or digits with cents.
+// An amount: a currency mark beside digits, or digits with cents. A run of
+// digits is read at most 25 characters long, longer than any price: an
+// open-ended run is tried again from every digit of a long number, and a
+// 40 KiB one took seconds.
 const MONEY_RE = new RegExp(
-    `(?:${SIGN}|R\\$|\\b(?:${CODES})\\b)\\s?-?\\d[\\d.,]*|\\d[\\d.,]*\\s?(?:${SIGN}|\\b(?:USD|EUR|GBP|CHF|kr)\\b|zł)|\\d[\\d,]*[.,]\\d{2}\\b`,
+    `(?:${SIGN}|R\\$|\\b(?:${CODES})\\b)\\s?-?\\d[\\d.,]{0,24}|\\d[\\d.,]{0,24}\\s?(?:${SIGN}|\\b(?:USD|EUR|GBP|CHF|kr)\\b|zł)|\\d[\\d,]{0,24}[.,]\\d{2}\\b`,
     'i',
 )
 const AMOUNT_ONLY = new RegExp(
     `^[^\\w${SIGN.slice(1, -1)}]{0,3}\\S{0,4}\\s?-?\\d[\\d.,\\s]*\\S{0,4}$`,
 )
 // A parenthetical ("incl. 15,17 € VAT") is commentary on the amount, not a
-// second total.
+// second total. One is at most 200 characters, so an unclosed "(" is not
+// read to the end of the text again from every "(" before it.
+const PARENTHETICAL = /\(.{0,200}?\)/g
 const moneyCount = t =>
-    (t.replace(/\(.*?\)/g, ' ').match(new RegExp(MONEY_RE.source, 'gi')) || [])
-        .length
+    (
+        t
+            .replace(PARENTHETICAL, ' ')
+            .match(new RegExp(MONEY_RE.source, 'gi')) || []
+    ).length
 // One row: short, and holding exactly one amount. A block with two amounts
 // (a struck-through price, a "free shipping over $150" line) is not a total
 // we can read honestly, because its largest number need not be the total.
@@ -1142,8 +1202,11 @@ function ownLabel(el) {
             .map(n => n.textContent)
             .join(' '),
     )
+    // A label is at most 40 characters (scanTotalRows): text far longer is no
+    // label, and is not cut, so a long blob is not read for amounts at all.
+    if (own.length > 200) return { own, bare: own }
     const bare = own
-        .replace(/\(.*?\)/g, ' ')
+        .replace(PARENTHETICAL, ' ')
         .replace(new RegExp(MONEY_RE.source, 'gi'), ' ')
         .replace(/\s+/g, ' ')
         .trim()
@@ -1341,8 +1404,11 @@ const DISCOUNT_NOT =
 const LINE_LABEL =
     /^\W*(?:(?:order|cart|basket) )?(?:coupon|discount|promo(?:tion)?|voucher)s?(?: code)?(?: applied)?\b:?/i
 const PUNCT = '[\\s.,;:!?()[\\]|/*×✕-]'
+// A line's spaces are single by the time it is read (isCouponLine), so the
+// tail opens with one space: a run would be tried again from every space in
+// it.
 const LINE_TAIL = new RegExp(
-    `\\s*(?:${CODES}|zł)?(?:${PUNCT}+(?:remove|edit|change|delete)(?:${PUNCT}+(?:coupon|code|discount|promo|voucher)){0,2})?${PUNCT}*$`,
+    `\\s?(?:${CODES}|zł)?(?:${PUNCT}+(?:remove|edit|change|delete)(?:${PUNCT}+(?:coupon|code|discount|promo|voucher)){0,2})?${PUNCT}*$`,
     'i',
 )
 const CUR = `(?:${SIGN}|\\b(?:${CODES}))\\s?`
@@ -1359,7 +1425,7 @@ function isCouponLine(line, typed) {
     const code = s
         .slice(0, m.index)
         .trim()
-        .replace(/\s*\bapplied\b:?$/i, '')
+        .replace(/\s?\bapplied\b:?$/i, '')
         .replace(/^["'“‘([]+|["'”’)\]:]+$/g, '')
     return !code || (!!typed && code.toLowerCase() === typed.toLowerCase())
 }
@@ -1415,7 +1481,9 @@ function newDeduction(el, base) {
     for (const h of hits) {
         if (hits.some(o => o !== h && o.el.contains(h.el))) continue
         // A code in brackets ("Coupon (SAVE20)") names the code, not an amount.
-        const t = textOf(h.el).replace(/\(\s*[\w-]*[a-z][\w-]*\s*\)/gi, ' ')
+        // The letter is looked for ahead, not between two open-ended runs: a
+        // long bracketed word was split every possible way, for seconds.
+        const t = textOf(h.el).replace(/\(\s*(?=[\w-]*[a-z])[\w-]+\s*\)/gi, ' ')
         const money = caramelFindMoney(t)
         const a = money.length === 1 ? Math.abs(money[0].value) : 0
         // The whole row is judged, not only its label or value cell: "Promo
@@ -1929,9 +1997,12 @@ async function caramelPickedRecord(rec, doc) {
 // wordless box cannot be told from another wordless box (a gift-card field
 // beside it), so it is never found again.
 // An id a framework generates (React ':r1:', 'mui-12', 'ember123') is new on
-// every re-draw, so it names nothing: the next key is read instead.
+// every re-draw, so it names nothing: the next key is read instead. A hex run
+// of 8 or more with a digit in it: looking at most 7 ahead for the digit finds
+// every such run (the last 8 of a run hold any digit the look would miss) and
+// does not read a long id to its end again from every letter.
 const GENERATED_ID_RE =
-    /:|^(?:mui|ember|radix|headlessui|react|rc|chakra|downshift|field|input)[-_]?\d|(?=[0-9a-f]*\d)[0-9a-f]{8,}/i
+    /:|^(?:mui|ember|radix|headlessui|react|rc|chakra|downshift|field|input)[-_]?\d|(?=[0-9a-f]{0,7}\d)[0-9a-f]{8,}/i
 const SIG_KEYS = [
     ['n', el => el.getAttribute('name')],
     ['i', el => (GENERATED_ID_RE.test(el.id) ? '' : el.id)],

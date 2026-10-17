@@ -1007,3 +1007,294 @@ describe('a loyalty or offers control is never clicked by the finder or the pick
         expect(t.savings).toEqual([{ code: 'SAVE20', amount: 20 }])
     })
 })
+
+describe('store credit, a gift card or a balance is never spent by the finder or the pick', () => {
+    // Applying store credit, a gift card or an account balance drops the
+    // total exactly like a code would, and the money check would read it as a
+    // saving that is not one: the shopper's own money, spent unasked. No code
+    // is involved, so neither the rules nor the server's pick click such a
+    // control, as a reveal or as an apply button, and neither types into or
+    // presses Enter in a field that takes one.
+    beforeEach(() => {
+        flags = { discovery: true, llm: true }
+    })
+    const watch = id =>
+        document
+            .getElementById(id)
+            .addEventListener('click', () => t.page.push('SPENT:' + id))
+    const spent = () => t.page.filter(e => e.startsWith('SPENT:'))
+    const FOLD = (label, lead = '') =>
+        '<div class="fold">' +
+        lead +
+        '<button id="spend" type="button" aria-expanded="false">' +
+        label +
+        '</button><div id="panel" style="display:none">' +
+        '<input id="x" name="field_7" type="text">' +
+        '<button id="go" type="button">Go</button></div></div>'
+    // The outline drops words it does not know ("credit", "balance"), so the
+    // reveal is found as the page's first button.
+    const pickFold = req =>
+        pick(
+            idx(req.outline, /textbox/),
+            idx(req.outline, /button "Go/),
+            idx(req.outline, /button /),
+        )
+    const opens = () =>
+        document.getElementById('spend').addEventListener('click', () => {
+            document.getElementById('panel').style.display = ''
+        })
+    const nothingSpent = () => {
+        expect(asked('couponBoxPick')).toHaveLength(1)
+        expect(spent()).toEqual([])
+        expect(document.getElementById('x').value).toBe('')
+        expect(t.savings).toEqual([])
+        handedOver()
+    }
+
+    const CONTROLS = [
+        'Use store credit',
+        'Apply credit',
+        'Apply gift card',
+        'Have a gift card?',
+        'Use balance',
+    ]
+    for (const label of CONTROLS)
+        it(`"${label}" as the reveal: neither the rules nor the server open it`, async () => {
+            freshPage(FOLD(label) + TOTAL)
+            watch('spend')
+            opens()
+            wireStore('x', 'go', 'drop')
+            answer = pickFold
+            await run()
+            nothingSpent()
+        })
+    for (const label of CONTROLS)
+        it(`"${label}" beside a bare field, named as the apply button: never clicked, nothing typed`, async () => {
+            freshPage(
+                '<div class="f"><input id="x" name="field_7" type="text">' +
+                    `<button id="spend" type="button">${label}</button></div>` +
+                    TOTAL,
+            )
+            watch('spend')
+            wireStore('x', 'spend', 'drop')
+            answer = req =>
+                pick(idx(req.outline, /textbox/), idx(req.outline, /button /))
+            await run()
+            nothingSpent()
+        })
+
+    it('a plain "Apply" beside a gift card number field: never clicked, nothing typed', async () => {
+        freshPage(
+            '<div class="gc"><label for="x">Gift card number</label>' +
+                '<input id="x" name="gc_number" type="text">' +
+                '<button id="spend" type="button">Apply</button></div>' +
+                TOTAL,
+        )
+        watch('spend')
+        wireStore('x', 'spend', 'drop')
+        answer = req =>
+            pick(idx(req.outline, /textbox/), idx(req.outline, /button /))
+        await run()
+        nothingSpent()
+    })
+
+    it('"Apply discount" in a section headed "Store credit": never clicked, nothing typed', async () => {
+        freshPage(
+            '<section><h3>Store credit</h3><p>$25.00 available</p>' +
+                '<div class="f"><input id="x" name="field_7" type="text">' +
+                '<button id="spend" type="button">Apply discount</button></div></section>' +
+                TOTAL,
+        )
+        watch('spend')
+        wireStore('x', 'spend', 'drop')
+        answer = req =>
+            pick(idx(req.outline, /textbox/), idx(req.outline, /button /))
+        await run()
+        nothingSpent()
+    })
+
+    it('an "Apply discount" reveal beside a store credit balance: never opened', async () => {
+        freshPage(FOLD('Apply discount', '<p>Store credit: $25.00</p>') + TOTAL)
+        watch('spend')
+        opens()
+        wireStore('x', 'go', 'drop')
+        answer = pickFold
+        await run()
+        nothingSpent()
+    })
+
+    it('a store credit field that applies on Enter: nothing typed, Enter never pressed', async () => {
+        freshPage(
+            '<div class="sc"><label for="x">Store credit to use</label>' +
+                '<input id="x" name="store_credit_amount" type="text"></div>' +
+                TOTAL,
+        )
+        const keys = []
+        document
+            .getElementById('x')
+            .addEventListener('keydown', e => keys.push(e.key))
+        answer = req => pick(idx(req.outline, /textbox/), null)
+        await run()
+        expect(asked('couponBoxPick')).toHaveLength(1)
+        expect(keys).toEqual([])
+        expect(document.getElementById('x').value).toBe('')
+        expect(t.savings).toEqual([])
+        handedOver()
+    })
+
+    // What must still work: a coupon box beside a gift card or a balance.
+    it('a promo box with a "Check gift card balance" link beside its Apply: the code goes in', async () => {
+        freshPage(
+            '<div class="promo"><label for="dc">Promo code</label>' +
+                '<input id="dc" name="promo_code" type="text">' +
+                '<button id="ap" type="button">Apply</button>' +
+                '<a href="#gc">Check gift card balance</a></div>' +
+                TOTAL,
+        )
+        wireStore('dc', 'ap', 'drop')
+        await run()
+        expect(t.page[0]).toBe('submit:ap:SAVE20')
+        expect(t.savings).toEqual([{ code: 'SAVE20', amount: 20 }])
+    })
+
+    it('a box labelled "Gift card or promo code": the code goes in', async () => {
+        freshPage(
+            '<div class="promo"><label for="dc">Gift card or promo code</label>' +
+                '<input id="dc" name="gift_or_promo" type="text">' +
+                '<button id="ap" type="button">Apply</button></div>' +
+                TOTAL,
+        )
+        wireStore('dc', 'ap', 'drop')
+        await run()
+        expect(t.page[0]).toBe('submit:ap:SAVE20')
+        expect(t.savings).toEqual([{ code: 'SAVE20', amount: 20 }])
+    })
+
+    it('a box the server names in a section headed "Credit card": a payment method, not credit, so the code goes in', async () => {
+        freshPage(
+            '<section><h3>Credit card</h3>' +
+                '<div class="f"><input id="x" name="field_7" type="text">' +
+                '<button id="go" type="button">Apply</button></div></section>' +
+                TOTAL,
+        )
+        wireStore('x', 'go', 'drop')
+        answer = req =>
+            pick(idx(req.outline, /textbox/), idx(req.outline, /button "Apply/))
+        await run()
+        expect(t.page[0]).toBe('submit:go:SAVE20')
+        expect(t.savings).toEqual([{ code: 'SAVE20', amount: 20 }])
+    })
+})
+
+describe('"Redeem" and the words that name a code read as the server reads them', () => {
+    beforeEach(() => {
+        flags = { discovery: true, llm: true }
+    })
+    const watch = id =>
+        document
+            .getElementById(id)
+            .addEventListener('click', () => t.page.push('SPENT:' + id))
+    const spent = () => t.page.filter(e => e.startsWith('SPENT:'))
+    const pickBox = req =>
+        pick(idx(req.outline, /textbox/), idx(req.outline, /button /))
+
+    it('"Redeem" beside a field labelled "Gutschein": the code goes in', async () => {
+        freshPage(
+            '<div class="f"><label for="x">Gutschein</label>' +
+                '<input id="x" name="field_7" type="text">' +
+                '<button id="rd" type="button">Redeem</button></div>' +
+                TOTAL,
+        )
+        wireStore('x', 'rd', 'drop')
+        answer = pickBox
+        await run()
+        expect(t.page).toContain('submit:rd:SAVE20')
+        expect(t.savings).toEqual([{ code: 'SAVE20', amount: 20 }])
+    })
+
+    it('"Redeem" beside a field labelled "Gift card code": never clicked, nothing typed', async () => {
+        freshPage(
+            '<div class="f"><label for="x">Gift card code</label>' +
+                '<input id="x" name="field_7" type="text">' +
+                '<button id="spend" type="button">Redeem</button></div>' +
+                TOTAL,
+        )
+        watch('spend')
+        wireStore('x', 'spend', 'drop')
+        answer = pickBox
+        await run()
+        expect(spent()).toEqual([])
+        expect(document.getElementById('x').value).toBe('')
+        expect(t.savings).toEqual([])
+        handedOver()
+    })
+
+    it('"Redeem 500 points for a $5 code" as the reveal: never opened', async () => {
+        freshPage(
+            '<div class="fold"><button id="spend" type="button" aria-expanded="false">' +
+                'Redeem 500 points for a $5 code</button>' +
+                '<div id="panel" style="display:none"><input id="x" name="field_7" type="text">' +
+                '<button id="go" type="button">Go</button></div></div>' +
+                TOTAL,
+        )
+        watch('spend')
+        document.getElementById('spend').addEventListener('click', () => {
+            document.getElementById('panel').style.display = ''
+        })
+        wireStore('x', 'go', 'drop')
+        answer = req =>
+            pick(
+                idx(req.outline, /textbox/),
+                idx(req.outline, /button "Go/),
+                idx(req.outline, /button /),
+            )
+        await run()
+        expect(spent()).toEqual([])
+        expect(document.getElementById('x').value).toBe('')
+        expect(t.savings).toEqual([])
+        handedOver()
+    })
+
+    it('a plain "Apply" in a section headed "Redeem a promo code": the code goes in', async () => {
+        freshPage(
+            '<section><h3>Redeem a promo code</h3>' +
+                '<div class="f"><input id="x" name="field_7" type="text">' +
+                '<button id="go" type="button">Apply</button></div></section>' +
+                TOTAL,
+        )
+        wireStore('x', 'go', 'drop')
+        answer = pickBox
+        await run()
+        expect(t.page).toContain('submit:go:SAVE20')
+        expect(t.savings).toEqual([{ code: 'SAVE20', amount: 20 }])
+    })
+
+    // A fold that names its code in another language is a code box's fold,
+    // even where a fold that says only "discount" is not.
+    for (const label of ['Bon de réduction', 'Rabattkod'])
+        it(`a "${label}" fold in a section headed "Gift cards": it is opened and the code goes in`, async () => {
+            freshPage(
+                '<section><h3>Gift cards</h3><div class="fold">' +
+                    `<button id="tg" type="button" aria-expanded="false">${label}</button>` +
+                    '<div id="panel" style="display:none"><label for="x">Code promo</label>' +
+                    '<input id="x" name="field_7" type="text">' +
+                    '<button id="go" type="button">Go</button></div></div></section>' +
+                    TOTAL,
+            )
+            document.getElementById('tg').addEventListener('click', () => {
+                t.page.push('OPENED')
+                document.getElementById('panel').style.display = ''
+            })
+            wireStore('x', 'go', 'drop')
+            answer = req =>
+                pick(
+                    idx(req.outline, /textbox/),
+                    idx(req.outline, /button "Go/),
+                    idx(req.outline, /button /),
+                )
+            await run()
+            expect(t.page).toContain('OPENED')
+            expect(t.page).toContain('submit:go:SAVE20')
+            expect(t.savings).toEqual([{ code: 'SAVE20', amount: 20 }])
+        })
+})

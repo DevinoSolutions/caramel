@@ -1555,3 +1555,68 @@ describe('a subtotal is netted only of a line the code added', () => {
         ).toBe(94.99)
     })
 })
+
+describe('the finder reads a page in bounded time, whatever text it holds', () => {
+    // Every rule is a regular expression over words the store wrote. One with
+    // an open-ended run is tried again from every character of a long word,
+    // and a page that carries 40 KiB of one (a serialized blob, a long
+    // number, a run of brackets) held the content script for seconds on each
+    // read. Each case is one such page; each was over a second before.
+    const LONG = 40 * 1024
+    const timed = fn => {
+        const t0 = performance.now()
+        const out = fn()
+        return { out, ms: performance.now() - t0 }
+    }
+    // Generous against a slow machine; the unbounded rules took seconds.
+    const BUDGET_MS = 400
+
+    it('a long word beside the Apply button: the box and its Apply, at once', () => {
+        document.body.innerHTML =
+            '<div class="promo"><label for="dc">Discount code</label>' +
+            '<input id="dc" name="discount_code" type="text">' +
+            '<button id="ap" type="button">Apply</button>' +
+            `<span>${'orandcodes'.repeat(LONG / 10)}</span></div>` +
+            TOTAL
+
+        const { out, ms } = timed(() => caramelDiscoverCouponBox())
+
+        expect(out.button?.id).toBe('ap')
+        expect(ms).toBeLessThan(BUDGET_MS)
+    })
+
+    it('a long number beside a "Total" word: the real total, at once', () => {
+        document.body.innerHTML = `<p>Total ${'1'.repeat(LONG)}x</p>` + TOTAL
+
+        const { out, ms } = timed(() => caramelFindOrderTotal())
+
+        expect(out?.textContent).toContain('$100.00')
+        expect(ms).toBeLessThan(BUDGET_MS)
+    })
+
+    it('a run of unclosed brackets beside a "Total" word: the real total, at once', () => {
+        document.body.innerHTML = `<p>Total ${'('.repeat(LONG)}</p>` + TOTAL
+
+        const { out, ms } = timed(() => caramelFindOrderTotal())
+
+        expect(out?.textContent).toContain('$100.00')
+        expect(ms).toBeLessThan(BUDGET_MS)
+    })
+
+    it('a box whose only name is a long id: found and remembered, at once', async () => {
+        const id = 'a'.repeat(LONG)
+        document.body.innerHTML =
+            `<div class="promo"><label for="${id}">Discount code</label>` +
+            `<input id="${id}" type="text">` +
+            '<button id="ap" type="button">Apply</button></div>' +
+            TOTAL
+
+        const t0 = performance.now()
+        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+        const ms = performance.now() - t0
+
+        // Letters only: not an id a framework generates, so it names the box.
+        expect(rec.caramelInputSig).toBe('i:' + id)
+        expect(ms).toBeLessThan(BUDGET_MS)
+    })
+})
