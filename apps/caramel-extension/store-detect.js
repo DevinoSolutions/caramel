@@ -254,8 +254,9 @@ export function _hostMatchesDomain(host, domain) {
 /* Does this URL name a cart or checkout? Generic across platforms — a word in
  * the path, never a store-specific rule. Used only to decide whether a live
  * cart probe is worth making, so a miss costs nothing but a missed probe.
- * `bag` is deliberately absent: /collections/bag is a product category on a
- * great many stores, and the prompt has no business appearing there.
+ * `bag` is deliberately absent here: /collections/bag is a product category
+ * on a great many stores, and the prompt has no business appearing there. The
+ * bag is a cart only as a whole page of its own, CARAMEL_BAG_FILE_RE below.
  *
  * The word must END its path segment. It may begin mid-segment (/shopping-cart
  * is a cart), but a segment that CONTINUES past it is a slug that merely starts
@@ -290,16 +291,75 @@ const CARAMEL_CART_PATH_RE =
  * string (?redirect=/cart.php) is not where the shopper is. */
 const CARAMEL_CART_FILE_RE =
     /^(?:(?:my|view|show|shop|shopping)[-_]?)?(?:cart|carts|basket|checkout|checkouts)(?:\.(?:php|aspx?|html?|jsp|cfm|do))?$/i
+/* A parent may also be the shop's own name for itself: store or shop, with no
+ * prefix or a generic one (/webshop/, /eshop/, /onlinestore/), or after the
+ * start of the store's OWN name (/acestore/ on acefitness.org and on
+ * shop.acefitness.org, measured with a promo box and a total in view). That
+ * last form is the capture group, at least three letters, and the caller
+ * checks it against the start of one of the host's own labels: any other
+ * prefix is an ordinary word (/workshop/, /giftshop/, /bishop/), and two
+ * letters are too few to name a store (/restore/ on restorationhardware.com). */
 const CARAMEL_CART_FILE_PARENT_RE =
-    /^(?:[a-z]{2}(?:[-_][a-z]{2})?|store|shop|checkout|cart|basket|secure|order|orders)$/i
-function _caramelCartFilePath(pathname) {
+    /^(?:[a-z]{2}(?:[-_][a-z]{2})?|(?:e|web|online|([a-z]{3,}))?(?:store|shop)|checkout|cart|basket|secure|orders?|app)$/i
+
+/* A path segment that is an action on the cart, written as one word
+ * (/app/manageCart/showManageOrder, the hosted order form of a checkout
+ * platform many small stores use). Only verbs, and only the WHOLE segment, and
+ * only near the top of the path under the same parents as a cart file, with
+ * at most one segment after it (the page the action opens): /products/viewcart,
+ * /docs/api/viewcart and /viewcart/help/how-to/faq are pages ABOUT the action. */
+const CARAMEL_CART_ACTION_SEGMENT_RE = /^(?:manage|view)[-_]?(?:cart|basket)$/i
+
+/* The shopping bag as a page (/bag on ulta.com, /shopping-bag, /en-us/mybag).
+ * Stricter than a cart file: the whole last segment is the bag, singular, and
+ * only locales may come before it. /handbags, /bags/leather-tote,
+ * /products/tote-bag, /collections/bag and /shop/bag are product pages or
+ * categories on many stores. */
+const CARAMEL_BAG_FILE_RE =
+    /^(?:(?:my|view|shopping)[-_]?)?bag(?:\.(?:php|aspx?|html?|jsp|cfm|do))?$/i
+// A locale is read by its shape (en, en-us, en_GB), the same shape the cart
+// file's parents already accept, not by a list of real language and country
+// codes. Any two letters therefore pass (/xy/bag), and what that admits is
+// still only a page whose whole last segment is the bag; a list of every
+// language and country code would cost more bytes than that case is worth.
+const CARAMEL_LOCALE_SEGMENT_RE = /^[a-z]{2}(?:[-_][a-z]{2})?$/i
+
+// Exported for tests/cart-capability-gate.test.mjs (the store-name parent pins).
+export function _caramelCartFilePath(pathname, hostname = location.hostname) {
+    // A ;jsessionid=… (or any ;param) belongs to the server, not the page name.
     const segs = String(pathname || '')
+        .replace(/;[^/]*/g, '')
         .split('/')
         .filter(Boolean)
-    if (!segs.length || segs.length > 3) return false
+    if (
+        segs.length < 4 &&
+        CARAMEL_BAG_FILE_RE.test(segs.at(-1)) &&
+        segs.slice(0, -1).every(seg => CARAMEL_LOCALE_SEGMENT_RE.test(seg))
+    )
+        return true
+    // Where the cart word sits: an action in the first two segments, or a cart
+    // file as the last of at most three. Everything before it must be a parent.
+    let at = segs
+        .slice(0, 2)
+        .findIndex(seg => CARAMEL_CART_ACTION_SEGMENT_RE.test(seg))
+    if (segs.length - at > 2) at = -1
+    if (at < 0 && segs.length < 4 && CARAMEL_CART_FILE_RE.test(segs.at(-1)))
+        at = segs.length - 1
+    // The store's own labels, without www and the top-level domain.
+    const labels = String(hostname || '')
+        .toLowerCase()
+        .split('.')
+        .slice(0, -1)
+        .filter(l => l !== 'www')
     return (
-        CARAMEL_CART_FILE_RE.test(segs[segs.length - 1]) &&
-        segs.slice(0, -1).every(seg => CARAMEL_CART_FILE_PARENT_RE.test(seg))
+        at >= 0 &&
+        segs.slice(0, at).every(seg => {
+            const m = CARAMEL_CART_FILE_PARENT_RE.exec(seg)
+            return (
+                m &&
+                (!m[1] || labels.some(l => l.startsWith(m[1].toLowerCase())))
+            )
+        })
     )
 }
 
