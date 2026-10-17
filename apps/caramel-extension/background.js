@@ -37,8 +37,11 @@ import {
 /* What a content script leaves for the next document of its tab (the
  * pending submit, the discount-link win, the run across reloads), held here
  * where the store's page cannot write it (tab-handoff.js). The tab and the
- * origin are the message sender's, never the message's. Answers { saved },
- * { value } for get/take, { cleared }, or { error }. */
+ * origin are the message sender's, never the message's, and only the tab's
+ * top document, while it is the live one, may hand anything off (a frame is
+ * another site's document, a prerendered or cached one is not the page the
+ * shopper is on). Answers { saved }, { value } for get/take, { cleared }, or
+ * { error }. */
 let _tabHandoffs = null
 const tabHandoffs = () =>
     (_tabHandoffs ??= caramelTabHandoffs(
@@ -52,12 +55,25 @@ function senderOrigin(sender) {
         return null
     }
 }
-async function tabHandoff({ op, key, value }, sender) {
+async function tabHandoff({ op, key, value, expected }, sender) {
     const tabId = sender?.tab?.id
     const origin = senderOrigin(sender)
     if (!Number.isInteger(tabId) || !origin) return { error: 'no tab' }
+    if (sender.frameId !== 0) return { error: 'not the top document' }
+    // documentLifecycle is Chrome's; a browser without it is not asked.
+    if (
+        sender.documentLifecycle !== undefined &&
+        sender.documentLifecycle !== 'active'
+    )
+        return { error: 'not the live document' }
     const h = tabHandoffs()
-    if (op === 'set') return { saved: await h.set(tabId, origin, key, value) }
+    const refused = saved => {
+        if (saved === 'refused') logError('tabHandoffRefused', `${op} ${key}`)
+        return { saved }
+    }
+    if (op === 'set') return refused(await h.set(tabId, origin, key, value))
+    if (op === 'replace')
+        return refused(await h.replace(tabId, origin, key, value, expected))
     if (op === 'get') return { value: await h.get(tabId, origin, key) }
     if (op === 'take') return { value: await h.take(tabId, origin, key) }
     if (op === 'clear') {
@@ -691,6 +707,14 @@ export function initBackground() {
     currentBrowser.tabs.onRemoved?.addListener(tabId =>
         tabHandoffs()
             .forgetTab(tabId)
+            .catch(err => logError('tabHandoffForget', err)),
+    )
+    // A tab swapped for a prerendered one gets a new id. Its records are not
+    // moved to it: a run, a pending code or a win is let go rather than
+    // carried into a document that did not ask for it.
+    currentBrowser.tabs.onReplaced?.addListener((_added, removedTabId) =>
+        tabHandoffs()
+            .forgetTab(removedTabId)
             .catch(err => logError('tabHandoffForget', err)),
     )
 

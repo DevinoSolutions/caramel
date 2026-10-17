@@ -150,7 +150,12 @@ module.exports = [
         // (tab-handoff.js and its message route), which hold the pending
         // submit, the discount-link win and the run where the store's page
         // cannot write them. Measured 13.24 kB.
-        limit: '13.6 KB',
+        // 2026-10-17 (review of PR #369), raised 13.6 -> 13.9 kB: the handoff
+        // route answers only the tab's top, live document, forgets a tab the
+        // browser replaces, writes down a refused record, and gains the
+        // compare-and-set replace that makes a cancel one step. Measured
+        // 13.60 kB.
+        limit: '13.9 KB',
         brotli: false,
     },
     {

@@ -18,7 +18,8 @@
  *
  * Backed by storage.session when the browser has it (a restarted service
  * worker keeps the record), memory otherwise. Every operation runs in order,
- * so a clear sent before the next set is applied before it.
+ * so a clear sent before the next set is applied before it, and a replace
+ * reads and writes as one step: nothing lands between the two.
  *
  * Called from background.js. */
 
@@ -28,7 +29,9 @@ export const TAB_HANDOFFS = {
     applied: 2 * 60 * 1000,
     run: 3 * 60 * 1000,
 }
+// Measured in UTF-8 bytes, not characters.
 const MAX_BYTES = 4096
+const bytes = s => new TextEncoder().encode(s).length
 const PREFIX = 'caramel_tab:'
 
 export function caramelTabHandoffs(area = null) {
@@ -59,6 +62,18 @@ export function caramelTabHandoffs(area = null) {
         origin.length > 0 &&
         Object.hasOwn(TAB_HANDOFFS, key)
 
+    const put = async (tabId, origin, key, value) => {
+        if (!known(tabId, origin, key)) return 'refused'
+        const json = JSON.stringify(value ?? null)
+        if (bytes(json) > MAX_BYTES) return 'refused'
+        await write(slotOf(tabId, key), {
+            origin,
+            value: JSON.parse(json),
+            t: Date.now(),
+        })
+        return 'saved'
+    }
+
     let chain = Promise.resolve()
     const inOrder = fn => {
         const run = chain.then(fn)
@@ -80,16 +95,22 @@ export function caramelTabHandoffs(area = null) {
     return {
         // 'saved', or 'refused' for an unknown kind or a record over 4 kB.
         set: (tabId, origin, key, value) =>
+            inOrder(() => put(tabId, origin, key, value)),
+        // Writes only over a fresh record of this origin, and, when `expected`
+        // is given, only while that record still holds exactly it: 'saved',
+        // 'absent' (no record to replace), 'changed' (someone else wrote it
+        // first) or 'refused'. Read and write are one step.
+        replace: (tabId, origin, key, value, expected) =>
             inOrder(async () => {
                 if (!known(tabId, origin, key)) return 'refused'
-                const json = JSON.stringify(value ?? null)
-                if (json.length > MAX_BYTES) return 'refused'
-                await write(slotOf(tabId, key), {
-                    origin,
-                    value: JSON.parse(json),
-                    t: Date.now(),
-                })
-                return 'saved'
+                const was = await fresh(tabId, origin, key, false)
+                if (was === null) return 'absent'
+                if (
+                    expected !== undefined &&
+                    JSON.stringify(was) !== JSON.stringify(expected)
+                )
+                    return 'changed'
+                return put(tabId, origin, key, value)
             }),
         get: (tabId, origin, key) =>
             inOrder(() => fresh(tabId, origin, key, false)),
