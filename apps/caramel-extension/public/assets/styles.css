@@ -1017,6 +1017,7 @@ body {
    deliberately quiet: a tinted strip, not an error. */
 .all-sites-banner {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 10px;
     margin-bottom: 12px;
@@ -1034,6 +1035,14 @@ body {
     font-size: 12px;
     line-height: 1.4;
     color: var(--cm-text-secondary);
+}
+/* Safari's menu route, shown in place of the Enable button once it has been
+   clicked: its own full-width line under the sentence. Beats the
+   `.all-sites-banner p` rule above, which would squeeze it into the row. */
+.all-sites-banner .permission-manual-note {
+    flex-basis: 100%;
+    margin: 0;
+    color: var(--cm-text-muted-2);
 }
 .all-sites-banner-btn {
     flex: none;

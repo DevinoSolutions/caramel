@@ -6,7 +6,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { initCaramelBase } from '../caramel-base.js'
 import { initCouponConstants } from '../coupon-constants.generated.js'
 import { App } from '../entrypoints/popup/App'
-import { allSitesOriginPattern } from '../permission-state.js'
+import { allSitesRequestPattern } from '../permission-state.js'
 
 /**
  * The missing-host-permission gate (2026-08-18/19).
@@ -254,7 +254,7 @@ describe('the half-working install: coupons load, but the content script is dead
 describe('Safari asks for a different pattern and can refuse the prompt outright', () => {
     it('asks for <all_urls>, the only pattern Safari counts as every website, and spells out the manual route', async () => {
         chromeStub.runtime.getURL = () => 'safari-web-extension://caramel/'
-        expect(allSitesOriginPattern()).toBe('<all_urls>')
+        expect(allSitesRequestPattern()).toBe('<all_urls>')
 
         armTransport({ error: 'HTTP 500' })
         const { requestCalls } = armPermissions(false)
@@ -266,12 +266,76 @@ describe('Safari asks for a different pattern and can refuse the prompt outright
         // Safari's request() can hand back a narrower grant than it was asked
         // for, or nothing at all, so the view carries the menus that always
         // work alongside the button.
-        expect(
-            screen.getByText(/Always Allow on Every Website/),
-        ).toBeInTheDocument()
+        expect(screen.getByText(/For other websites/)).toBeInTheDocument()
 
         fireEvent.click(screen.getByRole('button', { name: 'Enable Caramel' }))
         expect(requestCalls).toEqual([{ origins: ['<all_urls>'] }])
+    })
+
+    it('asks contains() about https://*/* on Safari, because Safari answers false for the <all_urls> it granted', async () => {
+        chromeStub.runtime.getURL = () => 'safari-web-extension://caramel/'
+        armTransport({ coupons: [{ code: 'SAVE10', status: 'valid' }] })
+        // Measured on macOS Safari 26 (2026-10-17) with "Always Allow on Every
+        // Website" on: getAll() listed <all_urls>, contains(<all_urls>) said
+        // false, contains(https://*/*) said true. The stub answers the same way.
+        const containsCalls: unknown[] = []
+        chromeStub.permissions.contains = (perms: any, cb: any) => {
+            containsCalls.push(perms)
+            cb(perms?.origins?.[0] === 'https://*/*')
+        }
+
+        render(<App />)
+
+        await waitFor(() =>
+            expect(screen.getByText(/Coupons for/)).toBeInTheDocument(),
+        )
+        await waitFor(() =>
+            expect(containsCalls).toContainEqual({ origins: ['https://*/*'] }),
+        )
+        expect(banner()).not.toBeInTheDocument()
+    })
+
+    it("swaps the banner button for Safari's own menu route once Enable is clicked, after still asking", async () => {
+        chromeStub.runtime.getURL = () => 'safari-web-extension://caramel/'
+        armTransport({ coupons: [{ code: 'SAVE10', status: 'valid' }] })
+        // Safari's measured answer: request() resolves true, nothing changes.
+        const { requestCalls } = armPermissions(false, true)
+
+        render(<App />)
+        await waitFor(() => expect(banner()).toBeInTheDocument())
+        expect(screen.queryByText(/For other websites/)).not.toBeInTheDocument()
+
+        fireEvent.click(screen.getByRole('button', { name: 'Enable' }))
+
+        // Still inside the click's own call stack, as on every browser.
+        expect(requestCalls).toEqual([{ origins: ['<all_urls>'] }])
+        await waitFor(() =>
+            expect(screen.getByText(/For other websites/)).toBeInTheDocument(),
+        )
+        expect(
+            screen.getByText(/Safari needs you to turn it on/),
+        ).toBeInTheDocument()
+        // The button that did nothing is gone, and the banner stays: the grant
+        // really is still missing.
+        expect(
+            screen.queryByRole('button', { name: 'Enable' }),
+        ).not.toBeInTheDocument()
+        expect(banner()).toBeInTheDocument()
+    })
+
+    it('keeps the banner button on Chromium after a refused prompt — no Safari route there', async () => {
+        armTransport({ coupons: [{ code: 'SAVE10', status: 'valid' }] })
+        armPermissions(false, false)
+
+        render(<App />)
+        await waitFor(() => expect(banner()).toBeInTheDocument())
+
+        fireEvent.click(screen.getByRole('button', { name: 'Enable' }))
+
+        expect(
+            screen.getByRole('button', { name: 'Enable' }),
+        ).toBeInTheDocument()
+        expect(screen.queryByText(/For other websites/)).not.toBeInTheDocument()
     })
 
     it('does not show the manual Safari route on a Chromium runtime', async () => {
@@ -281,9 +345,7 @@ describe('Safari asks for a different pattern and can refuse the prompt outright
 
         render(<App />)
         await waitFor(() => expect(permissionHeading()).toBeInTheDocument())
-        expect(
-            screen.queryByText(/Always Allow on Every Website/),
-        ).not.toBeInTheDocument()
+        expect(screen.queryByText(/For other websites/)).not.toBeInTheDocument()
     })
 })
 
