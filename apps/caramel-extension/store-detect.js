@@ -828,63 +828,72 @@ async function _resumePendingSubmit() {
    fires once, so it costs ~nothing and never nags. */
 // Called from inject.js and from coupon-runner.js's URL-change re-detection.
 export async function startCheckoutDetection() {
+    // Our own apply loop is running on this document (its overlay is up): a
+    // re-detection now (the address bar moved, coupon-runner.js) must not take
+    // the attempt it is in the middle of as if a reload had ended it. What the
+    // loop left is the loop's to finish.
+    const applying = !!document.getElementById('caramel-testing-overlay')
+    if (applying) log('HANDOFF_RESUME_SKIPPED_WHILE_APPLYING', {})
     // A discount-link apply reloads the page so the store's own UI shows the
     // applied code; finish that flow on the fresh document by showing the
     // result modal instead of re-prompting.
-    try {
-        const st = await caramelTakeAppliedWin()
-        if (st) {
-            // Discount-link wins reload the page before the saving is
-            // recorded — record it here, on the fresh document, from the
-            // handoff the background held for this tab.
-            caramelRecordSaving({
-                domain: location.hostname,
-                code: st.code,
-                amount: st.saved || 0,
-                currency: st.currency || 'USD',
-                couponId: st.id || null,
-            })
-            let amount = st.saved || 0
-            let msg = null
-            if (st.currency && st.currency !== 'USD' && amount > 0) {
-                // No price has been read on this freshly-reloaded page, so
-                // tell the UI the currency the saving was recorded in.
-                // Only then does the headline amount render as "£8.00".
-                let symbolKnown = false
-                try {
-                    const sym = new Intl.NumberFormat(undefined, {
-                        style: 'currency',
-                        currency: st.currency,
-                    })
-                        .formatToParts(amount)
-                        .find(p => p.type === 'currency')?.value
-                    symbolKnown = caramelSetCurrencySymbol(sym)
-                    if (!symbolKnown) {
-                        // Symbol we can't render in the headline (e.g.
-                        // "CA$", "R$"). Fall back to the applied-code
-                        // presentation, which states the formatted amount
-                        // in words rather than mislabelling it as "$".
-                        msg = `Code ${st.code} saved you ${new Intl.NumberFormat(
-                            undefined,
-                            { style: 'currency', currency: st.currency },
-                        ).format(amount)} — it's applied to your order.`
-                        amount = 0
+    if (!applying)
+        try {
+            const st = await caramelTakeAppliedWin()
+            if (st) {
+                // Discount-link wins reload the page before the saving is
+                // recorded — record it here, on the fresh document, from the
+                // handoff the background held for this tab.
+                caramelRecordSaving({
+                    domain: location.hostname,
+                    code: st.code,
+                    amount: st.saved || 0,
+                    currency: st.currency || 'USD',
+                    couponId: st.id || null,
+                })
+                let amount = st.saved || 0
+                let msg = null
+                if (st.currency && st.currency !== 'USD' && amount > 0) {
+                    // No price has been read on this freshly-reloaded page, so
+                    // tell the UI the currency the saving was recorded in.
+                    // Only then does the headline amount render as "£8.00".
+                    let symbolKnown = false
+                    try {
+                        const sym = new Intl.NumberFormat(undefined, {
+                            style: 'currency',
+                            currency: st.currency,
+                        })
+                            .formatToParts(amount)
+                            .find(p => p.type === 'currency')?.value
+                        symbolKnown = caramelSetCurrencySymbol(sym)
+                        if (!symbolKnown) {
+                            // Symbol we can't render in the headline (e.g.
+                            // "CA$", "R$"). Fall back to the applied-code
+                            // presentation, which states the formatted amount
+                            // in words rather than mislabelling it as "$".
+                            msg = `Code ${st.code} saved you ${new Intl.NumberFormat(
+                                undefined,
+                                { style: 'currency', currency: st.currency },
+                            ).format(amount)} — it's applied to your order.`
+                            amount = 0
+                        }
+                    } catch {
+                        /* unknown currency code — fall back to $ */
                     }
-                } catch {
-                    /* unknown currency code — fall back to $ */
                 }
+                showFinalModal(amount, st.code, msg)
+                return
             }
-            showFinalModal(amount, st.code, msg)
-            return
+        } catch (err) {
+            // A malformed handoff costs only the result modal; detection goes on.
+            log('APPLIED_WIN_UNREADABLE', {
+                error: String(err?.message || err),
+            })
         }
-    } catch (err) {
-        // A malformed handoff costs only the result modal; detection goes on.
-        log('APPLIED_WIN_UNREADABLE', { error: String(err?.message || err) })
-    }
     // An attempt the store's own form POST cut short finishes here, on the page
     // that replaced it — before tryInitialize can re-prompt as if nothing had
     // happened, which is precisely what the user saw before.
-    if (await _resumePendingSubmit()) {
+    if (!applying && (await _resumePendingSubmit())) {
         // Still a checkout page the shopper may type their own code into, so
         // watch for it. Arming only attaches gesture listeners (idempotent,
         // trusted shopper input only, silent while our overlay is up): it never

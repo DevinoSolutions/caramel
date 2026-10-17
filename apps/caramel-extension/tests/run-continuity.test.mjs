@@ -6,6 +6,7 @@ import {
     caramelCancelRun,
     caramelClaimRunHop,
     caramelEndRun,
+    caramelHoldAppliedWin,
     caramelMarkPendingSubmit,
 } from '../dom-utils.js'
 import {
@@ -188,6 +189,7 @@ describe('the run record', () => {
     })
 
     it('expires a chain that has been running too long', async () => {
+        await caramelBeginRun()
         await handoffs.put('run', { hops: 0, t: Date.now() - 181000 })
 
         expect(await caramelClaimRunHop()).toBeNull()
@@ -230,6 +232,7 @@ describe('the run record', () => {
     })
 
     it('starts clean over an unreadable record rather than building on it', async () => {
+        await caramelBeginRun()
         await handoffs.put('run', 'not json')
 
         await caramelBeginRun()
@@ -246,6 +249,7 @@ describe('the run record', () => {
     })
 
     it('forgets a corrupted record instead of trusting it', async () => {
+        await caramelBeginRun()
         await handoffs.put('run', 'not json')
 
         expect(await caramelClaimRunHop()).toBeNull()
@@ -270,6 +274,33 @@ describe('picking the loop back up after the store navigated', () => {
 
         expect(applyCalls).toHaveLength(1)
         expect(applyCalls[0][1]).toEqual({ resumed: true })
+    })
+
+    it('leaves an attempt to the loop that is still running it', async () => {
+        // The address bar moved (a SPA cart) while our own loop is applying on
+        // this same document: re-detection runs, and the attempt the loop is in
+        // the middle of is not a reload's leftover.
+        await caramelBeginRun()
+        await caramelMarkPendingSubmit('SALE20', 'c1', [])
+        await caramelHoldAppliedWin({ code: 'SALE20', id: 'c1', saved: 5 })
+        const overlay = document.createElement('div')
+        overlay.id = 'caramel-testing-overlay'
+        document.body.appendChild(overlay)
+
+        await startCheckoutDetection()
+
+        expect(applyCalls).toEqual([])
+        expect(finalModalCalls).toEqual([])
+        expect(await handoffs.peek('pending_submit')).toMatchObject({
+            code: 'SALE20',
+        })
+        expect(await handoffs.peek('applied')).toMatchObject({ saved: 5 })
+        expect((await runRecord()).hops).toBe(0)
+
+        // Once the loop is done, the next page picks it up as before.
+        overlay.remove()
+        await startCheckoutDetection()
+        expect(finalModalCalls).toHaveLength(1)
     })
 
     it('says nothing terminal while it is still working', async () => {

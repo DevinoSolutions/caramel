@@ -60,7 +60,12 @@ module.exports = [
         // coupon-runner.js) — the cookie reader pinned to the website's
         // schema, the install-id/record storage and the bounded retry.
         // Measured 111.27 -> 114.55 kB (+3.3 kB): one new capability, not prose.
-        limit: '120 KB',
+        // 2026-10-17 (review of PR #369), raised 120 -> 122 kB: every control
+        // in the injected UI acts only on the shopper's own (trusted) input,
+        // a cancel leaves a stop mark the next page reads before it claims a
+        // hop, and a note of which handoffs may exist lets a page with nothing
+        // pending skip asking the background. Measured 118.2 -> 119.84 kB.
+        limit: '122 KB',
         brotli: false,
     },
     {

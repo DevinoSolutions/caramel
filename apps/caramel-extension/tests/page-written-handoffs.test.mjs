@@ -1,6 +1,10 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { initCaramelBase } from '../caramel-base.js'
-import { caramelBeginRun, caramelMarkPendingSubmit } from '../dom-utils.js'
+import {
+    caramelBeginRun,
+    caramelHoldAppliedWin,
+    caramelMarkPendingSubmit,
+} from '../dom-utils.js'
 import {
     _caramelResetCachedCodes,
     getDomainRecord,
@@ -178,12 +182,11 @@ describe('a discount-link win the page wrote', () => {
     })
 
     it('control: the extension’s own win is still recorded once', async () => {
-        await handoffs.put('applied', {
+        await caramelHoldAppliedWin({
             code: 'SALE20',
             id: 'c1',
             saved: 8,
             currency: 'USD',
-            t: Date.now(),
         })
 
         await startCheckoutDetection()

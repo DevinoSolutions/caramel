@@ -11,6 +11,7 @@ import {
     showTestingModal,
     updateTestingModal,
 } from '../UI-helpers.js'
+import { trustedClick, trustedKey } from './_trusted-events.mjs'
 
 // Phase 3 pins (Shadow DOM migration of the injected UI) — the two contracts
 // that must never drift:
@@ -106,12 +107,7 @@ describe('UI-helpers.js — Shadow DOM hosts (Phase 3)', () => {
 
     it('Escape closes the testing modal via the document listener and sets the cancel flag', async () => {
         await showTestingModal()
-        document.dispatchEvent(
-            new window.KeyboardEvent('keydown', {
-                key: 'Escape',
-                bubbles: true,
-            }),
-        )
+        trustedKey(document, 'Escape')
         expect(document.getElementById('caramel-testing-overlay')).toBeNull()
         expect(globalThis._caramelCancelled).toBe(true)
     })
@@ -130,7 +126,7 @@ describe('UI-helpers.js — Shadow DOM hosts (Phase 3)', () => {
             'SAVE10',
         )
 
-        root.querySelector('#caramel-final-ok-btn').click()
+        trustedClick(root.querySelector('#caramel-final-ok-btn'))
         expect(document.getElementById('caramel-final-overlay')).toBeNull()
     })
 
@@ -279,7 +275,7 @@ describe('UI-helpers.js — Shadow DOM hosts (Phase 3)', () => {
 
         // × dismisses; stopPropagation keeps the apply flow from starting
         // (no testing overlay may appear afterwards).
-        root.querySelector('#caramel-close-btn').click()
+        trustedClick(root.querySelector('#caramel-close-btn'))
         expect(document.getElementById('caramel-small-prompt')).toBeNull()
         await Promise.resolve()
         expect(document.getElementById('caramel-testing-overlay')).toBeNull()

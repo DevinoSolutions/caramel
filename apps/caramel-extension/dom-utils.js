@@ -592,6 +592,39 @@ export function caramelDisclosureFor(el) {
  * is recorded. A pending attempt can never surface on another site or in
  * another tab, and it dies with the tab.
  */
+/* Which handoffs this tab MAY have left with the background, so a page load
+ * with nothing pending does not wait on the background to say so. The page can
+ * write this too, and it only ever decides WHETHER to ask: a hint the page
+ * forged gets the background's own answer, which is nothing, and a hint the
+ * page removed can only lose what this tab left (no report, no saving, no next
+ * hop), never make one up. Storage we cannot read means ask. */
+const CARAMEL_HANDOFF_HINT = 'caramel_handoff_hint'
+function _caramelHinted() {
+    try {
+        const v = JSON.parse(sessionStorage.getItem(CARAMEL_HANDOFF_HINT))
+        return Array.isArray(v) ? v : []
+    } catch {
+        return null
+    }
+}
+// Exported for tests/handoff-hint.test.mjs.
+export function caramelHandoffMayExist(kind) {
+    const h = _caramelHinted()
+    return h === null || h.includes(kind)
+}
+function _caramelHint(kind, on) {
+    const h = _caramelHinted()
+    if (h === null) return
+    const next = on ? [...new Set([...h, kind])] : h.filter(k => k !== kind)
+    try {
+        if (next.length)
+            sessionStorage.setItem(CARAMEL_HANDOFF_HINT, JSON.stringify(next))
+        else sessionStorage.removeItem(CARAMEL_HANDOFF_HINT)
+    } catch (err) {
+        log('HANDOFF_HINT_UNWRITABLE', { error: String(err?.message || err) })
+    }
+}
+
 // Consumed by coupon-runner.js (cross-file content-script call).
 // finder: false, or the row kind ('total' | 'subtotal') the baseline was read
 // from when the attempt ran on a box the promo-box finder picked
@@ -604,6 +637,7 @@ export async function caramelMarkPendingSubmit(
     prices,
     finder = false,
 ) {
+    _caramelHint('pending_submit', true)
     await caramelTabHandoff('set', 'pending_submit', {
         code,
         id: id ?? null,
@@ -631,13 +665,16 @@ function _caramelFinderRow(v) {
 // Consumed by coupon-runner.js (cross-file content-script call).
 export async function caramelClearPendingSubmit() {
     await caramelTabHandoff('clear', 'pending_submit')
+    _caramelHint('pending_submit', false)
 }
 /* Reads AND consumes the record: a pending attempt is reported once, on the
  * document that follows it, or not at all. Returns null when there is nothing
  * to resume or the record is stale/unreadable. */
 // Consumed by store-detect.js (cross-file content-script call).
 export async function caramelTakePendingSubmit(maxAgeMs = 120000) {
+    if (!caramelHandoffMayExist('pending_submit')) return null
     const st = (await caramelTabHandoff('take', 'pending_submit'))?.value
+    _caramelHint('pending_submit', false)
     if (!st || typeof st.code !== 'string' || !st.code) return null
     // A record older than the window belongs to a visit the user has moved on
     // from; announcing it over an unrelated page would be noise, not news.
@@ -659,11 +696,14 @@ export async function caramelTakePendingSubmit(maxAgeMs = 120000) {
  * reason: it carries the saving that is recorded. */
 // Consumed by coupon-runner.js (cross-file content-script call).
 export async function caramelHoldAppliedWin(win) {
+    _caramelHint('applied', true)
     await caramelTabHandoff('set', 'applied', { ...win, t: Date.now() })
 }
 // Consumed by store-detect.js (cross-file content-script call).
 export async function caramelTakeAppliedWin(maxAgeMs = 120000) {
+    if (!caramelHandoffMayExist('applied')) return null
     const st = (await caramelTabHandoff('take', 'applied'))?.value
+    _caramelHint('applied', false)
     if (!st || typeof st.code !== 'string' || !st.code) return null
     if (!(Date.now() - (st.t || 0) < maxAgeMs)) return null
     const saved = Number(st.saved)
@@ -701,13 +741,32 @@ export async function caramelTakeAppliedWin(maxAgeMs = 120000) {
  *   · each hop consumes at least one code from the tried-set, which also
  *     survives the navigation, so a chain cannot revisit the same code
  *   · cancelling (× or Esc) writes the flag that ends it, because
- *     _caramelCancelled itself does not survive a page load
+ *     _caramelCancelled itself does not survive a page load: in ONE background
+ *     step, and first as a stop mark in this tab's sessionStorage, which the
+ *     next page reads before it claims anything. The page can write that mark
+ *     too, and all it can do is stop a run.
  *   · the caller additionally refuses to continue on a page with no coupon box
  *
  * Held by the background, like the pending-submit record above: a run the
  * store's page could start would submit codes without the shopper's click.
  */
 const CARAMEL_RUN_KEY = 'run'
+const CARAMEL_RUN_STOP = 'caramel_run_stop'
+function _caramelRunStopped() {
+    try {
+        return sessionStorage.getItem(CARAMEL_RUN_STOP) !== null
+    } catch {
+        return false
+    }
+}
+function _caramelMarkRunStop(on) {
+    try {
+        if (on) sessionStorage.setItem(CARAMEL_RUN_STOP, '1')
+        else sessionStorage.removeItem(CARAMEL_RUN_STOP)
+    } catch (err) {
+        log('RUN_STOP_UNWRITABLE', { error: String(err?.message || err) })
+    }
+}
 const CARAMEL_RUN_MAX_HOPS = 6
 const CARAMEL_RUN_MAX_AGE_MS = 180000
 // Consumed by coupon-runner.js (cross-file content-script call).
@@ -724,17 +783,28 @@ export async function caramelBeginRun() {
      * closing the tab. Pressing the pill IS the consent this whole mechanism
      * runs on, so it starts a fresh run. */
     if (run && typeof run === 'object' && !run.cancelled) return
+    // The shopper's own click: an earlier stop no longer applies.
+    _caramelMarkRunStop(false)
+    _caramelHint('run', true)
     await caramelTabHandoff('set', CARAMEL_RUN_KEY, { hops: 0, t: Date.now() })
 }
 // Consumed by store-detect.js + UI-helpers.js (cross-file content-script call).
 export async function caramelEndRun() {
     await caramelTabHandoff('clear', CARAMEL_RUN_KEY)
+    _caramelHint('run', false)
 }
 /* Claims the next hop of an in-flight run, or returns null if there isn't one
  * to claim. Writing the increment here (rather than at the call site) is what
  * makes the cap hold even if a caller returns early afterwards. */
 // Consumed by store-detect.js (cross-file content-script call).
 export async function caramelClaimRunHop() {
+    if (!caramelHandoffMayExist('run')) return null
+    // The shopper pressed × on the page before this one.
+    if (_caramelRunStopped()) {
+        _caramelMarkRunStop(false)
+        await caramelEndRun()
+        return null
+    }
     const run = (await caramelTabHandoff('get', CARAMEL_RUN_KEY))?.value
     if (!run) return null
     if (typeof run !== 'object' || run.cancelled) {
@@ -751,19 +821,25 @@ export async function caramelClaimRunHop() {
         await caramelEndRun()
         return null
     }
-    const saved = await caramelTabHandoff('set', CARAMEL_RUN_KEY, {
-        hops: hops + 1,
-        t: startedAt,
-    })
+    // Only over the record just read: a cancel that landed in between wins.
+    const saved = await caramelTabHandoff(
+        'replace',
+        CARAMEL_RUN_KEY,
+        { hops: hops + 1, t: startedAt },
+        run,
+    )
     if (saved?.saved !== 'saved') return null
     return { hops: hops + 1, remaining: CARAMEL_RUN_MAX_HOPS - (hops + 1) }
 }
 /* The × and Esc set _caramelCancelled, which dies with the document. A chain
- * spans documents, so "stop" has to be written down. */
+ * spans documents, so "stop" has to be written down, and before the store's
+ * form POST can take this document away: the stop mark is written at once,
+ * and the tombstone in ONE background step sent at once (a read, then a write
+ * after its reply, would lose the write to the navigation). */
 // Consumed by UI-helpers.js (cross-file content-script call).
 export async function caramelCancelRun() {
-    if (!(await caramelTabHandoff('get', CARAMEL_RUN_KEY))?.value) return
-    await caramelTabHandoff('set', CARAMEL_RUN_KEY, {
+    _caramelMarkRunStop(true)
+    await caramelTabHandoff('replace', CARAMEL_RUN_KEY, {
         hops: CARAMEL_RUN_MAX_HOPS,
         t: 0,
         cancelled: 1,
