@@ -398,6 +398,11 @@ for (const [source, name] of Object.entries(SOURCES))
                 'a "gift card or discount code" toggle',
                 '<button id="tg" type="button">Gift card or discount code</button>',
             ],
+            // A reveal that says only "discount" is a code box's fold.
+            [
+                'a plain discount toggle',
+                '<button id="tg" type="button">Apply discount</button>',
+            ],
         ])
             it(`${what}: clicked, and the box it opens is used`, async () => {
                 // The pick cannot name a field the outline does not show, so
@@ -429,11 +434,10 @@ for (const [source, name] of Object.entries(SOURCES))
                 'rewards',
                 '<button id="tg" type="button">Redeem rewards</button>',
             ],
-            // A reveal that offers a discount without naming a code applies
-            // an offer or lists them; the server reads toggles the same way.
+            // A discount reveal beside a points balance spends the points.
             [
-                'a discount with no code',
-                '<button id="tg" type="button">Apply discount</button>',
+                'a discount under a points balance',
+                '<div><span>You have 500 points</span><button id="tg" type="button">Apply discount</button></div>',
             ],
             [
                 'a discount in another language',
