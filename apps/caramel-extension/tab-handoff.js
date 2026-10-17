@@ -2,8 +2,9 @@
  *
  * What one document of a tab leaves for the next one: the code submitted
  * before a form POST reloaded the cart (pending_submit), the discount-link win
- * re-shown after its own reload (applied), and the run carried across
- * navigations (run).
+ * re-shown after its own reload (applied), the run carried across
+ * navigations (run), the promo-box finder's server pick (box_pick), and the
+ * box a run used, confirmed on the page its submit reloads to (box_learn).
  *
  * These used to live in the page's sessionStorage, which the store's own page
  * can read and write. The pending-submit record decides whether a code is
@@ -28,6 +29,11 @@ export const TAB_HANDOFFS = {
     pending_submit: 2 * 60 * 1000,
     applied: 2 * 60 * 1000,
     run: 3 * 60 * 1000,
+    // That the server was asked for a store's box in this tab, and the names
+    // of a usable pick for the next page: kept for a shopping session.
+    box_pick: 12 * 60 * 60 * 1000,
+    // The box a run used, until the page its submit reloads to confirms it.
+    box_learn: 2 * 60 * 1000,
 }
 // Measured in UTF-8 bytes, not characters.
 const MAX_BYTES = 4096
