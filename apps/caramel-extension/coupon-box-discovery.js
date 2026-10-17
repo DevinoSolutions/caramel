@@ -630,12 +630,17 @@ const CODE_WORD_RE = /\b(?:codes?|coupons?|vouchers?)\b/i
 // coupon box's own label never refuses its button.
 const withoutCodePhrases = t =>
     t.replace(/(?:[\w-]+\s+(?:or|and|&|\/)\s+)?[\w-]+\s+codes?\b/gi, ' ')
-// A reveal opens a box to type a code into, so it names one. One that offers
-// a discount without naming a code ("Apply discount" under a points balance,
-// "View offers", "Promotions") applies an offer or opens a list of them. The
-// server reads its toggles by the same rule.
+// A reveal opens a box to type a code into. One that offers deals without
+// naming a code ("View offers", "Promotions") applies an offer or opens a list
+// of them. One that says only "discount" ("Have a discount?", "Add discount")
+// is a code box's fold, unless it or the words around it speak of points,
+// rewards, a gift card or a group ("Member discount", "Discounts & rewards",
+// "Apply discount" under a points balance). The server reads its toggles by
+// the same rule.
+const SAYS_OFFER_RE = /offer|\bdeals?\b|saving|\bsave\b|promotions?\b/i
 const SAYS_DISCOUNT_RE =
-    /discount|offer|\bdeals?\b|saving|\bsave\b|promotions?\b|rabatt|descuento|desconto|sconto|remise|réduction|korting|zniżka/i
+    /discount|rabatt|descuento|desconto|sconto|remise|réduction|korting|zniżka/i
+const MEMBER_OR_GIFT_RE = /\bmembers?\b|\bgift[\s-]*cards?\b/i
 const NAMES_CODE_RE =
     /code|codice|código|\bkod|coupon|cup[oó]n|cupom|voucher|gutschein|\bpromo\b/i
 // ...nor is a reveal of the small print ("Promo details", "Offer terms").
@@ -684,10 +689,16 @@ function wordsBeside(el) {
     return words
 }
 
-// The section a control sits in, by its name and heading: "Rewards",
-// "Member prices", "Students save 10%".
+// The section a control sits in, by its own name: "Rewards", "Member prices",
+// "Students save 10%". That is the section's aria name, or the nearest heading
+// BEFORE the control that heads the section rather than a block in it. A cart
+// <form> wrapping the line items is no section unless it is named: its first
+// heading is a product ("Military Green Parka", "Student Backpack"). A line
+// item, a block that holds its title with a price, a picture or a quantity
+// field, is skipped whole.
 const SECTION =
-    'section, aside, form, fieldset, [role="region"], [role="group"], [role="dialog"]'
+    'section, aside, fieldset, form[aria-label], form[aria-labelledby], [role="region"], [role="group"], [role="dialog"]'
+const HEADING = 'h1, h2, h3, h4, h5, h6, legend, [role="heading"]'
 function sectionWords(el) {
     const box = el.closest(SECTION)
     if (!box) return ''
@@ -696,10 +707,21 @@ function sectionWords(el) {
         .map(id => id && el.ownerDocument.getElementById(id))
         .filter(Boolean)
         .map(wordsOf)
-    const head = box.querySelector(
-        'h1, h2, h3, h4, h5, h6, legend, [role="heading"]',
-    )
-    return [ariaOf(box), ...named, head ? wordsOf(head) : ''].join(' ')
+    let head = ''
+    for (let n = el; !head && n !== box; n = n.parentElement)
+        for (let s = n; !head && (s = s.previousElementSibling); ) {
+            const h = s.matches(HEADING) ? s : s.querySelector(HEADING)
+            if (
+                h &&
+                (norm(s.textContent) === norm(h.textContent) ||
+                    !(
+                        s.querySelector('img, input, select') ||
+                        MONEY_RE.test(s.textContent)
+                    ))
+            )
+                head = wordsOf(h)
+        }
+    return [ariaOf(box), ...named, head].join(' ')
 }
 
 // Called for every control the finder or the pick might click. A control
@@ -731,11 +753,18 @@ const pointsField = el => {
     return LOYALTY_RE.test(words) && !CODE_WORD_RE.test(words)
 }
 
-// A reveal that names no code: an offer, a discount or the small print.
+// A reveal that names no code: an offer, a points or member discount, or the
+// small print.
 const offersOnly = el => {
     const own = controlWords(el)
     if (ABOUT_TERMS_RE.test(own) && !CODE_WORD_RE.test(own)) return true
-    return SAYS_DISCOUNT_RE.test(own) && !NAMES_CODE_RE.test(own)
+    if (NAMES_CODE_RE.test(own)) return false
+    if (SAYS_OFFER_RE.test(own)) return true
+    if (!SAYS_DISCOUNT_RE.test(own)) return false
+    const near = withoutCodePhrases(
+        [own, wordsBeside(el), sectionWords(el)].join(' '),
+    )
+    return LOYALTY_RE.test(near) || MEMBER_OR_GIFT_RE.test(near)
 }
 
 // A switch or a radio is a setting, never a fold: a radio picks one option of

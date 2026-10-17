@@ -314,6 +314,86 @@ describe('what the finder must never pick', () => {
     })
 })
 
+describe('a product named like a loyalty program is not a rewards section', () => {
+    // A cart <form> or <section> wraps the line items and the promo box, so
+    // its first heading is a product title. A product called "Military Green
+    // Parka" must not make the promo box's Apply read as a military discount.
+    const PRODUCTS = [
+        'Military Green Parka',
+        'Student Backpack',
+        '6 Point Socket Set',
+        'Teacher Appreciation Mug',
+        'Rewards Card Wallet',
+    ]
+    const item = title =>
+        `<div class="cart-item"><h3>${title}</h3><p>Qty 1</p><span>$100.00</span></div>`
+    const linkedItem = title =>
+        `<li class="line"><a href="/products/p"><img alt=""></a>` +
+        `<h3 class="t"><a href="/products/p">${title}</a></h3>` +
+        `<span class="p">$100.00</span></li>`
+    for (const title of PRODUCTS)
+        for (const [shape, html] of [
+            [
+                'a cart form',
+                `<form action="/cart" method="post">${item(title)}${PROMO_BOX}</form>`,
+            ],
+            [
+                'a cart section',
+                `<section class="cart"><ul>${linkedItem(title)}</ul>${PROMO_BOX}</section>`,
+            ],
+            [
+                'a cart section with its own heading',
+                `<section class="cart"><h2>Your cart</h2>${item(title)}${PROMO_BOX}</section>`,
+            ],
+            [
+                'a cart section whose line item shows only a quantity',
+                `<section class="cart"><div class="row"><h3>${title}</h3>` +
+                    `<select name="qty"><option>1</option></select></div>${PROMO_BOX}</section>`,
+            ],
+        ])
+            it(`"${title}" in ${shape}: the box and its Apply are found`, () => {
+                document.body.innerHTML = html + TOTAL
+
+                expect(caramelDiscoverCouponBox().button?.id).toBe('ap')
+                expect(caramelFinderSeesBox()).toBe(true)
+            })
+
+    // The same box under a section that IS a rewards or points block, named
+    // by its own heading, legend or aria name, is still refused.
+    for (const [label, html] of [
+        [
+            'a section headed "Rewards"',
+            `<section><h3>Rewards</h3>${PROMO_BOX}</section>`,
+        ],
+        [
+            'a section headed "Use points" in a wrapper',
+            `<section><div class="hd"><h2>Use points</h2></div>${PROMO_BOX}</section>`,
+        ],
+        [
+            'a section headed "Rewards" over a balance line',
+            `<section><div class="hd"><h3>Rewards</h3><p>You have 500 points</p></div>${PROMO_BOX}</section>`,
+        ],
+        [
+            'a fieldset for members',
+            `<form><fieldset><legend>Member prices</legend>${PROMO_BOX}</fieldset></form>`,
+        ],
+        [
+            'a form named "Rewards"',
+            `<form aria-label="Rewards">${PROMO_BOX}</form>`,
+        ],
+        [
+            'a "Your rewards" section inside a cart form of products',
+            `<form>${item('Military Green Parka')}<section><h3>Your rewards</h3>${PROMO_BOX}</section></form>`,
+        ],
+    ])
+        it(`${label}: its plain Apply is never taken`, () => {
+            document.body.innerHTML = html + TOTAL
+
+            expect(caramelDiscoverCouponBox().button).toBeNull()
+            expect(caramelFinderSeesBox()).toBe(false)
+        })
+})
+
 describe('the total reader reads one row, or nothing', () => {
     it('a column heading named Total is not the total row', () => {
         document.body.innerHTML =

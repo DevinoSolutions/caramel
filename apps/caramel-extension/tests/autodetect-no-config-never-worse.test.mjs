@@ -257,7 +257,6 @@ function freshPage(html, path = '/cart') {
     }
     for (const k of Object.keys(finderCalls)) delete finderCalls[k]
     getDomainRecord.cache = null
-    getDomainRecord.answered = false
     _caramelResetCachedCodes()
     _caramelResetDiscoveryFlag()
     sessionStorage.clear()
@@ -760,13 +759,9 @@ describe('a loyalty or offers control is never clicked by the finder or the pick
         expect(reported('worked')).toHaveLength(1)
     })
 
-    // A reveal names a code. One that offers a discount, offers or the small
-    // print without naming a code is refused even with no points in sight.
+    // A reveal that offers deals or the small print without naming a code is
+    // refused even with no points in sight.
     for (const [label, html] of [
-        [
-            '"Apply discount" on its own',
-            '<div><button id="spend" type="button">Apply discount</button></div>',
-        ],
         [
             '"View offers"',
             '<div><button id="spend" type="button" aria-expanded="false">View offers</button></div>',
@@ -783,6 +778,82 @@ describe('a loyalty or offers control is never clicked by the finder or the pick
             await run()
             expect(asked('couponBoxPick')).toHaveLength(1)
             expect(spent()).toEqual([])
+            expect(t.savings).toEqual([])
+            handedOver()
+        })
+
+    // A reveal that says only "discount" is a code box's fold: clicked, and
+    // the code goes into the box it opens. Unless it, or the words beside it,
+    // or its section speak of points, rewards, a gift card or a group: then
+    // neither the rules nor the server's pick click it.
+    const FOLD = (label, lead = '') =>
+        '<div class="fold">' +
+        lead +
+        '<button id="spend" type="button" aria-expanded="false">' +
+        label +
+        '</button><div id="panel" style="display:none">' +
+        '<input id="x" name="field_7" type="text">' +
+        '<button id="go" type="button">Go</button></div></div>'
+    // The fold is the page's first button: the outline may drop words of its
+    // name ("member", "student"), so it is not found by its name.
+    const pickFold = req =>
+        pick(
+            idx(req.outline, /textbox/),
+            idx(req.outline, /button "Go/),
+            idx(req.outline, /button /),
+        )
+    const opens = () =>
+        document.getElementById('spend').addEventListener('click', () => {
+            document.getElementById('panel').style.display = ''
+        })
+    for (const label of [
+        'Discount',
+        'Add discount',
+        'Have a discount?',
+        'Apply a discount',
+        'Apply discount',
+    ])
+        it(`a "${label}" fold: it is opened and the code goes in`, async () => {
+            freshPage(FOLD(label) + TOTAL)
+            watch('spend')
+            opens()
+            wireStore('x', 'go', 'drop')
+            // The rules open it on their own; the server would name it too.
+            answer = pickFold
+            await run()
+            expect(spent()).toEqual(['SPENT:spend'])
+            expect(t.page).toContain('submit:go:SAVE20')
+            expect(t.savings).toEqual([{ code: 'SAVE20', amount: 20 }])
+        })
+    for (const [label, name, open = '', close = '', lead] of [
+        ['"Discounts & rewards"', 'Discounts & rewards'],
+        ['"Member discount"', 'Member discount'],
+        ['"Student discount"', 'Student discount'],
+        ['"Military discount"', 'Military discount'],
+        [
+            '"Have a discount?" beside a points balance',
+            'Have a discount?',
+            '',
+            '',
+            '<p>You have 500 points</p>',
+        ],
+        [
+            '"Add discount" in a section headed "Gift cards"',
+            'Add discount',
+            '<section><h3>Gift cards</h3>',
+            '</section>',
+        ],
+    ])
+        it(`the server names ${label} as the reveal: never clicked, nothing typed`, async () => {
+            freshPage(open + FOLD(name, lead) + close + TOTAL)
+            watch('spend')
+            opens()
+            wireStore('x', 'go', 'drop')
+            answer = pickFold
+            await run()
+            expect(asked('couponBoxPick')).toHaveLength(1)
+            expect(spent()).toEqual([])
+            expect(document.getElementById('x').value).toBe('')
             expect(t.savings).toEqual([])
             handedOver()
         })
