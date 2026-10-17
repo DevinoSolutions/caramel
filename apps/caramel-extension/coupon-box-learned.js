@@ -61,8 +61,11 @@ const usable = v =>
 /* The only selectors a learned box is built from or read with, the same rule
  * on both sides: compound parts of a tag, #id, .class,
  * [id|name|type|aria-label|placeholder|data-*="plain value"],
- * :first-of-type and :nth-of-type(n), joined by a space or ">". At most four
- * parts, three attribute tests and MAX_READ_SELECTOR characters. Anything
+ * :first-of-type and :nth-of-type(n) (n up to 99), joined by spaces or ">".
+ * An attribute value is 1-100 characters with no quote, backslash, bracket,
+ * brace, ";", "<" or control character. At most four parts, three attribute
+ * tests and MAX_READ_SELECTOR characters. This is a subset of the grammar the
+ * server accepts and serves, so nothing built here is refused there. Anything
  * else (:has(), any other pseudo-class, a wildcard, a sibling combinator, an
  * unquoted or escaped value) is refused before any query runs: a selector
  * served by the server, or read back from storage, is data, and an expensive
@@ -71,8 +74,8 @@ const usable = v =>
 export const MAX_READ_SELECTOR = 256
 const TAG_RE = /[a-z][a-z0-9-]*/iy
 const SIMPLE_RE =
-    /#[A-Za-z_][\w-]*|\.[A-Za-z_-][\w-]*|\[(?:id|name|type|aria-label|placeholder|data-[a-z0-9_-]+)="[^"\\]+"\]|:first-of-type|:nth-of-type\([1-9]\d{0,2}\)/y
-const JOIN_RE = /\s*>\s*|\s+/y
+    /#[A-Za-z_][\w-]*|\.-?[A-Za-z_][\w-]*|\[(?:id|name|type|aria-label|placeholder|data-[a-z0-9-]+)="[^"'\\[\]{};<\p{Cc}]{1,100}"\]|:first-of-type|:nth-of-type\([1-9]\d?\)/uy
+const JOIN_RE = / *> *| +/y
 
 // Exported for tests/coupon-box-learned.test.mjs.
 export function caramelSelectorAllowed(css) {

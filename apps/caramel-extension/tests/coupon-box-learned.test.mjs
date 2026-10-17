@@ -222,6 +222,17 @@ describe('the learned-box selector grammar', () => {
         ['a leading space', ' input'],
         ['a trailing combinator', 'div >'],
         ['too long', 'input[name="' + 'a'.repeat(250) + '"]'],
+        // Outside the grammar the server accepts: never built, so a report
+        // is never refused for its selector.
+        [
+            'a value over 100 characters',
+            'input[name="' + 'a'.repeat(101) + '"]',
+        ],
+        ['a single quote in a value', `input[name="it's"]`],
+        ['a bracket in a value', 'input[name="code[0]"]'],
+        ['an underscore in a data attribute name', 'input[data-test_id="x"]'],
+        ['a class that starts with a hyphen and a digit', 'input.-5x'],
+        ['an index over 99', 'li:nth-of-type(100) > button'],
         ['script', 'input[name="javascript:x"]'],
         ['empty', ''],
         ['not a string', 7],
