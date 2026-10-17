@@ -243,6 +243,37 @@ export function caramelSendMessage(message, timeoutMs) {
     })
 }
 
+// How long a per-tab handoff may wait for the background. A worker that does
+// not answer costs only the handoff, never the attempt.
+const CARAMEL_HANDOFF_WAIT_MS = 3000
+
+/* One operation on what this tab leaves for its next document (tab-handoff.js,
+ * held by the background where the store's page cannot write it): 'set',
+ * 'get', 'take' (read once) or 'clear' on one kind of record. Answers the
+ * background's reply ({ saved }, { value }, { cleared }), or null when it
+ * could not be reached or refused; both are logged. */
+// Called from dom-utils.js.
+export async function caramelTabHandoff(op, key, value) {
+    try {
+        const r = await caramelSendMessage(
+            { action: 'tabHandoff', op, key, value },
+            CARAMEL_HANDOFF_WAIT_MS,
+        )
+        if (r?.error) {
+            log('TAB_HANDOFF_FAILED', { op, key, error: r.error })
+            return null
+        }
+        return r ?? null
+    } catch (err) {
+        log('TAB_HANDOFF_FAILED', {
+            op,
+            key,
+            error: String(err?.message || err),
+        })
+        return null
+    }
+}
+
 // Origins trusted to inject a login token via window.postMessage — decided by
 // the build, and matching the deployment this build actually talks to.
 //
