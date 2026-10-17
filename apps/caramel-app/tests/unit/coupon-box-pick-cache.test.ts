@@ -80,6 +80,10 @@ function productPage(carousel: number): string {
 const page = (n: number) =>
     [`- [0] link "Cart"`, `- [1] textbox "Promo ${'x'.repeat(n)}"`].join('\n')
 
+/** A bare textbox at [7] between two given lines. */
+const withNeighbours = (before: string, after: string) =>
+    [`- ${before}`, '- [7] textbox', `- ${after}`].join('\n')
+
 beforeEach(() => {
     envMock.COUPON_BOX_LLM_ENABLED = true
     envMock.COUPON_BOX_PICK_MODEL = 'test/box-model'
@@ -110,6 +114,53 @@ describe('repeat visit to one store', () => {
         chatMock.mockImplementation(async () => answer({ input: 4, button: 5 }))
         const withBox = await pickCouponBox({ domain, outline: cartPage(1) })
         expect(withBox).toMatchObject({ outcome: 'box', cached: false })
+        expect(chatMock).toHaveBeenCalledTimes(2)
+    })
+
+    it('a no-box answer does not cover a page that gained a text field, whatever its words', async () => {
+        chatMock.mockImplementation(async () => answer({}))
+        const domain = freshDomain()
+        await pickCouponBox({
+            domain,
+            outline: ['- [0] link "Cart"', '- [1] button "Checkout"'].join(
+                '\n',
+            ),
+        })
+        chatMock.mockImplementation(async () => answer({ input: 1, button: 2 }))
+        // The store labelled its box with no coupon word at all.
+        const gained = await pickCouponBox({
+            domain,
+            outline: [
+                '- [0] link "Cart"',
+                '- [1] textbox',
+                '- [2] button "Go"',
+            ].join('\n'),
+        })
+        expect(gained).toMatchObject({
+            outcome: 'box',
+            input: 1,
+            cached: false,
+        })
+        expect(chatMock).toHaveBeenCalledTimes(2)
+    })
+
+    it('a no-box answer does not cover a page that gained an apply control', async () => {
+        chatMock.mockImplementation(async () => answer({}))
+        const domain = freshDomain()
+        await pickCouponBox({
+            domain,
+            outline: ['- [0] link "Cart"', '- [1] button "Checkout"'].join(
+                '\n',
+            ),
+        })
+        await pickCouponBox({
+            domain,
+            outline: [
+                '- [0] link "Cart"',
+                '- [1] button "Checkout"',
+                '- [2] button "Anwenden"',
+            ].join('\n'),
+        })
         expect(chatMock).toHaveBeenCalledTimes(2)
     })
 
@@ -183,6 +234,61 @@ describe('createCouponBoxAnswerCache', () => {
         expect(cache.get('a.example', page(6))).toBe('v6')
         expect(cache.get('a.example', page(3))).toBe('v3')
         expect(cache.get('a.example', page(1))).toBeNull()
+    })
+
+    it('a bare picked line is told apart by the lines around it', () => {
+        const cache = createCouponBoxAnswerCache<string>({
+            ttlMs: 60_000,
+            maxStores: 10,
+        })
+        cache.set(
+            'a.example',
+            withNeighbours('heading "Order"', '[8] button "Go"'),
+            [7],
+            'box',
+        )
+        expect(
+            cache.get(
+                'a.example',
+                withNeighbours('heading "Order"', '[8] button "Go"'),
+            ),
+        ).toBe('box')
+        // The same bare textbox at [7], but a different field next to it.
+        expect(
+            cache.get(
+                'a.example',
+                withNeighbours('heading "Newsletter"', '[8] button "Go"'),
+            ),
+        ).toBeNull()
+        expect(
+            cache.get(
+                'a.example',
+                withNeighbours('heading "Order"', '[8] button "Join"'),
+            ),
+        ).toBeNull()
+    })
+
+    it('each answer expires on its own clock, not on the newest answer of its store', () => {
+        vi.useFakeTimers()
+        try {
+            const cache = createCouponBoxAnswerCache<string>({
+                ttlMs: 1000,
+                maxStores: 10,
+            })
+            const a = '- [0] link "Cart"'
+            const b = ['- [0] link "Cart"', '- [1] textbox "Promo code"'].join(
+                '\n',
+            )
+            cache.set('a.example', a, [], 'A')
+            vi.advanceTimersByTime(900)
+            cache.set('a.example', b, [1], 'B')
+            vi.advanceTimersByTime(900)
+            // 1800ms: A is 1800 old (expired), B is 900 old (live).
+            expect(cache.get('a.example', a)).toBeNull()
+            expect(cache.get('a.example', b)).toBe('B')
+        } finally {
+            vi.useRealTimers()
+        }
     })
 
     it('expires with the ttl', () => {
