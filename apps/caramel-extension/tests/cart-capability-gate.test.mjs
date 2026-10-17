@@ -283,6 +283,10 @@ describe('isCheckout — cart intent the path does not spell out', () => {
             '/blog/2024/05/viewcart',
             '/a/b/c/d/viewcart',
             '/admin/settings/managecart',
+            // More than one segment after the action: a help tree under it.
+            '/viewcart/help/how-to/faq',
+            '/viewbasket/help/faq',
+            '/app/manageCart/help/faq',
             // An ordinary word ending in shop/store is not the shop's name.
             '/workshop/basket.html',
             '/giftshop/basket.html',
@@ -350,6 +354,41 @@ describe('isCheckout — cart intent the path does not spell out', () => {
         expect(
             _caramelCartFilePath('/acestore/shoppingcart.aspx', 'example.com'),
         ).toBe(false)
+    })
+
+    it('reads the store’s name in any of its host’s labels, from three letters', () => {
+        // The shop on its own subdomain: the name is the second label.
+        expect(
+            _caramelCartFilePath(
+                '/acestore/shoppingcart.aspx',
+                'shop.acefitness.org',
+            ),
+        ).toBe(true)
+        // Two letters are too few to name a store: "re" + "store" is the word
+        // restore, even on a host that starts with "re".
+        expect(
+            _caramelCartFilePath(
+                '/restore/cart.php',
+                'restorationhardware.com',
+            ),
+        ).toBe(false)
+        expect(
+            _caramelCartFilePath(
+                '/restore/cart.php',
+                'www.restorationhardware.com',
+            ),
+        ).toBe(false)
+        // The top-level domain is not the store's name.
+        expect(
+            _caramelCartFilePath('/orgstore/cart.php', 'acefitness.org'),
+        ).toBe(false)
+    })
+
+    it('reads no path at all as no cart', () => {
+        for (const p of [undefined, null, ''])
+            expect(_caramelCartFilePath(p, 'acefitness.org'), String(p)).toBe(
+                false,
+            )
     })
 
     // The shopping bag is a cart only as a whole page of its own (ulta.com's
