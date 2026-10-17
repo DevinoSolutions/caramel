@@ -314,6 +314,82 @@ describe('what the finder must never pick', () => {
     })
 })
 
+// A control that adds to the cart, buys, adds a gift extra, protection or a
+// donation, updates the cart, subscribes or signs the shopper in is never the
+// box's apply button or its reveal, whatever else it says. The server's pick
+// is held to the same words (coupon-box-pick.test.mjs).
+describe('the finder never takes a control that is not a code', () => {
+    for (const label of [
+        'Apply and update cart',
+        'Update cart',
+        'Update quantity',
+        'Round up and apply',
+        'Add gift wrap',
+        'Add a gift message',
+        'Add protection',
+        'Add warranty',
+        'Add shipping insurance',
+        'Add a $1 donation',
+        'Subscribe',
+        'Sign up and apply',
+        'Sign in',
+        'Log in',
+        'Buy now',
+        'Save for later',
+    ])
+        it(`"${label}" beside a promo field is never its apply button`, () => {
+            document.body.innerHTML =
+                '<div><input id="pc" name="discount_code" type="text">' +
+                `<button id="b" type="button">${label}</button></div>` +
+                TOTAL
+
+            expect(caramelDiscoverCouponBox().button).toBeNull()
+        })
+
+    const folded = reveal =>
+        `<button id="tg" type="button" aria-expanded="false">${reveal}</button>` +
+        '<div id="panel" style="display:none"><label for="dc">Discount code</label>' +
+        '<input id="dc" name="discount_code" type="text">' +
+        '<button id="ap" type="button">Apply</button></div>' +
+        TOTAL
+    const watchReveal = () => {
+        let clicks = 0
+        document.getElementById('tg').addEventListener('click', () => {
+            clicks++
+            document.getElementById('panel').style.display = ''
+        })
+        return () => clicks
+    }
+
+    for (const reveal of [
+        'Add a gift card',
+        'Add gift wrap',
+        'Add a gift message',
+        'Sign in for a discount code',
+        'Subscribe for a promo code',
+    ])
+        it(`"${reveal}" is never clicked as the reveal`, async () => {
+            document.body.innerHTML = folded(reveal)
+            const clicks = watchReveal()
+
+            expect(caramelFinderSeesBox()).toBe(false)
+            expect(
+                await caramelDiscoveredRecord({ domain: 'shop.test' }),
+            ).toBeNull()
+            expect(clicks()).toBe(0)
+        })
+
+    it('a reveal that names a code is still clicked, and its box used (the control case)', async () => {
+        document.body.innerHTML = folded('Have a promo code?')
+        const clicks = watchReveal()
+
+        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+
+        expect(clicks()).toBe(1)
+        expect(document.querySelector(rec.couponInput)?.id).toBe('dc')
+    })
+})
+
 describe('a product named like a loyalty program is not a rewards section', () => {
     // A cart <form> or <section> wraps the line items and the promo box, so
     // its first heading is a product title. A product called "Military Green

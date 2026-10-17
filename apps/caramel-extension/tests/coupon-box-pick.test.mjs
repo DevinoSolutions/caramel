@@ -717,6 +717,62 @@ describe('an input-only pick, driven by the real apply flow', () => {
         })
 })
 
+// The server's word does not make a control a code's: a button or a reveal
+// that adds to the cart, buys, adds a gift extra, updates the cart, subscribes
+// or signs the shopper in is never clicked, the same as for the rules.
+describe('a pick never clicks a control that is not a code', () => {
+    for (const label of [
+        'Update cart',
+        'Apply and update cart',
+        'Add gift wrap',
+        'Add a $1 donation',
+        'Subscribe',
+        'Sign up and apply',
+        'Log in',
+        'Buy now',
+    ])
+        it(`"${label}" named as the apply button is never clicked`, async () => {
+            document.body.innerHTML =
+                '<div><input id="x" name="field_7" type="text">' +
+                `<button id="b" type="button">${label}</button></div>` +
+                TOTAL
+            let clicks = 0
+            document
+                .getElementById('b')
+                .addEventListener('click', () => clicks++)
+            answer = req =>
+                box(idx(req.outline, /textbox/), idx(req.outline, /button /))
+
+            await run()
+
+            expect(pickCalls).toHaveLength(1)
+            expect(clicks).toBe(0)
+            expect(appliedWith).toHaveLength(0)
+            gaveCodesToCopy()
+        })
+
+    for (const reveal of ['Add gift wrap', 'Sign in', 'Subscribe'])
+        it(`"${reveal}" named as the reveal is never clicked`, async () => {
+            document.body.innerHTML =
+                `<button id="tg" type="button">${reveal}</button>` +
+                '<div id="panel" style="display:none"><input id="x" name="field_7" type="text">' +
+                '<button id="b" type="button">Go</button></div>' +
+                TOTAL
+            let clicks = 0
+            document.getElementById('tg').addEventListener('click', () => {
+                clicks++
+                document.getElementById('panel').style.display = ''
+            })
+            answer = req =>
+                box(null, null, idx(req.outline, new RegExp(reveal)))
+
+            expect(
+                await caramelDiscoveredRecord({ domain: 'shop.test' }),
+            ).toBeNull()
+            expect(clicks).toBe(0)
+        })
+})
+
 describe('an apply button never leaves the page', () => {
     it('a link to another page, named as the button, is never clicked', async () => {
         document.body.innerHTML =

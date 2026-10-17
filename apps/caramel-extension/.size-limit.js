@@ -64,9 +64,13 @@ module.exports = [
         // never clicks a points, rewards, offers or settings control, judged
         // by the control's words, its neighbours and its section's name) and
         // the store lookup's registrable-domain check for hyphen hosts.
-        // Measured 118.05 -> 120.89 kB. The finder is ~28.5 kB of this bundle
-        // on every page; loading it on demand like coupon-box-outline.js is
-        // the next step before this budget is raised again.
+        // Measured 118.05 -> 120.89 kB; 121.47 kB once the finder also never
+        // clicks a control that adds to the cart, buys, adds a gift extra,
+        // updates the cart, subscribes or signs in (noCodeClick, the same
+        // words the server-pick checks use). The finder is ~28.5 kB of this
+        // bundle on every page; loading it on demand like
+        // coupon-box-outline.js is the next step before this budget is raised
+        // again.
         limit: '122 KB',
         brotli: false,
     },

@@ -570,6 +570,7 @@ function findButton(input) {
         if (seen.has(btn) || btn === input) return
         seen.add(btn)
         if (spendsPoints(btn)) return
+        if (noCodeClick(btn)) return
         const r = scoreButton(btn, input, level)
         if (r && r.s > 20 && (!best || r.s > best.score))
             best = { el: btn, score: r.s, reasons: r.reasons }
@@ -765,6 +766,28 @@ const offersOnly = el => {
         [own, wordsBeside(el), sectionWords(el)].join(' '),
     )
     return LOYALTY_RE.test(near) || MEMBER_OR_GIFT_RE.test(near)
+}
+
+/* ------------------------------------------------- never a code's click */
+// Never clicked on any path (the rules, the server's pick, a box remembered
+// here or by other installs): a control that adds to the cart or buys, adds a
+// gift extra, protection, a warranty, insurance or a donation, saves or
+// updates the cart, subscribes, or signs the shopper in or up. Judged by its
+// own words (controlWords), so a cross-sell "Add to cart" beside the box is
+// refused whatever named it. "Gift card or discount code" names a code and is
+// still a promo-box reveal.
+const NO_CODE_CLICK_RE =
+    /\badd(?:ing)? (?:it )?to (?:my |your |the )?(?:cart|bag|basket|order)\b|\bbuy\b|\bprotection\b|\bwarrant(?:y|ies)\b|\binsurance\b|\bdonat(?:e|ion)s?\b|\bround(?:ing)? ?up\b|\b(?:save|update) (?:my |your |the )?(?:cart|bag|basket|qty|quantit(?:y|ies))\b|\bsave for later\b|\bsubscri(?:be|ption)s?\b|\bnewsletters?\b|\bsign(?:ing)? ?(?:in|up)\b|\blog ?in\b/i
+const GIFT_EXTRA_RE =
+    /\bgift ?(?:card|wrap\w*|message|note|receipt|box|bag)s?\b/i
+const PROMO_WORD_RE = /\b(?:promo\w*|coupons?|discounts?|vouchers?)\b/i
+
+function noCodeClick(el) {
+    const words = controlWords(el)
+    return (
+        NO_CODE_CLICK_RE.test(words) ||
+        (GIFT_EXTRA_RE.test(words) && !PROMO_WORD_RE.test(words))
+    )
 }
 
 // A switch or a radio is a setting, never a fold: a radio picks one option of
@@ -1029,6 +1052,7 @@ function findToggle(doc, input) {
         if (!t || t.length > 60) continue
         if (!visible(el)) continue
         if (notAReveal(el)) continue
+        if (noCodeClick(el)) continue
         const r = scoreToggle(el, t)
         if (!r) continue
         // Equal score: the INNERMOST element wins (an outer wrapper may not
@@ -1464,6 +1488,7 @@ function mark(el, kind) {
  * form, places the order behind an innocent label ("Have a promo code?"). */
 function toggleRefused(el) {
     if (caramelIsForbiddenControl(el) || notAReveal(el)) return true
+    if (noCodeClick(el)) return true
     return (
         !!el.form &&
         ((el.tagName === 'BUTTON' && el.type === 'submit') ||
@@ -1734,7 +1759,8 @@ function clickable(el) {
     return (
         !caramelIsForbiddenControl(el) &&
         !NEVER_CLICK.test(words) &&
-        !spendsPoints(el)
+        !spendsPoints(el) &&
+        !noCodeClick(el)
     )
 }
 
