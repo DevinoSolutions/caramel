@@ -355,6 +355,34 @@ describe('a control the store drew as plain text', () => {
             expect(outline.toLowerCase()).not.toContain(word)
     })
 
+    it('still prints one that carries an icon, which is not a control of its own', () => {
+        document.body.innerHTML =
+            '<main>' +
+            '<div id="svg" tabindex="0">Promo code <svg role="img" aria-hidden="true"></svg></div>' +
+            '<div id="pres" tabindex="0"><span role="presentation">+</span> Gift card</div>' +
+            '</main>'
+
+        const { outline, elements } = caramelPageOutline(document.body)
+
+        expect(outline).toBe(
+            [
+                '- main:',
+                '  - [0] button "Promo code"',
+                '  - [1] button "+ Gift card"',
+            ].join('\n'),
+        )
+        expect(elements.map(e => e.id)).toEqual(['svg', 'pres'])
+    })
+
+    it('leaves one holding an interactive role a wrapper', () => {
+        document.body.innerHTML =
+            '<main><div tabindex="0">Promo <span role="button">code</span></div></main>'
+
+        expect(caramelPageOutline(document.body).outline).toBe(
+            ['- main:', '  - [0] button "code"'].join('\n'),
+        )
+    })
+
     it('prints at most 30 of them on a page', () => {
         document.body.innerHTML = Array.from(
             { length: 40 },

@@ -307,11 +307,14 @@ export function caramelPageOutline(root = document.body) {
         )
             return false
         const t = textOf(el)
+        // An icon inside it (<svg role="img">, role="presentation") is not a
+        // control of its own; only an interactive role is.
         return (
             !!t &&
             t.length <= CLICKABLE_TEXT_MAX &&
-            !el.querySelector(
-                'input, textarea, select, button, a[href], [role]',
+            !el.querySelector('input, textarea, select, button, a[href]') &&
+            ![...el.querySelectorAll('[role]')].some(c =>
+                INTERACTIVE.test(roleOf(c)),
             )
         )
     }

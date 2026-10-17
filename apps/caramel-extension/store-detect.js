@@ -178,6 +178,14 @@ export async function getDomainRecord(domain) {
 }
 getDomainRecord.cache = null
 
+/* The finder and the server's pick run only where the store list says a host
+ * has no config. Without a list (the fetch failed, or the answer was empty or
+ * not a list, and nothing is cached) that cannot be known, and every
+ * configured store would read as one with none, so neither runs. */
+export function caramelStoreListKnown() {
+    return Array.isArray(getDomainRecord.cache)
+}
+
 // Match the active hostname to a supported-store domain. Accept an exact match,
 // a real dotted subdomain (www./checkout./secure.<domain>), or a hyphen-prefixed
 // checkout host (gapfactory-style `secure-<brand>.gapfactory.com`). Plain
@@ -845,7 +853,15 @@ const _caramelPromptUp = () =>
 
 async function _caramelSecondLook() {
     window.__caramel_second_look?.()
-    if (!_caramelCartIntentSignal() || !(await caramelCouponBoxDiscoveryOn()))
+    // No store list: this host may well have a config, so the finder is not
+    // asked to look again (a failed list fetch would otherwise watch every
+    // configured store's cart for 15 seconds).
+    if (
+        !caramelStoreListKnown() ||
+        !_caramelCartIntentSignal() ||
+        _caramelPromptUp() ||
+        !(await caramelCouponBoxDiscoveryOn())
+    )
         return
     window.__caramel_second_look?.()
     if (_caramelPromptUp()) return
@@ -865,10 +881,7 @@ async function _caramelSecondLook() {
         const offer =
             !_caramelPromptUp() && (await _finderMayOffer(location.hostname))
         if (done) return
-        if (!offer && !_caramelPromptUp()) {
-            timer = 0
-            return
-        }
+        if (!offer && !_caramelPromptUp()) return
         stop()
         if (!offer) return
         const rec = caramelConfiglessRecord(location.hostname)
@@ -878,7 +891,12 @@ async function _caramelSecondLook() {
     const mo = new MutationObserver(() => {
         if (!timer)
             timer = setTimeout(
-                () => look().catch(e => logError('second look failed', e)),
+                () =>
+                    look()
+                        .catch(e => logError('second look failed', e))
+                        .finally(() => {
+                            timer = 0
+                        }),
                 1000,
             )
     })

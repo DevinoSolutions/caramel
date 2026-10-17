@@ -27,6 +27,10 @@ import {
 // all, and a store with a served config keeps the observer it always had.
 
 let finderOn
+// The next read of the finder flag fails, as an extension message can.
+let flagReadFails
+// The server-pick rule (caramelFinderMayAsk): does it offer on this page.
+let mayAsk
 
 let finderLooks
 let probeCalls
@@ -37,6 +41,10 @@ let observers
 vi.mock('../coupon-box-discovery.js', async importOriginal => ({
     ...(await importOriginal()),
     caramelCouponBoxDiscoveryOn: async () => {
+        if (flagReadFails) {
+            flagReadFails = false
+            throw new Error('Extension context invalidated')
+        }
         return finderOn
     },
     // The finder's rules, reduced to the one fact these cases vary: has the
@@ -45,7 +53,7 @@ vi.mock('../coupon-box-discovery.js', async importOriginal => ({
         finderLooks++
         return !!document.getElementById('late-promo')
     },
-    caramelFinderMayAsk: async () => false,
+    caramelFinderMayAsk: async () => mayAsk(),
 }))
 vi.mock('../coupon-apply.js', async importOriginal => ({
     ...(await importOriginal()),
@@ -158,6 +166,8 @@ beforeEach(() => {
     document.body.innerHTML = ''
     setPath('/cart')
     finderOn = true
+    flagReadFails = false
+    mayAsk = () => false
 
     finderLooks = 0
     probeCalls = 0
@@ -292,7 +302,60 @@ describe('a config-less cart page whose coupon box is drawn after load', () => {
     })
 })
 
+describe('a config-less cart page whose total is drawn after load', () => {
+    // harryrosen.com: no box the rules can see, and no total either until the
+    // store's script draws it. Once it does, the server-pick rule offers.
+    it('gets the prompt once the server-pick rule offers on the late total', async () => {
+        mayAsk = () => !!document.getElementById('late-total')
+        await startCheckoutDetection()
+        expect(prompted).toHaveLength(0)
+
+        const total = document.createElement('div')
+        total.id = 'late-total'
+        document.body.appendChild(total)
+        await settle()
+        await vi.advanceTimersByTimeAsync(1000)
+
+        expect(prompted).toHaveLength(1)
+        expect(liveObservers()).toBe(0)
+    })
+})
+
+describe('a look that fails', () => {
+    it('does not end the window: the next change is looked at again', async () => {
+        await startCheckoutDetection()
+        flagReadFails = true
+        churn(1)
+        await settle()
+        await vi.advanceTimersByTimeAsync(1000)
+        expect(prompted).toHaveLength(0)
+
+        drawPromoBox()
+        await settle()
+        await vi.advanceTimersByTimeAsync(1000)
+
+        expect(prompted).toHaveLength(1)
+    })
+})
+
 describe('what does not change', () => {
+    it('observes nothing when the store list could not be loaded', async () => {
+        // The list fetch answered nothing and nothing is cached: this host may
+        // have a config, so the finder does not watch it.
+        getDomainRecord.cache = null
+        await startCheckoutDetection()
+        const atLoad = finderLooks
+
+        drawPromoBox()
+        churn(20)
+        await settle()
+        await vi.advanceTimersByTimeAsync(16000)
+
+        expect(observers).toHaveLength(0)
+        expect(finderLooks).toBe(atLoad)
+        expect(prompted).toHaveLength(0)
+    })
+
     it('observes nothing with the finder off', async () => {
         finderOn = false
         await startCheckoutDetection()
