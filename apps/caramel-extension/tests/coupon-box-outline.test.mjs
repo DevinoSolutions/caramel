@@ -267,3 +267,128 @@ describe('the word allowlist', () => {
         expect(caramelAllowedWords('Avery Sample')).toBe('')
     })
 })
+
+// harryrosen.com draws its promo-code toggle as a plain <div> with a click
+// handler and a pointer cursor: no role, no tag that means "button", so the
+// outline carried no line for it and the pick had nothing to name. A short
+// element the store itself made clickable now prints as a button.
+describe('a control the store drew as plain text', () => {
+    it('prints a short clickable element as a button the pick can name', () => {
+        document.body.innerHTML =
+            '<main><form>' +
+            '<div id="toggle" style="cursor:pointer">Promo code</div>' +
+            '<span onclick="x()">Have a promo code?</span>' +
+            '<div tabindex="0">Apply</div>' +
+            '<input type="text" placeholder="Promo code">' +
+            '</form></main>'
+
+        const { outline, elements } = caramelPageOutline(document.body)
+
+        expect(outline).toBe(
+            [
+                '- main:',
+                '  - form:',
+                '    - [0] button "Promo code"',
+                '    - [1] button "Have a promo code?"',
+                '    - [2] button "Apply"',
+                '    - [3] textbox "Promo code"',
+            ].join('\n'),
+        )
+        expect(elements[0].id).toBe('toggle')
+    })
+
+    it('leaves text that nothing made clickable as it was', () => {
+        document.body.innerHTML =
+            '<main><div>Promo code</div><span>Apply</span>' +
+            '<div tabindex="-1">Promo code</div></main>'
+
+        expect(caramelPageOutline(document.body).outline).toBe('- main:')
+    })
+
+    it('reads a pointer cursor only where the element set it itself', () => {
+        // The whole card is clickable; its short lines inherit the cursor
+        // and are not controls of their own.
+        document.body.innerHTML =
+            '<div style="cursor:pointer">' +
+            '<span style="cursor:pointer">Promo code</span>' +
+            '<span>Apply</span>' +
+            'and a long description of everything this card offers to you' +
+            '</div>'
+
+        expect(caramelPageOutline(document.body).outline).toBe('')
+    })
+
+    it('adds nothing inside a control the outline already names', () => {
+        document.body.innerHTML =
+            '<a href="/cart"><span onclick="x()">Cart</span> <button>Go</button></a>' +
+            '<div role="dialog"><button><span onclick="x()">Apply</span></button></div>'
+
+        expect(caramelPageOutline(document.body).outline).toBe(
+            [
+                '- [0] link "Cart Go"',
+                '  - [1] button "Go"',
+                '- dialog:',
+                '  - [2] button "Apply"',
+            ].join('\n'),
+        )
+    })
+
+    it('keeps a clickable wrapper a wrapper, with its controls on their own lines', () => {
+        document.body.innerHTML =
+            '<div onclick="x()">Code <input type="text" aria-label="Promo code"></div>'
+
+        expect(caramelPageOutline(document.body).outline).toBe(
+            '- [0] textbox "Promo code"',
+        )
+    })
+
+    it('skips long text, and text with no allowed word in it', () => {
+        document.body.innerHTML =
+            '<div onclick="x()">Use the code at checkout for a discount on items</div>' +
+            '<div onclick="x()">Jane Doe</div>' +
+            '<div onclick="x()">Edit 10 Downing St</div>'
+
+        const { outline } = caramelPageOutline(document.body)
+
+        expect(outline).toBe('- [0] button "Edit ##"')
+        for (const word of ['jane', 'doe', 'downing'])
+            expect(outline.toLowerCase()).not.toContain(word)
+    })
+
+    it('still prints one that carries an icon, which is not a control of its own', () => {
+        document.body.innerHTML =
+            '<main>' +
+            '<div id="svg" tabindex="0">Promo code <svg role="img" aria-hidden="true"></svg></div>' +
+            '<div id="pres" tabindex="0"><span role="presentation">+</span> Gift card</div>' +
+            '</main>'
+
+        const { outline, elements } = caramelPageOutline(document.body)
+
+        expect(outline).toBe(
+            [
+                '- main:',
+                '  - [0] button "Promo code"',
+                '  - [1] button "+ Gift card"',
+            ].join('\n'),
+        )
+        expect(elements.map(e => e.id)).toEqual(['svg', 'pres'])
+    })
+
+    it('leaves one holding an interactive role a wrapper', () => {
+        document.body.innerHTML =
+            '<main><div tabindex="0">Promo <span role="button">code</span></div></main>'
+
+        expect(caramelPageOutline(document.body).outline).toBe(
+            ['- main:', '  - [0] button "code"'].join('\n'),
+        )
+    })
+
+    it('prints at most 30 of them on a page', () => {
+        document.body.innerHTML = Array.from(
+            { length: 40 },
+            () => '<div onclick="x()">Apply</div>',
+        ).join('')
+
+        expect(caramelPageOutline(document.body).elements).toHaveLength(30)
+    })
+})

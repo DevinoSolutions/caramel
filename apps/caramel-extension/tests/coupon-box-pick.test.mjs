@@ -350,6 +350,35 @@ describe('a pick is checked on the page before anything is touched', () => {
         expect(clicks).toBe(0)
     })
 
+    // The outline now lists a short element the store made clickable itself.
+    // A "Remove" drawn that way reaches the server like any button, and the
+    // page still refuses it, as the apply button and as the toggle.
+    for (const as of ['apply button', 'toggle'])
+        it(`never uses a plain-text "Remove" as the ${as}`, async () => {
+            document.body.innerHTML =
+                '<div><input id="x" name="field_7" type="text">' +
+                '<div id="rm" tabindex="0">Remove</div></div>' +
+                TOTAL
+            let clicks = 0
+            document
+                .getElementById('rm')
+                .addEventListener('click', () => clicks++)
+            let outline = ''
+            answer = req => {
+                outline = req.outline
+                const rm = idx(req.outline, /button "Remove"/)
+                return as === 'toggle'
+                    ? box(null, null, rm)
+                    : box(idx(req.outline, /textbox/), rm)
+            }
+
+            const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+
+            expect(outline).toContain('button "Remove"')
+            expect(rec).toBeNull()
+            expect(clicks).toBe(0)
+        })
+
     it('a field the apply flow cannot type a code into is not the box', async () => {
         document.body.innerHTML =
             '<div><input id="e" type="email" name="field_7">' +
