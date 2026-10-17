@@ -857,3 +857,58 @@ describe('the total is read again once the server has answered', () => {
         gaveCodesToCopy()
     })
 })
+
+describe('a box the server names is judged in bounded time, whatever text sits beside it', () => {
+    // The server's button and toggle pass the same click guards as the rules'
+    // (the words beside a control, its section's name), so 40 KiB of one word
+    // beside them is read as fast as a short label. Each was over a second
+    // before.
+    const LONG = 40 * 1024
+    const BUDGET_MS = 400
+    const BLOB = `<span>${'orandcodes'.repeat(LONG / 10)}</span>`
+
+    it('the button beside a long run of one word: judged at once, and used', async () => {
+        document.body.innerHTML =
+            '<div class="f"><input id="x" name="field_7" type="text">' +
+            '<button id="go" type="button">Go</button>' +
+            BLOB +
+            '</div>' +
+            TOTAL
+        answer = req =>
+            box(idx(req.outline, /textbox/), idx(req.outline, /button "Go/))
+
+        const t0 = performance.now()
+        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+        const ms = performance.now() - t0
+
+        expect(pickCalls).toHaveLength(1)
+        expect(document.querySelector(rec?.couponSubmit)?.id).toBe('go')
+        expect(ms).toBeLessThan(BUDGET_MS)
+    })
+
+    it('the toggle beside a long run of one word: judged at once, and opened', async () => {
+        document.body.innerHTML =
+            '<div class="fold"><button id="tg" type="button">Extras</button>' +
+            BLOB +
+            '<div id="panel" style="display:none">' +
+            '<label for="dc">Discount code</label>' +
+            '<input id="dc" name="discount_code" type="text">' +
+            '<button id="ap" type="button">Apply</button></div></div>' +
+            TOTAL
+        let opened = 0
+        document.getElementById('tg').addEventListener('click', () => {
+            opened++
+            document.getElementById('panel').style.display = ''
+        })
+        answer = req => box(null, null, idx(req.outline, TOGGLE))
+
+        const t0 = performance.now()
+        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+        const ms = performance.now() - t0
+
+        expect(pickCalls).toHaveLength(1)
+        expect(opened).toBe(1)
+        expect(document.querySelector(rec?.couponInput)?.id).toBe('dc')
+        expect(ms).toBeLessThan(BUDGET_MS)
+    })
+})

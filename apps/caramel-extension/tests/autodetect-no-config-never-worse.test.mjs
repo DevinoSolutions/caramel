@@ -204,6 +204,12 @@ const RULES_BOX =
 const BARE_BOX =
     '<div class="f"><input id="x" name="field_7" type="text">' +
     '<button id="go" type="button">Go</button></div>'
+// A box whose only coupon evidence is the form it posts to. That is enough
+// for a box the server names to be typed into, never for the rules to type a
+// code into it on their own.
+const SERVER_BOX =
+    '<form class="f" action="/cart/coupon"><input id="x" name="field_7" type="text">' +
+    '<button id="go" type="button">Go</button></form>'
 
 const pick = (input, button, toggle = null) => ({
     outcome: 'box',
@@ -368,8 +374,20 @@ describe('flags on, no config: the money rule holds whatever box was used', () =
         expect(t.overlay).toBe(false)
     })
 
+    it('a box the rules see but cannot use, with the server off: nothing is typed and the codes are to copy', async () => {
+        flags = { discovery: true, llm: false }
+        freshPage(SERVER_BOX + TOTAL)
+        wireStore('x', 'go', 'drop')
+        await run()
+        expect(asked('couponBoxPick')).toEqual([])
+        expect(t.page).toEqual([])
+        expect(document.getElementById('x').value).toBe('')
+        expect(t.savings).toEqual([])
+        handedOver()
+    })
+
     it('a box the server named, the total really drops: the same $20 saving', async () => {
-        freshPage(BARE_BOX + TOTAL)
+        freshPage(SERVER_BOX + TOTAL)
         wireStore('x', 'go', 'drop')
         answer = req =>
             pick(idx(req.outline, /textbox/), idx(req.outline, /button "Go"/))
@@ -384,7 +402,7 @@ describe('flags on, no config: the money rule holds whatever box was used', () =
         ['the rules found', RULES_BOX + TOTAL, 'dc', 'ap', () => {}],
         [
             'the server named',
-            BARE_BOX + TOTAL,
+            SERVER_BOX + TOTAL,
             'x',
             'go',
             () => {
@@ -1297,4 +1315,81 @@ describe('"Redeem" and the words that name a code read as the server reads them'
             expect(t.page).toContain('submit:go:SAVE20')
             expect(t.savings).toEqual([{ code: 'SAVE20', amount: 20 }])
         })
+})
+
+describe("a control that moves the checkout on or opens the orders page is never clicked on the server's word", () => {
+    // The server never names these, and the extension holds the same list:
+    // "Next" and "Proceed" move the checkout on a step, and a control named
+    // only "Orders" or "My orders" leaves the cart for the account pages.
+    beforeEach(() => {
+        flags = { discovery: true, llm: true }
+    })
+    const watch = id =>
+        document
+            .getElementById(id)
+            .addEventListener('click', () => t.page.push('LEFT:' + id))
+    const left = () => t.page.filter(e => e.startsWith('LEFT:'))
+
+    for (const label of ['Next', 'Proceed', 'Orders', 'My orders'])
+        it(`"${label}" named as the apply button: never clicked, nothing typed`, async () => {
+            freshPage(
+                '<div class="f"><input id="x" name="field_7" type="text">' +
+                    `<button id="away" type="button">${label}</button></div>` +
+                    TOTAL,
+            )
+            watch('away')
+            wireStore('x', 'away', 'drop')
+            answer = req =>
+                pick(idx(req.outline, /textbox/), idx(req.outline, /button /))
+            await run()
+            expect(asked('couponBoxPick')).toHaveLength(1)
+            expect(left()).toEqual([])
+            expect(document.getElementById('x').value).toBe('')
+            expect(t.savings).toEqual([])
+            handedOver()
+        })
+
+    for (const label of ['Next', 'My orders'])
+        it(`"${label}" named as the reveal: never opened`, async () => {
+            freshPage(
+                '<div class="fold">' +
+                    `<button id="away" type="button" aria-expanded="false">${label}</button>` +
+                    '<div id="panel" style="display:none">' +
+                    '<input id="x" name="field_7" type="text">' +
+                    '<button id="go" type="button">Go</button></div></div>' +
+                    TOTAL,
+            )
+            watch('away')
+            document.getElementById('away').addEventListener('click', () => {
+                document.getElementById('panel').style.display = ''
+            })
+            wireStore('x', 'go', 'drop')
+            answer = req =>
+                pick(
+                    idx(req.outline, /textbox/),
+                    idx(req.outline, /button "Go/),
+                    idx(req.outline, /button /),
+                )
+            await run()
+            expect(asked('couponBoxPick')).toHaveLength(1)
+            expect(left()).toEqual([])
+            expect(document.getElementById('x').value).toBe('')
+            expect(t.savings).toEqual([])
+            handedOver()
+        })
+
+    // A name that holds "order" without being only that is still a button.
+    it('"Apply to order" named as the apply button: the code goes in', async () => {
+        freshPage(
+            '<form class="f" action="/cart/coupon"><input id="x" name="field_7" type="text">' +
+                '<button id="ap" type="button">Apply to order</button></form>' +
+                TOTAL,
+        )
+        wireStore('x', 'ap', 'drop')
+        answer = req =>
+            pick(idx(req.outline, /textbox/), idx(req.outline, /button /))
+        await run()
+        expect(t.page).toContain('submit:ap:SAVE20')
+        expect(t.savings).toEqual([{ code: 'SAVE20', amount: 20 }])
+    })
 })

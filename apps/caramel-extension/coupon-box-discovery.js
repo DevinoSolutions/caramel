@@ -462,11 +462,12 @@ const FIELDS =
 // steppers, and a click on one moves the total the way a code would. Nor is it
 // one whose name, id, class or data-* attributes say it removes, changes a
 // quantity, checks out, pays, buys, signs in or up, subscribes or keeps a
-// wishlist. A labelled apply is judged as before.
+// wishlist, nor one labelled as a control never clicked ("Next", "My
+// orders"). A labelled apply is judged as before.
 const NOT_AN_APPLY_RE =
     /\b(?:remove|delete|trash|qty|quantity|plus|minus|(?:in|de)cre(?:ase|ment)|check ?out|place ?order|pay(?:pal)?|buy|purchase|sign ?(?:in|up)|log ?in|subscribe|wishlist)\b/i
 function wordlessApply(btn, input) {
-    if (!ownsBox(btn, input)) return false
+    if (!ownsBox(btn, input) || NEVER_CLICK.test(buttonLabel(btn))) return false
     for (const attr of [
         btn.getAttribute('name'),
         btn.id,
@@ -953,7 +954,7 @@ function ownsBox(el, input) {
 // discount card", "Use my voucher balance"), and never ask for consent ("Email
 // me promo codes and offers").
 const CODE_ENTRY_RE =
-    /\b(?:promo(?:tional)?|coupon|discount|voucher|offer|gift)\s+codes?\b|\b(?:have|got|enter|add|apply|use)\s+(?:a|an|your)?\s*(?:promo(?:tional)?|coupon|discount|voucher)\b(?!\s+(?:card|balance|points))/i
+    /\b(?:promo(?:tional)?|coupon|discount|voucher|offer|gift)\s+codes?\b|\b(?:have|got|enter|add|apply|use)\s{1,8}(?:a|an|your)?\s{0,8}(?:promo(?:tional)?|coupon|discount|voucher)\b(?!\s+(?:card|balance|points))/i
 const CONSENT_RE =
     /\b(?:e-?mail|sms|text me|newsletter|subscri\w*|sign me up|send me|notif\w*|marketing)\b/i
 
@@ -1799,7 +1800,7 @@ export const PICK_WAIT_MS = 29000
 const OUTLINE_MODULE = 'assets/coupon-box-outline.js'
 // Labels the server refuses to click, mirrored for the button and the toggle.
 const NEVER_CLICK =
-    /check ?out|place (?:my |your )?order|\bpay\b|pay ?pal|pay now|buy now|purchase|\bremove\b|\bdelete\b|empty (?:cart|basket|bag)|sign ?in|sign ?up|log ?in|register|create (?:an )?account|subscribe|continue/i
+    /check ?out|place (?:my |your )?order|\bpay\b|pay ?pal|pay now|buy now|purchase|\bremove\b|\bdelete\b|empty (?:cart|basket|bag)|sign ?in|sign ?up|log ?in|register|create (?:an )?account|subscribe|continue|\bproceed\b|\bnext\b|^\W*(?:(?:my|your|the)\s+)?orders?\W*$/i
 const _pickAsked = new Set()
 
 // The one spelling of a store in the asked-memory: the prompt gate reads it
