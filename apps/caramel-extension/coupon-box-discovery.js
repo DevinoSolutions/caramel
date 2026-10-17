@@ -1852,6 +1852,32 @@ const okToggle = t =>
 const okButton = (b, input) =>
     clickable(b) && applyLike(b) && b !== input && !navigatesAway(b)
 
+// A learned box names its apply by a selector, and a selector can name
+// anything on the page (#place-order, button[name=checkout], an add-to-cart).
+// So its apply says apply (okButton), or it is an arrow or an icon with no
+// words, in the box's own form or container. Never one whose words, name, id
+// or data attributes speak of checkout, paying, continuing, buying or adding
+// to the cart.
+function learnedApply(b, input) {
+    if (!b || !input) return false
+    const words = norm(
+        [controlWords(b), ...Object.values(b.dataset || {})]
+            .join(' ')
+            .replace(/[-_]+/g, ' '),
+    ).toLowerCase()
+    if (NEVER_CLICK.test(words) || isDanger(words) || noCodeClick(b))
+        return false
+    if (okButton(b, input)) return true
+    const text = norm([buttonLabel(b), ariaOf(b), b.title, b.value].join(' '))
+    return (
+        ARROWS_RE.test(text) &&
+        clickable(b) &&
+        b !== input &&
+        !navigatesAway(b) &&
+        (b.form ? b.form === input.form : ownsBox(b, input))
+    )
+}
+
 // The apply button for `input`: the one named, else the one the rules see
 // beside it. After a reload (a kept pick) either is used only when it is this
 // box's own: in its form, or in its small panel. A page that re-drew the box
@@ -1904,14 +1930,16 @@ export async function caramelFinderSees(domain, served, doc = document) {
 // Could a run go on with these elements, without clicking anything? A
 // showing box with its own button (or none, for a box that applies on Enter),
 // or the toggle that opens it.
-function boxShows({ input, button, toggle }, enterOnly, strict) {
+function boxShows({ input, button, toggle, learned }, enterOnly, strict) {
+    // A learned box whose apply is not an apply button is not offered.
+    if (learned && button && !learnedApply(button, input)) return false
     return (
         (typeableInput(input) &&
             visible(input) &&
             couponInput(input) &&
             (!!applyButtonFor(
                 input,
-                okButton(button, input) && button,
+                (learned || okButton(button, input)) && button,
                 true,
                 strict,
             ) ||
@@ -2079,7 +2107,13 @@ async function checkedPick(doc, picked, own, strict) {
 
     let { input, button, toggle } = picked
     if (!typeableInput(input) || !couponInput(input)) input = null
-    if (!okButton(button, input)) button = null
+    // A learned box whose apply is not an apply button is refused whole: no
+    // button of the rules' is swapped in, and normal detection runs instead.
+    if (picked.learned && button && !learnedApply(button, input)) {
+        log('FINDER_LEARNED_APPLY_REFUSED', {})
+        return null
+    }
+    if (!picked.learned && !okButton(button, input)) button = null
     if (!okToggle(toggle)) toggle = null
     const buttonFor = el => applyButtonFor(el, button, own, strict, toggle)
 
@@ -2168,6 +2202,7 @@ async function learnedEls(doc, b) {
         button: caramelOne(doc, b.apply),
         toggle: caramelOne(doc, b.toggle),
         enterOnly: b.enterOnly === true && !b.apply,
+        learned: true,
     }
 }
 

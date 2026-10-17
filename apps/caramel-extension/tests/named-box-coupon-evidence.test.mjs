@@ -722,6 +722,135 @@ describe('the rules never click a setting as a reveal', () => {
     })
 })
 
+// A learned box names its apply button by a selector, and a selector can name
+// anything on the page (#place-order, button[name=checkout], an add-to-cart).
+// Its apply must say apply, or be an arrow or icon inside the box's own form
+// or container. Otherwise the WHOLE box is refused and normal detection runs:
+// the rules may still find the same field with its real Apply, but the record
+// is the rules' find, never the learned box with a button swapped in.
+const LEARNED_SOURCES = Object.entries(SOURCES).slice(1)
+const learnedHost = () => location.hostname
+describe('a learned box whose apply is not an apply button is refused whole', () => {
+    const REAL_APPLY = '<button id="ok" type="button">Apply</button>'
+    for (const label of [
+        'Checkout',
+        'Check out',
+        'Place order',
+        'Pay now',
+        'Pay',
+        'Continue',
+        'Continue to payment',
+        'Proceed to checkout',
+        'Add to cart',
+        'Add to bag',
+        'Buy now',
+        'Apply and checkout',
+    ])
+        for (const [source, name] of LEARNED_SOURCES)
+            it(`${source}: "${label}" as the apply`, async () => {
+                // llm_first: after the refusal the rules still run, and find
+                // the field with its real Apply.
+                mode = 'llm_first'
+                document.body.innerHTML =
+                    '<div>' +
+                    PROMO_INPUT +
+                    REAL_APPLY +
+                    `<button id="b" type="button">${label}</button></div>` +
+                    TOTAL
+                name({ input: 'x', button: 'b' })
+                const clicks = watchClicks()
+
+                await run()
+
+                expect(clicks).not.toContain('b')
+                expect(drivenSubmit()).not.toBe('b')
+                // What runs is the rules' own find, not the learned box.
+                expect(appliedWith[0]?.rec.caramelLearn?.source).not.toBe(
+                    'server_learned',
+                )
+                expect(appliedWith[0]?.rec.caramelLearn?.learned).toBeFalsy()
+                // A remembered box that named it counts a failed use.
+                const kept = local[LEARNED_KEY]?.[learnedHost()]
+                if (kept) expect(kept.failures).toBe(1)
+            })
+
+    for (const [what, button] of [
+        [
+            'an apply word over a checkout name',
+            '<button id="b" name="checkout" type="button">Go</button>',
+        ],
+        [
+            'an apply word over a place-order id',
+            '<div><button id="b" type="button" data-testid="place-order">OK</button></div>',
+        ],
+        [
+            'a button that says nothing',
+            '<button id="b" type="button">Details</button>',
+        ],
+    ])
+        for (const [source, name] of LEARNED_SOURCES)
+            it(`${source}: ${what}`, async () => {
+                document.body.innerHTML =
+                    '<div>' + PROMO_INPUT + button + '</div>' + TOTAL
+                name({ input: 'x', button: 'b' })
+                const clicks = watchClicks()
+
+                await run()
+
+                expect(clicks).toEqual([])
+                expect(appliedWith).toHaveLength(0)
+            })
+
+    // An arrow or icon carries no words: it is the box's apply only when it
+    // sits in the box's own form or container.
+    for (const [source, name] of LEARNED_SOURCES) {
+        it(`${source}: an arrow inside the box's container is used`, async () => {
+            document.body.innerHTML =
+                '<div class="promo">' +
+                PROMO_INPUT +
+                '<button id="b" type="button">→</button></div>' +
+                TOTAL
+            name({ input: 'x', button: 'b' })
+
+            await run()
+
+            expect(drivenSubmit()).toBe('b')
+        })
+
+        it(`${source}: an icon inside the box's form is used`, async () => {
+            document.body.innerHTML =
+                '<form class="promo" onsubmit="return false">' +
+                PROMO_INPUT +
+                '<button id="b" type="button"><svg></svg></button></form>' +
+                TOTAL
+            name({ input: 'x', button: 'b' })
+
+            await run()
+
+            expect(drivenSubmit()).toBe('b')
+        })
+
+        it(`${source}: an arrow elsewhere on the page is refused`, async () => {
+            document.body.innerHTML =
+                '<div class="promo">' +
+                PROMO_INPUT +
+                '</div>' +
+                '<p>' +
+                'Free shipping on every order over fifty. '.repeat(12) +
+                '</p>' +
+                '<div class="footer"><button id="b" type="button">→</button></div>' +
+                TOTAL
+            name({ input: 'x', button: 'b' })
+            const clicks = watchClicks()
+
+            await run()
+
+            expect(clicks).toEqual([])
+            expect(appliedWith).toHaveLength(0)
+        })
+    }
+})
+
 // A served or stored selector is data: one outside the learned-box grammar
 // (coupon-box-learned.js caramelSelectorAllowed) is never even queried.
 describe('a learned selector outside the grammar is never read', () => {
@@ -780,5 +909,27 @@ describe('the prompt never offers a remembered box that is not a coupon box', ()
         remember()
 
         expect(await caramelFinderSees(location.hostname, false)).toBe(false)
+    })
+
+    it('a promo field whose remembered apply is "Checkout": not offered', async () => {
+        document.body.innerHTML =
+            '<div>' +
+            PROMO_INPUT +
+            '<button id="b" type="button">Checkout</button></div>' +
+            TOTAL
+        remember()
+
+        expect(await caramelFinderSees(location.hostname, false)).toBe(false)
+    })
+
+    it('a promo field whose remembered apply is an arrow in its box: offered', async () => {
+        document.body.innerHTML =
+            '<div>' +
+            PROMO_INPUT +
+            '<button id="b" type="button">→</button></div>' +
+            TOTAL
+        remember()
+
+        expect(await caramelFinderSees(location.hostname, false)).toBe(true)
     })
 })
