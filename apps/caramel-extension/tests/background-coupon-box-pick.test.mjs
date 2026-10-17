@@ -11,6 +11,7 @@ let handler
 let fetchCalls
 let responses // queue of fetch results, consumed in order
 let sessionData
+let onRemoved
 let localData
 
 function installWorkerRealm() {
@@ -50,6 +51,9 @@ function installWorkerRealm() {
     stub.runtime.lastError = undefined
     const listeners = []
     stub.runtime.onMessage.addListener = fn => listeners.push(fn)
+    stub.tabs.onRemoved.addListener = fn => {
+        onRemoved = fn
+    }
     globalThis.ServiceWorkerGlobalScope = {
         [Symbol.hasInstance]: () => true,
     }
@@ -83,6 +87,7 @@ beforeEach(async () => {
     fetchCalls = []
     responses = []
     sessionData = {}
+    onRemoved = null
     globalThis.fetch = async (url, opts) => {
         fetchCalls.push({ url: String(url), opts })
         const next = responses.shift()
@@ -536,6 +541,7 @@ describe('the box a run holds across a reload', () => {
         )
     const hold = (url, id) => send('couponBoxLearnHold', url, id, { l: L })
     const take = (url, id) => send('couponBoxLearnTake', url, id)
+    afterEach(() => vi.restoreAllMocks())
 
     it('is taken once, by the same tab on the same host', async () => {
         responses.push(features(true, true))
@@ -559,6 +565,24 @@ describe('the box a run holds across a reload', () => {
     it('a page that held nothing takes nothing', async () => {
         responses.push(features(true, true))
 
+        expect(await take('https://shop.test/cart')).toEqual({ l: null })
+    })
+
+    it('is not taken once its two minutes are up', async () => {
+        responses.push(features(true, true))
+        await hold('https://shop.test/cart')
+        const later = Date.now() + 2 * 60 * 1000 + 1
+        vi.spyOn(Date, 'now').mockReturnValue(later)
+
+        expect(await take('https://shop.test/cart')).toEqual({ l: null })
+    })
+
+    it('is forgotten when its tab closes', async () => {
+        responses.push(features(true, true))
+        await hold('https://shop.test/cart')
+        expect(onRemoved).toBeTypeOf('function')
+
+        onRemoved(7)
         expect(await take('https://shop.test/cart')).toEqual({ l: null })
     })
 

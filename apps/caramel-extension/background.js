@@ -458,44 +458,25 @@ async function couponBoxLearnedMessage(message, sender) {
 /* The box a run on a tab is using, held for the page a submit reloads to
  * (store-detect.js resumes the run there and confirms the box when the total
  * dropped). Held here, per tab and for the host the tab was on, never in the
- * page's own storage, which the page can write. Taken once, within
- * LEARN_HOLD_MS. */
-const LEARN_HOLD_KEY = 'caramel_learn_hold:'
-const LEARN_HOLD_MS = 120000
-// Where storage.session is missing (an older browser): this worker's memory.
-const _learnHolds = new Map()
+ * page's own storage, which the page can write: one of the tab's handoffs
+ * (tab-handoff.js), taken once, within its lifetime. */
 async function couponBoxLearnHold({ l }, sender) {
-    const tab = sender?.tab?.id
-    const host = senderHost(sender)
-    if (tab == null || !host || !l?.box || !(await couponBoxRememberOn()))
-        return { held: false }
-    const entry = {
-        host,
-        l: { box: l.box, source: l.source, learned: l.learned === true },
-        t: Date.now(),
-    }
-    const area = currentBrowser.storage?.session
-    if (area)
-        await new Promise(r => area.set({ [LEARN_HOLD_KEY + tab]: entry }, r))
-    else _learnHolds.set(LEARN_HOLD_KEY + tab, entry)
-    return { held: true }
+    if (!l?.box || !(await couponBoxRememberOn())) return { held: false }
+    const saved = await tabHandoffs().set(
+        sender?.tab?.id,
+        senderOrigin(sender),
+        'box_learn',
+        { box: l.box, source: l.source, learned: l.learned === true },
+    )
+    return { held: saved === 'saved' }
 }
 async function couponBoxLearnTake(sender) {
-    const tab = sender?.tab?.id
-    const host = senderHost(sender)
-    if (tab == null || !host) return { l: null }
-    const key = LEARN_HOLD_KEY + tab
-    const area = currentBrowser.storage?.session
-    let entry = _learnHolds.get(key)
-    _learnHolds.delete(key)
-    if (area) {
-        entry = await new Promise(r =>
-            area.get([key], items => r(items?.[key])),
-        )
-        area.remove([key])
-    }
-    const fresh = entry?.host === host && Date.now() - entry.t < LEARN_HOLD_MS
-    return { l: fresh ? entry.l : null }
+    const l = await tabHandoffs().take(
+        sender?.tab?.id,
+        senderOrigin(sender),
+        'box_learn',
+    )
+    return { l: l ?? null }
 }
 
 // The anonymous install id the install saved ({ iid } under this key), or

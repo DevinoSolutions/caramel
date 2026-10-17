@@ -152,6 +152,9 @@ module.exports = [
         // coupon-box-learned.js (validation and the selector grammar), holds
         // the box a run used across a reload per tab, and serialises writes
         // across tabs. Measured 13.57 kB.
+        // 2026-10-17, unchanged at 15 kB: the per-tab handoff store
+        // (tab-handoff.js) joined, and the box a run holds across a reload
+        // moved onto it in place of its own copy. Measured 13.97 kB.
         limit: '15 KB',
         brotli: false,
     },
