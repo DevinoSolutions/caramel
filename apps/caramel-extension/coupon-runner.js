@@ -61,6 +61,7 @@ import {
 } from './dom-utils.js'
 import { recordWelcomeFirstTouch } from './install-attribution.js'
 import {
+    caramelStoreListKnown,
     getDomainRecord,
     startCheckoutDetection,
     tryInitialize,
@@ -813,7 +814,12 @@ export async function startApplyingCoupons(rec, options) {
     // copy, let the finder look (coupon-box-discovery.js; off unless the
     // server's couponBoxDiscovery flag is on). It returns a record aimed at
     // the box it found, or null and this page keeps its copy-the-codes answer.
-    if ((!_box || !_isVisible(_box)) && (await caramelCouponBoxDiscoveryOn())) {
+    // Never while the store list is unknown: this may be a configured store.
+    if (
+        (!_box || !_isVisible(_box)) &&
+        caramelStoreListKnown() &&
+        (await caramelCouponBoxDiscoveryOn())
+    ) {
         const found = await caramelDiscoveredRecord(rec)
         if (found) {
             rec = found

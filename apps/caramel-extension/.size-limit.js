@@ -60,7 +60,30 @@ module.exports = [
         // coupon-runner.js) — the cookie reader pinned to the website's
         // schema, the install-id/record storage and the bounded retry.
         // Measured 111.27 -> 114.55 kB (+3.3 kB): one new capability, not prose.
-        limit: '120 KB',
+        // 2026-10-16, raised 120 -> 122 kB: the finder's safety guards (it
+        // never clicks a points, rewards, offers or settings control, judged
+        // by the control's words, its neighbours and its section's name) and
+        // the store lookup's registrable-domain check for hyphen hosts.
+        // Measured 118.05 -> 120.89 kB; 121.47 kB once the finder also never
+        // clicks a control that adds to the cart, buys, adds a gift extra,
+        // updates the cart, subscribes or signs in (noCodeClick, the same
+        // words the server-pick checks use).
+        // 2026-10-17, raised 122 -> 122.5 kB: an apply button with no apply
+        // word on it is taken only in the box's own panel, and never when its
+        // attributes say remove, quantity, checkout, pay, buy, sign in or up,
+        // subscribe or wishlist (wordlessApply). Measured 122.01 kB. The
+        // finder is ~28.5 kB of this bundle on every page; loading it on
+        // demand (coupon-box-finder.js) takes it out and brings this bundle
+        // back down to about 93.7 kB.
+        // 2026-10-17, raised 122.5 -> 123 kB: the finder never spends store
+        // credit, a gift card or a balance, reads every page in bounded time,
+        // and never clicks "Next", "Proceed" or an orders link on the
+        // server's word (the server's never-click list, byte for byte).
+        // Measured 122.58 kB.
+        // 2026-10-17, raised 123 -> 125 kB: stacked on the per-tab pick
+        // memory (a cart that reloads to show each answer keeps the server's
+        // box, found again by name). Measured 124.35 kB.
+        limit: '125 KB',
         brotli: false,
     },
     {
@@ -146,7 +169,16 @@ module.exports = [
         // through unnoticed. Measured 12.38 kB after the review fixes (id minted
         // only on accept, the consent re-read, device-local consent), so the
         // limit is measured + ~0.3 kB.
-        limit: '12.7 KB',
+        // 2026-10-17, raised 12.7 -> 13.6 kB: the per-tab handoffs
+        // (tab-handoff.js and its message route), which hold the pending
+        // submit, the discount-link win and the run where the store's page
+        // cannot write them. Measured 13.24 kB.
+        // 2026-10-17 (review of PR #369), raised 13.6 -> 13.9 kB: the handoff
+        // route answers only the tab's top, live document, forgets a tab the
+        // browser replaces, writes down a refused record, and gains the
+        // compare-and-set replace that makes a cancel one step. Measured
+        // 13.60 kB.
+        limit: '13.9 KB',
         brotli: false,
     },
     {
