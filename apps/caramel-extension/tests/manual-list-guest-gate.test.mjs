@@ -5,6 +5,7 @@ import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { initCaramelBase } from '../caramel-base.js'
 import { initCouponConstants } from '../coupon-constants.generated.js'
 import { showFinalModal } from '../UI-helpers.js'
+import { trustedClick } from './_trusted-events.mjs'
 
 // The manual "Grab a code" fallback must not hand a signed-out shopper more
 // codes than the popup does. The popup caps a guest at GUEST_COUPON_LIMIT (6)
@@ -31,8 +32,7 @@ const feedbackLink = () =>
     root()?.querySelector('#caramel-manual-feedback') ?? null
 const mounted = () => !!document.getElementById('caramel-final-overlay')
 
-const click = el =>
-    el.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }))
+const click = el => trustedClick(el)
 
 // N distinct code rows — every one un-rejected, so ordering is stable.
 const codes = n =>

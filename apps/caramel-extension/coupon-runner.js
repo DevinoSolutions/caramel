@@ -51,6 +51,7 @@ import {
     caramelCurrencyCode,
     caramelDisclosureFor,
     caramelEndRun,
+    caramelHoldAppliedWin,
     caramelIsForbiddenControl,
     caramelMarkPendingSubmit,
     getPrice,
@@ -579,26 +580,19 @@ export async function startApplyingCoupons(rec, options) {
             // unloads the page (the POST is already in flight by then).
             reportOutcome(bestId, 'worked')
             // Reload so the page's own UI shows the applied discount (tag + new
-            // total), then re-show our result on the fresh document —
-            // sessionStorage survives same-tab reloads and is per-origin, so the
-            // handoff can't leak across sites.
-            try {
-                sessionStorage.setItem(
-                    'caramel_applied',
-                    JSON.stringify({
-                        code: bestCode,
-                        // Carried across the reload so the fresh document can
-                        // record the saving against its catalog coupon — the
-                        // handoff is the only place that id still exists there.
-                        id: bestId,
-                        saved,
-                        currency: confirmed.currency || bestCurrency,
-                        t: Date.now(),
-                    }),
-                )
-            } catch {
-                /* storage blocked — the discount is still applied */
-            }
+            // total), then re-show our result on the fresh document. The
+            // background holds the handoff for this tab and origin
+            // (caramelHoldAppliedWin), so it can't leak across sites and the
+            // page cannot write it. Awaited: the reload ends this document.
+            await caramelHoldAppliedWin({
+                code: bestCode,
+                // Carried across the reload so the fresh document can record
+                // the saving against its catalog coupon — the handoff is the
+                // only place that id still exists there.
+                id: bestId,
+                saved,
+                currency: confirmed.currency || bestCurrency,
+            })
             location.reload()
             return
         }
@@ -849,7 +843,7 @@ export async function startApplyingCoupons(rec, options) {
     // up instead of leaving the shopper to click the pill again per code (see
     // caramelBeginRun). Deliberately NOT opened on the discount-link path
     // above: that one measures every code on this page and never hands off.
-    caramelBeginRun()
+    await caramelBeginRun()
 
     const hasPriceCfg = !!rec.priceContainer
     const original = hasPriceCfg
@@ -962,7 +956,7 @@ export async function startApplyingCoupons(rec, options) {
         // Written BEFORE the submit, because a submit that navigates never
         // comes back here (see caramelMarkPendingSubmit). Cleared immediately
         // after, so a normal attempt leaves nothing for the next page to read.
-        caramelMarkPendingSubmit(
+        await caramelMarkPendingSubmit(
             code,
             coupons[i].id,
             originalPrices,
@@ -975,7 +969,7 @@ export async function startApplyingCoupons(rec, options) {
                 : false,
         )
         const res = await applyCoupon(code, rec)
-        caramelClearPendingSubmit()
+        await caramelClearPendingSubmit()
 
         // Did this attempt prove ANYTHING about this code? An applied row, the
         // store's own error text, or a total we could actually read all count.
@@ -1145,7 +1139,7 @@ export async function startApplyingCoupons(rec, options) {
     // so whatever happens next is a result, not a hop. Close the run before any
     // of the terminal branches below: a record left open would let an unrelated
     // later navigation resume a chain that already had its answer.
-    caramelEndRun()
+    await caramelEndRun()
 
     if (globalThis._caramelCancelled) {
         log('AUTO_INSERT_STOP', { result: 'cancelled', t: performance.now() })
