@@ -249,6 +249,11 @@ export function redactSecrets(
             /([?&](?:key|api[_-]?key|token|access_token|secret)=)[^\s&"']+/gi,
             `$1${REDACTED}`,
         )
+        .replace(/\bBasic\s+[A-Za-z0-9+/=]{8,}/gi, `Basic ${REDACTED}`)
+        .replace(
+            /((?:api[_-]?key|x-api-key|client[_-]?secret|secret|refresh[_-]?token|access[_-]?token|token|authorization)["']?\s*[:=]\s*["']?)[^\s"',;&]+/gi,
+            `$1${REDACTED}`,
+        )
 }
 
 /**
@@ -267,10 +272,11 @@ export function formatThrownErrors(
     const counts = new Map<string, number>()
     for (const { thrownMessage } of suite.summaries) {
         if (thrownMessage === undefined) continue
-        const key = redactSecrets(thrownMessage, knownSecrets).slice(
-            0,
-            THROWN_MESSAGE_MAX_CHARS,
-        )
+        // One line per message: a response-body newline followed by `::`
+        // would otherwise reach the Actions runner as a workflow command.
+        const key = redactSecrets(thrownMessage, knownSecrets)
+            .replace(/\s+/g, ' ')
+            .slice(0, THROWN_MESSAGE_MAX_CHARS)
         counts.set(key, (counts.get(key) ?? 0) + 1)
     }
     return Array.from(counts)

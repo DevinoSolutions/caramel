@@ -333,12 +333,53 @@ describe('formatThrownErrors', () => {
         expect(out).not.toContain('KEY')
         expect(out).not.toContain('zzz')
     })
+
+    it('redacts an sk- key that straddles the 300-character cap', () => {
+        const out = formatThrownErrors(
+            suiteOf([
+                new Error('a'.repeat(289) + ' sk-or-v1-' + 'q'.repeat(40)),
+            ]),
+        )
+        expect(out).not.toContain('sk-or')
+        expect(out).not.toContain('qqq')
+    })
+
+    it('puts each message on one line so a body cannot start a workflow command', () => {
+        const out = formatThrownErrors(
+            suiteOf([
+                new Error('openrouter 400: bad\n::add-mask::x\r\n::error::y'),
+            ]),
+        )
+        expect(out).not.toMatch(/[\r\n]/)
+        expect(out).toBe('1x "openrouter 400: bad ::add-mask::x ::error::y"')
+    })
 })
 
 describe('redactSecrets', () => {
     it('ignores undefined known secrets and leaves clean messages alone', () => {
         expect(redactSecrets('openrouter 429: rate limited', [undefined])).toBe(
             'openrouter 429: rate limited',
+        )
+    })
+
+    it('redacts Basic credentials, labelled keys and secrets in headers, JSON and forms', () => {
+        const out = redactSecrets(
+            'Authorization: Basic dXNlcjpwYXNzd29yZA==; x-api-key: PROXYKEY1; {"api_key":"JSONKEY2"}; refresh_token=RT3&client_secret=CS4; key=BARE5',
+        )
+        for (const leaked of [
+            'dXNlcjpwYXNzd29yZA',
+            'PROXYKEY1',
+            'JSONKEY2',
+            'RT3',
+            'CS4',
+        ]) {
+            expect(out).not.toContain(leaked)
+        }
+    })
+
+    it('leaves ordinary status text alone', () => {
+        expect(redactSecrets('openrouter 404: model not found (max 600)')).toBe(
+            'openrouter 404: model not found (max 600)',
         )
     })
 })
