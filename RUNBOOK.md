@@ -867,14 +867,22 @@ it.
     own coupon form, inside a checkout form),
     `.coupon .purchase-summary button`, `#PayPal-apply`,
     `button[data-buy-box]` and `display`/`buyer` pass, while `button.checkout`, `button[name=place_order]` and
-    `#checkout-apply` are refused. What it does not catch, by design:
+    `#checkout-apply` are refused. One exception, for carts that put the
+    coupon apply in the checkout's own namespace: `checkout` alone (or
+    `check out`) does not refuse a compound that also names `coupon`,
+    `discount`, `promo`, `reduction`, `voucher` or `code` (plurals too), so
+    `#checkout-coupon-apply`, `#checkout_discount_btn` and
+    `button[name="checkout_reduction_code_apply"]` pass. Every other word
+    stays absolute: `#checkout-pay` and `#checkout-coupon-remove` are still
+    refused, as are `#checkout_submit` and `button[name=checkout]`. What it does not catch, by design:
     ancestors are not checked, so a checkout button whose own markup names
     nothing (`.cart__footer button[type=submit]`) passes, and partial
     attribute matches (`[aria-label*=heckout]`, `[id^=check][id$=out]`) are
     not read as words. This is defence in depth, not the safety net: the
     extension's own apply-control check, which reads the element itself
     whatever selector reached it, is what stops a wrong click. The cost: a store whose real apply button
-    is named after its checkout (`#checkout-apply`) is not learned, and keeps
+    is named after its checkout with no coupon word (`#checkout-apply`) is
+    not learned, and keeps
     being answered by the rules and the AI pick.
 
 **What the server cannot promise.** Every rule above counts NETWORKS (/24

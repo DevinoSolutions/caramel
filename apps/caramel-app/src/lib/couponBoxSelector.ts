@@ -171,6 +171,25 @@ const RISKY_CONTROL_PAIRS: ReadonlySet<string> = new Set([
     'pay now',
     'buy now',
 ])
+// Carts often put the coupon apply in the checkout's own namespace
+// (`#checkout-coupon-apply`, `button[name="checkout_reduction_code_apply"]`),
+// so `checkout` alone (or `check out`) is not risky when the same compound
+// also names one of these. Every other risky word stays absolute:
+// `#checkout-coupon-remove` is still refused.
+const CHECKOUT_RISKY: ReadonlySet<string> = new Set(['checkout', 'check out'])
+const COUPON_WORDS: ReadonlySet<string> = new Set([
+    'coupon',
+    'coupons',
+    'discount',
+    'discounts',
+    'promo',
+    'promos',
+    'reduction',
+    'voucher',
+    'vouchers',
+    'code',
+    'codes',
+])
 
 /**
  * Whether an APPLY or TOGGLE selector names a control that could place an
@@ -181,7 +200,8 @@ const RISKY_CONTROL_PAIRS: ReadonlySet<string> = new Set([
  * classes and attribute VALUES. Ancestors are not (WooCommerce's own apply
  * button is `form.checkout_coupon button[name=apply_coupon]`), nor attribute
  * names (`button[data-buy-box]` says what data the element carries), nor what
- * `:not(...)` excludes. This is defence in depth and can be bypassed: a
+ * `:not(...)` excludes. `checkout` alone does not make it risky when that
+ * compound also names a coupon word (COUPON_WORDS). This is defence in depth and can be bypassed: a
  * substring or position selector (`[aria-label*=heckout]`,
  * `[id^=check][id$=out]`, `.cart__footer button[type=submit]`) names no risky
  * word, and neither does a joined camelCase word like `checkoutButton`. The
@@ -200,9 +220,14 @@ export function isRiskyControlSelector(selector: string): boolean {
         .toLowerCase()
         .split(/[^a-z0-9]+/)
         .filter(Boolean)
-    return words.some(
-        (word, i) =>
-            RISKY_CONTROL_WORDS.has(word) ||
-            RISKY_CONTROL_PAIRS.has(`${word} ${words[i + 1] ?? ''}`),
-    )
+    const namesCoupon = words.some(word => COUPON_WORDS.has(word))
+    return words.some((word, i) => {
+        const pair = `${word} ${words[i + 1] ?? ''}`
+        const risky = RISKY_CONTROL_WORDS.has(word)
+            ? word
+            : RISKY_CONTROL_PAIRS.has(pair)
+              ? pair
+              : null
+        return risky !== null && !(namesCoupon && CHECKOUT_RISKY.has(risky))
+    })
 }
