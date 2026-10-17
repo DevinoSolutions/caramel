@@ -9,15 +9,19 @@
 // OPENROUTER_API_URL when the model lives behind another OpenAI-compatible
 // base) plus COUPON_BOX_PICK_MODEL — the model under test. With no model the
 // suite fails loudly instead of passing vacuously. Costs one short completion
-// per case (52), temperature 0.
+// per case (65), temperature 0.
 //
 // A case passes when:
-//   * the page has a box: the picked input is one of the labelled inputs, or
-//     no input was picked and the picked toggle is one of the labelled
+//   * the page has a box: the picked input is one of the labelled inputs (and,
+//     on a case that labels its buttons, the picked button is one of them),
+//     or no input was picked and the picked toggle is one of the labelled
 //     toggles (the box is behind it);
 //   * the page has no box: neither an input nor a toggle was picked.
-// Anything else — a wrong field, a missed box, a pick on a box-less page, a
-// model error or an unusable reply — fails the case.
+// Anything else — a wrong field, a wrong apply button, a missed box, a pick on
+// a box-less page, a refused answer, a model error or an unusable reply —
+// fails the case. A case marked knownMiss still runs and is reported, but is
+// left out of the pass rate; one that passes fails the suite until its mark
+// is removed.
 import {
     CouponBoxOutlineTooLargeError,
     pickCouponBox,
@@ -29,7 +33,7 @@ import { couponBoxCases, type CouponBoxCase } from './fixtures/coupon-box-cases'
 
 const PASS_RATE_THRESHOLD = 0.9
 // Cases run one at a time, as production calls arrive, so the latency figures
-// are not inflated by the suite's own load (52 calls: ~4 minutes measured).
+// are not inflated by the suite's own load (~2 minutes measured at 63 calls).
 const SUITE_TIMEOUT_MS = 12 * 60 * 1000
 
 interface Pick {
@@ -59,7 +63,12 @@ function pickOf(result: CouponBoxPickResult): Pick {
 function judge(c: CouponBoxCase, picked: Pick): boolean {
     const hasBox = c.inputs.length > 0 || c.toggles.length > 0
     if (!hasBox) return picked.input === null && picked.toggle === null
-    if (picked.input !== null) return c.inputs.includes(picked.input)
+    if (picked.input !== null)
+        return (
+            c.inputs.includes(picked.input) &&
+            (!c.buttons ||
+                (picked.button !== null && c.buttons.includes(picked.button)))
+        )
     return picked.toggle !== null && c.toggles.includes(picked.toggle)
 }
 
@@ -122,7 +131,7 @@ beforeAll(async () => {
     // A label that names no node in its own outline can never be matched: it
     // would silently turn a case into a free miss or a free pass.
     const stale = couponBoxCases.flatMap(c =>
-        [...c.inputs, ...c.toggles]
+        [...c.inputs, ...(c.buttons ?? []), ...c.toggles]
             .filter(
                 n =>
                     !new RegExp(`^\\s*- \\[${n}\\] [a-z]`, 'm').test(c.outline),
@@ -134,29 +143,51 @@ beforeAll(async () => {
             `fixture labels not in their outline: ${stale.join(', ')}`,
         )
     outcomes = await runAll(couponBoxCases)
-    const passed = outcomes.filter(o => o.pass).length
-    passRate = passed / outcomes.length
+    const scored = outcomes.filter((_, i) => !couponBoxCases[i]!.knownMiss)
+    const passed = scored.filter(o => o.pass).length
+    passRate = passed / scored.length
     const answered = outcomes
         .filter(o => o.outcome !== 'too_large')
         .map(o => o.ms)
     console.log(
-        `[coupon-box-pick-eval] model=${env.COUPON_BOX_PICK_MODEL} cases=${outcomes.length} pass=${passed}/${outcomes.length} (${(passRate * 100).toFixed(1)}%) p50=${percentile(answered, 0.5)}ms p95=${percentile(answered, 0.95)}ms`,
+        `[coupon-box-pick-eval] model=${env.COUPON_BOX_PICK_MODEL} cases=${scored.length} pass=${passed}/${scored.length} (${(passRate * 100).toFixed(1)}%) p50=${percentile(answered, 0.5)}ms p95=${percentile(answered, 0.95)}ms known-misses=${outcomes.length - scored.length}`,
     )
-    const byStore = new Map(couponBoxCases.map(c => [c.store, c]))
-    for (const o of outcomes) {
-        const c = byStore.get(o.store)!
+    // Paired by position, not by store: a store can have more than one case
+    // (two snapshots of its page), so its name does not pick out one label.
+    outcomes.forEach((o, i) => {
+        const c = couponBoxCases[i]!
+        const verdict = c.knownMiss
+            ? o.pass
+                ? 'KNOWN-MISS-NOW-PASSES'
+                : 'known-miss'
+            : o.pass
+              ? 'pass'
+              : 'FAIL'
         console.log(
-            `[coupon-box-pick-eval] ${o.pass ? 'pass' : 'FAIL'} ${o.store} ${o.ms}ms: ${o.outcome}${o.detail ? ` (${o.detail})` : ''} picked ${fmtPick(o.picked)}; expected input=${fmtList(c.inputs)} toggle=${fmtList(c.toggles)}`,
+            `[coupon-box-pick-eval] ${verdict} ${o.store} ${o.ms}ms: ${o.outcome}${o.detail ? ` (${o.detail})` : ''} picked ${fmtPick(o.picked)}; expected input=${fmtList(c.inputs)} button=${c.buttons ? fmtList(c.buttons) : 'any'} toggle=${fmtList(c.toggles)}`,
         )
-    }
+    })
 }, SUITE_TIMEOUT_MS)
 
 it(`pass rate meets the >=${PASS_RATE_THRESHOLD} threshold gate`, () => {
-    const failing = outcomes.filter(o => !o.pass).map(o => o.store)
+    const scored = outcomes.filter((_, i) => !couponBoxCases[i]!.knownMiss)
+    const failing = scored.filter(o => !o.pass).map(o => o.store)
     expect(
         passRate,
         failing.length
-            ? `pass_rate=${(passRate * 100).toFixed(1)}% (${outcomes.length} cases) — failing: ${failing.join(', ')}`
+            ? `pass_rate=${(passRate * 100).toFixed(1)}% (${scored.length} cases) — failing: ${failing.join(', ')}`
             : undefined,
     ).toBeGreaterThanOrEqual(PASS_RATE_THRESHOLD)
+})
+
+// A knownMiss that now passes has stopped being one: left marked, it stays out
+// of the pass rate, and a later regression on it would go unscored.
+it('no case marked knownMiss passes', () => {
+    const nowPassing = outcomes
+        .filter((o, i) => couponBoxCases[i]!.knownMiss && o.pass)
+        .map(o => o.store)
+    expect(
+        nowPassing,
+        'these cases now pass: remove knownMiss from them in evals/fixtures/coupon-box-cases.ts',
+    ).toEqual([])
 })

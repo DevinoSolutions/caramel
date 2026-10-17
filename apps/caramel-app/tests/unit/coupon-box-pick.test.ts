@@ -65,6 +65,7 @@ import {
     COUPON_BOX_PICK_BUDGET,
     resetCouponBoxPickBudgetForTests,
 } from '@/lib/couponBoxPickBudget'
+import { couponBoxCases } from '../../evals/fixtures/coupon-box-cases'
 
 const EXT_ORIGIN = 'chrome-extension://abcdefghijklmnopabcdefghijklmnop'
 
@@ -328,8 +329,11 @@ describe('the pick', () => {
         '  - [11] button "Pay with PayPal"',
     ].join('\n')
 
-    it.each([4, 5, 6, 7, 8, 11])(
-        'never returns control [%i] as the apply button',
+    // A refused apply button refuses the whole answer. Sent as button null,
+    // the extension would read "this box applies on Enter", and Enter in the
+    // box can submit the checkout or order button the model named.
+    it.each([4, 5, 6, 7, 8, 11, 2, 99])(
+        'refuses the answer when the apply button is control [%i]',
         async n => {
             chatMock.mockImplementation(async () =>
                 answer({ input: 2, button: n, toggle: null }),
@@ -339,9 +343,36 @@ describe('the pick', () => {
                     domain: freshDomain(),
                     outline: GUARDED,
                 }),
-            ).toMatchObject({ outcome: 'box', input: 2, button: null })
+            ).toEqual({
+                outcome: 'no_pick',
+                reason: 'refused_button',
+                cached: false,
+            })
         },
     )
+
+    it('caches a refused button like any answer', async () => {
+        chatMock.mockImplementation(async () =>
+            answer({ input: 2, button: 4, toggle: null }),
+        )
+        const domain = freshDomain()
+        await pickCouponBox({ domain, outline: GUARDED })
+        expect(await pickCouponBox({ domain, outline: GUARDED })).toEqual({
+            outcome: 'no_pick',
+            reason: 'refused_button',
+            cached: true,
+        })
+        expect(chatMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('keeps a box whose answer names no button (it applies on Enter)', async () => {
+        chatMock.mockImplementation(async () =>
+            answer({ input: 2, button: null, toggle: null }),
+        )
+        expect(
+            await pickCouponBox({ domain: freshDomain(), outline: GUARDED }),
+        ).toMatchObject({ outcome: 'box', input: 2, button: null })
+    })
 
     it.each([4, 5, 6, 7, 11])(
         'never returns control [%i] as the toggle',
@@ -374,6 +405,437 @@ describe('the pick', () => {
         expect(
             await pickCouponBox({ domain: freshDomain(), outline: GUARDED }),
         ).toMatchObject({ outcome: 'box', input: 2, button: 3, toggle: 10 })
+    })
+
+    // The page footer (the last contentinfo nested in nothing) holds links to
+    // other pages; restaurant.com's footer has "Have A Code?" beside Gift
+    // Cards. A footer inside the cart, or a dialog opened from the page
+    // footer, is still part of the cart.
+    const FOOTERED = [
+        '- main:',
+        '  - form:',
+        '    - [2] textbox "Promo code"',
+        '    - [3] button "Apply"',
+        '  - contentinfo:',
+        '    - [4] button "Have a promo code?"',
+        '- contentinfo:',
+        '  - list:',
+        '    - [5] link "Have A Code?"',
+        '    - [6] button "Apply"',
+        '  - dialog:',
+        '    - [7] button "Add discount code"',
+        '- [8] link "Have a promo code?"',
+    ].join('\n')
+
+    it('never returns a page-footer control as the toggle', async () => {
+        chatMock.mockImplementation(async () =>
+            answer({ input: null, button: null, toggle: 5 }),
+        )
+        expect(
+            await pickCouponBox({ domain: freshDomain(), outline: FOOTERED }),
+        ).toMatchObject({ outcome: 'no_box' })
+    })
+
+    it('never refuses an apply button for where it sits', async () => {
+        chatMock.mockImplementation(async () =>
+            answer({ input: 2, button: 6, toggle: null }),
+        )
+        expect(
+            await pickCouponBox({ domain: freshDomain(), outline: FOOTERED }),
+        ).toMatchObject({ outcome: 'box', input: 2, button: 6 })
+    })
+
+    it.each([4, 7, 8])(
+        'keeps toggle [%i]: a cart footer, a dialog, or a line after the page footer',
+        async n => {
+            chatMock.mockImplementation(async () =>
+                answer({ input: null, button: null, toggle: n }),
+            )
+            expect(
+                await pickCouponBox({
+                    domain: freshDomain(),
+                    outline: FOOTERED,
+                }),
+            ).toMatchObject({ outcome: 'box', input: null, toggle: n })
+        },
+    )
+
+    // A cart built of plain divs, with no <main>, whose order summary is a
+    // <footer>: it prints as a top-level contentinfo, but not the last one.
+    const DIV_CART = [
+        '- banner:',
+        '  - [0] link "Cart"',
+        '- [1] button "Remove"',
+        '- contentinfo:',
+        '  - heading "Order summary"',
+        '  - [2] button "Have a promo code?" [collapsed]',
+        '  - [3] textbox "Promo code"',
+        '  - [4] button "Apply"',
+        '  - [5] button "Checkout"',
+        '- contentinfo:',
+        '  - list:',
+        '    - [6] link "Help"',
+        '    - [7] link "Have A Code?"',
+    ].join('\n')
+
+    it('keeps the toggle and the box in a cart summary drawn as a footer', async () => {
+        chatMock.mockImplementation(async () =>
+            answer({ input: 3, button: 4, toggle: 2 }),
+        )
+        expect(
+            await pickCouponBox({ domain: freshDomain(), outline: DIV_CART }),
+        ).toMatchObject({ outcome: 'box', input: 3, button: 4, toggle: 2 })
+
+        chatMock.mockImplementation(async () =>
+            answer({ input: null, button: null, toggle: 7 }),
+        )
+        expect(
+            await pickCouponBox({ domain: freshDomain(), outline: DIV_CART }),
+        ).toMatchObject({ outcome: 'no_box' })
+    })
+
+    const pickOn = async (outline: string, a: object) => {
+        chatMock.mockImplementation(async () => answer(a))
+        return pickCouponBox({ domain: freshDomain(), outline })
+    }
+
+    // A footer that holds the cart's checkout or total is the cart's own
+    // summary, wherever it sits, and an outline the extension may have cut at
+    // its size cap may have lost the real page footer: neither is read as the
+    // page footer.
+    const STICKY = [
+        '- main:',
+        '  - [1] link "Classic"',
+        '- contentinfo:',
+        '  - list:',
+        '    - [2] link "Help"',
+        '    - [3] link "Have A Code?"',
+        '- contentinfo:',
+        '  - heading "Order total"',
+        '  - [4] button "Have a promo code?" [collapsed]',
+        '  - [5] button "Checkout"',
+    ].join('\n')
+
+    it('keeps a toggle in a cart summary drawn after the site footer', async () => {
+        expect(await pickOn(STICKY, { toggle: 4 })).toMatchObject({
+            outcome: 'box',
+            toggle: 4,
+        })
+        expect(await pickOn(STICKY, { toggle: 3 })).toMatchObject({
+            outcome: 'no_box',
+        })
+    })
+
+    it('reads no page footer in an outline that may have been cut at the cap', async () => {
+        const footer = ['- contentinfo:', '  - [5] link "Have a promo code?"']
+        const padded = (bytes: number) => {
+            const pad = '  - heading "Your cart"'
+            const lines = ['- main:']
+            while ((lines.length + 3) * (pad.length + 1) < bytes)
+                lines.push(pad)
+            return [...lines, ...footer].join('\n')
+        }
+        const cut = padded(MAX_OUTLINE_BYTES - 100)
+        expect(Buffer.byteLength(cut)).toBeLessThanOrEqual(MAX_OUTLINE_BYTES)
+        expect(Buffer.byteLength(cut)).toBeGreaterThan(MAX_OUTLINE_BYTES - 1024)
+        expect(await pickOn(cut, { toggle: 5 })).toMatchObject({
+            outcome: 'box',
+            toggle: 5,
+        })
+        expect(
+            await pickOn(padded(MAX_OUTLINE_BYTES - 4096), { toggle: 5 }),
+        ).toMatchObject({ outcome: 'no_box' })
+    })
+
+    // Rewards are the shopper's own money: a control that redeems points or
+    // rewards is never clicked on the model's word. A field that takes a
+    // rewards code is still a code field. The outline as an extension with the
+    // 2026-10-17 word list sends it ("points" kept).
+    const REWARDS = [
+        '- main:',
+        '  - heading "You have #,### points"',
+        '  - [0] button "Redeem ### points for a $# discount code"',
+        '  - [1] button "Apply Rewards"',
+        '  - [2] link "Loyalty"',
+        '  - [3] textbox "Promo or rewards code"',
+        '  - [4] button "Apply"',
+    ].join('\n')
+
+    it.each([0, 1, 2])(
+        'never returns rewards control [%i] as the toggle',
+        async n => {
+            expect(await pickOn(REWARDS, { toggle: n })).toMatchObject({
+                outcome: 'no_box',
+            })
+        },
+    )
+
+    it('keeps a promo-or-rewards code field and its Apply, and refuses its rewards button', async () => {
+        expect(await pickOn(REWARDS, { input: 3, button: 4 })).toMatchObject({
+            outcome: 'box',
+            input: 3,
+            button: 4,
+        })
+        expect(await pickOn(REWARDS, { input: 3, button: 1 })).toMatchObject({
+            outcome: 'no_pick',
+            reason: 'refused_button',
+        })
+    })
+
+    it('never returns a points-for-a-code redemption as the toggle, with or without "points"', async () => {
+        for (const name of [
+            'Redeem ### points for a $# discount code',
+            'Redeem ### for a $# discount code',
+        ])
+            expect(
+                await pickOn(
+                    `- main:\n  - heading "Order summary"\n  - [1] button "${name}"`,
+                    { toggle: 1 },
+                ),
+            ).toMatchObject({ outcome: 'no_box' })
+    })
+
+    // "Redeem" is how some stores name a code box's apply button: it is kept
+    // beside a field that names a code, and refused anywhere else.
+    const REDEEM_BOX = (field: string, button = 'Redeem') =>
+        [
+            '- main:',
+            '  - form:',
+            `    - [1] textbox "${field}"`,
+            `    - [2] button "${button}"`,
+            '  - [3] button "Checkout"',
+        ].join('\n')
+
+    it.each([
+        'Promo code',
+        'Discount code',
+        'Voucher',
+        'Gift card or discount code',
+        'rabattkod',
+        // "Bon de réduction" as the outline prints it: "de" is not on the
+        // extension's word list.
+        'Bon réduction',
+    ])(
+        'keeps "Redeem" beside a "%s" field as the apply button',
+        async field => {
+            expect(
+                await pickOn(REDEEM_BOX(field), { input: 1, button: 2 }),
+            ).toMatchObject({ outcome: 'box', input: 1, button: 2 })
+        },
+    )
+
+    it('keeps an apply button whose own name is a rewards code', async () => {
+        expect(
+            await pickOn(REDEEM_BOX('Promo code', 'Add rewards code'), {
+                input: 1,
+                button: 2,
+            }),
+        ).toMatchObject({ outcome: 'box', input: 1, button: 2 })
+    })
+
+    // A code word on the control wins, as in the extension's spendsPoints:
+    // "rewards code" names a code to type, not points to spend.
+    it('keeps "Apply rewards code" as the apply button', async () => {
+        expect(
+            await pickOn(REDEEM_BOX('Promo code', 'Apply rewards code'), {
+                input: 1,
+                button: 2,
+            }),
+        ).toMatchObject({ outcome: 'box', input: 1, button: 2 })
+    })
+
+    const IN_SUMMARY = (line: string) =>
+        [
+            '- main:',
+            '  - region "Order summary":',
+            '    - heading "Order summary"',
+            `    ${line}`,
+            '    - [9] button "Checkout"',
+        ].join('\n')
+
+    it('keeps "Have a promo or rewards code?" as the toggle', async () => {
+        expect(
+            await pickOn(
+                IN_SUMMARY(
+                    '- [5] button "Have a promo or rewards code?" [collapsed]',
+                ),
+                { toggle: 5 },
+            ),
+        ).toMatchObject({ outcome: 'box', toggle: 5 })
+    })
+
+    it.each(['Redeem ### points for a $# code', 'Use your points'])(
+        'still refuses "%s" as the toggle',
+        async name => {
+            expect(
+                await pickOn(IN_SUMMARY(`- [5] button "${name}" [collapsed]`), {
+                    toggle: 5,
+                }),
+            ).toMatchObject({ outcome: 'no_box' })
+        },
+    )
+
+    it('still refuses "Redeem ### points for a $# code" as the apply button', async () => {
+        expect(
+            await pickOn(
+                REDEEM_BOX('Promo code', 'Redeem ### points for a $# code'),
+                { input: 1, button: 2 },
+            ),
+        ).toMatchObject({ outcome: 'no_pick', reason: 'refused_button' })
+    })
+
+    it('refuses an Apply that spends the points its section names', async () => {
+        expect(
+            await pickOn(
+                [
+                    '- main:',
+                    '  - region "Order summary":',
+                    '    - heading "Use your ### points"',
+                    '    - [5] textbox',
+                    '    - [6] button "Apply"',
+                    '    - [9] button "Checkout"',
+                ].join('\n'),
+                { input: 5, button: 6 },
+            ),
+        ).toMatchObject({ outcome: 'no_pick', reason: 'refused_button' })
+    })
+
+    it('keeps a "Redeem code" button, whatever the field says', async () => {
+        expect(
+            await pickOn(REDEEM_BOX('Enter here', 'Redeem code'), {
+                input: 1,
+                button: 2,
+            }),
+        ).toMatchObject({ outcome: 'box', input: 1, button: 2 })
+    })
+
+    it.each(['Gift message', 'Enter here'])(
+        'refuses "Redeem" beside a "%s" field, which names no code',
+        async field => {
+            expect(
+                await pickOn(REDEEM_BOX(field), { input: 1, button: 2 }),
+            ).toMatchObject({ outcome: 'no_pick', reason: 'refused_button' })
+        },
+    )
+
+    it('a bare "Redeem" is never the toggle; "Redeem a promo code" is', async () => {
+        const toggleOn = (name: string) =>
+            pickOn(
+                [
+                    '- main:',
+                    '  - heading "Order summary"',
+                    `  - [1] button "${name}" [collapsed]`,
+                    '  - [2] button "Checkout"',
+                ].join('\n'),
+                { toggle: 1 },
+            )
+        expect(await toggleOn('Redeem')).toMatchObject({ outcome: 'no_box' })
+        expect(await toggleOn('Redeem a promo code')).toMatchObject({
+            outcome: 'box',
+            toggle: 1,
+        })
+    })
+
+    // A toggle opens a box to type a code into. One that says only "discount"
+    // is a code box's fold, unless points, rewards, a membership or a gift
+    // card are named on it or around it (coupon-box-discovery.js offersOnly).
+    // One that offers deals, or explains one, names no code.
+    const SUMMARY = (...lines: string[]) =>
+        [
+            '- main:',
+            '  - heading "Your cart"',
+            '  - [0] link "Classic"',
+            '  - region "Order summary":',
+            '    - heading "Order summary"',
+            ...lines.map(l => `    ${l}`),
+            '    - [9] button "Checkout"',
+        ].join('\n')
+
+    it.each([
+        'Have a discount?',
+        'Add discount',
+        'Apply a discount',
+        'Discount',
+        'Apply discount',
+    ])('a plain "%s" reveal is the toggle', async name => {
+        expect(
+            await pickOn(SUMMARY(`- [5] button "${name}" [collapsed]`), {
+                toggle: 5,
+            }),
+        ).toMatchObject({ outcome: 'box', toggle: 5 })
+    })
+
+    it.each([
+        [
+            'under a points balance',
+            [
+                '- heading "You have #,### points"',
+                '- [5] button "Apply discount"',
+            ],
+        ],
+        ['naming a member discount', ['- [5] button "Member discount"']],
+        ['naming rewards', ['- [5] button "Discounts & rewards"']],
+        ['naming a student discount', ['- [5] link "Student discount"']],
+        ['naming a military discount', ['- [5] link "Military discount"']],
+        ['naming a teacher discount', ['- [5] link "Teacher discount"']],
+        [
+            'in a Rewards section',
+            ['- region "Rewards":', '  - [5] button "Apply discount"'],
+        ],
+        [
+            'beside a gift card field',
+            [
+                '- [4] textbox "Gift card number"',
+                '- [5] button "Apply discount"',
+            ],
+        ],
+    ])('a discount reveal %s is never the toggle', async (_why, lines) => {
+        expect(await pickOn(SUMMARY(...lines), { toggle: 5 })).toMatchObject({
+            outcome: 'no_box',
+        })
+    })
+
+    it.each([
+        'View offers',
+        'Available Offers',
+        'View promotions',
+        'Promo details',
+        'Offer terms',
+    ])('"%s" names no code and is never the toggle', async name => {
+        expect(
+            await pickOn(SUMMARY(`- [5] button "${name}" [collapsed]`), {
+                toggle: 5,
+            }),
+        ).toMatchObject({ outcome: 'no_box' })
+    })
+
+    it.each([
+        'Promo',
+        'Promo-Code',
+        'Add Discount Code',
+        'rabattkod',
+        'Ange kampanjkod',
+        'Ajouter un bon de réduction',
+        'Codice sconto',
+        'Código de descuento',
+    ])('"%s" names a code and is the toggle', async name => {
+        expect(
+            await pickOn(SUMMARY(`- [5] button "${name}" [collapsed]`), {
+                toggle: 5,
+            }),
+        ).toMatchObject({ outcome: 'box', toggle: 5 })
+    })
+
+    it('keeps an "Apply discount" apply button beside a code field', async () => {
+        expect(
+            await pickOn(
+                SUMMARY(
+                    '- [4] textbox "Promo code"',
+                    '- [5] button "Apply discount"',
+                ),
+                { input: 4, button: 5 },
+            ),
+        ).toMatchObject({ outcome: 'box', input: 4, button: 5 })
     })
 
     it('reads the first JSON object out of a reply with prose around it', async () => {
@@ -524,5 +986,454 @@ describe('model-call budget', () => {
             ).toBe(200)
         }
         expect(chatMock).toHaveBeenCalledTimes(1)
+    })
+})
+
+// Names as the outline prints them: only words on the extension's word list
+// reach the server ("Complete order" arrives as "order").
+describe('controls that are not a coupon control', () => {
+    const pickOn = async (outline: string, a: object) => {
+        chatMock.mockImplementation(async () => answer(a))
+        return pickCouponBox({ domain: freshDomain(), outline })
+    }
+    const SUMMARY = (...lines: string[]) =>
+        [
+            '- main:',
+            '  - region "Order summary":',
+            ...lines.map(l => `    ${l}`),
+            '    - [9] button "Checkout"',
+        ].join('\n')
+    const BOX = (button: string, field = 'Promo code') =>
+        [
+            '- main:',
+            '  - form:',
+            `    - [1] textbox "${field}"`,
+            `    - [2] button "${button}"`,
+        ].join('\n')
+
+    // Store credit, a balance and a gift card are not a coupon: applying
+    // them drops the total, which reads as a saving that is not one.
+    it.each([
+        'Use store credit',
+        'Apply credit',
+        'Apply gift card',
+        'Have a gift card?',
+        'Check balance',
+        'Add protection',
+        'Add a gift message',
+        'Add to cart',
+        'Buy',
+    ])('"%s" is never the toggle', async name => {
+        expect(
+            await pickOn(SUMMARY(`- [5] button "${name}" [collapsed]`), {
+                toggle: 5,
+            }),
+        ).toMatchObject({ outcome: 'no_box' })
+    })
+
+    it('a discount reveal under a store credit balance is never the toggle', async () => {
+        expect(
+            await pickOn(
+                SUMMARY(
+                    '- heading "Store credit $#.##"',
+                    '- [5] button "Apply discount" [collapsed]',
+                ),
+                { toggle: 5 },
+            ),
+        ).toMatchObject({ outcome: 'no_box' })
+    })
+
+    it.each([
+        'Promo code or gift card',
+        'Gift card or discount code',
+        'Have a promo code?',
+    ])('"%s" is still the toggle', async name => {
+        expect(
+            await pickOn(SUMMARY(`- [5] button "${name}" [collapsed]`), {
+                toggle: 5,
+            }),
+        ).toMatchObject({ outcome: 'box', toggle: 5 })
+    })
+
+    it.each([
+        'Add to cart',
+        'Submit order',
+        'order',
+        'Buy',
+        'Proceed',
+        'Next',
+        'Apply credit',
+        'Add gift wrap',
+    ])('"%s" is never the apply button', async name => {
+        expect(await pickOn(BOX(name), { input: 1, button: 2 })).toEqual({
+            outcome: 'no_pick',
+            reason: 'refused_button',
+            cached: false,
+        })
+    })
+
+    it('refuses "Redeem" beside a field only for a gift card code', async () => {
+        expect(
+            await pickOn(BOX('Redeem', 'Gift card code'), {
+                input: 1,
+                button: 2,
+            }),
+        ).toMatchObject({ outcome: 'no_pick', reason: 'refused_button' })
+    })
+
+    it('keeps an Apply beside a credit card field heading', async () => {
+        expect(
+            await pickOn(
+                [
+                    '- main:',
+                    '  - region "Payment":',
+                    '    - heading "Credit card"',
+                    '    - [1] textbox "Promo code"',
+                    '    - [2] button "Apply"',
+                ].join('\n'),
+                { input: 1, button: 2 },
+            ),
+        ).toMatchObject({ outcome: 'box', input: 1, button: 2 })
+    })
+
+    // A switch or a radio is a setting, and so is a checkbox that does not
+    // speak of entering a code or that asks for consent.
+    it.each([
+        ['switch', 'Have a promo code?'],
+        ['checkbox', 'Gift wrap'],
+        ['checkbox', 'Email me promo codes and offers'],
+        ['checkbox', 'Use my voucher balance'],
+    ])('a %s "%s" is never the toggle', async (role, name) => {
+        expect(
+            await pickOn(SUMMARY(`- [5] ${role} "${name}"`), { toggle: 5 }),
+        ).toMatchObject({ outcome: 'no_box' })
+    })
+
+    it('a checkbox "Have a promo code?" is the toggle', async () => {
+        expect(
+            await pickOn(SUMMARY('- [5] checkbox "Have a promo code?"'), {
+                toggle: 5,
+            }),
+        ).toMatchObject({ outcome: 'box', toggle: 5 })
+    })
+})
+
+// A site footer's links ("Check out our blog") and a bare "total" do not make
+// it a cart summary: its "Have A Code?" link still leads off the page.
+describe('the page footer', () => {
+    const FOOTER = (...lines: string[]) =>
+        [
+            '- main:',
+            '  - [1] link "Classic"',
+            '- contentinfo:',
+            '  - list:',
+            ...lines.map(l => `    ${l}`),
+            '    - [5] link "Have A Code?"',
+        ].join('\n')
+
+    it.each([
+        ['a "Check out our blog" link', '- [3] link "Check out our blog"'],
+        ['a "Total" link', '- [3] link "Total"'],
+    ])('with %s is still the page footer', async (_, line) => {
+        chatMock.mockImplementation(async () => answer({ toggle: 5 }))
+        expect(
+            await pickCouponBox({
+                domain: freshDomain(),
+                outline: FOOTER(line),
+            }),
+        ).toMatchObject({ outcome: 'no_box' })
+    })
+
+    it.each([
+        ['a "Checkout" button', '- [3] button "Checkout"'],
+        ['a subtotal', '- heading "Subtotal $#.##"'],
+    ])('with %s is a cart summary', async (_, line) => {
+        chatMock.mockImplementation(async () => answer({ toggle: 5 }))
+        expect(
+            await pickCouponBox({
+                domain: freshDomain(),
+                outline: FOOTER(line),
+            }),
+        ).toMatchObject({ outcome: 'box', toggle: 5 })
+    })
+})
+
+// "Apply Promo Code" above a field heads (and folds) the box; its own "Apply"
+// after the field applies the code (onekingslane.com).
+describe('a code-naming control above the field', () => {
+    const BOX = (after: string) =>
+        [
+            '- main:',
+            '  - [45] button "Remove"',
+            '  - [46] button "Apply Promo Code"',
+            '  - [2] textbox',
+            `  - [47] button "${after}"`,
+            '  - [48] button',
+        ].join('\n')
+    const pick = async (outline: string, button: number) => {
+        chatMock.mockImplementation(async () => answer({ input: 2, button }))
+        return pickCouponBox({ domain: freshDomain(), outline })
+    }
+
+    it('is read as the "Apply" after the field', async () => {
+        expect(await pick(BOX('Apply'), 46)).toMatchObject({
+            outcome: 'box',
+            input: 2,
+            button: 47,
+        })
+    })
+
+    it('is kept when the control after the field is no apply verb', async () => {
+        expect(await pick(BOX('Gift wrap options'), 46)).toMatchObject({
+            outcome: 'box',
+            input: 2,
+            button: 46,
+        })
+    })
+
+    it('leaves a button after the field as the model named it', async () => {
+        expect(await pick(BOX('Apply'), 47)).toMatchObject({
+            outcome: 'box',
+            button: 47,
+        })
+    })
+})
+
+// The extension's spendsPoints and pointsField (coupon-box-discovery.js), on
+// the outline: the server keeps and refuses the same controls and fields.
+describe('points, store credit and gift cards around the box', () => {
+    const pickOn = async (outline: string, a: object) => {
+        chatMock.mockImplementation(async () => answer(a))
+        return pickCouponBox({ domain: freshDomain(), outline })
+    }
+    const REWARDS = (...lines: string[]) =>
+        [
+            '- main:',
+            '  - region "Rewards":',
+            '    - heading "Rewards"',
+            ...lines.map(l => `    ${l}`),
+            '  - [9] button "Checkout"',
+        ].join('\n')
+
+    // A control that names a code is a code's control wherever it sits.
+    it('keeps an "Apply code" button in a Rewards section', async () => {
+        expect(
+            await pickOn(
+                REWARDS(
+                    '- [1] textbox "Promo code"',
+                    '- [2] button "Apply code"',
+                ),
+                { input: 1, button: 2 },
+            ),
+        ).toMatchObject({ outcome: 'box', input: 1, button: 2 })
+    })
+
+    it('keeps a "Have a promo code?" toggle in a Rewards section', async () => {
+        expect(
+            await pickOn(
+                REWARDS('- [5] button "Have a promo code?" [collapsed]'),
+                { toggle: 5 },
+            ),
+        ).toMatchObject({ outcome: 'box', toggle: 5 })
+    })
+
+    it.each(['Redeem ### points for a $# code', 'Apply store credit', 'Apply'])(
+        'still refuses "%s" in a Rewards section',
+        async name => {
+            expect(
+                await pickOn(
+                    REWARDS('- [1] textbox', `- [2] button "${name}"`),
+                    { input: 1, button: 2 },
+                ),
+            ).toMatchObject({ outcome: 'no_pick', reason: 'refused_button' })
+        },
+    )
+
+    // A plain "Apply" spends a balance when store credit or a gift card's
+    // number is what sits around it.
+    it.each([
+        [
+            'under a store credit heading',
+            [
+                '- main:',
+                '  - region "Order summary":',
+                '    - heading "Store credit $#.##"',
+                '    - [1] textbox',
+                '    - [2] button "Apply"',
+            ],
+        ],
+        [
+            'beside "Check balance", the field naming no code',
+            [
+                '- main:',
+                '  - form:',
+                '    - [1] textbox',
+                '    - [2] button "Apply"',
+                '    - [3] button "Check balance"',
+            ],
+        ],
+        [
+            'beside a gift card number field',
+            [
+                '- main:',
+                '  - form:',
+                '    - [1] textbox "Gift card number"',
+                '    - [2] button "Apply"',
+            ],
+        ],
+    ])('refuses a plain "Apply" %s', async (_, lines) => {
+        expect(
+            await pickOn(lines.join('\n'), { input: 1, button: 2 }),
+        ).toMatchObject({ outcome: 'no_pick', reason: 'refused_button' })
+    })
+
+    it.each([
+        [
+            'beside "Check balance" in a promo box',
+            [
+                '- main:',
+                '  - form:',
+                '    - [1] textbox "Promo code"',
+                '    - [2] button "Apply"',
+                '    - [3] button "Check balance"',
+            ],
+        ],
+        [
+            'under a store credit heading beside a promo code field',
+            [
+                '- main:',
+                '  - region "Order summary":',
+                '    - heading "Store credit $#.##"',
+                '    - [1] textbox "Promo code"',
+                '    - [2] button "Apply"',
+            ],
+        ],
+    ])('keeps a plain "Apply" %s', async (_, lines) => {
+        expect(
+            await pickOn(lines.join('\n'), { input: 1, button: 2 }),
+        ).toMatchObject({ outcome: 'box', input: 1, button: 2 })
+    })
+
+    // The extension reads at most 1000 characters of the words beside a
+    // control (RULE_WORDS_MAX); a word past them is not read here either.
+    it('reads no more of the words beside a control than the extension does', async () => {
+        const links = Array.from(
+            { length: 40 },
+            (_, i) =>
+                `      - [${100 + i}] link "Shop all new arrivals and sale"`,
+        )
+        const outline = (last: string) =>
+            [
+                '- main:',
+                '  - form:',
+                '    - [1] textbox',
+                '    - [2] button "Apply"',
+                '    - list:',
+                ...(last === 'first' ? [] : links),
+                '      - [99] link "Use your points"',
+                ...(last === 'first' ? links : []),
+            ].join('\n')
+        expect(
+            await pickOn(outline('last'), { input: 1, button: 2 }),
+        ).toMatchObject({ outcome: 'box', input: 1, button: 2 })
+        expect(
+            await pickOn(outline('first'), { input: 1, button: 2 }),
+        ).toMatchObject({ outcome: 'no_pick', reason: 'refused_button' })
+    })
+
+    // Underscores read as spaces, as the extension reads a control's words.
+    it('reads "Use_member_discount" as a member discount, never the toggle', async () => {
+        expect(
+            await pickOn(
+                [
+                    '- main:',
+                    '  - region "Order summary":',
+                    '    - [5] button "Use_member_discount" [collapsed]',
+                    '    - [9] button "Checkout"',
+                ].join('\n'),
+                { toggle: 5 },
+            ),
+        ).toMatchObject({ outcome: 'no_box' })
+    })
+
+    // Typing a code into a points or store credit field and pressing Enter
+    // spends them.
+    it.each(['Points to redeem', 'Store credit', 'Rewards number', 'Balance'])(
+        'refuses a "%s" field',
+        async field => {
+            expect(
+                await pickOn(
+                    [
+                        '- main:',
+                        '  - form:',
+                        `    - [1] textbox "${field}"`,
+                        '  - [9] button "Checkout"',
+                    ].join('\n'),
+                    { input: 1 },
+                ),
+            ).toMatchObject({ outcome: 'no_box' })
+        },
+    )
+
+    it.each(['Promo or rewards code', 'Credit card or promo code', 'Voucher'])(
+        'keeps a "%s" field',
+        async field => {
+            expect(
+                await pickOn(
+                    [
+                        '- main:',
+                        '  - form:',
+                        `    - [1] textbox "${field}"`,
+                        '  - [9] button "Checkout"',
+                    ].join('\n'),
+                    { input: 1 },
+                ),
+            ).toMatchObject({ outcome: 'box', input: 1 })
+        },
+    )
+})
+
+// Every label in the live eval's fixtures, handed back as the model's answer,
+// must survive the server's own checks: a labelled box the server refuses is a
+// case no model can pass, and the eval would read it as the model's miss.
+describe('the eval fixtures', () => {
+    const labelled = couponBoxCases.filter(
+        c => !c.knownMiss && (c.inputs.length > 0 || c.toggles.length > 0),
+    )
+    const picks = labelled.flatMap(c => [
+        ...c.inputs.map(input => ({
+            c,
+            a: { input, button: c.buttons?.[0] ?? null },
+        })),
+        ...c.toggles.map(toggle => ({ c, a: { toggle } })),
+    ])
+
+    it.each(picks.map(p => [`${p.c.store} ${JSON.stringify(p.a)}`, p]))(
+        '%s is accepted',
+        async (_, { c, a }) => {
+            chatMock.mockImplementation(async () => answer(a))
+            expect(
+                await pickCouponBox({
+                    domain: freshDomain(),
+                    outline: c.outline,
+                }),
+            ).toMatchObject({ outcome: 'box', input: null, toggle: null, ...a })
+        },
+    )
+
+    it('the known miss is refused, as its note says', async () => {
+        const misses = couponBoxCases.filter(c => c.knownMiss)
+        expect(misses.map(c => c.store)).toEqual(['coversandall.com'])
+        for (const c of misses) {
+            chatMock.mockImplementation(async () =>
+                answer({ toggle: c.toggles[0] }),
+            )
+            expect(
+                await pickCouponBox({
+                    domain: freshDomain(),
+                    outline: c.outline,
+                }),
+            ).toMatchObject({ outcome: 'no_box' })
+        }
     })
 })

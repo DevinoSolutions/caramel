@@ -195,13 +195,14 @@ async function handlePick(req: NextRequest): Promise<PickExit> {
             modelStartedAt = performance.now()
         })
         return exit(json(result), outcomeOf(result), {
-            // A `disabled` no_pick never looked at the cache.
+            // A `disabled` no_pick never looked at the cache; a refused
+            // button is a model answer, cached like one.
             cached:
-                result.outcome === 'no_pick'
-                    ? result.reason === 'disabled'
-                        ? null
-                        : false
-                    : result.cached,
+                'cached' in result
+                    ? result.cached
+                    : result.reason === 'disabled'
+                      ? null
+                      : false,
             modelMs: modelMs(),
             store,
         })
