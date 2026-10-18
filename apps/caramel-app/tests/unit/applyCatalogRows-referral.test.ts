@@ -13,6 +13,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 type Captured = { sql: string; values: unknown[] }
 type StoredRow = {
     id: string
+    site: string | null
+    code: string
     expired: boolean
     status: string
     updated_at: Date
@@ -78,8 +80,12 @@ function coupon(
 }
 
 function stored(id: string, overrides: Partial<StoredRow> = {}): StoredRow {
+    // Same site and code as coupon(id, ...), so the id-identity guard sees the
+    // same coupon (applyCatalogRows-id-mismatch.test.ts covers a mismatch).
     return {
         id,
+        site: 'example.com',
+        code: `CODE-${id}`,
         expired: false,
         status: 'valid',
         updated_at: STORED_AT,
@@ -132,6 +138,7 @@ describe('applyCatalogRows - referral guard', () => {
             skippedOlder: 0,
             tombstoned: 0,
             skippedReferral: 1,
+            skippedIdMismatch: 0,
         })
         expect(writtenCoupons()).toEqual([
             { id: '800000202', expired: false, status: 'valid' },
@@ -166,6 +173,7 @@ describe('applyCatalogRows - referral guard', () => {
             skippedOlder: 0,
             tombstoned: 1,
             skippedReferral: 0,
+            skippedIdMismatch: 0,
         })
         expect(writtenCoupons()).toEqual([
             { id: '800000221', expired: true, status: 'valid' },
@@ -231,6 +239,7 @@ describe('applyCatalogRows - referral guard', () => {
             skippedOlder: 0,
             tombstoned: 1,
             skippedReferral: 0,
+            skippedIdMismatch: 0,
         })
         expect(writtenCoupons()).toEqual([
             { id: '800000261', expired: false, status: 'valid' },

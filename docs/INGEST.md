@@ -193,7 +193,8 @@ A non-gated `200` returns:
         "updated": 0,
         "skippedOlder": 0,
         "tombstoned": 0,
-        "skippedReferral": 0
+        "skippedReferral": 0,
+        "skippedIdMismatch": 0
     },
     "storeConfigs": { "upserted": 0 },
     "sources": { "upserted": 0 }
@@ -206,7 +207,16 @@ counts applied rows that flipped a visible coupon to non-visible;
 `src/lib/coupons.ts`: "refer a friend", "code in the link", ...) that were not
 in the catalog yet and so were not inserted. A referral row that IS already
 stored is written with `expired = true` (the one value the engine forces, so it
-leaves via the normal tombstone path and counts toward the 20% gate). For
+leaves via the normal tombstone path and counts toward the 20% gate).
+`skippedIdMismatch` counts rows whose id is already stored with a DIFFERENT
+coupon: another site, or another code (letter case ignored). Those rows are
+never written, so they neither update, expire nor tombstone the stored coupon;
+their ids (never codes) are logged as `[ingest/catalog] skippedIdMismatch=...`.
+The app's ids come from two id spaces (the 2026-08-08 bridge-sync seed from the
+dev coupons DB, and the prod pipeline DB that re-minted ids from 74351 on
+2026-08-10/11), so the id alone does not prove the row is the same coupon. Every
+applied push also logs one `[ingest/catalog] coupons inserted=... skippedIdMismatch=...`
+summary line. For
 `storeConfigs`/`sources`, `upserted` is the number of rows offered after dedupe
 (an idempotent re-affirmation of unchanged rows is not a failure).
 

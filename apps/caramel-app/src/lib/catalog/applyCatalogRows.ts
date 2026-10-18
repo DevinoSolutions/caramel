@@ -31,6 +31,20 @@
 // measured by the 20% gate like any other tombstone). Only `expired` is forced:
 // status and every other column stay raw.
 //
+// Identity guard: a pushed row is applied to a stored row ONLY when both are the
+// same coupon (isSameCatalogCoupon: same site, same code ignoring case). The
+// catalog's ids come from two id spaces. The 2026-08-08 bridge-sync seeded the
+// app from the dev coupons DB, and the prod pipeline DB (rebuilt 2026-08-10/11)
+// re-minted ids from 74351 on, so the same id can name two different coupons.
+// Measured on prod 2026-10-18: 8,824 stored rows still hold a different coupon
+// than the pipeline row with their id (e.g. 103346 is vitabiotics.com GPN10 here
+// and unbounce.com JhonDodo88 in the pipeline), and 20,339 seeded rows had
+// already been overwritten that way. A mismatched row is never written (no
+// update, no referral expiry, no tombstone): it is counted `skippedIdMismatch`
+// and its ids are logged. It cannot be inserted as new either, because its id is
+// the stored row's primary key. The ON CONFLICT clause repeats the check, so a
+// concurrent write cannot slip a different coupon onto the id.
+//
 // Safety gate: a single push that would tombstone/expire more than 20% of the
 // currently-visible catalog is REFUSED (409, `gated`) unless `force: true`.
 // This guards against a broken producer wiping the catalog with one bad push;
@@ -54,13 +68,16 @@ export interface CatalogGate {
  * skippedOlder are rows dropped by the only-if-newer rule; tombstoned counts
  * how many of the applied rows flipped a visible coupon to non-visible;
  * skippedReferral are personal referral codes (isReferralCoupon) that were not
- * in the catalog yet and so were never inserted. */
+ * in the catalog yet and so were never inserted; skippedIdMismatch are rows
+ * whose id is stored with a DIFFERENT coupon (isSameCatalogCoupon), never
+ * written. */
 export interface CatalogCounts {
     inserted: number
     updated: number
     skippedOlder: number
     tombstoned: number
     skippedReferral: number
+    skippedIdMismatch: number
 }
 
 // Discriminated on `gated` so callers (the route) can read `.gate` after a
@@ -128,6 +145,51 @@ class TombstoneGateError extends Error {
  */
 function normalizeSite(site: string | null): string | null {
     return site == null ? null : site.toLowerCase()
+}
+
+/** The stored side of the identity check: the row already holding the id. */
+interface StoredCouponIdentity {
+    site: string | null
+    code: string
+}
+
+/**
+ * True when a pushed row and the stored row with its id are the same coupon:
+ * the same site (normalizeSite, so stored rows, which are lowercase, compare
+ * against the lowercased push) and the same code ignoring case (the same rule
+ * as submitShopperCoupon's lower(code) dedupe). The upsert's ON CONFLICT WHERE
+ * repeats this in SQL; keep the two in step.
+ */
+function isSameCatalogCoupon(
+    stored: StoredCouponIdentity,
+    pushed: { site: string | null; code: string },
+): boolean {
+    return (
+        normalizeSite(stored.site) === normalizeSite(pushed.site) &&
+        stored.code.toLowerCase() === pushed.code.toLowerCase()
+    )
+}
+
+/** At most this many mismatched ids are named in the warning line. */
+const MISMATCH_LOG_ID_LIMIT = 50
+
+/**
+ * One summary line per applied push, plus a warning naming the mismatched ids
+ * (never codes) when any were skipped. Counts and ids only.
+ */
+function logCouponOutcome(counts: CatalogCounts, mismatchedIds: string[]) {
+    console.info(
+        `[ingest/catalog] coupons inserted=${counts.inserted} updated=${counts.updated} skippedOlder=${counts.skippedOlder} tombstoned=${counts.tombstoned} skippedReferral=${counts.skippedReferral} skippedIdMismatch=${counts.skippedIdMismatch}`,
+    )
+    if (mismatchedIds.length === 0) return
+    const named = mismatchedIds.slice(0, MISMATCH_LOG_ID_LIMIT).join(',')
+    const more =
+        mismatchedIds.length > MISMATCH_LOG_ID_LIMIT
+            ? ` (+${mismatchedIds.length - MISMATCH_LOG_ID_LIMIT} more)`
+            : ''
+    console.warn(
+        `[ingest/catalog] skippedIdMismatch=${mismatchedIds.length}: these ids hold a different coupon (site or code) in the catalog and were not written: ${named}${more}`,
+    )
 }
 
 function chunk<T>(items: readonly T[], size: number): T[][] {
@@ -261,9 +323,11 @@ export async function applyCatalogRows(
     payload: IngestCatalogPayload,
 ): Promise<ApplyResult> {
     const { force } = payload
+    // Filled inside the transaction, logged only once it commits.
+    const mismatchedIds: string[] = []
 
     try {
-        return await prisma.$transaction(
+        const result = await prisma.$transaction(
             async tx => {
                 // ---- coupons -------------------------------------------------
                 const coupons = dedupeByKey(
@@ -277,6 +341,7 @@ export async function applyCatalogRows(
                     skippedOlder: 0,
                     tombstoned: 0,
                     skippedReferral: 0,
+                    skippedIdMismatch: 0,
                 }
 
                 if (coupons.length > 0) {
@@ -284,7 +349,11 @@ export async function applyCatalogRows(
                     // can't exceed the parameter cap).
                     const current = new Map<
                         string,
-                        { expired: boolean; status: string; updated_at: Date }
+                        StoredCouponIdentity & {
+                            expired: boolean
+                            status: string
+                            updated_at: Date
+                        }
                     >()
                     for (const idChunk of chunk(
                         coupons.map(c => c.id),
@@ -293,15 +362,19 @@ export async function applyCatalogRows(
                         const rows = await tx.$queryRaw<
                             Array<{
                                 id: string
+                                site: string | null
+                                code: string
                                 expired: boolean
                                 status: string
                                 updated_at: Date
                             }>
                         >(
-                            Prisma.sql`SELECT id, expired, status, updated_at FROM coupons WHERE id IN (${Prisma.join(idChunk)})`,
+                            Prisma.sql`SELECT id, site, code, expired, status, updated_at FROM coupons WHERE id IN (${Prisma.join(idChunk)})`,
                         )
                         for (const row of rows) {
                             current.set(row.id, {
+                                site: row.site,
+                                code: row.code,
                                 expired: row.expired,
                                 status: row.status,
                                 updated_at: row.updated_at,
@@ -325,6 +398,13 @@ export async function applyCatalogRows(
                     const toWrite: typeof coupons = []
                     for (const pushed of coupons) {
                         const cur = current.get(pushed.id)
+                        // A different coupon under the same id is never
+                        // touched, whatever its timestamps or referral wording.
+                        if (cur && !isSameCatalogCoupon(cur, pushed)) {
+                            couponCounts.skippedIdMismatch++
+                            mismatchedIds.push(pushed.id)
+                            continue
+                        }
                         const isReferral = isReferralCoupon(pushed)
                         // A referral row never enters the catalog; an already
                         // stored one is expired (the only forced value) so the
@@ -401,6 +481,8 @@ export async function applyCatalogRows(
                                     verification_message = excluded.verification_message,
                                     updated_at = excluded.updated_at
                                 WHERE excluded.updated_at >= coupons.updated_at
+                                    AND lower(coupons.site) IS NOT DISTINCT FROM excluded.site
+                                    AND lower(coupons.code) = lower(excluded.code)
                             `,
                         )
                     }
@@ -475,6 +557,8 @@ export async function applyCatalogRows(
                 timeout: 120_000,
             },
         )
+        logCouponOutcome(result.coupons, mismatchedIds)
+        return result
     } catch (error) {
         if (error instanceof TombstoneGateError) {
             return {
@@ -486,6 +570,7 @@ export async function applyCatalogRows(
                     skippedOlder: 0,
                     tombstoned: 0,
                     skippedReferral: 0,
+                    skippedIdMismatch: 0,
                 },
                 storeConfigs: { upserted: 0 },
                 sources: { upserted: 0 },
