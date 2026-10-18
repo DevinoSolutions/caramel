@@ -55,7 +55,12 @@ module.exports = [
         // builder is NOT in this bundle, it ships as assets/coupon-box-outline.js
         // and has its own budget below. 4.9% headroom over 111.27 kB, so the
         // next capability trips the ratchet.
-        limit: '117 KB',
+        // 2026-10-15, raised 117 -> 120 kB: install attribution
+        // (install-attribution.js plus the /welcome first-touch capture in
+        // coupon-runner.js) — the cookie reader pinned to the website's
+        // schema, the install-id/record storage and the bounded retry.
+        // Measured 111.27 -> 114.55 kB (+3.3 kB): one new capability, not prose.
+        limit: '120 KB',
         brotli: false,
     },
     {
@@ -78,11 +83,18 @@ module.exports = [
         // every-website match pattern per runtime, the reachability probe that
         // tells "the browser refused us" apart from "you are offline", and the
         // gesture-safe request. Measured 10.04 kB.
+        // 2026-10-15: the sign-in sends the install's attribution (the exchange
+        // body fields, the Safari authorize query and the unreadable-storage
+        // report). Measured 10.81 kB, still under the unchanged 11 kB budget.
         // 2026-10-13, raised 11 -> 12 kB: recordPopupActivity (the popup
         // half of the Google Chrome daily-active ping — one message to the
         // worker, never a fetch from the popup) on top of main's 1.4.11
         // popup growth left 1.2% headroom. Measured 10.87 kB.
-        limit: '12 KB',
+        // 2026-10-18, merging main (1.4.15) back to 11 kB: main's Safari web
+        // sign-in moved the in-popup OAuth poll client out of this group, so
+        // with recordPopupActivity on top it measures 8.1 kB — the 12 kB
+        // raise above is no longer needed.
+        limit: '11 KB',
         brotli: false,
     },
     {
@@ -102,7 +114,12 @@ module.exports = [
         // sections (reported-not-working, hidden) — three new components plus
         // the storage module behind them (couponVote.ts). Measured 31.33 ->
         // 37.97 kB (+6.64 kB): one new feature surface, not prose.
-        limit: '41 KB',
+        // 2026-10-17, raised 41 -> 42 kB: Safari's own menu route for the
+        // every-website grant became a shared component (SafariAllSitesSteps)
+        // that the banner now shows too, because Safari's permissions.request()
+        // resolves without granting and left the banner's Enable button dead.
+        // Main already sat ~0.1 kB under 41 kB; this measured 41.04 kB.
+        limit: '42 KB',
         brotli: false,
     },
     {
@@ -131,6 +148,17 @@ module.exports = [
         // 2026-10-13, raised 10.7 -> 11.3 kB: the coupon-box pick request (its
         // flag, its message route, and one deadline over the flag read, the
         // token read and the request). Measured 10.52 kB.
+        // 2026-10-15, raised 11.3 -> 13.4 kB: the opt-in code-sharing funnel
+        // diagnostics (1.4.14): reportCodeShareFunnel, the consent + telemetry
+        // id module (usage-diagnostics-consent.js), the payload allowlist
+        // (code-share-funnel.js) and the shared permissions wrapper
+        // (permissions-api.js) for the Firefox data-collection grant. Measured
+        // 12.24 kB.
+        // 2026-10-15 (review of PR #353), tightened 13.4 -> 12.7 kB: the 2 kB of
+        // slack the first raise left would have let the next unrelated growth
+        // through unnoticed. Measured 12.38 kB after the review fixes (id minted
+        // only on accept, the consent re-read, device-local consent), so the
+        // limit is measured + ~0.3 kB.
         // 2026-10-13, raised 10 -> 13 kB: extension-activity.js joined
         // this group (the Google Chrome daily-active ping's worker half —
         // seed + SHA-256 daily id, the once-per-UTC-day state, the bounded
@@ -142,7 +170,12 @@ module.exports = [
         // discovery + pick routes into the daily-active ping (the two raises
         // above were each measured without the other). Measured 13.04 kB:
         // the sum of both features, not prose.
-        limit: '14 KB',
+        // 2026-10-18, raised 14 -> 15.2 kB on merging main (1.4.15): the
+        // daily-active ping on top of main's opt-in funnel diagnostics, install
+        // attribution and telemetry-id fix (main's 12.7 kB and this branch's
+        // 14 kB were each measured without the other). Measured 14.87 kB, so
+        // the limit is measured + ~0.3 kB, per the PR #353 tightening note.
+        limit: '15.2 KB',
         brotli: false,
     },
     {
@@ -153,6 +186,17 @@ module.exports = [
         // box. About half of it is the word allowlist every name is filtered
         // through, which is data the server's eval was measured with.
         limit: '9.2 KB',
+        brotli: false,
+    },
+    {
+        name: 'porkbun-alert-shim.js (porkbun.com checkout only, minified)',
+        path: '.size-cache/porkbun-alert.min.js',
+        // 2026-10-15 (T-2480) — own MAIN-world content script for porkbun.com's
+        // native coupon-failure alert(). 2026-10-16: the page-world capability
+        // marker (extension-capabilities.js, bundled into it) took it from 1.18
+        // to 1.86 kB minified; the same module adds ~0.8 kB to the per-page
+        // content-scripts group above (116.69 -> 117.49 kB, inside its limit).
+        limit: '2 KB',
         brotli: false,
     },
 ]

@@ -16,11 +16,23 @@
 // registration. What is left at module scope is inert declarations, so WXT can
 // import this file in Node at build time to read the entrypoint's options.
 import { CARAMEL_BASE_URL, CARAMEL_ENV } from './caramel-env.js'
+import { buildFunnelEvent } from './code-share-funnel.js'
 import {
     codeSharingAccepted,
+    codeSharingPromptVersion,
     readCodeSharingConsent,
 } from './code-sharing-consent.js'
 import { createActivityRecorder } from './extension-activity.js'
+import { saveInstallId } from './install-attribution.js'
+import {
+    USAGE_DIAGNOSTICS_CONSENT_KEY,
+    deleteTelemetryId,
+    parseUsageDiagnosticsConsent,
+    readTelemetryId,
+    readUsageDiagnosticsConsent,
+    resolveUsageDiagnostics,
+    usageDiagnosticsAccepted,
+} from './usage-diagnostics-consent.js'
 
 // Assigned by initBackground() instead of at module evaluation: the IIFE throws
 // when neither global exists, which is exactly the case in the Node import
@@ -420,6 +432,70 @@ export async function submitShopperCode(message) {
     )
 }
 
+/* --------------------------------------------------  code-share funnel diagnostics
+ * code-capture.js reports each point where the code-sharing offer can stop
+ * (code-share-funnel.js has the steps). Whether anything may leave the browser
+ * is decided HERE: the shopper's usageDiagnosticsConsent must be accepted and,
+ * on Firefox, the browser's data-collection grant must be held
+ * (usage-diagnostics-consent.js). Otherwise the answer is `{ skipped }` and no
+ * request is made. The request is ANONYMOUS on purpose: no bearer, no cookies,
+ * the per-device telemetry id as the only identity (READ here, never minted: the
+ * accept path owns minting, so a missing id means skip), the consent record as the
+ * proof the server checks (403 consent-required), and a payload that only
+ * buildFunnelEvent's allowlist can produce — never a code, user, URL or cart.
+ *
+ * A malformed step, a failed storage/permission read, a non-2xx or an event the
+ * server did not capture THROWS (the handler logs it and answers `{ error }`);
+ * there is no retry queue: a lost diagnostic is acceptable, a silent one is not. */
+// Exported for tests/background-code-share-funnel.test.mjs.
+export async function reportCodeShareFunnel(message) {
+    const consent = await resolveUsageDiagnostics(currentBrowser)
+    if (!consent) return { skipped: 'no-diagnostics-consent' }
+    const event = buildFunnelEvent({
+        step: message.step,
+        reason: message.reason,
+        store: message.store,
+        extVersion: currentBrowser.runtime.getManifest().version,
+        browser: detectStoreChannel(
+            currentBrowser.runtime.getURL(''),
+            navigator.userAgent,
+        ),
+        sharingPromptVersion: codeSharingPromptVersion(),
+    })
+    const id = await readTelemetryId(currentBrowser)
+    if (!id) return { skipped: 'no-diagnostics-id' }
+    // The shopper may have withdrawn while the id was being read: the record is
+    // the gate, so look at it once more right before anything leaves.
+    const latest = await readUsageDiagnosticsConsent(currentBrowser)
+    if (!usageDiagnosticsAccepted(latest))
+        return { skipped: 'no-diagnostics-consent' }
+    const r = await fetchWithTimeout(caramelUrl('api/extension/telemetry'), {
+        method: 'POST',
+        credentials: 'omit',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            id,
+            event,
+            consent: {
+                choice: latest.choice,
+                promptVersion: latest.promptVersion,
+            },
+        }),
+    })
+    const body = await r.json().catch(() => null)
+    // The server's own consent floor moved above our record's version: quiet,
+    // nothing was emitted (same reading as the submit route's consent gate).
+    if (r.status === 403 && body?.error === 'consent-required')
+        return { skipped: 'consent-rejected' }
+    if (!r.ok)
+        throw new Error(
+            `telemetry HTTP ${r.status}${body?.error ? ` ${body.error}` : ''}`,
+        )
+    if (body?.captured !== true)
+        throw new Error('telemetry: the server did not capture the event')
+    return { sent: true }
+}
+
 function isServiceWorkerContext() {
     return (
         typeof ServiceWorkerGlobalScope !== 'undefined' &&
@@ -558,6 +634,21 @@ export function initBackground() {
         logError,
     })
 
+    // Withdrawing diagnostics consent (the popup toggle or "No thanks") deletes
+    // the telemetry id: sends stop at once because the gate reads the record, and
+    // a later opt-in starts a new id that cannot be joined to this one. The
+    // record is device-local, so only this device's own changes arrive here.
+    currentBrowser.storage.onChanged.addListener((changes, area) => {
+        if (area !== 'local' || !changes[USAGE_DIAGNOSTICS_CONSENT_KEY]) return
+        const next = parseUsageDiagnosticsConsent(
+            changes[USAGE_DIAGNOSTICS_CONSENT_KEY].newValue,
+        )
+        if (usageDiagnosticsAccepted(next)) return
+        deleteTelemetryId(currentBrowser).catch(err =>
+            logError('usageDiagnosticsWithdraw', err),
+        )
+    })
+
     try {
         currentBrowser.action.setBadgeBackgroundColor({ color: '#ea6925' })
         if (currentBrowser.action.setBadgeTextColor)
@@ -603,13 +694,22 @@ export function initBackground() {
     currentBrowser.runtime.onInstalled.addListener(details => {
         if (details?.reason !== 'install') return
         try {
+            const iid = crypto.randomUUID()
+            // Keep the install id: the sign-in sends it to the server so the
+            // account joins this install's `extension_installed` event, and the
+            // /welcome page (content script) adds the first-touch record next
+            // to it. Not awaited: the tab does not depend on it, and storage
+            // answers long before a page has loaded. A refusal is recorded.
+            saveInstallId(currentBrowser, iid).catch(err =>
+                logError('onInstalledSaveInstallId', err),
+            )
             const url = welcomeUrl(
                 detectStoreChannel(
                     currentBrowser.runtime.getURL(''),
                     navigator.userAgent,
                 ),
                 currentBrowser.runtime.getManifest().version,
-                crypto.randomUUID(),
+                iid,
             )
             currentBrowser.tabs.create({ url }, () => {
                 if (currentBrowser.runtime.lastError)
@@ -668,9 +768,19 @@ export function initBackground() {
 
                 return true
             } else if (message.action === 'fetchCoupons') {
-                const { site, kw, category, page } = message
+                const { site, kw, category, page, capabilities } = message
                 const url = new URL(caramelUrl('api/coupons'))
                 url.searchParams.set('site', site)
+                // Proof of the page-side helpers this page runs (see
+                // extension-capabilities.js): the server withholds a gated
+                // store's codes without it. Absent when none is held.
+                if (Array.isArray(capabilities) && capabilities.length)
+                    url.searchParams.set(
+                        'caps',
+                        capabilities
+                            .filter(c => typeof c === 'string')
+                            .join(','),
+                    )
                 url.searchParams.set('key_words', kw || '')
                 url.searchParams.set('limit', String(COUPON_PAGE_SIZE))
                 if (category) url.searchParams.set('category', category)
@@ -770,6 +880,15 @@ export function initBackground() {
                     .then(resp => sendResponse(resp))
                     .catch(err => {
                         logError('submitShopperCode', err)
+                        sendResponse({ error: String(err) })
+                    })
+
+                return true
+            } else if (message.action === 'reportCodeShareFunnel') {
+                reportCodeShareFunnel(message)
+                    .then(resp => sendResponse(resp))
+                    .catch(err => {
+                        logError('reportCodeShareFunnel', err)
                         sendResponse({ error: String(err) })
                     })
 

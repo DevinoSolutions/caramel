@@ -373,6 +373,123 @@ describe('recordSignup', () => {
     })
 })
 
+describe('recordSignup: extension signups (explicit first touch, install id, identified person)', () => {
+    const INSTALL_ID = '3f2b8c1e-5a47-4d6b-9e10-7c2d4a8b9f01'
+    const extensionUser = {
+        id: 'user_1',
+        email: 'shopper@example.com',
+        name: 'Sam Shopper',
+        createdAt: new Date('2026-10-14T09:30:00.000Z'),
+    }
+
+    it('takes the explicit first-touch record when there are no headers: same source and first_* properties as a web signup, plus install_id', async () => {
+        await recordSignup({
+            user: extensionUser,
+            headers: null,
+            method: 'google',
+            surface: 'extension',
+            firstTouch,
+            installId: INSTALL_ID,
+        })
+
+        // The record lands in the stored acquisition exactly as a cookie would.
+        expect(prismaMock.user.updateMany.mock.calls[0]![0].data).toEqual({
+            acquisition: {
+                ...firstTouch,
+                source: 'reddit',
+                signup_surface: 'extension',
+                signup_method: 'google',
+            },
+        })
+        const capture = posthogServerMock.captureServerEvent.mock.calls[0]![0]
+        expect(capture.properties).toMatchObject({
+            method: 'google',
+            signup_surface: 'extension',
+            source: 'reddit',
+            install_id: INSTALL_ID,
+            first_utm_source: 'reddit',
+            first_utm_campaign: 'launch',
+            first_gclid: 'g1',
+            first_landing_path: '/',
+        })
+        expect(capture.properties.$set_once).toMatchObject({
+            acquisition_source: 'reddit',
+            signup_surface: 'extension',
+            install_id: INSTALL_ID,
+            first_utm_source: 'reddit',
+        })
+    })
+
+    it('an explicit record wins over a cookie on the request', async () => {
+        await recordSignup({
+            user: extensionUser,
+            headers: cookieHeaders({
+                firstTouch: { ...firstTouch, utm_source: 'from-cookie' },
+            }),
+            method: 'google',
+            surface: 'extension',
+            firstTouch,
+        })
+        expect(
+            posthogServerMock.captureServerEvent.mock.calls[0]![0].properties
+                .source,
+        ).toBe('reddit')
+    })
+
+    it('identifies the extension person with the browser identify builder: email, $email, name, user id, account age', async () => {
+        await recordSignup({
+            user: extensionUser,
+            headers: null,
+            method: 'google',
+            surface: 'extension',
+            firstTouch,
+            installId: INSTALL_ID,
+        })
+
+        expect(
+            posthogServerMock.captureServerEvent.mock.calls[0]![0].properties
+                .$set,
+        ).toEqual({
+            email: 'shopper@example.com',
+            $email: 'shopper@example.com',
+            name: 'Sam Shopper',
+            rc_app_user_id: 'user_1',
+            user_created_at: '2026-10-14T09:30:00.000Z',
+        })
+    })
+
+    it('a build that sends no attribution (old extension) stays source "unknown", has no install_id, and the person is still identified', async () => {
+        await recordSignup({
+            user: extensionUser,
+            headers: null,
+            method: 'apple',
+            surface: 'extension',
+            firstTouch: null,
+            installId: null,
+        })
+
+        const capture = posthogServerMock.captureServerEvent.mock.calls[0]![0]
+        expect(capture.properties.source).toBe('unknown')
+        expect(capture.properties).not.toHaveProperty('install_id')
+        expect(capture.properties.$set_once).not.toHaveProperty('install_id')
+        expect(capture.properties.$set).toMatchObject({
+            email: 'shopper@example.com',
+        })
+    })
+
+    it('a WEB signup is not identified from the server (the browser does that), so the two never race', async () => {
+        await recordSignup({
+            user: extensionUser,
+            headers: cookieHeaders({ firstTouch }),
+            method: 'email',
+            surface: 'web',
+        })
+        expect(
+            posthogServerMock.captureServerEvent.mock.calls[0]![0].properties,
+        ).not.toHaveProperty('$set')
+    })
+})
+
 describe('classifySignupMethod (which better-auth endpoint created the user)', () => {
     it.each([
         [{ path: '/sign-up/email' }, 'email'],

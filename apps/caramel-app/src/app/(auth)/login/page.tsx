@@ -57,8 +57,23 @@ export const metadata: Metadata = {
 export default async function Login({
     searchParams,
 }: {
-    searchParams: Promise<{ verified?: string; error?: string | string[] }>
+    searchParams: Promise<{
+        verified?: string
+        error?: string | string[]
+        provider?: string | string[]
+    }>
 }) {
-    const { verified, error } = await searchParams
-    return <LoginPageClient verified={verified} error={error} />
+    const { verified, error, provider } = await searchParams
+    // `?provider=apple|google` is the extension deep-link (Safari/Firefox open
+    // the login page preset to a provider). Normalize to the two real values
+    // and ignore anything else, so a junk param can never auto-launch.
+    const raw = Array.isArray(provider) ? provider[0] : provider
+    const autoProvider = raw === 'google' || raw === 'apple' ? raw : undefined
+    return (
+        <LoginPageClient
+            verified={verified}
+            error={error}
+            autoProvider={autoProvider}
+        />
+    )
 }

@@ -5,6 +5,10 @@ import {
     ExtensionOAuthEmailRequiredError,
     mintExtensionSession,
 } from '@/lib/auth/extensionOAuthSession'
+import {
+    resolveExtensionAttribution,
+    type ExtensionSignupAttribution,
+} from '@/lib/auth/extensionSignupAttribution'
 import { env } from '@/lib/env'
 import { BASE_URL } from '@/lib/env.client'
 import { createHmac, timingSafeEqual } from 'crypto'
@@ -17,25 +21,32 @@ interface OAuthStatePayload {
     provider: string
     redirectUri: string
     iat: number
+    /**
+     * The Safari flow's install id + first-touch record, signed into the state
+     * by /authorize (its exchange runs server-side, so the extension cannot
+     * put them in the POST body). Unvalidated shape here: re-validated on read.
+     */
+    attribution?: { iid?: unknown; firstTouch?: unknown }
 }
 
+/** The state's payload when its signature, provider, redirect URI and age all hold; else null. */
 function verifySignedState(
     state: string,
     expected: { provider: 'google' | 'apple'; redirectUri: string },
-): boolean {
+): OAuthStatePayload | null {
     if (!OAUTH_STATE_SECRET) {
         console.error('EXTENSION_OAUTH_STATE_SECRET is not configured')
-        return false
+        return null
     }
 
     const [payloadB64, sig] = state.split('.')
-    if (!payloadB64 || !sig) return false
+    if (!payloadB64 || !sig) return null
 
     let payloadJson: string
     try {
         payloadJson = Buffer.from(payloadB64, 'base64url').toString()
     } catch {
-        return false
+        return null
     }
 
     const expectedSig = createHmac('sha256', OAUTH_STATE_SECRET)
@@ -46,28 +57,28 @@ function verifySignedState(
     const expectedBuf = Buffer.from(expectedSig)
 
     if (sigBuf.length !== expectedBuf.length) {
-        return false
+        return null
     }
 
     if (!timingSafeEqual(sigBuf, expectedBuf)) {
-        return false
+        return null
     }
 
     let payload: OAuthStatePayload
     try {
         payload = JSON.parse(payloadJson)
     } catch {
-        return false
+        return null
     }
 
-    if (payload.provider !== expected.provider) return false
-    if (payload.redirectUri !== expected.redirectUri) return false
+    if (payload.provider !== expected.provider) return null
+    if (payload.redirectUri !== expected.redirectUri) return null
 
-    if (typeof payload.iat !== 'number') return false
+    if (typeof payload.iat !== 'number') return null
     const maxAgeMs = 5 * 60 * 1000
-    if (Date.now() - payload.iat > maxAgeMs) return false
+    if (Date.now() - payload.iat > maxAgeMs) return null
 
-    return true
+    return payload
 }
 
 // Strict on presence/shape only (missing/invalid-typed provider/code/
@@ -81,6 +92,14 @@ const OAuthExchangeBodySchema = z.object({
     code: z.string().min(1),
     state: z.string().min(1),
     redirectUri: z.string().min(1),
+    // OPTIONAL attribution from builds that carry it (old builds send neither).
+    // Deliberately `unknown`: a malformed value must be dropped with a Sentry
+    // warning (resolveExtensionAttribution), never turned into a 422 that
+    // would block a sign-in over analytics. The real validation shares
+    // INSTALL_ID_PATTERN and firstTouchRecordSchema with the rest of the
+    // attribution pipeline.
+    iid: z.unknown().optional(),
+    firstTouch: z.unknown().optional(),
 })
 
 // CORS TIGHTENS here: was any `chrome-extension://…` / `moz-extension://…`
@@ -104,11 +123,30 @@ export const POST = withRoute(
     async ({ req, body }) => {
         const { provider, code, state, redirectUri } = body
 
-        if (!verifySignedState(state, { provider, redirectUri })) {
+        const verifiedState = verifySignedState(state, {
+            provider,
+            redirectUri,
+        })
+        if (!verifiedState) {
             return NextResponse.json(
                 { error: 'Invalid or expired OAuth state' },
                 { status: 400 },
             )
+        }
+
+        // The body's fields win; the signed state carries the Safari flow's.
+        const bodyAttribution = resolveExtensionAttribution(
+            { iid: body.iid, firstTouch: body.firstTouch },
+            'oauth_body',
+        )
+        const stateAttribution = resolveExtensionAttribution(
+            verifiedState.attribution ?? {},
+            'authorize_query',
+        )
+        const attribution: ExtensionSignupAttribution = {
+            installId: bodyAttribution.installId ?? stateAttribution.installId,
+            firstTouch:
+                bodyAttribution.firstTouch ?? stateAttribution.firstTouch,
         }
 
         try {
@@ -216,6 +254,7 @@ export const POST = withRoute(
                         emailVerified: true,
                     },
                     tokens: { accessToken: access_token, idToken: id_token },
+                    attribution,
                 })
 
                 return NextResponse.json(minted)
@@ -346,6 +385,7 @@ export const POST = withRoute(
                             accessToken: access_token,
                             idToken: id_token,
                         },
+                        attribution,
                     })
                     return NextResponse.json(minted)
                 } catch (error) {

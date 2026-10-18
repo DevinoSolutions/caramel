@@ -41,7 +41,14 @@ const VALID_COUPON = {
 
 const NON_GATED = {
     gated: false as const,
-    coupons: { inserted: 1, updated: 0, skippedOlder: 0, tombstoned: 0 },
+    coupons: {
+        inserted: 1,
+        updated: 0,
+        skippedOlder: 0,
+        tombstoned: 0,
+        skippedReferral: 0,
+        skippedIdMismatch: 0,
+    },
     storeConfigs: { upserted: 0 },
     sources: { upserted: 0 },
 }
@@ -133,6 +140,8 @@ describe('POST /api/ingest/catalog — body validation + gate mapping', () => {
                 updated: 0,
                 skippedOlder: 0,
                 tombstoned: 0,
+                skippedReferral: 0,
+                skippedIdMismatch: 0,
             },
             storeConfigs: { upserted: 0 },
             sources: { upserted: 0 },

@@ -3,10 +3,13 @@ import {
     caramelGetCodeSharingConsent,
     caramelGetSession,
     caramelGetSettings,
+    caramelRequestUsageDiagnosticsPermission,
     caramelSendMessage,
     caramelSetCodeSharingConsent,
     caramelSetSettings,
+    caramelSetUsageDiagnosticsConsent,
     caramelSyncSavings,
+    caramelUsageDiagnosticsActive,
     logError,
 } from '../../../caramel-base.js'
 import { caramelUrl } from '../../../popup-core.js'
@@ -49,6 +52,10 @@ export function SettingsView({
     // (checkoutCodeSharingConsent). No record, a declined one, or one that
     // could not be read all display OFF.
     const [shareCodes, setShareCodes] = useState(false)
+    // Anonymous usage diagnostics are ON only while the consent is accepted AND
+    // (Firefox) the browser's data-collection grant is held; an unreadable
+    // record displays OFF, like the sharing switch.
+    const [diagnostics, setDiagnostics] = useState(false)
 
     useEffect(() => {
         let alive = true
@@ -59,17 +66,23 @@ export function SettingsView({
                 logError('settings: code-sharing consent read', err)
                 return null
             }),
+            caramelUsageDiagnosticsActive().catch((err: unknown) => {
+                logError('settings: usage-diagnostics read', err)
+                return false
+            }),
         ]).then(
-            ([loaded, session, consent]: [
+            ([loaded, session, consent, diagnosticsActive]: [
                 Settings,
                 { token?: string } | null,
                 { choice: string } | null,
+                boolean,
             ]) => {
                 if (!alive) return
                 setSettings(loaded)
                 setSyncSavings(loaded.syncSavings)
                 setHasAccount(!!session?.token)
                 setShareCodes(consent?.choice === 'accepted')
+                setDiagnostics(diagnosticsActive)
             },
         )
         return () => {
@@ -114,6 +127,35 @@ export function SettingsView({
             setShareCodes(!requested)
             showToast('Couldn’t change that setting. Please try again.')
         }
+    }
+
+    // Turning this ON is the explicit opt-in. On Firefox the browser's own
+    // data-collection prompt comes first, and the request must leave straight
+    // out of the click (no await before it); a refused prompt records nothing.
+    // Turning it OFF records `declined`, which also deletes the telemetry id.
+    const toggleDiagnostics = (requested: boolean) => {
+        setDiagnostics(requested)
+        const undo = (err: unknown) => {
+            logError('settings: usage-diagnostics write', err)
+            setDiagnostics(!requested)
+            showToast('Couldn’t change that setting. Please try again.')
+        }
+        if (!requested) {
+            caramelSetUsageDiagnosticsConsent('declined').catch(undo)
+            return
+        }
+        caramelRequestUsageDiagnosticsPermission()
+            .then(async (granted: boolean) => {
+                if (!granted) {
+                    setDiagnostics(false)
+                    showToast(
+                        'Your browser did not allow it, so nothing was turned on.',
+                    )
+                    return
+                }
+                await caramelSetUsageDiagnosticsConsent('accepted')
+            })
+            .catch(undo)
     }
 
     const toggleSite = async (checked: boolean) => {
@@ -215,6 +257,24 @@ export function SettingsView({
                     onChange={e =>
                         void toggleShareCheckoutCodes(e.target.checked)
                     }
+                />
+            </label>
+
+            <label className="settings-row">
+                <span className="settings-copy">
+                    <span>Send anonymous usage diagnostics</span>
+                    <small>
+                        Only at checkout on a supported store. Never your codes,
+                        your cart, the other pages you visit, or anything that
+                        identifies you.
+                    </small>
+                </span>
+                <input
+                    type="checkbox"
+                    id="usageDiagnosticsToggle"
+                    className="settings-switch"
+                    checked={diagnostics}
+                    onChange={e => toggleDiagnostics(e.target.checked)}
                 />
             </label>
 

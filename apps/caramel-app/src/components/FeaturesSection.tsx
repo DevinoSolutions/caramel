@@ -1,6 +1,7 @@
 'use client'
 
 import InstallSurfaceGate from '@/components/growth/InstallSurfaceGate'
+import { trackGrowthEvent } from '@/lib/analytics/growthEvents'
 import { useReducedMotion } from '@/lib/reducedMotion'
 import { m } from 'framer-motion'
 import {
@@ -423,6 +424,16 @@ export default function FeaturesSection() {
                                             href={browser.href}
                                             target="_blank"
                                             rel="noopener noreferrer"
+                                            onClick={() =>
+                                                trackGrowthEvent(
+                                                    'install_cta_click',
+                                                    {
+                                                        store: browser.name.toLowerCase(),
+                                                        placement:
+                                                            'home_features',
+                                                    },
+                                                )
+                                            }
                                             whileHover={{
                                                 scale: 1.05,
                                                 transition: { duration: 0.2 },

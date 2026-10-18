@@ -30,24 +30,31 @@ const SHIPPED_TO_STRANGERS = [
     // from disk here — the environment pins own it (env-stamp.test.mjs)
     'coupon-constants.generated.js',
     'cart-signals.js',
+    'extension-capabilities.js',
     'caramel-base.js',
     'dom-utils.js',
     'coupon-box-discovery.js',
     'store-detect.js',
     'coupon-apply.js',
     'code-capture.js',
+    'code-share-funnel.js',
     'code-sharing-consent.js',
     'coupon-fetch.js',
     'coupon-runner.js',
     'UI-helpers.js',
     'inject.js',
+    'install-attribution.js',
+    'permissions-api.js',
+    'usage-diagnostics-consent.js',
     'background.js',
     'extension-activity.js',
 ]
 // Not in any entrypoint's import graph, but shipped and run in the store's
 // page all the same: the build copies it beside the bundle and the finder
 // imports it by URL when it asks the server for a box (wxt.config.ts).
-const LOADED_ON_DEMAND = ['coupon-box-outline.js']
+// porkbun-alert-shim.js is the same kind of case: its own MAIN-world entry
+// (entrypoints/porkbun-alert.content.ts), run in porkbun.com's page.
+const LOADED_ON_DEMAND = ['coupon-box-outline.js', 'porkbun-alert-shim.js']
 
 function ungatedConsoleLines(file) {
     const src = readFileSync(join(root, file), 'utf8')

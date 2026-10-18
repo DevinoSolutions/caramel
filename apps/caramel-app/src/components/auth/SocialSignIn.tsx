@@ -3,12 +3,21 @@
 import { socialButtonClasses } from '@/components/auth/authStyles'
 import { trackGrowthEvent } from '@/lib/analytics/growthEvents'
 import { signIn } from '@/lib/auth/client'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { FaApple } from 'react-icons/fa'
 import { FcGoogle } from 'react-icons/fc'
 import { toast } from 'sonner'
 
 type Provider = 'google' | 'apple'
+
+// How long a successful signIn.social may leave the page before we decide the
+// navigation was abandoned and give the buttons back. Measured in desktop
+// Safari (2026-10-17): the Apple redirect opens Safari's NATIVE "Sign in with
+// Apple" sheet instead of loading appleid.apple.com, and cancelling it fires
+// no event at all on the page (no focus, blur, visibilitychange or pageshow) —
+// the page just stays, so elapsed time is the only signal there is. A normal
+// redirect unloads the page well inside this window.
+export const ABANDONED_REDIRECT_MS = 6000
 
 const PROVIDER_LABEL: Record<Provider, string> = {
     google: 'Google',
@@ -30,11 +39,24 @@ const PROVIDER_LABEL: Record<Provider, string> = {
 export default function SocialSignIn({
     verb = 'Sign in',
     callbackURL = '/',
+    autoStart,
 }: {
     verb?: 'Sign in' | 'Sign up'
     callbackURL?: string
+    // When set, immediately launch that provider on mount, as if the matching
+    // button were clicked. This is the extension deep-link: Safari/Firefox open
+    // /login?provider=apple in a tab so the sign-in goes straight to the
+    // provider with no extra tap. Only the two real providers are honored.
+    autoStart?: Provider
 }) {
     const [pending, setPending] = useState<Provider | null>(null)
+    const abandonTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+    useEffect(
+        () => () => {
+            if (abandonTimer.current) clearTimeout(abandonTimer.current)
+        },
+        [],
+    )
 
     const handle = async (provider: Provider) => {
         setPending(provider)
@@ -54,12 +76,31 @@ export default function SocialSignIn({
                 return
             }
             // On success signIn.social navigates away to the provider, so the
-            // pending state intentionally stays set until the page unloads.
+            // pending state stays set while the page unloads — unless the page
+            // is still here after ABANDONED_REDIRECT_MS (a cancelled native
+            // Apple sheet, a stopped load), when "Redirecting…" would
+            // otherwise sit on disabled buttons until a reload.
+            if (abandonTimer.current) clearTimeout(abandonTimer.current)
+            abandonTimer.current = setTimeout(
+                () => setPending(null),
+                ABANDONED_REDIRECT_MS,
+            )
         } catch {
             toast.error('Something went wrong. Please try again later.')
             setPending(null)
         }
     }
+
+    // Fire the deep-linked provider exactly once. A ref, not state: React 18
+    // StrictMode double-invokes effects in dev, and signIn.social kicks off a
+    // navigation we must not start twice.
+    const autoStarted = useRef(false)
+    useEffect(() => {
+        if (autoStart && !autoStarted.current) {
+            autoStarted.current = true
+            void handle(autoStart)
+        }
+    }, [autoStart])
 
     return (
         <div className="space-y-3">

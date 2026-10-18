@@ -174,6 +174,32 @@ const PrivacyPolicy = () => {
                                 tabs or apply coupons), and it is not sent by
                                 Caramel for Firefox, Safari or Microsoft Edge.
                             </>,
+                            <>
+                                <strong>
+                                    Anonymous usage diagnostics, only if you opt
+                                    in.
+                                </strong>{' '}
+                                If you press Allow on the extension&apos;s
+                                &quot;Help improve Caramel?&quot; card, or
+                                switch on &quot;Send anonymous usage
+                                diagnostics&quot; in its settings (it is off by
+                                default; Firefox also asks for its own
+                                permission), the extension sends anonymous
+                                diagnostics when you are at checkout on a
+                                supported store: which store, whether the
+                                code-sharing offer appeared, and why a code
+                                wasn&apos;t shared, along with the extension
+                                version and your browser. These events go to our
+                                self-hosted analytics under a random ID created
+                                on this device when you opt in, not linked to
+                                your account or install ID. They never include
+                                your codes, your cart, the other pages you
+                                visit, or anything that identifies you. You can
+                                change this anytime in the extension&apos;s
+                                settings. Switching it off deletes this
+                                device&apos;s random diagnostics ID; anything
+                                already sent can&apos;t be linked back to you.
+                            </>,
                         ]}
                     />
                     <Sub>If you create an account or sign in</Sub>
@@ -194,6 +220,17 @@ const PrivacyPolicy = () => {
                                 in. Our server records the session along with
                                 the IP address and browser type it was created
                                 from.
+                            </>,
+                            <>
+                                <strong>How you first found Caramel.</strong>{' '}
+                                Our website keeps a small first-party record of
+                                the campaign, link or site that first sent you
+                                to it, and the first page you landed on, and
+                                links it to your account when you sign up. If
+                                you sign in from the extension, it sends us the
+                                same record, which it reads only from
+                                grabcaramel.com, together with a random install
+                                ID, so your account is attributed the same way.
                             </>,
                             <>
                                 <strong>Favorite stores</strong> you mark in the
@@ -426,6 +463,11 @@ const PrivacyPolicy = () => {
                             'Sentry (self-hosted): error monitoring, which includes session replay on a sample of sessions and on every session where an error occurs (form fields are masked).',
                         ]}
                     />
+                    <Para>
+                        Neither PostHog nor Sentry records a session replay when
+                        your browser sends a Global Privacy Control or Do Not
+                        Track signal.
+                    </Para>
                     <Para>
                         The website uses cookies to keep you signed in and for
                         the analytics above. You can block or delete cookies in

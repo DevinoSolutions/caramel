@@ -15,60 +15,29 @@
 
 import { isSafariExtensionRuntime } from './caramel-base.js'
 import { CARAMEL_BASE_URL } from './caramel-env.js'
+import { getPermissionsApi } from './permissions-api.js'
 
-/**
- * The permissions API as PROMISES, or null where the runtime has none.
- *
- * Firefox and Safari expose a promise-style `browser.permissions`; Chrome and
- * Edge expose a callback-style `chrome.permissions`. The distinction is not
- * cosmetic here: caramel-base's bootstrap resolves `currentBrowser` to
- * `chrome` FIRST when both globals exist, which on Firefox is the
- * callback-shaped object — so reading the API off `currentBrowser` and calling
- * `.then` on the result would silently do nothing on the one browser this
- * whole module was written for. Prefer `browser` explicitly, wrap `chrome`.
- */
-function getPermissionsApi() {
-    const promiseStyle = globalThis.browser?.permissions
-    if (promiseStyle && typeof promiseStyle.contains === 'function') {
-        return {
-            contains: perms => promiseStyle.contains(perms),
-            request: perms => promiseStyle.request(perms),
-        }
-    }
-
-    const callbackStyle = globalThis.chrome?.permissions
-    if (callbackStyle && typeof callbackStyle.contains === 'function') {
-        const wrap = method => perms =>
-            new Promise((resolve, reject) => {
-                try {
-                    callbackStyle[method](perms, result => {
-                        const err = globalThis.chrome?.runtime?.lastError
-                        if (err) reject(new Error(err.message || String(err)))
-                        else resolve(result)
-                    })
-                } catch (e) {
-                    reject(e)
-                }
-            })
-        return { contains: wrap('contains'), request: wrap('request') }
-    }
-
-    return null
-}
-
-// The match pattern that MEANS "every website" to this runtime.
-//
-// Safari only treats <all_urls> (or *://*/*) as the every-website grant —
-// handed https://*/* it records a narrower permission and the "Always Allow on
-// Every Website" state never turns on. Chrome, Edge and Firefox take
-// https://*/*, which is exactly what the manifest's host_permissions asks for,
-// so contains() compares like against like.
+// The pattern we ASK for. Safari only treats <all_urls> (or *://*/*) as the
+// every-website grant — handed https://*/* it records a narrower permission
+// and the "Always Allow on Every Website" state never turns on. Chrome, Edge
+// and Firefox take https://*/*, which is exactly what the manifest's
+// host_permissions asks for.
 //
 // Line comments rather than a block: the patterns themselves contain `*/`,
 // which would close a /* */ comment mid-sentence.
-export function allSitesOriginPattern() {
+export function allSitesRequestPattern() {
     return isSafariExtensionRuntime() ? '<all_urls>' : 'https://*/*'
 }
+
+// The pattern we ask ABOUT, on every runtime. Deliberately not the request
+// pattern: measured in Safari 26 on macOS (2026-10-17), with "Always Allow on
+// Every Website" on, permissions.getAll() lists `<all_urls>` and yet
+// contains({ origins: ['<all_urls>'] }) answers false — so asking about the
+// pattern we requested told every fully-enabled Safari install it could not
+// run on every store. contains() with https://*/* answered true there, and
+// false once the grant was narrowed to single sites, which is the question
+// the banner actually asks: can the content script run on any https store.
+const ALL_SITES_CONTAINS_PATTERN = 'https://*/*'
 
 /**
  * Does the browser hold the every-website grant? `true` / `false`, or `null`
@@ -87,7 +56,7 @@ export function resolveAllSitesGranted() {
     const api = getPermissionsApi()
     if (!api) return Promise.resolve(null)
     return api
-        .contains({ origins: [allSitesOriginPattern()] })
+        .contains({ origins: [ALL_SITES_CONTAINS_PATTERN] })
         .then(has => (typeof has === 'boolean' ? has : null))
         .catch(() => null)
 }
@@ -161,11 +130,17 @@ export async function resolvePermissionState() {
  * popup down while the prompt is open, taking this continuation with it. That
  * is fine and deliberate — the popup re-derives permission state on every
  * open, so the next open shows the truth either way.
+ *
+ * On Safari this usually changes nothing: measured on macOS Safari 26
+ * (2026-10-17), request() for `<all_urls>` resolved `true` from a real key
+ * press without showing a prompt or recording a grant. The callers keep the
+ * call (a Safari that does prompt gets the one-click path) and show Safari's
+ * own menu route next to it — see SafariAllSitesSteps.
  */
 export function requestAllSites(onGranted) {
     const api = getPermissionsApi()
     if (!api) return
-    api.request({ origins: [allSitesOriginPattern()] })
+    api.request({ origins: [allSitesRequestPattern()] })
         .then(granted => {
             if (granted) onGranted()
         })

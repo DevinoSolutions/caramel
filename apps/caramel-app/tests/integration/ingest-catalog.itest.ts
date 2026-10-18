@@ -98,6 +98,71 @@ describe('applyCatalogRows — only-if-newer (real pg :58005)', () => {
     })
 })
 
+describe('applyCatalogRows — an id that holds a different coupon is never overwritten (real pg)', () => {
+    // Prod 2026-10-18: the bridge-sync seed (dev coupons DB) and the prod
+    // pipeline DB minted the same ids for different coupons, e.g. 103346 is
+    // vitabiotics.com GPN10 in the catalog and unbounce.com JhonDodo88 in the
+    // pipeline. A newer pipeline row must not replace the stored coupon.
+    it('skips a newer push whose site and code differ, and the stored row stays byte-for-byte', async () => {
+        const id = '800000095'
+        await applyCatalogRows(
+            push([
+                coupon(id, '2026-08-03T02:33:07.000Z', {
+                    site: 'vitabiotics.com',
+                    code: 'GPN10',
+                    status: 'pending',
+                }),
+            ]),
+        )
+        const before = await prisma.coupon.findUnique({ where: { id } })
+
+        const r = await applyCatalogRows(
+            push([
+                coupon(id, '2026-10-18T10:05:30.000Z', {
+                    site: 'unbounce.com',
+                    code: 'JhonDodo88',
+                    title: 'Unbounce Referral Code',
+                    description: 'Refer a friend',
+                    status: 'invalid',
+                }),
+            ]),
+        )
+        expect(r.gated).toBe(false)
+        if (r.gated) return
+        expect(r.coupons.skippedIdMismatch).toBe(1)
+        expect(r.coupons.updated).toBe(0)
+        expect(r.coupons.tombstoned).toBe(0)
+        expect(await prisma.coupon.findUnique({ where: { id } })).toEqual(
+            before,
+        )
+    })
+
+    it('still updates the same coupon when only the letter case of the code differs', async () => {
+        const id = '800000096'
+        await applyCatalogRows(
+            push([coupon(id, '2026-07-14T12:00:00.000Z', { code: 'save10' })]),
+        )
+
+        const r = await applyCatalogRows(
+            push([
+                coupon(id, '2026-07-14T18:00:00.000Z', {
+                    code: 'SAVE10',
+                    site: 'eBay.com',
+                    title: 't-v2',
+                }),
+            ]),
+        )
+        expect(r.gated).toBe(false)
+        if (r.gated) return
+        expect(r.coupons.updated).toBe(1)
+        expect(r.coupons.skippedIdMismatch).toBe(0)
+        const row = await prisma.coupon.findUnique({ where: { id } })
+        expect(row?.title).toBe('t-v2')
+        expect(row?.code).toBe('SAVE10')
+        expect(row?.site).toBe('ebay.com')
+    })
+})
+
 describe('applyCatalogRows — a partial store_config never deletes a selector', () => {
     // The producer's served rows are SPARSE (measured 2026-08-14 over 2,132 stores:
     // dismiss_button_xpath null on 97.8%, show_input_xpath on 74.6%), and the schema

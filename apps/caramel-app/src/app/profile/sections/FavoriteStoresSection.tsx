@@ -2,6 +2,7 @@
 
 import EmptyState from '@/components/profile/EmptyState'
 import ProfileSection from '@/components/profile/ProfileSection'
+import { trackGrowthEvent } from '@/lib/analytics/growthEvents'
 import { CHROME_WEB_STORE_URL } from '@/lib/brandLinks'
 import { promptSupportOnFailure } from '@/lib/feedback/promptSupportOnFailure'
 import {
@@ -129,6 +130,16 @@ export default function FavoriteStoresSection({
                                         href={CHROME_WEB_STORE_URL}
                                         target="_blank"
                                         rel="noopener noreferrer"
+                                        onClick={() =>
+                                            trackGrowthEvent(
+                                                'install_cta_click',
+                                                {
+                                                    store: 'chrome',
+                                                    placement:
+                                                        'profile_favorites',
+                                                },
+                                            )
+                                        }
                                         className={secondaryButtonClasses}
                                     >
                                         Get the extension

@@ -1017,6 +1017,7 @@ body {
    deliberately quiet: a tinted strip, not an error. */
 .all-sites-banner {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 10px;
     margin-bottom: 12px;
@@ -1035,6 +1036,14 @@ body {
     line-height: 1.4;
     color: var(--cm-text-secondary);
 }
+/* Safari's menu route, shown in place of the Enable button once it has been
+   clicked: its own full-width line under the sentence. Beats the
+   `.all-sites-banner p` rule above, which would squeeze it into the row. */
+.all-sites-banner .permission-manual-note {
+    flex-basis: 100%;
+    margin: 0;
+    color: var(--cm-text-muted-2);
+}
 .all-sites-banner-btn {
     flex: none;
     padding: 6px 12px;
@@ -1049,6 +1058,54 @@ body {
 }
 .all-sites-banner-btn:hover {
     background: var(--cm-brand-strong);
+}
+
+/* --- Anonymous-diagnostics ask (UsageDiagnosticsCard) -----------
+   Shown once, until answered. "Allow" and "No thanks" share ONE rule: same
+   size, weight and look, neither focused or pre-selected, so declining is
+   exactly as easy as accepting. */
+.diagnostics-card {
+    margin-bottom: 12px;
+    padding: 12px;
+    border-radius: 10px;
+    background: var(--cm-brand-soft);
+    border: 1px solid var(--cm-brand-soft-4);
+    text-align: left;
+}
+.diagnostics-card h3 {
+    margin: 0 0 6px;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--cm-text-primary);
+}
+.diagnostics-card p {
+    margin: 0 0 10px;
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--cm-text-secondary);
+}
+.diagnostics-card-actions {
+    display: flex;
+    gap: 8px;
+}
+.diagnostics-card-btn {
+    flex: 1;
+    padding: 7px 12px;
+    border: 1px solid var(--cm-brand);
+    border-radius: 8px;
+    background: var(--cm-surface);
+    color: var(--cm-brand);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background var(--cm-dur-fast) var(--cm-ease);
+}
+.diagnostics-card-btn:hover:not(:disabled) {
+    background: var(--cm-brand-soft-3);
+}
+.diagnostics-card-btn:disabled {
+    cursor: default;
+    opacity: 0.6;
 }
 
 /* The Safari fallback instructions under the permission view's button — the

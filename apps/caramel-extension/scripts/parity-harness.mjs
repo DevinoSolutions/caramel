@@ -169,6 +169,30 @@ for (const [browser, { golden, outDir }] of Object.entries(BUILDS)) {
     }
 }
 
+/* The MAIN-world content script (porkbun.com's alert shim) hides inside the
+ * allowlisted /content_scripts diff above, which compares that array as one
+ * unit — so a build that dropped it or widened its match would still read as
+ * the same expected diff. Pin it by name, per browser: exactly one MAIN-world
+ * script, porkbun.com's checkout only, at document_start. (Safari is derived
+ * from the Chrome build by release-extension.yml and so carries the same one.)
+ * Whether a browser honours `world` is decided at runtime by the capability
+ * marker, not here: see extension-capabilities.js. */
+for (const [browser, { outDir }] of Object.entries(BUILDS)) {
+    const manifest = JSON.parse(
+        readFileSync(join(outDir, 'manifest.json'), 'utf8'),
+    )
+    const mainWorld = (manifest.content_scripts ?? []).filter(
+        cs => cs.world === 'MAIN',
+    )
+    check(
+        mainWorld.length === 1 &&
+            JSON.stringify(mainWorld[0].matches) ===
+                JSON.stringify(['https://porkbun.com/checkout/*']) &&
+            mainWorld[0].run_at === 'document_start',
+        `${browser}: exactly one MAIN-world content script, porkbun.com/checkout/* at document_start (found ${JSON.stringify(mainWorld)})`,
+    )
+}
+
 /* ------------------------------------------------------- 2. file inventory */
 
 const walk = dir =>

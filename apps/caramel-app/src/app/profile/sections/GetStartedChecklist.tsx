@@ -1,6 +1,7 @@
 'use client'
 
 import ProfileSection from '@/components/profile/ProfileSection'
+import { trackGrowthEvent } from '@/lib/analytics/growthEvents'
 import { CHROME_WEB_STORE_URL } from '@/lib/brandLinks'
 import {
     bodyTextClasses,
@@ -96,6 +97,16 @@ export default function GetStartedChecklist({
                                                 href={step.cta.href}
                                                 target="_blank"
                                                 rel="noopener noreferrer"
+                                                onClick={() =>
+                                                    trackGrowthEvent(
+                                                        'install_cta_click',
+                                                        {
+                                                            store: 'chrome',
+                                                            placement:
+                                                                'profile_checklist',
+                                                        },
+                                                    )
+                                                }
                                                 className={
                                                     secondaryButtonClasses
                                                 }

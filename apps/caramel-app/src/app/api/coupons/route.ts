@@ -2,6 +2,12 @@ import { handleRouteError } from '@/lib/api/handleRouteError'
 import { withRoute } from '@/lib/api/withRoute'
 import { attachSignals } from '@/lib/couponSignals'
 import { listCoupons } from '@/lib/couponsRepo'
+import {
+    CAPABILITY_PROOF_PARAM,
+    parseCapabilityProof,
+    requiredCapabilityFor,
+} from '@/lib/extensionCapabilityGates'
+import { isExtensionOrigin } from '@/lib/rateLimit'
 import { resolveStoreDomain } from '@/lib/storeDomain'
 import { NextResponse } from 'next/server'
 
@@ -44,6 +50,31 @@ export const GET = withRoute(
             baseSite = base
         }
 
+        // Capability-gated store (extensionCapabilityGates.ts): the answer
+        // depends on WHO asks, so no shared cache may keep it — the Cloudflare
+        // rule keys on the URL, not the Origin, and would hand an extension's
+        // empty answer to the website (or the website's list to an extension).
+        const requiredCapability = baseSite
+            ? requiredCapabilityFor(baseSite)
+            : null
+        if (
+            requiredCapability &&
+            isExtensionOrigin(req) &&
+            !parseCapabilityProof(
+                url.searchParams.get(CAPABILITY_PROOF_PARAM),
+            ).has(requiredCapability)
+        ) {
+            return NextResponse.json(
+                { coupons: [], page, limit, total: 0, hasMore: false },
+                {
+                    headers: {
+                        'Cache-Control': 'private, no-store',
+                        'X-Caramel-Capability-Withheld': requiredCapability,
+                    },
+                },
+            )
+        }
+
         try {
             const skip = Math.max(0, (page - 1) * limit)
 
@@ -81,8 +112,9 @@ export const GET = withRoute(
                 },
                 {
                     headers: {
-                        'Cache-Control':
-                            'public, s-maxage=60, stale-while-revalidate=60',
+                        'Cache-Control': requiredCapability
+                            ? 'private, no-store'
+                            : 'public, s-maxage=60, stale-while-revalidate=60',
                     },
                 },
             )

@@ -37,6 +37,8 @@ function storesFromContract() {
 let onInstalled
 let createdTabs
 let tabCreateError
+let storedLocal
+let storeSetError
 let detectStoreChannel
 let welcomeUrl
 let manifestVersion
@@ -64,7 +66,14 @@ function installWorkerRealm() {
     const stub = wrap(function chromeStubRoot() {})
     for (const area of ['sync', 'local', 'session']) {
         stub.storage[area].get = (_keys, cb) => cb?.({})
-        stub.storage[area].set = (_items, cb) => cb?.()
+        stub.storage[area].set = (items, cb) => {
+            if (area === 'local') {
+                storedLocal.push(items)
+                stub.runtime.lastError = storeSetError
+            }
+            cb?.()
+            stub.runtime.lastError = undefined
+        }
         stub.storage[area].remove = (_keys, cb) => cb?.()
     }
     stub.runtime.lastError = undefined
@@ -90,6 +99,7 @@ beforeAll(async () => {
     globalThis.fetch = async () => ({ ok: false, status: 500 })
     manifestVersion = '1.4.6'
     createdTabs = []
+    storedLocal = []
     installWorkerRealm()
     const background = await import('../background.js')
     ;({ detectStoreChannel, welcomeUrl } = background)
@@ -98,7 +108,9 @@ beforeAll(async () => {
 
 beforeEach(() => {
     createdTabs.length = 0
+    storedLocal.length = 0
     tabCreateError = undefined
+    storeSetError = undefined
 })
 
 describe('runtime.onInstalled', () => {
@@ -117,6 +129,30 @@ describe('runtime.onInstalled', () => {
         expect(url.searchParams.get('store')).toBe('chrome')
         expect(url.searchParams.get('v')).toBe('1.4.6')
         expect(url.searchParams.get('iid')).toMatch(/^[0-9a-f-]{36}$/)
+    })
+
+    it('keeps the install id it put in the URL, so the sign-in can send it to the server', () => {
+        onInstalled({ reason: 'install' })
+        const iid = new URL(createdTabs[0].url).searchParams.get('iid')
+        expect(storedLocal).toEqual([{ caramel_install_attribution: { iid } }])
+    })
+
+    it('stores nothing on an update', () => {
+        onInstalled({ reason: 'update' })
+        expect(storedLocal).toEqual([])
+    })
+
+    it('still opens the welcome page when storage refuses the id (the failure is recorded, not raised)', async () => {
+        storeSetError = { message: 'quota exceeded' }
+        expect(() => onInstalled({ reason: 'install' })).not.toThrow()
+        expect(createdTabs).toHaveLength(1)
+        // logError (background) writes the failure to caramel_bg_errors.
+        await Promise.resolve()
+        await Promise.resolve()
+        const logged = storedLocal.find(items => items.caramel_bg_errors)
+        expect(logged?.caramel_bg_errors[0].where).toBe(
+            'onInstalledSaveInstallId',
+        )
     })
 
     it('mints a fresh install id per install', () => {
