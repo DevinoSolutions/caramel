@@ -10,6 +10,7 @@ import { LEARNED_KEY } from '../coupon-box-learned.js'
 import { caramelPageOutline } from '../coupon-box-outline.js'
 import { startApplyingCoupons } from '../coupon-runner.js'
 import { caramelConfiglessRecord, getDomainRecord } from '../store-detect.js'
+import { FINDER_ASSET, FINDER_FILE } from './_finder-asset.mjs'
 import { LEARNED_ACTIONS, learnedBackground } from './_learned-background.mjs'
 
 // A box someone else named: the server's pick (by its place in the outline),
@@ -105,11 +106,13 @@ function installChromeStub() {
     }
     stub.runtime.lastError = undefined
     stub.runtime.getURL = path =>
-        path === 'assets/coupon-box-learned.js'
-            ? LEARNED_FILE
-            : path === 'assets/coupon-box-outline.js'
-              ? OUTLINE_FILE
-              : 'chrome-extension://caramel/' + path
+        path === FINDER_ASSET
+            ? FINDER_FILE
+            : path === 'assets/coupon-box-learned.js'
+              ? LEARNED_FILE
+              : path === 'assets/coupon-box-outline.js'
+                ? OUTLINE_FILE
+                : 'chrome-extension://caramel/' + path
     stub.runtime.sendMessage = (message, cb) => {
         const a = message?.action
         if (a === 'fetchCoupons')

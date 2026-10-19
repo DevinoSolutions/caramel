@@ -35,6 +35,7 @@ import { transform } from 'esbuild'
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, extname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { buildFinderModule } from './finder-bundle.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 export const CACHE_DIR = '.size-cache'
@@ -63,7 +64,7 @@ export const GROUPS = {
         'cart-signals.js',
         'caramel-base.js',
         'dom-utils.js',
-        'coupon-box-discovery.js',
+        'coupon-box-finder-loader.js',
         'extension-capabilities.js',
         'store-detect.js',
         'coupon-apply.js',
@@ -135,3 +136,9 @@ await mkdir(cache, { recursive: true })
 for (const [name, files] of Object.entries(GROUPS)) {
     await buildGroup(name, typeof files === 'function' ? await files() : files)
 }
+// The finder loaded on demand is weighed as it ships: one bundled file, built
+// by the same function the build uses (scripts/finder-bundle.mjs).
+await writeFile(
+    join(cache, 'coupon-box-finder.min.js'),
+    await buildFinderModule(ROOT),
+)

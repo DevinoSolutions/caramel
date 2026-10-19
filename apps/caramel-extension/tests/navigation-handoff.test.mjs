@@ -1,5 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { initCaramelBase } from '../caramel-base.js'
+import { _caramelResetFinderLoad } from '../coupon-box-finder-loader.js'
 import { startApplyingCoupons } from '../coupon-runner.js'
 import {
     caramelMarkPendingSubmit,
@@ -10,6 +11,7 @@ import {
     getDomainRecord,
     startCheckoutDetection,
 } from '../store-detect.js'
+import { finderOnlyGetURL } from './_finder-asset.mjs'
 
 // Submitting a promo code on a classic checkout is a form POST: the page
 // navigates and takes the content script, the overlay, and everything the run
@@ -129,6 +131,7 @@ function installChromeStub() {
         }
     }
     stub.runtime.lastError = undefined
+    stub.runtime.getURL = finderOnlyGetURL
     stub.runtime.sendMessage = (message, cb) => {
         if (message?.action === 'fetchCoupons') {
             if (typeof cb === 'function') cb({ coupons: couponList })
@@ -358,6 +361,27 @@ describe('store-detect.js — the page after the navigation', () => {
 
         expect(recordedSavings).toHaveLength(1)
         expect(recordedSavings[0].amount).toBeCloseTo(11, 2)
+    })
+
+    it('a finder attempt on a page whose finder will not load: no saving, nothing thrown', async () => {
+        caramelMarkPendingSubmit('THEO20', 'c1', [110], true)
+        setTotalText('$100.00')
+        mountFinderTotal('$99.00')
+        const { runtime } = globalThis.chrome
+        _caramelResetFinderLoad()
+        runtime.getURL = () => {
+            throw new Error('Extension context invalidated.')
+        }
+        try {
+            await startCheckoutDetection()
+        } finally {
+            runtime.getURL = finderOnlyGetURL
+            _caramelResetFinderLoad()
+        }
+
+        // The same page as the measured win above: only the finder is gone,
+        // and with it the one reader of the total row the attempt used.
+        expect(recordedSavings).toEqual([])
     })
 
     it('a finder attempt measured on a subtotal is read on the subtotal after the reload', async () => {

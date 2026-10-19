@@ -75,6 +75,13 @@ beforeEach(async () => {
     setText(document.getElementById('total'), '$100.00')
     vi.resetModules()
     ;({ applyCoupon } = await import('../coupon-apply.js'))
+    // A record marked caramelFound is one the finder built, so the page has
+    // already loaded it: the apply flow reads the total through it.
+    const [{ _caramelUseLoadedFinder }, finder] = await Promise.all([
+        import('../coupon-box-finder-loader.js'),
+        import('../coupon-box-discovery.js'),
+    ])
+    _caramelUseLoadedFinder(finder)
 })
 
 describe('applyCoupon verdict — success rule', () => {
@@ -638,6 +645,44 @@ describe('applyCoupon verdict — success rule', () => {
 // promo section (message, a new input holding the code, a new button). The
 // finder's marks went with the old nodes, so the answer was never seen (the
 // full 10 s wait, no quote) and the next code found no box at all.
+describe('a finder-picked box on a page whose finder is not loaded', () => {
+    // The apply flow reads a finder record's total through the finder. A page
+    // that has not loaded it (or could not) has no way to read that total, so
+    // nothing can be measured: whatever the store prints, it is not a saving.
+    beforeEach(async () => {
+        const { _caramelResetFinderLoad } = await import(
+            '../coupon-box-finder-loader.js'
+        )
+        _caramelResetFinderLoad()
+    })
+
+    it('a price drop is not a success, and nothing throws', async () => {
+        const rec = { ...BASE, priceContainer: '#total', caramelFound: true }
+        respond(() => setText(document.getElementById('total'), '$90.00'))
+
+        const res = await applyCoupon('SAVE10', rec)
+
+        expect(res.success).toBe(false)
+    })
+
+    it('an applied row beside the drop is not a success either', async () => {
+        const rec = {
+            ...BASE,
+            successIndicator: '#applied-row',
+            priceContainer: '#total',
+            caramelFound: true,
+        }
+        respond(() => {
+            mountAppliedRow()
+            setText(document.getElementById('total'), '$90.00')
+        })
+
+        const res = await applyCoupon('SAVE10', rec)
+
+        expect(res.success).toBe(false)
+    })
+})
+
 describe('a finder-picked box the store re-draws to answer', () => {
     const SECTION = msg =>
         '<div class="promo">' +

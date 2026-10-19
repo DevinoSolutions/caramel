@@ -11,7 +11,8 @@ import {
     PICK_WAIT_MS,
 } from '../coupon-box-discovery.js'
 import { startApplyingCoupons } from '../coupon-runner.js'
-import { caramelConfiglessRecord } from '../store-detect.js'
+import { caramelConfiglessRecord, getDomainRecord } from '../store-detect.js'
+import { FINDER_ASSET, FINDER_FILE } from './_finder-asset.mjs'
 import { tabHandoffBackground } from './_tab-handoff-background.mjs'
 // The background's side of the per-tab handoffs (see the helper).
 const handoffs = tabHandoffBackground()
@@ -109,6 +110,7 @@ function installChromeStub() {
     }
     stub.runtime.lastError = undefined
     stub.runtime.getURL = path => {
+        if (path === FINDER_ASSET) return FINDER_FILE
         if (path !== 'assets/coupon-box-outline.js')
             return 'chrome-extension://caramel/' + path
         outlineLoads++
@@ -219,6 +221,9 @@ beforeEach(() => {
     answer = { outcome: 'no_box', confidence: 80, why: 'none', cached: false }
     outlineUrl = OUTLINE_FILE
     outlineLoads = 0
+    // On a page the store list has been read by detection before the runner
+    // is reached; this store is not on it.
+    getDomainRecord.cache = []
     _caramelResetDiscoveryFlag()
 })
 
@@ -369,6 +374,35 @@ describe('a pick is checked on the page before anything is touched', () => {
         )
         expect(clicks).toBe(0)
     })
+
+    // The outline now lists a short element the store made clickable itself.
+    // A "Remove" drawn that way reaches the server like any button, and the
+    // page still refuses it, as the apply button and as the toggle.
+    for (const as of ['apply button', 'toggle'])
+        it(`never uses a plain-text "Remove" as the ${as}`, async () => {
+            document.body.innerHTML =
+                '<div><input id="x" name="field_7" type="text">' +
+                '<div id="rm" tabindex="0">Remove</div></div>' +
+                TOTAL
+            let clicks = 0
+            document
+                .getElementById('rm')
+                .addEventListener('click', () => clicks++)
+            let outline = ''
+            answer = req => {
+                outline = req.outline
+                const rm = idx(req.outline, /button "Remove"/)
+                return as === 'toggle'
+                    ? box(null, null, rm)
+                    : box(idx(req.outline, /textbox/), rm)
+            }
+
+            const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+
+            expect(outline).toContain('button "Remove"')
+            expect(rec).toBeNull()
+            expect(clicks).toBe(0)
+        })
 
     it('a field the apply flow cannot type a code into is not the box', async () => {
         document.body.innerHTML =
@@ -712,11 +746,11 @@ describe('an input-only pick, driven by the real apply flow', () => {
     const unsafeForms = {
         'a form with a card number field':
             '<form>' +
-            PROMO_FIELD +
+            deep(PROMO_FIELD) +
             '<input name="cardnumber" type="text"></form>',
         'a form with a place-order control':
             '<form>' +
-            PROMO_FIELD +
+            deep(PROMO_FIELD) +
             '<button id="po" type="submit">Place order</button></form>',
     }
     for (const [name, html] of Object.entries(unsafeForms))
@@ -733,6 +767,62 @@ describe('an input-only pick, driven by the real apply flow', () => {
             expect(seen).toEqual([])
             expect(res.success).toBe(false)
             expect(document.getElementById('x').value).toBe('')
+        })
+})
+
+// The server's word does not make a control a code's: a button or a reveal
+// that adds to the cart, buys, adds a gift extra, updates the cart, subscribes
+// or signs the shopper in is never clicked, the same as for the rules.
+describe('a pick never clicks a control that is not a code', () => {
+    for (const label of [
+        'Update cart',
+        'Apply and update cart',
+        'Add gift wrap',
+        'Add a $1 donation',
+        'Subscribe',
+        'Sign up and apply',
+        'Log in',
+        'Buy now',
+    ])
+        it(`"${label}" named as the apply button is never clicked`, async () => {
+            document.body.innerHTML =
+                '<div><input id="x" name="field_7" type="text">' +
+                `<button id="b" type="button">${label}</button></div>` +
+                TOTAL
+            let clicks = 0
+            document
+                .getElementById('b')
+                .addEventListener('click', () => clicks++)
+            answer = req =>
+                box(idx(req.outline, /textbox/), idx(req.outline, /button /))
+
+            await run()
+
+            expect(pickCalls).toHaveLength(1)
+            expect(clicks).toBe(0)
+            expect(appliedWith).toHaveLength(0)
+            gaveCodesToCopy()
+        })
+
+    for (const reveal of ['Add gift wrap', 'Sign in', 'Subscribe'])
+        it(`"${reveal}" named as the reveal is never clicked`, async () => {
+            document.body.innerHTML =
+                `<button id="tg" type="button">${reveal}</button>` +
+                '<div id="panel" style="display:none"><input id="x" name="field_7" type="text">' +
+                '<button id="b" type="button">Go</button></div>' +
+                TOTAL
+            let clicks = 0
+            document.getElementById('tg').addEventListener('click', () => {
+                clicks++
+                document.getElementById('panel').style.display = ''
+            })
+            answer = req =>
+                box(null, null, idx(req.outline, new RegExp(reveal)))
+
+            expect(
+                await caramelDiscoveredRecord({ domain: 'shop.test' }),
+            ).toBeNull()
+            expect(clicks).toBe(0)
         })
 })
 
@@ -819,6 +909,64 @@ describe('the total is read again once the server has answered', () => {
         expect(pickCalls).toHaveLength(1)
         expect(appliedWith).toHaveLength(0)
         gaveCodesToCopy()
+    })
+})
+
+describe('a box the server names is judged in bounded time, whatever text sits beside it', () => {
+    // The server's button and toggle pass the same click guards as the rules'
+    // (the words beside a control, its section's name), so 40 KiB of one word
+    // beside them is read as fast as a short label. Each was over a second
+    // before.
+    const LONG = 40 * 1024
+    const BUDGET_MS = 400
+    const BLOB = `<span>${'orandcodes'.repeat(LONG / 10)}</span>`
+
+    it('the button beside a long run of one word: judged at once, and used', async () => {
+        document.body.innerHTML =
+            // The field's only coupon evidence is the form it posts to:
+            // enough for a box the server names, never for the rules.
+            '<form class="f" action="/cart/coupon">' +
+            '<input id="x" name="field_7" type="text">' +
+            '<button id="go" type="button">Go</button>' +
+            BLOB +
+            '</form>' +
+            TOTAL
+        answer = req =>
+            box(idx(req.outline, /textbox/), idx(req.outline, /button "Go/))
+
+        const t0 = performance.now()
+        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+        const ms = performance.now() - t0
+
+        expect(pickCalls).toHaveLength(1)
+        expect(document.querySelector(rec?.couponSubmit)?.id).toBe('go')
+        expect(ms).toBeLessThan(BUDGET_MS)
+    })
+
+    it('the toggle beside a long run of one word: judged at once, and opened', async () => {
+        document.body.innerHTML =
+            '<div class="fold"><button id="tg" type="button">Promo code</button>' +
+            BLOB +
+            '<div id="panel" style="display:none">' +
+            '<label for="dc">Discount code</label>' +
+            '<input id="dc" name="discount_code" type="text">' +
+            '<button id="ap" type="button">Apply</button></div></div>' +
+            TOTAL
+        let opened = 0
+        document.getElementById('tg').addEventListener('click', () => {
+            opened++
+            document.getElementById('panel').style.display = ''
+        })
+        answer = req => box(null, null, idx(req.outline, TOGGLE))
+
+        const t0 = performance.now()
+        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+        const ms = performance.now() - t0
+
+        expect(pickCalls).toHaveLength(1)
+        expect(opened).toBe(1)
+        expect(document.querySelector(rec?.couponInput)?.id).toBe('dc')
+        expect(ms).toBeLessThan(BUDGET_MS)
     })
 })
 
@@ -965,7 +1113,7 @@ describe('a pick is kept, by name, for the next page in the tab', () => {
         const rec = { domain: 'shop.test', caramelNoConfig: true }
         document.body.innerHTML =
             '<form id="promo">' +
-            PROMO_FIELD +
+            deep(PROMO_FIELD) +
             '</form>' +
             '<button id="go" type="button" form="promo">Go</button>' +
             TOTAL

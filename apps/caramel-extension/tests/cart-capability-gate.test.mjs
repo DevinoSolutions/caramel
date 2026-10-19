@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+    _caramelCartFilePath,
     _caramelCartHostname,
     getDomainRecord,
     isCheckout,
@@ -268,6 +269,32 @@ describe('isCheckout — cart intent the path does not spell out', () => {
             '/help/checkout.html',
             '/login?redirect=/cart.php',
             '/cartography.html',
+            // A store-ish parent does not make a product slug a cart, and a
+            // cart action must be the whole segment.
+            '/acestore/products/shoppingcart.aspx',
+            '/storefront/cart-organizer.html',
+            '/blog/viewcart-tips',
+            '/help/managecart-guide',
+            '/products/mycart',
+            // A cart action deep in a path, or under a parent that is not the
+            // shop's own, is a page ABOUT the action.
+            '/products/viewcart',
+            '/docs/api/viewcart',
+            '/blog/2024/05/viewcart',
+            '/a/b/c/d/viewcart',
+            '/admin/settings/managecart',
+            // More than one segment after the action: a help tree under it.
+            '/viewcart/help/how-to/faq',
+            '/viewbasket/help/faq',
+            '/app/manageCart/help/faq',
+            // An ordinary word ending in shop/store is not the shop's name.
+            '/workshop/basket.html',
+            '/giftshop/basket.html',
+            '/photoshop/checkout.html',
+            '/bishop/cart.html',
+            '/restore/cart.php',
+            // Past the three-segment limit.
+            '/en/us/shop/cart.php',
         ]) {
             setPath(url)
             expect(await isCheckout(), url).toBe(false)
@@ -290,9 +317,126 @@ describe('isCheckout — cart intent the path does not spell out', () => {
             '/checkout.php',
             '/shop/basket.aspx?cart=1',
             '/store/cart.php',
+            // The shop's own name for itself as the parent.
+            '/webshop/cart.html',
+            '/eshop/basket.aspx',
+            '/onlinestore/shoppingcart.asp',
+            // A server session parameter is not part of the page name.
+            '/shop/cart.do;jsessionid=AB12CD',
+            // A cart action as one whole segment near the top (a hosted order
+            // form).
+            '/app/manageCart/showManageOrder',
+            '/orders/viewbasket',
+            '/viewbasket',
         ]) {
             setPath(url)
             expect(await isCheckout(), url).toBe(true)
+        }
+    })
+
+    // jsdom serves every page from localhost, so the store-name rule is pinned
+    // on the function itself with the host it was measured on.
+    it('takes store or shop after the start of the store’s own name as a parent', () => {
+        const host = 'www.acefitness.org'
+        for (const url of [
+            '/acestore/shoppingcart.aspx',
+            '/acestore/shoppingcart.aspx;jsessionid=AB12CD',
+            '/acefitnessshop/cart.html',
+        ])
+            expect(_caramelCartFilePath(url, host), url).toBe(true)
+        for (const url of [
+            '/acestore/products/shoppingcart.aspx',
+            '/workshop/cart.html',
+            '/xstore/cart.html',
+        ])
+            expect(_caramelCartFilePath(url, host), url).toBe(false)
+        // The same parent on another store's host is an ordinary word.
+        expect(
+            _caramelCartFilePath('/acestore/shoppingcart.aspx', 'example.com'),
+        ).toBe(false)
+    })
+
+    it('reads the store’s name in any of its host’s labels, from three letters', () => {
+        // The shop on its own subdomain: the name is the second label.
+        expect(
+            _caramelCartFilePath(
+                '/acestore/shoppingcart.aspx',
+                'shop.acefitness.org',
+            ),
+        ).toBe(true)
+        // Two letters are too few to name a store: "re" + "store" is the word
+        // restore, even on a host that starts with "re".
+        expect(
+            _caramelCartFilePath(
+                '/restore/cart.php',
+                'restorationhardware.com',
+            ),
+        ).toBe(false)
+        expect(
+            _caramelCartFilePath(
+                '/restore/cart.php',
+                'www.restorationhardware.com',
+            ),
+        ).toBe(false)
+        // The top-level domain is not the store's name.
+        expect(
+            _caramelCartFilePath('/orgstore/cart.php', 'acefitness.org'),
+        ).toBe(false)
+    })
+
+    it('reads no path at all as no cart', () => {
+        for (const p of [undefined, null, ''])
+            expect(_caramelCartFilePath(p, 'acefitness.org'), String(p)).toBe(
+                false,
+            )
+    })
+
+    // The shopping bag is a cart only as a whole page of its own (ulta.com's
+    // cart is /bag); "bag" in a product or category path is merchandise.
+    it('opens on a shopping-bag page, and on no page that merely sells bags', async () => {
+        for (const url of [
+            '/bag',
+            '/bag/',
+            '/bag?step=1',
+            '/shopping-bag',
+            '/shoppingbag',
+            '/shopping_bag',
+            '/ShoppingBag.aspx',
+            '/mybag',
+            '/my-bag',
+            '/en/bag',
+            '/en-us/shopping-bag',
+            '/us/en/shoppingbag',
+            // A basket is already a cart word, in every shape.
+            '/basket',
+            '/en-gb/basket',
+            '/shop/basket.aspx',
+        ]) {
+            setPath(url)
+            expect(await isCheckout(), url).toBe(true)
+        }
+        for (const url of [
+            '/handbags',
+            '/handbags/',
+            '/bags',
+            '/bags/leather-tote',
+            '/collections/bag',
+            '/collections/bags',
+            '/products/tote-bag',
+            '/products/bag',
+            '/shop/bag',
+            '/store/bag',
+            '/women/bags/crossbody',
+            '/c/handbags/totes',
+            '/sleeping-bag',
+            '/bagels',
+            '/en/bags',
+            '/en/products/bag',
+            '/a/b/c/bag',
+            '/baggage-policy',
+        ]) {
+            setPath(url)
+            expect(await isCheckout(), url).toBe(false)
         }
     })
 

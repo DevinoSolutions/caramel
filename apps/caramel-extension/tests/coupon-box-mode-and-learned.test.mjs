@@ -10,6 +10,7 @@ import {
     getDomainRecord,
     isCheckout,
 } from '../store-detect.js'
+import { FINDER_ASSET, FINDER_FILE } from './_finder-asset.mjs'
 import { LEARNED_ACTIONS, learnedBackground } from './_learned-background.mjs'
 import { tabHandoffBackground } from './_tab-handoff-background.mjs'
 // The background's side of the per-tab handoffs (see the helper).
@@ -121,11 +122,13 @@ function installChromeStub() {
     }
     stub.runtime.lastError = undefined
     stub.runtime.getURL = path =>
-        path === 'assets/coupon-box-learned.js'
-            ? LEARNED_FILE
-            : path === 'assets/coupon-box-outline.js'
-              ? OUTLINE_FILE
-              : 'chrome-extension://caramel/' + path
+        path === FINDER_ASSET
+            ? FINDER_FILE
+            : path === 'assets/coupon-box-learned.js'
+              ? LEARNED_FILE
+              : path === 'assets/coupon-box-outline.js'
+                ? OUTLINE_FILE
+                : 'chrome-extension://caramel/' + path
     stub.runtime.sendMessage = (message, cb) => {
         if (handoffs.answers(message, cb)) return
         const a = message?.action

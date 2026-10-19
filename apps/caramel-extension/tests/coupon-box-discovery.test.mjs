@@ -20,6 +20,7 @@ import {
     tryInitialize,
 } from '../store-detect.js'
 import { EXT_ROOT } from './_entry-modules.mjs'
+import { finderOnlyGetURL } from './_finder-asset.mjs'
 import { tabHandoffBackground } from './_tab-handoff-background.mjs'
 // The background's side of the per-tab handoffs (see the helper).
 const handoffs = tabHandoffBackground()
@@ -111,6 +112,7 @@ function installChromeStub() {
         }
     }
     stub.runtime.lastError = undefined
+    stub.runtime.getURL = finderOnlyGetURL
     stub.runtime.sendMessage = (message, cb) => {
         if (handoffs.answers(message, cb)) return
         if (flagReadThrows && message?.action === 'couponBoxDiscoveryEnabled')
@@ -317,6 +319,253 @@ describe('what the finder must never pick', () => {
         expect(found.input?.id).toBe('pc')
         expect(found.button).toBeNull()
     })
+})
+
+// A control that adds to the cart, buys, adds a gift extra, protection or a
+// donation, updates the cart, subscribes or signs the shopper in is never the
+// box's apply button or its reveal, whatever else it says. The server's pick
+// is held to the same words (coupon-box-pick.test.mjs).
+describe('the finder never takes a control that is not a code', () => {
+    for (const label of [
+        'Apply and update cart',
+        'Update cart',
+        'Update quantity',
+        'Round up and apply',
+        'Add gift wrap',
+        'Add a gift message',
+        'Add protection',
+        'Add warranty',
+        'Add shipping insurance',
+        'Add a $1 donation',
+        'Subscribe',
+        'Sign up and apply',
+        'Sign in',
+        'Log in',
+        'Buy now',
+        'Save for later',
+    ])
+        it(`"${label}" beside a promo field is never its apply button`, () => {
+            document.body.innerHTML =
+                '<div><input id="pc" name="discount_code" type="text">' +
+                `<button id="b" type="button">${label}</button></div>` +
+                TOTAL
+
+            expect(caramelDiscoverCouponBox().button).toBeNull()
+        })
+
+    const folded = reveal =>
+        `<button id="tg" type="button" aria-expanded="false">${reveal}</button>` +
+        '<div id="panel" style="display:none"><label for="dc">Discount code</label>' +
+        '<input id="dc" name="discount_code" type="text">' +
+        '<button id="ap" type="button">Apply</button></div>' +
+        TOTAL
+    const watchReveal = () => {
+        let clicks = 0
+        document.getElementById('tg').addEventListener('click', () => {
+            clicks++
+            document.getElementById('panel').style.display = ''
+        })
+        return () => clicks
+    }
+
+    for (const reveal of [
+        'Add a gift card',
+        'Add gift wrap',
+        'Add a gift message',
+        'Sign in for a discount code',
+        'Subscribe for a promo code',
+    ])
+        it(`"${reveal}" is never clicked as the reveal`, async () => {
+            document.body.innerHTML = folded(reveal)
+            const clicks = watchReveal()
+
+            expect(caramelFinderSeesBox()).toBe(false)
+            expect(
+                await caramelDiscoveredRecord({ domain: 'shop.test' }),
+            ).toBeNull()
+            expect(clicks()).toBe(0)
+        })
+
+    it('a reveal that names a code is still clicked, and its box used (the control case)', async () => {
+        document.body.innerHTML = folded('Have a promo code?')
+        const clicks = watchReveal()
+
+        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+
+        expect(clicks()).toBe(1)
+        expect(document.querySelector(rec.couponInput)?.id).toBe('dc')
+    })
+})
+
+describe("an apply button with no apply word is taken only in the box's own panel", () => {
+    // Seven button shapes a store puts beside a promo field, two of them
+    // labelled for a screen reader ("Submit", "Go"), the rest an icon or an
+    // arrow and nothing else.
+    const SHAPES = {
+        'svg, no name': '<button id="shape" type="button"><svg></svg></button>',
+        'svg, aria "Submit"':
+            '<button id="shape" type="button" aria-label="Submit"><svg></svg></button>',
+        'arrow, aria "Go"':
+            '<button id="shape" type="button" aria-label="Go">→</button>',
+        'bare arrow': '<button id="shape" type="button">›</button>',
+        'icon span, submit':
+            '<button id="shape" type="submit"><span class="icon icon-arrow"></span></button>',
+        'input submit "›"': '<input id="shape" type="submit" value="›">',
+        'svg, class cart-remove':
+            '<button id="shape" type="button" class="cart-remove"><svg></svg></button>',
+    }
+    const FIELD =
+        '<label for="dc">Discount code</label>' +
+        '<input id="dc" name="discount_code" type="text">'
+    const LINE = name =>
+        `<div class="line"><p>${name}, organic cotton, relaxed fit, machine ` +
+        'washable, ships in recycled packaging within two business days. Free ' +
+        'returns for thirty days.</p>' +
+        '<select name="updates[]"><option>1</option><option>2</option></select>' +
+        '<span>$49.00</span>'
+    // The box's own panel, its own small form, and a whole-cart form in which
+    // the button sits in a line item, away from the box.
+    const CONTAINERS = {
+        'small panel': shape =>
+            `<div class="promo">${FIELD}${shape}</div>${TOTAL}`,
+        'small form': shape =>
+            `<form class="promo">${FIELD}${shape}</form>${TOTAL}`,
+        'whole-cart form': shape =>
+            '<form id="cart" action="/cart" method="post"><div class="items">' +
+            `${LINE('Field jacket')}<div class="actions">${shape}</div></div>` +
+            `${LINE('Wool sweater')}</div>${LINE('Canvas tote')}</div></div>` +
+            `<div class="summary"><div class="promo">${FIELD}</div>${TOTAL}</div></form>`,
+    }
+    // The two with an apply word in their aria-label are labelled, and a
+    // labelled apply is taken wherever it sits, as before. The rest are taken
+    // only in the box's own panel or small form, and a remove icon nowhere.
+    const TAKEN = {
+        'small panel': [true, true, true, true, true, true, false],
+        'small form': [true, true, true, true, true, true, false],
+        'whole-cart form': [false, true, true, false, false, false, false],
+    }
+
+    for (const [where, build] of Object.entries(CONTAINERS))
+        Object.keys(SHAPES).forEach((shape, i) =>
+            it(`${shape}, in a ${where}: ${TAKEN[where][i] ? 'taken' : 'never taken'}`, () => {
+                document.body.innerHTML = build(SHAPES[shape])
+
+                const found = caramelDiscoverCouponBox()
+
+                expect(found.input?.id).toBe('dc')
+                expect(found.button?.id === 'shape').toBe(TAKEN[where][i])
+            }),
+        )
+
+    for (const attrs of [
+        'class="qty-plus"',
+        'id="removeItem"',
+        'name="checkout"',
+        'data-action="delete"',
+        'data-testid="cart-item-trash"',
+        'class="btn" data-role="quantity-down"',
+        'class="signup-icon"',
+        'data-action="subscribe"',
+        'class="icon wishlist"',
+        'data-testid="logIn"',
+    ])
+        it(`an icon whose own attributes say so (${attrs}) is never the apply, even in the box's panel`, () => {
+            document.body.innerHTML = CONTAINERS['small panel'](
+                `<button type="button" ${attrs}><svg></svg></button>`,
+            )
+
+            expect(caramelDiscoverCouponBox().button).toBeNull()
+        })
+
+    it("an icon in the box's panel is taken over a remove icon in the same panel", () => {
+        document.body.innerHTML =
+            `<div class="promo">${FIELD}` +
+            '<button id="rm" type="button" class="cart-remove"><svg></svg></button>' +
+            '<button id="shape" type="submit" class="promo-submit"><svg></svg></button>' +
+            `</div>${TOTAL}`
+
+        expect(caramelDiscoverCouponBox().button?.id).toBe('shape')
+    })
+})
+
+describe('a product named like a loyalty program is not a rewards section', () => {
+    // A cart <form> or <section> wraps the line items and the promo box, so
+    // its first heading is a product title. A product called "Military Green
+    // Parka" must not make the promo box's Apply read as a military discount.
+    const PRODUCTS = [
+        'Military Green Parka',
+        'Student Backpack',
+        '6 Point Socket Set',
+        'Teacher Appreciation Mug',
+        'Rewards Card Wallet',
+    ]
+    const item = title =>
+        `<div class="cart-item"><h3>${title}</h3><p>Qty 1</p><span>$100.00</span></div>`
+    const linkedItem = title =>
+        `<li class="line"><a href="/products/p"><img alt=""></a>` +
+        `<h3 class="t"><a href="/products/p">${title}</a></h3>` +
+        `<span class="p">$100.00</span></li>`
+    for (const title of PRODUCTS)
+        for (const [shape, html] of [
+            [
+                'a cart form',
+                `<form action="/cart" method="post">${item(title)}${PROMO_BOX}</form>`,
+            ],
+            [
+                'a cart section',
+                `<section class="cart"><ul>${linkedItem(title)}</ul>${PROMO_BOX}</section>`,
+            ],
+            [
+                'a cart section with its own heading',
+                `<section class="cart"><h2>Your cart</h2>${item(title)}${PROMO_BOX}</section>`,
+            ],
+            [
+                'a cart section whose line item shows only a quantity',
+                `<section class="cart"><div class="row"><h3>${title}</h3>` +
+                    `<select name="qty"><option>1</option></select></div>${PROMO_BOX}</section>`,
+            ],
+        ])
+            it(`"${title}" in ${shape}: the box and its Apply are found`, () => {
+                document.body.innerHTML = html + TOTAL
+
+                expect(caramelDiscoverCouponBox().button?.id).toBe('ap')
+                expect(caramelFinderSeesBox()).toBe(true)
+            })
+
+    // The same box under a section that IS a rewards or points block, named
+    // by its own heading, legend or aria name, is still refused.
+    for (const [label, html] of [
+        [
+            'a section headed "Rewards"',
+            `<section><h3>Rewards</h3>${PROMO_BOX}</section>`,
+        ],
+        [
+            'a section headed "Use points" in a wrapper',
+            `<section><div class="hd"><h2>Use points</h2></div>${PROMO_BOX}</section>`,
+        ],
+        [
+            'a section headed "Rewards" over a balance line',
+            `<section><div class="hd"><h3>Rewards</h3><p>You have 500 points</p></div>${PROMO_BOX}</section>`,
+        ],
+        [
+            'a fieldset for members',
+            `<form><fieldset><legend>Member prices</legend>${PROMO_BOX}</fieldset></form>`,
+        ],
+        [
+            'a form named "Rewards"',
+            `<form aria-label="Rewards">${PROMO_BOX}</form>`,
+        ],
+        [
+            'a "Your rewards" section inside a cart form of products',
+            `<form>${item('Military Green Parka')}<section><h3>Your rewards</h3>${PROMO_BOX}</section></form>`,
+        ],
+    ])
+        it(`${label}: its plain Apply is never taken`, () => {
+            document.body.innerHTML = html + TOTAL
+
+            expect(caramelDiscoverCouponBox().button).toBeNull()
+            expect(caramelFinderSeesBox()).toBe(false)
+        })
 })
 
 describe('the total reader reads one row, or nothing', () => {
@@ -1314,5 +1563,70 @@ describe('a subtotal is netted only of a line the code added', () => {
                 '<div class="cl"><span>Coupon</span> <span>-$5.00 CHF</span></div>',
             ),
         ).toBe(94.99)
+    })
+})
+
+describe('the finder reads a page in bounded time, whatever text it holds', () => {
+    // Every rule is a regular expression over words the store wrote. One with
+    // an open-ended run is tried again from every character of a long word,
+    // and a page that carries 40 KiB of one (a serialized blob, a long
+    // number, a run of brackets) held the content script for seconds on each
+    // read. Each case is one such page; each was over a second before.
+    const LONG = 40 * 1024
+    const timed = fn => {
+        const t0 = performance.now()
+        const out = fn()
+        return { out, ms: performance.now() - t0 }
+    }
+    // Generous against a slow machine; the unbounded rules took seconds.
+    const BUDGET_MS = 400
+
+    it('a long word beside the Apply button: the box and its Apply, at once', () => {
+        document.body.innerHTML =
+            '<div class="promo"><label for="dc">Discount code</label>' +
+            '<input id="dc" name="discount_code" type="text">' +
+            '<button id="ap" type="button">Apply</button>' +
+            `<span>${'orandcodes'.repeat(LONG / 10)}</span></div>` +
+            TOTAL
+
+        const { out, ms } = timed(() => caramelDiscoverCouponBox())
+
+        expect(out.button?.id).toBe('ap')
+        expect(ms).toBeLessThan(BUDGET_MS)
+    })
+
+    it('a long number beside a "Total" word: the real total, at once', () => {
+        document.body.innerHTML = `<p>Total ${'1'.repeat(LONG)}x</p>` + TOTAL
+
+        const { out, ms } = timed(() => caramelFindOrderTotal())
+
+        expect(out?.textContent).toContain('$100.00')
+        expect(ms).toBeLessThan(BUDGET_MS)
+    })
+
+    it('a run of unclosed brackets beside a "Total" word: the real total, at once', () => {
+        document.body.innerHTML = `<p>Total ${'('.repeat(LONG)}</p>` + TOTAL
+
+        const { out, ms } = timed(() => caramelFindOrderTotal())
+
+        expect(out?.textContent).toContain('$100.00')
+        expect(ms).toBeLessThan(BUDGET_MS)
+    })
+
+    it('a box whose only name is a long id: found and remembered, at once', async () => {
+        const id = 'a'.repeat(LONG)
+        document.body.innerHTML =
+            `<div class="promo"><label for="${id}">Discount code</label>` +
+            `<input id="${id}" type="text">` +
+            '<button id="ap" type="button">Apply</button></div>' +
+            TOTAL
+
+        const t0 = performance.now()
+        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+        const ms = performance.now() - t0
+
+        // Letters only: not an id a framework generates, so it names the box.
+        expect(rec.caramelInputSig).toBe('i:' + id)
+        expect(ms).toBeLessThan(BUDGET_MS)
     })
 })

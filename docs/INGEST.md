@@ -67,24 +67,25 @@ the identical path.
 
 ### `coupons[]` — the `coupons` table
 
-| Field                  | Type / rule                                 | Notes                                                                         |
-| ---------------------- | ------------------------------------------- | ----------------------------------------------------------------------------- |
-| `id`                   | string or number → string, **`^\d{1,18}$`** | The pipeline coupon id; a garbage id is rejected at the write boundary.       |
-| `code`                 | string (required)                           |                                                                               |
-| `site`                 | string \| **null**                          | Column is nullable; a read query may still guarantee it non-null.             |
-| `title`                | string (required)                           |                                                                               |
-| `description`          | string (required)                           |                                                                               |
-| `rating`               | coerced number, default `0`                 |                                                                               |
-| `discount_type`        | string \| null                              | **OPEN string, stored raw** — never normalized/enum'd on write.               |
-| `discount_amount`      | coerced number \| null                      |                                                                               |
-| `expiry`               | string \| null                              | A `TEXT` column (free-form), never a real `DateTime`.                         |
-| `expired`              | boolean, default `false`                    |                                                                               |
-| `times_used`           | int ≥ 0, default `0`                        | The DB enforces the `int4` range (an out-of-range value fails the `INSERT`).  |
-| `last_time_used`       | date \| null, optional                      |                                                                               |
-| `status`               | string (required)                           | **OPEN string, stored raw** — a coupon always has a lifecycle status.         |
-| `verification_message` | string \| null                              |                                                                               |
-| `created_at`           | date, optional                              | Set on `INSERT` only; defaults to `now()` when omitted, preserved thereafter. |
-| `updated_at`           | date, **required**                          | The only-if-newer ordering key.                                               |
+| Field                  | Type / rule                                 | Notes                                                                                  |
+| ---------------------- | ------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `id`                   | string or number → string, **`^\d{1,18}$`** | The pipeline coupon id; a garbage id is rejected at the write boundary.                |
+| `code`                 | string (required)                           |                                                                                        |
+| `site`                 | string \| **null**                          | Column is nullable; a read query may still guarantee it non-null.                      |
+| `title`                | string (required)                           |                                                                                        |
+| `description`          | string (required)                           |                                                                                        |
+| `rating`               | coerced number, default `0`                 |                                                                                        |
+| `discount_type`        | string \| null                              | **OPEN string, stored raw** — never normalized/enum'd on write.                        |
+| `discount_amount`      | coerced number \| null                      |                                                                                        |
+| `expiry`               | string \| null                              | A `TEXT` column (free-form), never a real `DateTime`.                                  |
+| `expired`              | boolean, default `false`                    |                                                                                        |
+| `times_used`           | int ≥ 0, default `0`                        | The DB enforces the `int4` range (an out-of-range value fails the `INSERT`).           |
+| `last_time_used`       | date \| null, optional                      |                                                                                        |
+| `status`               | string (required)                           | **OPEN string, stored raw** — a coupon always has a lifecycle status.                  |
+| `verification_message` | string \| null                              |                                                                                        |
+| `created_at`           | date, optional                              | Set on `INSERT` only; defaults to `now()` when omitted, preserved thereafter.          |
+| `updated_at`           | date, **required**                          | The only-if-newer ordering key.                                                        |
+| `new_customers_only`   | boolean \| null, optional                   | "New customers only" label. **Absent or null = no opinion**: the stored value is kept. |
 
 ### `storeConfigs[]` — the `store_configs` table (PK `store_name`)
 
@@ -192,7 +193,9 @@ A non-gated `200` returns:
         "inserted": 0,
         "updated": 0,
         "skippedOlder": 0,
-        "tombstoned": 0
+        "tombstoned": 0,
+        "skippedReferral": 0,
+        "skippedIdMismatch": 0
     },
     "storeConfigs": { "upserted": 0 },
     "sources": { "upserted": 0 }
@@ -200,7 +203,25 @@ A non-gated `200` returns:
 ```
 
 `skippedOlder` counts rows dropped by the only-if-newer rule; `tombstoned`
-counts applied rows that flipped a visible coupon to non-visible. For
+counts applied rows that flipped a visible coupon to non-visible;
+`skippedReferral` counts personal referral codes (`isReferralCoupon` in
+`src/lib/coupons.ts`: "refer a friend", "code in the link", ...) that were not
+in the catalog yet and so were not inserted. A referral row that IS already
+stored is written with `expired = true` (the one value the engine forces, so it
+leaves via the normal tombstone path and counts toward the 20% gate).
+Exception: a referral row flagged `new_customers_only` (pushed `true`, or stored
+`true` and not cleared by an explicit `false` in the push) is a kept
+new-customer offer (owner decision 2026-10-19): it is written like any other
+row and the site labels it "New customers only".
+`skippedIdMismatch` counts rows whose id is already stored with a DIFFERENT
+coupon: another site, or another code (letter case ignored). Those rows are
+never written, so they neither update, expire nor tombstone the stored coupon;
+their ids (never codes) are logged as `[ingest/catalog] skippedIdMismatch=...`.
+The app's ids come from two id spaces (the 2026-08-08 bridge-sync seed from the
+dev coupons DB, and the prod pipeline DB that re-minted ids from 74351 on
+2026-08-10/11), so the id alone does not prove the row is the same coupon. Every
+applied push also logs one `[ingest/catalog] coupons inserted=... skippedIdMismatch=...`
+summary line. For
 `storeConfigs`/`sources`, `upserted` is the number of rows offered after dedupe
 (an idempotent re-affirmation of unchanged rows is not a failure).
 

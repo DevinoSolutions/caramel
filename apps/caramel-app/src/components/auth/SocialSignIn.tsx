@@ -10,6 +10,15 @@ import { toast } from 'sonner'
 
 type Provider = 'google' | 'apple'
 
+// How long a successful signIn.social may leave the page before we decide the
+// navigation was abandoned and give the buttons back. Measured in desktop
+// Safari (2026-10-17): the Apple redirect opens Safari's NATIVE "Sign in with
+// Apple" sheet instead of loading appleid.apple.com, and cancelling it fires
+// no event at all on the page (no focus, blur, visibilitychange or pageshow) —
+// the page just stays, so elapsed time is the only signal there is. A normal
+// redirect unloads the page well inside this window.
+export const ABANDONED_REDIRECT_MS = 6000
+
 const PROVIDER_LABEL: Record<Provider, string> = {
     google: 'Google',
     apple: 'Apple',
@@ -41,6 +50,13 @@ export default function SocialSignIn({
     autoStart?: Provider
 }) {
     const [pending, setPending] = useState<Provider | null>(null)
+    const abandonTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+    useEffect(
+        () => () => {
+            if (abandonTimer.current) clearTimeout(abandonTimer.current)
+        },
+        [],
+    )
 
     const handle = async (provider: Provider) => {
         setPending(provider)
@@ -60,7 +76,15 @@ export default function SocialSignIn({
                 return
             }
             // On success signIn.social navigates away to the provider, so the
-            // pending state intentionally stays set until the page unloads.
+            // pending state stays set while the page unloads — unless the page
+            // is still here after ABANDONED_REDIRECT_MS (a cancelled native
+            // Apple sheet, a stopped load), when "Redirecting…" would
+            // otherwise sit on disabled buttons until a reload.
+            if (abandonTimer.current) clearTimeout(abandonTimer.current)
+            abandonTimer.current = setTimeout(
+                () => setPending(null),
+                ABANDONED_REDIRECT_MS,
+            )
         } catch {
             toast.error('Something went wrong. Please try again later.')
             setPending(null)

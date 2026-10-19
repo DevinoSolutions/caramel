@@ -60,6 +60,38 @@ module.exports = [
         // coupon-runner.js) — the cookie reader pinned to the website's
         // schema, the install-id/record storage and the bounded retry.
         // Measured 111.27 -> 114.55 kB (+3.3 kB): one new capability, not prose.
+        // 2026-10-16, raised 120 -> 122 kB: the finder's safety guards (it
+        // never clicks a points, rewards, offers or settings control, judged
+        // by the control's words, its neighbours and its section's name) and
+        // the store lookup's registrable-domain check for hyphen hosts.
+        // Measured 118.05 -> 120.89 kB; 121.47 kB once the finder also never
+        // clicks a control that adds to the cart, buys, adds a gift extra,
+        // updates the cart, subscribes or signs in (noCodeClick, the same
+        // words the server-pick checks use).
+        // 2026-10-17, raised 122 -> 122.5 kB: an apply button with no apply
+        // word on it is taken only in the box's own panel, and never when its
+        // attributes say remove, quantity, checkout, pay, buy, sign in or up,
+        // subscribe or wishlist (wordlessApply). Measured 122.01 kB. The
+        // finder is ~28.5 kB of this bundle on every page; loading it on
+        // demand (coupon-box-finder.js) takes it out and brings this bundle
+        // back down to about 93.7 kB.
+        // 2026-10-17, raised 122.5 -> 123 kB: the finder never spends store
+        // credit, a gift card or a balance, reads every page in bounded time,
+        // and never clicks "Next", "Proceed" or an orders link on the
+        // server's word (the server's never-click list, byte for byte).
+        // Measured 122.58 kB.
+        // 2026-10-17, raised 123 -> 125 kB: stacked on the per-tab pick
+        // memory (a cart that reloads to show each answer keeps the server's
+        // box, found again by name). Measured 124.35 kB.
+        // 2026-10-17, lowered 125 -> 95.5 kB: the finder left this bundle. It
+        // ships as assets/coupon-box-finder.js (its own budget below) and is
+        // loaded only by a page that runs it; what stays is the flag read and
+        // the loader (coupon-box-finder-loader.js). Measured 124.35 -> 94.22
+        // kB (93.68 before the per-tab pick memory, 93.55 before the loader
+        // learned to report a failed load and to refuse a module without the
+        // hand-over), so the limit is measured + ~1.3 kB.
+        // The server-pick branch, measured against the 120 kB bundle that still
+        // held the finder:
         // 2026-10-16, raised 120 -> 122 kB: the server's pick mode
         // (rules_first / llm_first / llm_only, and the prompt asking the same
         // question per mode) and the remembered coupon box (read it first,
@@ -79,7 +111,12 @@ module.exports = [
         // #348, which brings in the notes above it dated 2026-10-15 (install
         // attribution, the porkbun capability marker) and the handoff store's
         // review fixes. Measured 128.46 kB.
-        limit: '130 KB',
+        // 2026-10-19, raised 95.5 -> 97 kB: the server pick mode and the
+        // remembered coupon box joined the on-demand finder. Their content
+        // script share (the mode read, the learned-box handoff, the resumed
+        // learn) stays in this bundle; the finder itself ships on demand.
+        // Measured 96.05 kB.
+        limit: '97 KB',
         brotli: false,
     },
     {
@@ -125,7 +162,12 @@ module.exports = [
         // sections (reported-not-working, hidden) — three new components plus
         // the storage module behind them (couponVote.ts). Measured 31.33 ->
         // 37.97 kB (+6.64 kB): one new feature surface, not prose.
-        limit: '41 KB',
+        // 2026-10-17, raised 41 -> 42 kB: Safari's own menu route for the
+        // every-website grant became a shared component (SafariAllSitesSteps)
+        // that the banner now shows too, because Safari's permissions.request()
+        // resolves without granting and left the banner's Enable button dead.
+        // Main already sat ~0.1 kB under 41 kB; this measured 41.04 kB.
+        limit: '42 KB',
         brotli: false,
     },
     {
@@ -202,6 +244,31 @@ module.exports = [
         // box. About half of it is the word allowlist every name is filtered
         // through, which is data the server's eval was measured with.
         limit: '9.2 KB',
+        brotli: false,
+    },
+    {
+        name: 'coupon-box-finder.js (loaded on demand, minified)',
+        path: '.size-cache/coupon-box-finder.min.js',
+        // 2026-10-17 — measured 29.74 kB, built exactly as it ships
+        // (scripts/finder-bundle.mjs). Not injected on every page: the
+        // content script imports it only when the finder flag is on and the
+        // page has no box a config describes. The nine-language vocabularies
+        // and the field, button, toggle and total-row readers are most of it
+        // (28.06 kB before it learned never to click a control that is not a
+        // code, 28.64 kB before an apply button with no apply word was
+        // limited to the box's own panel, 29.18 kB before it refused store
+        // credit, gift cards and balances and bounded what each rule reads,
+        // 29.65 kB before it refused the server's whole never-click list).
+        // The limit is measured + ~0.75 kB.
+        // 2026-10-17, raised 30.5 -> 32 kB: the per-tab pick memory (a cart
+        // that reloads to show each answer keeps the server's box, found again
+        // by name) ships in the finder. Measured 30.98 kB.
+        // 2026-10-19, raised 32 -> 37.5 kB: the server pick mode, the
+        // remembered coupon box and the checks on a learned apply ship in the
+        // finder now that it loads on demand. Measured 36.68 kB.
+        // It is written only here: tests/finder-module-build.test.mjs reads
+        // it.
+        limit: '37.5 KB',
         brotli: false,
     },
     {
