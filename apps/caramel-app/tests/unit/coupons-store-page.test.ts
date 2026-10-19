@@ -90,6 +90,7 @@ const couponFixture = {
     timesUsed: 5,
     status: 'valid',
     verificationMessage: null,
+    newCustomersOnly: false,
 }
 
 // listStoreCoupons's list rows carry `isSupplier` (submission_source IS NULL).

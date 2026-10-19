@@ -107,6 +107,10 @@ export const CouponListRowSchema = z.object({
     timesUsed: z.coerce.number(),
     status: z.string(),
     verificationMessage: z.string().nullable(),
+    // "New customers only" label (2026-10-19). The column is nullable (NULL =
+    // unknown); the reads select `new_customers_only IS TRUE`, so it is always
+    // a boolean here.
+    newCustomersOnly: z.boolean(),
 })
 export type CouponListRow = z.infer<typeof CouponListRowSchema>
 
