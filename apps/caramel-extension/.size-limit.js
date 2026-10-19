@@ -106,7 +106,12 @@ module.exports = [
         // sections (reported-not-working, hidden) — three new components plus
         // the storage module behind them (couponVote.ts). Measured 31.33 ->
         // 37.97 kB (+6.64 kB): one new feature surface, not prose.
-        limit: '41 KB',
+        // 2026-10-17, raised 41 -> 42 kB: Safari's own menu route for the
+        // every-website grant became a shared component (SafariAllSitesSteps)
+        // that the banner now shows too, because Safari's permissions.request()
+        // resolves without granting and left the banner's Enable button dead.
+        // Main already sat ~0.1 kB under 41 kB; this measured 41.04 kB.
+        limit: '42 KB',
         brotli: false,
     },
     {

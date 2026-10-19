@@ -62,6 +62,7 @@ function row(n: number) {
         timesUsed: 3,
         status: 'valid',
         verificationMessage: null,
+        newCustomersOnly: false,
     }
 }
 

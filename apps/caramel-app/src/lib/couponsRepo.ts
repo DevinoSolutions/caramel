@@ -313,7 +313,8 @@ export async function listCoupons(
             SELECT id, code, site, title, description, rating,
                    discount_type, discount_amount, expiry, expired,
                    times_used AS "timesUsed",
-                   status, verification_message AS "verificationMessage"
+                   status, verification_message AS "verificationMessage",
+                   (new_customers_only IS TRUE) AS "newCustomersOnly"
             FROM coupons
             WHERE ${whereClause}
             ORDER BY ${baseSite ? storeRankingOrderSql() : rankingOrderSql()}
@@ -377,6 +378,7 @@ export async function listStoreCoupons(
                    discount_type, discount_amount, expiry, expired,
                    times_used AS "timesUsed",
                    status, verification_message AS "verificationMessage",
+                   (new_customers_only IS TRUE) AS "newCustomersOnly",
                    (submission_source IS NULL) AS "isSupplier"
             FROM coupons
             WHERE ${visible}
