@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
+import { isSafariExtensionRuntime } from '../../../caramel-base.js'
 import {
     requestAllSites,
     resolveAllSitesGranted,
 } from '../../../permission-state.js'
 import type { AllSitesGranted, AppApi } from '../types'
+import { SafariAllSitesSteps } from './SafariAllSitesSteps'
 
 /**
  * The half-working install, which has no symptom of its own: the API is
@@ -24,6 +26,11 @@ import type { AllSitesGranted, AppApi } from '../types'
  */
 export function AllSitesBanner({ api }: { api: AppApi }) {
     const [granted, setGranted] = useState<AllSitesGranted>(null)
+    // Safari's request() can resolve without prompting or granting (measured
+    // on macOS Safari 26), which left Enable looking dead. On Safari the click
+    // still asks — then swaps the button for Safari's own menu route, so the
+    // click always leads somewhere.
+    const [showSafariSteps, setShowSafariSteps] = useState(false)
 
     // Re-read rather than assume: the prompt's own answer says what the USER
     // clicked, and `contains()` says what the browser actually recorded —
@@ -44,21 +51,26 @@ export function AllSitesBanner({ api }: { api: AppApi }) {
     return (
         <div className="all-sites-banner">
             <p>Caramel can&apos;t run on every store yet.</p>
-            <button
-                type="button"
-                id="allSitesEnableBtn"
-                className="all-sites-banner-btn"
-                onClick={() =>
-                    requestAllSites(() => {
-                        recheck()
-                        // The rest of the popup was resolved without the grant;
-                        // re-run it now that stores are reachable.
-                        api.refresh()
-                    })
-                }
-            >
-                Enable
-            </button>
+            {showSafariSteps ? (
+                <SafariAllSitesSteps lead="Safari needs you to turn it on:" />
+            ) : (
+                <button
+                    type="button"
+                    id="allSitesEnableBtn"
+                    className="all-sites-banner-btn"
+                    onClick={() => {
+                        requestAllSites(() => {
+                            recheck()
+                            // The rest of the popup was resolved without the
+                            // grant; re-run it now that stores are reachable.
+                            api.refresh()
+                        })
+                        if (isSafariExtensionRuntime()) setShowSafariSteps(true)
+                    }}
+                >
+                    Enable
+                </button>
+            )}
         </div>
     )
 }

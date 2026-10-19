@@ -35,6 +35,7 @@ describe('CouponListRowSchema', () => {
         timesUsed: 5,
         status: 'valid',
         verificationMessage: null,
+        newCustomersOnly: false,
     }
 
     it('accepts a production-shaped row, coercing numeric-as-string columns and normalizing the id to a string', () => {
@@ -62,6 +63,19 @@ describe('CouponListRowSchema', () => {
         expect(() =>
             parseCouponRows(CouponListRowSchema, [drifted], 'test'),
         ).toThrow(/coupons-db schema drift \[test\]/)
+    })
+
+    it('reads newCustomersOnly as a required boolean (the reads select `new_customers_only IS TRUE`)', () => {
+        const [row] = parseCouponRows(
+            CouponListRowSchema,
+            [{ ...validRow, newCustomersOnly: true }],
+            'test',
+        )
+        expect(row.newCustomersOnly).toBe(true)
+        const { newCustomersOnly: _drop, ...drifted } = validRow
+        expect(() =>
+            parseCouponRows(CouponListRowSchema, [drifted], 'test'),
+        ).toThrow(/coupons-db schema drift/)
     })
 
     it('rejects a null id (never a legitimate value for a primary key) instead of coercing it to "null"', () => {
