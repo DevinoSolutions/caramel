@@ -90,6 +90,10 @@ module.exports = [
         // kB (93.68 before the per-tab pick memory, 93.55 before the loader
         // learned to report a failed load and to refuse a module without the
         // hand-over), so the limit is measured + ~1.3 kB.
+        // 2026-10-19, raised 95.5 -> 96.5 kB: the second look at a config-less
+        // cart page (a bounded watch for a box or total the store draws after
+        // load) joined this bundle with the finder on demand. Measured
+        // 95.79 kB.
         // The server-pick branch, measured against the 120 kB bundle that still
         // held the finder:
         // 2026-10-16, raised 120 -> 122 kB: the server's pick mode
@@ -111,7 +115,7 @@ module.exports = [
         // #348, which brings in the notes above it dated 2026-10-15 (install
         // attribution, the porkbun capability marker) and the handoff store's
         // review fixes. Measured 128.46 kB.
-        // 2026-10-19, raised 95.5 -> 97 kB: the server pick mode and the
+        // 2026-10-19, raised 96.5 -> 97 kB: the server pick mode and the
         // remembered coupon box joined the on-demand finder. Their content
         // script share (the mode read, the learned-box handoff, the resumed
         // learn) stays in this bundle; the finder itself ships on demand.
@@ -265,7 +269,7 @@ module.exports = [
         // by name) ships in the finder. Measured 30.98 kB.
         // 2026-10-19, raised 32 -> 37.5 kB: the server pick mode, the
         // remembered coupon box and the checks on a learned apply ship in the
-        // finder now that it loads on demand. Measured 36.68 kB.
+        // finder now that it loads on demand. Measured 36.73 kB.
         // It is written only here: tests/finder-module-build.test.mjs reads
         // it.
         limit: '37.5 KB',

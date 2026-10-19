@@ -38,23 +38,34 @@ let prompted
 let couponsForSite
 let observers
 
-vi.mock('../coupon-box-discovery.js', async importOriginal => ({
-    ...(await importOriginal()),
-    caramelCouponBoxDiscoveryOn: async () => {
-        if (flagReadFails) {
-            flagReadFails = false
-            throw new Error('Extension context invalidated')
-        }
-        return finderOn
-    },
-    // The finder's rules, reduced to the one fact these cases vary: has the
-    // store drawn its coupon box yet.
-    caramelFinderSeesBox: () => {
-        finderLooks++
-        return !!document.getElementById('late-promo')
-    },
-    caramelFinderMayAsk: async () => mayAsk(),
-}))
+// The finder flag and the finder itself, which the content script loads on
+// demand (coupon-box-finder-loader.js): the real finder, with its rules
+// reduced to the one fact these cases vary.
+vi.mock('../coupon-box-finder-loader.js', async importOriginal => {
+    const finder = {
+        ...(await vi.importActual('../coupon-box-discovery.js')),
+        // Has the store drawn its coupon box yet. Detection asks the
+        // finder's whole look (the rules' box, a kept pick, a remembered
+        // box) through caramelFinderSees.
+        caramelFinderSees: async () => {
+            finderLooks++
+            return !!document.getElementById('late-promo')
+        },
+        caramelFinderMayAsk: async () => mayAsk(),
+    }
+    return {
+        ...(await importOriginal()),
+        caramelCouponBoxDiscoveryOn: async () => {
+            if (flagReadFails) {
+                flagReadFails = false
+                throw new Error('Extension context invalidated')
+            }
+            return finderOn
+        },
+        caramelLoadFinder: async () => finder,
+        caramelLoadedFinder: () => finder,
+    }
+})
 vi.mock('../coupon-apply.js', async importOriginal => ({
     ...(await importOriginal()),
     probeCartJson: async () => {
