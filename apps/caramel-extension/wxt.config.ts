@@ -21,6 +21,7 @@ import { resolve } from 'node:path'
 import { defineConfig } from 'wxt'
 
 import { ENVIRONMENTS, stampFor } from './scripts/environments.mjs'
+import { buildFinderModule, FINDER_ASSET } from './scripts/finder-bundle.mjs'
 import { FIREFOX_NAME, NAME, SUMMARY } from './scripts/store-listing.mjs'
 
 // React is POPUP-ONLY by doctrine (content scripts stay React-free — the
@@ -57,31 +58,43 @@ function resolveEnvironment(mode: string): EnvironmentName {
     return mode
 }
 
+// Content-script modules loaded by URL on demand (see build:publicAssets).
+const ON_DEMAND_MODULES = ['coupon-box-outline.js', 'coupon-box-learned.js']
+
 export default defineConfig({
     modules: ['@wxt-dev/module-react'],
     hooks: {
-        // The coupon-box outline builder ships as its own file rather than in
-        // the content-script bundle: coupon-box-discovery.js imports it only
-        // when it is about to ask the server for a box, so pages that never
-        // ask never load it. It has no imports of its own, so it is minified
-        // on its own with the same esbuild settings scripts/measure-size.mjs
-        // budgets it with, and the file that ships is the file that is
-        // measured; assets/* is already web-accessible, which a content
-        // script's import() of an extension URL needs.
+        // The coupon-box outline builder and the learned-box memory ship as
+        // their own files rather than in the content-script bundle:
+        // coupon-box-discovery.js imports the outline only when it is about to
+        // ask the server for a box, and the memory only on a store with no
+        // config, so pages that never need them never load them. Neither has
+        // imports of its own, so each is minified on its own with the same
+        // esbuild settings scripts/measure-size.mjs budgets it with, and the
+        // file that ships is the file that is measured; assets/* is already
+        // web-accessible, which a content script's import() of an extension
+        // URL needs.
         'build:publicAssets': async (wxt, files) => {
-            const source = await readFile(
-                resolve(wxt.config.root, 'coupon-box-outline.js'),
-                'utf8',
-            )
-            const { code } = await transform(source, {
-                loader: 'js',
-                format: 'esm',
-                minify: true,
-                target: 'es2022',
-            })
+            for (const name of ON_DEMAND_MODULES) {
+                const source = await readFile(
+                    resolve(wxt.config.root, name),
+                    'utf8',
+                )
+                const { code } = await transform(source, {
+                    loader: 'js',
+                    format: 'esm',
+                    minify: true,
+                    target: 'es2022',
+                })
+                files.push({ contents: code, relativeDest: `assets/${name}` })
+            }
+            // The promo-box finder ships the same way, and is loaded only by a
+            // page about to run it (coupon-box-finder-loader.js). Its imports
+            // of the content script's own modules are not bundled: see
+            // scripts/finder-bundle.mjs.
             files.push({
-                contents: code,
-                relativeDest: 'assets/coupon-box-outline.js',
+                contents: await buildFinderModule(wxt.config.root),
+                relativeDest: FINDER_ASSET,
             })
         },
     },

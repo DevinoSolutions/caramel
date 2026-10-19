@@ -192,6 +192,41 @@ if (BEHAVIOUR === 'late-reveal') {
 }
 </script></body></html>`
 
+/* A cart for a store with NO config: no promo box anywhere, an order total,
+ * a cross-sell "Add to cart" and a plain note field. The S9 scenario points a
+ * learned box served by the server at those two. Adding the cross-sell raises
+ * the total, the way a real one does. */
+const configlessHtml = () => `<!doctype html><html><head><meta charset=utf-8>
+<title>Cart</title><style>body{font-family:system-ui;padding:24px}</style>
+</head><body>
+<h1>Your cart</h1>
+<div class="line">Mattress <span>$120.00</span></div>
+<div class="xsell"><h3>You may also like</h3><div>Pillow</div>
+  <button id="xsell-add" type="button">Add to cart</button></div>
+<div class="note"><label for="order-note">Note for the seller</label>
+  <input type="text" id="order-note" name="order_note"></div>
+<div class="row"><span>Order total</span> <span id="total">$120.00</span></div>
+<button id="place-order-btn" aria-label="Place Order">Place Order</button>
+<script>
+window.__orderPlaced = false
+window.__applyClicks = 0
+window.__codesSeen = []
+window.__cartAdds = 0
+window.__typed = []
+let total = 120
+document.getElementById('place-order-btn').addEventListener('click', () => {
+    window.__orderPlaced = true
+})
+document.getElementById('xsell-add').addEventListener('click', () => {
+    window.__cartAdds++
+    total += 25
+    document.getElementById('total').textContent = '$' + total.toFixed(2)
+})
+const note = document.getElementById('order-note')
+for (const type of ['input', 'keydown'])
+    note.addEventListener(type, () => window.__typed.push(note.value))
+</script></body></html>`
+
 /** The real config with one deliberate lie: the apply selector resolved to the
  *  checkout's order button — the most expensive way a scraped config is wrong. */
 const doctoredConfig = () => ({
@@ -205,9 +240,9 @@ const doctoredConfig = () => ({
  *  including the stylesheet every injected surface awaits — which stalls the UI
  *  and looks exactly like a product bug. */
 const REPORTS_KEY = '__caramel_test_reports'
-const stubApi = (sw, config) =>
+const stubApi = (sw, config, server = null) =>
     sw.evaluate(
-        ([cfg, coupons, reportsKey]) => {
+        ([cfg, coupons, reportsKey, server]) => {
             if (globalThis.__caramelStubbed) return
             globalThis.__caramelStubbed = true
             const realFetch = globalThis.fetch
@@ -259,10 +294,38 @@ const stubApi = (sw, config) =>
              *
              * The reader awaits this before it looks. */
             globalThis.__caramelReportsSettled = () => queue
+            // A scenario with `server` answers the finder's own routes too: the
+            // features flags, the coupon-box pick (recorded, with whether it
+            // accepted a learned answer) and the learned-box report (recorded
+            // with its body). Its install id is seeded, so a report is never
+            // skipped for want of one: a report that was not sent was not sent.
+            if (server?.iid)
+                chrome.storage.local.set({
+                    caramel_install_attribution: { iid: server.iid },
+                })
             globalThis.fetch = (input, init) => {
                 const u = String(typeof input === 'string' ? input : input.url)
                 if (u.includes('/api/extension/supported-stores'))
-                    return json({ supported: [cfg] })
+                    return json({ supported: cfg ? [cfg] : [] })
+                if (server && u.includes('/api/extension/features'))
+                    return json(server.features)
+                if (server && u.includes('/api/extension/coupon-box-pick')) {
+                    let body = {}
+                    try {
+                        body = JSON.parse(init?.body || '{}')
+                    } catch {
+                        // recorded as not accepting
+                    }
+                    record({
+                        kind: 'pick',
+                        acceptsLearned: body.acceptsLearned === true,
+                    })
+                    return json(server.pick)
+                }
+                if (server && u.includes('/api/extension/coupon-box-learned')) {
+                    record({ kind: 'learned', body: init?.body || '' })
+                    return json({ recorded: true })
+                }
                 if (/\/api\/coupons\/[^/]+\/report/.test(u)) {
                     record({ kind: 'report', body: init?.body || '' })
                     return json({ ok: true })
@@ -276,7 +339,7 @@ const stubApi = (sw, config) =>
                 return realFetch(input, init)
             }
         },
-        [config, COUPONS, REPORTS_KEY],
+        [config, COUPONS, REPORTS_KEY, server],
     )
 
 async function runScenario({
@@ -285,6 +348,11 @@ async function runScenario({
     doctor = false,
     cart = null,
     lateReveal = false,
+    // A store with no config, and the server's answers for it (stubApi).
+    server = null,
+    // Extra time before the reports are read: a report fired after the
+    // result shows must still be seen.
+    settleMs = 0,
     assert,
 }) {
     console.log(`\n=== ${name} ===`)
@@ -339,18 +407,18 @@ async function runScenario({
             return route.fulfill({
                 status: 200,
                 contentType: 'text/html; charset=utf-8',
-                body: pageHtml(behaviour),
+                body: server ? configlessHtml() : pageHtml(behaviour),
             })
         })
 
-        const config = doctor ? doctoredConfig() : STORE_CONFIG
+        const config = server ? null : doctor ? doctoredConfig() : STORE_CONFIG
         let sw =
             ctx.serviceWorkers()[0] ||
             (await ctx.waitForEvent('serviceworker', { timeout: 30_000 }))
-        await stubApi(sw, config)
+        await stubApi(sw, config, server)
         // An idle MV3 worker is killed and replaced; re-stub every replacement
         // so a restart mid-flow cannot let a real request through.
-        ctx.on('serviceworker', w => stubApi(w, config).catch(() => {}))
+        ctx.on('serviceworker', w => stubApi(w, config, server).catch(() => {}))
 
         const page = await ctx.newPage()
         const logs = []
@@ -401,7 +469,11 @@ async function runScenario({
                 ? 'prompt appears the moment the promo entry is inserted'
                 : 'prompt appears on a supported checkout',
             true,
-            doctor ? 'doctored config' : 'production config',
+            server
+                ? 'no config, the server answers'
+                : doctor
+                  ? 'doctored config'
+                  : 'production config',
         )
 
         await page.click('#caramel-small-prompt')
@@ -428,7 +500,11 @@ async function runScenario({
             orderPlaced: window.__orderPlaced,
             applyClicks: window.__applyClicks,
             codesSeen: window.__codesSeen,
+            cartAdds: window.__cartAdds ?? 0,
+            typed: window.__typed ?? [],
+            note: document.getElementById('order-note')?.value ?? '',
         }))
+        if (settleMs) await page.waitForTimeout(settleMs)
         // Extension storage is unreachable from the page's main world.
         sw = ctx.serviceWorkers()[0] || sw
         const savings = await sw.evaluate(
@@ -765,6 +841,80 @@ const SCENARIOS = [
                     r => r.kind === 'report' && /worked/.test(r.body || ''),
                 ),
                 JSON.stringify(reports.map(r => r.kind)),
+            )
+            check('never touches the order button', state.orderPlaced === false)
+        },
+    },
+    /* A store with no config, where the server serves a learned box (a box it
+     * says other installs saw this store answer through) that names a
+     * cross-sell "Add to cart" as the apply button and a note field as the
+     * input. Neither carries a word a coupon box carries, so the box is
+     * refused before anything is touched: nothing is typed, nothing is added
+     * to the cart, the shopper gets the codes to copy, and no `failed` is
+     * reported for the box, because the store was never asked anything. */
+    {
+        name: 'S9 learned box on a cross-sell button and a note field — refused untouched',
+        server: {
+            iid: '7a1d3c2e-9b4f-4e1a-8c6d-2f5e0b9a1c3d',
+            features: {
+                shopperCodeCapture: false,
+                couponBoxDiscovery: true,
+                couponBoxLlm: true,
+                couponBoxLearned: true,
+            },
+            pick: {
+                outcome: 'box',
+                source: 'learned',
+                input: null,
+                button: null,
+                toggle: null,
+                box: {
+                    input: 'input[name="order_note"]',
+                    apply: 'button#xsell-add',
+                    toggle: null,
+                    enterOnly: false,
+                },
+            },
+        },
+        settleMs: 2000,
+        assert: ({ modal, state, savings, logs, reports, check }) => {
+            check(
+                'asked the server, accepting a learned box',
+                reports.some(r => r.kind === 'pick' && r.acceptsLearned),
+                JSON.stringify(reports),
+            )
+            check(
+                'never clicks the cross-sell "Add to cart"',
+                state.cartAdds === 0,
+                `cartAdds=${state.cartAdds}`,
+            )
+            check(
+                'never types into the note field',
+                state.note === '' && state.typed.length === 0,
+                JSON.stringify({ note: state.note, typed: state.typed }),
+            )
+            check(
+                'hands the shopper the codes to copy',
+                /SAVE12/.test(modal),
+                modal.slice(0, 140),
+            )
+            check(
+                'reports no failed learned box (the store was never asked)',
+                !reports.some(
+                    r =>
+                        r.kind === 'learned' &&
+                        /"outcome":"failed"/.test(r.body || ''),
+                ),
+                JSON.stringify(reports),
+            )
+            check(
+                'logs the learned box as unusable',
+                logs.some(l => l.includes('FINDER_PICK_UNUSABLE')),
+            )
+            check(
+                'banks no savings',
+                savings.length === 0,
+                JSON.stringify(savings),
             )
             check('never touches the order button', state.orderPlaced === false)
         },

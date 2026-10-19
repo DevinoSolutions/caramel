@@ -27,6 +27,9 @@ export interface Coupon {
     timesUsed: number
     status?: CouponStatus
     verificationMessage?: string | null
+    // "New customers only" label (owner decision 2026-10-19): the code works
+    // only for a brand-new account. Absent on older payloads = no label.
+    newCustomersOnly?: boolean
     // App-owned trust signal (W1): ISO timestamp of the last extension-reported
     // "worked" outcome, attached in app code by couponSignals.ts's
     // attachSignals() from the coupon_signals table — NOT a column on the

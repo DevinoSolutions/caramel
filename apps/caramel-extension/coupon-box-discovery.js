@@ -1,7 +1,8 @@
 // owns: finding a store's promo box, apply button, reveal toggle and order
 // total when no config describes them (caramelDiscoverCouponBox,
-// caramelFindOrderTotal, caramelDiscoveredRecord, caramelFinderSeesBox,
-// caramelCouponBoxDiscoveryOn).
+// caramelFindOrderTotal, caramelDiscoveredRecord, caramelFinderSeesBox).
+// It is loaded on demand (coupon-box-finder-loader.js), never in the
+// content-script bundle.
 //
 // Most stores we hold codes for are reached through a config row: a set of
 // selectors someone wrote for that store. Two cases have no usable row: a
@@ -37,10 +38,12 @@
 // flow as a rule pick, so every check after this point still runs.
 import {
     caramelSendMessage,
+    caramelTabHandoff,
     currentBrowser,
     log,
     sleep,
 } from './caramel-base.js'
+import { _caramelResetDiscoveryOn } from './coupon-box-finder-loader.js'
 import {
     _isVisible,
     caramelFindMoney,
@@ -211,13 +214,13 @@ const TOGGLE_RE =
 // eingeben"). The whole label, so a sentence that merely mentions a voucher is
 // not a toggle.
 const TOGGLE_OBJ_RE =
-    /^\s*(gutschein(code)?|rabatt(code)?|aktionscode|promo-?code|kortingscode|actiecode|codice (sconto|promozionale|promo)|buono sconto)\s*(eingeben|einl[oö]sen|hinzuf[üu]gen|invoeren|toevoegen|inserisci|aggiungi|inserire)\s*[+▾▼›>→]?\s*$/i
+    /^(gutschein(code)?|rabatt(code)?|aktionscode|promo-?code|kortingscode|actiecode|codice (sconto|promozionale|promo)|buono sconto) ?(eingeben|einl[oö]sen|hinzuf[üu]gen|invoeren|toevoegen|inserisci|aggiungi|inserire) ?[+▾▼›>→]?$/i
 // A bare row title: "Coupon/Gift Certificate", "Promo code", "Coupon:".
 const TOGGLE_BARE_RE =
-    /^\s*(promo(tion(al)?)?|coupon|discount|voucher|gift card)\s*(code)?s?\s*((or|\/|&|and)\s*(gift\s+(card|certificate)|coupon|promo(\s+code)?)s?)?\s*[?:]?\s*[+▾▼›>]?\s*$/i
+    /^(promo(tion(al)?)?|coupon|discount|voucher|gift card) ?(code)?s? ?((or|\/|&|and) ?(gift (card|certificate)|coupon|promo( code)?)s?)? ?[?:]? ?[+▾▼›>]?$/i
 // The noun as a row title with the verb AFTER it ("Coupon  View →").
 const TOGGLE_TAIL_RE =
-    /^\s*(promo(tion(al)?)?|coupon|discount|voucher)\s*(code)?s?\s*(view|show|open|add|see|enter)( all| code| it)?\s*[+▾▼›>→]?\s*$/i
+    /^(promo(tion(al)?)?|coupon|discount|voucher) ?(code)?s? ?(view|show|open|add|see|enter)( all| code| it)? ?[+▾▼›>→]?$/i
 
 /* --------------------------------------------------------------- helpers */
 const norm = s => (s || '').toString().toLowerCase().replace(/\s+/g, ' ').trim()
@@ -323,122 +326,128 @@ function has(text, w) {
 // never sees it.
 function scoreInputs(doc) {
     const candidates = []
-    const win = doc.defaultView
-    const pageW = doc.documentElement.scrollWidth
     for (const el of doc.querySelectorAll('input')) {
-        if (el.type !== 'text' && el.type !== 'search') continue
-        if (el.readOnly) continue
-        // A field parked far off-screen is a bot honeypot, not for people.
-        const box = el.getBoundingClientRect()
-        if (
-            box.right + win.scrollX < -100 ||
-            box.bottom + win.scrollY < -100 ||
-            (pageW > 0 && box.left + win.scrollX > pageW + 100)
-        )
-            continue
-        const attrs = attrText(el)
-        const label = labelText(el)
-        const ctx = contextText(el)
-        const reasons = []
-        let score = 0
-        const strongAttr = STRONG.filter(w => has(attrs, w))
-        const strongLabel = STRONG.filter(w => has(label, w))
-        // Context is weaker evidence than the field's own words, and two
-        // contexts lie: a newsletter blurb ("special offers, exclusive
-        // promotions") and a gift-card widget ("Redeem" beside "Gift Card").
-        const weak = WEAK.filter(w => has(attrs, w) || has(label, w))
-        let strongCtx = STRONG.filter(w => has(ctx, w))
-        if (/newsletter|subscribe|sign up for|signup|join our/.test(ctx))
-            strongCtx = []
-        const form = el.form || el.closest('form')
-        // An account form ("perks and promotions by email" under a password
-        // field) is never a coupon box on context alone.
-        if (form?.querySelector('input[type=password]')) strongCtx = []
-        if (
-            weak.some(w => w.includes('gift')) &&
-            !strongAttr.length &&
-            !strongLabel.length
-        )
-            strongCtx = strongCtx.filter(w => !/^redeem|^redemption/.test(w))
-        if (strongAttr.length) {
-            score += 50 + 5 * (strongAttr.length - 1)
-            reasons.push('attr:' + strongAttr.join('|'))
-        }
-        if (strongLabel.length) {
-            score += 40
-            reasons.push('label:' + strongLabel.join('|'))
-        }
-        if (strongCtx.length) {
-            score += 20
-            reasons.push('ctx:' + strongCtx.join('|'))
-        }
-        if (weak.length) {
-            score += strongAttr.length || strongLabel.length ? 5 : 15
-            reasons.push('weak:' + weak.join('|'))
-        }
-        const neg = NEGATIVE.filter(w => has(attrs, w))
-        if (neg.length && !strongAttr.length) {
-            score -= 80
-            reasons.push('neg:' + neg.join('|'))
-        } else if (neg.length) {
-            score -= 15
-            reasons.push('neg-soft:' + neg.join('|'))
-        }
-        // Site search lives in a search form or a role=search region.
-        const action = norm(form?.getAttribute('action'))
-        if (
-            el.closest('[role="search"]') ||
-            /search|\/s\b|query/.test(action)
-        ) {
-            score -= 100
-            reasons.push('in-search')
-        }
-        if (/coupon|promo|discount|voucher|reduction/.test(action)) {
-            score += 25
-            reasons.push('form-action')
-        }
-        // A gift-card-only box takes a different kind of code.
-        if (
-            weak.some(w => w.includes('gift')) &&
-            !strongAttr.length &&
-            !strongLabel.length &&
-            !strongCtx.length
-        ) {
-            score -= 20
-            reasons.push('gift-only')
-        }
-        // A box disabled until the cart has items is still the box, but never
-        // one we may type into, so it can only lose to a live one.
-        if (el.disabled) {
-            score -= 30
-            reasons.push('disabled')
-        }
-        const vis = visible(el)
-        if (vis) {
-            score += 15
-            reasons.push('visible')
-        } else {
-            score -= 10
-            reasons.push('hidden')
-        }
-        const ml = Number(el.getAttribute('maxlength'))
-        if (ml && ml < 4) {
-            score -= 30
-            reasons.push('maxlength<4')
-        }
-        // No coupon evidence, no candidate. A visible text field on a cart page
-        // is a zip code or a newsletter box far more often than a coupon box,
-        // and typing a code into one is worse than finding nothing.
-        const evidence =
-            strongAttr.length ||
-            strongLabel.length ||
-            strongCtx.length ||
-            reasons.includes('form-action')
-        if (score > 0 && evidence)
-            candidates.push({ el, score, reasons, visible: vis })
+        const c = scoreInput(el)
+        if (c) candidates.push(c)
     }
     candidates.sort((a, b) => b.score - a.score)
     return candidates
+}
+
+// One field as the rules judge it: { el, score, reasons, visible }, or null
+// when it is no candidate. A field someone else named (the server's pick, a
+// remembered box) is typed into only when this accepts it too (couponInput).
+function scoreInput(el) {
+    if (el.type !== 'text' && el.type !== 'search') return null
+    if (el.readOnly) return null
+    const doc = el.ownerDocument
+    const win = doc.defaultView
+    const pageW = doc.documentElement.scrollWidth
+    // A field parked far off-screen is a bot honeypot, not for people.
+    const box = el.getBoundingClientRect()
+    if (
+        box.right + win.scrollX < -100 ||
+        box.bottom + win.scrollY < -100 ||
+        (pageW > 0 && box.left + win.scrollX > pageW + 100)
+    )
+        return null
+    const attrs = attrText(el)
+    const label = labelText(el)
+    const ctx = contextText(el)
+    const reasons = []
+    let score = 0
+    const strongAttr = STRONG.filter(w => has(attrs, w))
+    const strongLabel = STRONG.filter(w => has(label, w))
+    // Context is weaker evidence than the field's own words, and two
+    // contexts lie: a newsletter blurb ("special offers, exclusive
+    // promotions") and a gift-card widget ("Redeem" beside "Gift Card").
+    const weak = WEAK.filter(w => has(attrs, w) || has(label, w))
+    let strongCtx = STRONG.filter(w => has(ctx, w))
+    if (/newsletter|subscribe|sign up for|signup|join our/.test(ctx))
+        strongCtx = []
+    const form = el.form || el.closest('form')
+    // An account form ("perks and promotions by email" under a password
+    // field) is never a coupon box on context alone.
+    if (form?.querySelector('input[type=password]')) strongCtx = []
+    if (
+        weak.some(w => w.includes('gift')) &&
+        !strongAttr.length &&
+        !strongLabel.length
+    )
+        strongCtx = strongCtx.filter(w => !/^redeem|^redemption/.test(w))
+    if (strongAttr.length) {
+        score += 50 + 5 * (strongAttr.length - 1)
+        reasons.push('attr:' + strongAttr.join('|'))
+    }
+    if (strongLabel.length) {
+        score += 40
+        reasons.push('label:' + strongLabel.join('|'))
+    }
+    if (strongCtx.length) {
+        score += 20
+        reasons.push('ctx:' + strongCtx.join('|'))
+    }
+    if (weak.length) {
+        score += strongAttr.length || strongLabel.length ? 5 : 15
+        reasons.push('weak:' + weak.join('|'))
+    }
+    const neg = NEGATIVE.filter(w => has(attrs, w))
+    if (neg.length && !strongAttr.length) {
+        score -= 80
+        reasons.push('neg:' + neg.join('|'))
+    } else if (neg.length) {
+        score -= 15
+        reasons.push('neg-soft:' + neg.join('|'))
+    }
+    // Site search lives in a search form or a role=search region.
+    const action = norm(form?.getAttribute('action'))
+    if (el.closest('[role="search"]') || /search|\/s\b|query/.test(action)) {
+        score -= 100
+        reasons.push('in-search')
+    }
+    if (/coupon|promo|discount|voucher|reduction/.test(action)) {
+        score += 25
+        reasons.push('form-action')
+    }
+    // A gift-card-only box takes a different kind of code.
+    if (
+        weak.some(w => w.includes('gift')) &&
+        !strongAttr.length &&
+        !strongLabel.length &&
+        !strongCtx.length
+    ) {
+        score -= 20
+        reasons.push('gift-only')
+    }
+    // A box disabled until the cart has items is still the box, but never
+    // one we may type into, so it can only lose to a live one.
+    if (el.disabled) {
+        score -= 30
+        reasons.push('disabled')
+    }
+    const vis = visible(el)
+    if (vis) {
+        score += 15
+        reasons.push('visible')
+    } else {
+        score -= 10
+        reasons.push('hidden')
+    }
+    const ml = Number(el.getAttribute('maxlength'))
+    if (ml && ml < 4) {
+        score -= 30
+        reasons.push('maxlength<4')
+    }
+    // No coupon evidence, no candidate. A visible text field on a cart page
+    // is a zip code or a newsletter box far more often than a coupon box,
+    // and typing a code into one is worse than finding nothing.
+    const evidence =
+        strongAttr.length ||
+        strongLabel.length ||
+        strongCtx.length ||
+        reasons.includes('form-action')
+    if (score > 0 && evidence) return { el, score, reasons, visible: vis }
+    return null
 }
 
 /* --------------------------------------------------------------- buttons */
@@ -456,6 +465,35 @@ const isDanger = text => DANGER.some(w => has(text, w))
 const FIELDS =
     'input:not([type=hidden]):not([type=checkbox]):not([type=radio]):not([type=submit]):not([type=button]):not([type=image]):not([type=reset]), textarea'
 
+// A button with no apply word on it, in its label, aria-label, title or value
+// (an icon, an arrow), is the box's apply only in the box's own small panel
+// (ownsBox): a whole-cart form also holds each line's remove icon and quantity
+// steppers, and a click on one moves the total the way a code would. Nor is it
+// one whose name, id, class or data-* attributes say it removes, changes a
+// quantity, checks out, pays, buys, signs in or up, subscribes or keeps a
+// wishlist, nor one labelled as a control never clicked ("Next", "My
+// orders"). A labelled apply is judged as before.
+const NOT_AN_APPLY_RE =
+    /\b(?:remove|delete|trash|qty|quantity|plus|minus|(?:in|de)cre(?:ase|ment)|check ?out|place ?order|pay(?:pal)?|buy|purchase|sign ?(?:in|up)|log ?in|subscribe|wishlist)\b/i
+function wordlessApply(btn, input) {
+    if (!ownsBox(btn, input) || NEVER_CLICK.test(buttonLabel(btn))) return false
+    for (const attr of [
+        btn.getAttribute('name'),
+        btn.id,
+        btn.getAttribute('class'),
+        ...Array.from(btn.attributes, a =>
+            a.name.startsWith('data-') ? a.name.slice(5) + ' ' + a.value : '',
+        ),
+    ])
+        if (
+            NOT_AN_APPLY_RE.test(
+                (attr || '').replace(/([a-z])(?=[A-Z])|[-_]+/g, '$1 '),
+            )
+        )
+            return false
+    return true
+}
+
 function scoreButton(btn, input, level) {
     const reasons = []
     const text = buttonLabel(btn)
@@ -470,6 +508,9 @@ function scoreButton(btn, input, level) {
     )
         return null
     if (isDanger(text) && !APPLY_VERBS.some(w => has(text, w))) return null
+    const said = norm([text, ariaOf(btn), btn.title, btn.value].join(' '))
+    if (!APPLY_WORDS.some(w => has(said, w)) && !wordlessApply(btn, input))
+        return null
     const applyHit = APPLY_WORDS.filter(w => has(text, w) || has(attrs, w))
     if (applyHit.length) {
         s += 40
@@ -563,12 +604,18 @@ function scoreButton(btn, input, level) {
 const BTN =
     'button, input[type="submit"], input[type="button"], [role="button"], a[href^="#"], a[href^="javascript:" i], a:not([href])'
 
-function findButton(input) {
+// `reveal`: the toggle that opened this box. Clicking it again folds the box,
+// so it is never the box's apply button.
+function findButton(input, reveal = null) {
     const seen = new Set()
     let best = null
     const consider = (btn, level) => {
-        if (seen.has(btn) || btn === input) return
+        if (seen.has(btn) || btn === input || btn === reveal) return
         seen.add(btn)
+        if (spendsPoints(btn)) return
+        if (noCodeClick(btn)) return
+        // A link elsewhere is a way out of the cart, whatever it says.
+        if (navigatesAway(btn)) return
         const r = scoreButton(btn, input, level)
         if (r && r.s > 20 && (!best || r.s > best.score))
             best = { el: btn, score: r.s, reasons: r.reasons }
@@ -609,10 +656,261 @@ function findButton(input) {
     return best
 }
 
+/* ------------------------------------------------------ points and offers */
+// A click on "Apply discount" under "You have 500 points", on "Redeem points"
+// or on "Use my rewards" spends the shopper's points or picks an offer for
+// them, unasked, and no code is involved. The finder and the server's pick
+// never click one, as a reveal or as an apply button. Only a CLICKED control
+// is judged, by its own name and by the words around it: a field labelled
+// "Promo or rewards code" is still a coupon box, and the plain "Apply" beside
+// it is still clicked, because those words name a code. A configured store
+// never reaches this: its own selectors are clicked as written.
+//
+// The server's pick now sees these words too (the outline carries them since
+// 2026-10-17), but this layer still judges every control it would click.
+const LOYALTY_RE =
+    /\b(?:redeem(?:s|ed|ing)?|points?|rewards?|loyalty|memberships?|member pric(?:e|es|ing)|students?|military|teachers?|verif(?:y|ied|ication))\b/i
+// Store credit and a balance are the shopper's money too: applying them drops
+// the total and reads as a saving that is not one. "Credit card" is a payment
+// method. A gift card is judged by noCodeClick on the control's own name, as
+// "Promo code or gift card" still reveals the coupon box.
+const STORE_CREDIT_RE =
+    /\bstore credits?\b|\bcredits?\b(?! ?cards?)|\bbalances?\b/i
+const CODE_WORD_RE = /\b(?:codes?|coupons?|vouchers?)\b/i
+const REDEEM_RE = /\bredeem/i
+const REDEEM_WORDS_RE = /\bredeem\w*/gi
+// "Promo or rewards code", "Rewards & Promo codes": words that name a code.
+// Taken out of the surrounding words before they are read for points, so a
+// coupon box's own label never refuses its button. Every run is bounded: an
+// open-ended one backtracks over a long word on every start, and a 40 KiB
+// word took over a second.
+const withoutCodePhrases = t =>
+    t.replace(
+        /(?:[\w-]{1,40}\s{1,8}(?:or|and|&|\/)\s{1,8})?[\w-]{1,40}\s{1,8}codes?\b/gi,
+        ' ',
+    )
+// "Redeem ### points for a $# discount code" spends points to get a code,
+// whatever it names. A toggle opens a box to type a code into; this buys one.
+// Bounded gaps: two open-ended ones made a long name cubic.
+const REDEEM_FOR_A_CODE_RE =
+    /\bredeem\w{0,8}\b.{0,60}?\bfor\b.{0,40}?\b(?:codes?|coupons?|vouchers?)\b/i
+// The words a rule reads, at most this long: no control, label or heading a
+// shopper reads is longer, and every rule then runs in bounded time.
+const RULE_WORDS_MAX = 1000
+const ruleWords = t => String(t || '').slice(0, RULE_WORDS_MAX)
+// A reveal opens a box to type a code into. One that offers deals without
+// naming a code ("View offers", "Promotions") applies an offer or opens a list
+// of them. One that says only "discount" ("Have a discount?", "Add discount")
+// is a code box's fold, unless it or the words around it speak of points,
+// rewards, a gift card or a group ("Member discount", "Discounts & rewards",
+// "Apply discount" under a points balance). The server reads its toggles by
+// the same rule.
+const SAYS_OFFER_RE = /offer|\bdeals?\b|saving|\bsave\b|promotions?\b/i
+const SAYS_DISCOUNT_RE =
+    /discount|rabatt|descuento|desconto|sconto|remise|réduction|korting|zniżka/i
+const MEMBER_OR_GIFT_RE = /\bmembers?\b|\bgift[\s-]*cards?\b/i
+// Words that name a code. "kod" also inside a word (Swedish "rabattkod",
+// "kampanjkod"); "promo" only as a word, so "promotions" is an offer, not a
+// code. The server's pick reads its toggles by the same words.
+const NAMES_CODE_RE =
+    /code|codice|código|kod|coupon|cup[oó]n|cupom|voucher|gutschein|\bpromo\b|\bbons?\b(?:\s+de)?\s+r[ée]duction/i
+// ...nor is a reveal of the small print ("Promo details", "Offer terms").
+const ABOUT_TERMS_RE =
+    /\b(?:details|terms|conditions|exclusions|restrictions|learn more)\b/i
+
+// Text with a space between every node: "You have 500 points" and "Apply
+// discount" in two elements must not read as "pointsApply".
+const wordsOf = el =>
+    Array.from(el.childNodes, n =>
+        n.nodeType === 3 ? n.data : n.nodeType === 1 ? wordsOf(n) : '',
+    ).join(' ')
+
+const controlWords = el =>
+    [
+        wordsOf(el),
+        ariaOf(el),
+        el.tagName === 'INPUT' ? labelText(el) : '',
+        el.value,
+        el.title,
+        el.getAttribute('name'),
+        el.id,
+    ]
+        .join(' ')
+        .slice(0, RULE_WORDS_MAX)
+        .replace(/[-_]+/g, ' ')
+
+// The words a shopper reads beside a control: the small block around it, or,
+// once a block also holds a field, only its own neighbours. A neighbour that IS
+// a field speaks by its label (the box this button applies); one that holds a
+// field is another box and says nothing about this control.
+function wordsBeside(el) {
+    let words = ''
+    for (let n = el, k = 0; k < 3; n = n.parentElement, k++) {
+        const p = n.parentElement
+        if (!p || p === el.ownerDocument.body) break
+        if (p.querySelector(FIELDS)) {
+            for (const sib of [n.previousElementSibling, n.nextElementSibling])
+                if (sib?.matches(FIELDS)) words += ' ' + labelText(sib)
+                else if (sib && !sib.querySelector(FIELDS))
+                    words += ' ' + wordsOf(sib)
+            break
+        }
+        if (norm(p.textContent).length > 160) break
+        words = wordsOf(p)
+    }
+    return ruleWords(words)
+}
+
+// The section a control sits in, by its own name: "Rewards", "Member prices",
+// "Students save 10%". That is the section's aria name, or the nearest heading
+// BEFORE the control that heads the section rather than a block in it. A cart
+// <form> wrapping the line items is no section unless it is named: its first
+// heading is a product ("Military Green Parka", "Student Backpack"). A line
+// item, a block that holds its title with a price, a picture or a quantity
+// field, is skipped whole.
+const SECTION =
+    'section, aside, fieldset, form[aria-label], form[aria-labelledby], [role="region"], [role="group"], [role="dialog"]'
+const HEADING = 'h1, h2, h3, h4, h5, h6, legend, [role="heading"]'
+function sectionWords(el) {
+    const box = el.closest(SECTION)
+    if (!box) return ''
+    const named = (box.getAttribute('aria-labelledby') || '')
+        .split(/\s+/)
+        .map(id => id && el.ownerDocument.getElementById(id))
+        .filter(Boolean)
+        .map(wordsOf)
+    let head = ''
+    for (let n = el; !head && n !== box; n = n.parentElement)
+        for (let s = n; !head && (s = s.previousElementSibling); ) {
+            const h = s.matches(HEADING) ? s : s.querySelector(HEADING)
+            if (
+                h &&
+                (norm(s.textContent) === norm(h.textContent) ||
+                    !(
+                        s.querySelector('img, input, select') ||
+                        MONEY_RE.test(s.textContent)
+                    ))
+            )
+                head = wordsOf(h)
+        }
+    return ruleWords([ariaOf(box), ...named, head].join(' '))
+}
+
+// Called for every control the finder or the pick might click. One whose own
+// name, the phrases that name a code taken out, speaks of points, rewards,
+// membership, a student, military or teacher discount, verification or store
+// credit is refused ("Use my rewards", "Apply credit"), and so is one that
+// redeems points for a code. One that names a code ("Apply code") is then
+// kept wherever it sits. Any other ("Apply discount", "Apply", a bare
+// "Redeem") is judged by the words beside it and by its section's name, codes
+// taken out. The server's pick judges the controls it names by the same rule.
+function spendsPoints(el) {
+    const own = controlWords(el)
+    const ownWords = withoutCodePhrases(own).replace(REDEEM_WORDS_RE, '')
+    if (LOYALTY_RE.test(ownWords) || STORE_CREDIT_RE.test(ownWords)) return true
+    if (REDEEM_FOR_A_CODE_RE.test(own)) return true
+    if (CODE_WORD_RE.test(own)) return false
+    const beside = wordsBeside(el)
+    // "Redeem" is how some stores name a voucher box's button: only when it
+    // or the field beside it names a coupon code.
+    if (
+        REDEEM_RE.test(own) &&
+        !namesCouponCode(own) &&
+        !namesCouponCode(beside)
+    )
+        return true
+    const near = withoutCodePhrases(`${beside} ${sectionWords(el)}`).replace(
+        REDEEM_WORDS_RE,
+        '',
+    )
+    if (LOYALTY_RE.test(near)) return true
+    // A plain "Apply" under "Store credit $25.00", or beside a gift card's
+    // number, spends the shopper's balance. Only where nothing beside it names
+    // a coupon code: a promo box keeps its "Apply" beside "Check balance".
+    return (
+        !namesCouponCode(beside) &&
+        (STORE_CREDIT_RE.test(near) || giftOnly(beside))
+    )
+}
+
+// A field that takes points or store credit rather than a code ("Points to
+// redeem"). Pressing Enter in it is the same as clicking its "Redeem" button.
+const pointsField = el => {
+    const words = ruleWords(
+        [labelText(el), el.placeholder, ariaOf(el), el.name, el.id].join(' '),
+    )
+    return (
+        (LOYALTY_RE.test(words) || STORE_CREDIT_RE.test(words)) &&
+        !CODE_WORD_RE.test(words)
+    )
+}
+
+// A reveal that names no code: an offer, a points, member or store-credit
+// discount, or the small print.
+const offersOnly = el => {
+    const own = controlWords(el)
+    if (ABOUT_TERMS_RE.test(own) && !CODE_WORD_RE.test(own)) return true
+    if (NAMES_CODE_RE.test(own)) return false
+    if (SAYS_OFFER_RE.test(own)) return true
+    if (!SAYS_DISCOUNT_RE.test(own)) return false
+    const near = withoutCodePhrases(
+        [own, wordsBeside(el), sectionWords(el)].join(' '),
+    )
+    return (
+        LOYALTY_RE.test(near) ||
+        MEMBER_OR_GIFT_RE.test(near) ||
+        STORE_CREDIT_RE.test(near)
+    )
+}
+
+/* ------------------------------------------------- never a code's click */
+// Never clicked on any path (the rules, the server's pick, a box remembered
+// here or by other installs): a control that adds to the cart or buys, adds a
+// gift extra, protection, a warranty, insurance or a donation, saves or
+// updates the cart, subscribes, or signs the shopper in or up. Judged by its
+// own words (controlWords), so a cross-sell "Add to cart" beside the box is
+// refused whatever named it. "Gift card or discount code" names a code and is
+// still a promo-box reveal.
+const NO_CODE_CLICK_RE =
+    /\badd(?:ing)? (?:it )?to (?:my |your |the )?(?:cart|bag|basket|order)\b|\bbuy\b|\bprotection\b|\bwarrant(?:y|ies)\b|\binsurance\b|\bdonat(?:e|ion)s?\b|\bround(?:ing)? ?up\b|\b(?:save|update) (?:my |your |the )?(?:cart|bag|basket|qty|quantit(?:y|ies))\b|\bsave for later\b|\bsubscri(?:be|ption)s?\b|\bnewsletters?\b|\bsign(?:ing)? ?(?:in|up)\b|\blog ?in\b/i
+const GIFT_EXTRA_RE =
+    /\bgift ?(?:card|wrap\w*|message|note|receipt|box|bag)s?\b/i
+const PROMO_WORD_RE = /\b(?:promo\w*|coupons?|discounts?|vouchers?)\b/i
+
+// Words about a gift card and nothing about a coupon ("Gift card number").
+const giftOnly = t => GIFT_EXTRA_RE.test(t) && !PROMO_WORD_RE.test(t)
+// A code for a coupon, not one only for a gift card ("Gift card code").
+const namesCouponCode = t => NAMES_CODE_RE.test(t) && !giftOnly(t)
+
+function noCodeClick(el) {
+    const words = controlWords(el)
+    return NO_CODE_CLICK_RE.test(words) || giftOnly(words)
+}
+
+// A switch or a radio is a setting, never a fold: a radio picks one option of
+// a group (a payment method), and a second click cannot put the shopper's pick
+// back. So is a checkbox that does not speak of entering a code. The finder
+// and the server's pick are held to the same rule.
+function settingControl(el) {
+    const role = (el.getAttribute('role') || '').toLowerCase()
+    if (/^(?:switch|radio|menuitemradio|menuitemcheckbox)$/.test(role))
+        return true
+    const check = checkboxOf(el)
+    if (check?.type.toLowerCase() === 'radio') return true
+    if (!check && role !== 'checkbox') return false
+    const t = toggleText(el)
+    return !CODE_ENTRY_RE.test(t) || CONSENT_RE.test(t)
+}
+
+// Never clicked as a reveal by the finder or the pick.
+const notAReveal = el =>
+    spendsPoints(el) || offersOnly(el) || settingControl(el)
+
 /* --------------------------------------------------------------- toggles */
 // A toggle REVEALS a box on this page. A link that takes the shopper off
 // their cart is never one.
 function navigatesAway(el) {
+    if (submitsAway(el)) return true
     const a = el.closest('a[href]')
     if (!a) return false
     const h = (a.getAttribute('href') || '').trim()
@@ -624,6 +922,26 @@ function navigatesAway(el) {
             u.pathname !== location.pathname ||
             u.search !== location.search
         )
+    } catch {
+        return true
+    }
+}
+
+// A submit button whose form goes to another site or another window (its
+// formaction/formtarget, else its form's action/target). A form that posts to
+// this store and reloads the cart is not leaving: that is how many stores
+// apply a code, and the reload is measured (store-detect.js).
+function submitsAway(el) {
+    const b = el.closest('button, input')
+    if (!b?.form || !/^(?:submit|image)$/i.test(b.type)) return false
+    const attr = (own, form) =>
+        (b.getAttribute(own) ?? b.form.getAttribute(form) ?? '').trim()
+    const target = attr('formtarget', 'target')
+    if (target && !/^_self$/i.test(target)) return true
+    const action = attr('formaction', 'action')
+    if (!action) return false
+    try {
+        return new URL(action, location.href).origin !== location.origin
     } catch {
         return true
     }
@@ -670,7 +988,7 @@ function ownsBox(el, input) {
 // discount card", "Use my voucher balance"), and never ask for consent ("Email
 // me promo codes and offers").
 const CODE_ENTRY_RE =
-    /\b(?:promo(?:tional)?|coupon|discount|voucher|offer|gift)\s+codes?\b|\b(?:have|got|enter|add|apply|use)\s+(?:a|an|your)?\s*(?:promo(?:tional)?|coupon|discount|voucher)\b(?!\s+(?:card|balance|points))/i
+    /\b(?:promo(?:tional)?|coupon|discount|voucher|offer|gift)\s+codes?\b|\b(?:have|got|enter|add|apply|use)\s{1,8}(?:a|an|your)?\s{0,8}(?:promo(?:tional)?|coupon|discount|voucher)\b(?!\s+(?:card|balance|points))/i
 const CONSENT_RE =
     /\b(?:e-?mail|sms|text me|newsletter|subscri\w*|sign me up|send me|notif\w*|marketing)\b/i
 
@@ -826,13 +1144,14 @@ function scoreToggle(el, t) {
     return { s, reasons }
 }
 
+const TOGGLE_SEL =
+    'button, a, summary, [role="button"], [aria-expanded], label, span, div, p, h2, h3, h4, header, input[type="checkbox"]'
+
 // `input` is the hidden promo field, when there is one.
 function findToggle(doc, input) {
     let best = null
     // Headings too: an accordion's trigger is often its <h3>.
-    for (const el of doc.querySelectorAll(
-        'button, a, summary, [role="button"], [aria-expanded], label, span, div, p, h2, h3, h4, header, input[type="checkbox"]',
-    )) {
+    for (const el of doc.querySelectorAll(TOGGLE_SEL)) {
         // Leaf-ish only: a div wrapping the whole sidebar also "says" promo.
         if (el.children.length > 3) continue
         // Cheap first (no layout): innerText below forces one per element.
@@ -843,16 +1162,16 @@ function findToggle(doc, input) {
         // A box that only renders once its fold is checked has no input to
         // own yet: then a label or wrapper may still open it (what its words
         // say decides), but a bare checkbox never.
-        // A radio is never a fold: it picks one option of a group (a payment
-        // method), and a second click cannot put the shopper's pick back.
+        // What it says is judged with every other reveal (settingControl):
+        // a radio never, a checkbox only when it speaks of entering a code.
         const check = checkboxOf(el)
-        if (check?.type.toLowerCase() === 'radio') continue
         if (check && (input ? !ownsBox(el, input) : el.tagName === 'INPUT'))
             continue
         const t = toggleText(el)
-        if (check && (!CODE_ENTRY_RE.test(t) || CONSENT_RE.test(t))) continue
         if (!t || t.length > 60) continue
         if (!visible(el)) continue
+        if (notAReveal(el)) continue
+        if (noCodeClick(el)) continue
         const r = scoreToggle(el, t)
         if (!r) continue
         // Equal score: the INNERMOST element wins (an outer wrapper may not
@@ -884,19 +1203,27 @@ const SIGN = '[$£€¥₹₩₺₱₪₫฿₦]'
 // ...and the currency codes written beside an amount.
 const CODES =
     'USD|CAD|AUD|NZD|EUR|GBP|CHF|SEK|NOK|DKK|PLN|AED|SAR|INR|JPY|HKD|SGD|MXN|ZAR|kr'
-// An amount: a currency mark beside digits, or digits with cents.
+// An amount: a currency mark beside digits, or digits with cents. A run of
+// digits is read at most 25 characters long, longer than any price: an
+// open-ended run is tried again from every digit of a long number, and a
+// 40 KiB one took seconds.
 const MONEY_RE = new RegExp(
-    `(?:${SIGN}|R\\$|\\b(?:${CODES})\\b)\\s?-?\\d[\\d.,]*|\\d[\\d.,]*\\s?(?:${SIGN}|\\b(?:USD|EUR|GBP|CHF|kr)\\b|zł)|\\d[\\d,]*[.,]\\d{2}\\b`,
+    `(?:${SIGN}|R\\$|\\b(?:${CODES})\\b)\\s?-?\\d[\\d.,]{0,24}|\\d[\\d.,]{0,24}\\s?(?:${SIGN}|\\b(?:USD|EUR|GBP|CHF|kr)\\b|zł)|\\d[\\d,]{0,24}[.,]\\d{2}\\b`,
     'i',
 )
 const AMOUNT_ONLY = new RegExp(
     `^[^\\w${SIGN.slice(1, -1)}]{0,3}\\S{0,4}\\s?-?\\d[\\d.,\\s]*\\S{0,4}$`,
 )
 // A parenthetical ("incl. 15,17 € VAT") is commentary on the amount, not a
-// second total.
+// second total. One is at most 200 characters, so an unclosed "(" is not
+// read to the end of the text again from every "(" before it.
+const PARENTHETICAL = /\(.{0,200}?\)/g
 const moneyCount = t =>
-    (t.replace(/\(.*?\)/g, ' ').match(new RegExp(MONEY_RE.source, 'gi')) || [])
-        .length
+    (
+        t
+            .replace(PARENTHETICAL, ' ')
+            .match(new RegExp(MONEY_RE.source, 'gi')) || []
+    ).length
 // One row: short, and holding exactly one amount. A block with two amounts
 // (a struck-through price, a "free shipping over $150" line) is not a total
 // we can read honestly, because its largest number need not be the total.
@@ -911,8 +1238,11 @@ function ownLabel(el) {
             .map(n => n.textContent)
             .join(' '),
     )
+    // A label is at most 40 characters (scanTotalRows): text far longer is no
+    // label, and is not cut, so a long blob is not read for amounts at all.
+    if (own.length > 200) return { own, bare: own }
     const bare = own
-        .replace(/\(.*?\)/g, ' ')
+        .replace(PARENTHETICAL, ' ')
         .replace(new RegExp(MONEY_RE.source, 'gi'), ' ')
         .replace(/\s+/g, ' ')
         .trim()
@@ -1110,8 +1440,11 @@ const DISCOUNT_NOT =
 const LINE_LABEL =
     /^\W*(?:(?:order|cart|basket) )?(?:coupon|discount|promo(?:tion)?|voucher)s?(?: code)?(?: applied)?\b:?/i
 const PUNCT = '[\\s.,;:!?()[\\]|/*×✕-]'
+// A line's spaces are single by the time it is read (isCouponLine), so the
+// tail opens with one space: a run would be tried again from every space in
+// it.
 const LINE_TAIL = new RegExp(
-    `\\s*(?:${CODES}|zł)?(?:${PUNCT}+(?:remove|edit|change|delete)(?:${PUNCT}+(?:coupon|code|discount|promo|voucher)){0,2})?${PUNCT}*$`,
+    `\\s?(?:${CODES}|zł)?(?:${PUNCT}+(?:remove|edit|change|delete)(?:${PUNCT}+(?:coupon|code|discount|promo|voucher)){0,2})?${PUNCT}*$`,
     'i',
 )
 const CUR = `(?:${SIGN}|\\b(?:${CODES}))\\s?`
@@ -1128,7 +1461,7 @@ function isCouponLine(line, typed) {
     const code = s
         .slice(0, m.index)
         .trim()
-        .replace(/\s*\bapplied\b:?$/i, '')
+        .replace(/\s?\bapplied\b:?$/i, '')
         .replace(/^["'“‘([]+|["'”’)\]:]+$/g, '')
     return !code || (!!typed && code.toLowerCase() === typed.toLowerCase())
 }
@@ -1184,7 +1517,9 @@ function newDeduction(el, base) {
     for (const h of hits) {
         if (hits.some(o => o !== h && o.el.contains(h.el))) continue
         // A code in brackets ("Coupon (SAVE20)") names the code, not an amount.
-        const t = textOf(h.el).replace(/\(\s*[\w-]*[a-z][\w-]*\s*\)/gi, ' ')
+        // The letter is looked for ahead, not between two open-ended runs: a
+        // long bracketed word was split every possible way, for seconds.
+        const t = textOf(h.el).replace(/\(\s*(?=[\w-]*[a-z])[\w-]+\s*\)/gi, ' ')
         const money = caramelFindMoney(t)
         const a = money.length === 1 ? Math.abs(money[0].value) : 0
         // The whole row is judged, not only its label or value cell: "Promo
@@ -1234,10 +1569,11 @@ export function caramelFindOrderTotal(doc = document) {
 
 /* ---------------------------------------------------------------- decide */
 // Exported for tests/coupon-box-discovery.test.mjs.
-export function caramelDiscoverCouponBox(doc = document) {
+// `reveal`: the toggle clicked to open the box, never its button.
+export function caramelDiscoverCouponBox(doc = document, reveal = null) {
     const candidates = scoreInputs(doc)
     const top = candidates[0] || null
-    const button = top ? findButton(top.el) : null
+    const button = top ? findButton(top.el, reveal) : null
     const toggle = !top || !top.visible ? findToggle(doc, top?.el) : null
     return {
         input: top?.el || null,
@@ -1287,7 +1623,8 @@ function mark(el, kind) {
  * reveal never needs to submit; a submit posts the cart or, in a checkout
  * form, places the order behind an innocent label ("Have a promo code?"). */
 function toggleRefused(el) {
-    if (caramelIsForbiddenControl(el)) return true
+    if (caramelIsForbiddenControl(el) || notAReveal(el)) return true
+    if (noCodeClick(el)) return true
     return (
         !!el.form &&
         ((el.tagName === 'BUTTON' && el.type === 'submit') ||
@@ -1334,7 +1671,7 @@ export function caramelFinderSeesBox(doc = document) {
 export async function caramelFinderMayAsk(domain, doc = document) {
     if (!(await caramelCouponBoxLlmOn())) return false
     if (ORDER_PLACED_PATH_RE.test(doc.location?.pathname || '')) return false
-    if (pickAsked(domain || doc.location?.hostname)) return false
+    if (await pickAsked(domain || doc.location?.hostname)) return false
     if (!shownPositiveTotal(doc)) return false
     log('FINDER_MAY_ASK', {})
     return true
@@ -1372,6 +1709,17 @@ function shownPositiveTotal(doc) {
  * machinery it uses for a config row, and sets caramelFound so the verdict
  * holds them to the money rule. Returns null when anything is missing: the
  * caller then keeps its own copy-the-codes answer. */
+//
+// On a store with no config (rec.caramelNoConfig), two things come first: a
+// box this install saw the store answer through before (learnedRecord), and,
+// per the server's couponBoxPickMode, the server's pick:
+//   · rules_first: the rules, then the server only when they find nothing;
+//   · llm_first: the server first, then the rules when it names no usable box
+//     (no box, no pick, a refusal, a timeout, an error);
+//   · llm_only: the server alone. The rules never find the box, so a miss is
+//     a miss; the checks on the pick and the money rule still run.
+// A store with a served config is always rules_first and never reads or saves
+// a learned box.
 // Called from coupon-runner.js.
 export async function caramelDiscoveredRecord(rec, doc = document) {
     const totalRow = findTotalRow(doc)
@@ -1381,6 +1729,17 @@ export async function caramelDiscoveredRecord(rec, doc = document) {
     if (!total || !readableTotal(total)) {
         log('FINDER_NO_TOTAL', {})
         return null
+    }
+    const served = isServed(rec)
+    const mode = await pickMode(served)
+    if (!served) {
+        const learned = await learnedRecord(rec, doc, mode)
+        if (learned) return learned
+    }
+    if (mode !== RULES_FIRST) {
+        const picked = await caramelPickedRecord(rec, doc, mode)
+        if (picked || mode === LLM_ONLY) return picked
+        log('FINDER_PICK_FALLBACK', { mode })
     }
     let found = caramelDiscoverCouponBox(doc)
     const opened = found.inputVisible ? null : found.toggle
@@ -1397,7 +1756,7 @@ export async function caramelDiscoveredRecord(rec, doc = document) {
         toggle.click()
         for (let waited = 0; waited < 2500; waited += 250) {
             await sleep(250)
-            found = caramelDiscoverCouponBox(doc)
+            found = caramelDiscoverCouponBox(doc, toggle)
             if (found.inputVisible) break
         }
         // A checkbox that opened no box we can use was not its fold, or not
@@ -1413,10 +1772,15 @@ export async function caramelDiscoveredRecord(rec, doc = document) {
     }
     if (!found.inputVisible || !confident(found)) {
         log('FINDER_NO_BOX', { reasons: found.reasons })
-        return caramelPickedRecord(rec, doc)
+        // In llm_first the server was asked above: this finds only a pick it
+        // kept for this page.
+        return caramelPickedRecord(rec, doc, mode)
     }
     log('FINDER_PICKED', { reasons: found.reasons })
-    return finderRecord(rec, found, totalRow, opened)
+    return learnable(finderRecord(rec, found, totalRow, opened), 'rules', {
+        found,
+        opened,
+    })
 }
 
 // The record for a box the finder settled on: `found` holds a visible input
@@ -1483,8 +1847,15 @@ function finderRecord(rec, found, totalRow, opened) {
 // Any other answer, a refusal or a failure to ask leaves the page exactly as
 // the rules left it: no box, and the codes handed over to copy.
 //
-// At most one ask per store per tab session, whatever came back.
-const PICK_KEY = 'caramel_box_pick:'
+// At most one ask per store per tab session, whatever came back. A usable
+// pick is also kept, by name (keptPick), for the next page in the tab: a cart
+// that reloads to show the store's answer gets its box found again there.
+// Both are held by the background for this tab and site (tab-handoff.js),
+// never in the page's sessionStorage: the page could otherwise name the
+// fields the codes go into, or clear the memory and buy a second ask. That
+// holds while the background answers. One that cannot (pickMemo then reads
+// nothing) leaves only this page's own memory, so the next page may ask again.
+const PICK_KEY = 'box_pick'
 // How long the page waits for the answer. The server gives the model 20s and
 // then answers no_pick itself; the background allows the whole ask (flag
 // read, token read, request) COUPON_BOX_PICK_DEADLINE_MS, 24s (background.js);
@@ -1499,7 +1870,7 @@ export const PICK_WAIT_MS = 29000
 const OUTLINE_MODULE = 'assets/coupon-box-outline.js'
 // Labels the server refuses to click, mirrored for the button and the toggle.
 const NEVER_CLICK =
-    /check ?out|place (?:my |your )?order|\bpay\b|pay ?pal|pay now|buy now|purchase|\bremove\b|\bdelete\b|empty (?:cart|basket|bag)|sign ?in|sign ?up|log ?in|register|create (?:an )?account|subscribe|continue/i
+    /check ?out|place (?:my |your )?order|\bpay\b|pay ?pal|pay now|buy now|purchase|\bremove\b|\bdelete\b|empty (?:cart|basket|bag)|sign ?in|sign ?up|log ?in|register|create (?:an )?account|subscribe|continue|\bproceed\b|\bnext\b|^\W*(?:(?:my|your|the)\s+)?orders?\W*$/i
 const _pickAsked = new Set()
 
 // The one spelling of a store in the asked-memory: the prompt gate reads it
@@ -1509,26 +1880,266 @@ const pickKey = domain =>
         .trim()
         .toLowerCase()
 
-function pickAsked(domain) {
+// What this tab holds for each store: 1 once asked, or the kept pick.
+const pickMemo = async () =>
+    (await caramelTabHandoff('get', PICK_KEY))?.value || {}
+
+async function pickAsked(domain) {
     domain = pickKey(domain)
     if (_pickAsked.has(domain)) return true
-    try {
-        return sessionStorage.getItem(PICK_KEY + domain) !== null
-    } catch (err) {
-        // Storage blocked: this page's own memory is all there is.
-        log('FINDER_PICK_STORAGE', { error: String(err) })
-        return false
+    // A background that could not answer leaves this page's own memory.
+    return Object.hasOwn(await pickMemo(), domain)
+}
+
+async function rememberPick(domain, kept = 1) {
+    domain = pickKey(domain)
+    _pickAsked.add(domain)
+    await caramelTabHandoff('set', PICK_KEY, {
+        ...(await pickMemo()),
+        [domain]: kept,
+    })
+}
+
+// The names a usable pick left for later pages in this tab, or null: the ask
+// found nothing usable, or this is not the page the pick was made on. A
+// form-POST cart comes back to its own path; a checkout page with a "code"
+// field of its own is not that page.
+async function keptPick(domain, doc) {
+    const k = (await pickMemo())[pickKey(domain)]
+    return k?.i && k.p === doc.location?.pathname ? k : null
+}
+
+// What an element is and what it is called: its tag, then its stable name
+// (inputSig), or for a toggle ('t') its words. A kept input ('i') is named
+// only by its field name or id: a placeholder or label ("Enter code") is
+// worn by a gift-card field too. '' when nothing names it.
+function pickName(el, how) {
+    const n = el && (how === 't' ? toggleText(el) : inputSig(el))
+    return n && (how !== 'i' || /^[ni]:/.test(n)) ? el.tagName + ' ' + n : ''
+}
+
+// The kept pick on this page. Each name must fit exactly one element (a wrapper
+// says what the control inside it says, so only the innermost counts): a name
+// that also fits a gift-card field would put the codes there.
+function refindPick(doc, k) {
+    const find = (css, name, how) => {
+        if (!name) return null
+        const m = [...doc.querySelectorAll(css)].filter(
+            el => pickName(el, how) === name,
+        )
+        const inner = m.filter(e => !m.some(o => o !== e && e.contains(o)))
+        return inner.length === 1 ? inner[0] : null
+    }
+    return {
+        input: find('input', k.i, 'i'),
+        button: find(TOGGLE_SEL + ',input', k.b, 'b'),
+        toggle: find(TOGGLE_SEL, k.t, 't'),
     }
 }
 
-function rememberPick(domain) {
-    domain = pickKey(domain)
-    _pickAsked.add(domain)
-    try {
-        sessionStorage.setItem(PICK_KEY + domain, '1')
-    } catch (err) {
-        log('FINDER_PICK_STORAGE', { error: String(err) })
+/* A box someone else named (the server's pick, a pick kept from the last
+ * page, a box remembered here or by other installs) passes the coupon-word
+ * checks a box the rules find passes, on top of the click guards. */
+
+// Its field: what the rules would accept (scoreInput: a coupon word in its
+// own name, label, placeholder or aria-label, or in the short region around
+// it, and no sign of a search, an address or a newsletter box), never a field
+// that takes points.
+const couponInput = el => !!scoreInput(el) && !pointsField(el)
+
+// Its apply button says so: an apply word (Apply, Redeem, Use code, Submit,
+// OK...) in its label, or, on an arrow or an icon, in its aria-label, title
+// or value. Never one whose label also says checkout, pay or the like.
+const ARROWS_RE = /^[\s→›>»▶➔➜➝➞⟶↵⏎]*$/u
+function applyLike(btn) {
+    const text = buttonLabel(btn)
+    if (text.length > 40) return false
+    if (isDanger(text) && !APPLY_VERBS.some(w => has(text, w))) return false
+    const says = t => APPLY_WORDS.some(w => has(t, w))
+    return (
+        says(text) ||
+        (ARROWS_RE.test(text) &&
+            says(norm([ariaOf(btn), btn.title, btn.value].join(' '))))
+    )
+}
+
+// Its toggle names a CODE ("Have a promo code?", "Add a coupon", "Discount
+// code", "Gutscheincode eingeben"), never a card, a balance or points, and
+// never asks for consent to mail. The Swedish and French names the server's
+// pick reads its toggles by ("Rabattkod", "Kampanjkod", "Bon de réduction",
+// as NAMES_CODE_RE) name a code too.
+const CODE_WORD_TOGGLE_RE =
+    /\b(?:promo|coupon|discount|voucher|rabatt|gutschein|aktions|kortings)codes?\b|\b\w*kod\b|\bbons?\b(?:\s+de)?\s+r[ée]duction/i
+function codeToggle(el) {
+    const t = toggleText(el)
+    const words = norm(t + ' ' + (ariaOf(el) || ''))
+    return (
+        (CODE_ENTRY_RE.test(words) ||
+            TOGGLE_OBJ_RE.test(t) ||
+            CODE_WORD_TOGGLE_RE.test(words)) &&
+        !CONSENT_RE.test(words)
+    )
+}
+
+// A checkbox, radio or switch changes a setting of the order (a balance used,
+// a payment picked), and one named by someone else is never clicked: it is
+// no reveal a click can safely try.
+const SWITCHES =
+    'input[type="checkbox"], input[type="radio"], [role="switch"], [role="checkbox"], [role="radio"], [role="menuitemcheckbox"], [role="menuitemradio"], [aria-checked]'
+const switchLike = el =>
+    !!checkboxOf(el) || !!el.closest(SWITCHES) || !!el.querySelector(SWITCHES)
+
+// A toggle clicked on someone else's word: one the shopper can see, that
+// names a code, never an order, pay, remove or leave-the-cart control (nor a
+// part of one: a <span> inside a submit button submits its form), and never a
+// checkbox, radio or switch.
+const okToggle = t =>
+    visible(t) &&
+    clickable(t) &&
+    codeToggle(t) &&
+    !switchLike(t) &&
+    !toggleRefused(t.closest('button') || t) &&
+    !navigatesAway(t)
+
+// An apply button says apply and never leaves the page: a link elsewhere is a
+// way out of the cart, whatever it says.
+const okButton = (b, input) =>
+    clickable(b) && applyLike(b) && b !== input && !navigatesAway(b)
+
+// A learned box names its apply by a selector, and a selector can name
+// anything on the page (#place-order, button[name=checkout], an add-to-cart).
+// So its apply says apply (okButton), or it is an arrow or an icon with no
+// words in the box's own small panel (ownsBox): sharing the field's form is not
+// enough, a form can hold the whole cart. Never one whose label speaks of
+// checkout, paying, continuing, buying or adding to the cart. Its name, id and
+// data attributes refuse it the same way, with one exception: many real apply
+// buttons live in the checkout's own namespace (checkout_reduction_code,
+// checkout-coupon-apply, checkout_discount_btn). An attribute whose only
+// refusing word is that checkout or cart namespace passes when it also names
+// the coupon or the apply and the label says apply.
+const NAMES_COUPON_RE = /coupon|promo|discount|reduction|voucher|apply/
+// The cart words the danger list refuses on their own ("cart" itself is not).
+const CART_NAMESPACE_RE =
+    /check ?out|warenkorb|panier|carrito|carrello|winkelwagen|koszyk|cesta/g
+const refuses = words => NEVER_CLICK.test(words) || isDanger(words)
+function learnedApply(b, input, positional = false) {
+    if (!b || !input) return false
+    const text = norm([buttonLabel(b), ariaOf(b), b.title, b.value].join(' '))
+    const label = norm(
+        [wordsOf(b), b.tagName === 'INPUT' ? labelText(b) : '', text]
+            .join(' ')
+            .replace(/[-_]+/g, ' '),
+    ).toLowerCase()
+    if (refuses(label) || noCodeClick(b)) return false
+    for (const attr of [
+        b.getAttribute('name'),
+        b.id,
+        b.getAttribute('class'),
+        ...Array.from(b.attributes, a =>
+            a.name.startsWith('data-') ? a.name.slice(5) + ' ' + a.value : '',
+        ),
+    ]) {
+        const words = norm(
+            String(attr || '').replace(/[-_]+/g, ' '),
+        ).toLowerCase()
+        if (!refuses(words)) continue
+        const namespaced =
+            NAMES_COUPON_RE.test(words) &&
+            !NO_CODE_CLICK_RE.test(words) &&
+            !refuses(words.replace(CART_NAMESPACE_RE, ' '))
+        if (!namespaced || !applyLike(b)) return false
     }
+    if (okButton(b, input)) return true
+    return (
+        ARROWS_RE.test(text) &&
+        clickable(b) &&
+        b !== input &&
+        !navigatesAway(b) &&
+        !positional &&
+        ownsBox(b, input)
+    )
+}
+
+// A plain pick's button (the server named it by its place in this page's
+// outline): one that says apply, or, as for a learned box, a wordless arrow or
+// icon in the box's own small panel whose name, id, class and data attributes
+// refuse nothing. Many stores ship only an icon beside the field.
+const pickApply = (b, input) => okButton(b, input) || learnedApply(b, input)
+
+// The apply button for `input`: the one named, else the one the rules see
+// beside it. With `own` (every named box: a pick, a kept pick, a learned box)
+// either is used only when it is this box's own: in its form, or in its small
+// panel. A page that re-drew the box beside a gift-card form must not lend it
+// that form's button.
+// strict (llm_only): the named button only, never one the rules find.
+// reveal: the toggle that opened the box, never its button.
+function applyButtonFor(input, button, own, strict, reveal = null) {
+    const ok = b =>
+        b &&
+        b !== reveal &&
+        !navigatesAway(b) &&
+        (!own || (b.form ? b.form === input.form : ownsBox(b, input)))
+    return [button, !strict && findButton(input, reveal)?.el].find(ok) || null
+}
+
+/* The rules see no box, but this tab's kept pick names one here: the cart
+ * reloaded to show the store's answer to the last code. Clicks nothing, and
+ * says yes only where the run could go on: a box with its button (or none,
+ * for a box kept as applying on Enter), or the toggle that opened it. */
+// Called from store-detect.js.
+export async function caramelFinderSeesKeptPick(
+    domain,
+    doc = document,
+    strict = false,
+) {
+    const k =
+        (await caramelCouponBoxLlmOn()) &&
+        (await keptPick(domain || doc.location?.hostname, doc))
+    if (!k || !shownPositiveTotal(doc)) return false
+    const sees = boxShows(refindPick(doc, k), k.e, strict)
+    if (sees) log('FINDER_SEES_KEPT', {})
+    return sees
+}
+
+/* Can the finder see a box a run could use on this page, without touching
+ * it? The rules' box (never in llm_only, where the rules find nothing), the
+ * pick kept from the last page in this tab, or, on a store with no config, a
+ * box this install remembers. `served`: the store has a served config, so it
+ * is rules_first and never reads a learned box. */
+// Called from store-detect.js.
+export async function caramelFinderSees(domain, served, doc = document) {
+    const mode = await pickMode(served)
+    return (
+        (mode !== LLM_ONLY && caramelFinderSeesBox(doc)) ||
+        (await caramelFinderSeesKeptPick(domain, doc, mode === LLM_ONLY)) ||
+        (!served && (await learnedSees(doc, mode)))
+    )
+}
+
+// Could a run go on with these elements, without clicking anything? A
+// showing box with its own button (or none, for a box that applies on Enter),
+// or the toggle that opens it.
+function boxShows(
+    { input, button, toggle, learned, applyPositional },
+    enterOnly,
+    strict,
+) {
+    // A learned box whose apply is not an apply button is not offered.
+    if (learned && button && !learnedApply(button, input, applyPositional))
+        return false
+    return (
+        (typeableInput(input) &&
+            visible(input) &&
+            couponInput(input) &&
+            (!!applyButtonFor(
+                input,
+                (learned || pickApply(button, input)) && button,
+                true,
+                strict,
+            ) ||
+                !!enterOnly)) ||
+        okToggle(toggle)
+    )
 }
 
 // The element the server named by index, if it is still on the page.
@@ -1555,15 +2166,16 @@ function clickable(el) {
     )
         return false
     const words = [textOf(el), ariaOf(el), el.value, el.title].join(' ')
-    return !caramelIsForbiddenControl(el) && !NEVER_CLICK.test(words)
+    return (
+        !caramelIsForbiddenControl(el) &&
+        !NEVER_CLICK.test(words) &&
+        !spendsPoints(el) &&
+        !noCodeClick(el)
+    )
 }
 
-// Called from caramelDiscoveredRecord, after the rules found no box.
-async function caramelPickedRecord(rec, doc) {
-    if (!(await caramelCouponBoxLlmOn())) return null
-    const domain = pickKey(rec.domain || doc.location?.hostname)
-    if (!domain || pickAsked(domain)) return null
-    rememberPick(domain)
+// Ask the server once, from an outline of the page. null on any miss.
+async function askPick(domain, doc, served) {
     let outline, elements
     try {
         const { caramelPageOutline } = await import(
@@ -1580,7 +2192,7 @@ async function caramelPickedRecord(rec, doc) {
     let answer
     try {
         answer = await caramelSendMessage(
-            { action: 'couponBoxPick', domain, outline },
+            { action: 'couponBoxPick', domain, outline, served },
             PICK_WAIT_MS,
         )
     } catch (err) {
@@ -1594,6 +2206,98 @@ async function caramelPickedRecord(rec, doc) {
         })
         return null
     }
+    // A box other installs saw this store answer through is named by
+    // selectors (under `box`, the shape the report carried), not by places in
+    // this page's outline; its index fields are null. Each selector must be in
+    // the learned-box grammar and find exactly one element here
+    // (learnedEls); everything after this point checks it like any pick.
+    if (answer.source === 'learned' && answer.box) {
+        // A store with a served config never uses a learned box.
+        if (served) {
+            log('FINDER_PICK_MISS', { learned: 'served config' })
+            return null
+        }
+        try {
+            return { learned: true, ...(await learnedEls(doc, answer.box)) }
+        } catch (err) {
+            log('FINDER_PICK_MISS', { learned: String(err?.message || err) })
+            return null
+        }
+    }
+    return {
+        answer,
+        input: pickedEl(elements, answer.input),
+        button: pickedEl(elements, answer.button),
+        toggle: pickedEl(elements, answer.toggle),
+        enterOnly: answer.button == null,
+    }
+}
+
+// Called from caramelDiscoveredRecord: after the rules found no box, or, in
+// the llm modes, before them.
+async function caramelPickedRecord(rec, doc, mode) {
+    if (!(await caramelCouponBoxLlmOn())) return null
+    const domain = pickKey(rec.domain || doc.location?.hostname)
+    if (!domain) return null
+    const kept = await keptPick(domain, doc)
+    let picked
+    if (kept) picked = { ...refindPick(doc, kept), enterOnly: !!kept.e }
+    else {
+        if (await pickAsked(domain)) return null
+        await rememberPick(domain)
+        picked = await askPick(domain, doc, isServed(rec))
+        if (!picked) return null
+    }
+    const learned = kept ? !!kept.l : !!picked.learned
+    // Every pick's button is the box's own (in its form, or its small
+    // panel): a far-away "Apply credit" is someone else's apply, whether the
+    // model named it or other installs did.
+    const got = await checkedPick(doc, picked, true, mode === LLM_ONLY)
+    if (!got) return null
+    const { found, opened, total } = got
+    log('FINDER_PICK_USED', {
+        confidence: picked.answer?.confidence ?? null,
+        toggle: !!opened,
+        kept: !!kept,
+        learned,
+        reasons: found.reasons || null,
+    })
+    // Kept only when each name finds exactly this element again, here: a name
+    // this page already shares with another field would not find the box
+    // after the reload either.
+    const k = {
+        p: doc.location?.pathname,
+        i: pickName(found.input, 'i'),
+        b: pickName(found.button, 'b'),
+        t: pickName(opened, 't'),
+        // Applies on Enter: there is no button to find again.
+        ...(found.button ? {} : { e: 1 }),
+        // A box other installs confirmed, not the model's pick.
+        ...(learned ? { l: 1 } : {}),
+    }
+    const again = refindPick(doc, k)
+    if (
+        !kept &&
+        again.input === found.input &&
+        again.button === (k.b ? found.button : null) &&
+        again.toggle === (k.t ? opened : null)
+    )
+        await rememberPick(domain, k)
+    return learnable(
+        finderRecord(rec, found, total, opened),
+        learned ? 'server_learned' : 'llm',
+        { found, opened, learned },
+    )
+}
+
+/* Check a box someone else named (the server's pick, a pick kept from the
+ * last page, a box remembered from an earlier visit) on this page, before
+ * anything is touched. `picked` holds the elements and whether the box
+ * applies on Enter; `own` asks that a button be the box's own (in its form,
+ * or its small panel); `strict` (llm_only) that the rules find nothing, not
+ * even the box a named toggle reveals or a button beside the named input.
+ * Returns { found, opened, total } or null. */
+async function checkedPick(doc, picked, own, strict) {
     // The cart may have re-rendered while the server answered: the baseline is
     // the total as it is now, and with no readable total nothing can be
     // measured.
@@ -1603,72 +2307,51 @@ async function caramelPickedRecord(rec, doc) {
         return null
     }
 
-    let input = pickedEl(elements, answer.input)
-    if (!typeableInput(input)) input = null
-    let button = pickedEl(elements, answer.button)
-    // An apply button never leaves the page: a link elsewhere is a way out of
-    // the cart, whatever it says.
-    if (!clickable(button) || button === input || navigatesAway(button))
-        button = null
-    let toggle = pickedEl(elements, answer.toggle)
+    let { input, button, toggle } = picked
+    if (!typeableInput(input) || !couponInput(input)) input = null
+    // A learned box whose apply is not an apply button is refused whole: no
+    // button of the rules' is swapped in, and normal detection runs instead.
     if (
-        toggle &&
-        (!clickable(toggle) ||
-            toggleRefused(toggle) ||
-            navigatesAway(toggle) ||
-            // A radio cannot be put back if the box does not appear.
-            checkboxOf(toggle)?.type === 'radio')
-    )
-        toggle = null
-    // The server's button, else the one the rules see beside the input; a
-    // link that leaves the page is never it either way.
-    const buttonFor = el => {
-        if (button) return button
-        const b = findButton(el)?.el
-        return b && !navigatesAway(b) ? b : null
+        picked.learned &&
+        button &&
+        !learnedApply(button, input, picked.applyPositional)
+    ) {
+        log('FINDER_PICK_UNUSABLE', { input: !!input, apply: 'refused' })
+        return null
     }
+    if (!picked.learned && !pickApply(button, input)) button = null
+    if (!okToggle(toggle)) toggle = null
+    const buttonFor = el => applyButtonFor(el, button, own, strict, toggle)
 
-    // A usable pick: an input with its button, or the server's own input when
-    // the server named NO button (a box that applies on Enter). A button the
-    // server did name but this page refused above (a link out of the cart, an
-    // order control) never turns into an Enter press: that stays a miss.
+    // A usable pick: an input with its button, or the named input when no
+    // button was named (a box that applies on Enter). A button that was named
+    // but this page refused above (a link out of the cart, an order control)
+    // never turns into an Enter press: that stays a miss. A kept pick is
+    // Enter-only only when it was made that way: a box kept with a button that
+    // the reload took away is a miss.
     const usableBox = f =>
         !!f?.input &&
-        (!!f.button || (f.input === input && answer.button == null))
+        (!!f.button ||
+            (f.input === input && picked.enterOnly && !pointsField(input)))
 
     let found = null
     let opened = null
     if (input && visible(input)) {
         found = { input, button: buttonFor(input) }
     } else if (toggle) {
-        const check = checkboxOf(toggle)
-        const wasChecked = check?.checked
         toggle.click()
         for (let waited = 0; waited < 2500 && !found; waited += 250) {
             await sleep(250)
-            // The server's own input once it shows, else whatever box the
-            // rules can now see.
+            // The named input once it shows, else whatever box the rules can
+            // now see.
             if (input && visible(input) && typeableInput(input))
                 found = { input, button: buttonFor(input) }
-            else {
-                const rules = caramelDiscoverCouponBox(doc)
-                // Same guard as buttonFor: a button that leaves the page is
-                // never the apply button on the server-pick path.
-                if (rules.inputVisible && confident(rules))
-                    found = {
-                        ...rules,
-                        button:
-                            rules.button && !navigatesAway(rules.button)
-                                ? rules.button
-                                : null,
-                    }
+            else if (!strict) {
+                // The rules never take a link that leaves the page
+                // (findButton), nor the toggle just clicked as the button.
+                const rules = caramelDiscoverCouponBox(doc, toggle)
+                if (rules.inputVisible && confident(rules)) found = rules
             }
-        }
-        // A checkbox that opened no usable box goes back the way the shopper
-        // left it, as for a rule pick.
-        if (!usableBox(found) && check && check.checked !== wasChecked) {
-            log('FINDER_TOGGLE_RESTORED', {})
-            toggle.click()
         }
         opened = toggle
     }
@@ -1680,13 +2363,227 @@ async function caramelPickedRecord(rec, doc) {
         })
         return null
     }
-    log('FINDER_PICK_USED', {
-        confidence: answer.confidence ?? null,
-        toggle: !!opened,
-        reasons: found.reasons || null,
-    })
-    return finderRecord(rec, found, total, opened)
+    return { found, opened, total }
 }
+
+/* ------------------------------------------------------- learned boxes */
+// A box the store answered through (the total dropped, or the store replied
+// about the code) on a store with no config is remembered for this install
+// (coupon-box-learned.js keeps the memory: storage.local, at most 200
+// domains, forgotten after two failed uses in a row), and, while the
+// couponBoxLlm flag is on, reported to the server, which serves a box several
+// installs confirmed back as a pick (source 'learned', askPick).
+//
+// What is saved and sent is the box's selectors and where it came from:
+// never page text, a code or a price.
+const LEARNED_MODULE = 'assets/coupon-box-learned.js'
+const isServed = rec => rec?.caramelNoConfig !== true
+
+const loadLearned = () =>
+    import(/* @vite-ignore */ currentBrowser.runtime.getURL(LEARNED_MODULE))
+
+// The box this install remembers for this tab's own store, or null. The
+// background keeps the memory (behind its own flag) and answers only for the
+// host of the tab that asks.
+async function learnedBox() {
+    try {
+        const b = (await caramelSendMessage({ action: 'couponBoxLearnedBox' }))
+            ?.box
+        return b?.v === 1 && typeof b.input === 'string' ? b : null
+    } catch (err) {
+        log('FINDER_LEARNED_UNREADABLE', { error: String(err?.message || err) })
+        return null
+    }
+}
+
+// A learned box's elements, each the one element its selector finds
+// (coupon-box-learned.js caramelOne: a selector outside the learned-box
+// grammar is never queried). Rejects when the module does not load.
+const POSITIONAL_RE = /:(?:nth|first)-of-type/
+async function learnedEls(doc, b) {
+    const { caramelOne } = await loadLearned()
+    return {
+        input: caramelOne(doc, b.input),
+        button: caramelOne(doc, b.apply),
+        toggle: caramelOne(doc, b.toggle),
+        enterOnly: b.enterOnly === true && !b.apply,
+        learned: true,
+        // Named by its place among its siblings: a count that changes (one
+        // more line in the cart) names another element.
+        applyPositional: POSITIONAL_RE.test(b.apply || ''),
+    }
+}
+
+// llm_only lets the server alone find a box: a box the rules found once is
+// not used then.
+const learnedFor = async mode => {
+    const b = await learnedBox()
+    return b && !(mode === LLM_ONLY && b.source === 'rules') ? b : null
+}
+
+/* Tried first on a store with no config. A box that no longer resolves here,
+ * or fails the checks, counts as a failed use (two and it is forgotten), and
+ * detection goes on as if there were none. */
+async function learnedRecord(rec, doc, mode) {
+    const b = await learnedFor(mode)
+    if (!b) return null
+    // Off the cart (a run started from the popup on another page) nothing
+    // can be measured and no box is expected: not a use of the box at all.
+    if (!shownPositiveTotal(doc)) return null
+    let els
+    try {
+        els = await learnedEls(doc, b)
+    } catch (err) {
+        // Nothing was tried: not a failed use of the box.
+        log('FINDER_LEARN_UNAVAILABLE', { error: String(err?.message || err) })
+        return null
+    }
+    const got = await checkedPick(doc, els, true, mode === LLM_ONLY)
+    if (!got) {
+        log('FINDER_LEARNED_UNUSABLE', {})
+        // Only this install's memory: whether it applies here is not news
+        // about the box for anyone else.
+        learnOutcome({ box: b, source: b.source }, 'failed', null, false)
+        return null
+    }
+    // A named toggle can reveal a box the rules then pick, and a stale button
+    // name gives way to the button the rules see beside the box (checkedPick):
+    // then what runs is the rules' find, not the remembered box.
+    const now = await learnedEls(doc, b)
+    const same =
+        got.found.input === now.input &&
+        (got.found.button || null) === (b.apply ? now.button : null)
+    log('FINDER_LEARNED_USED', { source: b.source, same })
+    return learnable(
+        finderRecord(rec, got.found, got.total, got.opened),
+        same ? b.source : 'rules',
+        same ? { ...got, learned: true, box: b } : got,
+    )
+}
+
+/* Can a remembered box be used here, without touching anything? For the
+ * prompt and the reload chain, the same question caramelFinderSeesKeptPick
+ * answers for a kept pick. */
+async function learnedSees(doc, mode) {
+    const b = await learnedFor(mode)
+    if (!b || !shownPositiveTotal(doc)) return false
+    let els
+    try {
+        els = await learnedEls(doc, b)
+    } catch (err) {
+        log('FINDER_LEARN_UNAVAILABLE', { error: String(err?.message || err) })
+        return false
+    }
+    const sees = boxShows(els, els.enterOnly, mode === LLM_ONLY)
+    if (sees) log('FINDER_SEES_LEARNED', {})
+    return sees
+}
+
+/* Give a record on a store with no config what it needs to remember its box:
+ * the box's selectors (built by coupon-box-learned.js, each checked to find
+ * exactly its element) and where it came from. A box with no stable name is
+ * not remembered, and the record is returned either way. */
+async function learnable(record, source, { found, opened, learned, box }) {
+    if (isServed(record)) return record
+    const domain = pickKey(record.domain)
+    let l
+    try {
+        l = (await loadLearned()).caramelLearnable(
+            domain,
+            box || [found.input, found.button, opened],
+            source,
+            learned,
+        )
+    } catch (err) {
+        log('FINDER_LEARN_UNAVAILABLE', { error: String(err?.message || err) })
+        return record
+    }
+    if (!l) {
+        log('FINDER_LEARN_NO_NAME', {})
+        return record
+    }
+    // Held by the background for this tab, for the page a submit reloads to
+    // (caramelFinderLearnResumed): never in the page's own storage.
+    caramelSendMessage({ action: 'couponBoxLearnHold', l }).catch(err =>
+        log('FINDER_LEARN_HOLD_FAILED', { error: String(err?.message || err) }),
+    )
+    return { ...record, caramelLearn: l }
+}
+
+/* What a run taught us about its box. `confirmed` with its evidence
+ * ('total_dropped' or 'store_answered'), once per run; `failed` only for a
+ * box that came from memory (this install's or the server's) and got no
+ * answer from the store at all. Saved for this install, then reported to the
+ * server; both results are logged, and neither can touch the shopper's run. */
+// Called from coupon-runner.js.
+// A run reports once, except that a total that dropped after the store
+// only answered (a reply, then a code that worked) is the stronger evidence
+// and is reported too.
+export function caramelFinderLearn(rec, outcome, evidence = null) {
+    const l = rec?.caramelLearn
+    if (!l || (outcome === 'failed' && !l.learned)) return
+    const stronger =
+        l.done === 'store_answered' &&
+        outcome === 'confirmed' &&
+        evidence === 'total_dropped'
+    if (l.done && !stronger) return
+    l.done = evidence || outcome
+    return learnOutcome(l, outcome, evidence, true)
+}
+
+/* The page a submit reloaded to measured the total drop: the box the run
+ * used is confirmed. */
+// Called from store-detect.js.
+// The box is the one the background held for this tab and this host (a
+// page cannot write it); the store is always this page's own.
+export async function caramelFinderLearnResumed() {
+    let l = null
+    try {
+        l = (await caramelSendMessage({ action: 'couponBoxLearnTake' }))?.l
+    } catch (err) {
+        log('FINDER_LEARN_HOLD_FAILED', { error: String(err?.message || err) })
+    }
+    if (l?.box)
+        return caramelFinderLearn(
+            {
+                caramelLearn: {
+                    box: l.box,
+                    source: l.source,
+                    learned: l.learned,
+                },
+            },
+            'confirmed',
+            'total_dropped',
+        )
+}
+
+// Saved by the background for this tab's own store, then, with `report`,
+// reported to the server (background.js couponBoxLearnedMessage). Logged
+// either way; nothing here can touch the shopper's run.
+const learnOutcome = (l, outcome, evidence, report) =>
+    caramelSendMessage({
+        action: 'couponBoxLearned',
+        box: l.box,
+        source: l.source,
+        evidence,
+        outcome,
+        report,
+    })
+        .then(resp =>
+            log('FINDER_LEARNED_SAVED', {
+                outcome,
+                saved: resp?.saved || null,
+                ok: resp?.ok === true,
+                recorded: resp?.recorded === true,
+                error: resp?.error || resp?.skipped || resp?.reason || null,
+            }),
+        )
+        .catch(err =>
+            log('FINDER_LEARNED_SAVE_FAILED', {
+                outcome,
+                error: String(err?.message || err),
+            }),
+        )
 
 // What a box IS, by its most stable name: the field name the server reads,
 // then its id, then the words it carries. Only that one name is compared, so
@@ -1695,9 +2592,12 @@ async function caramelPickedRecord(rec, doc) {
 // wordless box cannot be told from another wordless box (a gift-card field
 // beside it), so it is never found again.
 // An id a framework generates (React ':r1:', 'mui-12', 'ember123') is new on
-// every re-draw, so it names nothing: the next key is read instead.
+// every re-draw, so it names nothing: the next key is read instead. A hex run
+// of 8 or more with a digit in it: looking at most 7 ahead for the digit finds
+// every such run (the last 8 of a run hold any digit the look would miss) and
+// does not read a long id to its end again from every letter.
 const GENERATED_ID_RE =
-    /:|^(?:mui|ember|radix|headlessui|react|rc|chakra|downshift|field|input)[-_]?\d|(?=[0-9a-f]*\d)[0-9a-f]{8,}/i
+    /:|^(?:mui|ember|radix|headlessui|react|rc|chakra|downshift|field|input)[-_]?\d|(?=[0-9a-f]{0,7}\d)[0-9a-f]{8,}/i
 const SIG_KEYS = [
     ['n', el => el.getAttribute('name')],
     ['i', el => (GENERATED_ID_RE.test(el.id) ? '' : el.id)],
@@ -1882,40 +2782,40 @@ function readableTotal(el) {
     return caramelFindMoney(el.innerText || '').length > 0
 }
 
-/* Is the finder switched on? The background answers from its cached features
- * read; any failure to ask is answered as off. Asked once per page. */
-let _discoveryOn = null
-// Called from coupon-runner.js and store-detect.js.
-export function caramelCouponBoxDiscoveryOn() {
-    if (!_discoveryOn)
-        _discoveryOn = caramelSendMessage({
-            action: 'couponBoxDiscoveryEnabled',
-        })
-            .then(resp => resp?.enabled === true)
-            .catch(e => {
-                log('FINDER_FLAG_UNREADABLE', { error: String(e) })
-                return false
+/* May the finder ask the server to pick a box the rules missed, and in which
+ * order (the server's couponBoxPickMode)? Read the same way, from the
+ * couponBoxLlm flag: any failure to ask is off, and off, or a mode this build
+ * does not know, is rules_first. */
+const RULES_FIRST = 'rules_first'
+const LLM_ONLY = 'llm_only'
+const PICK_MODES = [RULES_FIRST, 'llm_first', LLM_ONLY]
+let _llm = null
+function llmFlags() {
+    if (!_llm)
+        _llm = caramelSendMessage({ action: 'couponBoxLlmEnabled' })
+            .then(resp => {
+                const on = resp?.enabled === true
+                return {
+                    on,
+                    mode:
+                        on && PICK_MODES.includes(resp.mode)
+                            ? resp.mode
+                            : RULES_FIRST,
+                }
             })
-    return _discoveryOn
-}
-
-/* May the finder ask the server to pick a box the rules missed? Read the same
- * way, from the couponBoxLlm flag: any failure to ask is off. */
-let _llmOn = null
-function caramelCouponBoxLlmOn() {
-    if (!_llmOn)
-        _llmOn = caramelSendMessage({ action: 'couponBoxLlmEnabled' })
-            .then(resp => resp?.enabled === true)
             .catch(err => {
                 log('FINDER_PICK_FLAG', { error: String(err?.message || err) })
-                return false
+                return { on: false, mode: RULES_FIRST }
             })
-    return _llmOn
+    return _llm
 }
+const caramelCouponBoxLlmOn = () => llmFlags().then(f => f.on)
+// The mode for a record: a store with a served config is always rules_first.
+const pickMode = served => (served ? RULES_FIRST : llmFlags().then(f => f.mode))
 
 // Test seam: forget the per-page answers.
 export function _caramelResetDiscoveryFlag() {
-    _discoveryOn = null
-    _llmOn = null
+    _caramelResetDiscoveryOn()
+    _llm = null
     _pickAsked.clear()
 }

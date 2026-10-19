@@ -94,6 +94,7 @@ const couponFixture = {
     timesUsed: 5,
     status: 'valid',
     verificationMessage: null,
+    newCustomersOnly: false,
 }
 
 describe('GET /api/coupons — list+count (CouponListRow + TotalCountRow)', () => {

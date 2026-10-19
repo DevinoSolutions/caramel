@@ -6,6 +6,7 @@ import {
     getDomainRecord,
     startCheckoutDetection,
 } from '../store-detect.js'
+import { finderOnlyGetURL } from './_finder-asset.mjs'
 import { tabHandoffBackground } from './_tab-handoff-background.mjs'
 // The background's side of the per-tab handoffs (see the helper).
 const handoffs = tabHandoffBackground()
@@ -86,6 +87,7 @@ function installChromeStub() {
         }
     }
     stub.runtime.lastError = undefined
+    stub.runtime.getURL = finderOnlyGetURL
     stub.runtime.sendMessage = (message, cb) => {
         if (handoffs.answers(message, cb)) return
         if (message?.action === 'reportOutcome') outcomeMessages.push(message)
