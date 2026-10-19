@@ -63,6 +63,12 @@ async function prepareVisualPage(
         await page.locator(readySelector).first().waitFor({ state: 'visible' })
     }
 
+    // Framer opacity fades survive reduced-motion emulation, so zero all motion
+    await page.addStyleTag({
+        content:
+            '*,*::before,*::after{animation:none!important;transition:none!important}',
+    })
+
     await triggerInViewAnimations(page)
 }
 

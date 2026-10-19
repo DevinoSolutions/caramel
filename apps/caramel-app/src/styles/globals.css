@@ -2,6 +2,29 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Motion tokens for the subtle motion pass (docs/motion-audit.md). Tailwind
+   exposes them as duration-fast/base/slow, ease-motion-out and the
+   animate-motion-* utilities (tailwind.config.ts). */
+:root {
+    --motion-dur-fast: 120ms;
+    --motion-dur-base: 180ms;
+    --motion-dur-slow: 240ms;
+    --motion-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Global reduced-motion net: zero every animation/transition except spinners
+   (a rotation is allowed to stay). Per-component rules and framer's
+   MotionConfig reducedMotion="user" handle the rest. */
+@media (prefers-reduced-motion: reduce) {
+    *:not(.animate-spin),
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}
+
 html {
     scroll-behavior: smooth;
     /* Reserve gutter so the layout doesn't jump when scrollbars appear/disappear */
