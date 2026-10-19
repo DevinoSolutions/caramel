@@ -85,6 +85,11 @@ const IngestCouponSchema = z.object({
     verification_message: z.string().nullable(),
     created_at: z.coerce.date().optional(),
     updated_at: z.coerce.date(),
+    // "New customers only" label (owner decision 2026-10-19). OPTIONAL, and
+    // absent or null means "no opinion": applyCatalogRows keeps the stored
+    // value, so a producer that does not know the flag never clears one the
+    // app set. An explicit false clears it.
+    new_customers_only: z.boolean().nullable().optional(),
 })
 
 // One flattened store apply-config = the `store_configs` table (PK store_name).

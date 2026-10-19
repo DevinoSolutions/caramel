@@ -6,6 +6,7 @@ import {
     getDomainRecord,
     startCheckoutDetection,
 } from '../store-detect.js'
+import { finderOnlyGetURL } from './_finder-asset.mjs'
 
 // A run on a box the promo-box finder picked carries across a form-POST cart's
 // reload just like a configured run does. On a cart that reloads per submit,
@@ -83,6 +84,7 @@ function installChromeStub() {
         }
     }
     stub.runtime.lastError = undefined
+    stub.runtime.getURL = finderOnlyGetURL
     stub.runtime.sendMessage = (message, cb) => {
         if (message?.action === 'reportOutcome') outcomeMessages.push(message)
         if (typeof cb !== 'function') return

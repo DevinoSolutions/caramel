@@ -34,8 +34,8 @@ import {
 } from './coupon-apply.js'
 import {
     caramelCouponBoxDiscoveryOn,
-    caramelDiscoveredRecord,
-} from './coupon-box-discovery.js'
+    caramelLoadFinder,
+} from './coupon-box-finder-loader.js'
 import {
     _caramelCleanCodes,
     caramelRankByValue,
@@ -61,6 +61,7 @@ import {
 } from './dom-utils.js'
 import { recordWelcomeFirstTouch } from './install-attribution.js'
 import {
+    caramelStoreListKnown,
     getDomainRecord,
     startCheckoutDetection,
     tryInitialize,
@@ -813,8 +814,22 @@ export async function startApplyingCoupons(rec, options) {
     // copy, let the finder look (coupon-box-discovery.js; off unless the
     // server's couponBoxDiscovery flag is on). It returns a record aimed at
     // the box it found, or null and this page keeps its copy-the-codes answer.
-    if ((!_box || !_isVisible(_box)) && (await caramelCouponBoxDiscoveryOn())) {
-        const found = await caramelDiscoveredRecord(rec)
+    // Never while the store list is unknown: this may be a configured store.
+    if (
+        (!_box || !_isVisible(_box)) &&
+        caramelStoreListKnown() &&
+        (await caramelCouponBoxDiscoveryOn())
+    ) {
+        // A finder that did not load, or that fails, found nothing: the codes
+        // to copy.
+        const finder = await caramelLoadFinder()
+        let found = null
+        if (finder)
+            try {
+                found = await finder.caramelDiscoveredRecord(rec)
+            } catch (e) {
+                log('FINDER_FAILED', { error: String(e) })
+            }
         if (found) {
             rec = found
             _box = pickBestMatch(rec.couponInput)
