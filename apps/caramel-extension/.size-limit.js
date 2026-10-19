@@ -90,7 +90,11 @@ module.exports = [
         // kB (93.68 before the per-tab pick memory, 93.55 before the loader
         // learned to report a failed load and to refuse a module without the
         // hand-over), so the limit is measured + ~1.3 kB.
-        limit: '95.5 KB',
+        // 2026-10-19, raised 95.5 -> 96.5 kB: the second look at a config-less
+        // cart page (a bounded watch for a box or total the store draws after
+        // load) joined this bundle with the finder on demand. Measured
+        // 95.79 kB.
+        limit: '96.5 KB',
         brotli: false,
     },
     {
