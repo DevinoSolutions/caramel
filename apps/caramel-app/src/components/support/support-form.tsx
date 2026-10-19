@@ -54,6 +54,10 @@ export default function SupportForm({
     const [honeypot, setHoneypot] = useState('')
     const [loading, setLoading] = useState(false)
     const [submitted, setSubmitted] = useState(false)
+    // Height of the form at the moment it is replaced by the success card; the
+    // card reserves it as min-height so the swap shifts nothing below it (CLS).
+    const [reservedHeight, setReservedHeight] = useState(0)
+    const formRef = useRef<HTMLFormElement>(null)
 
     // ONE feedback_id per logical submission: generated once, REUSED on retry
     // after a failure, regenerated only after a success (so a genuinely new
@@ -174,6 +178,7 @@ export default function SupportForm({
             // Success: fresh id for the NEXT logical submission, clear + show
             // the success state.
             feedbackIdRef.current = crypto.randomUUID()
+            setReservedHeight(formRef.current?.offsetHeight ?? 0)
             resetForm()
             setSubmitted(true)
             onSubmitted?.()
@@ -188,7 +193,14 @@ export default function SupportForm({
 
     if (submitted) {
         return (
-            <div className="flex w-full flex-col items-center gap-4 rounded-3xl border border-caramel/20 bg-gradient-to-br from-caramel/5 via-orange-50/20 to-caramel/5 p-8 text-center shadow-md dark:border-caramel/30 dark:from-caramel/10 dark:via-orange-900/10 dark:to-caramel/10">
+            <div
+                role="status"
+                data-support-success
+                style={
+                    reservedHeight ? { minHeight: reservedHeight } : undefined
+                }
+                className="flex w-full flex-col items-center justify-center gap-4 rounded-3xl border border-caramel/20 bg-gradient-to-br from-caramel/5 via-orange-50/20 to-caramel/5 p-8 text-center shadow-md motion-safe:animate-motion-fade-up dark:border-caramel/30 dark:from-caramel/10 dark:via-orange-900/10 dark:to-caramel/10"
+            >
                 <p className="text-lg font-semibold text-gray-800 dark:text-gray-100">
                     Thanks for reaching out
                 </p>
@@ -200,7 +212,7 @@ export default function SupportForm({
                     type="button"
                     whileTap={{ scale: 0.95 }}
                     onClick={() => setSubmitted(false)}
-                    className="rounded-full bg-gradient-to-r from-caramel to-orange-600 px-6 py-2 text-sm font-semibold text-white shadow transition-all hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-900"
+                    className="rounded-full bg-gradient-to-r from-caramel to-orange-600 px-6 py-2 text-sm font-semibold text-white shadow transition-colors hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-900"
                 >
                     Send another
                 </m.button>
@@ -210,6 +222,7 @@ export default function SupportForm({
 
     return (
         <form
+            ref={formRef}
             onSubmit={submit}
             className="flex w-full flex-col gap-5 rounded-3xl border border-caramel/20 bg-gradient-to-br from-caramel/5 via-orange-50/20 to-caramel/5 p-8 shadow-md dark:border-caramel/30 dark:from-caramel/10 dark:via-orange-900/10 dark:to-caramel/10 sm:p-6"
         >
@@ -227,7 +240,7 @@ export default function SupportForm({
                                 type="button"
                                 aria-pressed={active}
                                 onClick={() => setType(opt.value)}
-                                className={`rounded-full border-2 px-4 py-2 text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-900 ${
+                                className={`rounded-full border-2 px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-900 ${
                                     active
                                         ? 'border-caramel bg-gradient-to-r from-caramel to-orange-600 text-white shadow'
                                         : 'border-caramel/30 bg-white text-gray-700 hover:border-caramel dark:bg-gray-900 dark:text-gray-200 dark:hover:border-orange-400'
@@ -255,7 +268,7 @@ export default function SupportForm({
                     required
                     placeholder="Tell us what happened, or what you'd like to see…"
                     aria-label="Your message"
-                    className="w-full resize-y rounded-2xl border-2 border-caramel/30 bg-white px-4 py-3 placeholder-gray-400 shadow-sm outline-none transition-all focus:border-caramel dark:bg-gray-900 dark:text-white dark:placeholder-gray-500 dark:focus:border-orange-400"
+                    className="w-full resize-y rounded-2xl border-2 border-caramel/30 bg-white px-4 py-3 placeholder-gray-400 shadow-sm outline-none transition-colors focus:border-caramel dark:bg-gray-900 dark:text-white dark:placeholder-gray-500 dark:focus:border-orange-400"
                 />
                 <span className="text-right text-xs text-gray-500 dark:text-gray-400">
                     {message.length}/{MESSAGE_MAX}
@@ -281,7 +294,7 @@ export default function SupportForm({
                     maxLength={EXPECTED_MAX}
                     placeholder="The coupon should have applied at checkout…"
                     aria-label="Expected outcome"
-                    className="w-full rounded-full border-2 border-caramel/30 bg-white px-6 py-3 placeholder-gray-400 shadow-sm outline-none transition-all focus:border-caramel dark:bg-gray-900 dark:text-white dark:placeholder-gray-500 dark:focus:border-orange-400"
+                    className="w-full rounded-full border-2 border-caramel/30 bg-white px-6 py-3 placeholder-gray-400 shadow-sm outline-none transition-colors focus:border-caramel dark:bg-gray-900 dark:text-white dark:placeholder-gray-500 dark:focus:border-orange-400"
                 />
             </label>
 
@@ -318,7 +331,7 @@ export default function SupportForm({
                         required
                         placeholder="you@example.com"
                         aria-label="Your email"
-                        className="w-full rounded-full border-2 border-caramel/30 bg-white px-6 py-3 placeholder-gray-400 shadow-sm outline-none transition-all focus:border-caramel dark:bg-gray-900 dark:text-white dark:placeholder-gray-500 dark:focus:border-orange-400"
+                        className="w-full rounded-full border-2 border-caramel/30 bg-white px-6 py-3 placeholder-gray-400 shadow-sm outline-none transition-colors focus:border-caramel dark:bg-gray-900 dark:text-white dark:placeholder-gray-500 dark:focus:border-orange-400"
                     />
                 </label>
             ) : null}
@@ -350,9 +363,24 @@ export default function SupportForm({
                 type="submit"
                 disabled={loading}
                 whileTap={{ scale: 0.95 }}
-                className="rounded-full bg-gradient-to-r from-caramel to-orange-600 px-8 py-3 font-semibold text-white shadow transition-all hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 dark:focus-visible:ring-offset-gray-900"
+                className="rounded-full bg-gradient-to-r from-caramel to-orange-600 px-8 py-3 font-semibold text-white shadow transition-colors hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 dark:focus-visible:ring-offset-gray-900"
             >
-                {loading ? 'Sending…' : 'Send feedback'}
+                {/* Both labels share one grid cell so the button keeps the
+                    wider width and only opacity changes between them. */}
+                <span className="grid">
+                    <span
+                        aria-hidden={loading}
+                        className={`col-start-1 row-start-1 transition-opacity duration-fast ease-motion-out ${loading ? 'opacity-0' : 'opacity-100'}`}
+                    >
+                        Send feedback
+                    </span>
+                    <span
+                        aria-hidden={!loading}
+                        className={`col-start-1 row-start-1 transition-opacity duration-fast ease-motion-out ${loading ? 'opacity-100' : 'opacity-0'}`}
+                    >
+                        Sending…
+                    </span>
+                </span>
             </m.button>
         </form>
     )

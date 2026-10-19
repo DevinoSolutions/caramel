@@ -130,18 +130,22 @@ export default function AgentSetupPill({
                 className="inline-flex items-center gap-2 rounded-full font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-caramel"
             >
                 <span>Onboard your agent to {APP_NAME}</span>
-                {copied ? (
-                    <FiCheck
-                        className="h-4 w-4 text-green-600"
-                        aria-hidden="true"
-                    />
-                ) : (
+                {/* Fixed 16px box with both icons stacked: the swap is an
+                    opacity cross-fade (check also eases 0.96 -> 1), so the
+                    label never shifts. Enter 180ms, revert 120ms. */}
+                <span className="relative h-4 w-4" aria-hidden="true">
                     <FiCopy
-                        className="h-4 w-4 text-caramel"
-                        aria-hidden="true"
+                        className={`absolute inset-0 h-4 w-4 text-caramel transition-opacity duration-fast ease-motion-out ${copied ? 'opacity-0' : 'opacity-100'}`}
                     />
-                )}
+                    <FiCheck
+                        data-copied-icon
+                        className={`absolute inset-0 h-4 w-4 text-green-600 transition-[opacity,transform] ease-motion-out ${copied ? 'opacity-100 duration-base' : 'opacity-0 duration-fast motion-safe:scale-[0.96]'}`}
+                    />
+                </span>
             </button>
+            <span role="status" className="sr-only">
+                {copied ? AGENT_SETUP_TOAST : ''}
+            </span>
             <span
                 role="group"
                 className="flex items-center gap-1"

@@ -144,7 +144,7 @@ export default function Header({ scrollRef }: HeaderProps) {
                             data-growth={
                                 link.installOnly ? 'install' : undefined
                             }
-                            className={`whitespace-nowrap px-6 py-2.5 hover:scale-105 2xl:px-4 ${isActive ? 'bg-caramel text-white shadow-sm' : 'text-caramel hover:bg-caramel/10'} inline-flex cursor-pointer items-center justify-center gap-2.5 rounded-3xl transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/60 xl:px-3 xl:text-sm`}
+                            className={`whitespace-nowrap px-6 py-2.5 2xl:px-4 ${isActive ? 'bg-caramel text-white shadow-sm' : 'text-caramel hover:bg-caramel/10'} inline-flex cursor-pointer items-center justify-center gap-2.5 rounded-3xl transition-[transform,background-color,color] duration-fast ease-motion-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/60 motion-safe:active:scale-[0.98] xl:px-3 xl:text-sm`}
                         >
                             {link.name}
                         </Link>
@@ -157,7 +157,7 @@ export default function Header({ scrollRef }: HeaderProps) {
                             aria-haspopup="menu"
                             aria-expanded={isUserMenuOpen}
                             aria-label="Account menu"
-                            className="flex h-8 w-8 items-center justify-center rounded-full bg-caramel text-sm font-semibold text-white ring-2 ring-caramel/20 transition hover:scale-105 hover:ring-caramel/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/60"
+                            className="flex h-8 w-8 items-center justify-center rounded-full bg-caramel text-sm font-semibold text-white ring-2 ring-caramel/20 transition-transform duration-fast ease-motion-out hover:ring-caramel/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/60 motion-safe:active:scale-[0.98]"
                         >
                             {avatarLetter}
                         </button>
@@ -193,13 +193,13 @@ export default function Header({ scrollRef }: HeaderProps) {
                     <div className="ml-2 flex items-center gap-3 xl:gap-2">
                         <Link
                             href="/login"
-                            className="inline-flex cursor-pointer items-center justify-center gap-2.5 whitespace-nowrap rounded-3xl border border-caramel px-6 py-2.5 font-medium text-caramel transition hover:scale-105 hover:bg-caramel/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/60 xl:px-3 xl:text-sm"
+                            className="inline-flex cursor-pointer items-center justify-center gap-2.5 whitespace-nowrap rounded-3xl border border-caramel px-6 py-2.5 font-medium text-caramel transition-[transform,background-color] duration-fast ease-motion-out hover:bg-caramel/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/60 motion-safe:active:scale-[0.98] xl:px-3 xl:text-sm"
                         >
                             Login
                         </Link>
                         <Link
                             href="/signup"
-                            className="inline-flex cursor-pointer items-center justify-center gap-2.5 whitespace-nowrap rounded-3xl bg-caramel px-6 py-2.5 font-medium text-white shadow-sm transition hover:scale-105 hover:bg-caramel/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/60 focus-visible:ring-offset-2 xl:px-3 xl:text-sm"
+                            className="inline-flex cursor-pointer items-center justify-center gap-2.5 whitespace-nowrap rounded-3xl bg-caramel px-6 py-2.5 font-medium text-white shadow-sm transition-[transform,background-color] duration-fast ease-motion-out hover:bg-caramel/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/60 focus-visible:ring-offset-2 motion-safe:active:scale-[0.98] xl:px-3 xl:text-sm"
                         >
                             Sign Up
                         </Link>

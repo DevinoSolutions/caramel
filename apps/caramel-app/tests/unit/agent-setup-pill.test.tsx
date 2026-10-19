@@ -58,6 +58,27 @@ describe('AgentSetupPill', () => {
         })
     })
 
+    it('announces the copy through a role="status" region and fades the check in', async () => {
+        const { container } = render(<AgentSetupPill surface="hero" />)
+        const status = screen.getByRole('status')
+        expect(status.textContent).toBe('')
+        const check = container.querySelector('[data-copied-icon]')
+        expect(check?.getAttribute('class')).toContain('opacity-0')
+
+        fireEvent.click(
+            screen.getByRole('button', {
+                name: 'Onboard your agent to Caramel: copy the setup prompt',
+            }),
+        )
+        await waitFor(() =>
+            expect(status.textContent).toBe(
+                'Copied. Paste into any AI coding agent.',
+            ),
+        )
+        expect(check?.getAttribute('class')).toContain('opacity-100')
+        expect(check?.getAttribute('class')).not.toContain('opacity-0')
+    })
+
     it('reports a denied clipboard with an error toast and no conversion event', async () => {
         writeText.mockRejectedValueOnce(new Error('denied'))
         const consoleError = vi

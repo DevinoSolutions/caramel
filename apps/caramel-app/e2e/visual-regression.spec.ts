@@ -63,7 +63,12 @@ async function prepareVisualPage(
         await page.locator(readySelector).first().waitFor({ state: 'visible' })
     }
 
-    // Framer opacity fades survive reduced-motion emulation, so zero all motion
+    // Freeze CSS animations and transitions so a screenshot never lands on a
+    // mid-transition frame. This cannot stop framer-motion: its JS/WAAPI
+    // animations are not CSS. Those are handled by <MotionConfig
+    // reducedMotion="user"> under the reduced-motion emulation (transforms are
+    // skipped, opacity still fades); triggerInViewAnimations and Argos's
+    // `animations: 'disabled'` settle those fades before capture.
     await page.addStyleTag({
         content:
             '*,*::before,*::after{animation:none!important;transition:none!important}',

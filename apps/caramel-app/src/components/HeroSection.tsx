@@ -574,7 +574,7 @@ export default function HeroSection() {
                             href="https://github.com/DevinoSolutions/caramel"
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="cursor-pointer rounded px-1 font-semibold text-caramel transition-all duration-300 hover:bg-orange-500/10"
+                            className="cursor-pointer rounded px-1 font-semibold text-caramel transition-colors duration-fast ease-motion-out hover:bg-orange-500/10"
                             whileHover={{
                                 backgroundColor: 'rgba(234, 105, 37, 0.1)',
                                 scale: 1.02,
@@ -585,7 +585,7 @@ export default function HeroSection() {
                         and{' '}
                         <m.a
                             href="#why-not"
-                            className="cursor-pointer rounded px-1 font-semibold text-caramel transition-all duration-300 hover:bg-orange-500/10"
+                            className="cursor-pointer rounded px-1 font-semibold text-caramel transition-colors duration-fast ease-motion-out hover:bg-orange-500/10"
                             whileHover={{
                                 backgroundColor: 'rgba(234, 105, 37, 0.1)',
                                 scale: 1.02,
@@ -597,7 +597,7 @@ export default function HeroSection() {
                         the best coupon codes at checkout —
                         <m.a
                             href="#why-not"
-                            className="cursor-pointer rounded px-1 font-semibold text-caramel transition-all duration-300 hover:bg-orange-500/10"
+                            className="cursor-pointer rounded px-1 font-semibold text-caramel transition-colors duration-fast ease-motion-out hover:bg-orange-500/10"
                             whileHover={{
                                 backgroundColor: 'rgba(234, 105, 37, 0.1)',
                                 scale: 1.02,
@@ -609,7 +609,7 @@ export default function HeroSection() {
                         or{' '}
                         <m.a
                             href="#why-not"
-                            className="cursor-pointer rounded px-1 font-semibold text-caramel transition-all duration-300 hover:bg-orange-500/10"
+                            className="cursor-pointer rounded px-1 font-semibold text-caramel transition-colors duration-fast ease-motion-out hover:bg-orange-500/10"
                             whileHover={{
                                 backgroundColor: 'rgba(234, 105, 37, 0.1)',
                                 scale: 1.02,
@@ -630,7 +630,7 @@ export default function HeroSection() {
                         <InstallSurfaceGate className="contents">
                             <m.a
                                 href="#install-extension"
-                                className="rounded-full bg-gradient-to-r from-caramel to-orange-600 px-6 py-3 text-sm font-semibold text-black shadow-lg transition-all duration-300 hover:from-orange-600 hover:to-caramel hover:shadow-xl md:w-full md:text-center"
+                                className="rounded-full bg-gradient-to-r from-caramel to-orange-600 px-6 py-3 text-sm font-semibold text-black shadow-lg hover:from-orange-600 hover:to-caramel hover:shadow-xl md:w-full md:text-center"
                                 initial={{
                                     boxShadow: '0 0 10px rgba(234,105,37,0.5)',
                                 }}
@@ -655,11 +655,10 @@ export default function HeroSection() {
                                     ease: 'easeInOut',
                                 }}
                                 whileHover={{
-                                    scale: 1.05,
                                     boxShadow:
                                         '0 20px 40px rgba(234,105,37,0.35)',
                                 }}
-                                whileTap={{ scale: 0.95 }}
+                                whileTap={{ scale: 0.98 }}
                             >
                                 Install Extension
                             </m.a>
@@ -668,21 +667,16 @@ export default function HeroSection() {
                             href="https://github.com/DevinoSolutions/caramel"
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="group inline-flex items-center justify-center gap-2 rounded-full border-2 border-caramel/40 bg-transparent px-5 py-3 text-sm font-semibold text-caramel backdrop-blur-sm transition-all duration-300 hover:border-caramel hover:bg-caramel hover:text-white md:w-full"
-                            whileHover={{ scale: 1.05 }}
-                            whileTap={{ scale: 0.95 }}
+                            className="group inline-flex items-center justify-center gap-2 rounded-full border-2 border-caramel/40 bg-transparent px-5 py-3 text-sm font-semibold text-caramel backdrop-blur-sm transition-colors duration-fast ease-motion-out hover:border-caramel hover:bg-caramel hover:text-white md:w-full"
+                            whileTap={{ scale: 0.98 }}
                         >
-                            <FaGithub className="h-4 w-4 transition-transform duration-300 group-hover:rotate-12" />
+                            <FaGithub className="h-4 w-4 transition-transform duration-base ease-motion-out motion-safe:group-hover:rotate-12" />
                             View Source Code
                         </m.a>
                         <m.a
                             href="#features"
-                            className="rounded-full border-2 border-gray-300/60 bg-transparent px-6 py-3 text-sm font-semibold text-gray-700 backdrop-blur-sm transition-all duration-300 hover:border-caramel hover:text-caramel dark:border-gray-600/60 dark:text-gray-300 md:w-full md:text-center"
-                            whileHover={{
-                                scale: 1.05,
-                                borderColor: 'rgb(234, 105, 37)',
-                            }}
-                            whileTap={{ scale: 0.95 }}
+                            className="rounded-full border-2 border-gray-300/60 bg-transparent px-6 py-3 text-sm font-semibold text-gray-700 backdrop-blur-sm transition-colors duration-fast ease-motion-out hover:border-caramel hover:text-caramel dark:border-gray-600/60 dark:text-gray-300 md:w-full md:text-center"
+                            whileTap={{ scale: 0.98 }}
                         >
                             Why Choose Caramel?
                         </m.a>
