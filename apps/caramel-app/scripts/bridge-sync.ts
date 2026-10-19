@@ -128,6 +128,8 @@ async function main(): Promise<void> {
             console.log(
                 `[bridge-sync] OK — coupons: ${result.coupons.inserted} inserted, ` +
                     `${result.coupons.updated} updated, ${result.coupons.skippedOlder} skipped (older), ` +
+                    `${result.coupons.skippedReferral} skipped (referral), ` +
+                    `${result.coupons.skippedIdMismatch} skipped (id holds a different coupon), ` +
                     `${result.coupons.tombstoned} tombstoned; storeConfigs: ` +
                     `${result.storeConfigs.upserted} upserted; sources: ` +
                     `${result.sources.upserted} upserted.`,

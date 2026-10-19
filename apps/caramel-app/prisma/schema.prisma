@@ -191,6 +191,11 @@ model Coupon {
   // @default(now()) is a PLAIN default (fills the column only when an insert
   // omits it: seed rows + insert safety), never rewritten on update.
   updatedAt           DateTime  @default(now()) @map("updated_at")
+  // "New customers only" label (owner decision 2026-10-19, T-2956): the code
+  // works only for a brand-new account (e.g. a kept referral code). NULL =
+  // unknown (no producer has said), read as false. Ingest treats an absent
+  // value as "no opinion" and keeps the stored one (applyCatalogRows).
+  newCustomersOnly    Boolean?  @map("new_customers_only")
 
   // Shopper-submitted codes (owner-directed 2026-10-02, submitShopperCoupon in
   // couponsRepo.ts). BOTH are NULL on every supplier row; both are set together

@@ -1,6 +1,7 @@
 import { Button } from 'caramel-ui'
 import { isSafariExtensionRuntime } from '../../../caramel-base.js'
 import { requestAllSites } from '../../../permission-state.js'
+import { SafariAllSitesSteps } from '../components/SafariAllSitesSteps'
 import type { AppApi } from '../types'
 
 /**
@@ -56,13 +57,7 @@ export function PermissionView({ api }: { api: AppApi }) {
                 </Button>
             </div>
             {safari && (
-                <p className="permission-manual-note">
-                    If nothing happens, set it yourself: on Mac, click the
-                    Caramel button in the toolbar and choose{' '}
-                    <strong>Always Allow on Every Website</strong>. On iPhone or
-                    iPad, tap <strong>AA</strong> in the address bar, choose
-                    Caramel, then <strong>Always Allow</strong>.
-                </p>
+                <SafariAllSitesSteps lead="If nothing happens, set it yourself:" />
             )}
         </div>
     )
