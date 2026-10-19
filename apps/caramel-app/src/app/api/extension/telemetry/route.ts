@@ -24,7 +24,7 @@ import { NextResponse } from 'next/server'
 //     extension-origin fetch can read the answer.
 //   - NO auth, on purpose: this is anonymous. The extension sends no bearer and
 //     no cookies, and the handler never reads a session, so nothing here can
-//     be joined to an account. The telemetry id is a random per-install id,
+//     be joined to an account. The telemetry id is a random per-device id,
 //     not the install id (`iid`) and not a user id.
 //
 // Consent proof (same pattern as POST /api/coupons/submit): the body must carry

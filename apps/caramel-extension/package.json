@@ -1,6 +1,6 @@
 {
     "name": "caramel-extension",
-    "version": "1.4.14",
+    "version": "1.4.15",
     "description": "Caramel browser extension",
     "private": true,
     "scripts": {
@@ -17,6 +17,7 @@
         "test": "vitest run",
         "test:e2e": "node scripts/test-extension.mjs",
         "test:guards": "node scripts/test-guards.mjs",
+        "test:autodetect": "node scripts/test-autodetect.mjs",
         "test:smoke": "node scripts/smoke-package.mjs ./.output/chrome-mv3 production",
         "test:parity": "node scripts/parity-harness.mjs",
         "size": "node scripts/measure-size.mjs && size-limit",

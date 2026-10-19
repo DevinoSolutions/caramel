@@ -392,3 +392,18 @@ describe('a control the store drew as plain text', () => {
         expect(caramelPageOutline(document.body).elements).toHaveLength(30)
     })
 })
+
+describe('an address is scrubbed at every length a name can have', () => {
+    // The scrub is bounded at the lengths an address may have, as the
+    // server's is. A name is clipped to 100 characters before it is scrubbed,
+    // so a longer local part than the bound still leaves nothing behind.
+    it('a plain address and one with a 100-character local part', () => {
+        document.body.innerHTML =
+            '<button type="button">Apply jane.doe@example.com</button>' +
+            `<button type="button">Apply ${'x'.repeat(100)}@example.com</button>`
+
+        const { outline } = caramelPageOutline(document.body)
+
+        expect(outline).not.toMatch(/@|jane|example|xxx/i)
+    })
+})

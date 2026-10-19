@@ -89,9 +89,14 @@ const clip = (s, n) => (s.length > n ? s.slice(0, n - 1) + '…' : s)
 // Every digit and anything email-shaped, in everything but the [n] index.
 // "Digit" is any Unicode number (\p{N}), not just 0-9: a phone number written
 // in Arabic-Indic, Persian, fullwidth or circled digits has no letters, so the
-// word allowlist below would otherwise keep it verbatim.
+// word allowlist below would otherwise keep it verbatim. Every part of an
+// address is bounded at the lengths an address may have (the server reads the
+// outline with the same pattern): an open-ended one is read again from every
+// character of a long word, and a 40 KiB one took seconds.
 const scrub = s =>
-    s.replace(/[\w.+-]+@[\w-]+\.[\w.]+/g, '[email]').replace(/\p{N}/gu, '#')
+    s
+        .replace(/[\w.+-]{1,64}@[\w-]{1,253}\.[\w.]{1,253}/g, '[email]')
+        .replace(/\p{N}/gu, '#')
 const bytes = s => new TextEncoder().encode(s).length
 
 // The words a name may carry. Every other word is dropped before the outline

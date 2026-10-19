@@ -39,10 +39,8 @@ import {
 } from './coupon-apply.js'
 import {
     caramelCouponBoxDiscoveryOn,
-    caramelFinderMayAsk,
-    caramelFinderReadTotal,
-    caramelFinderSeesBox,
-} from './coupon-box-discovery.js'
+    caramelLoadFinder,
+} from './coupon-box-finder-loader.js'
 import { fetchCoupons } from './coupon-fetch.js'
 import { reportOutcome, startApplyingCoupons } from './coupon-runner.js'
 import {
@@ -132,7 +130,14 @@ export async function getDomainRecord(domain) {
                         continue
                     }
                     failure = null
-                    if (resp?.supported?.length) {
+                    // Only a real list is kept, and only a kept list makes
+                    // the store list known (see caramelStoreListKnown): an
+                    // empty or malformed answer says nothing about which
+                    // stores have a config.
+                    if (
+                        Array.isArray(resp?.supported) &&
+                        resp.supported.length > 0
+                    ) {
                         getDomainRecord.cache = resp.supported
                         currentBrowser.storage.local.set({
                             [STORE_CACHE_KEY]: {
@@ -172,9 +177,36 @@ export async function getDomainRecord(domain) {
             }
         }
     }
-    return getDomainRecord.cache?.find(r =>
-        _hostMatchesDomain(domain, r.domain),
-    )
+    // The most specific row wins, not the first. oldnavy.gap.com has its own
+    // row, but gap.com is served before it, and a first-match scan gave Old
+    // Navy's cart Gap's row: Gap's codes, Gap's selectors. 31 configured
+    // stores in the 2026-10-16 list were shadowed by a parent store that way.
+    // Specificity is the domain without its www. label, so a www. row and a
+    // bare row of the same store tie, and the earlier row keeps it, as before.
+    // A www. row only reaches hosts other than its own through that
+    // normalisation; there it gives way to a bare row of the same store.
+    //
+    // A <shop>.myshopify.com host matched only by its shop label ranks below
+    // every real match and keeps list order among its matches: the label says
+    // nothing about which of princesspolly.com and princesspolly.com.au it
+    // is, and ranking those by length would pick a row by the length of its
+    // country suffix.
+    const host = String(domain).toLowerCase()
+    let best
+    let bestRank = -1
+    for (const r of getDomainRecord.cache || []) {
+        if (!_hostMatchesDomain(host, r.domain)) continue
+        const d = String(r.domain).toLowerCase()
+        const rank = !_hostIsUnderDomain(host, d)
+            ? 0
+            : _withoutWww(d).length * 2 +
+              (d.startsWith('www.') && d !== host ? 0 : 1)
+        if (rank > bestRank) {
+            best = r
+            bestRank = rank
+        }
+    }
+    return best
 }
 getDomainRecord.cache = null
 
@@ -198,10 +230,12 @@ export function caramelStoreListKnown() {
 // `athleta.gap.com`'s checkout) but a bare "any prefix + '-'" rule also lets
 // an ATTACKER-registered `evil-target.com` inherit `target.com`'s selectors
 // and coupons. Every genuine hyphen host in the catalog is a known checkout
-// prefix in front of a domain that already has its own subdomain, so require
-// BOTH: an allow-listed prefix label, and a domain of 3+ labels. That admits
-// every real case (`secure-{athleta,oldnavy,bananarepublic,…}.<brand>.<tld>`)
-// while `evil-target.com` → `target.com` (2 labels, unknown prefix) is out.
+// prefix in front of a store that is a SUBDOMAIN of its registrable domain
+// (`athleta` under `gap.com`), so require BOTH: an allow-listed prefix label,
+// and a prefix that lands on a label below the registrable domain. Then
+// `secure-athleta.gap.com` is still gap.com's own host, while
+// `secure-target.com` and `secure-emmabridgewater.co.uk` are different
+// registrable domains anyone could buy, and get nothing.
 const HYPHEN_CHECKOUT_PREFIXES = new Set([
     'secure',
     'checkout',
@@ -209,6 +243,51 @@ const HYPHEN_CHECKOUT_PREFIXES = new Set([
     'shop',
     'store',
 ])
+// Two-label public suffixes, where a registrable domain has three labels
+// (`x.co.uk`). Not the whole public-suffix list: the suffixes the store list
+// uses plus the common country ones. A suffix missing here makes `x.<suffix>`
+// look like a subdomain of `<suffix>` and lets its hyphen hosts match, which
+// is how the rule behaved for every suffix before.
+const TWO_LABEL_PUBLIC_SUFFIXES = new Set([
+    'co.uk',
+    'org.uk',
+    'me.uk',
+    'ac.uk',
+    'com.au',
+    'net.au',
+    'org.au',
+    'co.nz',
+    'net.nz',
+    'co.jp',
+    'ne.jp',
+    'com.br',
+    'com.mx',
+    'co.za',
+    'com.sg',
+    'com.hk',
+    'co.in',
+    'com.tr',
+    'com.cn',
+    'co.kr',
+    'com.ar',
+    'com.co',
+    'com.my',
+    'com.ph',
+    'com.tw',
+    'co.il',
+    'co.id',
+    'co.th',
+])
+// Does the domain have a label below its registrable domain?
+function _isUnderRegistrableDomain(domain) {
+    const labels = domain.split('.')
+    const suffixLabels = TWO_LABEL_PUBLIC_SUFFIXES.has(
+        labels.slice(-2).join('.'),
+    )
+        ? 2
+        : 1
+    return labels.length > suffixLabels + 1
+}
 /* A Shopify store's own checkout can live on its <shop>.myshopify.com host
  * rather than on the brand domain. 5starnutritionusa.com does exactly this
  * (QA sweep 2026-08-05): the shopper adds $44.99, hits checkout, lands on
@@ -228,13 +307,16 @@ const HYPHEN_CHECKOUT_PREFIXES = new Set([
  * catalogue row; this fixes the aligned majority, not every case.
  */
 const CARAMEL_SHOPIFY_HOST_SUFFIX = '.myshopify.com'
+const _withoutWww = d => d.replace(/^www\./, '')
 function _shopifyShopHostMatches(host, domain) {
     if (!host.endsWith(CARAMEL_SHOPIFY_HOST_SUFFIX)) return false
     const shop = host.slice(0, -CARAMEL_SHOPIFY_HOST_SUFFIX.length)
     // One label only: `a.b.myshopify.com` is not a shop host.
     if (!shop || shop.includes('.')) return false
+    // The row as written: a www. row names no shop (`www.usa.canon.com` is not
+    // the `usa` shop, and www.myshopify.com is Shopify's own site).
     const brandLabel = domain.split('.')[0]
-    return !!brandLabel && shop === brandLabel
+    return !!brandLabel && brandLabel !== 'www' && shop === brandLabel
 }
 
 // Exported for tests/host-matches-domain.test.mjs, which pins this boundary
@@ -243,8 +325,20 @@ export function _hostMatchesDomain(host, domain) {
     if (!host || !domain) return false
     host = String(host).toLowerCase()
     domain = String(domain).toLowerCase()
+    return (
+        _hostIsUnderDomain(host, domain) ||
+        _shopifyShopHostMatches(host, domain)
+    )
+}
+
+// The host is the row's domain, a subdomain of it, or one of its hyphen
+// checkout hosts. The myshopify rule is separate: it names a store by its
+// first label only, so it is weaker evidence (see getDomainRecord).
+function _hostIsUnderDomain(host, domain) {
+    // A row written as www.x.com describes the store x.com: it matches x.com
+    // and x.com's subdomains exactly as a bare x.com row does.
+    domain = _withoutWww(domain)
     if (host === domain) return true
-    if (_shopifyShopHostMatches(host, domain)) return true
     const i = host.length - domain.length
     if (i <= 0) return false
     if (host.slice(i) !== domain) return false
@@ -253,7 +347,7 @@ export function _hostMatchesDomain(host, domain) {
     if (sep !== '-') return false
     return (
         HYPHEN_CHECKOUT_PREFIXES.has(host.slice(0, i - 1)) &&
-        domain.split('.').length >= 3
+        _isUnderRegistrableDomain(domain)
     )
 }
 
@@ -262,8 +356,9 @@ export function _hostMatchesDomain(host, domain) {
 /* Does this URL name a cart or checkout? Generic across platforms — a word in
  * the path, never a store-specific rule. Used only to decide whether a live
  * cart probe is worth making, so a miss costs nothing but a missed probe.
- * `bag` is deliberately absent: /collections/bag is a product category on a
- * great many stores, and the prompt has no business appearing there.
+ * `bag` is deliberately absent here: /collections/bag is a product category
+ * on a great many stores, and the prompt has no business appearing there. The
+ * bag is a cart only as a whole page of its own, CARAMEL_BAG_FILE_RE below.
  *
  * The word must END its path segment. It may begin mid-segment (/shopping-cart
  * is a cart), but a segment that CONTINUES past it is a slug that merely starts
@@ -298,16 +393,75 @@ const CARAMEL_CART_PATH_RE =
  * string (?redirect=/cart.php) is not where the shopper is. */
 const CARAMEL_CART_FILE_RE =
     /^(?:(?:my|view|show|shop|shopping)[-_]?)?(?:cart|carts|basket|checkout|checkouts)(?:\.(?:php|aspx?|html?|jsp|cfm|do))?$/i
+/* A parent may also be the shop's own name for itself: store or shop, with no
+ * prefix or a generic one (/webshop/, /eshop/, /onlinestore/), or after the
+ * start of the store's OWN name (/acestore/ on acefitness.org and on
+ * shop.acefitness.org, measured with a promo box and a total in view). That
+ * last form is the capture group, at least three letters, and the caller
+ * checks it against the start of one of the host's own labels: any other
+ * prefix is an ordinary word (/workshop/, /giftshop/, /bishop/), and two
+ * letters are too few to name a store (/restore/ on restorationhardware.com). */
 const CARAMEL_CART_FILE_PARENT_RE =
-    /^(?:[a-z]{2}(?:[-_][a-z]{2})?|store|shop|checkout|cart|basket|secure|order|orders)$/i
-function _caramelCartFilePath(pathname) {
+    /^(?:[a-z]{2}(?:[-_][a-z]{2})?|(?:e|web|online|([a-z]{3,}))?(?:store|shop)|checkout|cart|basket|secure|orders?|app)$/i
+
+/* A path segment that is an action on the cart, written as one word
+ * (/app/manageCart/showManageOrder, the hosted order form of a checkout
+ * platform many small stores use). Only verbs, and only the WHOLE segment, and
+ * only near the top of the path under the same parents as a cart file, with
+ * at most one segment after it (the page the action opens): /products/viewcart,
+ * /docs/api/viewcart and /viewcart/help/how-to/faq are pages ABOUT the action. */
+const CARAMEL_CART_ACTION_SEGMENT_RE = /^(?:manage|view)[-_]?(?:cart|basket)$/i
+
+/* The shopping bag as a page (/bag on ulta.com, /shopping-bag, /en-us/mybag).
+ * Stricter than a cart file: the whole last segment is the bag, singular, and
+ * only locales may come before it. /handbags, /bags/leather-tote,
+ * /products/tote-bag, /collections/bag and /shop/bag are product pages or
+ * categories on many stores. */
+const CARAMEL_BAG_FILE_RE =
+    /^(?:(?:my|view|shopping)[-_]?)?bag(?:\.(?:php|aspx?|html?|jsp|cfm|do))?$/i
+// A locale is read by its shape (en, en-us, en_GB), the same shape the cart
+// file's parents already accept, not by a list of real language and country
+// codes. Any two letters therefore pass (/xy/bag), and what that admits is
+// still only a page whose whole last segment is the bag; a list of every
+// language and country code would cost more bytes than that case is worth.
+const CARAMEL_LOCALE_SEGMENT_RE = /^[a-z]{2}(?:[-_][a-z]{2})?$/i
+
+// Exported for tests/cart-capability-gate.test.mjs (the store-name parent pins).
+export function _caramelCartFilePath(pathname, hostname = location.hostname) {
+    // A ;jsessionid=… (or any ;param) belongs to the server, not the page name.
     const segs = String(pathname || '')
+        .replace(/;[^/]*/g, '')
         .split('/')
         .filter(Boolean)
-    if (!segs.length || segs.length > 3) return false
+    if (
+        segs.length < 4 &&
+        CARAMEL_BAG_FILE_RE.test(segs.at(-1)) &&
+        segs.slice(0, -1).every(seg => CARAMEL_LOCALE_SEGMENT_RE.test(seg))
+    )
+        return true
+    // Where the cart word sits: an action in the first two segments, or a cart
+    // file as the last of at most three. Everything before it must be a parent.
+    let at = segs
+        .slice(0, 2)
+        .findIndex(seg => CARAMEL_CART_ACTION_SEGMENT_RE.test(seg))
+    if (segs.length - at > 2) at = -1
+    if (at < 0 && segs.length < 4 && CARAMEL_CART_FILE_RE.test(segs.at(-1)))
+        at = segs.length - 1
+    // The store's own labels, without www and the top-level domain.
+    const labels = String(hostname || '')
+        .toLowerCase()
+        .split('.')
+        .slice(0, -1)
+        .filter(l => l !== 'www')
     return (
-        CARAMEL_CART_FILE_RE.test(segs[segs.length - 1]) &&
-        segs.slice(0, -1).every(seg => CARAMEL_CART_FILE_PARENT_RE.test(seg))
+        at >= 0 &&
+        segs.slice(0, at).every(seg => {
+            const m = CARAMEL_CART_FILE_PARENT_RE.exec(seg)
+            return (
+                m &&
+                (!m[1] || labels.some(l => l.startsWith(m[1].toLowerCase())))
+            )
+        })
     )
 }
 
@@ -545,12 +699,21 @@ export async function isCheckout() {
  * It is asked only on a cart-shaped URL, the same bar _platformCartUsable sets,
  * and only while the server's couponBoxDiscovery flag is on; tryInitialize then
  * still requires codes for the domain before the prompt appears. Detection
- * never clicks anything: opening a folded box waits for the shopper's tap. */
-async function _finderSeesBox() {
-    if (!_caramelCartIntentSignal()) return false
+ * never clicks anything: opening a folded box waits for the shopper's tap.
+ * A box the server picked earlier in this tab counts too, found again by name
+ * (caramelFinderSeesKeptPick): a cart that reloads to show each answer. */
+async function _finderSeesBox(domain) {
+    if (!caramelStoreListKnown() || !_caramelCartIntentSignal()) return false
     if (!(await caramelCouponBoxDiscoveryOn())) return false
+    // Loaded only here, with the flag on and no box a config describes. A
+    // finder that did not load sees nothing.
+    const finder = await caramelLoadFinder()
+    if (!finder) return false
     try {
-        return caramelFinderSeesBox()
+        return (
+            finder.caramelFinderSeesBox() ||
+            (await finder.caramelFinderSeesKeptPick(domain))
+        )
     } catch (e) {
         log('FINDER_FAILED', { error: String(e) })
         return false
@@ -561,14 +724,16 @@ async function _finderSeesBox() {
  * couponBoxLlm flag is on, a cart the server could still find one on once the
  * shopper taps (caramelFinderMayAsk). The reload chain (_caramelContinueRun)
  * keeps asking _finderSeesBox alone: the server is asked once per store per
- * tab session, so a page the rules cannot see has nothing left to continue
- * on. */
+ * tab session, so a page after the ask continues only on a box the rules see
+ * or the pick it kept. */
 async function _finderMayOffer(domain) {
-    if (await _finderSeesBox()) return true
-    if (!_caramelCartIntentSignal()) return false
+    if (await _finderSeesBox(domain)) return true
+    if (!caramelStoreListKnown() || !_caramelCartIntentSignal()) return false
     if (!(await caramelCouponBoxDiscoveryOn())) return false
+    const finder = await caramelLoadFinder()
+    if (!finder) return false
     try {
-        return await caramelFinderMayAsk(domain)
+        return await finder.caramelFinderMayAsk(domain)
     } catch (e) {
         log('FINDER_FAILED', { error: String(e) })
         return false
@@ -659,10 +824,11 @@ export async function tryInitialize() {
  *     guaranteed no-op that still costs a reload.
  */
 async function _caramelContinueRun(rec, finder = false) {
-    // A finder run picked its box itself, and the reload threw that pick away.
-    // It goes on only where the finder sees a box on THIS page (the run below
-    // finds it again); a store with no config row runs on the stand-in record
-    // the first click ran on.
+    // A finder run picked its box itself, and the reload threw its marks away
+    // (a server pick is also kept by name: caramelFinderSeesKeptPick). It goes on
+    // only where the finder sees a box on THIS page (the run below finds it
+    // again); a store with no config row runs on the stand-in record the first
+    // click ran on.
     const runRec =
         rec ?? (finder ? caramelConfiglessRecord(location.hostname) : null)
     // Every refusal says which bound stopped the chain: on a form-POST cart the
@@ -674,7 +840,7 @@ async function _caramelContinueRun(rec, finder = false) {
     }
     if (!runRec) return stop('no record')
     if (finder) {
-        if (!(await _finderSeesBox())) return stop('no box')
+        if (!(await _finderSeesBox(runRec.domain))) return stop('no box')
     } else {
         const box = pickBestMatch(rec.couponInput)
         const toggle = rec.showInput ? pickBestMatch(rec.showInput) : null
@@ -716,8 +882,15 @@ async function _resumePendingSubmit() {
     const rec = await getDomainRecord(location.hostname)
     // A finder attempt's baseline came from the finder's total row; reading a
     // config's priceContainer here would compare two different numbers.
+    // A finder that does not load reads no total, so no saving is measured.
+    // The finder is loaded here whatever the flag says now: pending.finder is
+    // set only when the page before this navigation ran the finder.
     const now = pending.finder
-        ? caramelFinderReadTotal(document, pending.finder, pending.finderRow)
+        ? ((await caramelLoadFinder())?.caramelFinderReadTotal(
+              document,
+              pending.finder,
+              pending.finderRow,
+          ) ?? NaN)
         : rec && rec.priceContainer
           ? getPrice(rec.priceContainer, { returnLargest: true })
           : NaN

@@ -37,6 +37,18 @@ describe('_hostMatchesDomain', () => {
         )
     })
 
+    it("www.myshopify.com is Shopify's own site, not the shop of a www. row", () => {
+        // A www. row's first label is "www", which names no shop.
+        expect(_hostMatchesDomain('www.myshopify.com', 'www.toms.com')).toBe(
+            false,
+        )
+        expect(
+            _hostMatchesDomain('www.myshopify.com', 'www.usa.canon.com'),
+        ).toBe(false)
+        // The row's real label still matches its shop.
+        expect(_hostMatchesDomain('toms.myshopify.com', 'toms.com')).toBe(true)
+    })
+
     it('does not match bare myshopify.com against anything', () => {
         expect(_hostMatchesDomain('myshopify.com', 'toms.com')).toBe(false)
         expect(_hostMatchesDomain('.myshopify.com', 'toms.com')).toBe(false)
@@ -56,6 +68,45 @@ describe('_hostMatchesDomain', () => {
         expect(
             _hostMatchesDomain('secure-athleta.gap.com', 'athleta.gap.com'),
         ).toBe(true)
+        // Under a two-label suffix too, when the store is a subdomain.
+        expect(
+            _hostMatchesDomain(
+                'secure-shop.example.co.uk',
+                'shop.example.co.uk',
+            ),
+        ).toBe(true)
+    })
+
+    it('a hyphen prefix on a registrable domain is a different domain, under a two-label suffix too', () => {
+        // secure-emmabridgewater.co.uk is not emmabridgewater.co.uk's host:
+        // anyone can register it. Neither is shop-shavershop.com.au.
+        for (const [host, domain] of [
+            ['secure-emmabridgewater.co.uk', 'www.emmabridgewater.co.uk'],
+            ['secure-emmabridgewater.co.uk', 'emmabridgewater.co.uk'],
+            ['shop-shavershop.com.au', 'www.shavershop.com.au'],
+            ['checkout-allsaints.co.uk', 'allsaints.co.uk'],
+            ['secure-target.com', 'target.com'],
+        ])
+            expect(_hostMatchesDomain(host, domain)).toBe(false)
+        // Their real hosts still match.
+        expect(
+            _hostMatchesDomain(
+                'checkout.emmabridgewater.co.uk',
+                'www.emmabridgewater.co.uk',
+            ),
+        ).toBe(true)
+    })
+
+    it('a www. row names no Shopify shop', () => {
+        expect(
+            _hostMatchesDomain('usa.myshopify.com', 'www.usa.canon.com'),
+        ).toBe(false)
+        expect(
+            _hostMatchesDomain('www.myshopify.com', 'www.acmetools.com'),
+        ).toBe(false)
+        expect(_hostMatchesDomain('usa.myshopify.com', 'usa.canon.com')).toBe(
+            true,
+        )
     })
 
     it('handles missing input without throwing', () => {

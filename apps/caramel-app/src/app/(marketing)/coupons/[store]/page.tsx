@@ -13,6 +13,11 @@ import { BASE_URL } from '@/lib/env.client'
 import { faqPageJsonLd, jsonLdString } from '@/lib/jsonLd'
 import { buildStoreFaq } from '@/lib/seo/storeFaq'
 import { evaluateStorePageIndexability } from '@/lib/seo/storeIndexability'
+import {
+    buildStoreDescription,
+    buildStoreTitle,
+    storeDisplayName,
+} from '@/lib/seo/storeMetadata'
 import { isUkStoreDomain, resolveStoreDomain } from '@/lib/storeDomain'
 import type { Coupon } from '@/types/coupon'
 import * as Sentry from '@sentry/nextjs'
@@ -109,7 +114,7 @@ export async function generateMetadata({
     // store with zero visible coupons, is `noindex, follow`, and the sitemap
     // omits exactly those pages. fetchStoreCoupons short-circuits (no catalog
     // read) when `base` is empty, and cache() shares the read with the body.
-    const { total } = await fetchStoreCoupons(storeParam)
+    const { total, facts } = await fetchStoreCoupons(storeParam)
     const verdict = evaluateStorePageIndexability({
         base,
         visibleCouponCount: total,
@@ -154,31 +159,18 @@ export async function generateMetadata({
     // 'no-coupons'): thousands of thin "no codes right now" pages in the
     // index are soft-404 bloat. `total` is the same cached catalog read as the
     // indexability verdict above.
-    // Search Console (90 days to 2026-09-11): store pages sit at positions
-    // 25–55 for "<store> promo code" queries. The title/description use only
-    // data the page already renders — the base domain and the live `total`
-    // (the same "N active codes" the prose below states) — never an invented
-    // display name or date. The zero-coupon page keeps the generic title: it
-    // is noindexed above and must not advertise codes it does not have.
-    // UK stores use UK search vocabulary ("discount code", "voucher code"):
-    // see isUkStoreDomain for the Search Console numbers behind it.
-    const count = total.toLocaleString('en-US')
-    const codeWord = total === 1 ? 'code' : 'codes'
+    // Title and description: see storeMetadata.ts for the Search Console
+    // numbers behind the wording and what they may claim. Both use only data
+    // the page already renders (the store's domain, the live `total`, the
+    // best percent-off and last-updated facts the FAQ states). The
+    // zero-coupon page keeps a generic title: it is noindexed above and must
+    // not advertise codes it does not have. UK stores use UK search
+    // vocabulary ("discount code", "voucher"): see isUkStoreDomain.
     const uk = isUkStoreDomain(base)
-    const title = uk
-        ? total > 0
-            ? `${base} discount codes & voucher codes — ${count} active ${codeWord} | Caramel`
-            : `${base} Discount Codes & Voucher Codes | Caramel`
-        : total > 0
-          ? `${base} coupons & promo codes — ${count} active ${codeWord} | Caramel`
-          : `${base} Coupons & Promo Codes | Caramel`
-    const description = uk
-        ? total > 0
-            ? `Caramel lists ${count} active discount ${codeWord} for ${base} — voucher codes and promo codes refreshed as new codes are found and dead ones retired.`
-            : `Find ${base} discount codes, voucher codes, and promo codes — refreshed as new codes are found.`
-        : total > 0
-          ? `Caramel lists ${count} active coupon ${codeWord} for ${base} — promo codes and discounts refreshed as new codes are found and dead ones retired.`
-          : `Find ${base} coupon codes, promo codes, and discounts — refreshed as new codes are found.`
+    const metadataInput = { base, total, facts, uk, now: new Date() }
+    const title = buildStoreTitle(metadataInput)
+    const description = buildStoreDescription(metadataInput)
+    const name = storeDisplayName(base)
 
     return {
         title,
@@ -197,7 +189,7 @@ export async function generateMetadata({
                     url: banner,
                     width: 1200,
                     height: 630,
-                    alt: `${base} ${uk ? 'discount' : 'coupon'} codes on Caramel`,
+                    alt: `${name} ${uk ? 'discount' : 'coupon'} codes on Caramel`,
                 },
             ],
         },
@@ -277,20 +269,28 @@ export default async function StoreCouponsPage({
     // slug variant would contradict the canonical it sits next to.
     const storeUrl = `${baseUrl}/coupons/${encodeURIComponent(base)}`
 
+    // The brand name shoppers search by ("Coursera" for coursera.org), as the
+    // title says it (storeMetadata.ts). The domain stays in the prose below.
+    const name = storeDisplayName(base)
+
+    // Every coupon lives on this one page, so a ListItem carries no `url` (the
+    // same URL twenty times made the list read as a broken carousel), and an
+    // empty description is left out rather than published as "".
     const structuredData = {
         '@context': 'https://schema.org',
         '@type': 'ItemList',
         name: uk
-            ? `${base} discount codes and voucher codes`
-            : `${base} coupons and promo codes`,
+            ? `${name} discount codes and voucher codes`
+            : `${name} promo codes and coupons`,
         url: storeUrl,
         numberOfItems: total,
         itemListElement: listedCoupons.map((coupon: Coupon, idx: number) => ({
             '@type': 'ListItem',
             position: idx + 1,
-            url: storeUrl,
             name: coupon.title,
-            description: coupon.description,
+            ...(coupon.description.trim()
+                ? { description: coupon.description }
+                : {}),
         })),
     }
 
@@ -307,7 +307,7 @@ export default async function StoreCouponsPage({
                 name: 'Coupons',
                 item: `${baseUrl}/coupons`,
             },
-            { '@type': 'ListItem', position: 3, name: `${base} coupons` },
+            { '@type': 'ListItem', position: 3, name: `${name} coupons` },
         ],
     }
 
@@ -334,7 +334,7 @@ export default async function StoreCouponsPage({
                 heroAction={
                     base ? <StoreFavoriteStar store={base} /> : undefined
                 }
-                heroTitle={`Best ${base} ${codeNoun} codes today`}
+                heroTitle={`Best ${name} ${codeNoun} codes today`}
                 heroSubtitle={`Save at ${base} with Caramel—the privacy-first coupon finder that applies the top deals automatically at checkout.`}
             />
             {/* Client-only (renders nothing until the session is known), so the

@@ -1,6 +1,7 @@
 import { defersAnalytics, onFirstActivity } from '@/lib/afterPageLoad'
 import { browserSignalsTrackingOptOut } from '@/lib/analytics/trackingOptOut'
 import { SENTRY_RELEASE } from '@/lib/buildInfo'
+import { INJECTED_SCRIPT_DENY_URLS } from '@/lib/sentryInjectedScriptNoise'
 import * as Sentry from '@sentry/nextjs'
 
 // Next.js only loads client instrumentation from `instrumentation-client.ts`.
@@ -78,6 +79,10 @@ if (process.env.NODE_ENV === 'production' && dsn) {
         // limit.
         replaysSessionSampleRate: 0.1,
         replaysOnErrorSampleRate: 1.0,
+        // A third-party extension injects `executors/<n>.js` into our pages;
+        // its throws are not ours (CARAMEL-Z, lib/sentryInjectedScriptNoise.ts).
+        // Matched on the frame that threw, so our own errors still report.
+        denyUrls: INJECTED_SCRIPT_DENY_URLS,
         debug: false,
     })
     if (!browserSignalsTrackingOptOut()) {
