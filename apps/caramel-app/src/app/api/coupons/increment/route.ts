@@ -38,9 +38,11 @@ const IncrementBodySchema = z.object({
 // `origin: true` refuses other cross-origin pages, and the handler then refuses
 // any PRESENT Origin that is not a browser-extension origin (the Caramel site
 // included) with 403. A MISSING Origin is let through, because a background
-// fetch under host_permissions may omit it (Firefox/Safari are not proven to
-// send one) and the extension's call is fire-and-forget, so a refusal there
-// would silently drop real uses. Origin is a browser rule, not authentication:
+// fetch under host_permissions may omit it. Chrome and Firefox send one (a
+// Firefox 153 request passed the strict extension gate on
+// extension/coupon-box-pick in production); Safari is not proven to, and the
+// extension's call is fire-and-forget, so a refusal there would silently drop
+// real uses. Origin is a browser rule, not authentication:
 // any HTTP client can send or drop it, so the per-reporter dedupe below is what
 // actually bounds the counter.
 export const POST = withRoute(
