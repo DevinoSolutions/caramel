@@ -22,6 +22,7 @@ import {
     codeSharingPromptVersion,
     readCodeSharingConsent,
 } from './code-sharing-consent.js'
+import { createActivityRecorder } from './extension-activity.js'
 import { saveInstallId } from './install-attribution.js'
 import {
     USAGE_DIAGNOSTICS_CONSENT_KEY,
@@ -38,6 +39,9 @@ import {
 // above. Every reader below sits in a function body that runs after init, so
 // the value each one sees is unchanged.
 let currentBrowser
+// The daily-active ping recorder (extension-activity.js), built by
+// initBackground() once currentBrowser exists.
+let recordActivity
 
 const caramelUrl = path => new URL(path, `${CARAMEL_BASE_URL}/`).toString()
 
@@ -621,6 +625,15 @@ export function initBackground() {
 
     keepAlive()
 
+    recordActivity = createActivityRecorder({
+        storageLocal: currentBrowser.storage.local,
+        lastError: () => currentBrowser.runtime.lastError,
+        fetchApi: fetchCaramelApi,
+        apiUrl: caramelUrl,
+        version: currentBrowser.runtime.getManifest?.()?.version,
+        logError,
+    })
+
     // Withdrawing diagnostics consent (the popup toggle or "No thanks") deletes
     // the telemetry id: sends stop at once because the gate reads the record, and
     // a later opt-in starts a new id that cannot be joined to this one. The
@@ -1018,6 +1031,26 @@ export function initBackground() {
                     .catch(err => {
                         logError('fetchSupportedStores', err)
                         sendResponse({ supported: [], error: String(err) })
+                    })
+
+                return true
+            } else if (message.action === 'recordExtensionActivity') {
+                // The daily-active ping. Sent ONLY by the popup page on open
+                // (popup-core.js recordPopupActivity, which also decided this
+                // is Google Chrome); refused from anywhere else — a content
+                // script or the apply flow must never count as a use. Done
+                // here, not in the popup, so closing the popup does not cancel
+                // the request mid-flight.
+                const popupUrl = currentBrowser.runtime.getURL('popup.html')
+                if (!sender?.url?.startsWith(popupUrl)) {
+                    sendResponse({ error: 'not_popup' })
+                    return
+                }
+                recordActivity()
+                    .then(resp => sendResponse(resp))
+                    .catch(err => {
+                        logError('recordExtensionActivity', err)
+                        sendResponse({ error: String(err) })
                     })
 
                 return true

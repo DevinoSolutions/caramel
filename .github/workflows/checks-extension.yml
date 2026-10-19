@@ -134,6 +134,16 @@ jobs:
 
       - name: Boot the app on :58000
         working-directory: ./apps/caramel-app
+        # The DAU ping step (test-extension.mjs 7b) verifies the route's PostHog
+        # capture REQUEST against a MOCK ingestion host the suite itself serves
+        # on localhost:58010 — the e2e dataset is pointed there, so no event can
+        # reach any real PostHog project. The switch is on only for this app.
+        env:
+          EXTENSION_DAU_TELEMETRY_ENABLED: 'true'
+          POSTHOG_DATASET: e2e
+          NEXT_PUBLIC_POSTHOG_DATASET: e2e
+          NEXT_PUBLIC_POSTHOG_E2E_TEST_PROJECT_HOST: http://localhost:58010
+          NEXT_PUBLIC_POSTHOG_E2E_TEST_PROJECT_CAPTURE_TOKEN: phc_e2e_mock_not_a_real_project
         run: |
           nohup pnpm exec next dev -p 58000 > /tmp/next-dev.log 2>&1 &
           for i in $(seq 1 60); do
@@ -157,6 +167,8 @@ jobs:
       # The MV3 service worker needs a headed Chromium (the suite launches
       # headless:false) — xvfb provides the display on the runner.
       - name: Run extension e2e suite
+        env:
+          CARAMEL_E2E_POSTHOG_MOCK_PORT: '58010'
         run: |
           sudo apt-get -yqq install xvfb
           xvfb-run --auto-servernum pnpm --filter caramel-extension test:e2e

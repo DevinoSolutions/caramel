@@ -86,6 +86,14 @@ module.exports = [
         // 2026-10-15: the sign-in sends the install's attribution (the exchange
         // body fields, the Safari authorize query and the unreadable-storage
         // report). Measured 10.81 kB, still under the unchanged 11 kB budget.
+        // 2026-10-13, raised 11 -> 12 kB: recordPopupActivity (the popup
+        // half of the Google Chrome daily-active ping — one message to the
+        // worker, never a fetch from the popup) on top of main's 1.4.11
+        // popup growth left 1.2% headroom. Measured 10.87 kB.
+        // 2026-10-18, merging main (1.4.15) back to 11 kB: main's Safari web
+        // sign-in moved the in-popup OAuth poll client out of this group, so
+        // with recordPopupActivity on top it measures 8.1 kB — the 12 kB
+        // raise above is no longer needed.
         limit: '11 KB',
         brotli: false,
     },
@@ -151,7 +159,23 @@ module.exports = [
         // through unnoticed. Measured 12.38 kB after the review fixes (id minted
         // only on accept, the consent re-read, device-local consent), so the
         // limit is measured + ~0.3 kB.
-        limit: '12.7 KB',
+        // 2026-10-13, raised 10 -> 13 kB: extension-activity.js joined
+        // this group (the Google Chrome daily-active ping's worker half —
+        // seed + SHA-256 daily id, the once-per-UTC-day state, the bounded
+        // disabled/failure cooldowns, the serialized in-flight attempt) plus
+        // the popup-only recordExtensionActivity route in background.js.
+        // Measured 11.96 kB after merging main's code-sharing consent (was
+        // 9.29 kB): one new feature, not prose.
+        // 2026-10-14, raised 13 -> 14 kB on merging main's coupon-box
+        // discovery + pick routes into the daily-active ping (the two raises
+        // above were each measured without the other). Measured 13.04 kB:
+        // the sum of both features, not prose.
+        // 2026-10-18, raised 14 -> 15.2 kB on merging main (1.4.15): the
+        // daily-active ping on top of main's opt-in funnel diagnostics, install
+        // attribution and telemetry-id fix (main's 12.7 kB and this branch's
+        // 14 kB were each measured without the other). Measured 14.87 kB, so
+        // the limit is measured + ~0.3 kB, per the PR #353 tightening note.
+        limit: '15.2 KB',
         brotli: false,
     },
     {

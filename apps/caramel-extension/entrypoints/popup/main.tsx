@@ -14,7 +14,7 @@ import { createRoot } from 'react-dom/client'
 import { initCaramelBase } from '../../caramel-base.js'
 import { initCouponConstants } from '../../coupon-constants.generated.js'
 import { initCouponRunner } from '../../coupon-runner.js'
-import { capturePopupCallerId } from '../../popup-core.js'
+import { capturePopupCallerId, recordPopupActivity } from '../../popup-core.js'
 import { App } from './App'
 
 initCouponConstants()
@@ -25,3 +25,8 @@ capturePopupCallerId()
 const root = document.getElementById('root')
 if (!root) throw new Error('popup index.html lost its #root mount point')
 createRoot(root).render(<App />)
+
+// The daily-active ping (Google Chrome only): one popup open = one qualifying
+// use, whatever view resolves. Deliberately after render and not awaited — the
+// worker does the delivery and recordPopupActivity logs its own failures.
+void recordPopupActivity()

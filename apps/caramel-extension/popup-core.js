@@ -20,10 +20,12 @@ import {
     currentBrowser,
     isSafariExtensionRuntime,
     log,
+    logError,
 } from './caramel-base.js'
 import { CARAMEL_ENV } from './caramel-env.js'
 import { CaramelCoupons } from './coupon-constants.generated.js'
 import { fetchCouponsPage } from './coupon-fetch.js'
+import { isGoogleChromeRuntime } from './extension-activity.js'
 import { installAttributionFields } from './install-attribution.js'
 import { resolvePermissionState } from './permission-state.js'
 
@@ -147,6 +149,35 @@ export function afterLoginSuccess() {
         return
     }
     afterLoginRerender()
+}
+
+/* ------------------------------------------------------------ */
+/*  Daily-active ping                                           */
+/* ------------------------------------------------------------ */
+// Opening the popup is the ONE qualifying use (guests included, whatever view
+// resolves). This only decides "is this Google Chrome?" — with the Safari
+// check that needs this realm's currentBrowser — and hands the rest to the
+// worker (extension-activity.js), which outlives this page. main.tsx calls it
+// after the first render and never awaits it, so the popup paints the same
+// with or without it. Resolves to the worker's answer, or null when skipped.
+export async function recordPopupActivity() {
+    const isChrome = isGoogleChromeRuntime({
+        buildBrowser: import.meta.env.BROWSER,
+        isSafari: isSafariExtensionRuntime(),
+        brands: globalThis.navigator?.userAgentData?.brands,
+    })
+    if (!isChrome) return null
+    try {
+        const resp = await caramelSendMessage({
+            action: 'recordExtensionActivity',
+        })
+        if (resp?.error) logError('recordPopupActivity', resp.error)
+        return resp
+    } catch (err) {
+        // The popup closing first lands here too; the worker carries on.
+        logError('recordPopupActivity', err)
+        return null
+    }
 }
 
 /* ------------------------------------------------------------ */

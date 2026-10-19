@@ -63,6 +63,21 @@ describe('privacy policy coverage', () => {
         )
     })
 
+    it('discloses the Google Chrome daily usage count (extension_active) and no longer claims the extension has no analytics', () => {
+        expect(text).not.toContain('no ads, no analytics')
+        expect(text).toContain('Daily usage count (Google Chrome only).')
+        expect(text).toContain('a random ID that changes every day')
+        // The request reaches our server even while counting is switched off.
+        expect(text).toContain(
+            'because counting is switched off on our server, or the message failed — the message still reaches our server, nothing is recorded',
+        )
+        expect(text).toContain('only records whether you were signed in')
+        expect(text).toContain(
+            'not sent by Caramel for Firefox, Safari or Microsoft Edge',
+        )
+        expect(text).toContain("the extension's only analytics is the")
+    })
+
     it('discloses what the coupon-box finder and server pick send (wording delegated 2026-10-13)', () => {
         const normalized = text.replace(/&quot;/g, '"').replace(/\s+/g, ' ')
         for (const claim of [

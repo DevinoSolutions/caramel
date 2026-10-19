@@ -1,5 +1,6 @@
 // GENERATED FILE — DO NOT EDIT BY HAND.
-// Source: apps/caramel-app/src/lib/coupons.ts
+// Sources: apps/caramel-app/src/lib/coupons.ts,
+//          apps/caramel-app/src/lib/extensionActivity.ts
 // Regenerate: pnpm --filter caramel-app generate:coupon-constants
 // (apps/caramel-app/scripts/generate-coupon-constants.ts)
 //
@@ -78,6 +79,18 @@ export const CaramelCoupons = {
     },
     WORKED_VERIFIED_WINDOW_MS: 86400000,
     WORKED_AT_CLOCK_SKEW_TOLERANCE_MS: 300000,
+}
+
+// The extension DAU ping's wire contract (extension-activity.js).
+export const CaramelExtensionActivity = {
+    PATH: 'api/extension/activity',
+    ID_DOMAIN: 'caramel-ext-dau-v1',
+    BROWSER: 'chrome',
+    STATUS: {
+        RECORDED: 'recorded',
+        DISABLED: 'disabled',
+        CAPTURE_FAILED: 'capture_failed',
+    },
 }
 
 export function initCouponConstants() {

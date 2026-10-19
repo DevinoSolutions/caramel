@@ -191,6 +191,30 @@ describe('parseServerEnv', () => {
         ).toThrow(/SHOPPER_CODE_CAPTURE_ENABLED/)
     })
 
+    it('(i) EXTENSION_DAU_TELEMETRY_ENABLED defaults OFF, parses "true"/"false", and a typo fails boot naming it', () => {
+        expect(
+            parseServerEnv(validServerFixture).EXTENSION_DAU_TELEMETRY_ENABLED,
+        ).toBe(false)
+        expect(
+            parseServerEnv({
+                ...validServerFixture,
+                EXTENSION_DAU_TELEMETRY_ENABLED: 'true',
+            }).EXTENSION_DAU_TELEMETRY_ENABLED,
+        ).toBe(true)
+        expect(
+            parseServerEnv({
+                ...validServerFixture,
+                EXTENSION_DAU_TELEMETRY_ENABLED: 'false',
+            }).EXTENSION_DAU_TELEMETRY_ENABLED,
+        ).toBe(false)
+        expect(() =>
+            parseServerEnv({
+                ...validServerFixture,
+                EXTENSION_DAU_TELEMETRY_ENABLED: '1',
+            }),
+        ).toThrow(/EXTENSION_DAU_TELEMETRY_ENABLED/)
+    })
+
     it('(h) COUPON_BOX_DISCOVERY_ENABLED is a boolean defaulting to false, and a typo fails boot', () => {
         expect(
             parseServerEnv(validServerFixture).COUPON_BOX_DISCOVERY_ENABLED,

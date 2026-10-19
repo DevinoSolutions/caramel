@@ -47,6 +47,7 @@ const SHIPPED_TO_STRANGERS = [
     'permissions-api.js',
     'usage-diagnostics-consent.js',
     'background.js',
+    'extension-activity.js',
 ]
 // Not in any entrypoint's import graph, but shipped and run in the store's
 // page all the same: the build copies it beside the bundle and the finder
