@@ -129,6 +129,7 @@ const couponFixture = {
     timesUsed: 5,
     status: 'valid',
     verificationMessage: null,
+    newCustomersOnly: false,
 }
 
 /** listStoreCoupons selects `isSupplier` on each list row; listCoupons does not

@@ -796,6 +796,18 @@ body {
     font-weight: 600;
 }
 
+/* "New customers only" label: the code works only for a new account. */
+.coupon-new-customers {
+    display: inline-block;
+    margin-bottom: 4px;
+    padding: 1px 8px;
+    border-radius: var(--cm-radius-pill);
+    color: var(--cm-tier-amber-text);
+    background: var(--cm-tier-amber-bg);
+    font-size: var(--cm-text-xs);
+    font-weight: 600;
+}
+
 /* The coupon's title. flex-basis 60% (not 0) keeps a readable measure when a
    badge + "worked Xh ago" share the row — below that the pair wraps under the
    title (.coupon-head is flex-wrap:wrap) instead of crushing it into mid-word

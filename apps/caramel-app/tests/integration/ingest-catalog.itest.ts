@@ -163,6 +163,63 @@ describe('applyCatalogRows — an id that holds a different coupon is never over
     })
 })
 
+describe('applyCatalogRows — new_customers_only survives a push that omits it (real pg)', () => {
+    // Owner decision 2026-10-19 (T-2956): the app labels kept referral codes
+    // "New customers only". The pipeline does not send the flag, so its pushes
+    // must leave a stored flag alone; only an explicit true/false changes it.
+    it('keeps a stored true across a newer push without the flag, and clears it only on an explicit false', async () => {
+        const id = '800000094'
+        await applyCatalogRows(
+            push([
+                coupon(id, '2026-10-19T08:00:00.000Z', {
+                    new_customers_only: true,
+                }),
+            ]),
+        )
+        expect(
+            (await prisma.coupon.findUnique({ where: { id } }))
+                ?.newCustomersOnly,
+        ).toBe(true)
+
+        const r = await applyCatalogRows(
+            push([coupon(id, '2026-10-19T09:00:00.000Z', { title: 't-v2' })]),
+        )
+        expect(r.gated).toBe(false)
+        if (r.gated) return
+        expect(r.coupons.updated).toBe(1)
+        const kept = await prisma.coupon.findUnique({ where: { id } })
+        expect(kept?.title).toBe('t-v2')
+        expect(kept?.newCustomersOnly).toBe(true)
+
+        await applyCatalogRows(
+            push([
+                coupon(id, '2026-10-19T10:00:00.000Z', {
+                    new_customers_only: false,
+                }),
+            ]),
+        )
+        expect(
+            (await prisma.coupon.findUnique({ where: { id } }))
+                ?.newCustomersOnly,
+        ).toBe(false)
+    })
+
+    it('a row inserted without the flag stores NULL (unknown), which reads as no label', async () => {
+        const id = '800000093'
+        await applyCatalogRows(
+            push([
+                coupon(id, '2026-10-19T08:00:00.000Z', { site: 'kikoff.com' }),
+            ]),
+        )
+        expect(
+            (await prisma.coupon.findUnique({ where: { id } }))
+                ?.newCustomersOnly,
+        ).toBeNull()
+        const { coupons } = await listStoreCoupons('kikoff.com', 50)
+        expect(coupons.find(c => c.id === id)?.newCustomersOnly).toBe(false)
+    })
+})
+
 describe('applyCatalogRows — a partial store_config never deletes a selector', () => {
     // The producer's served rows are SPARSE (measured 2026-08-14 over 2,132 stores:
     // dismiss_button_xpath null on 97.8%, show_input_xpath on 74.6%), and the schema

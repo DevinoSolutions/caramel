@@ -29,7 +29,14 @@
 // already stored is written with `expired = true`, so it leaves the catalog
 // through the ordinary per-row tombstone path (counted in `tombstoned` and
 // measured by the 20% gate like any other tombstone). Only `expired` is forced:
-// status and every other column stay raw.
+// status and every other column stay raw. A referral row flagged
+// `new_customers_only` (pushed true, or stored true and not cleared by the push)
+// is NOT removed: it is a referral code the owner kept because the new customer
+// gets a discount (2026-10-19), and the site labels it "New customers only".
+//
+// `new_customers_only` is the one coupon column where absent means "no
+// opinion": a push that omits it (or sends null) keeps the stored value, via
+// COALESCE in the ON CONFLICT clause, like the selector columns below.
 //
 // Identity guard: a pushed row is applied to a stored row ONLY when both are the
 // same coupon (isSameCatalogCoupon: same site, same code ignoring case). The
@@ -105,7 +112,7 @@ const VISIBLE = new Set<string>(VISIBLE_COUPON_STATUSES)
 // without force. See the module header for the rationale.
 const TOMBSTONE_THRESHOLD_PCT = 20
 
-// Bulk-write chunk size. Each coupon tuple binds 16 parameters; 500 * 16 = 8000
+// Bulk-write chunk size. Each coupon tuple binds 17 parameters; 500 * 17 = 8500
 // is comfortably under Postgres' 65535-parameter statement cap, with the same
 // headroom for the narrower store_config/source tuples.
 const WRITE_CHUNK = 500
@@ -151,6 +158,18 @@ function normalizeSite(site: string | null): string | null {
 interface StoredCouponIdentity {
     site: string | null
     code: string
+}
+
+/**
+ * True when a row is a kept new-customer offer: the push flags it, or the push
+ * has no opinion (absent/null) and the stored row is flagged. Such a row is
+ * exempt from the referral removal (see the module header).
+ */
+function isNewCustomersOnly(
+    pushed: boolean | null | undefined,
+    stored: boolean | null | undefined,
+): boolean {
+    return (pushed ?? stored) === true
 }
 
 /**
@@ -353,6 +372,7 @@ export async function applyCatalogRows(
                             expired: boolean
                             status: string
                             updated_at: Date
+                            new_customers_only: boolean | null
                         }
                     >()
                     for (const idChunk of chunk(
@@ -367,9 +387,10 @@ export async function applyCatalogRows(
                                 expired: boolean
                                 status: string
                                 updated_at: Date
+                                new_customers_only: boolean | null
                             }>
                         >(
-                            Prisma.sql`SELECT id, site, code, expired, status, updated_at FROM coupons WHERE id IN (${Prisma.join(idChunk)})`,
+                            Prisma.sql`SELECT id, site, code, expired, status, updated_at, new_customers_only FROM coupons WHERE id IN (${Prisma.join(idChunk)})`,
                         )
                         for (const row of rows) {
                             current.set(row.id, {
@@ -378,6 +399,7 @@ export async function applyCatalogRows(
                                 expired: row.expired,
                                 status: row.status,
                                 updated_at: row.updated_at,
+                                new_customers_only: row.new_customers_only,
                             })
                         }
                     }
@@ -405,10 +427,16 @@ export async function applyCatalogRows(
                             mismatchedIds.push(pushed.id)
                             continue
                         }
-                        const isReferral = isReferralCoupon(pushed)
+                        const isReferral =
+                            isReferralCoupon(pushed) &&
+                            !isNewCustomersOnly(
+                                pushed.new_customers_only,
+                                cur?.new_customers_only,
+                            )
                         // A referral row never enters the catalog; an already
                         // stored one is expired (the only forced value) so the
-                        // tombstone path below removes it.
+                        // tombstone path below removes it. A kept new-customer
+                        // offer is not a referral to remove.
                         const row = isReferral
                             ? { ...pushed, expired: true }
                             : pushed
@@ -459,11 +487,11 @@ export async function applyCatalogRows(
                     for (const rowChunk of chunk(toWrite, WRITE_CHUNK)) {
                         const tuples = rowChunk.map(
                             r =>
-                                Prisma.sql`(${r.id}, ${r.code}, ${normalizeSite(r.site)}, ${r.title}, ${r.description}, ${r.rating}, ${r.discount_type}, ${r.discount_amount}, ${r.expiry}, ${r.expired}, ${r.times_used}, ${r.last_time_used ?? null}, ${r.status}, ${r.verification_message}, ${r.created_at ?? new Date()}, ${r.updated_at})`,
+                                Prisma.sql`(${r.id}, ${r.code}, ${normalizeSite(r.site)}, ${r.title}, ${r.description}, ${r.rating}, ${r.discount_type}, ${r.discount_amount}, ${r.expiry}, ${r.expired}, ${r.times_used}, ${r.last_time_used ?? null}, ${r.status}, ${r.verification_message}, ${r.created_at ?? new Date()}, ${r.updated_at}, ${r.new_customers_only ?? null})`,
                         )
                         await tx.$executeRaw(
                             Prisma.sql`
-                                INSERT INTO coupons (id, code, site, title, description, rating, discount_type, discount_amount, expiry, expired, times_used, last_time_used, status, verification_message, created_at, updated_at)
+                                INSERT INTO coupons (id, code, site, title, description, rating, discount_type, discount_amount, expiry, expired, times_used, last_time_used, status, verification_message, created_at, updated_at, new_customers_only)
                                 VALUES ${Prisma.join(tuples)}
                                 ON CONFLICT (id) DO UPDATE SET
                                     code = excluded.code,
@@ -479,7 +507,8 @@ export async function applyCatalogRows(
                                     last_time_used = excluded.last_time_used,
                                     status = excluded.status,
                                     verification_message = excluded.verification_message,
-                                    updated_at = excluded.updated_at
+                                    updated_at = excluded.updated_at,
+                                    new_customers_only = COALESCE(excluded.new_customers_only, coupons.new_customers_only)
                                 WHERE excluded.updated_at >= coupons.updated_at
                                     AND lower(coupons.site) IS NOT DISTINCT FROM excluded.site
                                     AND lower(coupons.code) = lower(excluded.code)
