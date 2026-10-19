@@ -242,7 +242,7 @@ const doctoredConfig = () => ({
 const REPORTS_KEY = '__caramel_test_reports'
 const stubApi = (sw, config, server = null) =>
     sw.evaluate(
-        ([cfg, coupons, reportsKey, server]) => {
+        ([cfg, coupons, reportsKey, server, otherStore]) => {
             if (globalThis.__caramelStubbed) return
             globalThis.__caramelStubbed = true
             const realFetch = globalThis.fetch
@@ -306,7 +306,11 @@ const stubApi = (sw, config, server = null) =>
             globalThis.fetch = (input, init) => {
                 const u = String(typeof input === 'string' ? input : input.url)
                 if (u.includes('/api/extension/supported-stores'))
-                    return json({ supported: cfg ? [cfg] : [] })
+                    // A store with no config is a store missing from a real
+                    // list, never an empty one: an empty answer leaves the
+                    // store list unknown, and the finder runs only where the
+                    // list says the host has no config.
+                    return json({ supported: cfg ? [cfg] : [otherStore] })
                 if (server && u.includes('/api/extension/features'))
                     return json(server.features)
                 if (server && u.includes('/api/extension/coupon-box-pick')) {
@@ -339,7 +343,13 @@ const stubApi = (sw, config, server = null) =>
                 return realFetch(input, init)
             }
         },
-        [config, COUPONS, REPORTS_KEY, server],
+        [
+            config,
+            COUPONS,
+            REPORTS_KEY,
+            server,
+            { ...STORE_CONFIG, domain: 'another-store.example' },
+        ],
     )
 
 async function runScenario({
