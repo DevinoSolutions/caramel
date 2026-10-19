@@ -157,7 +157,7 @@ export default function Header({ scrollRef }: HeaderProps) {
                             aria-haspopup="menu"
                             aria-expanded={isUserMenuOpen}
                             aria-label="Account menu"
-                            className="flex h-8 w-8 items-center justify-center rounded-full bg-caramel text-sm font-semibold text-white ring-2 ring-caramel/20 transition-transform duration-fast ease-motion-out hover:ring-caramel/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/60 motion-safe:active:scale-[0.98]"
+                            className="flex h-8 w-8 items-center justify-center rounded-full bg-caramel text-sm font-semibold text-white ring-2 ring-caramel/20 transition-[transform,box-shadow] duration-fast ease-motion-out hover:ring-caramel/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/60 motion-safe:active:scale-[0.98]"
                         >
                             {avatarLetter}
                         </button>

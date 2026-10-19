@@ -58,10 +58,9 @@ describe('AgentSetupPill', () => {
         })
     })
 
-    it('announces the copy through a role="status" region and fades the check in', async () => {
+    it('fades the check in on copy without adding its own live region (the sonner toast announces)', async () => {
         const { container } = render(<AgentSetupPill surface="hero" />)
-        const status = screen.getByRole('status')
-        expect(status.textContent).toBe('')
+        expect(screen.queryByRole('status')).toBeNull()
         const check = container.querySelector('[data-copied-icon]')
         expect(check?.getAttribute('class')).toContain('opacity-0')
 
@@ -71,11 +70,8 @@ describe('AgentSetupPill', () => {
             }),
         )
         await waitFor(() =>
-            expect(status.textContent).toBe(
-                'Copied. Paste into any AI coding agent.',
-            ),
+            expect(check?.getAttribute('class')).toContain('opacity-100'),
         )
-        expect(check?.getAttribute('class')).toContain('opacity-100')
         expect(check?.getAttribute('class')).not.toContain('opacity-0')
     })
 

@@ -24,7 +24,9 @@ const CLEARED_FILES = [
 describe('motion pass: cleared files carry no transition-all', () => {
     it.each(CLEARED_FILES)('%s', file => {
         const source = fs.readFileSync(path.join(srcDir, file), 'utf8')
-        expect(source).not.toMatch(/transition-all/)
+        expect(source).not.toMatch(
+            /transition-all|transition-\[all\]|transition:\s*all/,
+        )
         expect(source).not.toMatch(/hover:scale-/)
     })
 })

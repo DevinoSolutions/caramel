@@ -7,7 +7,7 @@
 // rounded-full inputs, framer-motion whileTap, sonner toasts, dark mode).
 import { getLoadedPosthog } from '@/lib/analytics/posthogBrowser'
 import { m } from 'framer-motion'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
 export type SupportFeedbackType =
@@ -58,6 +58,21 @@ export default function SupportForm({
     // card reserves it as min-height so the swap shifts nothing below it (CLS).
     const [reservedHeight, setReservedHeight] = useState(0)
     const formRef = useRef<HTMLFormElement>(null)
+    const successRef = useRef<HTMLDivElement>(null)
+    // Focus follows the swap: the submit button unmounts on success (focus
+    // would drop to <body>), so land on the success card; "Send another" lands
+    // on the form's first field. Skipped on the initial mount.
+    const hasSwappedRef = useRef(false)
+    useEffect(() => {
+        if (submitted) {
+            hasSwappedRef.current = true
+            successRef.current?.focus({ preventScroll: true })
+        } else if (hasSwappedRef.current) {
+            formRef.current
+                ?.querySelector<HTMLElement>('button, input, textarea')
+                ?.focus({ preventScroll: true })
+        }
+    }, [submitted])
 
     // ONE feedback_id per logical submission: generated once, REUSED on retry
     // after a failure, regenerated only after a success (so a genuinely new
@@ -194,12 +209,13 @@ export default function SupportForm({
     if (submitted) {
         return (
             <div
-                role="status"
+                ref={successRef}
+                tabIndex={-1}
                 data-support-success
                 style={
                     reservedHeight ? { minHeight: reservedHeight } : undefined
                 }
-                className="flex w-full flex-col items-center justify-center gap-4 rounded-3xl border border-caramel/20 bg-gradient-to-br from-caramel/5 via-orange-50/20 to-caramel/5 p-8 text-center shadow-md motion-safe:animate-motion-fade-up dark:border-caramel/30 dark:from-caramel/10 dark:via-orange-900/10 dark:to-caramel/10"
+                className="flex w-full flex-col items-center justify-center gap-4 rounded-3xl border border-caramel/20 bg-gradient-to-br from-caramel/5 via-orange-50/20 to-caramel/5 p-8 text-center shadow-md focus:outline-none motion-safe:animate-motion-fade-up dark:border-caramel/30 dark:from-caramel/10 dark:via-orange-900/10 dark:to-caramel/10"
             >
                 <p className="text-lg font-semibold text-gray-800 dark:text-gray-100">
                     Thanks for reaching out
@@ -210,7 +226,7 @@ export default function SupportForm({
                 </p>
                 <m.button
                     type="button"
-                    whileTap={{ scale: 0.95 }}
+                    whileTap={{ scale: 0.98 }}
                     onClick={() => setSubmitted(false)}
                     className="rounded-full bg-gradient-to-r from-caramel to-orange-600 px-6 py-2 text-sm font-semibold text-white shadow transition-colors hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-900"
                 >
@@ -362,7 +378,7 @@ export default function SupportForm({
             <m.button
                 type="submit"
                 disabled={loading}
-                whileTap={{ scale: 0.95 }}
+                whileTap={{ scale: 0.98 }}
                 className="rounded-full bg-gradient-to-r from-caramel to-orange-600 px-8 py-3 font-semibold text-white shadow transition-colors hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 dark:focus-visible:ring-offset-gray-900"
             >
                 {/* Both labels share one grid cell so the button keeps the

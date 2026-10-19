@@ -133,7 +133,7 @@ describe('SupportForm — feedback_id lifecycle', () => {
         expect(postedBody(1).feedback_id).toBe('id-2')
     })
 
-    it('shows the success card as a role="status" region that reserves the form height', async () => {
+    it('shows the success card, reserves the form height and moves focus onto it', async () => {
         vi.stubGlobal(
             'fetch',
             vi.fn().mockResolvedValue({
@@ -154,11 +154,44 @@ describe('SupportForm — feedback_id lifecycle', () => {
         fireEvent.submit(formEl)
 
         const card = await waitFor(() => {
-            const el = screen.getByRole('status')
+            const el = form.container.querySelector(
+                '[data-support-success]',
+            ) as HTMLElement
             expect(el.textContent).toContain('Thanks for reaching out')
             return el
         })
         expect(card.style.minHeight).toBe('640px')
+        // Not a live region (the toast announces); focus lands on the card
+        // because the submit button that had focus just unmounted.
+        expect(card.getAttribute('role')).toBeNull()
+        expect(card.getAttribute('tabindex')).toBe('-1')
+        expect(document.activeElement).toBe(card)
+    })
+
+    it('returns focus to the first form field when "Send another" restores the form', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue({
+                ok: true,
+                status: 200,
+                json: async () => ({ ok: true, analytics: 'ok', email: 'ok' }),
+            }),
+        )
+        const { container } = render(<SupportForm accountEmail={null} />)
+        // Nothing is stolen on first mount.
+        expect(document.activeElement).toBe(document.body)
+
+        typeMessage('a message')
+        fireEvent.submit(container.querySelector('form') as HTMLFormElement)
+        await waitFor(() =>
+            expect(screen.getByText('Send another')).toBeTruthy(),
+        )
+
+        fireEvent.click(screen.getByText('Send another'))
+        const firstField = (
+            container.querySelector('form') as HTMLFormElement
+        ).querySelector('button, input, textarea')
+        await waitFor(() => expect(document.activeElement).toBe(firstField))
     })
 
     it('keeps one fixed-width submit button while swapping Send feedback / Sending… by opacity', async () => {
@@ -191,6 +224,10 @@ describe('SupportForm — feedback_id lifecycle', () => {
             status: 200,
             json: async () => ({ ok: true, analytics: 'ok', email: 'ok' }),
         })
-        await waitFor(() => expect(screen.getByRole('status')).toBeTruthy())
+        await waitFor(() =>
+            expect(
+                container.querySelector('[data-support-success]'),
+            ).toBeTruthy(),
+        )
     })
 })

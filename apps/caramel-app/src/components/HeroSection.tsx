@@ -577,7 +577,6 @@ export default function HeroSection() {
                             className="cursor-pointer rounded px-1 font-semibold text-caramel transition-colors duration-fast ease-motion-out hover:bg-orange-500/10"
                             whileHover={{
                                 backgroundColor: 'rgba(234, 105, 37, 0.1)',
-                                scale: 1.02,
                             }}
                         >
                             open-source
@@ -588,7 +587,6 @@ export default function HeroSection() {
                             className="cursor-pointer rounded px-1 font-semibold text-caramel transition-colors duration-fast ease-motion-out hover:bg-orange-500/10"
                             whileHover={{
                                 backgroundColor: 'rgba(234, 105, 37, 0.1)',
-                                scale: 1.02,
                             }}
                         >
                             privacy-first
@@ -600,7 +598,6 @@ export default function HeroSection() {
                             className="cursor-pointer rounded px-1 font-semibold text-caramel transition-colors duration-fast ease-motion-out hover:bg-orange-500/10"
                             whileHover={{
                                 backgroundColor: 'rgba(234, 105, 37, 0.1)',
-                                scale: 1.02,
                             }}
                         >
                             {' '}
@@ -612,7 +609,6 @@ export default function HeroSection() {
                             className="cursor-pointer rounded px-1 font-semibold text-caramel transition-colors duration-fast ease-motion-out hover:bg-orange-500/10"
                             whileHover={{
                                 backgroundColor: 'rgba(234, 105, 37, 0.1)',
-                                scale: 1.02,
                             }}
                         >
                             hijacking creatorsʼ commissions

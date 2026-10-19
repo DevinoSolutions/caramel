@@ -143,9 +143,6 @@ export default function AgentSetupPill({
                     />
                 </span>
             </button>
-            <span role="status" className="sr-only">
-                {copied ? AGENT_SETUP_TOAST : ''}
-            </span>
             <span
                 role="group"
                 className="flex items-center gap-1"
