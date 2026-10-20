@@ -151,7 +151,12 @@ module.exports = [
         // through unnoticed. Measured 12.38 kB after the review fixes (id minted
         // only on accept, the consent re-read, device-local consent), so the
         // limit is measured + ~0.3 kB.
-        limit: '12.7 KB',
+        // 2026-10-20 (PR #384), raised 12.7 -> 13.4 kB: the toolbar badge
+        // counts only the tab in front (re-badging on tab switch), shares one
+        // request per domain and backs off after a 429, so it no longer spends
+        // the per-IP burst budget the shopper's coupon list needs. Measured
+        // 13.09 kB, so the limit is measured + ~0.3 kB.
+        limit: '13.4 KB',
         brotli: false,
     },
     {
