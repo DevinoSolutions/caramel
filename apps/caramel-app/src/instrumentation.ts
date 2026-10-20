@@ -8,6 +8,14 @@ export async function register() {
         return
     }
 
+    // Before anything opens an outbound connection (see outboundNetwork.ts:
+    // the default 250 ms per-address cut-off was failing real sign-ins).
+    const { configureOutboundNetwork } = await import('@/lib/outboundNetwork')
+    const network = configureOutboundNetwork()
+    console.log(
+        `[boot] outbound network: resultOrder=${network.resultOrder} autoSelectFamily=${network.autoSelectFamily}`,
+    )
+
     await import('../sentry.server.config')
 
     // Loud, once-at-boot report of the coupons bridge-sync posture (W4-D3).
