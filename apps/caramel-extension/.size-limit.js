@@ -183,7 +183,15 @@ module.exports = [
         // browser replaces, writes down a refused record, and gains the
         // compare-and-set replace that makes a cancel one step. Measured
         // 13.60 kB.
-        limit: '13.9 KB',
+        // 2026-10-20 (PR #384), raised 12.7 -> 13.4 kB: the toolbar badge
+        // counts only the tab in front (re-badging on tab switch), shares one
+        // request per domain and backs off after a 429, so it no longer spends
+        // the per-IP burst budget the shopper's coupon list needs. Measured
+        // 13.09 kB, so the limit is measured + ~0.3 kB.
+        // 2026-10-20, merging main into #348: both raises above land together
+        // (the per-tab handoffs and the toolbar badge). Measured 14.19 kB, so
+        // the limit is measured + ~0.3 kB.
+        limit: '14.5 KB',
         brotli: false,
     },
     {

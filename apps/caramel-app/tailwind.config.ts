@@ -46,6 +46,39 @@ const config: Config = {
             transitionTimingFunction: {
                 // Soft decelerating ease shared by landing hover/reveal transitions
                 caramel: 'cubic-bezier(0.22, 1, 0.36, 1)',
+                'motion-out': 'var(--motion-ease-out)',
+            },
+            transitionDuration: {
+                fast: 'var(--motion-dur-fast)',
+                base: 'var(--motion-dur-base)',
+                slow: 'var(--motion-dur-slow)',
+            },
+            // Shared enter keyframes for the motion pass: transform + opacity
+            // only. Gate the translate/scale ones with motion-safe: at use sites.
+            keyframes: {
+                'motion-fade-in': {
+                    from: { opacity: '0' },
+                    to: { opacity: '1' },
+                },
+                'motion-fade-up': {
+                    from: {
+                        opacity: '0',
+                        transform: 'translateY(var(--motion-rise, 6px))',
+                    },
+                    to: { opacity: '1', transform: 'translateY(0)' },
+                },
+                'motion-scale-in': {
+                    from: { opacity: '0', transform: 'scale(0.96)' },
+                    to: { opacity: '1', transform: 'scale(1)' },
+                },
+            },
+            animation: {
+                'motion-fade-in':
+                    'motion-fade-in var(--motion-dur-base) var(--motion-ease-out) both',
+                'motion-fade-up':
+                    'motion-fade-up var(--motion-dur-base) var(--motion-ease-out) both',
+                'motion-scale-in':
+                    'motion-scale-in var(--motion-dur-base) var(--motion-ease-out) both',
             },
         },
     },

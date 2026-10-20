@@ -1,5 +1,6 @@
 import { POST } from '@/app/api/coupons/[id]/report/route'
-import { resetFailedReportDedupeForTests } from '@/lib/couponFailureReportDedupe'
+import { POST as incrementPOST } from '@/app/api/coupons/increment/route'
+import { resetReportDedupeForTests } from '@/lib/couponReportDedupe'
 import prisma from '@/lib/prisma'
 import { NextRequest } from 'next/server'
 import {
@@ -81,6 +82,16 @@ function reportRequest(id: string, body: unknown, ip = '203.0.113.1') {
     })
 }
 
+function incrementRequest(id: string, ip = '203.0.113.1') {
+    return new NextRequest(`http://localhost/api/coupons/increment?id=${id}`, {
+        method: 'POST',
+        headers: {
+            origin: 'chrome-extension://abcdefghijklmnopabcdefghijklmnop',
+            'cf-connecting-ip': ip,
+        },
+    })
+}
+
 async function cleanup() {
     // coupon_reports first: its FK to coupons is ON DELETE CASCADE, but the
     // user relation is too, and deleting in dependency order keeps this cleanup
@@ -96,7 +107,7 @@ async function cleanup() {
 }
 
 beforeEach(async () => {
-    resetFailedReportDedupeForTests()
+    resetReportDedupeForTests()
     await cleanup()
     const user = await prisma.user.create({ data: { email: USER_EMAIL } })
     userId = user.id
@@ -231,6 +242,44 @@ describe('POST /api/coupons/[id]/report — attribution against real pg :58005',
             KNOWN_ID,
             OTHER_ID,
         ])
+    })
+
+    it('a repeated success from one anonymous shopper moves lastWorkedAt and workCount once; another shopper still counts', async () => {
+        getSessionMock.mockImplementation(async () => null)
+
+        await POST(reportRequest(KNOWN_ID, { outcome: 'worked' }))
+        await incrementPOST(incrementRequest(KNOWN_ID))
+        const first = await prisma.couponSignal.findUniqueOrThrow({
+            where: { couponId: KNOWN_ID },
+        })
+        expect(first.workCount).toBe(1)
+
+        await new Promise(resolve => setTimeout(resolve, 20))
+        for (let i = 0; i < 3; i++) {
+            const report = await POST(
+                reportRequest(KNOWN_ID, { outcome: 'worked' }),
+            )
+            expect(await report.json()).toEqual({ ok: true, deduped: true })
+            const use = await incrementPOST(incrementRequest(KNOWN_ID))
+            expect(await use.json()).toEqual({ ok: true, deduped: true })
+        }
+        const repeated = await prisma.couponSignal.findUniqueOrThrow({
+            where: { couponId: KNOWN_ID },
+        })
+        expect(repeated.lastWorkedAt).toEqual(first.lastWorkedAt)
+        expect(repeated.workCount).toBe(1)
+
+        await POST(
+            reportRequest(KNOWN_ID, { outcome: 'worked' }, '203.0.113.2'),
+        )
+        await incrementPOST(incrementRequest(KNOWN_ID, '203.0.113.2'))
+        const another = await prisma.couponSignal.findUniqueOrThrow({
+            where: { couponId: KNOWN_ID },
+        })
+        expect(another.lastWorkedAt!.getTime()).toBeGreaterThan(
+            first.lastWorkedAt!.getTime(),
+        )
+        expect(another.workCount).toBe(2)
     })
 
     it('an anonymous report writes the signal and NOTHING to coupon_reports', async () => {

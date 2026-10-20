@@ -55,7 +55,7 @@ export default function SupportDialog() {
             ref={dialogRef}
             onClose={() => setArgs(null)}
             onClick={onDialogClick}
-            className="w-[92vw] max-w-lg bg-transparent p-0 backdrop:bg-black/60 backdrop:backdrop-blur-sm"
+            className="motion-dialog w-[92vw] max-w-lg bg-transparent p-0 backdrop:bg-black/60 backdrop:backdrop-blur-sm"
         >
             {args ? (
                 <div className="relative">
@@ -63,7 +63,7 @@ export default function SupportDialog() {
                         type="button"
                         onClick={close}
                         aria-label="Close support form"
-                        className="absolute right-4 top-4 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-white/80 text-lg font-bold text-gray-600 shadow transition hover:bg-white hover:text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel dark:bg-gray-800/80 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white"
+                        className="absolute right-4 top-4 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-white/80 text-lg font-bold text-gray-600 shadow transition-colors duration-fast hover:bg-white hover:text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel dark:bg-gray-800/80 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white"
                     >
                         ×
                     </button>
