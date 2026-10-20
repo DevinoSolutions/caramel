@@ -240,7 +240,7 @@ export default function Header({ scrollRef }: HeaderProps) {
                                     data-growth={
                                         link.installOnly ? 'install' : undefined
                                     }
-                                    className={`px-[30px] py-2.5 ${isActive ? 'bg-caramel text-white shadow-sm' : 'text-caramel hover:bg-caramel/10'} inline-flex cursor-pointer items-center justify-center gap-2.5 whitespace-nowrap rounded-3xl transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/60`}
+                                    className={`px-[30px] py-2.5 ${isActive ? 'bg-caramel text-white shadow-sm' : 'text-caramel hover:bg-caramel/10'} inline-flex cursor-pointer items-center justify-center gap-2.5 whitespace-nowrap rounded-3xl transition-colors duration-fast focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/60`}
                                 >
                                     {link.name}
                                 </Link>
@@ -254,7 +254,7 @@ export default function Header({ scrollRef }: HeaderProps) {
                             target="_blank"
                             rel="noopener noreferrer"
                             onClick={() => setIsMenuOpen(false)}
-                            className="inline-flex cursor-pointer items-center justify-center gap-2.5 whitespace-nowrap rounded-3xl px-[30px] py-2.5 text-caramel transition hover:bg-caramel/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/60"
+                            className="inline-flex cursor-pointer items-center justify-center gap-2.5 whitespace-nowrap rounded-3xl px-[30px] py-2.5 text-caramel transition-colors duration-fast hover:bg-caramel/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/60"
                         >
                             <FaDiscord aria-hidden="true" className="text-sm" />
                             Join our Discord
@@ -264,7 +264,7 @@ export default function Header({ scrollRef }: HeaderProps) {
                                 <Link
                                     onClick={() => setIsMenuOpen(false)}
                                     href="/profile"
-                                    className={`px-[30px] py-2.5 ${pathname === '/profile' ? 'bg-caramel text-white shadow-sm' : 'text-caramel hover:bg-caramel/10'} inline-flex cursor-pointer items-center justify-center gap-2.5 rounded-3xl transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/60`}
+                                    className={`px-[30px] py-2.5 ${pathname === '/profile' ? 'bg-caramel text-white shadow-sm' : 'text-caramel hover:bg-caramel/10'} inline-flex cursor-pointer items-center justify-center gap-2.5 rounded-3xl transition-colors duration-fast focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/60`}
                                 >
                                     Profile
                                 </Link>
@@ -273,7 +273,7 @@ export default function Header({ scrollRef }: HeaderProps) {
                                         setIsMenuOpen(false)
                                         handleSignOut()
                                     }}
-                                    className="inline-flex cursor-pointer items-center justify-center gap-2.5 rounded-3xl px-[30px] py-2.5 text-caramel transition hover:bg-caramel/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/60"
+                                    className="inline-flex cursor-pointer items-center justify-center gap-2.5 rounded-3xl px-[30px] py-2.5 text-caramel transition-colors duration-fast hover:bg-caramel/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/60"
                                 >
                                     Sign out
                                 </button>
@@ -283,14 +283,14 @@ export default function Header({ scrollRef }: HeaderProps) {
                                 <Link
                                     onClick={() => setIsMenuOpen(false)}
                                     href="/login"
-                                    className="inline-flex cursor-pointer items-center justify-center gap-2.5 rounded-3xl border border-caramel px-[30px] py-2.5 font-medium text-caramel transition hover:bg-caramel/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/60"
+                                    className="inline-flex cursor-pointer items-center justify-center gap-2.5 rounded-3xl border border-caramel px-[30px] py-2.5 font-medium text-caramel transition-colors duration-fast hover:bg-caramel/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/60"
                                 >
                                     Login
                                 </Link>
                                 <Link
                                     onClick={() => setIsMenuOpen(false)}
                                     href="/signup"
-                                    className="inline-flex cursor-pointer items-center justify-center gap-2.5 rounded-3xl bg-caramel px-[30px] py-2.5 font-medium text-white shadow-sm transition hover:bg-caramel/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/60"
+                                    className="inline-flex cursor-pointer items-center justify-center gap-2.5 rounded-3xl bg-caramel px-[30px] py-2.5 font-medium text-white shadow-sm transition-colors duration-fast hover:bg-caramel/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/60"
                                 >
                                     Sign Up
                                 </Link>
