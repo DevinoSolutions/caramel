@@ -16,6 +16,13 @@ export async function register() {
         `[boot] outbound network: resultOrder=${network.resultOrder} autoSelectFamily=${network.autoSelectFamily}`,
     )
 
+    // Analytics requests are proxied to PostHog; see the module for why each
+    // proxied response needs more than Node's default 10 listeners.
+    const { raiseListenerCeilingForProxiedResponses } = await import(
+        '@/lib/proxiedResponseListenerCeiling'
+    )
+    raiseListenerCeilingForProxiedResponses()
+
     await import('../sentry.server.config')
 
     // Loud, once-at-boot report of the coupons bridge-sync posture (W4-D3).
