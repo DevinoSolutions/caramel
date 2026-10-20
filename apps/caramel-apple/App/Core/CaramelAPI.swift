@@ -11,6 +11,12 @@ struct APIError: LocalizedError {
 
     var isUnauthorized: Bool { status == 401 }
 
+    /// A 4xx other than 429: the server answered and will answer the same again.
+    var isFinalRefusal: Bool {
+        guard let status = status else { return false }
+        return (400..<500).contains(status) && status != 429
+    }
+
     var errorDescription: String? {
         let outcome = status.map { "HTTP \($0)" } ?? "no response"
         return "\(method) \(path) failed (\(outcome)): \(detail) [request \(requestID)]"
@@ -64,6 +70,13 @@ struct CaramelAPI {
         let response: URLResponse
         do {
             (data, response) = try await session.data(for: request)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as URLError where error.code == .cancelled {
+            // URLSession reports a cancelled Task as URLError(.cancelled). Callers
+            // handle one cancellation type, so normalize it: a cancelled request
+            // is never an APIError (it would flash as a failure per keystroke).
+            throw CancellationError()
         } catch {
             throw APIError(method: method, path: path, status: nil, requestID: requestID, detail: error.localizedDescription)
         }
@@ -167,8 +180,8 @@ extension CaramelAPI {
     /// PUT or DELETE /api/account/favorites/:store. Returns the store key the
     /// server actually wrote (it normalizes to the registrable domain).
     func setFavorite(_ store: String, favorited: Bool, bearer: String) async throws -> String {
-        let encoded = store.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? store
-        let path = "/api/account/favorites/\(encoded)"
+        // Raw, not pre-encoded: URLComponents.path percent-encodes it once.
+        let path = "/api/account/favorites/\(store)"
         let (data, _) = try await send(favorited ? "PUT" : "DELETE", path, bearer: bearer)
         return try decode(FavoriteWriteResponse.self, from: data, method: favorited ? "PUT" : "DELETE", path: path).store
     }

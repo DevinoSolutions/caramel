@@ -76,6 +76,10 @@ enum AlertsEngine {
                     // Codes expired: lower the baseline so the next new one is counted.
                     markSeen(store: store, total: page.total)
                 }
+            } catch is CancellationError {
+                // The caller went away (view change, new run): the rest of the
+                // stores were not checked, which is not a failure to report.
+                break
             } catch {
                 result.failures[store] = error.localizedDescription
             }

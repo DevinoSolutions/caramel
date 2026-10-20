@@ -47,6 +47,9 @@ targets:
         # Export compliance: the app and extension ship no crypto of their own
         # (HTTPS through Apple's OS networking), the same answer release-extension.yml stamps.
         ITSAppUsesNonExemptEncryption: false
+        # Full keychain access group (team prefix resolved at build time), read by
+        # Shared/AppGroup.swift SharedSessionKeychain.
+        CaramelKeychainAccessGroup: $(AppIdentifierPrefix)com.devino.Caramel.shared
         LSRequiresIPhoneOS: true
         UILaunchScreen: {}
         # Local new-codes alerts (AlertsEngine): BGAppRefreshTask.
@@ -94,6 +97,7 @@ targets:
       properties:
         CFBundleDisplayName: Caramel
         CFBundleShortVersionString: $(MARKETING_VERSION)
+        CaramelKeychainAccessGroup: $(AppIdentifierPrefix)com.devino.Caramel.shared
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:
           NSExtensionPointIdentifier: com.apple.Safari.web-extension

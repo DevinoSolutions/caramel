@@ -6,7 +6,7 @@ import SwiftUI
 /// apps/caramel-extension/entrypoints/popup/components/SafariAllSitesSteps.tsx
 /// (walked on an iOS 26 simulator, 2026-10-19: the page-menu icon at the left of
 /// the address bar, then Always Allow > Always Allow on Every Website). Keep the
-/// two in step; tests/apple-onboarding-copy.test.mjs in the extension package
+/// two in step; apps/caramel-extension/tests/apple-container-parity.test.mjs
 /// fails when they drift.
 enum OnboardingCopy {
     static let openSettings = "Open the Settings app, then go to Safari > Extensions. (On iOS 18 and later it is Settings > Apps > Safari > Extensions.)"

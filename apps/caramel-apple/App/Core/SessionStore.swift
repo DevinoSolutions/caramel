@@ -43,9 +43,21 @@ final class WebSignIn: NSObject, ASWebAuthenticationPresentationContextProviding
 
         let deadline = Date().addingTimeInterval(5 * 60)
         var pollsAfterClose = 2
+        var consecutivePollErrors = 0
         while Date() < deadline {
             try await Task.sleep(nanoseconds: 2_000_000_000)
-            if let result = try await api.oauthPoll(nonce: nonce) { return result }
+            do {
+                if let result = try await api.oauthPoll(nonce: nonce) { return result }
+                consecutivePollErrors = 0
+            } catch let error as APIError where error.isFinalRefusal {
+                // A 4xx (the 400 failure sentinel, a bad nonce) is the server's final answer.
+                throw error
+            } catch let error as APIError {
+                // No response, a 5xx or a 429: a flaky network must not abort a sign-in
+                // the shopper already finished, so allow a few in a row.
+                consecutivePollErrors += 1
+                if consecutivePollErrors > 3 { throw error }
+            }
             if sheetClosed {
                 // The shopper may have tapped Done right after the page said
                 // "signed in": allow a final poll or two before giving up.

@@ -165,6 +165,8 @@ struct AccountView: View {
             overview = .loaded(try await CaramelAPI.shared.overview(bearer: token))
         } catch let error as APIError where error.isUnauthorized {
             overview = .failed("Your session expired. Sign out and sign in again.")
+        } catch is CancellationError {
+            overview = .idle
         } catch {
             overview = .failed(error.localizedDescription)
         }

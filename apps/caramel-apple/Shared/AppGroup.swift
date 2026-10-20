@@ -25,6 +25,8 @@ enum AppGroup {
         static let onboardingConfirmedByUser = "onboardingConfirmedByUser"
         /// Mirror of the saved-stores list ([String]); the account list when signed in, the only list when not.
         static let savedStores = "savedStores"
+        /// [String] saved stores not yet confirmed by the account (signed in only); a sync never drops these.
+        static let savedStoresPendingPush = "savedStoresPendingPush"
         static let alertsNotifyEnabled = "alertsNotifyEnabled"
         /// [String: Int] store -> coupon total the shopper last looked at.
         static let alertsLastSeenTotals = "alertsLastSeenTotals"
@@ -38,8 +40,11 @@ enum AppGroup {
 /// keychain so the Safari extension can read the app's sign-in.
 ///
 /// Both targets list the same single `keychain-access-groups` entry
-/// (project.yml), and an item written without an explicit access group lands in
-/// the first entry, so app and extension address one shared item.
+/// (project.yml). The item names that group explicitly: its full value (team
+/// prefix included) is stamped into both Info.plists as
+/// `CaramelKeychainAccessGroup` at build time, so nothing hardcodes the team id.
+/// Data-protection keychain, this device only (a bearer must not ride an
+/// iCloud/backup restore onto another device).
 enum SharedSessionKeychain {
     struct KeychainError: LocalizedError {
         let operation: String
@@ -52,11 +57,21 @@ enum SharedSessionKeychain {
     private static let service = "com.devino.Caramel.session"
     private static let account = "extension-bearer"
 
+    private static var accessGroup: String {
+        guard let group = Bundle.main.object(forInfoDictionaryKey: "CaramelKeychainAccessGroup") as? String,
+              !group.isEmpty, !group.contains("$(") else {
+            preconditionFailure("Info.plist has no resolved CaramelKeychainAccessGroup: check project.yml info.properties on this target.")
+        }
+        return group
+    }
+
     private static func baseQuery() -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
+            kSecAttrAccessGroup as String: accessGroup,
+            kSecUseDataProtectionKeychain as String: true,
         ]
     }
 
@@ -88,7 +103,7 @@ enum SharedSessionKeychain {
         }
         var add = baseQuery()
         add[kSecValueData as String] = data
-        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         let addStatus = SecItemAdd(add as CFDictionary, nil)
         guard addStatus == errSecSuccess else {
             throw KeychainError(operation: "add", status: addStatus)

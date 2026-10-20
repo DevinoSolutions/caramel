@@ -7,6 +7,7 @@ struct SavedView: View {
     @State private var newCodes: [String: Int] = [:]
     @State private var alertsOn = AlertsEngine.notifyEnabled
     @State private var alertsMessage: String?
+    @State private var checkMessage: String?
 
     var body: some View {
         NavigationStack {
@@ -45,6 +46,9 @@ struct SavedView: View {
                     Toggle("Notify me about new codes", isOn: alertsBinding)
                     if let alertsMessage = alertsMessage {
                         Text(alertsMessage).font(.footnote).foregroundStyle(.red)
+                    }
+                    if let checkMessage = checkMessage {
+                        Text(checkMessage).font(.footnote).foregroundStyle(.red)
                     }
                 } header: {
                     Text("Alerts")
@@ -91,9 +95,13 @@ struct SavedView: View {
 
     private func checkForNewCodes() async {
         let result = await AlertsEngine.check(stores: favorites.stores)
-        newCodes = Dictionary(uniqueKeysWithValues: result.hits.map { ($0.store, $0.newCodes) })
-        if !result.failures.isEmpty {
-            alertsMessage = "Could not check some stores:\n" + result.failures
+        // A cancelled check (view change, new run) is incomplete: keep the last result.
+        guard !Task.isCancelled else { return }
+        newCodes = Dictionary(result.hits.map { ($0.store, $0.newCodes) }, uniquingKeysWith: max)
+        if result.failures.isEmpty {
+            checkMessage = nil
+        } else {
+            checkMessage = "Could not check some stores:\n" + result.failures
                 .map { "\($0.key): \($0.value)" }
                 .sorted()
                 .joined(separator: "\n")

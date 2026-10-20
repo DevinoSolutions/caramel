@@ -49,6 +49,9 @@ struct StoreDetailView: View {
         .refreshable { await load() }
     }
 
+    // TODO(T-4905): only page 1 (50 codes) is loaded; `hasMore` just points to the
+    // website. Add paging (CaramelAPI.coupons already takes `page`) before a store
+    // with more than 50 visible codes matters.
     private func load() async {
         state = .loading
         do {
@@ -57,6 +60,8 @@ struct StoreDetailView: View {
             // Looking at the codes clears the store's "new" marker (and sets the
             // baseline for a store saved straight from here).
             AlertsEngine.markSeen(store: domain, total: page.total)
+        } catch is CancellationError {
+            state = .idle
         } catch {
             state = .failed(error.localizedDescription)
         }

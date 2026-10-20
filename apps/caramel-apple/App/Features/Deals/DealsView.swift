@@ -59,6 +59,8 @@ struct DealsView: View {
         worked = .loading
         do {
             worked = .loaded(try await CaramelAPI.shared.recentlyWorked())
+        } catch is CancellationError {
+            worked = .idle
         } catch {
             worked = .failed(error.localizedDescription)
         }
@@ -68,6 +70,8 @@ struct DealsView: View {
         topStores = .loading
         do {
             topStores = .loaded(try await CaramelAPI.shared.topStores())
+        } catch is CancellationError {
+            topStores = .idle
         } catch {
             topStores = .failed(error.localizedDescription)
         }
