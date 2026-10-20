@@ -81,6 +81,15 @@ const nextConfig = {
     // e2e/inline-css.spec.ts assert it on a real production build.
     experimental: {
         inlineCss: true,
+        // src/middleware.ts matches every path, so Next copies each request
+        // body for it and holds up to this many bytes in memory before any
+        // route runs (default 10 MB). Past it Next TRUNCATES the body the
+        // route sees, so it must stay above the largest real one. Measured
+        // 2026-10-20: a 1000-row store-config chunk from the coupon pipeline
+        // is ~0.45 MB (1 MB worst case), session-replay batches go out
+        // gzipped from a 0.9 MB JSON flush point, and the extension routes
+        // cap themselves at 46 KB. 4 MB keeps ~4x headroom over those.
+        proxyClientMaxBodySize: '4mb',
     },
     outputFileTracingRoot: workspaceRoot,
     // posthog-js POSTs to trailing-slash endpoints (/i/v0/e/, /flags/, /s/) on
