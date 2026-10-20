@@ -3,6 +3,9 @@
 //
 // The ONE shared surface every growth prompt renders in: a bottom-right card
 // on desktop, a bottom sheet on small screens (fleet growth-prompts spec §B).
+// NOTE: this repo's Tailwind screens are MAX-width (tailwind.config.ts), so
+// the unprefixed classes are the desktop card and `md:` (<=767px) turns it
+// into the full-width sheet. Pinned by tests/unit/growth-prompt-card-layout.test.tsx.
 // Prompts supply copy; this owns layout, dark mode, focus and the two exits,
 // so no prompt can ship its own popup with its own quirks.
 import type { PromptCardContent } from '@/lib/prompts/registry'
@@ -45,7 +48,7 @@ export default function GrowthPromptCard({
             aria-labelledby={titleId}
             aria-describedby={bodyId}
             data-growth-prompt={promptId}
-            className="fixed bottom-0 left-0 right-0 z-40 rounded-t-2xl border border-gray-200 bg-white p-5 shadow-2xl dark:border-white/10 dark:bg-darkSurface md:bottom-6 md:left-auto md:right-6 md:w-[22rem] md:rounded-2xl sm:bottom-0"
+            className="motion-growth-card fixed bottom-6 right-6 z-40 w-[22rem] rounded-2xl border border-gray-200 bg-white p-5 shadow-2xl dark:border-white/10 dark:bg-darkSurface md:bottom-0 md:left-0 md:right-0 md:w-auto md:rounded-b-none"
         >
             <button
                 ref={dismissRef}

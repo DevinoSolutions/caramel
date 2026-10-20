@@ -20,7 +20,7 @@ export default function StoreButtons() {
                     href={CHROME_WEB_STORE_URL}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center gap-2 rounded-xl border-[1.5px] border-black px-3 py-1.5 text-black transition-transform duration-200 ease-in-out hover:scale-105 hover:border-caramel hover:bg-caramel hover:text-white dark:border-white dark:text-white"
+                    className="flex items-center gap-2 rounded-xl border-[1.5px] border-black px-3 py-1.5 text-black transition-[transform,background-color,border-color,color] duration-fast ease-motion-out hover:border-caramel hover:bg-caramel hover:text-white motion-safe:active:scale-[0.98] dark:border-white dark:text-white"
                 >
                     <div className="w-10">
                         <FaChrome aria-hidden="true" size={40} />
@@ -38,7 +38,7 @@ export default function StoreButtons() {
                     target="_blank"
                     href={FIREFOX_ADDONS_URL}
                     rel="noopener noreferrer"
-                    className="flex items-center gap-2 rounded-xl border-[1.5px] border-black px-3 py-1.5 text-black transition-transform duration-200 ease-in-out hover:scale-105 hover:border-caramel hover:bg-caramel hover:text-white dark:border-white dark:text-white"
+                    className="flex items-center gap-2 rounded-xl border-[1.5px] border-black px-3 py-1.5 text-black transition-[transform,background-color,border-color,color] duration-fast ease-motion-out hover:border-caramel hover:bg-caramel hover:text-white motion-safe:active:scale-[0.98] dark:border-white dark:text-white"
                 >
                     <div className="w-10">
                         <FaFirefox aria-hidden="true" size={40} />
