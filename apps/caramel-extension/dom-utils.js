@@ -573,7 +573,7 @@ export function caramelDisclosureFor(el) {
  * had never run. A win we actually delivered read as a dead feature.
  *
  * The discount-link path already survives its own (deliberate) reload through
- * sessionStorage; this is the same handoff for the path that navigates without
+ * the background's per-tab handoff; this is the same handoff for the path that navigates without
  * being asked. The crucial difference: this record carries only what we KNEW
  * BEFORE submitting — the code, its id, and the prices then on the page — and
  * never an outcome. At write time we genuinely do not know whether the code
