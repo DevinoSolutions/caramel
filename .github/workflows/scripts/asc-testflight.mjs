@@ -193,8 +193,16 @@ async function attachBuild(marketingVersion, buildNumber, groupName) {
         )
     }
 
-    const current = await listAll(`/builds/${build.id}/betaGroups?limit=200`)
-    if (current.some(g => g.id === groupId)) {
+    // GET /builds/{id}/betaGroups is not allowed (the relationship is
+    // create/delete only), so membership is read from the group's side.
+    const inGroup = async () =>
+        (
+            await listAll(
+                `/betaGroups/${groupId}/builds?filter[version]=${encodeURIComponent(buildNumber)}&limit=200`,
+            )
+        ).some(member => member.id === build.id)
+
+    if (await inGroup()) {
         console.log(`Build is already in "${groupName}".`)
     } else {
         await api(`/betaGroups/${groupId}/relationships/builds`, {
@@ -204,8 +212,7 @@ async function attachBuild(marketingVersion, buildNumber, groupName) {
         console.log(`Added build ${build.id} to "${groupName}" (${groupId}).`)
     }
 
-    const after = await listAll(`/builds/${build.id}/betaGroups?limit=200`)
-    if (!after.some(g => g.id === groupId)) {
+    if (!(await inGroup())) {
         throw new Error(
             `Build ${build.id} is not in "${groupName}" after the attach call.`,
         )
