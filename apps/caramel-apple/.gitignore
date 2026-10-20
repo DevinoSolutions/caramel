@@ -1,0 +1,6 @@
+# Xcode user state and build output. The WXT Safari build is read straight from
+# apps/caramel-extension/.output/safari-mv3 (gitignored there) and never copied here.
+xcuserdata/
+*.xcuserstate
+/build/
+/DerivedData/
