@@ -194,6 +194,10 @@ function _captureRefusalReason(verdict) {
     // The total dropped but no applied row matched: the structural false
     // negative of a store config without a row we can read.
     if (verdict?.priceDropped === true) return 'price-dropped-no-row'
+    // A row appeared and then did not hold (the store took the code and undid
+    // it), or a finder-picked box committed with no drop: a refusal the store
+    // acted out, not silence.
+    if (verdict?.committed === true) return 'committed-no-effect'
     // No new error, no price drop, and no row that held within the window.
     return 'no-signal'
 }

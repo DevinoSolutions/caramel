@@ -1522,6 +1522,30 @@ describe('funnel diagnostics: why the store did not count as accepting', () => {
         expect(sent).toEqual([])
     }, 20000)
 
+    it('a row that committed and then reverted, beside stale error text: committed-no-effect', async () => {
+        await armed()
+        // The error text was already on the page before the code was applied
+        // (furniture, not the store's verdict), so it is not attributable.
+        setText(document.getElementById('err'), 'Invalid promo code')
+        document.getElementById('apply').addEventListener('click', () => {
+            setTimeout(() => {
+                const row = document.createElement('div')
+                row.id = 'applied-row'
+                setText(row, `${promo().value} applied`)
+                document.body.appendChild(row)
+                // The store takes the code, then undoes it before the row has
+                // held for 1.2s.
+                setTimeout(() => row.remove(), 300)
+            }, 100)
+        })
+        shopperTypes('SAVE10')
+        shopperClicksApply()
+
+        await waitForRefusal()
+        expect(refusalReasons()).toEqual(['committed-no-effect'])
+        expect(sent).toEqual([])
+    }, 20000)
+
     it('an accepted code reports no refusal and is still shared', async () => {
         await armed()
         storeAnswers(true)

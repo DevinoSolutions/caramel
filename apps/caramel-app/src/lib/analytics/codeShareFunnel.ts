@@ -70,6 +70,7 @@ export const CODE_SHARE_FUNNEL_STEP_REASONS = {
         'store-error',
         'not-tied-to-code',
         'price-dropped-no-row',
+        'committed-no-effect',
         'no-signal',
     ],
     prompt_shown: [],

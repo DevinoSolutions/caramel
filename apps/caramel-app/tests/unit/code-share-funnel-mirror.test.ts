@@ -107,6 +107,7 @@ describe('code-share-funnel.js mirrors the server vocabulary (app <-> extension 
                 'store-error',
                 'not-tied-to-code',
                 'price-dropped-no-row',
+                'committed-no-effect',
                 'no-signal',
             ]),
         )
