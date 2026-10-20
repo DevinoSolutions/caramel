@@ -31,8 +31,6 @@ name: Release â€“ Apple App (iOS container + Safari extension)
 on:
   push:
     tags: ['apple-v*']
-    # TODO(T-4904): remove before merge — pre-merge TestFlight evidence run
-    branches: [feat/caramel-apple-app]
   workflow_dispatch:
   pull_request:
     paths:
