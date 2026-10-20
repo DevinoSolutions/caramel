@@ -1,0 +1,473 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		1C69055E2D02E0D9890B3118 /* CaramelExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = D4C6080DC2774B12A877F80E /* CaramelExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		223B143989D737111224AB12 /* SafariWebExtensionHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 788B56A4598C221C0BD84FBF /* SafariWebExtensionHandler.swift */; };
+		4D18E194A4E69E2CC85028D9 /* AppConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71AFE3F0DC45860AB6819739 /* AppConfig.swift */; };
+		83C57960323D370868438989 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C832CD8A3FA16B7C3DC4E1A3 /* Assets.xcassets */; };
+		A4617CF2EE8E49BCFF6F4997 /* CaramelApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02CFAE4BA11D3EF91F8953D0 /* CaramelApp.swift */; };
+		C2D00FA1479A757BABC8803B /* RootTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADD85713C3AEE9C01B979904 /* RootTabView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		763D2EAF9C8C7D0D89D19E34 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = C2D1DC32ACCBAF636BFF49E0 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 11A6284E5054D506030ADE3E;
+			remoteInfo = CaramelExtension;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		04DA84F4D940B50BC15398CA /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				1C69055E2D02E0D9890B3118 /* CaramelExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		02CFAE4BA11D3EF91F8953D0 /* CaramelApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaramelApp.swift; sourceTree = "<group>"; };
+		1B8AC0E55EE09B3B11102E43 /* CaramelExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = CaramelExtension.entitlements; sourceTree = "<group>"; };
+		2408B1D019256A89A6BBCB76 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		71AFE3F0DC45860AB6819739 /* AppConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfig.swift; sourceTree = "<group>"; };
+		788B56A4598C221C0BD84FBF /* SafariWebExtensionHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafariWebExtensionHandler.swift; sourceTree = "<group>"; };
+		A90F079566A3D1F6C98CBE67 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		ADD85713C3AEE9C01B979904 /* RootTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootTabView.swift; sourceTree = "<group>"; };
+		B1FEFF51E83F4DFE0E2E857C /* Caramel.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Caramel.entitlements; sourceTree = "<group>"; };
+		C832CD8A3FA16B7C3DC4E1A3 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		C96F52B98AA80D4156953406 /* Caramel.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Caramel.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		D4C6080DC2774B12A877F80E /* CaramelExtension.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = CaramelExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		001DD958604FE03ECE110609 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				C96F52B98AA80D4156953406 /* Caramel.app */,
+				D4C6080DC2774B12A877F80E /* CaramelExtension.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		61F89EE2BF1DA21BEEBF3320 /* Extension */ = {
+			isa = PBXGroup;
+			children = (
+				1B8AC0E55EE09B3B11102E43 /* CaramelExtension.entitlements */,
+				2408B1D019256A89A6BBCB76 /* Info.plist */,
+				788B56A4598C221C0BD84FBF /* SafariWebExtensionHandler.swift */,
+			);
+			path = Extension;
+			sourceTree = "<group>";
+		};
+		A34112C8158E5253304D80C3 = {
+			isa = PBXGroup;
+			children = (
+				D13D979766F8CB3306288908 /* App */,
+				61F89EE2BF1DA21BEEBF3320 /* Extension */,
+				001DD958604FE03ECE110609 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		D13D979766F8CB3306288908 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				71AFE3F0DC45860AB6819739 /* AppConfig.swift */,
+				C832CD8A3FA16B7C3DC4E1A3 /* Assets.xcassets */,
+				B1FEFF51E83F4DFE0E2E857C /* Caramel.entitlements */,
+				02CFAE4BA11D3EF91F8953D0 /* CaramelApp.swift */,
+				A90F079566A3D1F6C98CBE67 /* Info.plist */,
+				ADD85713C3AEE9C01B979904 /* RootTabView.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		11A6284E5054D506030ADE3E /* CaramelExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 2EB2C7FA3C103B5E5324E676 /* Build configuration list for PBXNativeTarget "CaramelExtension" */;
+			buildPhases = (
+				C4DD483E9B01E8E402F1C0FF /* Sources */,
+				4626EB18C0E3154C57E5DB81 /* Copy WXT Safari build */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = CaramelExtension;
+			packageProductDependencies = (
+			);
+			productName = CaramelExtension;
+			productReference = D4C6080DC2774B12A877F80E /* CaramelExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		41348FEC973626C9253F97D4 /* Caramel */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E7411F4D1A346D94E6AB2E00 /* Build configuration list for PBXNativeTarget "Caramel" */;
+			buildPhases = (
+				0F1F9AA12907A7491F1B60BA /* Sources */,
+				AAC7FA2433AA3AD8171641F5 /* Resources */,
+				04DA84F4D940B50BC15398CA /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				41DB5CAA98FD4047F676225D /* PBXTargetDependency */,
+			);
+			name = Caramel;
+			packageProductDependencies = (
+			);
+			productName = Caramel;
+			productReference = C96F52B98AA80D4156953406 /* Caramel.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		C2D1DC32ACCBAF636BFF49E0 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					11A6284E5054D506030ADE3E = {
+						ProvisioningStyle = Automatic;
+					};
+					41348FEC973626C9253F97D4 = {
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 250E1CA6CC4F9917E5D28063 /* Build configuration list for PBXProject "Caramel" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = A34112C8158E5253304D80C3;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 001DD958604FE03ECE110609 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				41348FEC973626C9253F97D4 /* Caramel */,
+				11A6284E5054D506030ADE3E /* CaramelExtension */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		AAC7FA2433AA3AD8171641F5 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				83C57960323D370868438989 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		4626EB18C0E3154C57E5DB81 /* Copy WXT Safari build */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Copy WXT Safari build";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -euo pipefail\nsrc=\"${CARAMEL_SAFARI_BUILD_DIR:-${SRCROOT}/../caramel-extension/.output/safari-mv3}\"\ndest=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}\"\nif [ ! -f \"${src}/manifest.json\" ]; then\n  echo \"error: ${src}/manifest.json is missing. Build the extension first: pnpm --filter caramel-extension exec wxt build, then derive .output/safari-mv3 (apps/caramel-apple/scripts/derive-safari-build.sh).\" >&2\n  exit 1\nfi\nmkdir -p \"${dest}\"\nrsync -a --exclude='.DS_Store' \"${src}/\" \"${dest}/\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		0F1F9AA12907A7491F1B60BA /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				4D18E194A4E69E2CC85028D9 /* AppConfig.swift in Sources */,
+				A4617CF2EE8E49BCFF6F4997 /* CaramelApp.swift in Sources */,
+				C2D00FA1479A757BABC8803B /* RootTabView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C4DD483E9B01E8E402F1C0FF /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				223B143989D737111224AB12 /* SafariWebExtensionHandler.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		41DB5CAA98FD4047F676225D /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 11A6284E5054D506030ADE3E /* CaramelExtension */;
+			targetProxy = 763D2EAF9C8C7D0D89D19E34 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		1A35D35A2605F43AA419BC5B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.4;
+				MARKETING_VERSION = 1.5.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		3AB740D84E34E89E0F00D9E0 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Extension/CaramelExtension.entitlements;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				INFOPLIST_FILE = Extension/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.devino.Caramel.Extension;
+				PRODUCT_NAME = "Caramel Extension";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		6FD87C80AC2B60354643C515 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.4;
+				MARKETING_VERSION = 1.5.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		ADCC539E193D96AF4BB02425 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Extension/CaramelExtension.entitlements;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				INFOPLIST_FILE = Extension/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.devino.Caramel.Extension;
+				PRODUCT_NAME = "Caramel Extension";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		B10C9D598A18F68346835F70 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = App/Caramel.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = App/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.devino.Caramel;
+				PRODUCT_NAME = Caramel;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		BCEE7DF55F1BBC6D86EA85C4 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = App/Caramel.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = App/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.devino.Caramel;
+				PRODUCT_NAME = Caramel;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		250E1CA6CC4F9917E5D28063 /* Build configuration list for PBXProject "Caramel" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1A35D35A2605F43AA419BC5B /* Debug */,
+				6FD87C80AC2B60354643C515 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		2EB2C7FA3C103B5E5324E676 /* Build configuration list for PBXNativeTarget "CaramelExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				ADCC539E193D96AF4BB02425 /* Debug */,
+				3AB740D84E34E89E0F00D9E0 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		E7411F4D1A346D94E6AB2E00 /* Build configuration list for PBXNativeTarget "Caramel" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B10C9D598A18F68346835F70 /* Debug */,
+				BCEE7DF55F1BBC6D86EA85C4 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = C2D1DC32ACCBAF636BFF49E0 /* Project object */;
+}

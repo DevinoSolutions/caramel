@@ -41,6 +41,8 @@ targets:
       path: App/Info.plist
       properties:
         CFBundleDisplayName: Caramel
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         # Export compliance: the app and extension ship no crypto of their own
         # (HTTPS through Apple's OS networking), the same answer release-extension.yml stamps.
         ITSAppUsesNonExemptEncryption: false
@@ -75,6 +77,8 @@ targets:
       path: Extension/Info.plist
       properties:
         CFBundleDisplayName: Caramel
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:
           NSExtensionPointIdentifier: com.apple.Safari.web-extension
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).SafariWebExtensionHandler
