@@ -198,7 +198,7 @@ async function attachBuild(marketingVersion, buildNumber, groupName) {
     const inGroup = async () =>
         (
             await listAll(
-                `/betaGroups/${groupId}/builds?filter[version]=${encodeURIComponent(buildNumber)}&limit=200`,
+                `/betaGroups/${groupId}/builds?fields[builds]=version&limit=200`,
             )
         ).some(member => member.id === build.id)
 
