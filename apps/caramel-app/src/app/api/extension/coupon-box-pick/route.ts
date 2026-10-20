@@ -7,6 +7,11 @@ import { handleRouteError } from '@/lib/api/handleRouteError'
 import { readBodyCapped } from '@/lib/api/readBodyCapped'
 import { preflight, withRoute } from '@/lib/api/withRoute'
 import {
+    couponBoxLearnedEnabled,
+    findServableLearnedBox,
+    type CouponBoxLearnedAnswer,
+} from '@/lib/couponBoxLearned'
+import {
     couponBoxLlmEnabled,
     couponBoxPickRequestSchema,
     MAX_OUTLINE_BYTES,
@@ -14,9 +19,11 @@ import {
     type CouponBoxPickResult,
 } from '@/lib/couponBoxPick'
 import { admitCouponBoxPickModelCall } from '@/lib/couponBoxPickBudget'
+import { hasServedStoreConfig } from '@/lib/couponsRepo'
 import { env } from '@/lib/env'
 import { ModelCallBudgetExceededError } from '@/lib/modelCallBudget'
 import { getClientIp } from '@/lib/rateLimit'
+import * as Sentry from '@sentry/nextjs'
 import { NextResponse, type NextRequest } from 'next/server'
 
 // POST /api/extension/coupon-box-pick — when the extension's rules cannot
@@ -26,6 +33,15 @@ import { NextResponse, type NextRequest } from 'next/server'
 // toggle that reveals the box. Every answer except a refusal is a 200 the
 // extension can act on; `outcome: 'no_pick'` means "carry on as if the rules
 // found nothing".
+//
+// Learned answer (src/lib/couponBoxLearned.ts): when the request carries
+// `acceptsLearned: true` and the store has no served config, a coupon box
+// enough shoppers already confirmed is answered first, before the cache and
+// the model, with no model call and no budget spent:
+//   { outcome: 'box', source: 'learned', input: null, button: null,
+//     toggle: null, box: { input, apply, toggle, enterOnly } }
+// (CSS selectors under `box`). A build that does not send `acceptsLearned`
+// never gets one. Behind the same couponBoxLlm switch as the model pick.
 
 // The outline cap plus room for the JSON envelope: escaping the outline's
 // quotes and newlines adds up to ~13% on real cart pages (measured on the
@@ -34,7 +50,10 @@ const MAX_BODY_BYTES = 46 * 1024
 
 const NO_STORE = { 'Cache-Control': 'private, no-store' } as const
 
-function json(body: CouponBoxPickResult | { error: string }, status = 200) {
+function json(
+    body: CouponBoxPickResult | CouponBoxLearnedAnswer | { error: string },
+    status = 200,
+) {
     return NextResponse.json(body, { status, headers: NO_STORE })
 }
 
@@ -152,6 +171,11 @@ async function handlePick(req: NextRequest): Promise<PickExit> {
         })
     }
 
+    if (parsed.data.acceptsLearned === true && couponBoxLearnedEnabled()) {
+        const learned = await learnedAnswer(store)
+        if (learned) return exit(json(learned), 'learned', { store })
+    }
+
     // Set when the budget admitted a model call: pickCouponBox is then in the
     // model call, so its remaining time is the model's (the cache lookup and
     // scrub before the admit are in-memory and microseconds).
@@ -168,13 +192,14 @@ async function handlePick(req: NextRequest): Promise<PickExit> {
             modelStartedAt = performance.now()
         })
         return exit(json(result), outcomeOf(result), {
-            // A `disabled` no_pick never looked at the cache.
+            // A `disabled` no_pick never looked at the cache; a refused
+            // button is a model answer, cached like one.
             cached:
-                result.outcome === 'no_pick'
-                    ? result.reason === 'disabled'
-                        ? null
-                        : false
-                    : result.cached,
+                'cached' in result
+                    ? result.cached
+                    : result.reason === 'disabled'
+                      ? null
+                      : false,
             modelMs: modelMs(),
             store,
         })
@@ -214,5 +239,38 @@ async function handlePick(req: NextRequest): Promise<PickExit> {
             'server_error',
             { modelMs: modelMs(), store },
         )
+    }
+}
+
+/**
+ * The learned box for `domain`, or null to carry on to the cache and the
+ * model. Never for a store with a served config. A lookup error is reported
+ * and answered as null: the pick then runs exactly as it would have without
+ * a learned table.
+ */
+async function learnedAnswer(
+    domain: string,
+): Promise<CouponBoxLearnedAnswer | null> {
+    try {
+        if (await hasServedStoreConfig(domain)) return null
+        const box = await findServableLearnedBox(domain)
+        if (!box) return null
+        return {
+            outcome: 'box',
+            source: 'learned',
+            input: null,
+            button: null,
+            toggle: null,
+            box,
+        }
+    } catch (error) {
+        console.error('[coupon-box-pick] learned lookup failed', error, {
+            domain,
+        })
+        Sentry.captureException(error, {
+            tags: { surface: 'coupon-box-pick', operation: 'learned_lookup' },
+            extra: { domain },
+        })
+        return null
     }
 }

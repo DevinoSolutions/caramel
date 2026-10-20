@@ -161,6 +161,11 @@ export const KnownStoreRowSchema = z.object({
     known: z.boolean(),
 })
 
+/** `SELECT EXISTS(...) AS served` — couponsRepo.hasServedStoreConfig. */
+export const ServedStoreConfigRowSchema = z.object({
+    served: z.boolean(),
+})
+
 /** `SELECT COUNT(*)::int AS total` — coupons/route.ts + [store]/page.tsx. */
 export const TotalCountRowSchema = z.object({
     total: z.number(),

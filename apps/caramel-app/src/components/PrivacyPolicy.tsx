@@ -100,15 +100,17 @@ const PrivacyPolicy = () => {
                                 on the page, on your device. Nothing new is sent
                                 to Caramel for that, except that the extension
                                 reads Caramel&apos;s feature switches from our
-                                server. If that also fails, and only after you
-                                tap to apply codes, the extension sends one
-                                request to our server (at most once per store in
-                                a browser tab). The request contains the
-                                store&apos;s hostname and a trimmed outline of
-                                the cart page&apos;s buttons, links, headings
-                                and form-control labels. Each name in the
-                                outline is cut to at most 100 characters, every
-                                digit is replaced with &quot;#&quot;,
+                                server and, if the box it found works, reports
+                                where the box is (see “Remembering a promo-code
+                                box that worked” below). If that also fails, and
+                                only after you tap to apply codes, the extension
+                                sends one request to our server (at most once
+                                per store in a browser tab). The request
+                                contains the store&apos;s hostname and a trimmed
+                                outline of the cart page&apos;s buttons, links,
+                                headings and form-control labels. Each name in
+                                the outline is cut to at most 100 characters,
+                                every digit is replaced with &quot;#&quot;,
                                 email-shaped text is replaced with a
                                 placeholder, and every word that is not on a
                                 fixed list of common interface and coupon words
@@ -126,6 +128,66 @@ const PrivacyPolicy = () => {
                                 timings, the store&apos;s hostname and the
                                 model&apos;s name as an event in our self-hosted
                                 analytics, not tied to you or your account.
+                            </>,
+                            // Pinned by tests/unit/privacy-policy-coverage.test.tsx
+                            // with the paragraph above; anyone changing
+                            // api/extension/coupon-box-learned or
+                            // couponBoxLearned.ts must update both.
+                            <>
+                                <strong>
+                                    Remembering a promo-code box that worked.
+                                </strong>{' '}
+                                When the extension finds a store&apos;s
+                                promo-code box itself, and the store responds to
+                                a code typed into it, the extension tells our
+                                server where that box is on the page: the
+                                store&apos;s hostname, short technical
+                                descriptions (CSS selectors) that locate the
+                                code field, its apply button and the control
+                                that reveals it, whether it worked, and the
+                                random install ID the extension created when it
+                                was installed (the same ID described under “How
+                                you first found Caramel” below). The
+                                descriptions are read from the store&apos;s own
+                                page, so they can contain text from that
+                                page&apos;s markup, such as a field&apos;s label
+                                or placeholder, but never anything you typed. A
+                                store&apos;s markup can also carry details about
+                                you, so our server refuses a description with an
+                                @ sign in it, or with a number of six or more
+                                digits (even split by spaces, dashes or dots) in
+                                a value such as a label or placeholder, which is
+                                how an email address or a phone, card or order
+                                number would appear there. These records do not
+                                contain the install ID or your IP address, only
+                                salted hashes of the install ID, of the network
+                                part of your IP address (its first three parts)
+                                and of a wider part of it (its first two parts),
+                                made separately for each store with a secret key
+                                that we hold, so the records for one store
+                                cannot be joined with the records for another
+                                store in our database. We use them only to count
+                                how many different installs, networks and wider
+                                networks confirmed a box or reported it failing.
+                                Separately, to limit abuse, when a report adds a
+                                new box or leads to a store being added to our
+                                list of stores to support, we keep salted hashes
+                                of the network part of your IP address and of a
+                                wider part of it (its first two parts), with no
+                                store and no install in them, and only the hour,
+                                not the exact time; we delete them within 25
+                                hours. The reports carry no account. Because we
+                                hold the key and may hold your install ID with
+                                your account, we could in principle recompute
+                                the hash for a known install ID; we do not do
+                                this. Once installs on several different
+                                networks have confirmed a box, the extension may
+                                use it on that store without asking the AI
+                                model, and the store may be added to our list of
+                                stores to support. Apart from what the selectors
+                                name, these reports never include page text, and
+                                they never include codes, your cart, or your
+                                account.
                             </>,
                             <>
                                 <strong>Coupon results.</strong> Which codes
@@ -306,6 +368,7 @@ const PrivacyPolicy = () => {
                             'Sign-in sessions expire after 7 days (website sessions are extended while you stay active); signing out ends the session and deletes its record immediately. Records of sessions that expire without signing out, including their IP address and browser type, are kept until you delete your account.',
                             'Cart page summaries are not stored in our database. They are processed to classify your cart, and the result is kept in temporary memory for up to 24 hours so the same cart is not processed twice.',
                             'Cart-page outlines (see “Finding the promo-code box” above) are not stored in our database. The model’s answer, which control is the code box, is kept in temporary memory for up to 24 hours for that store and page shape so the same page is not processed twice, looked up by a one-way hash of the store and outline rather than by the outline itself. Your IP address is used to rate-limit these requests. The outcome event described above is kept in our self-hosted analytics.',
+                            'Promo-code box locations (see “Remembering a promo-code box that worked” above) are kept while shoppers keep confirming them: the store’s hostname and domain, the CSS selectors, at most 5 boxes per store, and for each install that reported on a box, the per-store salted hashes described there, whether it last confirmed the box or reported it failing, and when. At most 50 installs are kept per box; to make room, the record of an install that adds nothing to the counts is deleted first (for example a second install on a network already counted), and the only recent failure report from a network is never deleted. A box nobody has confirmed for 30 days is no longer used. A box nobody has confirmed for 60 days is deleted with everything recorded about it, and an install’s record on a box is deleted 60 days after that install last reported on it. The network records kept to limit abuse are deleted within 25 hours.',
                             'Coupon results without an account are kept only as anonymous per-code totals (when a code last worked or failed, and the store’s last error message).',
                             'Shared codes stay published while they are valid; deleting your account removes the link between a shared code and you.',
                             'Server logs, which can include IP addresses and browser type, are kept for up to 90 days for security and troubleshooting.',
@@ -403,7 +466,7 @@ const PrivacyPolicy = () => {
                         'Use it for advertising, or for creditworthiness or lending decisions.',
                         'Read or collect payment card details, your address, your order number or order history, or passwords you type into stores.',
                         'Send full page addresses or page contents of the sites you visit: for each page you load, the extension sends only its hostname (see above), and the cart summary only when described above.',
-                        'The only other page content the extension sends is the trimmed cart-page outline described under “Finding the promo-code box on a cart page”, and only as described there.',
+                        'The only other page content the extension sends is the trimmed cart-page outline described under “Finding the promo-code box on a cart page” and the promo-code box locations described under “Remembering a promo-code box that worked”, and only as described there.',
                         'Run code downloaded from the internet: everything the extension runs ships inside the extension package.',
                     ]}
                 />
@@ -482,7 +545,7 @@ const PrivacyPolicy = () => {
             >
                 <div className="mb-6 inline-flex items-center gap-3 rounded-full bg-caramel/10 px-6 py-3 text-sm font-semibold text-caramel">
                     <FaShieldAlt className="h-4 w-4" />
-                    Effective Date: October 14, 2026
+                    Effective Date: October 17, 2026
                 </div>
                 <p className="mx-auto max-w-4xl text-lg leading-relaxed text-gray-600 dark:text-gray-300">
                     Welcome to{' '}

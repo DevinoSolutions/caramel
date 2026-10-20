@@ -182,13 +182,17 @@ When the extension's rules cannot find a store's coupon box, it sends a
 privacy-trimmed accessibility outline of the cart page and the model picks
 the coupon input, its apply button, or the toggle that reveals the box.
 
-- `fixtures/coupon-box-cases.ts` — 51 labelled real cart/checkout pages
-  (13 have no box). The header explains the labels.
+- `fixtures/coupon-box-cases.ts` — 65 labelled pages: 58 real store pages
+  and 7 probe carts (19 have no box). The header explains
+  the labels.
 - The suite runs the production `pickCouponBox()` (prompt, scrub, parsing,
   index validation — imported, never copied), one case at a time, and gates
   on a **pass rate ≥ 0.90**. A case passes when the picked input is a
-  labelled input, or no input was picked and the picked toggle is a labelled
-  toggle; on a page with no box only "no input, no toggle" passes. An outline
+  labelled input (and, where the case labels its buttons, the picked button
+  is a labelled button), or no input was picked and the picked toggle is a
+  labelled toggle; on a page with no box only "no input, no toggle" passes.
+  A case marked `knownMiss` runs and is reported, but is left out of the pass
+  rate. An outline
   over the route's size cap (`MAX_OUTLINE_BYTES`) is refused exactly as in
   production and counts as no pick.
 - Needs `COUPON_BOX_PICK_MODEL` (the model under test; there is no code

@@ -481,16 +481,17 @@ than that:
 with a named error instead of breaking deep inside a request handler). The
 operationally load-bearing ones:
 
-| Var                                                    | Used for                                                                                                                                                                               |
-| ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DATABASE_URL`                                         | auth_db + the app-owned coupon catalog (Prisma) — required                                                                                                                             |
-| `COUPONS_DATABASE_URL`                                 | OPTIONAL, bridge-sync only — read-only external `caramel_coupons` connection string; unset in normal deploys                                                                           |
-| `INGEST_API_KEY`                                       | bearer for `POST /api/ingest/catalog` (the coupons pipeline supplier push) — server-to-server, never a client                                                                          |
-| `COUPONS_ADMIN_SECRET`                                 | bearer for `POST /api/coupons/expire` + rate-limit trust exemption                                                                                                                     |
-| `UPKUMA_HEALTH_SECRET`                                 | bearer for `GET /api/health/db`                                                                                                                                                        |
-| `OPENROUTER_API_KEY`                                   | extension cart classifier (`/api/classify-cart`) — unset throws a named `OpenRouterError`, not a silent no-op                                                                          |
-| `NEXT_PUBLIC_SENTRY_DSN`                               | Sentry init (client + server) — unset means Sentry never initializes, production or not                                                                                                |
-| `APPLE_TEAM_ID` / `APPLE_KEY_ID` / `APPLE_PRIVATE_KEY` | Sign in with Apple: the app signs its own client-secret JWT from these (required when `APPLE_CLIENT_ID` is set; `.p8` as one line with literal `\n`) — see "Apple sign-in fails" above |
+| Var                                                    | Used for                                                                                                                                                                                                                                            |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`                                         | auth_db + the app-owned coupon catalog (Prisma) — required                                                                                                                                                                                          |
+| `COUPONS_DATABASE_URL`                                 | OPTIONAL, bridge-sync only — read-only external `caramel_coupons` connection string; unset in normal deploys                                                                                                                                        |
+| `INGEST_API_KEY`                                       | bearer for `POST /api/ingest/catalog` (the coupons pipeline supplier push) — server-to-server, never a client                                                                                                                                       |
+| `COUPONS_ADMIN_SECRET`                                 | bearer for `POST /api/coupons/expire` + rate-limit trust exemption                                                                                                                                                                                  |
+| `UPKUMA_HEALTH_SECRET`                                 | bearer for `GET /api/health/db`                                                                                                                                                                                                                     |
+| `OPENROUTER_API_KEY`                                   | extension cart classifier (`/api/classify-cart`) — unset throws a named `OpenRouterError`, not a silent no-op                                                                                                                                       |
+| `NEXT_PUBLIC_SENTRY_DSN`                               | Sentry init (client + server) — unset means Sentry never initializes, production or not                                                                                                                                                             |
+| `APPLE_TEAM_ID` / `APPLE_KEY_ID` / `APPLE_PRIVATE_KEY` | Sign in with Apple: the app signs its own client-secret JWT from these (required when `APPLE_CLIENT_ID` is set; `.p8` as one line with literal `\n`) — see "Apple sign-in fails" above                                                              |
+| `COUPON_BOX_LEARNED_SALT`                              | salt for the learned coupon box's per-store reporter hashes (32+ characters; required when `COUPON_BOX_LEARNED_ENABLED=true`) — secret, never sent to a client; rotating it makes every returning install a new reporter (see "Learned coupon box") |
 
 TODO(human): record where these are actually set/rotated in Dokploy (env
 var UI vs. secret store) and the rotation procedure for
@@ -531,10 +532,17 @@ redeploy. The extension reads the same condition from `GET /api/extension/featur
 `coupon_box_pick_outcome` (properties: `outcome`, `cached`, `latency_ms`,
 `model_ms` when a model was called, `store`, `model`). Requests refused earlier
 by withRoute (non-extension Origin 403, generic rate limit 429) emit nothing.
-`outcome` is one of `box`, `no_box`, `no_pick:disabled`, `no_pick:model_error`,
-`no_pick:unparsable`, `budget_exceeded:client|global|daily`, `too_large`,
+`outcome` is one of `box`, `no_box`, `learned` (answered from a learned coupon
+box, below: no model call), `no_pick:disabled`, `no_pick:model_error`,
+`no_pick:unparsable`, `no_pick:refused_button`,
+`budget_exceeded:client|global|daily`, `too_large`,
 `invalid`, `server_error` (`COUPON_BOX_PICK_OUTCOMES` in
 `src/lib/analytics/couponBoxPickOutcome.ts`).
+`no_pick:refused_button` is the whole answer refused, not only its button. An
+answer that names a good toggle and no input, but also names an apply button
+the server refuses (checkout, place order, a gift card or store credit
+control), is discarded with its toggle: the extension gets nothing for that
+page, though the toggle alone would have opened the box.
 
 Outcome mix, last 24h:
 
@@ -568,3 +576,436 @@ Reading it: many `budget_exceeded:daily` means the cap is too low for real
 traffic (re-size it) or someone is forging the extension Origin; a rising
 `no_pick:model_error` with a high `model_p95_ms` is the model timing out
 (`TIMEOUT_MS` is 20s).
+
+### Pick mode: which finder goes first
+
+`COUPON_BOX_PICK_MODE` (redeploy to change) decides what the extension does on
+a cart page of a store with NO served config. It is advertised as
+`couponBoxPickMode` on `GET /api/extension/features`, and only while the pick
+is on; with `couponBoxLlm` false the extension is always told `rules_first`. A
+store with a served config is never affected by any mode.
+
+- `rules_first` (default, today's behaviour): the rules find the box; the pick
+  is asked only when they find nothing.
+- `llm_first`: the pick is asked first; a `no_box`, `no_pick`, 429, timeout or
+  error falls back to the rules exactly as before.
+- `llm_only`: the pick is the only finder (battle tests and deliberate
+  experiments only). Every safety check still runs.
+
+`llm_first` and `llm_only` ask the pick on every no-config cart page, so model
+calls rise: watch `budget_exceeded:daily` in the outcome mix and size
+`COUPON_BOX_PICK_DAILY_CAP` for it. Back to normal: `COUPON_BOX_PICK_MODE=rules_first`
+(or unset) and redeploy.
+
+## Learned coupon box
+
+When the extension finds a store's coupon box itself, types a code into it and
+the STORE ANSWERS (the total dropped, or the store showed a coupon reply), it
+reports the box to `POST /api/extension/coupon-box-learned` as `confirmed`; a
+learned box that did not work is reported `failed`. Once enough shoppers agree,
+`POST /api/extension/coupon-box-pick` answers with that box before the cache
+and the model: no model call, no budget spent, PostHog outcome `learned`. Code:
+`src/lib/couponBoxLearned.ts` (the one home of the rules below; every number
+is in `LEARNED_BOX_RULES`). Tables: `learned_coupon_boxes`,
+`learned_coupon_box_reporters`, `learned_coupon_box_stores`,
+`learned_coupon_box_network_events` and `learned_coupon_box_handovers`.
+
+**Before switching it on (owner).** Every rule below counts NETWORKS, read from
+the client address, and the app trusts `CF-Connecting-IP` first
+(`src/lib/clientIp.ts`). Cloudflare sets that header and overwrites any value a
+client sends, but only on traffic that passes through Cloudflare. If the origin
+can be reached directly, one machine can send any `CF-Connecting-IP` it likes
+and be as many "networks" as it wants, and every per-network rule here is void.
+So before `COUPON_BOX_LEARNED_ENABLED=true`, prove that the origin accepts
+connections only from Cloudflare: either the host's firewall admits only
+Cloudflare's published IP ranges on 80/443, or Cloudflare Authenticated Origin
+Pulls is on and the origin refuses any TLS client without Cloudflare's
+certificate. Check it from outside: a request to the origin's own address with
+a forged `CF-Connecting-IP` must not reach the app.
+
+Also check the zone's **Network > Pseudo IPv4** setting: it must be **Off** or
+**Add header**, never **Overwrite headers**. Overwrite puts a made-up IPv4
+address from the reserved `240.0.0.0/4` range into `CF-Connecting-IP` for every
+IPv6 visitor, so every IPv6 shopper's "network" would be a slice of one
+reserved block, and the per-network and per-block caps below would count
+unrelated shoppers together.
+
+**Switch.** Learned boxes have their own switch, so the AI pick can run without
+the crowd-sourced write path. They work only while `COUPON_BOX_LEARNED_ENABLED=true`
+AND the pick is on (`COUPON_BOX_LLM_ENABLED=true` + `COUPON_BOX_PICK_MODEL`).
+`COUPON_BOX_LEARNED_ENABLED=true` also needs `COUPON_BOX_LEARNED_SALT` (32+
+characters, e.g. `openssl rand -hex 32`), or boot fails naming it. The extension
+reads the same condition as `couponBoxLearned` on `GET /api/extension/features`
+and only then opts in.
+
+- Switch on: set the salt, set `COUPON_BOX_LEARNED_ENABLED=true`, redeploy.
+  Boot logs `learned coupon boxes ENABLED`.
+- Kill switch: `COUPON_BOX_LEARNED_ENABLED=false` and redeploy. The report route
+  answers `{recorded:false, reason:'disabled'}` without reading the body, the
+  pick ignores `acceptsLearned`, features says `couponBoxLearned: false`, and the
+  AI pick keeps running. The rows stay; wipe them below if they are the problem.
+- Rotating the salt: every install AND network hash is made under it. Left
+  alone, a rotation would let every install and every network count twice:
+  old rows keep counting for up to 30 days next to the new rows the same
+  installs and networks write under the new salt, so one real network could
+  supply two of the 3 networks a box needs, and the per-network caps would
+  start again from zero. The ONLY supported rotation is therefore: set the
+  new salt, redeploy, and in the same window run
+  `DELETE FROM learned_coupon_box_reporters;`. That stops ALL serving until
+  each box is confirmed again from 3 networks under the new salt (the boxes
+  themselves stay, and still count toward the 5-per-store cap until they
+  age out). Rotate only on purpose, for example after a leaked salt.
+
+**Stores and hosts.** A box is filed under the host it was found on (the
+extension asks the pick with the host), but everything that limits or
+identifies reporters is keyed by the STORE: the registrable domain of that
+host (`r1.shop.com`, `www.shop.com` and `shop.com` are one store,
+`store_domain` on the row). So the caps, the lock, the reporter hashes and the
+hand-over cannot be multiplied by inventing hosts. Hosts on a shared hosting
+suffix (the private section of the Public Suffix List: `vercel.app`,
+`github.io`, `netlify.app`, `herokuapp.com`, ...) are refused with 400: those
+are anyone's free hosting, and their "registrable domain" would put every site
+on the platform into one store. The one exception is `<shop>.myshopify.com`,
+which is its own store: a Shopify store's own checkout can live there, and the
+extension and the served-config check already treat that host as the store.
+`a.b.myshopify.com` and `myshopify.com` itself are refused.
+
+Known limit: a store is what the Public Suffix List says. A platform that
+hosts many shops under its own domain but is NOT on the list (so
+`shop-a.platform.example` and `shop-b.platform.example` both have the
+registrable domain `platform.example`) is treated as ONE store: its shops share
+one 5-box cap, one set of reporter hashes and one hand-over. Their boxes are
+still filed per host, so a box confirmed on one shop is served only for that
+host, but a busy shop on such a platform can crowd the others out of the 5
+slots. If that matters for a platform, add it to `STORE_PLATFORM_SUFFIXES` in
+`src/lib/couponBoxLearned.ts` (as `myshopify.com` is) or give its shops
+configs.
+
+**Who counts.** A reporter is one install on one box, keyed by
+`HMAC(salt, "install\n" + installId + "\n" + store)`. Its network is
+`HMAC(salt, "network\n" + prefix + "\n" + store)`, where the prefix is the
+/24 for IPv4 and the /48 for IPv6. Hashes are per store, so rows for two
+stores cannot be joined. A reporter's network is the one it FIRST reported
+from and never changes, and an install counts only from that network. A report
+from any other network is answered `recorded` and writes nothing: it neither
+confirms nor fails the box, does not keep a confirmation fresh, and does not
+count as the install being seen (a reporter's `last_seen_at` is the time of
+its latest COUNTED report, so retention cannot be held off from elsewhere). So a few
+networks heard once cannot hand their installs to one machine elsewhere and
+keep a box alive, or keep failing it, from there; and moving installs between
+networks frees no slot. The cost: a shopper who first reported from home and
+later from their phone counts only from home. A reporter is CONFIRMING when its latest counted
+report is `confirmed` and that confirmation is under 30 days old; a tie with a
+failure reads as failed. It is FAILING when its latest counted report is
+`failed` and under 30 days old. The client makes its own install ids, so one
+machine can forge many; the network rules are what bound it.
+
+**When a box is served.** All of:
+
+- at least 3 distinct confirming installs AND at least 3 distinct confirming
+  networks. Failing and stale reporters do not count.
+- more confirming networks than failing networks (a tie stops serving).
+  Failures count per network: ten failing installs on one network count once.
+- not suppressed. Once failing reporters span 2 or more networks, the box
+  stops until at least 2 networks that are NOT among the failing ones confirm
+  it AFTER the latest failure. An install that confirms again from a failing
+  network does not count toward that.
+- the store has no served config (`store_configs` with input + apply xpaths,
+  matched on the host, its parent domains and the hyphen checkout hosts the
+  extension accepts). Such a store is never read or written.
+- the request said `acceptsLearned: true` (older builds never get one).
+
+Known cost, accepted: two `failed` reports from two installs on two different
+networks are enough to suppress a box. That is cheap on purpose: a box that
+breaks must stop fast, and a wrong box costs a shopper more than a missing
+one. A suppressed box loses only the shortcut. The pick falls through to the
+cache and the AI model, exactly as for a store with no learned box, so
+shoppers still get an answer. Recovery takes 2 confirmations from 2 new
+networks after the last failure.
+
+Known cost, accepted: a low-traffic store can be kept off the shortcut by
+little effort. Four failing installs on two networks (two per network), each
+re-reporting `failed` once a day, keep their failures fresh, so the box stays
+suppressed unless 2 other networks confirm it after each day's latest failure.
+A busy store recovers on its own; a store with a few shoppers a week does not,
+and keeps being answered by the cache and the AI model instead. The server
+cannot tell such failures from real ones (it never sees the cart), so this is
+left as is. If it bites a store that matters, give the store a config.
+
+**Caps.** All caps are per store, enforced under one per-store database lock,
+so parallel reports cannot race past them. A report never waits for that lock:
+one that arrives while another report for the same store is being written is
+answered `{recorded:false, reason:'ignored'}` at once, so a few clients sending
+reports for one store in parallel cannot tie up database connections. A
+shopper's report is rarely lost that way (writing one takes milliseconds), and
+the box's next confirmation, from that shopper or another, counts as usual.
+The hand-over below works the same way: it never waits for its lock, and one
+that finds it taken is tried again on the store's next servable report.
+
+A report that would ADD a box also takes one lock shared by all stores
+(`learned-coupon-box:new-boxes`), so the caps kept across stores below hold
+under parallel reports. It waits for it at most 250 ms (`lock_timeout`); a
+report that cannot get it in time is answered `ignored` and writes nothing.
+The network's own counts are read BEFORE that lock, so a network already over
+its cap is answered without ever taking it, and the lock is taken only just
+before the new box is written. Reports on boxes that already exist never take
+it.
+
+- New reporters: at most 2 new installs per network per box in any 7 days.
+  More are answered `{recorded:false, reason:'ignored'}`.
+- Reporters per box: at most 50. To make room, the reporter seen longest ago
+  whose removal changes nothing the serving rule reads (servable, confirming
+  and failing networks, suppression) is deleted: in practice a second install
+  of a network that is already heard. If there is none, the reporter seen
+  longest ago that is not failing the box, or whose failure is over 30 days
+  old, is deleted. A network's only fresh `failed` voice is never deleted to
+  make room. If nothing may go, the new report is ignored. So filling a box
+  with installs from a few networks only ever pushes out those networks' own
+  extra installs, and cannot lock real shoppers out.
+- Boxes per store: at most 5, across all the store's hosts. A network
+  stands behind a box ALONE when it confirms that box and no other box of the
+  store. A 6th selector set replaces the weakest box that is NOT servable:
+  fewest networks standing behind it alone, then fewest confirming networks,
+  then the oldest last confirmation. A box that some network stands behind
+  alone gives way only to a new box whose network confirms nothing in the
+  store yet; a new box from a network that already confirms one is refused
+  instead (`ignored`). A store whose 5 boxes are all servable takes no new
+  one. What that buys:
+    - A network stands behind one box alone at a time, so a few networks
+      churning junk boxes, every hour, cannot push out a young real box a
+      shopper's network confirmed while its next shoppers arrive. Pushing it
+      out takes roughly one network per slot the real boxes do not fill,
+      kept confirming daily, plus a new network for every box pushed out.
+    - Having more networks behind it alone protects a box no further, so 5
+      boxes backed by 2 networks each still give way to a new box and cannot
+      lock a store.
+    - Within a store there is no limit on how many boxes one network
+      reports on, so shoppers behind one shared address block (a mobile
+      carrier, an office) are not refused for reporting several boxes of one
+      store. The cost: when one network confirms two different boxes, both
+      are the first to go. Across stores they CAN be refused: see the
+      per-network day caps below.
+- One install counts at most once per 24h per box and per outcome, and only
+  from the network it first reported from (see "Who counts"). A `failed`
+  report for a box nobody confirmed creates nothing.
+- Across ALL stores, per day: one network (the same /24 or /48 prefix,
+  hashed with no store) may add at most 20 new boxes, and its wider block (the
+  same /16 IPv4 or /32 IPv6) at most 100. A report over either is answered
+  `ignored`. Without them, one network could create boxes on every
+  registrable domain there is (the rate limiter counts single addresses, and
+  an IPv6 /64 holds billions) and the tables would grow without bound. The
+  cost, accepted: shoppers behind one busy carrier or office prefix (a mobile
+  CGNAT /24 can carry thousands) share those 20. Once the prefix has added 20
+  new boxes in a day, its shoppers' later NEW boxes that day are refused and
+  simply not learned; their confirmations of boxes that already exist are not
+  limited by it. "A day" is counted from the hour: events are kept with their
+  time cut to the hour, and an event counts while its hour is less than 24
+  hours before the current hour, so an event counts for between 24 and 25
+  hours.
+- New stores (a store's first box): a store heard from ONE network only is
+  PROVISIONAL (`learned_coupon_box_stores.established_at` is null). At most
+  5000 provisional stores exist at once; a new store past that pushes out the
+  oldest provisional store whose lock is free and that is not already
+  confirmed from two networks (its boxes and reporters go with it). A store
+  becomes ESTABLISHED once boxes of it are confirmed from two different
+  networks, at most 500 stores a day across all stores; one past that cap
+  stays provisional (never refused, never pushed out, since it is confirmed
+  from two networks) and is tried again on its next counted confirmation.
+  Established stores are never pushed out by this rule. Why this shape and
+  not a plain "500 new stores a day": with a plain cap, about 25 networks (20
+  new boxes each) could spend the whole day's cap on made-up stores and no
+  real store could get its first box that day. Now made-up stores from a few
+  networks only push out each other and other single-network stores, and a
+  real store is safe as soon as a second network confirms it. What remains:
+  an attacker holding networks in many different /16 blocks can still churn
+  the provisional pool (a real store heard from only one network can be pushed
+  out before its second shopper arrives, and is learned again later), and
+  pairs of networks confirming each other's made-up stores can use up the
+  500 establishments of a day, which only delays real stores' establishment.
+  If the pool is ever full of stores confirmed from two networks, a new
+  store is refused (`ignored`) until establishments free it up.
+- Near-cap warnings: when a cap kept across all stores passes 80% (the
+  provisional pool, the day's establishments, the day's hand-overs), the
+  server logs `[learned-coupon-box] a global cap is nearly used up` with the
+  cap's name, how much is used and the cap, at most once an hour per cap.
+  Seeing it outside a launch is a sign of abuse: read the network events and
+  the newest provisional stores.
+- What an answer reveals: a report on a box that does not exist yet is
+  answered `ignored` once its network's cap is used up, while a report on a
+  box that exists is still answered `recorded`. A client over its cap can
+  therefore learn whether a given selector set is a learned box of a store
+  (a `failed` report already tells it the same way: `unknown_box`). That is
+  store data the server would serve to any shopper anyway once it is
+  servable, never data about another shopper, so it is left as is.
+- Domains must be plausible store hosts (see "Stores and hosts" above).
+  Refused: single labels, IPs, `localhost`, internal suffixes, bare public
+  suffixes, shared hosting suffixes and broken punycode.
+- Selectors must fit the grammar in `src/lib/couponBoxSelector.ts`, the one
+  home of it, shared with the extension:
+    - at most 4 compounds, at most 3 attribute selectors, at most 256
+      characters;
+    - attributes limited to `id`, `name`, `type`, `aria-label`, `placeholder`
+      and `data-*`, with plain values;
+    - no `:has(`, no `:nth-last-*`, no selector lists;
+    - nothing that looks like data about a person: no `@` (or `%40`)
+      anywhere in the selector, how an email address would appear, and, in
+      an attribute VALUE other than `id`, no number of 6 or more digits, even
+      when its digits are split by spaces, dashes or dots
+      (`[data-phone="555-123-4567"]`, `[data-card="4111 1111 1111 1111"]`),
+      how a phone, card, order or account number would. A store's markup can
+      carry such data (`[data-customer-email="..."]`). Digit runs in `#id`
+      and `.class` tokens and in `[id=...]` are allowed: platforms build ids
+      from section and template numbers
+      (`#shopify-section-template--16712345678__main`), and refusing them
+      would refuse most Shopify stores. This is a filter for the common
+      shapes, not a guarantee: the privacy policy says what it refuses, and
+      no more.
+
+    Anything else is refused whole (400). The apply and toggle selectors (the
+    ones the extension clicks) are also refused when the element they CLICK
+    is named after a control that could spend money or change the cart:
+    `checkout`, `place order`, `submit order`, `pay`, `buy`, `pay now`,
+    `buy now`, `purchase`, `delete` or `remove`, as whole words in any
+    spelling (`place-order`, `place_order`, `placeOrder`, `check-out`). Only
+    the LAST compound is read (the element clicked, not the ones it sits
+    in), and only its ids, classes, tag and attribute VALUES, not attribute
+    names. So `form.checkout_coupon button[name=apply_coupon]` (WooCommerce's
+    own coupon form, inside a checkout form),
+    `.coupon .purchase-summary button`, `#PayPal-apply`,
+    `button[data-buy-box]` and `display`/`buyer` pass, while `button.checkout`, `button[name=place_order]` and
+    `#checkout-apply` are refused. One exception, for carts that put the
+    coupon apply in the checkout's own namespace: `checkout` alone (or
+    `check out`) does not refuse a compound that also names `coupon`,
+    `discount`, `promo`, `reduction`, `voucher` or `code` (plurals too), so
+    `#checkout-coupon-apply`, `#checkout_discount_btn` and
+    `button[name="checkout_reduction_code_apply"]` pass. Every other word
+    stays absolute: `#checkout-pay` and `#checkout-coupon-remove` are still
+    refused, as are `#checkout_submit` and `button[name=checkout]`. What it does not catch, by design:
+    ancestors are not checked, so a checkout button whose own markup names
+    nothing (`.cart__footer button[type=submit]`) passes, and partial
+    attribute matches (`[aria-label*=heckout]`, `[id^=check][id$=out]`) are
+    not read as words. This is defence in depth, not the safety net: the
+    extension's own apply-control check, which reads the element itself
+    whatever selector reached it, is what stops a wrong click. The cost: a store whose real apply button
+    is named after its checkout with no coupon word (`#checkout-apply`) is
+    not learned, and keeps
+    being answered by the rules and the AI pick.
+
+**What the server cannot promise.** Every rule above counts NETWORKS (/24
+IPv4, /48 IPv6), and networks are cheaper than they look: IPv6 /48s come free
+with tunnel brokers and some hosting plans, and the client address is the one
+the CDN reports in `CF-Connecting-IP`. A determined attacker with enough
+networks can still get a wrong box served, or keep a right one off the
+shortcut, for a store with little traffic. The server makes that slower and
+costlier; it cannot make it impossible (and nothing at all, if the origin can
+be reached without Cloudflare: see "Before switching it on"). The real safety
+net is in the
+extension: a served box is only a suggestion that must pass every check the
+extension runs on the page (the coupon-word and text-input checks, the
+apply-control check, the leave-the-page guard, the money check and the cart
+re-read), so a wrong box costs a failed attempt, never a claimed saving. Keep
+`COUPON_BOX_LEARNED_ENABLED` off until the extension's apply-control check has
+shipped.
+
+**Retention.** A box with no confirmation for 60 days is deleted with its
+reporters, and a reporter row is deleted 60 days after that install last
+reported. The prune runs for the store on every report, and store-wide at boot
+and every 6 hours (`[boot] learned coupon box retention prune ENABLED`). The
+store-wide prune takes each store's lock in turn, like a report, so it never
+deletes a box under a report that is adding to it. It waits at most 5 seconds
+for one store's lock; a store it cannot lock is logged and left for the next
+run, and the other stores are still pruned. Any other error on a store is
+logged and the run goes on, but after 3 such errors IN A ROW (a database that
+is down fails every store the same way) the run stops. Either way the run
+sends ONE Sentry event (the first error, with how many stores failed and
+whether it stopped), never one per store. The store's own reports prune it in
+the meantime. A store row (`learned_coupon_box_stores`) whose last box was
+deleted is deleted too. The cross-store network records
+(`learned_coupon_box_network_events`) are deleted once out of their window,
+within 25 hours, by the same prune. It runs whatever the switch says, so rows
+written before a kill switch still age out.
+
+**Wipe one poisoned store.** Read-only first, then delete (the reporters go
+with the boxes, `ON DELETE CASCADE`):
+
+```sql
+SELECT b.id, b.input_selector, b.apply_selector, b.toggle_selector,
+       b.enter_only, b.confirmations, b.failures, b.first_source,
+       b.last_confirmed_at, b.last_failed_at,
+       count(r.id) AS reporters,
+       count(DISTINCT r.network_hash) AS networks
+FROM learned_coupon_boxes b
+LEFT JOIN learned_coupon_box_reporters r ON r.box_id = b.id
+WHERE b.store_domain = 'shop.example'
+GROUP BY b.id;
+
+DELETE FROM learned_coupon_boxes WHERE store_domain = 'shop.example';
+DELETE FROM learned_coupon_box_stores WHERE store_domain = 'shop.example';
+```
+
+(`store_domain` covers every host of the store; filter on `domain` to wipe a
+single host.)
+
+The pick stops serving it on the next request (nothing is cached). To delete
+one box only: `DELETE FROM learned_coupon_boxes WHERE id = '<id>';`. New
+reports can teach the same store again. If it keeps being poisoned, give it a
+store config: a served config shuts learned boxes off for that store for good.
+The wipe leaves the store's hand-over marker, so it is not handed over again.
+
+**Hand-over to the store pipeline.** A store (its registrable domain, never one
+of its hosts) is handed over at most once, ever, and only when one of its boxes
+meets the serving rule above. It is recorded in
+the site-suggestions inbox with `source = 'auto_detect'`, no user and no
+requester email, so the coupons pipeline picks it up like any other store
+request. `learned_coupon_box_handovers` holds one row per store handed over;
+that row is what makes it once ever, so deleting the suggestion or the boxes
+does not reopen it. Only a COUNTED report hands a store over (a report from an
+install's foreign network, which counts nothing, never does). At most 50
+stores are handed over per day across all stores, at most 3 per network (the
+network of that counted report) and at most 10 per wider block (/16 IPv4, /32
+IPv6). A store must already be servable, which takes 3 confirming networks,
+so spending the day's 50 takes about 17 networks spread over at least 5
+blocks, each confirming made-up stores; the result is that real stores are
+handed over a day later, nothing worse (the 80% warning above names it). A
+store refused by any cap is asked again on its next counted servable report,
+and the server logs `pipeline hand-over deferred: daily cap reached` or
+`... this network reached its daily cap`. Those refusals, and "already handed
+over", are read before the hand-over lock, so a refused report never takes
+it. A hand-over that finds another one in progress answers `busy` and is
+likewise tried again.
+With no email, no status the pipeline sets can ever mail a shopper. Marking it
+`supported` still sends the operator's own "marked supported" summary. Find
+them:
+`SELECT domain, status, created_at FROM site_suggestions WHERE source = 'auto_detect' ORDER BY created_at DESC;`
+
+**What is stored (privacy).**
+
+- Per box: the host it was found on, the store's registrable domain, and the
+  CSS selectors of the code field, its
+  apply button and the control that reveals it. The selectors are read from
+  the store's own page, so they can hold attribute text such as a
+  placeholder, but never anything the shopper typed. Also whether it applies
+  on Enter, counters, timestamps, and which finder first found it.
+- Per reporter: the two per-store HMAC-SHA256 hashes above, plus that
+  reporter's counters and timestamps.
+- Per store (`learned_coupon_box_stores`): the registrable domain, when its
+  first box was added and when it became established.
+- For the caps kept across stores (`learned_coupon_box_network_events`): two
+  rows each time a report adds a new box or hands a store over, one holding
+  `HMAC(salt, "network-any-store\n" + prefix + "\n")` (the /24 or /48 alone)
+  and one `HMAC(salt, "block-any-store\n" + block + "\n")` (the /16 or /32
+  alone), with no store and no install, the kind of event, a random id and
+  the time cut to the hour. Deleted within 25 hours. It holds no store, and
+  its time is never the exact time of a box, reporter, store or hand-over row,
+  so it is not joined to them by time. What remains, accepted: within one
+  hour, which rows were written in the same transaction can still be guessed
+  by someone reading the raw table pages (rows sit in insertion order), and
+  in a quiet hour with one new box the hour alone narrows it down. Both need
+  database access, and the rows are gone within 25 hours.
+
+These hashes are not anonymous against the operator: we hold the salt, and
+install ids also reach the server, in the clear, with sign-in attribution. We
+could recompute the hash for a known install; we do not.
+
+Never stored here: page or outline text, codes, cart contents, IP addresses,
+install ids in the clear, or an account.
