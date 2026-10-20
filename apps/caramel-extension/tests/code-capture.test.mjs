@@ -1534,8 +1534,10 @@ describe('funnel diagnostics: why the store did not count as accepting', () => {
                 setText(row, `${promo().value} applied`)
                 document.body.appendChild(row)
                 // The store takes the code, then undoes it before the row has
-                // held for 1.2s.
-                setTimeout(() => row.remove(), 300)
+                // held for 1.2s. The runner polls every 200ms, so the row must
+                // outlive a few polls (600ms = about three) to be seen as
+                // committed at all.
+                setTimeout(() => row.remove(), 600)
             }, 100)
         })
         shopperTypes('SAVE10')
