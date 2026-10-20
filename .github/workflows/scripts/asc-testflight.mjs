@@ -131,7 +131,7 @@ async function nextBuildNumber() {
 
 async function findBuild(appId, marketingVersion, buildNumber) {
     const found = await api(
-        `/builds?filter[app]=${appId}&filter[version]=${encodeURIComponent(buildNumber)}&filter[preReleaseVersion.platform]=IOS&include=preReleaseVersion&fields[builds]=version,processingState,expired&fields[preReleaseVersions]=version,platform&limit=50`,
+        `/builds?filter[app]=${appId}&filter[version]=${encodeURIComponent(buildNumber)}&filter[preReleaseVersion.platform]=IOS&include=preReleaseVersion&fields[builds]=version,processingState,expired,preReleaseVersion&fields[preReleaseVersions]=version,platform&limit=50`,
     )
     const trains = new Map(
         (found.included ?? []).map(item => [item.id, item.attributes.version]),
