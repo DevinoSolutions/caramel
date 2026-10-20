@@ -28,4 +28,11 @@ describe('motion pass 3/3: entrance class hooks', () => {
             expect(read('styles/globals.css')).toContain(`.${hook}`)
         },
     )
+
+    it('scopes the entrances to the states that show them', () => {
+        const css = read('styles/globals.css')
+        expect(css).toMatch(/\.motion-dialog\[open\]\s*\{/)
+        expect(css).toMatch(/\.motion-dialog\[open\]::backdrop\s*\{/)
+        expect(css).toMatch(/details\[open\]\s*>\s*\.motion-faq-answer\s*\{/)
+    })
 })

@@ -503,7 +503,7 @@ export default function HeroSection() {
                         8.6 s mobile LCP PageSpeed measured. Same timings and
                         easing as before, transform-only (see globals.css for
                         why the fade had to go); reduced motion is honoured by
-                        the stylesheet. framer stays for hover/tap/loops. */}
+                        the stylesheet. framer stays for the stat tickets, tap and loops. */}
                     {/* lg:w-full on the h1 and on the wordmark's wrapper
                         (2026-09-26): below lg the wordmark is `w-full`, and
                         both of its ancestors were shrink-to-fit, so until the
@@ -518,7 +518,7 @@ export default function HeroSection() {
                         <div className="mb-4 text-gray-700 dark:text-white">
                             Welcome to
                         </div>
-                        <m.div
+                        <div
                             className="hero-enter-scale relative lg:w-full"
                             style={{ animationDelay: '0.3s' }}
                         >
@@ -558,7 +558,7 @@ export default function HeroSection() {
                                 fetchPriority="high"
                                 unoptimized
                             />
-                        </m.div>
+                        </div>
                     </h1>
 
                     <p
