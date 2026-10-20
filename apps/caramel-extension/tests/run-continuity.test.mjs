@@ -1,5 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { initCaramelBase } from '../caramel-base.js'
+import { caramelMarkOwnHost, initCaramelBase } from '../caramel-base.js'
 import { _markTriedCode } from '../coupon-apply.js'
 import {
     caramelBeginRun,
@@ -283,7 +283,9 @@ describe('picking the loop back up after the store navigated', () => {
         await caramelBeginRun()
         await caramelMarkPendingSubmit('SALE20', 'c1', [])
         await caramelHoldAppliedWin({ code: 'SALE20', id: 'c1', saved: 5 })
-        const overlay = document.createElement('div')
+        // Marked as ours, the way the runner's overlay is (a page element
+        // with this id is not our runner).
+        const overlay = caramelMarkOwnHost(document.createElement('div'))
         overlay.id = 'caramel-testing-overlay'
         document.body.appendChild(overlay)
 

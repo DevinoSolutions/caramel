@@ -322,7 +322,10 @@ describe('capture is armed on the resumed page', () => {
         await ready()
 
         storeAcceptsOnApply()
-        const overlay = document.createElement('div')
+        // Marked as ours, the way the runner's overlay is (a page element
+        // with this id is not our runner).
+        const { caramelMarkOwnHost } = await import('../caramel-base.js')
+        const overlay = caramelMarkOwnHost(document.createElement('div'))
         overlay.id = 'caramel-testing-overlay'
         document.body.appendChild(overlay)
         shopperTypes('SAVE10')

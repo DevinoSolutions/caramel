@@ -18,6 +18,7 @@
 // comment noise in the pre-port sources. Every imported binding below is read
 // at CALL time, never during module evaluation, so no TDZ hazard exists.
 import {
+    caramelOwnHost,
     caramelRecordSaving,
     caramelSendMessage,
     currentBrowser,
@@ -1032,7 +1033,7 @@ const _caramelPromptUp = () =>
         'caramel-small-prompt',
         'caramel-testing-overlay',
         'caramel-final-overlay',
-    ].some(id => document.getElementById(id))
+    ].some(id => caramelOwnHost(id))
 
 async function _caramelSecondLook() {
     window.__caramel_second_look?.()
@@ -1098,7 +1099,7 @@ export async function startCheckoutDetection() {
     // re-detection now (the address bar moved, coupon-runner.js) must not take
     // the attempt it is in the middle of as if a reload had ended it. What the
     // loop left is the loop's to finish.
-    const applying = !!document.getElementById('caramel-testing-overlay')
+    const applying = !!caramelOwnHost('caramel-testing-overlay')
     if (applying) log('HANDOFF_RESUME_SKIPPED_WHILE_APPLYING', {})
     // A discount-link apply reloads the page so the store's own UI shows the
     // applied code; finish that flow on the fresh document by showing the
@@ -1185,9 +1186,9 @@ export async function startCheckoutDetection() {
         caramelNoteCheckoutForCapture(rec)
         // Don't re-prompt if the prompt is already up or we're mid-apply.
         if (
-            document.getElementById('caramel-small-prompt') ||
-            document.getElementById('caramel-testing-overlay') ||
-            document.getElementById('caramel-final-overlay')
+            caramelOwnHost('caramel-small-prompt') ||
+            caramelOwnHost('caramel-testing-overlay') ||
+            caramelOwnHost('caramel-final-overlay')
         )
             return
         // Require the coupon box (or its reveal toggle) to be VISIBLE, not just
@@ -1205,9 +1206,9 @@ export async function startCheckoutDetection() {
             getCachedCodes(rec).then(codes => {
                 if (
                     !codes.length ||
-                    document.getElementById('caramel-small-prompt') ||
-                    document.getElementById('caramel-testing-overlay') ||
-                    document.getElementById('caramel-final-overlay')
+                    caramelOwnHost('caramel-small-prompt') ||
+                    caramelOwnHost('caramel-testing-overlay') ||
+                    caramelOwnHost('caramel-final-overlay')
                 )
                     return
                 insertCaramelPrompt(rec)
