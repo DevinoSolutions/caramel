@@ -612,6 +612,20 @@ export function caramelHandoffMayExist(kind) {
     const h = _caramelHinted()
     return h === null || h.includes(kind)
 }
+/* Reads and consumes one handoff kind. A take the background did not answer
+ * (caramelTabHandoff's null: a stalled or waking worker) is not "nothing
+ * pending": the record may still be there. It is asked once more, and the hint
+ * is cleared only once the background has answered, so a record a stall hid
+ * is still asked for by the next document instead of being dropped with its
+ * result card. */
+async function _caramelTakeHandoff(kind) {
+    if (!caramelHandoffMayExist(kind)) return null
+    let r = await caramelTabHandoff('take', kind)
+    if (r === null) r = await caramelTabHandoff('take', kind)
+    if (r === null) return null
+    _caramelHint(kind, false)
+    return r.value ?? null
+}
 function _caramelHint(kind, on) {
     const h = _caramelHinted()
     if (h === null) return
@@ -672,9 +686,7 @@ export async function caramelClearPendingSubmit() {
  * to resume or the record is stale/unreadable. */
 // Consumed by store-detect.js (cross-file content-script call).
 export async function caramelTakePendingSubmit(maxAgeMs = 120000) {
-    if (!caramelHandoffMayExist('pending_submit')) return null
-    const st = (await caramelTabHandoff('take', 'pending_submit'))?.value
-    _caramelHint('pending_submit', false)
+    const st = await _caramelTakeHandoff('pending_submit')
     if (!st || typeof st.code !== 'string' || !st.code) return null
     // A record older than the window belongs to a visit the user has moved on
     // from; announcing it over an unrelated page would be noise, not news.
@@ -701,9 +713,7 @@ export async function caramelHoldAppliedWin(win) {
 }
 // Consumed by store-detect.js (cross-file content-script call).
 export async function caramelTakeAppliedWin(maxAgeMs = 120000) {
-    if (!caramelHandoffMayExist('applied')) return null
-    const st = (await caramelTabHandoff('take', 'applied'))?.value
-    _caramelHint('applied', false)
+    const st = await _caramelTakeHandoff('applied')
     if (!st || typeof st.code !== 'string' || !st.code) return null
     if (!(Date.now() - (st.t || 0) < maxAgeMs)) return null
     const saved = Number(st.saved)

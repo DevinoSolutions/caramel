@@ -246,3 +246,52 @@ describe('storage.session that throws', () => {
         await expect(h.get(1, A, 'run')).rejects.toThrow('storage gone')
     })
 })
+
+describe('a storage call that fails', () => {
+    // The storage API reports a failure only through runtime.lastError, set
+    // while its callback runs (a full quota, a closed session area).
+    function failingArea(failOn) {
+        const area = sessionArea()
+        for (const method of failOn) {
+            const real = area[method]
+            area[method] = (arg, cb) =>
+                real(arg, () => {
+                    globalThis.chrome = {
+                        runtime: {
+                            lastError: {
+                                message: 'QUOTA_BYTES quota exceeded',
+                            },
+                        },
+                    }
+                    try {
+                        cb?.()
+                    } finally {
+                        delete globalThis.chrome
+                    }
+                })
+        }
+        return area
+    }
+
+    it('is not answered as saved when the write did not land', async () => {
+        const h = caramelTabHandoffs(failingArea(['set']))
+        await expect(
+            h.set(1, A, 'pending_submit', { code: 'SAVE10' }),
+        ).rejects.toThrow('QUOTA_BYTES')
+    })
+
+    it('fails the read rather than answering that nothing is pending', async () => {
+        const h = caramelTabHandoffs(failingArea(['get']))
+        await expect(h.take(1, A, 'pending_submit')).rejects.toThrow(
+            'QUOTA_BYTES',
+        )
+    })
+
+    it('does not stop the next operation from running', async () => {
+        // The failing set still stored its record here; what matters is that
+        // the queue behind it keeps going.
+        const h = caramelTabHandoffs(failingArea(['set']))
+        await h.set(1, A, 'run', { hops: 1 }).catch(() => {})
+        expect(await h.get(1, A, 'run')).toEqual({ hops: 1 })
+    })
+})

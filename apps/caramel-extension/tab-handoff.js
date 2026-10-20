@@ -43,11 +43,17 @@ const PREFIX = 'caramel_tab:'
 export function caramelTabHandoffs(area = null) {
     const memory = new Map()
     // The callback form of the storage API, which every browser we ship to
-    // answers (the promise form is not universal).
+    // answers (the promise form is not universal). A storage call that fails
+    // reports it only through runtime.lastError in its callback; read there,
+    // so a write that did not land is not answered as 'saved'.
     const call = (method, arg) =>
         new Promise((resolve, reject) => {
             try {
-                area[method](arg, resolve)
+                area[method](arg, result => {
+                    const err = globalThis.chrome?.runtime?.lastError
+                    if (err) reject(new Error(err.message || String(err)))
+                    else resolve(result)
+                })
             } catch (err) {
                 reject(err)
             }
