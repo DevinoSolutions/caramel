@@ -330,7 +330,6 @@ function StatCard({
                 delay: 0.5 + index * 0.12,
                 ease: revealEase,
             }}
-            whileHover={reduce ? undefined : { y: -4, scale: 1.03 }}
             className="relative w-32 rounded-2xl bg-gradient-to-br from-caramel to-orange-600 px-5 py-4 text-white shadow-caramel-lg md:w-28"
             style={ticketNotchMask('0.55rem', '50%')}
         >
@@ -522,9 +521,6 @@ export default function HeroSection() {
                         <m.div
                             className="hero-enter-scale relative lg:w-full"
                             style={{ animationDelay: '0.3s' }}
-                            whileHover={
-                                reduceMotion ? undefined : { scale: 1.02 }
-                            }
                         >
                             {/* unoptimized on purpose: the wordmark is a 40KB
                                 PNG, and a large width makes the optimizer build

@@ -55,7 +55,7 @@ export default function SupportDialog() {
             ref={dialogRef}
             onClose={() => setArgs(null)}
             onClick={onDialogClick}
-            className="w-[92vw] max-w-lg bg-transparent p-0 backdrop:bg-black/60 backdrop:backdrop-blur-sm"
+            className="motion-dialog w-[92vw] max-w-lg bg-transparent p-0 backdrop:bg-black/60 backdrop:backdrop-blur-sm"
         >
             {args ? (
                 <div className="relative">

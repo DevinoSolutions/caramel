@@ -326,3 +326,106 @@ html.dark select:-webkit-autofill:focus {
         animation: none;
     }
 }
+
+/* Subtle motion pass 3/3 (docs/motion-audit.md rows 1, 4, 5): FAQ answer,
+   native dialogs and the growth prompt card enter softly. All three are only
+   ever shown after an interaction or client-side state (details[open],
+   showModal(), the growth host's effect), so a both-fill keyframe starting at
+   opacity 0 never hides server-rendered content. Exits stay instant. The
+   opacity-only keyframes run for everyone; the translate/scale ones sit under
+   no-preference. The global reduced-motion net above also collapses every
+   duration, and ::backdrop is outside its selector, so the backdrop fade is
+   no-preference-only. */
+@keyframes motion-faq-answer-fade {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes motion-faq-answer-rise {
+    from {
+        opacity: 0;
+        transform: translateY(-4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes motion-dialog-fade {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes motion-dialog-scale {
+    from {
+        opacity: 0;
+        transform: scale(0.96);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+@keyframes motion-growth-fade {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes motion-growth-rise {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.motion-faq-answer {
+    animation: motion-faq-answer-fade var(--motion-dur-base)
+        var(--motion-ease-out) both;
+}
+
+.motion-dialog[open] {
+    animation: motion-dialog-fade 160ms var(--motion-ease-out) both;
+}
+
+.motion-growth-card {
+    animation: motion-growth-fade 200ms var(--motion-ease-out) both;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    details[open] > .motion-faq-answer {
+        animation-name: motion-faq-answer-rise;
+    }
+
+    .motion-dialog[open] {
+        animation-name: motion-dialog-scale;
+    }
+
+    .motion-dialog[open]::backdrop {
+        animation: motion-dialog-fade 150ms var(--motion-ease-out) both;
+    }
+
+    /* One 8px rise for every layout: the card is bottom-anchored in all of
+       them (note the tailwind screens here are max-width, so md: is the
+       corner card at <=767px and the default is the full-width bar). */
+    .motion-growth-card {
+        animation-name: motion-growth-rise;
+    }
+}

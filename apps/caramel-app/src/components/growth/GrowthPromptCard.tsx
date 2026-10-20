@@ -45,7 +45,7 @@ export default function GrowthPromptCard({
             aria-labelledby={titleId}
             aria-describedby={bodyId}
             data-growth-prompt={promptId}
-            className="fixed bottom-0 left-0 right-0 z-40 rounded-t-2xl border border-gray-200 bg-white p-5 shadow-2xl dark:border-white/10 dark:bg-darkSurface md:bottom-6 md:left-auto md:right-6 md:w-[22rem] md:rounded-2xl sm:bottom-0"
+            className="motion-growth-card fixed bottom-0 left-0 right-0 z-40 rounded-t-2xl border border-gray-200 bg-white p-5 shadow-2xl dark:border-white/10 dark:bg-darkSurface md:bottom-6 md:left-auto md:right-6 md:w-[22rem] md:rounded-2xl sm:bottom-0"
         >
             <button
                 ref={dismissRef}

@@ -3,7 +3,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
-// Motion pass 2/3: the files below were moved off `transition-all` onto named
+// Motion passes 2/3 and 3/3: the files below were moved off `transition-all` onto named
 // properties (the brief animates transform and opacity only, plus colours on
 // small elements). A reintroduced `transition-all` re-animates layout and
 // paint properties, so it fails here. Extend this list as later motion PRs
@@ -19,6 +19,10 @@ const CLEARED_FILES = [
     'components/StoreButtons.tsx',
     'components/growth/AgentSetupPill.tsx',
     'layouts/Header/Header.tsx',
+    'components/FaqSection.tsx',
+    'components/support/SupportDialog.tsx',
+    'components/profile/ConfirmDialog.tsx',
+    'components/growth/GrowthPromptCard.tsx',
 ]
 
 describe('motion pass: cleared files carry no transition-all', () => {
