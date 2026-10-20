@@ -1,16 +1,15 @@
 import { withRoute } from '@/lib/api/withRoute'
 import {
-    admitFailedReport,
-    releaseFailedReport,
-    type FailedReportReporter,
-} from '@/lib/couponFailureReportDedupe'
+    admitReport,
+    releaseReport,
+    reporterFor,
+} from '@/lib/couponReportDedupe'
 import {
     recordFailed,
     recordWorked,
     type CouponSignalWriter,
 } from '@/lib/couponSignals'
 import prisma from '@/lib/prisma'
-import { getClientIp } from '@/lib/rateLimit'
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 
@@ -80,19 +79,18 @@ export const POST = withRoute(
 
         const userId = session?.user?.id ?? null
 
-        // At most one 'failed' report per reporter per coupon per 24h
-        // (couponFailureReportDedupe.ts): reports are anonymous, and failures
-        // sink then collapse a code, so one reporter must not be able to flag a
-        // code alone. The reporter is the signed-in USER when there is a session
-        // (two users behind one IP each keep their own report and attribution
-        // row) and the client IP only for anonymous callers. A duplicate is a 2xx
-        // no-op, never an error: the extension and the web card must not show a
-        // failure for a harmless repeat. 'worked' reports are left alone and
-        // never consume a slot (they never hide anything).
-        const reporter: FailedReportReporter = userId
-            ? { kind: 'user', userId }
-            : { kind: 'ip', ip: getClientIp(req) }
-        if (body.outcome === 'failed' && !admitFailedReport(reporter, id)) {
+        // At most one report per outcome per reporter per coupon per 24h
+        // (couponReportDedupe.ts): reports are anonymous, a failure sinks then
+        // collapses a code, and a success shows it Verified, lists it in "Codes
+        // that just worked" and clears its failing state, so one reporter must
+        // not be able to move either alone by repeating it. The reporter is the
+        // signed-in USER when there is a session (two users behind one IP each
+        // keep their own report and attribution row) and the client IP only for
+        // anonymous callers. 'worked' and 'failed' have separate slots. A
+        // duplicate is a 2xx no-op, never an error: the extension and the web
+        // card must not show a failure for a harmless repeat.
+        const reporter = reporterFor(userId, req)
+        if (!admitReport(body.outcome, reporter, id)) {
             return NextResponse.json({ ok: true, deduped: true })
         }
 
@@ -126,12 +124,10 @@ export const POST = withRoute(
             // failure can never leave a counted report with no attribution (or the
             // reverse) for a client that will retry.
             await prisma.$transaction(async tx => {
-                // Written on every report that got past the per-IP 'failed'
-                // dedupe above. The per-day dedup below applies to the
-                // ATTRIBUTION ONLY: a repeat 'worked' report has always bumped
-                // the aggregate, so suppressing a signed-in user's second one
-                // would mean signing in silently weakens the signal the whole
-                // catalog is ranked by.
+                // Written on every report that got past the per-reporter dedupe
+                // above, exactly as for an anonymous report. The per-day dedup
+                // below applies to the ATTRIBUTION ONLY, and survives a restart
+                // that empties the in-memory window.
                 await writeSignal(tx)
 
                 // coupon_reports.coupon_id carries a real FK to `coupons`
@@ -172,9 +168,7 @@ export const POST = withRoute(
         } catch (error) {
             // The report never landed: free its slot so a retry is not deduped.
             // withRoute still routes the rethrown error to Sentry.
-            if (body.outcome === 'failed') {
-                releaseFailedReport(reporter, id)
-            }
+            releaseReport(body.outcome, reporter, id)
             throw error
         }
     },
