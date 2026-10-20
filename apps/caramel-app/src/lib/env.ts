@@ -91,7 +91,16 @@ const serverObjectSchema = z.object({
     // Leave unset for production (SDK default https://api.sendly.now); only
     // set to aim the SDK at a staging API.
     SENDLY_BASE_URL: z.string().optional(),
-    SENDLY_FROM_EMAIL: z.string().default('no_reply@grabcaramel.com'),
+    // The BARE sender address (no "Name <...>" form; the display name is
+    // SENDLY_FROM_NAME). It also selects which sends the delivery-health check
+    // reads: grabcaramel.com shares the Sendly "Devino" project with other
+    // Devino apps, so an empty or malformed value must fail the boot here
+    // rather than let the health check scan another app's mail.
+    SENDLY_FROM_EMAIL: z
+        .email({
+            error: 'SENDLY_FROM_EMAIL must be a bare email address such as no_reply@grabcaramel.com',
+        })
+        .default('no_reply@grabcaramel.com'),
     SENDLY_FROM_NAME: z.string().default('Caramel'),
     // Async email-delivery health (src/lib/emailDeliveryHealthMonitor.ts).
     // Unset → ON in production whenever SENDLY_API_KEY is set, OFF elsewhere.

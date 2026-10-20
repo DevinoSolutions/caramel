@@ -30,7 +30,11 @@ import { describe, expect, it } from 'vitest'
 // faked, via the SDK's own `fetch` injection point (fakeSendlyFetch below).
 
 const KEY = 'sk_test_fake_key_for_unit_tests'
-const FROM = 'Caramel <no_reply@grabcaramel.com>'
+/** The configured sender (SENDLY_FROM_EMAIL) and how Sendly stores it on a row. */
+const FROM = 'no_reply@grabcaramel.com'
+const FROM_WITH_NAME = 'Caramel <no_reply@grabcaramel.com>'
+/** Another Devino app sharing the Sendly project. */
+const OTHER_APP_FROM = 'hello@somewhere-else.com'
 
 interface RawRowOverrides {
     id?: string
@@ -78,6 +82,13 @@ interface FakeSendlyOptions {
     /** Pages of rows, newest-first, in the order the API would return them. */
     pages: ReturnType<typeof rawRow>[][]
     listStatus?: number
+    /**
+     * Behave like the real list endpoint's `from` filter (exact match on the
+     * row's `from`, applied BEFORE paging, re-paged by `limit`). Off = the
+     * provider ignores `from`, which is what the client-side domain filter
+     * defends against.
+     */
+    honourFromFilter?: boolean
 }
 
 /**
@@ -109,8 +120,20 @@ function fakeSendlyFetch(options: FakeSendlyOptions) {
         }
         const cursor = url.searchParams.get('cursor')
         const page = cursor ? Number(cursor.slice(1)) : 1
-        const rows = options.pages[page - 1] ?? []
-        const hasNext = page < options.pages.length
+        let pages = options.pages
+        if (options.honourFromFilter) {
+            const wanted = url.searchParams.get('from')
+            const limit = Number(url.searchParams.get('limit') ?? 50)
+            const matching = options.pages
+                .flat()
+                .filter(row => row.from === wanted)
+            pages = []
+            for (let i = 0; i < matching.length; i += limit) {
+                pages.push(matching.slice(i, i + limit))
+            }
+        }
+        const rows = pages[page - 1] ?? []
+        const hasNext = page < pages.length
         return Response.json({
             success: true,
             data: rows,
@@ -122,7 +145,7 @@ function fakeSendlyFetch(options: FakeSendlyOptions) {
 
 describe('extractEmailDomain', () => {
     it('reads the domain out of a display-name address, a bare address, and rejects junk', () => {
-        expect(extractEmailDomain(FROM)).toBe('grabcaramel.com')
+        expect(extractEmailDomain(FROM_WITH_NAME)).toBe('grabcaramel.com')
         expect(extractEmailDomain('no_reply@GrabCaramel.com')).toBe(
             'grabcaramel.com',
         )
@@ -324,7 +347,7 @@ describe('checkEmailDeliveryHealth', () => {
                     // Another app on the same Sendly project — not our mail.
                     rawRow({
                         id: 'other-domain',
-                        from: 'App <hello@somewhere-else.com>',
+                        from: OTHER_APP_FROM,
                         status: 'BOUNCED',
                         createdAt: '2026-09-16T12:31:00.000Z',
                     }),
@@ -366,11 +389,185 @@ describe('checkEmailDeliveryHealth', () => {
         }) as unknown as typeof fetch
         const report = await checkEmailDeliveryHealth({
             apiKey: KEY,
+            fromEmail: FROM,
             fetchImpl: impl,
             now,
         })
         expect(report.status).toBe('error')
         expect(report.reason).toContain('ECONNREFUSED')
+    })
+})
+
+const SENDER = { senderAddress: FROM, senderDomain: 'grabcaramel.com' }
+
+describe('shared Sendly project: the check is always pinned to our sender', () => {
+    const now = new Date('2026-09-16T13:00:00.000Z')
+
+    it.each([
+        ['undefined', undefined],
+        ['empty string', ''],
+        ['not an address', 'not-an-address'],
+        ['no local part', '@grabcaramel.com'],
+        ['no dotted domain', 'no_reply@localhost'],
+        ['whitespace inside', 'no reply@grabcaramel.com'],
+    ])(
+        'refuses to run (status error, no network call) when the sender is %s',
+        async (_label, fromEmail) => {
+            const { impl, calls } = fakeSendlyFetch({
+                pages: [[rawRow({ from: OTHER_APP_FROM, status: 'BOUNCED' })]],
+            })
+            const report = await checkEmailDeliveryHealth({
+                apiKey: KEY,
+                fromEmail,
+                fetchImpl: impl,
+                now,
+            })
+            expect(report.status).toBe('error')
+            expect(report.reason).toContain('refusing to run unfiltered')
+            expect(report.senderDomain).toBeNull()
+            expect(calls).toHaveLength(0)
+        },
+    )
+
+    it('asks Sendly for our sender only (from = the bare address), also when configured with a display name', async () => {
+        const { impl, calls } = fakeSendlyFetch({ pages: [[]] })
+        await checkEmailDeliveryHealth({
+            apiKey: KEY,
+            fromEmail: FROM_WITH_NAME,
+            fetchImpl: impl,
+            now,
+        })
+        expect(calls[0]!.searchParams.get('from')).toBe(FROM)
+    })
+
+    it("does not let another app's bounce count when the provider ignores the from filter", async () => {
+        const { impl } = fakeSendlyFetch({
+            pages: [
+                [
+                    rawRow({
+                        id: 'other',
+                        from: OTHER_APP_FROM,
+                        status: 'BOUNCED',
+                    }),
+                ],
+            ],
+        })
+        const report = await checkEmailDeliveryHealth({
+            apiKey: KEY,
+            fromEmail: FROM,
+            fetchImpl: impl,
+            now,
+        })
+        expect(report.status).toBe('ok')
+        expect(report.failed).toBe(0)
+        expect(report.scanned).toBe(0)
+    })
+
+    // Two full pages of ANOTHER app's mail, then a Caramel bounce on page 3.
+    const otherAppPage = (page: number) => [
+        rawRow({
+            id: `o${page}a`,
+            from: OTHER_APP_FROM,
+            createdAt: '2026-09-16T12:55:00.000Z',
+        }),
+        rawRow({
+            id: `o${page}b`,
+            from: OTHER_APP_FROM,
+            createdAt: '2026-09-16T12:54:00.000Z',
+        }),
+    ]
+    const caramelBounceLast = [
+        otherAppPage(1),
+        otherAppPage(2),
+        [
+            rawRow({
+                id: 'caramel-bounce',
+                status: 'BOUNCED',
+                createdAt: '2026-09-16T12:30:00.000Z',
+            }),
+            rawRow({
+                id: 'older',
+                createdAt: '2026-09-16T11:00:00.000Z',
+            }),
+        ],
+    ]
+
+    it("never reports ok when other apps' pages eat the budget before the Caramel failure (provider ignores from)", async () => {
+        const { impl } = fakeSendlyFetch({ pages: caramelBounceLast })
+        const report = await checkEmailDeliveryHealth({
+            apiKey: KEY,
+            fromEmail: FROM,
+            fetchImpl: impl,
+            pageSize: 2,
+            maxPages: 2,
+            now,
+        })
+        expect(report.status).toBe('incomplete')
+        expect(report.truncated).toBe(true)
+        expect(report.reason).toContain('page budget exhausted')
+        expect(formatEmailDeliveryHealthLine(report)).toContain(
+            'truncated=true',
+        )
+    })
+
+    it("finds the Caramel failure once the budget covers the other apps' pages", async () => {
+        const { impl } = fakeSendlyFetch({ pages: caramelBounceLast })
+        const report = await checkEmailDeliveryHealth({
+            apiKey: KEY,
+            fromEmail: FROM,
+            fetchImpl: impl,
+            pageSize: 2,
+            maxPages: 3,
+            now,
+        })
+        expect(report.status).toBe('degraded')
+        expect(report.failed).toBe(1)
+        expect(report.truncated).toBe(false)
+    })
+
+    it('with the from filter honoured, the same Caramel failure is found in ONE page', async () => {
+        const { impl, calls } = fakeSendlyFetch({
+            pages: caramelBounceLast,
+            honourFromFilter: true,
+        })
+        const report = await checkEmailDeliveryHealth({
+            apiKey: KEY,
+            fromEmail: FROM,
+            fetchImpl: impl,
+            pageSize: 2,
+            maxPages: 1,
+            now,
+        })
+        expect(report.status).toBe('degraded')
+        expect(report.failed).toBe(1)
+        expect(report.pagesFetched).toBe(1)
+        expect(calls).toHaveLength(1)
+    })
+
+    it('a degraded window that is also truncated stays degraded (the bad row outranks the gap)', async () => {
+        const { impl } = fakeSendlyFetch({
+            pages: [
+                [
+                    rawRow({
+                        id: 'b1',
+                        status: 'BOUNCED',
+                        createdAt: '2026-09-16T12:55:00.000Z',
+                    }),
+                    rawRow({ id: 'b2', createdAt: '2026-09-16T12:54:00.000Z' }),
+                ],
+                [rawRow({ id: 'b3', createdAt: '2026-09-16T12:53:00.000Z' })],
+            ],
+        })
+        const report = await checkEmailDeliveryHealth({
+            apiKey: KEY,
+            fromEmail: FROM,
+            fetchImpl: impl,
+            pageSize: 2,
+            maxPages: 1,
+            now,
+        })
+        expect(report.status).toBe('degraded')
+        expect(report.truncated).toBe(true)
     })
 })
 
@@ -390,7 +587,7 @@ describe('collectEmailLogWindow pagination', () => {
         })
         const result = await collectEmailLogWindow(
             { apiKey: KEY, pageSize: 2, fetchImpl: impl },
-            { windowStart, windowEnd, senderDomain: null },
+            { windowStart, windowEnd, ...SENDER },
         )
         expect(result.entries.map(e => e.id)).toEqual(['1'])
         expect(result.pagesFetched).toBe(1)
@@ -407,7 +604,7 @@ describe('collectEmailLogWindow pagination', () => {
         })
         const result = await collectEmailLogWindow(
             { apiKey: KEY, pageSize: 1, fetchImpl: impl },
-            { windowStart, windowEnd, senderDomain: null },
+            { windowStart, windowEnd, ...SENDER },
         )
         expect(result.entries.map(e => e.id)).toEqual(['1', '2'])
         expect(result.pagesFetched).toBe(2)
@@ -420,7 +617,7 @@ describe('collectEmailLogWindow pagination', () => {
         const { impl, calls } = fakeSendlyFetch({ pages: [[]] })
         await collectEmailLogWindow(
             { apiKey: KEY, pageSize: 500, fetchImpl: impl },
-            { windowStart, windowEnd, senderDomain: null },
+            { windowStart, windowEnd, ...SENDER },
         )
         expect(calls[0]!.searchParams.get('limit')).toBe('50')
     })
@@ -435,7 +632,7 @@ describe('collectEmailLogWindow pagination', () => {
         })
         const result = await collectEmailLogWindow(
             { apiKey: KEY, pageSize: 2, maxPages: 2, fetchImpl: impl },
-            { windowStart, windowEnd, senderDomain: null },
+            { windowStart, windowEnd, ...SENDER },
         )
         expect(result.pagesFetched).toBe(2)
         expect(result.truncated).toBe(true)

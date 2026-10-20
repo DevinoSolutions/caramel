@@ -88,8 +88,9 @@ export function decideEmailDeliveryHealthMonitor(
 }
 
 /**
- * Report a window to Sentry — at most one event per clock hour. A 'degraded' or
- * 'error' window is an issue; 'ok' and 'skipped' are not. Never throws: a
+ * Report a window to Sentry — at most one event per clock hour. A 'degraded',
+ * 'incomplete' (coverage gap) or 'error' window is an issue; 'ok' and 'skipped'
+ * are not. Never throws: a
  * broken reporter must not kill the interval that produced the finding.
  *
  * Returns whether an event was actually sent, so the caller can log the
@@ -99,40 +100,41 @@ export async function reportEmailDeliveryHealth(
     report: EmailDeliveryHealthReport,
     now: Date = new Date(),
 ): Promise<boolean> {
-    if (report.status !== 'degraded' && report.status !== 'error') return false
+    if (report.status === 'ok' || report.status === 'skipped') return false
     const bucket = Math.floor(now.getTime() / HOUR_MS)
     if (lastSentryHourBucket === bucket) return false
     lastSentryHourBucket = bucket
 
     try {
         const level = report.failed > 0 || report.status === 'error'
-        Sentry.captureMessage(
+        const message =
             report.status === 'error'
                 ? 'Transactional email delivery health check failed'
-                : 'Transactional email delivery degraded',
-            {
-                level: level ? 'error' : 'warning',
-                tags: {
-                    surface: 'email-delivery-health',
-                    provider: 'sendly',
-                    health_status: report.status,
-                },
-                // Counts and statuses only — the send log's to/subject/html
-                // never reach this object (see emailDeliveryHealth.ts).
-                extra: {
-                    windowStart: report.windowStart,
-                    windowEnd: report.windowEnd,
-                    scanned: report.scanned,
-                    failed: report.failed,
-                    delayed: report.delayed,
-                    stuckPending: report.stuckPending,
-                    byStatus: report.byStatus,
-                    senderDomain: report.senderDomain,
-                    truncated: report.truncated,
-                    reason: report.reason,
-                },
+                : report.status === 'incomplete'
+                  ? 'Transactional email delivery health check incomplete'
+                  : 'Transactional email delivery degraded'
+        Sentry.captureMessage(message, {
+            level: level ? 'error' : 'warning',
+            tags: {
+                surface: 'email-delivery-health',
+                provider: 'sendly',
+                health_status: report.status,
             },
-        )
+            // Counts and statuses only — the send log's to/subject/html
+            // never reach this object (see emailDeliveryHealth.ts).
+            extra: {
+                windowStart: report.windowStart,
+                windowEnd: report.windowEnd,
+                scanned: report.scanned,
+                failed: report.failed,
+                delayed: report.delayed,
+                stuckPending: report.stuckPending,
+                byStatus: report.byStatus,
+                senderDomain: report.senderDomain,
+                truncated: report.truncated,
+                reason: report.reason,
+            },
+        })
         await Sentry.flush(2000)
         return true
     } catch (error) {

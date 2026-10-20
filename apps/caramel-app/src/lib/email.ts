@@ -1,3 +1,4 @@
+import { EMAIL_FAILURE_STATUSES } from '@/lib/emailDeliveryHealth'
 import { env } from '@/lib/env'
 import { Sendly, SendlyError } from 'sendly-sdk'
 
@@ -94,16 +95,50 @@ const describeSendlyFailure = (error: unknown): string => {
 }
 
 /**
+ * Receipt statuses that mean this message will NOT be delivered. A 202 receipt
+ * is normally PENDING, but the API may already answer with a terminal state
+ * (a rejected or unrenderable message); resolving the promise is not success.
+ * CANCELLED joins the delivery-health failure set here because a send we
+ * just requested and the provider already cancelled is lost mail.
+ */
+const RECEIPT_FAILURE_STATUSES: ReadonlySet<string> = new Set([
+    ...EMAIL_FAILURE_STATUSES,
+    'CANCELLED',
+])
+
+/**
+ * Describe what is wrong with a resolved receipt, or null when it is fine.
+ * Carries the receipt id + status only - never the recipient.
+ */
+const describeReceiptProblem = (receipt: unknown): string | null => {
+    const { id, status } = (receipt ?? {}) as {
+        id?: unknown
+        status?: unknown
+    }
+    if (typeof id !== 'string' || typeof status !== 'string') {
+        return 'Sendly returned a receipt without an id/status (cannot confirm acceptance)'
+    }
+    if (RECEIPT_FAILURE_STATUSES.has(status)) {
+        return `receipt ${id} came back with terminal status ${status}`
+    }
+    return null
+}
+
+/**
  * Send email through Sendly — the only email transport in this app (useSend and
  * Resend are retired).
  *
- * Throws on ANY failure — a missing key, a rejected request, a transport error
- * — with a message naming the Sendly status/code/requestId, so every caller's
- * Sentry capture is actionable. Nothing here swallows an error.
+ * Throws on ANY failure — a missing key, a rejected request, a transport error,
+ * or a receipt that already carries a terminal failure status (FAILED, BOUNCED,
+ * REJECTED, RENDERING_FAILURE, CANCELLED) — with a message naming the Sendly
+ * status/code/requestId or receipt id + status, so every caller's Sentry
+ * capture is actionable. Nothing here swallows an error. (A later async
+ * bounce is NOT visible here; emailDeliveryHealth.ts covers that.)
  *
  * Sendly's send takes ONE recipient per request (`cc`/`bcc` copy others), so an
  * array `to` is fanned out as one send per recipient. ALL are attempted, and
- * one error naming every failed recipient index is thrown if any failed.
+ * one error naming every failed recipient index is thrown if any failed - a
+ * partial fan-out failure (some delivered-looking, some not) still throws.
  * Separate sends (rather than `cc`) keep recipients from seeing each other.
  */
 export const sendEmail = async (data: EmailPayload): Promise<void> => {
@@ -134,22 +169,33 @@ export const sendEmail = async (data: EmailPayload): Promise<void> => {
         ),
     )
 
-    const rejections = outcomes.flatMap((outcome, index) =>
-        outcome.status === 'rejected'
-            ? [{ index, reason: outcome.reason as unknown }]
-            : [],
-    )
-    if (rejections.length > 0) {
-        const detail = rejections
+    const failures = outcomes.flatMap((outcome, index) => {
+        if (outcome.status === 'rejected') {
+            return [
+                {
+                    index,
+                    message: describeSendlyFailure(outcome.reason),
+                    cause: outcome.reason as unknown,
+                },
+            ]
+        }
+        const problem = describeReceiptProblem(outcome.value)
+        return problem === null
+            ? []
+            : [{ index, message: problem, cause: undefined }]
+    })
+    if (failures.length > 0) {
+        const detail = failures
             .map(
-                ({ index, reason }) =>
-                    `recipient ${index + 1}/${recipients.length}: ${describeSendlyFailure(reason)}`,
+                ({ index, message }) =>
+                    `recipient ${index + 1}/${recipients.length}: ${message}`,
             )
             .join('; ')
         // tsconfig's lib predates ErrorOptions, so the first underlying
-        // SendlyError is attached as `cause` by hand for Sentry's chain view.
+        // SendlyError (when there is one) is attached as `cause` by hand for
+        // Sentry's chain view.
         throw Object.assign(new Error(`Sendly email failed — ${detail}`), {
-            cause: rejections[0]!.reason,
+            cause: failures.find(failure => failure.cause !== undefined)?.cause,
         })
     }
 }

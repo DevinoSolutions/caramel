@@ -90,6 +90,32 @@ describe('parseServerEnv', () => {
         expect(parsed.GOOGLE_CLIENT_ID).toBeUndefined()
     })
 
+    it('(j) SENDLY_FROM_EMAIL must be a bare email address - the delivery-health check is pinned to its domain in the shared Sendly project', () => {
+        expect(
+            parseServerEnv({
+                ...validServerFixture,
+                SENDLY_FROM_EMAIL: 'support@grabcaramel.com',
+            }).SENDLY_FROM_EMAIL,
+        ).toBe('support@grabcaramel.com')
+        for (const bad of [
+            '',
+            'grabcaramel.com',
+            'not-an-address',
+            'Caramel <no_reply@grabcaramel.com>',
+            '@grabcaramel.com',
+            'no_reply@',
+        ]) {
+            expect(
+                () =>
+                    parseServerEnv({
+                        ...validServerFixture,
+                        SENDLY_FROM_EMAIL: bad,
+                    }),
+                `SENDLY_FROM_EMAIL=${JSON.stringify(bad)}`,
+            ).toThrow(/SENDLY_FROM_EMAIL/)
+        }
+    })
+
     it('(i) Apple stays disabled when APPLE_CLIENT_ID is unset or empty — the signing vars are not required', () => {
         expect(() => parseServerEnv(validServerFixture)).not.toThrow()
         expect(() =>

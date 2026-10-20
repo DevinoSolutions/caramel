@@ -400,6 +400,7 @@ one** Sentry event per bad clock hour:
 | only `DELIVERED`/`SENT`/…      | nothing (one `[email-health] ok …` log line)           |
 | any failure status             | `Transactional email delivery degraded`, level `error` |
 | only stuck/delayed sends       | same message, level `warning`                          |
+| page budget ran out (gap)      | `…health check incomplete`, level `warning`            |
 | provider unreachable / refused | `…health check failed`, level `error`                  |
 
 The event carries counts, statuses, the window and the sender domain — **never** a
@@ -425,17 +426,30 @@ either way:
 
 **On demand.** The same check runs as a one-shot, from inside the prod container
 or anywhere the `SENDLY_*` vars exist (it reads `process.env` directly and does
-NOT need `DATABASE_URL`). Exit code 0 = healthy/skipped, 1 = degraded or
-unreachable:
+NOT need `DATABASE_URL`). Exit code 0 = healthy/skipped, 1 = degraded, incomplete
+or unreachable:
 
 ```bash
 pnpm --filter caramel-app run email:health -- --minutes 1440
 # [email-health] ok window=… scanned=152 failed=0 delayed=0 stuck=0 (DELIVERED=152)
 ```
 
-**Key type.** The check needs a **full-access `sk_*`** Sendly key: listing emails
-is not a sending operation, so a sending-only `pk_*` key sends fine but turns
-the check into a permanent `error` report.
+**Key scopes.** The key needs `emails:send` (sending) and `emails:read` (the
+check lists sent mail); without `emails:read` the check is a permanent `error`
+report.
+
+**Shared project.** grabcaramel.com lives in the shared Sendly "Devino" project
+(other Devino apps send from it too) and a key cannot be limited to one domain.
+So the check is always pinned to `SENDLY_FROM_EMAIL`: the list query is
+narrowed with Sendly's `from` filter (exact match on the bare address), rows
+are re-filtered to the sender domain, and with no usable sender the check
+refuses to run (`error`) instead of scanning the whole project.
+`SENDLY_FROM_EMAIL` is zod-validated as an email address at boot.
+
+**Incomplete coverage.** If the page budget (10 pages x 50 rows) runs out before
+the start of the window, the result is `incomplete` - reported to Sentry (level
+`warning`) and a non-zero exit from `email:health` - never `ok`. A window that
+also contains a bad row stays `degraded`.
 
 **If it reports degraded:** open Sendly (docs: https://docs.sendly.now) for the
 affected window — the counts in the Sentry event tell you which class.

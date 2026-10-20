@@ -186,6 +186,24 @@ describe('reportEmailDeliveryHealth', () => {
         expect(captureMessageMock.mock.calls[0][1].level).toBe('warning')
     })
 
+    it('reports a coverage gap (incomplete) to Sentry as a warning, never silently', async () => {
+        const { reportEmailDeliveryHealth } = await freshMonitor()
+        const sent = await reportEmailDeliveryHealth(
+            report({
+                status: 'incomplete',
+                truncated: true,
+                reason: 'page budget exhausted',
+            }),
+        )
+        expect(sent).toBe(true)
+        const [message, options] = captureMessageMock.mock.calls[0]
+        expect(message).toBe(
+            'Transactional email delivery health check incomplete',
+        )
+        expect(options.level).toBe('warning')
+        expect(options.extra.truncated).toBe(true)
+    })
+
     it('reports an unreachable provider as an error-level event', async () => {
         const { reportEmailDeliveryHealth } = await freshMonitor()
         await reportEmailDeliveryHealth(

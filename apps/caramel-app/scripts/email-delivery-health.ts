@@ -12,7 +12,8 @@
 //     pnpm exec tsx scripts/email-delivery-health.ts --minutes 1440'
 //
 // or locally with the vars exported. Exit code is the verdict: 0 healthy or
-// skipped, 1 degraded (failures / stuck sends) or unreachable — so a human, a
+// skipped, 1 degraded (failures / stuck sends), incomplete (page budget ran out
+// before the window was fully read) or unreachable / unusable sender — so a human, a
 // Dokploy schedule or an Uptime-Kuma push monitor can all consume it.
 //
 // It deliberately reads process.env directly instead of importing @/lib/env:
@@ -49,7 +50,7 @@ async function main() {
         windowMinutes,
     })
     console.log(formatEmailDeliveryHealthLine(report))
-    if (report.status === 'degraded' || report.status === 'error') {
+    if (report.status !== 'ok' && report.status !== 'skipped') {
         process.exit(1)
     }
 }

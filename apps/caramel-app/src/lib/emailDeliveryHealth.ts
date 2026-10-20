@@ -27,13 +27,28 @@
 //   * never-throwing at the top level — checkEmailDeliveryHealth() returns a
 //     report with status 'error' instead of blowing up a boot or an interval.
 //
+// SHARED PROJECT: grabcaramel.com lives in the Sendly "Devino" project, which
+// also sends for other Devino apps, and a Sendly key cannot be scoped to one
+// domain. So this check is ALWAYS filtered to the configured sender:
+//
+//   * the provider query is narrowed with the list endpoint's `from` filter
+//     (checked 2026-10-20 against the live API: an EXACT, case-sensitive match
+//     on the bare sender address; a domain-only value matches nothing), so
+//     other apps' mail cannot eat the page budget;
+//   * every returned row is ALSO filtered to the sender DOMAIN here, so a
+//     provider that ever loosens that match cannot leak another app's mail in;
+//   * with no usable sender (empty / not an address) the check REFUSES to run
+//     (status 'error') rather than falling back to scanning the whole project.
+//
+// If the page budget runs out before the window start is reached, the window
+// was not fully covered: that reports 'incomplete' (reported to Sentry, non-zero
+// CLI exit), never 'ok' - a gap in coverage must not read as a clean bill.
+//
 // The Sendly API this speaks to (sendly-sdk 1.1.0, `sendly.emails.list`):
-//   GET /api/emails?limit=<n>&cursor=<c>  -> { data: Email[], nextCursor? }
+//   GET /api/emails?limit=<n>&cursor=<c>&from=<address> -> { data: Email[], nextCursor? }
 //        newest-first, cursor-paginated. Row fields used: id, createdAt,
-//        status, from, complainedAt. The `from` query filter is NOT used: we
-//        want everything sent from our domain, so the sender-domain filter is
-//        done here.
-// It needs a FULL-access key (`sk_*`): a sending-only `pk_*` key cannot list.
+//        status, from, complainedAt.
+// It needs a key with the `emails:read` scope (sending uses `emails:send`).
 import { Sendly } from 'sendly-sdk'
 
 /** One Sendly email-list row, stripped to the fields that carry no PII. */
@@ -85,7 +100,19 @@ export const MAX_PAGE_SIZE = 50
 /** Hard ceiling so a pathological log can never turn this into a crawl. */
 export const DEFAULT_MAX_PAGES = 10
 
-export type EmailDeliveryHealthStatus = 'ok' | 'degraded' | 'error' | 'skipped'
+/**
+ * ok         every row in the window was read and none is bad.
+ * degraded   a bad row exists (failed / complained / stuck / delayed).
+ * incomplete the page budget ran out before the window start: coverage gap.
+ * error      the check could not run (provider error, unusable sender).
+ * skipped    Sendly is not configured.
+ */
+export type EmailDeliveryHealthStatus =
+    | 'ok'
+    | 'degraded'
+    | 'incomplete'
+    | 'error'
+    | 'skipped'
 
 export interface EmailDeliveryHealthReport {
     status: EmailDeliveryHealthStatus
@@ -100,19 +127,26 @@ export interface EmailDeliveryHealthReport {
     stuckPending: number
     /** Count per raw Sendly status, for the Sentry event and the log line. */
     byStatus: Record<string, number>
-    /** Sender domain the window was filtered to; null = no filter applied. */
+    /**
+     * Sender domain the window was filtered to. null only when the check
+     * REFUSED to run (no usable sender address) - it never means "unfiltered".
+     */
     senderDomain: string | null
     pagesFetched: number
-    /** True when maxPages was hit before the window was fully covered. */
+    /** True when maxPages was hit before the window was fully covered (status 'incomplete'). */
     truncated: boolean
 }
 
 export interface EmailDeliveryHealthConfig {
-    /** Sendly FULL-access API key (`sk_*`); a sending-only key cannot list. */
+    /** Sendly API key with the `emails:read` scope (required to list). */
     apiKey: string
     /** Override the Sendly API base (staging); undefined → SDK default. */
     baseUrl?: string
-    /** Sender address; its domain selects which sends are ours. */
+    /**
+     * Bare sender address (`no_reply@grabcaramel.com`). REQUIRED in practice:
+     * it narrows the provider query and selects which sends are ours in the
+     * shared Sendly project. Empty / not an address -> the check errors out.
+     */
     fromEmail?: string
     windowMinutes?: number
     stuckAfterMinutes?: number
@@ -122,13 +156,35 @@ export interface EmailDeliveryHealthConfig {
     fetchImpl?: typeof fetch
 }
 
+/** `"Caramel <no_reply@grabcaramel.com>"` / `"no_reply@x"` -> the bare address. */
+function bareAddress(address: string): string {
+    const match = /<([^>]+)>/.exec(address)
+    return (match ? match[1] : address).trim()
+}
+
 /** `"Caramel <no_reply@grabcaramel.com>"` / `"no_reply@x"` -> `"x"`. */
 export function extractEmailDomain(address: string): string | null {
-    const match = /<([^>]+)>/.exec(address)
-    const bare = (match ? match[1] : address).trim()
+    const bare = bareAddress(address)
     const at = bare.lastIndexOf('@')
     if (at === -1 || at === bare.length - 1) return null
     return bare.slice(at + 1).toLowerCase()
+}
+
+/**
+ * The sender identity the check is pinned to, or null when `fromEmail` is not
+ * a usable address (empty, no local part, no dotted domain, or any whitespace).
+ */
+function resolveSender(
+    fromEmail: string | undefined,
+): { address: string; domain: string } | null {
+    if (!fromEmail) return null
+    const address = bareAddress(fromEmail)
+    if (/\s/.test(address)) return null
+    const at = address.lastIndexOf('@')
+    if (at < 1) return null
+    const domain = extractEmailDomain(address)
+    if (!domain || !domain.includes('.') || domain.startsWith('.')) return null
+    return { address, domain }
 }
 
 /**
@@ -167,16 +223,17 @@ function createSendlyClient(config: EmailDeliveryHealthConfig): Sendly {
 }
 
 /**
- * Page the newest-first email list until the rows predate `windowStart` (or the
- * page budget runs out), keeping only the rows inside the window and — when a
- * sender domain is known — only the rows sent from our own domain.
+ * Page the newest-first email list (narrowed server-side to the sender address)
+ * until the rows predate `windowStart` or the page budget runs out, keeping
+ * only the rows inside the window that were sent from our own domain.
  */
 export async function collectEmailLogWindow(
     config: EmailDeliveryHealthConfig,
     options: {
         windowStart: Date
         windowEnd: Date
-        senderDomain: string | null
+        senderAddress: string
+        senderDomain: string
     },
 ): Promise<WindowCollection> {
     const client = createSendlyClient(config)
@@ -190,6 +247,7 @@ export async function collectEmailLogWindow(
     for (let page = 1; page <= maxPages; page++) {
         const result = await client.emails.list({
             limit: pageSize,
+            from: options.senderAddress,
             ...(cursor ? { cursor } : {}),
         })
         pagesFetched = page
@@ -208,12 +266,7 @@ export async function collectEmailLogWindow(
                 continue
             }
             if (created >= options.windowEnd.getTime()) continue
-            if (
-                options.senderDomain !== null &&
-                entry.fromDomain !== options.senderDomain
-            ) {
-                continue
-            }
+            if (entry.fromDomain !== options.senderDomain) continue
             entries.push(entry)
         }
         if (reachedWindowStart) break
@@ -283,11 +336,10 @@ export async function checkEmailDeliveryHealth(
         (config.stuckAfterMinutes ?? DEFAULT_STUCK_AFTER_MINUTES) * 60_000
     const windowEnd = now
     const windowStart = new Date(now.getTime() - windowMinutes * 60_000)
-    // Without a sender domain every row in the project is scanned — the safe
-    // direction (over-reporting beats missing our own bounces).
-    const senderDomain = config.fromEmail
-        ? extractEmailDomain(config.fromEmail)
-        : null
+    // The Sendly project is shared with other Devino apps, so the check is
+    // always pinned to our sender. No usable sender -> refuse (see below).
+    const sender = resolveSender(config.fromEmail)
+    const senderDomain = sender?.domain ?? null
     const base: Pick<
         EmailDeliveryHealthReport,
         | 'windowStart'
@@ -321,11 +373,22 @@ export async function checkEmailDeliveryHealth(
         }
     }
 
+    if (!sender) {
+        return {
+            ...base,
+            status: 'error',
+            reason:
+                'refusing to run unfiltered: the sender address (SENDLY_FROM_EMAIL) is empty or not an email address, ' +
+                'and the Sendly project is shared with other apps',
+        }
+    }
+
     try {
         const collected = await collectEmailLogWindow(config, {
             windowStart,
             windowEnd,
-            senderDomain,
+            senderAddress: sender.address,
+            senderDomain: sender.domain,
         })
         const summary = summariseEmailDeliveryWindow(collected.entries, {
             now,
@@ -335,12 +398,24 @@ export async function checkEmailDeliveryHealth(
             summary.failed > 0 ||
             summary.stuckPending > 0 ||
             summary.delayed > 0
+        // A bad row outranks a coverage gap (both are reported); a coverage
+        // gap alone must never read as 'ok'.
+        const status: EmailDeliveryHealthStatus = bad
+            ? 'degraded'
+            : collected.truncated
+              ? 'incomplete'
+              : 'ok'
         return {
             ...base,
             ...summary,
             pagesFetched: collected.pagesFetched,
             truncated: collected.truncated,
-            status: bad ? 'degraded' : 'ok',
+            status,
+            ...(collected.truncated
+                ? {
+                      reason: `page budget exhausted after ${collected.pagesFetched} page(s) before the window start; older rows in the window were not read`,
+                  }
+                : {}),
         }
     } catch (error) {
         return {
