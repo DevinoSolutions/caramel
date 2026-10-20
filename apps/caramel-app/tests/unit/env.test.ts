@@ -209,6 +209,24 @@ describe('parseServerEnv', () => {
         ).toThrow(/COUPON_BOX_DISCOVERY_ENABLED/)
     })
 
+    it('COUPON_BOX_SAVE_ENABLED is a strict boolean (default off) and a typo fails boot', () => {
+        expect(parseServerEnv(validServerFixture).COUPON_BOX_SAVE_ENABLED).toBe(
+            false,
+        )
+        expect(
+            parseServerEnv({
+                ...validServerFixture,
+                COUPON_BOX_SAVE_ENABLED: 'true',
+            }).COUPON_BOX_SAVE_ENABLED,
+        ).toBe(true)
+        expect(() =>
+            parseServerEnv({
+                ...validServerFixture,
+                COUPON_BOX_SAVE_ENABLED: 'on',
+            }),
+        ).toThrow(/COUPON_BOX_SAVE_ENABLED/)
+    })
+
     it('COUPON_BOX_LLM_ENABLED is a strict boolean (default off) and a typo fails boot', () => {
         expect(parseServerEnv(validServerFixture).COUPON_BOX_LLM_ENABLED).toBe(
             false,

@@ -159,6 +159,16 @@ const serverObjectSchema = z.object({
         .enum(['true', 'false'])
         .default('false')
         .transform(value => value === 'true'),
+    // Served to the extension as `couponBoxSave` by GET
+    // /api/extension/features. On, a promo box the extension found and proved
+    // on a store with no config may be saved as that store's config through
+    // POST /api/extension/coupon-box-save (couponBoxSave.ts). Off, the route
+    // answers 404 and the extension never calls it. Same strict two-value
+    // enum as SHOPPER_CODE_CAPTURE_ENABLED.
+    COUPON_BOX_SAVE_ENABLED: z
+        .enum(['true', 'false'])
+        .default('false')
+        .transform(value => value === 'true'),
     OPENROUTER_API_KEY: z.string().optional(),
     // Base URL of the OpenAI-compatible chat API that openrouter.ts POSTs
     // `${OPENROUTER_API_URL}/chat/completions` to. Unset (or blank) =

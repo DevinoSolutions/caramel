@@ -25,8 +25,9 @@ import { describe, expect, it } from 'vitest'
 // NEVER be modelled here: the verification pipeline's own tables
 // (verification_stores, store_verification_configs, verification_configs,
 // verification_runs, …) and any agent_*/scraper_* run state. The published
-// StoreConfig is the FLATTENED shape (store_name + 8 xpaths); the internal
-// `verification_stores` ⋈ `store_verification_configs` join that PRODUCES it is
+// StoreConfig is the FLATTENED shape (store_name + 8 xpaths + `origin`, who
+// wrote the row: NULL = the pipeline, 'auto_detect' = the extension's save);
+// the internal `verification_stores` ⋈ `store_verification_configs` join that PRODUCES it is
 // exactly what may not leak.
 //
 // The gate is therefore MAP-TARGET based (real DB table/column names), not
@@ -134,6 +135,7 @@ describe('prisma-schema-secrecy (DESIGN §2(k) forward-rule, W3a-inverted)', () 
         expect(schema).toMatch(/@@map\("sources"\)/)
         expect(schema).toMatch(/\bmodel\s+StoreConfig\b/)
         expect(schema).toMatch(/@@map\("store_configs"\)/)
+        expect(schema).toMatch(/\borigin\s+String\?\s+@map\("origin"\)/)
         expect(schema).toMatch(/@map\("verification_message"\)/)
         expect(schema).toMatch(/\bmodel\s+CouponSignal\b/)
         expect(schema).toMatch(/@@map\("coupon_signals"\)/)

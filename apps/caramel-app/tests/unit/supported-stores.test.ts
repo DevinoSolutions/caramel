@@ -113,5 +113,9 @@ describe('GET /api/extension/supported-stores — qualification predicate (D1 fi
         // The flattened table has no metadata column — extension_compatible is
         // resolved at ingest, so it must NOT appear as a query predicate.
         expect(queryCapture.sql).not.toMatch(/extension_compatible/)
+        // Who wrote a row (store_configs.origin: the pipeline or the
+        // extension's coupon-box save) never reaches the extension: a saved
+        // row is served exactly like a pipeline row.
+        expect(queryCapture.sql).not.toMatch(/\borigin\b/)
     })
 })

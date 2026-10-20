@@ -1,15 +1,15 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-    isLearnedBoxSelector,
+    isCouponBoxSelector,
     isRiskyControlSelector,
 } from '@/lib/couponBoxSelector'
 
-// The learned coupon box selector grammar (src/lib/couponBoxSelector.ts), the
-// contract the extension emits against: what it must accept, and what a
-// crowd-sourced report may never smuggle in.
+// The coupon box selector grammar (src/lib/couponBoxSelector.ts), the
+// contract the extension emits against: what it must accept, and what a saved
+// box may never smuggle in.
 
-describe('learned coupon box selector grammar', () => {
+describe('coupon box selector grammar', () => {
     it.each([
         '#promo',
         '.promo-code',
@@ -40,7 +40,7 @@ describe('learned coupon box selector grammar', () => {
         '#_code',
         'input[name=""]',
     ])('accepts %s', selector => {
-        expect(isLearnedBoxSelector(selector)).toBe(true)
+        expect(isCouponBoxSelector(selector)).toBe(true)
     })
 
     it.each([
@@ -92,7 +92,7 @@ describe('learned coupon box selector grammar', () => {
         ['a newline', 'form\ninput'],
         ['a comment', 'input/* x */'],
     ])('refuses %s', (_, selector) => {
-        expect(isLearnedBoxSelector(selector)).toBe(false)
+        expect(isCouponBoxSelector(selector)).toBe(false)
     })
 
     // A store's markup can carry the shopper's own data; a box location must
@@ -114,7 +114,7 @@ describe('learned coupon box selector grammar', () => {
         ['a number in an unquoted value', 'input[data-order=n-555-123-4567]'],
         ['a long number in a placeholder', 'input[placeholder="Ref 1234567"]'],
     ])('refuses personal data: %s', (_, selector) => {
-        expect(isLearnedBoxSelector(selector)).toBe(false)
+        expect(isCouponBoxSelector(selector)).toBe(false)
     })
 
     it.each([
@@ -131,7 +131,7 @@ describe('learned coupon box selector grammar', () => {
     ])(
         'accepts short numbers, and long ones in ids and classes: %s',
         selector => {
-            expect(isLearnedBoxSelector(selector)).toBe(true)
+            expect(isCouponBoxSelector(selector)).toBe(true)
         },
     )
 })

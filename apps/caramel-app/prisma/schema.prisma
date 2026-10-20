@@ -242,6 +242,11 @@ model StoreConfig {
   // Plain pipeline timestamp (only-if-newer), NOT @updatedAt — see Coupon.updatedAt.
   updatedAt             DateTime @default(now()) @map("updated_at")
   createdAt             DateTime @default(now()) @map("created_at")
+  // Who wrote the row: NULL = the coupons pipeline, 'auto_detect' = the
+  // extension saved a promo box it proved on a store with no config
+  // (couponBoxSave.ts). A pipeline push replaces an 'auto_detect' row's eight
+  // selectors whole and clears this (applyCatalogRows).
+  origin                String?  @map("origin")
 
   @@map("store_configs")
 }

@@ -1,8 +1,8 @@
 // src/lib/couponBoxSelector.ts
 //
-// The selector grammar a learned coupon box may use: the ONE home of the rule
-// POST /api/extension/coupon-box-learned enforces, and the grammar the
-// extension emits and accepts. A learned box is crowd-sourced, so its
+// The selector grammar a saved coupon box may use: the ONE home of the rule
+// POST /api/extension/coupon-box-save enforces, and the grammar the extension
+// emits and accepts. A saved box arrives from an extension install, so its
 // selectors are untrusted input that other shoppers' browsers will run
 // `querySelector` on: the grammar is a small allowlist rather than "any CSS",
 // and anything outside it is refused whole.
@@ -141,9 +141,9 @@ function holdsPersonalData(selector: string): boolean {
     return false
 }
 
-/** Whether `selector` is inside the learned coupon box grammar above and
- * holds nothing that looks like personal data. */
-export function isLearnedBoxSelector(selector: string): boolean {
+/** Whether `selector` is inside the coupon box grammar above and holds
+ * nothing that looks like personal data. */
+export function isCouponBoxSelector(selector: string): boolean {
     return compoundsOf(selector) !== null && !holdsPersonalData(selector)
 }
 

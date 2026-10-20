@@ -161,6 +161,11 @@ export const KnownStoreRowSchema = z.object({
     known: z.boolean(),
 })
 
+/** `SELECT ... AS name` — couponsRepo.findCatalogStoreNames. */
+export const CatalogStoreNameRowSchema = z.object({
+    name: z.string(),
+})
+
 /** `SELECT EXISTS(...) AS served` — couponsRepo.hasServedStoreConfig. */
 export const ServedStoreConfigRowSchema = z.object({
     served: z.boolean(),
