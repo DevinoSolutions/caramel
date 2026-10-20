@@ -499,6 +499,9 @@ model LearnedCouponBoxReporter {
   box             LearnedCouponBox @relation(fields: [boxId], references: [id], onDelete: Cascade)
   installHash     String           @map("install_hash")
   networkHash     String           @map("network_hash")
+  // The wider block of that network (/16 IPv4, /32 IPv6), hashed per store
+  // like it. Null on rows written before it was recorded.
+  blockHash       String?          @map("block_hash")
   // This install's COUNTED reports for this box. An install counts at most
   // once per 24h per outcome; the two timestamps are that clock, and the
   // later of them is this install's latest word on the box.

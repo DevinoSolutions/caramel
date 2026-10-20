@@ -107,6 +107,10 @@ export const LEARNED_BOX_RULES = {
      * box is a confirmation from the last `freshDays`. */
     minConfirmingInstalls: 3,
     minConfirmingNetworks: 3,
+    /** ...and those networks must sit in at least this many wider blocks
+     * (/16 IPv4, /32 IPv6). One person's free IPv6 tunnels, or a few
+     * proxies from one range, are several networks but one block. */
+    minConfirmingBlocks: 2,
     /** Confirmations and failures older than this no longer count. */
     freshDays: 30,
     /** Failing reporters from this many networks suppress the box... */
@@ -293,7 +297,12 @@ export type LearnedBoxReport = z.infer<typeof learnedBoxReportSchema>
 // ---------------------------------------------------------------------------
 
 function saltedHash(
-    kind: 'install' | 'network' | 'network-any-store' | 'block-any-store',
+    kind:
+        | 'install'
+        | 'network'
+        | 'block'
+        | 'network-any-store'
+        | 'block-any-store',
     value: string,
     domain: string,
 ): string {
@@ -348,6 +357,12 @@ export function hashNetwork(ip: string, domain: string): string {
     return saltedHash('network', networkPrefix(ip), domain)
 }
 
+/** The reporter's wider block (networkBlock), hashed per store like its
+ * network: the serving rule wants confirmations from more than one block. */
+export function hashBlock(ip: string, domain: string): string {
+    return saltedHash('block', networkBlock(ip), domain)
+}
+
 /** The wider block a network sits in: the first two octets of an IPv4
  * address, the first two groups of an IPv6 one. Free IPv6 /48s come from a
  * handful of /32s, so a cap on the block holds where one on the /48 does
@@ -386,6 +401,9 @@ export function hashNetworkAcrossStores(ip: string): CrossStoreNetwork {
 export interface ReporterEvidence {
     installHash: string
     networkHash: string
+    /** hashBlock of the network the install first reported from. Null on a
+     * row written before the block was recorded: it counts toward no block. */
+    blockHash: string | null
     lastConfirmedAt: Date | null
     lastFailedAt: Date | null
 }
@@ -427,6 +445,7 @@ export interface LearnedBoxAssessment {
     servable: boolean
     confirmingInstalls: number
     confirmingNetworks: number
+    confirmingBlocks: number
     failingNetworks: number
     /** Failing reporters on enough networks, not yet outvoted by new ones. */
     suppressed: boolean
@@ -437,7 +456,8 @@ export interface LearnedBoxAssessment {
  *
  *   1. at least 3 installs AND at least 3 networks whose latest word on the
  *      box is a confirmation from the last 30 days (a reporter that has since
- *      failed it no longer counts);
+ *      failed it no longer counts), and those networks span at least 2
+ *      wider blocks (/16 IPv4, /32 IPv6);
  *   2. more confirming networks than failing networks (failing = latest word
  *      a failure from the last 30 days; failures from one network count once);
  *   3. if failing reporters sit on 2 or more networks, confirmations from at
@@ -457,6 +477,9 @@ export function assessLearnedBox(
     )
     const confirmingNetworks = new Set(confirming.map(r => r.networkHash))
     const confirmingInstalls = new Set(confirming.map(r => r.installHash))
+    const confirmingBlocks = new Set(
+        confirming.flatMap(r => (r.blockHash === null ? [] : [r.blockHash])),
+    )
     const failingNetworks = new Set(failing.map(r => r.networkHash))
 
     let suppressed = false
@@ -482,10 +505,12 @@ export function assessLearnedBox(
                 LEARNED_BOX_RULES.minConfirmingInstalls &&
             confirmingNetworks.size >=
                 LEARNED_BOX_RULES.minConfirmingNetworks &&
+            confirmingBlocks.size >= LEARNED_BOX_RULES.minConfirmingBlocks &&
             confirmingNetworks.size > failingNetworks.size &&
             !suppressed,
         confirmingInstalls: confirmingInstalls.size,
         confirmingNetworks: confirmingNetworks.size,
+        confirmingBlocks: confirmingBlocks.size,
         failingNetworks: failingNetworks.size,
         suppressed,
     }
@@ -517,6 +542,7 @@ export interface CouponBoxLearnedAnswer {
 const REPORTER_EVIDENCE_SELECT = {
     installHash: true,
     networkHash: true,
+    blockHash: true,
     lastConfirmedAt: true,
     lastFailedAt: true,
 } as const
@@ -588,6 +614,8 @@ interface RecordInput {
     installHash: string
     /** hashNetwork: the reporter's network, for this store. */
     networkHash: string
+    /** hashBlock: that network's wider block, for this store. */
+    blockHash: string
     /** hashNetworkAcrossStores: the same network and its wider block, for the
      * caps kept across stores. */
     anyStoreNetwork: CrossStoreNetwork
@@ -714,6 +742,7 @@ async function recordOnce({
     report,
     installHash,
     networkHash,
+    blockHash,
     anyStoreNetwork,
     now = new Date(),
 }: RecordInput): Promise<LearnedReportResult> {
@@ -781,6 +810,7 @@ async function recordOnce({
                         installHash,
                         // Fixed for the life of the row: see the update below.
                         networkHash,
+                        blockHash,
                         firstSeenAt: now,
                         lastSeenAt: now,
                     },
@@ -1114,6 +1144,7 @@ function assessmentKey(a: LearnedBoxAssessment): string {
     return [
         a.servable,
         a.confirmingNetworks,
+        a.confirmingBlocks,
         a.failingNetworks,
         a.suppressed,
     ].join('|')

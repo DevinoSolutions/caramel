@@ -4,6 +4,7 @@ import {
     type CouponBoxPickOutcomeEvent,
 } from '@/lib/analytics/couponBoxPickOutcome'
 import { handleRouteError } from '@/lib/api/handleRouteError'
+import { readBodyCapped } from '@/lib/api/readBodyCapped'
 import { preflight, withRoute } from '@/lib/api/withRoute'
 import {
     couponBoxLearnedEnabled,
@@ -146,19 +147,15 @@ async function handlePick(req: NextRequest): Promise<PickExit> {
         )
     }
 
-    const contentLength = Number(req.headers.get('content-length') || 0)
-    if (contentLength > MAX_BODY_BYTES) {
-        return exit(json({ error: 'payload too large' }, 413), 'too_large')
-    }
-    // A chunked body carries no Content-Length: measure what arrived.
-    const text = await req.text()
-    if (Buffer.byteLength(text, 'utf8') > MAX_BODY_BYTES) {
+    // Read no further than the cap, chunked bodies included.
+    const body = await readBodyCapped(req, MAX_BODY_BYTES)
+    if (!body.ok) {
         return exit(json({ error: 'payload too large' }, 413), 'too_large')
     }
 
     let raw: unknown
     try {
-        raw = JSON.parse(text)
+        raw = JSON.parse(body.text)
     } catch {
         return exit(json({ error: 'invalid payload' }, 400), 'invalid')
     }

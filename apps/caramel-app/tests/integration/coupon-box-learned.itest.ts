@@ -145,6 +145,7 @@ function record(
         report: r,
         installHash: `install-${install}`,
         networkHash: `network-${network}`,
+        blockHash: `store-block-${block}`,
         anyStoreNetwork: crossStore(network, block),
         now,
     })
@@ -339,6 +340,31 @@ describe('learned coupon box: who counts (real Postgres)', () => {
         expect(
             await findServableLearnedBox(domain, new Date(start + 40 * DAY)),
         ).toBeNull()
+    })
+
+    it('3 networks inside ONE wider block never make a box servable; a network in a second block does', async () => {
+        const domain = freshDomain()
+        const now = new Date()
+        for (const [install, network] of [
+            ['t1', 'tunnel-1'],
+            ['t2', 'tunnel-2'],
+            ['t3', 'tunnel-3'],
+        ] as const) {
+            await record(
+                report(domain),
+                install,
+                network,
+                now,
+                'one-tunnel-provider',
+            )
+        }
+        expect(await findServableLearnedBox(domain, now)).toBeNull()
+
+        // A real shopper elsewhere confirms it.
+        expect(
+            await record(report(domain), 'shopper', 'home', now, 'home-isp'),
+        ).toMatchObject({ recorded: true, servable: true })
+        expect(await findServableLearnedBox(domain, now)).toEqual(BOX)
     })
 
     it('poisoning by many forged install ids from ONE network: 2 new reporters per network per 7 days, the rest ignored', async () => {

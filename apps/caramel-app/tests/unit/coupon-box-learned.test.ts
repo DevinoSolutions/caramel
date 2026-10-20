@@ -48,6 +48,8 @@ vi.mock('@/lib/rateLimit', async importOriginal => {
 
 import { POST } from '@/app/api/extension/coupon-box-learned/route'
 import {
+    assessLearnedBox,
+    hashBlock,
     hashInstallId,
     hashNetwork,
     hashNetworkAcrossStores,
@@ -127,6 +129,7 @@ describe('POST /api/extension/coupon-box-learned', () => {
         const call = recordMock.mock.calls[0]?.[0] as {
             installHash: string
             networkHash: string
+            blockHash: string
             anyStoreNetwork: { network: string; block: string }
         }
         expect(call.installHash).toBe(
@@ -137,6 +140,13 @@ describe('POST /api/extension/coupon-box-learned', () => {
         expect(call.networkHash).toBe(
             hashNetwork('203.0.113.99', 'shop-example.com'),
         )
+        expect(call.blockHash).toBe(
+            hashBlock('203.0.113.99', 'shop-example.com'),
+        )
+        // Per store, like the network: neither the network's hash nor the
+        // cross-store block hash.
+        expect(call.blockHash).not.toBe(call.networkHash)
+        expect(call.blockHash).not.toBe(block('203.0.113.99'))
         expect(call.anyStoreNetwork).toEqual(
             hashNetworkAcrossStores('203.0.113.99'),
         )
@@ -158,6 +168,41 @@ describe('POST /api/extension/coupon-box-learned', () => {
         expect(declared.status).toBe(413)
         const arrived = await post(big)
         expect(arrived.status).toBe(413)
+        expect(recordMock).not.toHaveBeenCalled()
+    })
+
+    it('oversize chunked body (no Content-Length): 413, and reading stops at the cap', async () => {
+        // 1 MiB offered in 1 KiB chunks, pulled only as the route reads.
+        let pulled = 0
+        const stream = new ReadableStream<Uint8Array>({
+            pull(controller) {
+                pulled += 1
+                if (pulled > 1024) controller.close()
+                else controller.enqueue(new Uint8Array(1024).fill(0x20))
+            },
+        })
+        const init = {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+                'cf-connecting-ip': '203.0.113.5',
+                origin: EXT_ORIGIN,
+            },
+            body: stream,
+            duplex: 'half',
+        } as RequestInit
+        const res = await POST(
+            new NextRequest(
+                new Request(
+                    'http://localhost/api/extension/coupon-box-learned',
+                    init,
+                ),
+            ),
+        )
+        expect(res.status).toBe(413)
+        // The 4 KiB cap is passed on the 5th chunk; a few more may be
+        // buffered ahead, never the whole body.
+        expect(pulled).toBeLessThan(20)
         expect(recordMock).not.toHaveBeenCalled()
     })
 
@@ -567,5 +612,60 @@ describe('reporter identity', () => {
                 }),
             ).success,
         ).toBe(true)
+    })
+})
+
+describe('serving rule: confirmations must span wider blocks', () => {
+    const now = new Date('2026-10-20T12:00:00.000Z')
+    const confirmedBy = (
+        install: string,
+        network: string,
+        blockHash: string | null,
+    ) => ({
+        installHash: install,
+        networkHash: network,
+        blockHash,
+        lastConfirmedAt: new Date(now.getTime() - 60_000),
+        lastFailedAt: null,
+    })
+
+    it('3 installs on 3 networks inside ONE block are not servable', () => {
+        const a = assessLearnedBox(
+            [
+                confirmedBy('i1', 'n1', 'b1'),
+                confirmedBy('i2', 'n2', 'b1'),
+                confirmedBy('i3', 'n3', 'b1'),
+            ],
+            now,
+        )
+        expect(a).toMatchObject({
+            servable: false,
+            confirmingNetworks: 3,
+            confirmingBlocks: 1,
+        })
+    })
+
+    it('the same, with one of the networks in a second block, is servable', () => {
+        const a = assessLearnedBox(
+            [
+                confirmedBy('i1', 'n1', 'b1'),
+                confirmedBy('i2', 'n2', 'b1'),
+                confirmedBy('i3', 'n3', 'b2'),
+            ],
+            now,
+        )
+        expect(a).toMatchObject({ servable: true, confirmingBlocks: 2 })
+    })
+
+    it('a row with no recorded block counts toward no block', () => {
+        const a = assessLearnedBox(
+            [
+                confirmedBy('i1', 'n1', 'b1'),
+                confirmedBy('i2', 'n2', null),
+                confirmedBy('i3', 'n3', null),
+            ],
+            now,
+        )
+        expect(a).toMatchObject({ servable: false, confirmingBlocks: 1 })
     })
 })
