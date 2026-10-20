@@ -330,7 +330,6 @@ function StatCard({
                 delay: 0.5 + index * 0.12,
                 ease: revealEase,
             }}
-            whileHover={reduce ? undefined : { y: -4, scale: 1.03 }}
             className="relative w-32 rounded-2xl bg-gradient-to-br from-caramel to-orange-600 px-5 py-4 text-white shadow-caramel-lg md:w-28"
             style={ticketNotchMask('0.55rem', '50%')}
         >
@@ -504,7 +503,7 @@ export default function HeroSection() {
                         8.6 s mobile LCP PageSpeed measured. Same timings and
                         easing as before, transform-only (see globals.css for
                         why the fade had to go); reduced motion is honoured by
-                        the stylesheet. framer stays for hover/tap/loops. */}
+                        the stylesheet. framer stays for the stat tickets, tap and loops. */}
                     {/* lg:w-full on the h1 and on the wordmark's wrapper
                         (2026-09-26): below lg the wordmark is `w-full`, and
                         both of its ancestors were shrink-to-fit, so until the
@@ -519,12 +518,9 @@ export default function HeroSection() {
                         <div className="mb-4 text-gray-700 dark:text-white">
                             Welcome to
                         </div>
-                        <m.div
+                        <div
                             className="hero-enter-scale relative lg:w-full"
                             style={{ animationDelay: '0.3s' }}
-                            whileHover={
-                                reduceMotion ? undefined : { scale: 1.02 }
-                            }
                         >
                             {/* unoptimized on purpose: the wordmark is a 40KB
                                 PNG, and a large width makes the optimizer build
@@ -562,7 +558,7 @@ export default function HeroSection() {
                                 fetchPriority="high"
                                 unoptimized
                             />
-                        </m.div>
+                        </div>
                     </h1>
 
                     <p
