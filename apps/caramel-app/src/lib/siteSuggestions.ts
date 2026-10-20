@@ -163,13 +163,6 @@ export async function recordSiteSuggestion(
     return { id: row.id }
 }
 
-/** The `source` of a suggestion nobody typed: shoppers' extensions found and
- * confirmed a store's coupon box themselves
- * (couponBoxLearned.handOverLearnedStore), so the store is worth a real
- * config. Deliberately NOT in SiteSuggestionSourceSchema, so no client can
- * submit a row under it. */
-export const AUTO_DETECT_SUGGESTION_SOURCE = 'auto_detect'
-
 // ---------------------------------------------------------------------------
 // Pipeline-facing contract (GET /api/ingest/site-suggestions + .../ack).
 //

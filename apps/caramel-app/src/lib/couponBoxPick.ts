@@ -54,8 +54,7 @@ const WHY_MAX_CHARS = 200
 const RAW_REPLY_LOG_MAX = 300
 
 /** The store's host as the extension sends it. ONE definition, shared with
- * the learned coupon box (couponBoxLearned.ts), so both key a store the same
- * way. */
+ * the coupon-box save (couponBoxSave.ts), so both read a host the same way. */
 export const couponBoxDomainSchema = z
     .string()
     .trim()
@@ -65,11 +64,6 @@ export const couponBoxDomainSchema = z
 export const couponBoxPickRequestSchema = z.object({
     domain: couponBoxDomainSchema,
     outline: z.string().min(1),
-    // Opt-in: the extension build understands a learned answer
-    // (`source: 'learned'`, selectors under `box`). Only then may the route
-    // answer from the learned table; an older build never sends this, so it
-    // keeps getting exactly the index-bearing answers it always got.
-    acceptsLearned: z.boolean().optional(),
 })
 
 export type CouponBoxPickRequest = z.infer<typeof couponBoxPickRequestSchema>
