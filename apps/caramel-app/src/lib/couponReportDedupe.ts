@@ -17,11 +17,12 @@
 // 'used', and a shopper who reports a code worked can still report it failed
 // later (and the reverse).
 //
-// The reporter is the signed-in USER when there is a session and the client IP
-// only for anonymous callers: two users behind one NAT must each keep their own
-// report (and their coupon_reports attribution row). Two ANONYMOUS shoppers
-// behind one IP share a slot per coupon per kind: the second one's repeat of the
-// same report within 24h is not counted.
+// The reporter is the signed-in USER when there is a session and the client
+// network (the IP, an IPv6 one cut to its /64) only for anonymous callers: two
+// users behind one NAT must each keep their own report (and their coupon_reports
+// attribution row). Two ANONYMOUS shoppers behind one IP, or one IPv6 /64, share
+// a slot per coupon per kind: the second one's repeat of the same report within
+// 24h is not counted.
 //
 // STATE: an in-memory Map<key, expiry>, per process. It resets on every deploy
 // and restart (a reporter can re-report once after one), and a multi-instance
@@ -30,8 +31,8 @@
 // classifyCartModelBudget.ts).
 //
 // BOUNDED: a Map entry per (reporter, coupon) must not grow without limit across
-// rotating addresses (an IPv6 /64 is 2^64 of them), because this app has had
-// memory/slowness outages. There are no per-key timers: entries are plain
+// rotating addresses and coupon ids, because this app has had memory/slowness
+// outages. There are no per-key timers: entries are plain
 // expiries, swept lazily. At the cap the dedupe FAILS OPEN: the report is
 // accepted without being tracked (a forger gets no throttle while the table is
 // full, but no honest report is ever refused), and one throttled Sentry warning
@@ -85,9 +86,10 @@ export type ReportReporter =
     | { kind: 'ip'; ip: string }
 
 /**
- * The reporter a request counts as: its signed-in user, else its client IP
- * (getClientIp, the same address the rate limiter uses). Both report routes
- * call this, so a shopper is one reporter on both.
+ * The reporter a request counts as: its signed-in user, else its client
+ * network (getClientIp, the same address the rate limiter uses, with an IPv6
+ * address cut to its /64). Both report routes call this, so a shopper is one
+ * reporter on both.
  */
 export function reporterFor(
     userId: string | null,
@@ -95,7 +97,36 @@ export function reporterFor(
 ): ReportReporter {
     return userId
         ? { kind: 'user', userId }
-        : { kind: 'ip', ip: getClientIp(req) }
+        : { kind: 'ip', ip: reporterNetwork(getClientIp(req)) }
+}
+
+/**
+ * An IPv4 address as it is; an IPv6 address as its /64, the block one home or
+ * phone connection is handed whole. Keyed per address, a shopper on IPv6
+ * could pick a new address from that block for each report and count as a
+ * new reporter every time. An IPv4-mapped IPv6 address is its IPv4 address.
+ * Anything that does not parse as IPv6 is returned unchanged.
+ */
+export function reporterNetwork(ip: string): string {
+    if (!ip.includes(':')) return ip
+    const bare = ip.split('%')[0].toLowerCase()
+    const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(bare)
+    if (mapped) return mapped[1]
+    const halves = bare.split('::')
+    if (halves.length > 2) return ip
+    const groups = (s: string) => (s ? s.split(':') : [])
+    const head = groups(halves[0])
+    const tail = halves.length === 2 ? groups(halves[1]) : []
+    // An IPv4 tail ("64:ff9b::1.2.3.4") is two groups; it never reaches the
+    // first four, so it only has to be counted.
+    const width = (g: string[]) =>
+        g.reduce((n, part) => n + (part.includes('.') ? 2 : 1), 0)
+    const missing = 8 - width(head) - width(tail)
+    if (halves.length === 1 ? missing !== 0 : missing < 1) return ip
+    const full = [...head, ...Array<string>(missing).fill('0'), ...tail]
+    const prefix = full.slice(0, 4)
+    if (!prefix.every(part => /^[0-9a-f]{1,4}$/.test(part))) return ip
+    return prefix.map(part => part.replace(/^0+(?=.)/, '')).join(':') + '::/64'
 }
 
 /** Short key within a kind's table: reporter kind + id, then the coupon id. */

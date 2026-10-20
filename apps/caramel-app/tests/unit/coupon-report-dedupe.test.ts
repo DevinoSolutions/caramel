@@ -2,6 +2,7 @@ import {
     admitReport,
     releaseReport,
     reporterFor,
+    reporterNetwork,
     resetReportDedupeForTests,
 } from '@/lib/couponReportDedupe'
 import * as Sentry from '@sentry/nextjs'
@@ -89,6 +90,43 @@ describe('report kinds', () => {
             kind: 'ip',
             ip: '203.0.113.9',
         })
+    })
+
+    it('a signed-out shopper on IPv6 is one reporter for the whole /64, whatever address they report from', () => {
+        const from = (addr: string) =>
+            reporterFor(
+                null,
+                new NextRequest('http://localhost/api/coupons/7/report', {
+                    headers: { 'cf-connecting-ip': addr },
+                }),
+            )
+        const a = from('2001:db8:1:2:aaaa::1')
+        const b = from('2001:db8:1:2:bbbb:cccc:dddd:eeee')
+        expect(a).toEqual({ kind: 'ip', ip: '2001:db8:1:2::/64' })
+        expect(b).toEqual(a)
+        expect(admitReport('worked', a, '7', T0)).toBe(true)
+        expect(admitReport('worked', b, '7', T0)).toBe(false)
+        // Another home's /64 is another reporter.
+        const other = from('2001:db8:1:3::1')
+        expect(admitReport('worked', other, '7', T0)).toBe(true)
+    })
+
+    it.each([
+        ['203.0.113.9', '203.0.113.9'],
+        ['2001:DB8:0001:0002::1', '2001:db8:1:2::/64'],
+        ['2001:db8::1', '2001:db8:0:0::/64'],
+        ['::1', '0:0:0:0::/64'],
+        ['fe80::1%eth0', 'fe80:0:0:0::/64'],
+        ['::ffff:203.0.113.9', '203.0.113.9'],
+        ['64:ff9b::203.0.113.9', '64:ff9b:0:0::/64'],
+        ['2001:db8:1:2:3:4:5:6', '2001:db8:1:2::/64'],
+        // Not an address: kept whole, never merged with anything else.
+        ['unknown', 'unknown'],
+        ['1::2::3', '1::2::3'],
+        ['1:2:3', '1:2:3'],
+        ['zz:1:2:3::1', 'zz:1:2:3::1'],
+    ])('reporterNetwork(%s) is %s', (ip, want) => {
+        expect(reporterNetwork(ip)).toBe(want)
     })
 })
 
