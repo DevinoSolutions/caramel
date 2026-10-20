@@ -1259,7 +1259,7 @@ describe('funnel diagnostics: which steps the page reports', () => {
             expect.objectContaining({ step: 'apply_observed' }),
             expect.objectContaining({
                 step: 'store_not_accepted',
-                reason: 'not-committed',
+                reason: 'store-error',
             }),
         ])
     })
@@ -1470,5 +1470,117 @@ describe('funnel diagnostics: which steps the page reports', () => {
         shopperClicksApply()
 
         await vi.waitFor(() => expect(sent).toHaveLength(1), LONG)
+    })
+})
+
+// Why the capture refused a code is telemetry only: every refusal below must
+// share nothing, exactly as before; only the reported reason differs.
+describe('funnel diagnostics: why the store did not count as accepting', () => {
+    const refusalReasons = () =>
+        funnel.filter(m => m.step === 'store_not_accepted').map(m => m.reason)
+    const waitForRefusal = () =>
+        vi.waitFor(() => expect(refusalReasons()).toHaveLength(1), {
+            timeout: 13000,
+        })
+
+    it('a visible rejection with no applied row: store-error', async () => {
+        await armed()
+        storeAnswers(false)
+        shopperTypes('NOPE123')
+        shopperClicksApply()
+
+        await waitForRefusal()
+        expect(refusalReasons()).toEqual(['store-error'])
+        expect(sent).toEqual([])
+    })
+
+    it('an applied row beside a new error: store-error', async () => {
+        await armed()
+        storeAnswers(true, {
+            after: () =>
+                setText(document.getElementById('err'), 'This code is invalid'),
+        })
+        shopperTypes('SAVE10')
+        shopperClicksApply()
+
+        await waitForRefusal()
+        expect(refusalReasons()).toEqual(['store-error'])
+        expect(sent).toEqual([])
+    })
+
+    it('a price drop with no applied row: price-dropped-no-row', async () => {
+        await armed()
+        cartTotalDropsOnApply()
+        shopperTypes('SAVE10')
+        shopperClicksApply()
+
+        await waitForRefusal()
+        expect(refusalReasons()).toEqual(['price-dropped-no-row'])
+        expect(sent).toEqual([])
+    })
+
+    it('nothing changes within the window: no-signal', async () => {
+        await armed()
+        shopperTypes('SAVE10')
+        shopperClicksApply()
+
+        await waitForRefusal()
+        expect(refusalReasons()).toEqual(['no-signal'])
+        expect(sent).toEqual([])
+        // Waits out the whole 10s verdict window.
+    }, 20000)
+
+    it('an applied row that does not name the code, with no drop: not-tied-to-code', async () => {
+        await armed()
+        document.getElementById('apply').addEventListener('click', () => {
+            setTimeout(() => {
+                const row = document.createElement('div')
+                row.id = 'applied-row'
+                setText(row, 'Reward points redeemed')
+                document.body.appendChild(row)
+            }, 100)
+        })
+        shopperTypes('SAVE10')
+        shopperClicksApply()
+
+        await waitForRefusal()
+        expect(refusalReasons()).toEqual(['not-tied-to-code'])
+        expect(sent).toEqual([])
+    }, 20000)
+
+    it('a row that committed and then reverted, beside stale error text: committed-no-effect', async () => {
+        await armed()
+        // The error text was already on the page before the code was applied
+        // (furniture, not the store's verdict), so it is not attributable.
+        setText(document.getElementById('err'), 'Invalid promo code')
+        document.getElementById('apply').addEventListener('click', () => {
+            setTimeout(() => {
+                const row = document.createElement('div')
+                row.id = 'applied-row'
+                setText(row, `${promo().value} applied`)
+                document.body.appendChild(row)
+                // The store takes the code, then undoes it before the row has
+                // held for 1.2s. The runner polls every 200ms, so the row must
+                // outlive a few polls (600ms = about three) to be seen as
+                // committed at all.
+                setTimeout(() => row.remove(), 600)
+            }, 100)
+        })
+        shopperTypes('SAVE10')
+        shopperClicksApply()
+
+        await waitForRefusal()
+        expect(refusalReasons()).toEqual(['committed-no-effect'])
+        expect(sent).toEqual([])
+    }, 20000)
+
+    it('an accepted code reports no refusal and is still shared', async () => {
+        await armed()
+        storeAnswers(true)
+        shopperTypes('SAVE10')
+        shopperClicksApply()
+
+        await vi.waitFor(() => expect(sent).toHaveLength(1), LONG)
+        expect(refusalReasons()).toEqual([])
     })
 })
