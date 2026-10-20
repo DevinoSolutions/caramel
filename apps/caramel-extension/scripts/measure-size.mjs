@@ -101,9 +101,9 @@ export const GROUPS = {
     // Injected only on porkbun.com/checkout/* (entrypoints/porkbun-alert.content.ts,
     // MAIN world), so it neither hides in nor inflates the per-page budget.
     'porkbun-alert': ['extension-capabilities.js', 'porkbun-alert-shim.js'],
-    // The same, for the learned-box memory: imported only on a store with no
-    // config, when the finder is about to remember a box (wxt.config.ts).
-    'coupon-box-learned': ['coupon-box-learned.js'],
+    // The same, for the coupon-box selector builder: imported only on a store
+    // with no config, when the finder has a box to save (wxt.config.ts).
+    'coupon-box-selectors': ['coupon-box-selectors.js'],
 }
 
 /** Minified bytes of one group, written as a single file for size-limit. */

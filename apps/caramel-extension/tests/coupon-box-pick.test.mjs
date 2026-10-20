@@ -31,7 +31,6 @@ let finalModals
 let appliedWith
 let flagOn
 let llmOn
-let mode // the server's couponBoxPickMode (undefined: rules_first)
 let pickCalls
 let answer // the server's answer: an object, or a function of the request
 // The outline builder is loaded from the extension's own URL, which the stub
@@ -121,7 +120,7 @@ function installChromeStub() {
         const a = message?.action
         if (a === 'fetchCoupons') cb({ coupons: COUPONS })
         else if (a === 'couponBoxDiscoveryEnabled') cb({ enabled: flagOn })
-        else if (a === 'couponBoxLlmEnabled') cb({ enabled: llmOn, mode })
+        else if (a === 'couponBoxLlmEnabled') cb({ enabled: llmOn })
         else if (a === 'couponBoxPick') {
             pickCalls.push(message)
             cb(typeof answer === 'function' ? answer(message) : answer)
@@ -217,7 +216,6 @@ beforeEach(() => {
     pickCalls = []
     flagOn = true
     llmOn = true
-    mode = undefined
     answer = { outcome: 'no_box', confidence: 80, why: 'none', cached: false }
     outlineUrl = OUTLINE_FILE
     outlineLoads = 0
@@ -1107,30 +1105,28 @@ describe('a pick is kept, by name, for the next page in the tab', () => {
     })
 
     it("a kept button outside the box's own form is not its button", async () => {
-        // The rules settle on a promo field whose button they can reach, so
-        // the server is asked first (llm_first, a store with no config).
-        mode = 'llm_first'
         const rec = { domain: 'shop.test', caramelNoConfig: true }
+        // The field sits deep in its form and "Go" beside the form, out of
+        // the rules' reach, so the server is asked.
         document.body.innerHTML =
-            '<form id="promo">' +
+            '<div class="f"><form id="promo">' +
             deep(PROMO_FIELD) +
             '</form>' +
-            '<button id="go" type="button" form="promo">Go</button>' +
+            '<button id="go" type="button">Go</button></div>' +
             TOTAL
         answer = req =>
             box(idx(req.outline, /textbox/), idx(req.outline, /button "Go"/))
         expect(await caramelDiscoveredRecord(rec)).not.toBeNull()
         expect(pickCalls).toHaveLength(1)
 
-        // The same button now belongs to the gift-card form. (The field sits
-        // deep in its form, so the rules, which run after a pick that cannot
-        // be used here, cannot reach that button either.)
+        // The same button now belongs to the gift-card form. (The rules
+        // cannot reach it either.)
         reload(
-            '<form id="promo">' +
+            '<div class="f"><form id="promo">' +
                 deep(PROMO_FIELD) +
                 '</form>' +
                 '<form id="gift"><input name="gift_card" type="text"></form>' +
-                '<button id="go" type="button" form="gift">Go</button>' +
+                '<button id="go" type="button" form="gift">Go</button></div>' +
                 TOTAL,
         )
 

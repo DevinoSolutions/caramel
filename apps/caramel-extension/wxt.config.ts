@@ -59,16 +59,17 @@ function resolveEnvironment(mode: string): EnvironmentName {
 }
 
 // Content-script modules loaded by URL on demand (see build:publicAssets).
-const ON_DEMAND_MODULES = ['coupon-box-outline.js', 'coupon-box-learned.js']
+const ON_DEMAND_MODULES = ['coupon-box-outline.js', 'coupon-box-selectors.js']
 
 export default defineConfig({
     modules: ['@wxt-dev/module-react'],
     hooks: {
-        // The coupon-box outline builder and the learned-box memory ship as
-        // their own files rather than in the content-script bundle:
+        // The coupon-box outline builder and the coupon-box selector builder
+        // ship as their own files rather than in the content-script bundle:
         // coupon-box-discovery.js imports the outline only when it is about to
-        // ask the server for a box, and the memory only on a store with no
-        // config, so pages that never need them never load them. Neither has
+        // ask the server for a box, and the selector builder only on a store
+        // with no config once it has a box to save, so pages that never need
+        // them never load them. Neither has
         // imports of its own, so each is minified on its own with the same
         // esbuild settings scripts/measure-size.mjs budgets it with, and the
         // file that ships is the file that is measured; assets/* is already

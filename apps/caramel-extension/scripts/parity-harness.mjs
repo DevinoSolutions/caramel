@@ -251,11 +251,11 @@ for (const [browser, { outDir }] of Object.entries(BUILDS)) {
     // that stopped emitting it would pass every reference check above and only
     // fail on a shopper's page, as a quiet miss. Pin the file itself, per
     // browser: present, non-empty, and still the module the finder imports.
-    // The learned-box memory (assets/coupon-box-learned.js) ships the same
-    // way and is pinned the same way.
+    // The coupon-box selector builder (assets/coupon-box-selectors.js) ships
+    // the same way and is pinned the same way.
     for (const [asset, defines] of [
         ['assets/coupon-box-outline.js', /\bcaramelPageOutline\b/],
-        ['assets/coupon-box-learned.js', /\bcaramelLearnedOutcome\b/],
+        ['assets/coupon-box-selectors.js', /\bcaramelBoxSelectors\b/],
     ]) {
         const ships = files.includes(asset)
         check(

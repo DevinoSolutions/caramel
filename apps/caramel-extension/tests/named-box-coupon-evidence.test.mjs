@@ -2,22 +2,15 @@ import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { initCaramelBase } from '../caramel-base.js'
-import {
-    _caramelResetDiscoveryFlag,
-    caramelFinderSees,
-} from '../coupon-box-discovery.js'
-import { LEARNED_KEY } from '../coupon-box-learned.js'
+import { _caramelResetDiscoveryFlag } from '../coupon-box-discovery.js'
 import { caramelPageOutline } from '../coupon-box-outline.js'
 import { startApplyingCoupons } from '../coupon-runner.js'
 import { caramelConfiglessRecord, getDomainRecord } from '../store-detect.js'
 import { FINDER_ASSET, FINDER_FILE } from './_finder-asset.mjs'
-import { LEARNED_ACTIONS, learnedBackground } from './_learned-background.mjs'
 
-// A box someone else named: the server's pick (by its place in the outline),
-// a box the server learned from other installs (by selectors), and a box this
-// install remembers (by selectors). The page is the last line of defence for
-// all three, so each must pass the coupon-word checks a box the rules find
-// passes, and the click guards:
+// A box someone else named: the server's pick, by its place in the outline.
+// The page is the last line of defence for it, so it must pass the
+// coupon-word checks a box the rules find passes, and the click guards:
 //   · its field carries a coupon word (its name, label, placeholder,
 //     aria-label or the short region around it), and never takes points;
 //   · its apply button says apply (Apply, Redeem, Submit, OK, or an arrow
@@ -26,23 +19,18 @@ import { LEARNED_ACTIONS, learnedBackground } from './_learned-background.mjs'
 //   · nothing that adds to the cart, buys, adds a gift extra, protection or a
 //     donation, updates the cart, subscribes, signs in, or spends points is
 //     ever clicked, by a pick or by the rules.
-// llm_only throughout, so the rules never stand in for a refused part.
+// The rules run first and the pick is asked only when they find nothing, so
+// a refused pick part may still leave the rules' own find to run: what is
+// pinned is that the refused part is never used.
 
-const LEARNED_FILE = pathToFileURL(
-    resolve(import.meta.dirname, '../coupon-box-learned.js'),
-).href
 const OUTLINE_FILE = pathToFileURL(
     resolve(import.meta.dirname, '../coupon-box-outline.js'),
 ).href
 
 let finalModals
 let appliedWith
-let mode
 let answer
 let pickCalls
-// The background's per-tab hold of the box a run used.
-let holds = new Map()
-let reported
 let local
 
 vi.mock('../coupon-apply.js', async importOriginal => ({
@@ -108,27 +96,19 @@ function installChromeStub() {
     stub.runtime.getURL = path =>
         path === FINDER_ASSET
             ? FINDER_FILE
-            : path === 'assets/coupon-box-learned.js'
-              ? LEARNED_FILE
-              : path === 'assets/coupon-box-outline.js'
-                ? OUTLINE_FILE
-                : 'chrome-extension://caramel/' + path
+            : path === 'assets/coupon-box-outline.js'
+              ? OUTLINE_FILE
+              : 'chrome-extension://caramel/' + path
     stub.runtime.sendMessage = (message, cb) => {
         const a = message?.action
         if (a === 'fetchCoupons')
             cb({ coupons: [{ code: 'SAVE20', id: 'c1' }] })
         else if (a === 'couponBoxDiscoveryEnabled') cb({ enabled: true })
-        else if (a === 'couponBoxLlmEnabled') cb({ enabled: true, mode })
+        else if (a === 'couponBoxLlmEnabled') cb({ enabled: true })
         else if (a === 'couponBoxPick') {
             pickCalls.push(message)
             cb(typeof answer === 'function' ? answer(message) : answer)
-        } else if (LEARNED_ACTIONS.includes(a))
-            learnedBackground(
-                stub.storage.local,
-                reported,
-                holds,
-            )(message).then(cb)
-        else cb?.({})
+        } else cb?.({})
     }
     globalThis.chrome = stub
     globalThis.browser = undefined
@@ -161,10 +141,16 @@ function stubLayout() {
 const TOTAL = '<div class="row"><span>Total</span><span>$100.00</span></div>'
 const PROMO_INPUT = '<input id="x" name="promo_code" type="text">'
 const APPLY = '<button id="b" type="button">Apply</button>'
+// A promo field the rules cannot settle on (its button sits out of their
+// reach), so the server pick is asked: what a pick names is then tested
+// alone, with no rules' find standing in.
+const PICK_ONLY_INPUT =
+    '<div>'.repeat(6) +
+    '<input id="x" name="field_7" type="text" placeholder="Promo code">' +
+    '</div>'.repeat(6)
 const $ = id => document.getElementById(id)
 
-// The three ways a box is named, each naming the elements with these ids
-// (null: not named). `enterOnly` only when no button is named.
+// How a box is named, naming the elements with these ids (null: not named).
 const SOURCES = {
     'the server pick': ({ input, button, toggle }) => {
         answer = () => {
@@ -183,35 +169,6 @@ const SOURCES = {
                 why: 'test',
                 cached: false,
             }
-        }
-    },
-    'a box the server learned': ({ input, button, toggle }) => {
-        answer = {
-            outcome: 'box',
-            source: 'learned',
-            input: null,
-            button: null,
-            toggle: null,
-            box: {
-                input: input && `#${input}`,
-                apply: button && `#${button}`,
-                toggle: toggle && `#${toggle}`,
-                enterOnly: !button,
-            },
-        }
-    },
-    'a box this install remembers': ({ input, button, toggle }) => {
-        local[LEARNED_KEY] = {
-            [location.hostname]: {
-                v: 1,
-                input: input && `#${input}`,
-                apply: button && `#${button}`,
-                toggle: toggle && `#${toggle}`,
-                enterOnly: !button,
-                source: 'llm',
-                confirmedAt: 1,
-                failures: 0,
-            },
         }
     },
 }
@@ -244,10 +201,7 @@ beforeEach(() => {
     finalModals = []
     appliedWith = []
     pickCalls = []
-    reported = []
-    holds = new Map()
     local = {}
-    mode = 'llm_only'
     answer = { outcome: 'no_box', confidence: 80, why: 'none', cached: false }
     getDomainRecord.cache = []
     _caramelResetDiscoveryFlag()
@@ -335,7 +289,7 @@ for (const [source, name] of Object.entries(SOURCES))
         it('a button that does not say apply is never clicked, nor swapped for Enter', async () => {
             document.body.innerHTML =
                 '<div>' +
-                PROMO_INPUT +
+                PICK_ONLY_INPUT +
                 '<button id="b" type="button">Details</button></div>' +
                 TOTAL
             name({ input: 'x', button: 'b' })
@@ -343,6 +297,7 @@ for (const [source, name] of Object.entries(SOURCES))
 
             await run()
 
+            expect(pickCalls).toHaveLength(1)
             expect(appliedWith).toHaveLength(0)
             expect(clicks).toEqual([])
         })
@@ -417,7 +372,6 @@ for (const [source, name] of Object.entries(SOURCES))
             it(`${what}: clicked, and the box it opens is used`, async () => {
                 // The pick cannot name a field the outline does not show, so
                 // the rules read the box the toggle opened.
-                mode = 'llm_first'
                 document.body.innerHTML = folded(html)
                 opens()
                 name({ input: 'x', button: 'b', toggle: 'tg' })
@@ -498,10 +452,6 @@ for (const [source, name] of Object.entries(SOURCES))
 // The rules find the box themselves: the same never-click words hold for
 // the button and the reveal they pick.
 describe('the rules never click a control that is not a code', () => {
-    beforeEach(() => {
-        mode = 'rules_first'
-    })
-
     it('a promo field whose only button is "Update cart": no apply button, no run', async () => {
         document.body.innerHTML =
             '<div><label for="dc">Discount code</label>' +
@@ -533,21 +483,11 @@ describe('the rules never click a control that is not a code', () => {
     })
 })
 
-// Every path that names an apply button: the three named sources (llm_only,
-// so the rules never stand in) and the rules on their own.
+// Every path that names an apply button: the server pick, and the rules on
+// their own.
 const PATHS = {
-    ...Object.fromEntries(
-        Object.entries(SOURCES).map(([source, name]) => [
-            source,
-            ids => {
-                mode = 'llm_only'
-                name(ids)
-            },
-        ]),
-    ),
-    'the rules': () => {
-        mode = 'rules_first'
-    },
+    ...SOURCES,
+    'the rules': () => {},
 }
 
 // A link elsewhere is a way out of the cart, whatever it says: never the apply
@@ -676,9 +616,6 @@ describe('an apply button among points or member words is never clicked', () => 
 // The rules' own reveals: a switch or a radio is a setting, never a fold; a
 // checkbox is clicked only when it speaks of entering a code.
 describe('the rules never click a setting as a reveal', () => {
-    beforeEach(() => {
-        mode = 'rules_first'
-    })
     // The reveal and the box share one small panel, as a fold does.
     const folded = toggle =>
         '<div class="promo">' +
@@ -736,309 +673,14 @@ describe('the rules never click a setting as a reveal', () => {
     })
 })
 
-// A learned box names its apply button by a selector, and a selector can name
-// anything on the page (#place-order, button[name=checkout], an add-to-cart).
-// Its apply must say apply, or be an arrow or icon inside the box's own form
-// or container. Otherwise the WHOLE box is refused and normal detection runs:
-// the rules may still find the same field with its real Apply, but the record
-// is the rules' find, never the learned box with a button swapped in.
-const LEARNED_SOURCES = Object.entries(SOURCES).slice(1)
-const learnedHost = () => location.hostname
-describe('a learned box whose apply is not an apply button is refused whole', () => {
-    const REAL_APPLY = '<button id="ok" type="button">Apply</button>'
-    for (const label of [
-        'Checkout',
-        'Check out',
-        'Place order',
-        'Pay now',
-        'Pay',
-        'Continue',
-        'Continue to payment',
-        'Proceed to checkout',
-        'Add to cart',
-        'Add to bag',
-        'Buy now',
-        'Apply and checkout',
-    ])
-        for (const [source, name] of LEARNED_SOURCES)
-            it(`${source}: "${label}" as the apply`, async () => {
-                // llm_first: after the refusal the rules still run, and find
-                // the field with its real Apply.
-                mode = 'llm_first'
-                document.body.innerHTML =
-                    '<div>' +
-                    PROMO_INPUT +
-                    REAL_APPLY +
-                    `<button id="b" type="button">${label}</button></div>` +
-                    TOTAL
-                name({ input: 'x', button: 'b' })
-                const clicks = watchClicks()
-
-                await run()
-
-                expect(clicks).not.toContain('b')
-                expect(drivenSubmit()).not.toBe('b')
-                // What runs is the rules' own find, not the learned box.
-                expect(appliedWith[0]?.rec.caramelLearn?.source).not.toBe(
-                    'server_learned',
-                )
-                expect(appliedWith[0]?.rec.caramelLearn?.learned).toBeFalsy()
-                // A remembered box that named it counts a failed use.
-                const kept = local[LEARNED_KEY]?.[learnedHost()]
-                if (kept) expect(kept.failures).toBe(1)
-            })
-
-    for (const [what, button] of [
-        [
-            'an apply word over a checkout name',
-            '<button id="b" name="checkout" type="button">Go</button>',
-        ],
-        [
-            'an apply word over a place-order id',
-            '<div><button id="b" type="button" data-testid="place-order">OK</button></div>',
-        ],
-        [
-            'a button that says nothing',
-            '<button id="b" type="button">Details</button>',
-        ],
-    ])
-        for (const [source, name] of LEARNED_SOURCES)
-            it(`${source}: ${what}`, async () => {
-                document.body.innerHTML =
-                    '<div>' + PROMO_INPUT + button + '</div>' + TOTAL
-                name({ input: 'x', button: 'b' })
-                const clicks = watchClicks()
-
-                await run()
-
-                expect(clicks).toEqual([])
-                expect(appliedWith).toHaveLength(0)
-            })
-
-    // Many real apply buttons live in the checkout's own namespace: an id,
-    // name or data attribute that names the checkout AND the coupon, on a
-    // button that says Apply, is the box's apply.
-    for (const [id, attrs] of [
-        ['checkout_reduction_code', ''],
-        ['checkout-coupon-apply', ''],
-        ['checkout_discount_btn', ''],
-        ['b', 'name="checkout[reduction_code]"'],
-        ['b', 'data-testid="checkoutCouponApply"'],
-    ])
-        for (const [source, name] of LEARNED_SOURCES)
-            it(`${source}: an Apply named ${attrs || '#' + id} is used`, async () => {
-                document.body.innerHTML =
-                    '<div>' +
-                    PROMO_INPUT +
-                    `<button id="${id}" ${attrs} type="button">Apply</button></div>` +
-                    TOTAL
-                name({ input: 'x', button: id })
-
-                await run()
-
-                expect(drivenSubmit()).toBe(id)
-                expect(appliedWith[0]?.rec.caramelLearn?.learned).toBeTruthy()
-            })
-
-    // ...but the namespace lets off the checkout word only: the label must
-    // still say apply, and an attribute that also places the order or adds to
-    // the cart is still refused.
-    for (const [what, button] of [
-        [
-            'a coupon-named checkout id whose label says checkout',
-            '<button id="b" type="button" data-testid="checkout-coupon-apply">Checkout</button>',
-        ],
-        [
-            'a coupon-named checkout id whose label says nothing',
-            '<button id="b" type="button" data-testid="checkout_discount_btn">Details</button>',
-        ],
-        [
-            'a coupon-named checkout id on a wordless arrow',
-            '<button id="b" type="button" data-testid="checkout-coupon-apply">→</button>',
-        ],
-        [
-            'a promo-named place-order attribute',
-            '<button id="b" type="button" data-testid="place-order-promo">Apply</button>',
-        ],
-        [
-            'a coupon-named add-to-cart attribute',
-            '<button id="b" type="button" data-testid="add-to-cart-coupon">Apply</button>',
-        ],
-        [
-            'a coupon-named checkout-and-pay attribute',
-            '<button id="b" type="button" name="checkout_pay_discount">Apply</button>',
-        ],
-    ])
-        for (const [source, name] of LEARNED_SOURCES)
-            it(`${source}: ${what} is refused`, async () => {
-                document.body.innerHTML =
-                    '<div>' + PROMO_INPUT + button + '</div>' + TOTAL
-                name({ input: 'x', button: 'b' })
-                const clicks = watchClicks()
-
-                await run()
-
-                expect(clicks).toEqual([])
-                expect(appliedWith).toHaveLength(0)
-            })
-
-    // An arrow or icon carries no words: it is the box's apply only when it
-    // sits in the box's own form or container.
-    for (const [source, name] of LEARNED_SOURCES) {
-        it(`${source}: an arrow inside the box's container is used`, async () => {
-            document.body.innerHTML =
-                '<div class="promo">' +
-                PROMO_INPUT +
-                '<button id="b" type="button">→</button></div>' +
-                TOTAL
-            name({ input: 'x', button: 'b' })
-
-            await run()
-
-            expect(drivenSubmit()).toBe('b')
-        })
-
-        it(`${source}: an icon inside the box's form is used`, async () => {
-            document.body.innerHTML =
-                '<form class="promo" onsubmit="return false">' +
-                PROMO_INPUT +
-                '<button id="b" type="button"><svg></svg></button></form>' +
-                TOTAL
-            name({ input: 'x', button: 'b' })
-
-            await run()
-
-            expect(drivenSubmit()).toBe('b')
-        })
-
-        it(`${source}: an arrow elsewhere on the page is refused`, async () => {
-            document.body.innerHTML =
-                '<div class="promo">' +
-                PROMO_INPUT +
-                '</div>' +
-                '<p>' +
-                'Free shipping on every order over fifty. '.repeat(12) +
-                '</p>' +
-                '<div class="footer"><button id="b" type="button">→</button></div>' +
-                TOTAL
-            name({ input: 'x', button: 'b' })
-            const clicks = watchClicks()
-
-            await run()
-
-            expect(clicks).toEqual([])
-            expect(appliedWith).toHaveLength(0)
-        })
-
-        // A form can hold the whole cart: sharing the field's form is not
-        // being its button.
-        it(`${source}: an icon elsewhere in a whole-cart form is refused`, async () => {
-            document.body.innerHTML =
-                '<form class="cart" onsubmit="return false">' +
-                '<div class="promo">' +
-                PROMO_INPUT +
-                '</div>' +
-                '<p>' +
-                'Organic cotton tee, size M, qty 1. '.repeat(14) +
-                '</p>' +
-                '<div class="line"><button id="b" type="button"><svg></svg></button></div>' +
-                '</form>' +
-                TOTAL
-            name({ input: 'x', button: 'b' })
-            const clicks = watchClicks()
-
-            await run()
-
-            expect(clicks).toEqual([])
-            expect(appliedWith).toHaveLength(0)
-        })
-
-        for (const [what, attrs] of [
-            ['a place-order data attribute', 'data-place-order'],
-            ['a remove class', 'class="cart-remove"'],
-        ])
-            it(`${source}: a wordless arrow with ${what} is refused`, async () => {
-                document.body.innerHTML =
-                    '<div class="promo">' +
-                    PROMO_INPUT +
-                    `<button id="b" type="button" ${attrs}>→</button></div>` +
-                    TOTAL
-                name({ input: 'x', button: 'b' })
-                const clicks = watchClicks()
-
-                await run()
-
-                expect(clicks).toEqual([])
-                expect(appliedWith).toHaveLength(0)
-            })
-    }
-
-    // A selector that names the apply by its place among its siblings names
-    // another element once the cart gains a line: a wordless one is never
-    // trusted, a labelled one still is.
-    const POSITIONAL = {
-        'a box the server learned': apply => {
-            answer = {
-                outcome: 'box',
-                source: 'learned',
-                input: null,
-                button: null,
-                toggle: null,
-                box: { input: '#x', apply, toggle: null, enterOnly: false },
-            }
-        },
-        'a box this install remembers': apply => {
-            local[LEARNED_KEY] = {
-                [location.hostname]: {
-                    v: 1,
-                    input: '#x',
-                    apply,
-                    toggle: null,
-                    enterOnly: false,
-                    source: 'llm',
-                    confirmedAt: 1,
-                    failures: 0,
-                },
-            }
-        },
-    }
-    for (const [source, name] of Object.entries(POSITIONAL)) {
-        it(`${source}: a wordless apply named by its place is refused`, async () => {
-            document.body.innerHTML =
-                '<div class="promo">' +
-                PROMO_INPUT +
-                '<button id="b" type="button">→</button></div>' +
-                TOTAL
-            name('div.promo > button:nth-of-type(1)')
-            const clicks = watchClicks()
-
-            await run()
-
-            expect(clicks).toEqual([])
-            expect(appliedWith).toHaveLength(0)
-        })
-
-        it(`${source}: an Apply named by its place is used (the control case)`, async () => {
-            document.body.innerHTML =
-                '<div class="promo">' + PROMO_INPUT + APPLY + '</div>' + TOTAL
-            name('div.promo > button:nth-of-type(1)')
-
-            await run()
-
-            expect(drivenSubmit()).toBe('b')
-        })
-    }
-})
-
 // Every box's apply is its own: in the field's form or its small panel. An
 // Apply across the page belongs to something else, whoever named it.
 describe('an apply far from the box is never its button', () => {
     for (const [source, name] of Object.entries(SOURCES))
         it(`${source}: an Apply in another section is refused`, async () => {
-            mode = 'llm_only'
             document.body.innerHTML =
                 '<div class="promo">' +
-                PROMO_INPUT +
+                PICK_ONLY_INPUT +
                 '</div>' +
                 '<p>' +
                 'Free shipping on every order over fifty. '.repeat(12) +
@@ -1050,14 +692,14 @@ describe('an apply far from the box is never its button', () => {
 
             await run()
 
+            expect(pickCalls).toHaveLength(1)
             expect(clicks).not.toContain('b')
             expect(drivenSubmit()).not.toBe('b')
         })
 })
 
 // Many stores ship only an icon or an arrow beside the field. A plain pick
-// (llm_only, so the rules never stand in) uses one in the box's own small
-// panel, but never one across a whole-cart form, and never one whose name,
+// uses one in the box's own small panel, but never one across a whole-cart form, and never one whose name,
 // class or data attributes say it removes, checks out or places the order.
 describe("a plain pick's wordless apply", () => {
     const pick = () => SOURCES['the server pick']({ input: 'x', button: 'b' })
@@ -1172,87 +814,4 @@ describe('a submit that leaves the store is never the apply button', () => {
 
             expect(drivenSubmit()).toBe('b')
         })
-})
-
-// A served or stored selector is data: one outside the learned-box grammar
-// (coupon-box-learned.js caramelSelectorAllowed) is never even queried.
-describe('a learned selector outside the grammar is never read', () => {
-    const BOX =
-        '<div class="c"><div class="d">' +
-        PROMO_INPUT +
-        APPLY +
-        '</div></div>' +
-        TOTAL
-    for (const [what, css] of [
-        // Each of these finds the promo field, were it ever run.
-        ['a :has()', 'div:has(> button) > input'],
-        ['five parts', 'html > body > div.c > div.d > input'],
-        ['an attribute outside the list', 'input[class="x"]'],
-    ])
-        for (const [source, name] of Object.entries(SOURCES).slice(1))
-            it(`${source}: ${what}`, async () => {
-                document.body.innerHTML = BOX
-                name({ input: 'x', button: 'b' })
-                const box = local[LEARNED_KEY]?.[location.hostname]
-                if (box) box.input = css
-                else answer.box.input = css
-                const spy = vi.spyOn(document, 'querySelectorAll')
-
-                await run()
-
-                expect(spy.mock.calls.map(c => c[0])).not.toContain(css)
-                spy.mockRestore()
-                expect(appliedWith).toHaveLength(0)
-            })
-})
-
-// Before any run, the prompt asks whether a remembered box could be used
-// here (caramelFinderSees). The same coupon-word check answers it: a box
-// whose field says nothing about a code is not offered.
-describe('the prompt never offers a remembered box that is not a coupon box', () => {
-    const remember = () =>
-        SOURCES['a box this install remembers']({
-            input: 'x',
-            button: 'b',
-        })
-    it('a promo field and its Apply button: offered (the control case)', async () => {
-        document.body.innerHTML =
-            '<div>' + PROMO_INPUT + APPLY + '</div>' + TOTAL
-        remember()
-
-        expect(await caramelFinderSees(location.hostname, false)).toBe(true)
-    })
-
-    it('a note field and an Apply button: not offered', async () => {
-        document.body.innerHTML =
-            '<div><input id="x" name="order_note" type="text">' +
-            APPLY +
-            '</div>' +
-            TOTAL
-        remember()
-
-        expect(await caramelFinderSees(location.hostname, false)).toBe(false)
-    })
-
-    it('a promo field whose remembered apply is "Checkout": not offered', async () => {
-        document.body.innerHTML =
-            '<div>' +
-            PROMO_INPUT +
-            '<button id="b" type="button">Checkout</button></div>' +
-            TOTAL
-        remember()
-
-        expect(await caramelFinderSees(location.hostname, false)).toBe(false)
-    })
-
-    it('a promo field whose remembered apply is an arrow in its box: offered', async () => {
-        document.body.innerHTML =
-            '<div>' +
-            PROMO_INPUT +
-            '<button id="b" type="button">→</button></div>' +
-            TOTAL
-        remember()
-
-        expect(await caramelFinderSees(location.hostname, false)).toBe(true)
-    })
 })

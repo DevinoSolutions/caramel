@@ -193,8 +193,8 @@ if (BEHAVIOUR === 'late-reveal') {
 </script></body></html>`
 
 /* A cart for a store with NO config: no promo box anywhere, an order total,
- * a cross-sell "Add to cart" and a plain note field. The S9 scenario points a
- * learned box served by the server at those two. Adding the cross-sell raises
+ * a cross-sell "Add to cart" and a plain note field. The S9 scenario points the
+ * server's pick at those two. Adding the cross-sell raises
  * the total, the way a real one does. */
 const configlessHtml = () => `<!doctype html><html><head><meta charset=utf-8>
 <title>Cart</title><style>body{font-family:system-ui;padding:24px}</style>
@@ -295,14 +295,7 @@ const stubApi = (sw, config, server = null) =>
              * The reader awaits this before it looks. */
             globalThis.__caramelReportsSettled = () => queue
             // A scenario with `server` answers the finder's own routes too: the
-            // features flags, the coupon-box pick (recorded, with whether it
-            // accepted a learned answer) and the learned-box report (recorded
-            // with its body). Its install id is seeded, so a report is never
-            // skipped for want of one: a report that was not sent was not sent.
-            if (server?.iid)
-                chrome.storage.local.set({
-                    caramel_install_attribution: { iid: server.iid },
-                })
+            // features flags and the coupon-box pick (recorded).
             globalThis.fetch = (input, init) => {
                 const u = String(typeof input === 'string' ? input : input.url)
                 if (u.includes('/api/extension/supported-stores'))
@@ -314,21 +307,8 @@ const stubApi = (sw, config, server = null) =>
                 if (server && u.includes('/api/extension/features'))
                     return json(server.features)
                 if (server && u.includes('/api/extension/coupon-box-pick')) {
-                    let body = {}
-                    try {
-                        body = JSON.parse(init?.body || '{}')
-                    } catch {
-                        // recorded as not accepting
-                    }
-                    record({
-                        kind: 'pick',
-                        acceptsLearned: body.acceptsLearned === true,
-                    })
+                    record({ kind: 'pick' })
                     return json(server.pick)
-                }
-                if (server && u.includes('/api/extension/coupon-box-learned')) {
-                    record({ kind: 'learned', body: init?.body || '' })
-                    return json({ recorded: true })
                 }
                 if (/\/api\/coupons\/[^/]+\/report/.test(u)) {
                     record({ kind: 'report', body: init?.body || '' })
@@ -855,42 +835,36 @@ const SCENARIOS = [
             check('never touches the order button', state.orderPlaced === false)
         },
     },
-    /* A store with no config, where the server serves a learned box (a box it
-     * says other installs saw this store answer through) that names a
-     * cross-sell "Add to cart" as the apply button and a note field as the
-     * input. Neither carries a word a coupon box carries, so the box is
-     * refused before anything is touched: nothing is typed, nothing is added
-     * to the cart, the shopper gets the codes to copy, and no `failed` is
-     * reported for the box, because the store was never asked anything. */
+    /* A store with no config, where the rules find no box and the server's
+     * pick names a cross-sell "Add to cart" as the apply button and a note
+     * field as the input. Neither carries a word a coupon box carries, so the
+     * box is refused before anything is touched: nothing is typed, nothing is
+     * added to the cart, and the shopper gets the codes to copy. */
     {
-        name: 'S9 learned box on a cross-sell button and a note field — refused untouched',
+        name: 'S9 server pick on a cross-sell button and a note field — refused untouched',
         server: {
-            iid: '7a1d3c2e-9b4f-4e1a-8c6d-2f5e0b9a1c3d',
             features: {
                 shopperCodeCapture: false,
                 couponBoxDiscovery: true,
                 couponBoxLlm: true,
-                couponBoxLearned: true,
             },
+            // The page outline lists the cross-sell button first and the note
+            // field second.
             pick: {
                 outcome: 'box',
-                source: 'learned',
-                input: null,
-                button: null,
+                input: 1,
+                button: 0,
                 toggle: null,
-                box: {
-                    input: 'input[name="order_note"]',
-                    apply: 'button#xsell-add',
-                    toggle: null,
-                    enterOnly: false,
-                },
+                confidence: 90,
+                why: 'test',
+                cached: false,
             },
         },
         settleMs: 2000,
         assert: ({ modal, state, savings, logs, reports, check }) => {
             check(
-                'asked the server, accepting a learned box',
-                reports.some(r => r.kind === 'pick' && r.acceptsLearned),
+                'asked the server',
+                reports.some(r => r.kind === 'pick'),
                 JSON.stringify(reports),
             )
             check(
@@ -909,16 +883,7 @@ const SCENARIOS = [
                 modal.slice(0, 140),
             )
             check(
-                'reports no failed learned box (the store was never asked)',
-                !reports.some(
-                    r =>
-                        r.kind === 'learned' &&
-                        /"outcome":"failed"/.test(r.body || ''),
-                ),
-                JSON.stringify(reports),
-            )
-            check(
-                'logs the learned box as unusable',
+                'logs the pick as unusable',
                 logs.some(l => l.includes('FINDER_PICK_UNUSABLE')),
             )
             check(

@@ -34,7 +34,6 @@ import {
 } from './coupon-apply.js'
 import {
     caramelCouponBoxDiscoveryOn,
-    caramelLoadedFinder,
     caramelLoadFinder,
 } from './coupon-box-finder-loader.js'
 import {
@@ -1039,16 +1038,6 @@ export async function startApplyingCoupons(rec, options) {
             }
         }
 
-        // The store answered through a box the finder found on a store with no
-        // config: the total dropped, or it replied about this code. That box
-        // is remembered (coupon-box-discovery.js; a no-op for any other box).
-        if (res.success || (res.errorMsg && res.errorIsNew))
-            caramelLoadedFinder()?.caramelFinderLearn(
-                rec,
-                'confirmed',
-                res.success ? 'total_dropped' : 'store_answered',
-            )
-
         if (res.success) {
             // Real success — keep this code applied, stop here.
             // Measure against the most conservative baseline the page supports
@@ -1258,8 +1247,6 @@ export async function startApplyingCoupons(rec, options) {
             showFinalModal(bestSave, bestCode)
         }
     } else {
-        // A remembered box the store never answered through: one failed use.
-        caramelLoadedFinder()?.caramelFinderLearn(rec, 'failed')
         log('AUTO_INSERT_STOP', {
             result: 'none',
             bestCode: null,

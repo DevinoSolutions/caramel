@@ -15,9 +15,8 @@
  *                                           marked by the finder
  *   B  no config, both flags OFF         -> no prompt, no pick asked
  *   C  no config, a box the rules find   -> the true saving, no pick asked
- *   D  no config, server-only pick mode
- *      (the rules never run), the server
- *      names the box                     -> one pick asked, the true saving
+ *   D  no config, a box the rules miss,
+ *      the server names it               -> one pick asked, the true saving
  *   E  no config, a wrong pick (an email
  *      field and a link out of the cart) -> the codes to copy, no saving,
  *                                           never left the cart
@@ -42,7 +41,8 @@
  *   M  no config, the server names a
  *      field with no coupon word and a
  *      "Go" button                       -> nothing typed, the codes to copy
- *   K  as J, in server-only pick mode   -> one pick asked and kept across the
+ *   K  as J, with a box the rules miss
+ *      and the server names              -> one pick asked and kept across the
  *                                           reloads, the true saving
  *
  * Run: pnpm test:autodetect          (default: .output/chrome-mv3-dev)
@@ -172,6 +172,16 @@ const RULES_BOX =
     '<div class="promo"><label for="in">Discount code</label>' +
     '<input id="in" name="discount_code" type="text">' +
     '<button id="btn" type="button">Apply</button></div>'
+// A promo field the rules cannot settle on: its Apply sits out of their
+// reach, so the run asks the server, which names it.
+const PICK_ONLY_FIELD =
+    '<div>'.repeat(6) +
+    '<input id="in" name="field_7" type="text" placeholder="Promo code">' +
+    '</div>'.repeat(6)
+const PICK_ONLY_BOX =
+    '<div class="f">' +
+    PICK_ONLY_FIELD +
+    '<button id="btn" type="button">Apply</button></div>'
 // No coupon word on the field and a button that does not say apply: whatever
 // names it, the page refuses it.
 const BARE_BOX =
@@ -225,12 +235,13 @@ input.addEventListener('keydown', e => {
 /* A cart that posts its discount form and reloads the whole page after every
  * code, the way Magento 2's couponPost does. The cart lives on the "server"
  * (this closure): SAVE20 is refused, TENOFF takes $10 off, and the reloaded
- * page says so. `posts` records every code the store received. */
-function reloadingCart() {
+ * page says so. `posts` records every code the store received. With
+ * `pickOnly` its box is one the rules miss (PICK_ONLY_FIELD). */
+function reloadingCart(pickOnly = false) {
     const posts = []
     let applied = null
     let note = ''
-    const field = 'discount_code'
+    const field = pickOnly ? 'field_7' : 'discount_code'
     const serve = request => {
         if (request.method() === 'POST') {
             const code =
@@ -242,7 +253,9 @@ function reloadingCart() {
             } else note = 'Sorry, ' + code + ' is not a valid code.'
         }
         const box =
-            '<label for="in">Discount code</label><input id="in" name="discount_code" type="text">' +
+            (pickOnly
+                ? PICK_ONLY_FIELD
+                : '<label for="in">Discount code</label><input id="in" name="discount_code" type="text">') +
             '<button id="btn" type="submit">Apply</button>'
         return SHELL(`
 <div class="row"><span>Total</span> <span id="tot">$${applied ? '90.00' : '100.00'}</span></div>
@@ -300,7 +313,6 @@ const stubApi = (sw, opts) =>
                         shopperCodeCapture: false,
                         couponBoxDiscovery: o.flags,
                         couponBoxLlm: o.flags,
-                        couponBoxPickMode: o.pickMode,
                     })
                 }
                 if (u.includes('/api/extension/coupon-box-pick')) {
@@ -350,7 +362,6 @@ async function runScenario({
     serve = null,
     flags,
     pickPlan = null,
-    pickMode = undefined,
     expectPrompt = true,
     assert,
 }) {
@@ -381,7 +392,7 @@ async function runScenario({
             })
         })
 
-        const opts = { flags, pickPlan, pickMode, config: CONFIG }
+        const opts = { flags, pickPlan, config: CONFIG }
         let sw =
             ctx.serviceWorkers()[0] ||
             (await ctx.waitForEvent('serviceworker', { timeout: 30_000 }))
@@ -604,12 +615,11 @@ const SCENARIOS = [
         },
     },
     {
-        name: 'D no config, server-only mode: the server alone names the box — the true saving',
+        name: 'D no config, a box the rules miss, the server names it — the true saving',
         host: 'shop-the-server-names.example',
         path: '/cart',
-        page: finderPage(RULES_BOX),
+        page: finderPage(PICK_ONLY_BOX),
         flags: true,
-        pickMode: 'llm_only',
         pickPlan: { input: 'textbox', button: 'button "Apply"' },
         assert: ({ modal, state, savings, picks, worked }) => {
             check(
@@ -677,9 +687,8 @@ const SCENARIOS = [
         name: 'G no config, the store says "applied" but the total never moves — no saving',
         host: 'shop-that-says-yes.example',
         path: '/cart',
-        page: finderPage(RULES_BOX, true),
+        page: finderPage(PICK_ONLY_BOX, true),
         flags: true,
-        pickMode: 'llm_only',
         pickPlan: { input: 'textbox', button: 'button "Apply"' },
         assert: ({ modal, state, savings, picks, worked }) => {
             check('asks the server once', picks.length === 1)
@@ -830,17 +839,16 @@ const SCENARIOS = [
         },
     },
     (() => {
-        const cart = reloadingCart()
+        const cart = reloadingCart(true)
         return {
-            name: 'K no config, server-only mode, a cart that reloads per code — the true saving',
-            // The rules never run in this mode, so the reloaded page has a
-            // box only because the run keeps the server's pick across the
-            // reload (PR #348): the server is asked once for both codes.
+            name: 'K no config, a box the rules miss, a cart that reloads per code — the true saving',
+            // The rules miss the box, so the reloaded page has one only
+            // because the run keeps the server's pick across the reload
+            // (PR #348): the server is asked once for both codes.
             host: 'shop-that-reloads-for-the-server.example',
             path: '/cart',
             serve: cart.serve,
             flags: true,
-            pickMode: 'llm_only',
             pickPlan: { input: 'textbox', button: 'button "Apply"' },
             assert: ({ modal, savings, picks, worked }) => {
                 check(
