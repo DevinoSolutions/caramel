@@ -15,9 +15,9 @@ import { describe, expect, it } from 'vitest'
 //   half the side stays outside the inscribed circle.
 // - The apple touch icon is a fully opaque square: iOS masks its own corners
 //   and paints transparency black.
-// Regenerate from public/square_caramel_logo.png (full-bleed 600px source)
-// with a 20% corner radius, never from the padded logo.png / app/ios /
-// app/android art.
+// Regenerate with apps/caramel-extension/brand/generate-icons.py (rasterises
+// brand/icon-master.svg at each size; squircle tile that fills the frame),
+// never from the padded logo.png / app/ios / app/android art.
 
 const PUBLIC_DIR = path.resolve(__dirname, '../../public')
 const PNG_SIGNATURE = Buffer.from([

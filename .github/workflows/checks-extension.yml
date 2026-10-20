@@ -75,7 +75,7 @@ jobs:
   e2e:
     name: extension e2e
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # Playwright does not support ubuntu 26.04 (T-5003)
     timeout-minutes: 15
     services:
       postgres:
