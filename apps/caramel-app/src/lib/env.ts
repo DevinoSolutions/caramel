@@ -84,14 +84,17 @@ const serverObjectSchema = z.object({
     // (401) when it's unset. Never shipped to any client.
     INGEST_API_KEY: z.string().optional(),
     UPKUMA_HEALTH_SECRET: z.string().optional(),
-    // Read directly by the usesend-js SDK — not by our own code — but still
-    // part of the validated contract so it's documented and drift-checked.
-    USESEND_BASE_URL: z.string().optional(),
-    USESEND_API_KEY: z.string().optional(),
-    USESEND_FROM_EMAIL: z.string().default('no_reply@grabcaramel.com'),
-    USESEND_FROM_NAME: z.string().default('Caramel'),
+    // Sendly is the ONLY email transport (src/lib/email.ts); useSend and Resend
+    // are retired. The key is optional so a dev/CI boot without email still
+    // starts — sendEmail() throws loudly at send time if it is missing.
+    SENDLY_API_KEY: z.string().optional(),
+    // Leave unset for production (SDK default https://api.sendly.now); only
+    // set to aim the SDK at a staging API.
+    SENDLY_BASE_URL: z.string().optional(),
+    SENDLY_FROM_EMAIL: z.string().default('no_reply@grabcaramel.com'),
+    SENDLY_FROM_NAME: z.string().default('Caramel'),
     // Async email-delivery health (src/lib/emailDeliveryHealthMonitor.ts).
-    // Unset → ON in production whenever USESEND_API_KEY is set, OFF elsewhere.
+    // Unset → ON in production whenever SENDLY_API_KEY is set, OFF elsewhere.
     // 'false' opts a production deploy out; 'true' forces it on in dev/CI.
     // A typo'd value fails the boot instead of silently disabling the check —
     // "it was never running" is exactly the failure this monitor exists to end.

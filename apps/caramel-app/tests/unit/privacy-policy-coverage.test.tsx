@@ -27,7 +27,7 @@ describe('privacy policy coverage', () => {
         'OpenRouter',
         'Anthropic',
         'Google and Apple',
-        'UseSend',
+        'Sendly',
         'Amazon SES',
         'Cloudflare',
         'Google Analytics',

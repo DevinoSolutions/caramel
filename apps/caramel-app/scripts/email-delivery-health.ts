@@ -6,7 +6,7 @@
 // output — this is the ops handle for "did our mail actually get delivered?"
 // without waiting for the next interval or reading a Sentry issue.
 //
-// Run it from INSIDE the prod container, where USESEND_* already exist:
+// Run it from INSIDE the prod container, where SENDLY_* already exist:
 //
 //   docker exec <web-container> sh -lc 'cd apps/caramel-app && \
 //     pnpm exec tsx scripts/email-delivery-health.ts --minutes 1440'
@@ -43,9 +43,9 @@ export function parseWindowMinutes(argv: readonly string[]): number {
 async function main() {
     const windowMinutes = parseWindowMinutes(process.argv.slice(2))
     const report = await checkEmailDeliveryHealth({
-        baseUrl: process.env.USESEND_BASE_URL ?? '',
-        apiKey: process.env.USESEND_API_KEY ?? '',
-        fromEmail: process.env.USESEND_FROM_EMAIL,
+        apiKey: process.env.SENDLY_API_KEY ?? '',
+        baseUrl: process.env.SENDLY_BASE_URL || undefined,
+        fromEmail: process.env.SENDLY_FROM_EMAIL ?? 'no_reply@grabcaramel.com',
         windowMinutes,
     })
     console.log(formatEmailDeliveryHealthLine(report))

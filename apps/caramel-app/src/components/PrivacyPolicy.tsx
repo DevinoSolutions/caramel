@@ -356,8 +356,8 @@ const PrivacyPolicy = () => {
                             </>,
                             <>
                                 <strong>
-                                    UseSend (self-hosted by Devino) and Amazon
-                                    Web Services (Amazon SES)
+                                    Sendly (operated by Devino) and Amazon Web
+                                    Services (Amazon SES)
                                 </strong>
                                 : your email address, to deliver account emails
                                 such as sign-up verification and password

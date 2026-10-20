@@ -35,7 +35,7 @@ const USER_EMAIL = 'suggest-itest@example.com'
 
 // Only better-auth and the mail wire are stood in for: a real session needs a
 // full sign-in round-trip (WHICH user withRoute resolves is pinned by its own
-// tests), and the ops email is a UseSend call. Everything else — prisma, the
+// tests), and the ops email is a Sendly call. Everything else — prisma, the
 // FK, the queries — is real.
 const { getSessionMock } = vi.hoisted(() => ({
     getSessionMock: vi.fn(

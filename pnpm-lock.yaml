@@ -169,6 +169,9 @@ importers:
       sass:
         specifier: 1.101.0
         version: 1.101.0
+      sendly-sdk:
+        specifier: 1.1.0
+        version: 1.1.0
       server-only:
         specifier: 0.0.1
         version: 0.0.1
@@ -181,9 +184,6 @@ importers:
       tldts:
         specifier: 7.4.10
         version: 7.4.10
-      usesend-js:
-        specifier: 1.6.3
-        version: 1.6.3(react-dom@19.2.3(react@19.2.3))
       yup:
         specifier: 1.7.0
         version: 1.7.0
@@ -6402,6 +6402,10 @@ packages:
     resolution: {integrity: sha512-VMbMxbDeehAxpOtWJXlcUS5E8iXh6QmN+BkRX1GARS3wRaXEEgzCcB10gTQazO42tpNIya8xIyNx8fll1OFPrg==}
     engines: {node: '>= 0.8.0'}
 
+  sendly-sdk@1.1.0:
+    resolution: {integrity: sha512-QYl42OUamiNikSyn1Ksqid80kQDPN3DJJzunL+b5nIPsrD+z8JFQ5PeKnzeeEgo8bG4vfjtHuZKdR3GQI07qxg==}
+    engines: {node: '>=20'}
+
   serve-static@1.16.3:
     resolution: {integrity: sha512-x0RTqQel6g5SY7Lg6ZreMmsOzncHFU7nhnRWkKgWuMTu5NN0DR5oruckMqRvacAN9d5w6ARnRBXl9xhDCgfMeA==}
     engines: {node: '>= 0.8.0'}
@@ -7189,9 +7193,6 @@ packages:
     resolution: {integrity: sha512-Rb46I4cGGVBmjamjphe8L/UnvJD+uPPtTkNvX5mZgqdbavhI4EbgIWJiIHXJ8bc/i9EQGPRh4DwEURJ552Do0A==}
     peerDependencies:
       react: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
-
-  usesend-js@1.6.3:
-    resolution: {integrity: sha512-HKhW4F+RbAnp6izWxo2sjISmxhYQvxAjAsBFvdn0P25oVnZ8kXTMjvEqKyvkhgRrzXALu0N6NUyQjVOdOsjnoA==}
 
   util-deprecate@1.0.2:
     resolution: {integrity: sha512-EPD5q1uXyFxJpCrLnCc1nHnq3gOa6DZBocAIiI2TaSCA7VCJ1UJDMagCzIkXNsUYfD1daK//LTEQ8xiIbrHtcw==}
@@ -14164,6 +14165,8 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  sendly-sdk@1.1.0: {}
+
   serve-static@1.16.3:
     dependencies:
       encodeurl: 2.0.0
@@ -15051,13 +15054,6 @@ snapshots:
   use-sync-external-store@1.5.0(react@19.2.3):
     dependencies:
       react: 19.2.3
-
-  usesend-js@1.6.3(react-dom@19.2.3(react@19.2.3)):
-    dependencies:
-      '@react-email/render': 1.2.1(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
-      react: 19.2.3
-    transitivePeerDependencies:
-      - react-dom
 
   util-deprecate@1.0.2: {}
 

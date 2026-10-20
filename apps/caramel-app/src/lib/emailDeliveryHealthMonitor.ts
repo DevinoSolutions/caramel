@@ -18,7 +18,7 @@
 // On top of that, `lastSentryHourBucket` caps the alert rate at ONE Sentry event
 // per clock hour per process even if the interval is configured shorter.
 //
-// Enabled by default in production when useSend is configured; the env var
+// Enabled by default in production when Sendly is configured; the env var
 // EMAIL_DELIVERY_HEALTH_ENABLED is an explicit override in BOTH directions
 // ('false' = opt out of the default, 'true' = force it on outside production).
 import {
@@ -44,9 +44,7 @@ let lastSentryHourBucket: number | null = null
 
 export interface EmailDeliveryHealthSettings {
     NODE_ENV?: string
-    USESEND_API_KEY?: string
-    USESEND_BASE_URL?: string
-    USESEND_FROM_EMAIL?: string
+    SENDLY_API_KEY?: string
     EMAIL_DELIVERY_HEALTH_ENABLED?: 'true' | 'false'
     EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES?: number
 }
@@ -64,7 +62,7 @@ export interface MonitorDecision {
 export function decideEmailDeliveryHealthMonitor(
     settings: EmailDeliveryHealthSettings,
 ): MonitorDecision {
-    const configured = Boolean(settings.USESEND_API_KEY)
+    const configured = Boolean(settings.SENDLY_API_KEY)
     if (settings.EMAIL_DELIVERY_HEALTH_ENABLED === 'false') {
         return {
             enabled: false,
@@ -74,7 +72,7 @@ export function decideEmailDeliveryHealthMonitor(
     if (!configured) {
         return {
             enabled: false,
-            reason: 'useSend is not configured (USESEND_API_KEY unset)',
+            reason: 'Sendly is not configured (SENDLY_API_KEY unset)',
         }
     }
     if (settings.EMAIL_DELIVERY_HEALTH_ENABLED === 'true') {
@@ -116,7 +114,7 @@ export async function reportEmailDeliveryHealth(
                 level: level ? 'error' : 'warning',
                 tags: {
                     surface: 'email-delivery-health',
-                    provider: 'usesend',
+                    provider: 'sendly',
                     health_status: report.status,
                 },
                 // Counts and statuses only — the send log's to/subject/html
@@ -129,7 +127,7 @@ export async function reportEmailDeliveryHealth(
                     delayed: report.delayed,
                     stuckPending: report.stuckPending,
                     byStatus: report.byStatus,
-                    domainId: report.domainId,
+                    senderDomain: report.senderDomain,
                     truncated: report.truncated,
                     reason: report.reason,
                 },
@@ -150,9 +148,9 @@ export async function reportEmailDeliveryHealth(
  */
 export async function runEmailDeliveryHealthCycle(): Promise<EmailDeliveryHealthReport> {
     const report = await checkEmailDeliveryHealth({
-        baseUrl: env.USESEND_BASE_URL ?? '',
-        apiKey: env.USESEND_API_KEY ?? '',
-        fromEmail: env.USESEND_FROM_EMAIL,
+        apiKey: env.SENDLY_API_KEY ?? '',
+        baseUrl: env.SENDLY_BASE_URL,
+        fromEmail: env.SENDLY_FROM_EMAIL,
         windowMinutes: env.EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES,
     })
     const line = formatEmailDeliveryHealthLine(report)
@@ -173,7 +171,7 @@ export async function runEmailDeliveryHealthCycle(): Promise<EmailDeliveryHealth
 export function startEmailDeliveryHealthMonitor(): MonitorDecision {
     const decision = decideEmailDeliveryHealthMonitor({
         NODE_ENV: process.env.NODE_ENV,
-        USESEND_API_KEY: env.USESEND_API_KEY,
+        SENDLY_API_KEY: env.SENDLY_API_KEY,
         EMAIL_DELIVERY_HEALTH_ENABLED: env.EMAIL_DELIVERY_HEALTH_ENABLED,
     })
     if (!decision.enabled || timer) return decision
