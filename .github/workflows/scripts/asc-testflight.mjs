@@ -202,9 +202,24 @@ async function attachBuild(marketingVersion, buildNumber, groupName) {
             )
         ).some(member => member.id === build.id)
 
-    if (await inGroup()) {
-        console.log(`Build is already in "${groupName}".`)
-    } else {
+    // An internal group with "access to all builds" receives every processed
+    // build by itself and App Store Connect refuses a manual add (422 "Cannot
+    // add internal group to a build"). Devino is such a group, so there the
+    // attach is a wait-and-verify; a group without it gets an explicit add.
+    if (attributes.hasAccessToAllBuilds) {
+        console.log(
+            `"${groupName}" has access to all builds: waiting for it to pick the build up.`,
+        )
+        const memberDeadline = Date.now() + BETA_STATE_TIMEOUT_MS
+        while (!(await inGroup())) {
+            if (Date.now() > memberDeadline) {
+                throw new Error(
+                    `Build ${build.id} did not appear in "${groupName}" within ${BETA_STATE_TIMEOUT_MS / 60000} minutes although the group has access to all builds.`,
+                )
+            }
+            await sleep(15 * 1000)
+        }
+    } else if (!(await inGroup())) {
         await api(`/betaGroups/${groupId}/relationships/builds`, {
             method: 'POST',
             body: { data: [{ type: 'builds', id: build.id }] },
@@ -214,9 +229,10 @@ async function attachBuild(marketingVersion, buildNumber, groupName) {
 
     if (!(await inGroup())) {
         throw new Error(
-            `Build ${build.id} is not in "${groupName}" after the attach call.`,
+            `Build ${build.id} is not in "${groupName}" after the attach step.`,
         )
     }
+    console.log(`Build ${build.id} is in "${groupName}".`)
 
     const betaDeadline = Date.now() + BETA_STATE_TIMEOUT_MS
     let internalState
