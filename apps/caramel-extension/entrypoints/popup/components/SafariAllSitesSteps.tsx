@@ -10,6 +10,12 @@
  * only offers "Always Allow on Every Website" on a site Caramel is not yet
  * allowed on, and on an allowed store (the one the shopper is usually on) it
  * just opens this popup.
+ *
+ * The iPhone/iPad route was walked on an iOS 26 simulator (2026-10-19): the
+ * address bar has no "AA" button any more, it is the page-menu icon at its
+ * left; Caramel's row there asks "Always Allow…", which then offers "This
+ * Website" or "Every Website". Only the second one grants every site, so the
+ * copy names it.
  */
 export function SafariAllSitesSteps({ lead }: { lead: string }) {
     return (
@@ -17,8 +23,9 @@ export function SafariAllSitesSteps({ lead }: { lead: string }) {
             {lead} on Mac, open Safari <strong>Settings</strong> &gt;{' '}
             <strong>Websites</strong>, choose Caramel, and set{' '}
             <strong>For other websites</strong> to <strong>Allow</strong>. On
-            iPhone or iPad, tap <strong>AA</strong> in the address bar, choose
-            Caramel, then <strong>Always Allow</strong>.
+            iPhone or iPad, tap the page menu at the left of the address bar,
+            choose Caramel, then <strong>Always Allow</strong> &gt;{' '}
+            <strong>Always Allow on Every Website</strong>.
         </p>
     )
 }

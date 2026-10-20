@@ -301,6 +301,38 @@ describe('coupon_box_pick_outcome: one event per handler exit', () => {
         expect(expectOutcome('too_large')).not.toHaveProperty('store')
     })
 
+    it('too_large: a chunked body with no Content-Length is read only up to the cap', async () => {
+        // 1 MiB offered in 1 KiB chunks, pulled only as the route reads.
+        let pulled = 0
+        const body = new ReadableStream<Uint8Array>({
+            pull(controller) {
+                pulled += 1
+                if (pulled > 1024) controller.close()
+                else controller.enqueue(new Uint8Array(1024).fill(0x20))
+            },
+        })
+        const req = new NextRequest(
+            'http://localhost/api/extension/coupon-box-pick',
+            {
+                method: 'POST',
+                headers: {
+                    'content-type': 'application/json',
+                    origin: EXT_ORIGIN,
+                    'cf-connecting-ip': '203.0.113.9',
+                },
+                body,
+                duplex: 'half',
+            } as ConstructorParameters<typeof NextRequest>[1],
+        )
+        const res = await POST(req)
+        expect(res.status).toBe(413)
+        expectOutcome('too_large')
+        // The 46 KiB cap is passed on the 47th chunk; a few more may be
+        // buffered ahead, never the whole body.
+        expect(pulled).toBeLessThan(70)
+        expect(chatMock).not.toHaveBeenCalled()
+    })
+
     it('too_large: an outline over the outline cap carries the (valid) store', async () => {
         // Plain text, so JSON escaping does not push the whole body over the
         // (larger) body cap first.
