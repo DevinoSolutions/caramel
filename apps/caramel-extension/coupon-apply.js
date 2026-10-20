@@ -8,10 +8,7 @@
 // window/globalThis and has no effectful top-level statement, so it exports no
 // init() — there is nothing for the composition entrypoint to call.
 import { log, logError, recordTiming, sleep } from './caramel-base.js'
-import {
-    caramelFinderTotalNow,
-    caramelRemarkFoundBox,
-} from './coupon-box-discovery.js'
+import { caramelLoadedFinder } from './coupon-box-finder-loader.js'
 import {
     _caramelLastPrices,
     _isVisible,
@@ -24,6 +21,15 @@ import {
     waitForTextChange,
     waitForVisible,
 } from './dom-utils.js'
+
+// A record the finder built (rec.caramelFound) exists only once the finder is
+// loaded (coupon-box-finder-loader.js), so these always reach it. Should it
+// ever be missing, the total reads as unknown and nothing is re-marked: no
+// saving can be measured from that.
+const caramelFinderTotalNow = (...args) =>
+    caramelLoadedFinder()?.caramelFinderTotalNow(...args) ?? NaN
+const caramelRemarkFoundBox = (...args) =>
+    caramelLoadedFinder()?.caramelRemarkFoundBox(...args) ?? false
 
 // Generic selectors used when the per-store config doesn't specify them.
 // These cover the most common Honey-style cart UIs.

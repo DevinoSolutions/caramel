@@ -35,6 +35,7 @@ import { transform } from 'esbuild'
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, extname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { buildFinderModule } from './finder-bundle.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 export const CACHE_DIR = '.size-cache'
@@ -63,7 +64,7 @@ export const GROUPS = {
         'cart-signals.js',
         'caramel-base.js',
         'dom-utils.js',
-        'coupon-box-discovery.js',
+        'coupon-box-finder-loader.js',
         'extension-capabilities.js',
         'store-detect.js',
         'coupon-apply.js',
@@ -100,6 +101,9 @@ export const GROUPS = {
     // Injected only on porkbun.com/checkout/* (entrypoints/porkbun-alert.content.ts,
     // MAIN world), so it neither hides in nor inflates the per-page budget.
     'porkbun-alert': ['extension-capabilities.js', 'porkbun-alert-shim.js'],
+    // The same, for the learned-box memory: imported only on a store with no
+    // config, when the finder is about to remember a box (wxt.config.ts).
+    'coupon-box-learned': ['coupon-box-learned.js'],
 }
 
 /** Minified bytes of one group, written as a single file for size-limit. */
@@ -132,3 +136,9 @@ await mkdir(cache, { recursive: true })
 for (const [name, files] of Object.entries(GROUPS)) {
     await buildGroup(name, typeof files === 'function' ? await files() : files)
 }
+// The finder loaded on demand is weighed as it ships: one bundled file, built
+// by the same function the build uses (scripts/finder-bundle.mjs).
+await writeFile(
+    join(cache, 'coupon-box-finder.min.js'),
+    await buildFinderModule(ROOT),
+)

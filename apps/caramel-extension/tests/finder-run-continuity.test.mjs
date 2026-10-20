@@ -6,6 +6,10 @@ import {
     getDomainRecord,
     startCheckoutDetection,
 } from '../store-detect.js'
+import { finderOnlyGetURL } from './_finder-asset.mjs'
+import { tabHandoffBackground } from './_tab-handoff-background.mjs'
+// The background's side of the per-tab handoffs (see the helper).
+const handoffs = tabHandoffBackground()
 
 // A run on a box the promo-box finder picked carries across a form-POST cart's
 // reload just like a configured run does. On a cart that reloads per submit,
@@ -83,7 +87,9 @@ function installChromeStub() {
         }
     }
     stub.runtime.lastError = undefined
+    stub.runtime.getURL = finderOnlyGetURL
     stub.runtime.sendMessage = (message, cb) => {
+        if (handoffs.answers(message, cb)) return
         if (message?.action === 'reportOutcome') outcomeMessages.push(message)
         if (typeof cb !== 'function') return
         if (message?.action === 'fetchCoupons') cb({ coupons: couponList })
@@ -118,6 +124,7 @@ beforeAll(() => {
 
 beforeEach(() => {
     sessionStorage.clear()
+    handoffs.reset()
     history.replaceState({}, '', '/cart')
     applyCalls = []
     finalModalCalls = []
@@ -145,8 +152,8 @@ beforeEach(() => {
 describe('a finder run on a cart that reloads per code', () => {
     it('goes on to the next code on the page the store sent us to', async () => {
         document.body.innerHTML = BOX + TOTAL
-        caramelBeginRun()
-        caramelMarkPendingSubmit('DEAD5', 'c1', [100], ROW)
+        await caramelBeginRun()
+        await caramelMarkPendingSubmit('DEAD5', 'c1', [100], ROW)
 
         await startCheckoutDetection()
 
@@ -158,8 +165,8 @@ describe('a finder run on a cart that reloads per code', () => {
 
     it('stops where the finder sees no box on the new page', async () => {
         document.body.innerHTML = TOTAL
-        caramelBeginRun()
-        caramelMarkPendingSubmit('DEAD5', 'c1', [100], ROW)
+        await caramelBeginRun()
+        await caramelMarkPendingSubmit('DEAD5', 'c1', [100], ROW)
 
         await startCheckoutDetection()
 
@@ -175,8 +182,8 @@ describe('a finder run on a cart that reloads per code', () => {
         document.body.innerHTML =
             BOX +
             '<div class="row"><span>Estimated total</span> <span>$90.00</span></div>'
-        caramelBeginRun()
-        caramelMarkPendingSubmit('DEAD5', 'c1', [100], ROW)
+        await caramelBeginRun()
+        await caramelMarkPendingSubmit('DEAD5', 'c1', [100], ROW)
 
         await startCheckoutDetection()
 
@@ -188,8 +195,8 @@ describe('a finder run on a cart that reloads per code', () => {
         document.body.innerHTML =
             BOX +
             '<div class="row"><span>Order total</span> <span>$90.00</span></div>'
-        caramelBeginRun()
-        caramelMarkPendingSubmit('SAVE10', 'c2', [100], ROW)
+        await caramelBeginRun()
+        await caramelMarkPendingSubmit('SAVE10', 'c2', [100], ROW)
 
         await startCheckoutDetection()
 

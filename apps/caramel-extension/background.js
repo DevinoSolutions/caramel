@@ -22,7 +22,12 @@ import {
     codeSharingPromptVersion,
     readCodeSharingConsent,
 } from './code-sharing-consent.js'
+import {
+    caramelLearnedOutcome,
+    caramelLearnedRead,
+} from './coupon-box-learned.js'
 import { saveInstallId } from './install-attribution.js'
+import { caramelTabHandoffs } from './tab-handoff.js'
 import {
     USAGE_DIAGNOSTICS_CONSENT_KEY,
     deleteTelemetryId,
@@ -32,6 +37,55 @@ import {
     resolveUsageDiagnostics,
     usageDiagnosticsAccepted,
 } from './usage-diagnostics-consent.js'
+
+/* What a content script leaves for the next document of its tab (the
+ * pending submit, the discount-link win, the run across reloads), held here
+ * where the store's page cannot write it (tab-handoff.js). The tab and the
+ * origin are the message sender's, never the message's, and only the tab's
+ * top document, while it is the live one, may hand anything off (a frame is
+ * another site's document, a prerendered or cached one is not the page the
+ * shopper is on). Answers { saved }, { value } for get/take, { cleared }, or
+ * { error }. */
+let _tabHandoffs = null
+const tabHandoffs = () =>
+    (_tabHandoffs ??= caramelTabHandoffs(
+        currentBrowser.storage?.session ?? null,
+    ))
+function senderOrigin(sender) {
+    try {
+        const origin = new URL(sender?.url || sender?.tab?.url).origin
+        return origin === 'null' ? null : origin
+    } catch {
+        return null
+    }
+}
+async function tabHandoff({ op, key, value, expected }, sender) {
+    const tabId = sender?.tab?.id
+    const origin = senderOrigin(sender)
+    if (!Number.isInteger(tabId) || !origin) return { error: 'no tab' }
+    if (sender.frameId !== 0) return { error: 'not the top document' }
+    // documentLifecycle is Chrome's; a browser without it is not asked.
+    if (
+        sender.documentLifecycle !== undefined &&
+        sender.documentLifecycle !== 'active'
+    )
+        return { error: 'not the live document' }
+    const h = tabHandoffs()
+    const refused = saved => {
+        if (saved === 'refused') logError('tabHandoffRefused', `${op} ${key}`)
+        return { saved }
+    }
+    if (op === 'set') return refused(await h.set(tabId, origin, key, value))
+    if (op === 'replace')
+        return refused(await h.replace(tabId, origin, key, value, expected))
+    if (op === 'get') return { value: await h.get(tabId, origin, key) }
+    if (op === 'take') return { value: await h.take(tabId, origin, key) }
+    if (op === 'clear') {
+        await h.clear(tabId, origin, key)
+        return { cleared: true }
+    }
+    return { error: 'unknown op' }
+}
 
 // Assigned by initBackground() instead of at module evaluation: the IIFE throws
 // when neither global exists, which is exactly the case in the Node import
@@ -250,6 +304,15 @@ async function _fetchFeatures() {
         couponBoxDiscovery: json.couponBoxDiscovery === true,
         // The same rule for the server pick (POST coupon-box-pick).
         couponBoxLlm: json.couponBoxLlm === true,
+        // The pick's order (rules_first, llm_first, llm_only), passed on as
+        // sent: the content script reads anything it does not know, or any
+        // mode while couponBoxLlm is off, as rules_first.
+        couponBoxPickMode: json.couponBoxPickMode,
+        // Learned coupon boxes on the server (the pick's learned answer and
+        // the report route): a literal true only, like the flags above, so a
+        // build in the stores never reports to a server that has not shipped
+        // the route.
+        couponBoxLearned: json.couponBoxLearned === true,
         ts: Date.now(),
     }
     _writeFeaturesSession(_featuresMemo)
@@ -294,15 +357,187 @@ async function couponBoxDiscoveryEnabled() {
     }
 }
 
-// Answers the content script's couponBoxLlmEnabled message, the same way.
-async function couponBoxLlmEnabled() {
+// Answers the content script's couponBoxLlmEnabled message, the same way,
+// with the server's pick mode (judged by the content script).
+async function couponBoxLlmFlags() {
     try {
-        return (await _features()).couponBoxLlm === true
+        const f = await _features()
+        return { enabled: f.couponBoxLlm === true, mode: f.couponBoxPickMode }
+    } catch (err) {
+        logError('features', err)
+        return { enabled: false }
+    }
+}
+const couponBoxLlmEnabled = async () => (await couponBoxLlmFlags()).enabled
+
+// Learned coupon boxes on the server: its flag AND the pick's, since the
+// server reads a report and serves a learned answer only with both on. Any
+// failure to read them is off.
+async function couponBoxLearnedOn() {
+    try {
+        const f = await _features()
+        return f.couponBoxLlm === true && f.couponBoxLearned === true
     } catch (err) {
         logError('features', err)
         return false
     }
 }
+
+/* Reports what a coupon box did (coupon-box-discovery.js learnOutcome): the
+ * store answered a code typed into it ('confirmed'), or a remembered box got
+ * no answer at all ('failed'). Selectors, the outcome and the anonymous
+ * install id only: the server counts a box as confirmed by several installs,
+ * never by one install reporting it twice (the privacy policy names this use
+ * of the id). Sent only while the server's learned-box flag is on, and only
+ * with an install id (installs older than the id have none: their reports
+ * are skipped, and their own memory of the box still works). The answer says
+ * whether it landed: { ok, recorded, reason } or { error } / { skipped }. */
+async function couponBoxLearned({ domain, box, source, evidence, outcome }) {
+    if (!(await couponBoxLearnedOn())) return { skipped: 'disabled' }
+    if (!EVIDENCE.includes(evidence)) evidence = null
+    const installId = await storedInstallId()
+    if (!installId) return { skipped: 'no install id' }
+    // Sent once and never retried: a refusal (400 for a box the server will
+    // not keep) or a network failure is answered as an { error } the finder
+    // logs, and the shopper's run never waits on it.
+    let r
+    try {
+        r = await fetchWithTimeout(
+            caramelUrl('api/extension/coupon-box-learned'),
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    installId,
+                    domain,
+                    box,
+                    source,
+                    evidence,
+                    outcome,
+                }),
+            },
+        )
+    } catch (err) {
+        return { error: String(err) }
+    }
+    if (!r.ok) return { error: `HTTP ${r.status}` }
+    const j = await r.json().catch(() => ({}))
+    return { ok: true, recorded: j.recorded === true, reason: j.reason ?? null }
+}
+
+const EVIDENCE = ['total_dropped', 'store_answered']
+
+// The host of the tab a message came from: the one store a content script
+// may speak for. null for a message from no tab.
+function senderHost(sender) {
+    try {
+        return new URL(sender?.tab?.url).hostname.toLowerCase() || null
+    } catch {
+        return null
+    }
+}
+
+// This install's memory of coupon boxes (storage.local) has its own switch:
+// the finder on AND the server's learned-box flag. Turning the finder on
+// alone never turns remembering on. Any failure to read them is off.
+async function couponBoxRememberOn() {
+    try {
+        const f = await _features()
+        return f.couponBoxDiscovery === true && f.couponBoxLearned === true
+    } catch (err) {
+        logError('features', err)
+        return false
+    }
+}
+
+// The box this install remembers for the sender's own host, or null.
+async function couponBoxLearnedBox(sender) {
+    const host = senderHost(sender)
+    if (!host || !(await couponBoxRememberOn())) return { box: null }
+    return {
+        box: await caramelLearnedRead(currentBrowser.storage.local, host),
+    }
+}
+
+// One read-modify-write of the memory at a time, so two tabs answering at
+// once never lose either update.
+let _learnedWrites = Promise.resolve()
+function saveLearned(host, { box, source, outcome }) {
+    const run = _learnedWrites.then(() =>
+        caramelLearnedOutcome(
+            currentBrowser.storage.local,
+            host,
+            box,
+            source,
+            outcome,
+            Date.now(),
+        ),
+    )
+    _learnedWrites = run.catch(() => {})
+    return run
+}
+
+/* What a coupon box did (coupon-box-discovery.js learnOutcome): saved in this
+ * install's memory for the sender's own host, then, with `report`, reported
+ * to the server (couponBoxLearned). The message names no store: a page
+ * cannot speak for another. Answers { saved, ...the report's answer } or
+ * { skipped }. */
+async function couponBoxLearnedMessage(message, sender) {
+    const host = senderHost(sender)
+    if (!host) return { skipped: 'no tab' }
+    if (!(await couponBoxRememberOn())) return { skipped: 'disabled' }
+    const saved = await saveLearned(host, message)
+    if (saved === 'refused' || message.report !== true) return { saved }
+    return { saved, ...(await couponBoxLearned({ ...message, domain: host })) }
+}
+
+/* The box a run on a tab is using, held for the page a submit reloads to
+ * (store-detect.js resumes the run there and confirms the box when the total
+ * dropped). Held here, per tab and for the host the tab was on, never in the
+ * page's own storage, which the page can write: one of the tab's handoffs
+ * (tab-handoff.js), taken once, within its lifetime. */
+// The tab's own live top document, as every handoff requires (tabHandoff):
+// a store's iframe or a prerendered page shares the tab id.
+const fromLiveTopDocument = sender =>
+    sender?.frameId === 0 &&
+    (sender.documentLifecycle === undefined ||
+        sender.documentLifecycle === 'active')
+async function couponBoxLearnHold({ l }, sender) {
+    if (!fromLiveTopDocument(sender)) return { held: false }
+    if (!l?.box || !(await couponBoxRememberOn())) return { held: false }
+    const saved = await tabHandoffs().set(
+        sender?.tab?.id,
+        senderOrigin(sender),
+        'box_learn',
+        { box: l.box, source: l.source, learned: l.learned === true },
+    )
+    return { held: saved === 'saved' }
+}
+async function couponBoxLearnTake(sender) {
+    if (!fromLiveTopDocument(sender)) return { l: null }
+    const l = await tabHandoffs().take(
+        sender?.tab?.id,
+        senderOrigin(sender),
+        'box_learn',
+    )
+    return { l: l ?? null }
+}
+
+// The anonymous install id the install saved ({ iid } under this key), or
+// null. TODO(caramel#349): once this branch is on main, import
+// INSTALL_ATTRIBUTION_KEY from install-attribution.js instead of naming the
+// key here; this branch was cut before that module landed.
+const INSTALL_ATTRIBUTION_KEY = 'caramel_install_attribution'
+const storedInstallId = () =>
+    new Promise(resolve =>
+        currentBrowser.storage.local.get([INSTALL_ATTRIBUTION_KEY], items =>
+            resolve(
+                currentBrowser.runtime.lastError
+                    ? null
+                    : items?.[INSTALL_ATTRIBUTION_KEY]?.iid || null,
+            ),
+        ),
+    )
 
 /* Asks the server which element of a page outline is the promo box (see
  * coupon-box-outline.js and the finder's caramelPickedRecord). The outline is
@@ -324,9 +559,13 @@ async function couponBoxLlmEnabled() {
 export const COUPON_BOX_PICK_DEADLINE_MS = 24000
 const COUPON_BOX_PICK_TIMEOUT_MS = 23000
 const COUPON_BOX_PICK_MIN_MS = 3000
-async function couponBoxPick({ domain, outline }) {
+async function couponBoxPick({ domain, outline, served }) {
     const deadline = Date.now() + COUPON_BOX_PICK_DEADLINE_MS
     if (!(await couponBoxLlmEnabled())) return { error: 'disabled' }
+    // A learned answer only from a server that has learned boxes on, and
+    // never for a store with a served config (one whose selectors went
+    // stale asks too): a store with a config never uses a learned box.
+    const acceptsLearned = served !== true && (await couponBoxLearnedOn())
     const token = await getStoredToken()
     const left = Math.min(COUPON_BOX_PICK_TIMEOUT_MS, deadline - Date.now())
     if (left < COUPON_BOX_PICK_MIN_MS) return { error: 'out of time' }
@@ -336,7 +575,11 @@ async function couponBoxPick({ domain, outline }) {
             {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ domain, outline }),
+                body: JSON.stringify(
+                    acceptsLearned
+                        ? { domain, outline, acceptsLearned }
+                        : { domain, outline },
+                ),
             },
             token,
         ),
@@ -697,6 +940,21 @@ export function initBackground() {
     currentBrowser.tabs.onUpdated.addListener(_caramelOnTabUpdated)
     currentBrowser.tabs.onActivated?.addListener(_caramelOnTabActivated)
 
+    // A closed tab's handoffs (tab-handoff.js) are never read again.
+    currentBrowser.tabs.onRemoved?.addListener(tabId =>
+        tabHandoffs()
+            .forgetTab(tabId)
+            .catch(err => logError('tabHandoffForget', err)),
+    )
+    // A tab swapped for a prerendered one gets a new id. Its records are not
+    // moved to it: a run, a pending code or a win is let go rather than
+    // carried into a document that did not ask for it.
+    currentBrowser.tabs.onReplaced?.addListener((_added, removedTabId) =>
+        tabHandoffs()
+            .forgetTab(removedTabId)
+            .catch(err => logError('tabHandoffForget', err)),
+    )
+
     // The user granted us host access (permission-state.js requestAllSites, or
     // the browser's own permissions UI). The popup does not need telling — it
     // re-derives permission state on every open — so this records the fact and
@@ -930,7 +1188,39 @@ export function initBackground() {
                 )
                 return true
             } else if (message.action === 'couponBoxLlmEnabled') {
-                couponBoxLlmEnabled().then(enabled => sendResponse({ enabled }))
+                couponBoxLlmFlags().then(sendResponse)
+                return true
+            } else if (message.action === 'couponBoxLearned') {
+                couponBoxLearnedMessage(message, sender)
+                    .then(sendResponse)
+                    .catch(err => {
+                        logError('couponBoxLearned', err)
+                        sendResponse({ error: String(err) })
+                    })
+                return true
+            } else if (message.action === 'couponBoxLearnedBox') {
+                couponBoxLearnedBox(sender)
+                    .then(sendResponse)
+                    .catch(err => {
+                        logError('couponBoxLearnedBox', err)
+                        sendResponse({ box: null })
+                    })
+                return true
+            } else if (message.action === 'couponBoxLearnHold') {
+                couponBoxLearnHold(message, sender)
+                    .then(sendResponse)
+                    .catch(err => {
+                        logError('couponBoxLearnHold', err)
+                        sendResponse({ held: false })
+                    })
+                return true
+            } else if (message.action === 'couponBoxLearnTake') {
+                couponBoxLearnTake(sender)
+                    .then(sendResponse)
+                    .catch(err => {
+                        logError('couponBoxLearnTake', err)
+                        sendResponse({ l: null })
+                    })
                 return true
             } else if (message.action === 'couponBoxPick') {
                 couponBoxPick(message)
@@ -1042,6 +1332,14 @@ export function initBackground() {
                         sendResponse({ error: String(err) })
                     })
 
+                return true
+            } else if (message.action === 'tabHandoff') {
+                tabHandoff(message, sender)
+                    .then(resp => sendResponse(resp))
+                    .catch(err => {
+                        logError('tabHandoff', err)
+                        sendResponse({ error: String(err) })
+                    })
                 return true
             } else if (message.action === 'fetchSupportedStores') {
                 const url = caramelUrl('api/extension/supported-stores')

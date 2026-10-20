@@ -17,6 +17,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { FINDER_SOURCE } from '../scripts/finder-files.mjs'
 import { entryModuleClosure, EXT_ROOT } from './_entry-modules.mjs'
 
 const root = EXT_ROOT
@@ -33,7 +34,10 @@ const SHIPPED_TO_STRANGERS = [
     'extension-capabilities.js',
     'caramel-base.js',
     'dom-utils.js',
-    'coupon-box-discovery.js',
+    'coupon-box-finder-loader.js',
+    // The service worker reads and writes the learned-box memory through it;
+    // the finder also loads it on demand in the store's page.
+    'coupon-box-learned.js',
     'store-detect.js',
     'coupon-apply.js',
     'code-capture.js',
@@ -47,13 +51,19 @@ const SHIPPED_TO_STRANGERS = [
     'permissions-api.js',
     'usage-diagnostics-consent.js',
     'background.js',
+    'tab-handoff.js',
 ]
 // Not in any entrypoint's import graph, but shipped and run in the store's
-// page all the same: the build copies it beside the bundle and the finder
-// imports it by URL when it asks the server for a box (wxt.config.ts).
+// page all the same: the build copies them beside the bundle, and the content
+// script imports the finder by URL when it is about to run it, and the finder
+// the outline when it asks the server for a box (wxt.config.ts).
 // porkbun-alert-shim.js is the same kind of case: its own MAIN-world entry
 // (entrypoints/porkbun-alert.content.ts), run in porkbun.com's page.
-const LOADED_ON_DEMAND = ['coupon-box-outline.js', 'porkbun-alert-shim.js']
+const LOADED_ON_DEMAND = [
+    FINDER_SOURCE,
+    'coupon-box-outline.js',
+    'porkbun-alert-shim.js',
+]
 
 function ungatedConsoleLines(file) {
     const src = readFileSync(join(root, file), 'utf8')

@@ -194,3 +194,11 @@ jobs:
 
       - name: Run extension guard suite (dev-stamped build)
         run: xvfb-run --auto-servernum pnpm --filter caramel-extension test:guards
+
+      # The promo-box auto-detect, in the same real browser: a configured store
+      # is untouched with every flag on, a store with no config is untouched
+      # with every flag off, and with the flags on a wrong pick, a missing box
+      # or a store that only SAYS "applied" never produce a saving or leave
+      # the cart. The flags and the pick endpoint are stubbed per scenario.
+      - name: Run promo-box auto-detect suite (dev-stamped build)
+        run: xvfb-run --auto-servernum pnpm --filter caramel-extension test:autodetect
