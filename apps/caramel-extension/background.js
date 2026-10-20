@@ -778,6 +778,13 @@ function keepAlive() {
  * fires on every tab switch, nothing user-scoped to gain. */
 const BADGE_CACHE_TTL_MS = 10 * 60 * 1000
 const _badgeCounts = new Map() // domain -> { count, ts }
+// One request per domain at a time: a navigation reports both the URL change
+// and the load completing, and both used to fetch before either was cached.
+const _badgeInFlight = new Map() // domain -> Promise<number>
+// The count shares the per-IP burst budget (20 requests / 2s) with the coupon
+// list a shopper opens at checkout. After a 429 the badge waits as long as the
+// server asked, so it is never the reason that list is refused.
+let _badgePausedUntil = 0
 
 function _setBadge(tabId, count) {
     const text = count > 0 ? (count > 99 ? '99+' : String(count)) : ''
@@ -788,15 +795,35 @@ function _setBadge(tabId, count) {
     }
 }
 
-async function _couponCountFor(domain) {
+function _couponCountFor(domain) {
     const hit = _badgeCounts.get(domain)
-    if (hit && Date.now() - hit.ts < BADGE_CACHE_TTL_MS) return hit.count
+    if (hit && Date.now() - hit.ts < BADGE_CACHE_TTL_MS)
+        return Promise.resolve(hit.count)
+    if (Date.now() < _badgePausedUntil) return Promise.resolve(hit?.count ?? 0)
+    let p = _badgeInFlight.get(domain)
+    if (!p) {
+        p = _fetchCouponCount(domain).finally(() =>
+            _badgeInFlight.delete(domain),
+        )
+        _badgeInFlight.set(domain, p)
+    }
+    return p
+}
+
+async function _fetchCouponCount(domain) {
     const url = new URL(caramelUrl('api/coupons'))
     url.searchParams.set('site', domain)
     url.searchParams.set('limit', '1')
     let count = 0
     try {
         const r = await fetchWithTimeout(url.toString())
+        if (r.status === 429) {
+            const after = Number(r.headers?.get?.('retry-after'))
+            _badgePausedUntil =
+                Date.now() + (after > 0 ? Math.min(after, 600) : 60) * 1000
+            // Not cached: the count is unknown, not zero.
+            return _badgeCounts.get(domain)?.count ?? 0
+        }
         if (r.ok) {
             const json = await r.json()
             count =
@@ -828,11 +855,27 @@ export async function updateBadgeForTab(tabId, tabUrl) {
     _setBadge(tabId, count)
 }
 
-function _caramelOnTabUpdated(tabId, changeInfo, tab) {
+// Exported for tests/badge.test.mjs.
+export function _caramelOnTabActivated({ tabId }) {
+    try {
+        currentBrowser.tabs.get(tabId, tab => {
+            if (currentBrowser.runtime.lastError || !tab) return
+            updateBadgeForTab(tabId, tab.url || '')
+        })
+    } catch (err) {
+        logError('badgeOnActivated', err)
+    }
+}
+
+// Exported for tests/badge.test.mjs.
+export function _caramelOnTabUpdated(tabId, changeInfo, tab) {
     // Fire on navigation commit (URL change) and on load completion —
     // covers SPA address-bar updates that never re-"complete".
     if (!changeInfo.url && changeInfo.status !== 'complete') return
-    updateBadgeForTab(tabId, tab.url || '')
+    // A tab loading out of sight (restored at startup, opened in the
+    // background) is counted when the shopper switches to it, so restoring
+    // twenty tabs does not ask for twenty counts at once.
+    if (tab.active !== false) updateBadgeForTab(tabId, tab.url || '')
     if (!changeInfo.url) return
     // A same-document rewrite can move the shopper into a cart without the
     // content script running again or firing anything it can hear — a store
@@ -895,6 +938,7 @@ export function initBackground() {
     })
 
     currentBrowser.tabs.onUpdated.addListener(_caramelOnTabUpdated)
+    currentBrowser.tabs.onActivated?.addListener(_caramelOnTabActivated)
 
     // A closed tab's handoffs (tab-handoff.js) are never read again.
     currentBrowser.tabs.onRemoved?.addListener(tabId =>

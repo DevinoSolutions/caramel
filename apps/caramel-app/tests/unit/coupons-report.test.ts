@@ -1,5 +1,5 @@
 import { POST } from '@/app/api/coupons/[id]/report/route'
-import { resetFailedReportDedupeForTests } from '@/lib/couponFailureReportDedupe'
+import { resetReportDedupeForTests } from '@/lib/couponReportDedupe'
 import { NextRequest } from 'next/server'
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -165,7 +165,7 @@ function anonymous() {
 }
 
 beforeEach(() => {
-    resetFailedReportDedupeForTests()
+    resetReportDedupeForTests()
     prismaMock.couponSignal.upsert.mockClear()
     prismaMock.$transaction.mockClear()
     txMock.couponSignal.upsert.mockClear()
@@ -288,11 +288,50 @@ describe('POST /api/coupons/[id]/report — anonymous behavior (characterization
         expect(reportRows).toEqual([])
     })
 
-    it('repeat WORKED reports are NOT deduped: every one writes the signal again', async () => {
-        await POST(reportRequest(KNOWN_COUPON, { outcome: 'worked' }))
-        await POST(reportRequest(KNOWN_COUPON, { outcome: 'worked' }))
-        await POST(reportRequest(KNOWN_COUPON, { outcome: 'worked' }))
+    it('a repeated WORKED report from the SAME IP moves lastWorkedAt once: the repeats are 2xx no-ops ({ok:true, deduped:true})', async () => {
+        const first = await POST(
+            reportRequest(KNOWN_COUPON, { outcome: 'worked' }),
+        )
+        expect(await first.json()).toEqual({ ok: true })
+        vi.setSystemTime(new Date('2026-08-09T15:00:00.000Z'))
+        for (let i = 0; i < 3; i++) {
+            const dup = await POST(
+                reportRequest(KNOWN_COUPON, { outcome: 'worked' }),
+            )
+            expect(dup.status).toBe(200)
+            expect(await dup.json()).toEqual({ ok: true, deduped: true })
+        }
 
+        // One write, carrying the FIRST report's time: the repeats 3h later did
+        // not move lastWorkedAt.
+        expect(prismaMock.couponSignal.upsert).toHaveBeenCalledTimes(1)
+        expect(prismaMock.couponSignal.upsert.mock.calls[0]![0].update).toEqual(
+            { lastWorkedAt: new Date('2026-08-09T12:00:00.000Z') },
+        )
+    })
+
+    it('honest WORKED reports from distinct IPs each count, and the same IP counts again after 24h', async () => {
+        for (const ip of ['198.51.100.1', '198.51.100.2']) {
+            await POST(
+                reportRequest(
+                    KNOWN_COUPON,
+                    { outcome: 'worked' },
+                    undefined,
+                    ip,
+                ),
+            )
+        }
+        vi.setSystemTime(new Date('2026-08-10T12:00:00.000Z'))
+        const nextDay = await POST(
+            reportRequest(
+                KNOWN_COUPON,
+                { outcome: 'worked' },
+                undefined,
+                '198.51.100.1',
+            ),
+        )
+
+        expect(await nextDay.json()).toEqual({ ok: true })
         expect(prismaMock.couponSignal.upsert).toHaveBeenCalledTimes(3)
     })
 
@@ -438,6 +477,21 @@ describe('POST /api/coupons/[id]/report — anonymous behavior (characterization
         expect(await retry.json()).toEqual({ ok: true })
     })
 
+    it('a failed WORKED write frees its slot too: the retry is NOT deduped', async () => {
+        prismaMock.couponSignal.upsert.mockRejectedValueOnce(
+            new Error('db down'),
+        )
+        const failed = await POST(
+            reportRequest(KNOWN_COUPON, { outcome: 'worked' }),
+        )
+        expect(failed.status).toBe(500)
+
+        const retry = await POST(
+            reportRequest(KNOWN_COUPON, { outcome: 'worked' }),
+        )
+        expect(await retry.json()).toEqual({ ok: true })
+    })
+
     it('an id that is well-formed but absent from the catalog still writes the signal (coupon_signals has no FK)', async () => {
         catalogIds.clear() // nothing exists in the catalog
 
@@ -507,7 +561,7 @@ describe('POST /api/coupons/[id]/report — signed-in attribution (coupon_report
         })
     })
 
-    it('a same-day repeat is IDEMPOTENT — 200, no second row, and the aggregate signal is STILL written', async () => {
+    it('a same-day repeat is IDEMPOTENT — 200, no second row, and the aggregate signal is not written again', async () => {
         signedInAs('user-1')
 
         await POST(
@@ -519,12 +573,26 @@ describe('POST /api/coupons/[id]/report — signed-in attribution (coupon_report
         )
 
         expect(res.status).toBe(200)
-        expect(await res.json()).toEqual({ ok: true })
+        expect(await res.json()).toEqual({ ok: true, deduped: true })
         expect(txMock.couponReport.create).toHaveBeenCalledTimes(1)
         expect(reportRows).toHaveLength(1)
-        // The signal is NOT deduped — repeat anonymous reports each bump it
-        // (pinned above), so signing in must not silently weaken the aggregate.
-        expect(txMock.couponSignal.upsert).toHaveBeenCalledTimes(2)
+        // Deduped per USER like an anonymous repeat is per IP: one write.
+        expect(txMock.couponSignal.upsert).toHaveBeenCalledTimes(1)
+    })
+
+    it('after a restart empties the in-memory window, the day-scoped attribution check still stops a second row', async () => {
+        signedInAs('user-1')
+
+        await POST(
+            reportRequest(KNOWN_COUPON, { outcome: 'worked' }, 'Bearer good'),
+        )
+        resetReportDedupeForTests() // a deploy or restart
+        const res = await POST(
+            reportRequest(KNOWN_COUPON, { outcome: 'worked' }, 'Bearer good'),
+        )
+
+        expect(await res.json()).toEqual({ ok: true })
+        expect(reportRows).toHaveLength(1)
     })
 
     it('the SAME user reporting the SAME coupon the next UTC day is attributed again', async () => {
@@ -535,6 +603,9 @@ describe('POST /api/coupons/[id]/report — signed-in attribution (coupon_report
             reportRequest(KNOWN_COUPON, { outcome: 'worked' }, 'Bearer good'),
         )
         vi.setSystemTime(new Date('2026-08-10T00:01:00.000Z')) // 2 minutes later
+        // The in-memory 24h window would dedupe this; empty it (as a restart
+        // does) so what is pinned is the attribution's UTC-day window.
+        resetReportDedupeForTests()
         await POST(
             reportRequest(KNOWN_COUPON, { outcome: 'worked' }, 'Bearer good'),
         )

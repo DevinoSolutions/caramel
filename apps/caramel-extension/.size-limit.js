@@ -237,7 +237,18 @@ module.exports = [
         // 2026-10-17, raised 15 -> 16.6 kB: main through #348 brings the
         // code-sharing funnel diagnostics (dated 2026-10-15 above) and the
         // handoff store's review fixes. Measured 16.2 kB.
-        limit: '16.6 KB',
+        // 2026-10-20 (PR #384), raised 12.7 -> 13.4 kB: the toolbar badge
+        // counts only the tab in front (re-badging on tab switch), shares one
+        // request per domain and backs off after a 429, so it no longer spends
+        // the per-IP burst budget the shopper's coupon list needs. Measured
+        // 13.09 kB, so the limit is measured + ~0.3 kB.
+        // 2026-10-20, merging main into #348: both raises above land together
+        // (the per-tab handoffs and the toolbar badge). Measured 14.19 kB, so
+        // the limit is measured + ~0.3 kB.
+        // 2026-10-20, merging main (through #348) again: the learned-box
+        // memory and pick mode above plus the toolbar badge from #384.
+        // Measured 16.91 kB, so the limit is measured + ~0.3 kB.
+        limit: '17.2 KB',
         brotli: false,
     },
     {
