@@ -37,6 +37,7 @@ targets:
     platform: iOS
     sources:
       - path: App
+      - path: Shared
     info:
       path: App/Info.plist
       properties:
@@ -48,6 +49,11 @@ targets:
         ITSAppUsesNonExemptEncryption: false
         LSRequiresIPhoneOS: true
         UILaunchScreen: {}
+        # Local new-codes alerts (AlertsEngine): BGAppRefreshTask.
+        UIBackgroundModes:
+          - fetch
+        BGTaskSchedulerPermittedIdentifiers:
+          - com.devino.Caramel.alerts-refresh
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         UISupportedInterfaceOrientations~ipad:
@@ -60,10 +66,19 @@ targets:
       properties:
         com.apple.security.application-groups:
           - group.com.devino.Caramel
+        # One shared keychain group so the app and the extension address the same session item
+        # (Shared/AppGroup.swift SharedSessionKeychain).
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)com.devino.Caramel.shared
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.devino.Caramel
         PRODUCT_NAME: Caramel
+        # App/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png is a byte copy of
+        # apps/caramel-extension/brand/generated/ios/AppIcon.appiconset/icon-1024.png
+        # (full-bleed 1024, rasterised from brand/icon-master.svg by
+        # brand/generate-icons.py, T-4981). Never edit or resize it by hand: rerun
+        # the generator and copy the file (a unit test in caramel-extension pins the copy).
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     dependencies:
       - target: CaramelExtension
@@ -73,6 +88,7 @@ targets:
     platform: iOS
     sources:
       - path: Extension
+      - path: Shared
     info:
       path: Extension/Info.plist
       properties:
@@ -87,6 +103,10 @@ targets:
       properties:
         com.apple.security.application-groups:
           - group.com.devino.Caramel
+        # One shared keychain group so the app and the extension address the same session item
+        # (Shared/AppGroup.swift SharedSessionKeychain).
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)com.devino.Caramel.shared
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.devino.Caramel.Extension
