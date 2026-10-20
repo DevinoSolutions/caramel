@@ -160,13 +160,14 @@ const PrivacyPolicy = () => {
                                 how an email address or a phone, card or order
                                 number would appear there. These records do not
                                 contain the install ID or your IP address, only
-                                salted hashes of the install ID and of the
-                                network part of your IP address (its first three
-                                parts), made separately for each store with a
-                                secret key that we hold, so the records for one
-                                store cannot be joined with the records for
-                                another store in our database. We use them only
-                                to count how many different installs and
+                                salted hashes of the install ID, of the network
+                                part of your IP address (its first three parts)
+                                and of a wider part of it (its first two parts),
+                                made separately for each store with a secret key
+                                that we hold, so the records for one store
+                                cannot be joined with the records for another
+                                store in our database. We use them only to count
+                                how many different installs, networks and wider
                                 networks confirmed a box or reported it failing.
                                 Separately, to limit abuse, when a report adds a
                                 new box or leads to a store being added to our

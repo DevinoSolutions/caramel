@@ -1,8 +1,10 @@
 import { handleRouteError } from '@/lib/api/handleRouteError'
+import { readBodyCapped } from '@/lib/api/readBodyCapped'
 import { preflight, withRoute } from '@/lib/api/withRoute'
 import {
     couponBoxLearnedEnabled,
     handOverLearnedStore,
+    hashBlock,
     hashInstallId,
     hashNetwork,
     hashNetworkAcrossStores,
@@ -81,18 +83,12 @@ async function handleReport(req: NextRequest): Promise<NextResponse> {
         return json({ recorded: false, reason: 'disabled' })
     }
 
-    const contentLength = Number(req.headers.get('content-length') || 0)
-    if (contentLength > MAX_BODY_BYTES) {
-        return json({ error: 'payload too large' }, 413)
-    }
-    // A chunked body carries no Content-Length: measure what arrived.
-    const text = await req.text()
-    if (Buffer.byteLength(text, 'utf8') > MAX_BODY_BYTES) {
-        return json({ error: 'payload too large' }, 413)
-    }
+    // Read no further than the cap, chunked bodies included.
+    const body = await readBodyCapped(req, MAX_BODY_BYTES)
+    if (!body.ok) return json({ error: 'payload too large' }, 413)
     let raw: unknown
     try {
-        raw = JSON.parse(text)
+        raw = JSON.parse(body.text)
     } catch {
         return json({ error: 'invalid payload' }, 400)
     }
@@ -116,6 +112,7 @@ async function handleReport(req: NextRequest): Promise<NextResponse> {
             report,
             installHash: hashInstallId(report.installId, store),
             networkHash: hashNetwork(ip, store),
+            blockHash: hashBlock(ip, store),
             anyStoreNetwork,
         })
         if (!result.recorded) {
