@@ -15,20 +15,21 @@
  *                                           marked by the finder
  *   B  no config, both flags OFF         -> no prompt, no pick asked
  *   C  no config, a box the rules find   -> the true saving, no pick asked
- *   D  no config, a box only the server
- *      can name                          -> one pick asked, the true saving
+ *   D  no config, server-only pick mode
+ *      (the rules never run), the server
+ *      names the box                     -> one pick asked, the true saving
  *   E  no config, a wrong pick (an email
  *      field and a link out of the cart) -> the codes to copy, no saving,
  *                                           never left the cart
  *   F  no config, no box at all          -> the codes to copy, no saving
- *   G  no config, a server-named box where
- *      the store SAYS "applied" but the
+ *   G  as D, but the store SAYS
+ *      "applied" and the
  *      total never moves                 -> no saving, no "worked" report
  *   H  no config, a labelled box that
  *      applies on Enter (no button), the
  *      server names none                 -> the codes to copy, nothing pressed
- *   I  no config, a box only the server
- *      can name, applies on Enter        -> one pick asked, Enter pressed,
+ *   I  as H, but the server names the
+ *      box                               -> one pick asked, Enter pressed,
  *                                           the true saving
  *   J  no config, a box the rules find in
  *      a cart that reloads per code      -> both codes tried across the
@@ -38,10 +39,11 @@
  *      discount" button and no coupon
  *      box, the server names it as the
  *      reveal                            -> nothing clicked, the codes to copy
- *   K  as J, but a box only the server
- *      can name                          -> skipped unless the build keeps a
- *                                           server pick across a reload
- *                                           (CARAMEL_AUTODETECT_KEPT_PICK=1)
+ *   M  no config, the server names a
+ *      field with no coupon word and a
+ *      "Go" button                       -> nothing typed, the codes to copy
+ *   K  as J, in server-only pick mode   -> one pick asked and kept across the
+ *                                           reloads, the true saving
  *
  * Run: pnpm test:autodetect          (default: .output/chrome-mv3-dev)
  *      CARAMEL_EXT_DIR=<dir> pnpm test:autodetect
@@ -170,7 +172,8 @@ const RULES_BOX =
     '<div class="promo"><label for="in">Discount code</label>' +
     '<input id="in" name="discount_code" type="text">' +
     '<button id="btn" type="button">Apply</button></div>'
-// Recognised by no rule: only the server's pick can name it.
+// No coupon word on the field and a button that does not say apply: whatever
+// names it, the page refuses it.
 const BARE_BOX =
     '<div class="f"><input id="in" name="field_7" type="text">' +
     '<button id="btn" type="button">Go</button></div>'
@@ -194,17 +197,12 @@ document.getElementById('spend').addEventListener('click', () => {
 })
 </script>`)
 
-// Boxes that apply on Enter: no button at all. The page answers the keydown
-// the way such carts do. The rules recognise the labelled one; only the
-// server's pick can name the bare one.
-const enterPage = labelled =>
-    SHELL(`
+// A labelled box that applies on Enter: no button at all. The page answers
+// the keydown the way such carts do. The rules see the box but never press
+// Enter on their own (H); it is used only when the server's pick names it (I).
+const ENTER_PAGE = SHELL(`
 <div class="row"><span>Total</span> <span id="tot">$100.00</span></div>
-<div class="promo">${
-        labelled
-            ? '<label for="in">Discount code</label><input id="in" name="discount_code" type="text">'
-            : '<input id="in" name="field_7" type="text">'
-    }</div>
+<div class="promo"><label for="in">Discount code</label><input id="in" name="discount_code" type="text"></div>
 <script>
 const input = document.getElementById('in')
 input.addEventListener('keydown', e => {
@@ -227,14 +225,12 @@ input.addEventListener('keydown', e => {
 /* A cart that posts its discount form and reloads the whole page after every
  * code, the way Magento 2's couponPost does. The cart lives on the "server"
  * (this closure): SAVE20 is refused, TENOFF takes $10 off, and the reloaded
- * page says so. `labelled` gives the rules a box they recognise; without it
- * only the server's pick can name the box. `posts` records every code the
- * store received. */
-function reloadingCart(labelled) {
+ * page says so. `posts` records every code the store received. */
+function reloadingCart() {
     const posts = []
     let applied = null
     let note = ''
-    const field = labelled ? 'discount_code' : 'field_7'
+    const field = 'discount_code'
     const serve = request => {
         if (request.method() === 'POST') {
             const code =
@@ -245,11 +241,9 @@ function reloadingCart(labelled) {
                 note = 'Discount applied'
             } else note = 'Sorry, ' + code + ' is not a valid code.'
         }
-        const box = labelled
-            ? '<label for="in">Discount code</label><input id="in" name="discount_code" type="text">' +
-              '<button id="btn" type="submit">Apply</button>'
-            : '<input id="in" name="field_7" type="text">' +
-              '<button id="btn" type="submit">Go</button>'
+        const box =
+            '<label for="in">Discount code</label><input id="in" name="discount_code" type="text">' +
+            '<button id="btn" type="submit">Apply</button>'
         return SHELL(`
 <div class="row"><span>Total</span> <span id="tot">$${applied ? '90.00' : '100.00'}</span></div>
 <form method="post" action="/cart" class="promo">${box}<div class="note">${note}</div></form>`)
@@ -306,6 +300,7 @@ const stubApi = (sw, opts) =>
                         shopperCodeCapture: false,
                         couponBoxDiscovery: o.flags,
                         couponBoxLlm: o.flags,
+                        couponBoxPickMode: o.pickMode,
                     })
                 }
                 if (u.includes('/api/extension/coupon-box-pick')) {
@@ -355,6 +350,7 @@ async function runScenario({
     serve = null,
     flags,
     pickPlan = null,
+    pickMode = undefined,
     expectPrompt = true,
     assert,
 }) {
@@ -385,7 +381,7 @@ async function runScenario({
             })
         })
 
-        const opts = { flags, pickPlan, config: CONFIG }
+        const opts = { flags, pickPlan, pickMode, config: CONFIG }
         let sw =
             ctx.serviceWorkers()[0] ||
             (await ctx.waitForEvent('serviceworker', { timeout: 30_000 }))
@@ -608,12 +604,13 @@ const SCENARIOS = [
         },
     },
     {
-        name: 'D no config, a box only the server can name — the true saving',
-        host: 'shop-with-a-bare-box.example',
+        name: 'D no config, server-only mode: the server alone names the box — the true saving',
+        host: 'shop-the-server-names.example',
         path: '/cart',
-        page: finderPage(BARE_BOX),
+        page: finderPage(RULES_BOX),
         flags: true,
-        pickPlan: { input: 'textbox', button: 'button "Go"' },
+        pickMode: 'llm_only',
+        pickPlan: { input: 'textbox', button: 'button "Apply"' },
         assert: ({ modal, state, savings, picks, worked }) => {
             check(
                 'asks the server once',
@@ -680,9 +677,10 @@ const SCENARIOS = [
         name: 'G no config, the store says "applied" but the total never moves — no saving',
         host: 'shop-that-says-yes.example',
         path: '/cart',
-        page: finderPage(BARE_BOX, true),
+        page: finderPage(RULES_BOX, true),
         flags: true,
-        pickPlan: { input: 'textbox', button: 'button "Go"' },
+        pickMode: 'llm_only',
+        pickPlan: { input: 'textbox', button: 'button "Apply"' },
         assert: ({ modal, state, savings, picks, worked }) => {
             check('asks the server once', picks.length === 1)
             check(
@@ -707,7 +705,7 @@ const SCENARIOS = [
         name: 'H no config, a box the rules see but that applies on Enter, the server names none — the codes to copy',
         host: 'shop-with-an-enter-box.example',
         path: '/cart',
-        page: enterPage(true),
+        page: ENTER_PAGE,
         flags: true,
         assert: ({ modal, state, savings, picks, worked }) => {
             check('asks the server once', picks.length === 1)
@@ -726,10 +724,10 @@ const SCENARIOS = [
         },
     },
     {
-        name: 'I no config, a box only the server can name that applies on Enter — the true saving',
-        host: 'shop-with-a-bare-enter-box.example',
+        name: 'I no config, a box the rules see but that applies on Enter, the server names it — the true saving',
+        host: 'shop-with-a-named-enter-box.example',
         path: '/cart',
-        page: enterPage(false),
+        page: ENTER_PAGE,
         flags: true,
         // The server names the input and no button.
         pickPlan: { input: 'textbox', button: null },
@@ -755,7 +753,7 @@ const SCENARIOS = [
         },
     },
     (() => {
-        const cart = reloadingCart(true)
+        const cart = reloadingCart()
         return {
             name: 'J no config, a box the rules find in a cart that reloads per code — the true saving',
             host: 'shop-that-reloads.example',
@@ -805,24 +803,45 @@ const SCENARIOS = [
             check('fires no "worked" report', worked.length === 0)
         },
     },
+    {
+        // The page is the last line of defence for a box someone else named:
+        // a field with no coupon word, or an apply that says nothing like
+        // apply, is never typed into, whoever names it.
+        name: 'M no config, the server names a field with no coupon word and a "Go" button — the codes to copy',
+        host: 'shop-with-a-bare-box.example',
+        path: '/cart',
+        page: finderPage(BARE_BOX),
+        flags: true,
+        pickPlan: { input: 'textbox', button: 'button "Go"' },
+        assert: ({ modal, state, savings, picks, worked }) => {
+            check('asks the server once', picks.length === 1)
+            check(
+                'types nothing anywhere',
+                state.submits.length === 0,
+                JSON.stringify(state.submits),
+            )
+            check(
+                'hands over the codes to copy',
+                /SAVE20/.test(modal) && /TENOFF/.test(modal),
+                modal.slice(0, 120),
+            )
+            check('banks nothing', savings.length === 0)
+            check('fires no "worked" report', worked.length === 0)
+        },
+    },
     (() => {
-        const cart = reloadingCart(false)
+        const cart = reloadingCart()
         return {
-            name: 'K no config, a box only the server can name in a cart that reloads per code — the true saving',
-            // A server pick is not kept across a reload on main: the rules see
-            // no box on the reloaded page and the store is never asked twice,
-            // so the chain stops after the first code and hands the rest over
-            // to copy. Keeping the pick is PR #348's change; this scenario is
-            // its proof once it lands.
-            skip:
-                process.env.CARAMEL_AUTODETECT_KEPT_PICK === '1'
-                    ? null
-                    : 'this build does not keep a server pick across a reload (PR #348); set CARAMEL_AUTODETECT_KEPT_PICK=1 to run it',
-            host: 'shop-that-reloads-a-bare-box.example',
+            name: 'K no config, server-only mode, a cart that reloads per code — the true saving',
+            // The rules never run in this mode, so the reloaded page has a
+            // box only because the run keeps the server's pick across the
+            // reload (PR #348): the server is asked once for both codes.
+            host: 'shop-that-reloads-for-the-server.example',
             path: '/cart',
             serve: cart.serve,
             flags: true,
-            pickPlan: { input: 'textbox', button: 'button "Go"' },
+            pickMode: 'llm_only',
+            pickPlan: { input: 'textbox', button: 'button "Apply"' },
             assert: ({ modal, savings, picks, worked }) => {
                 check(
                     'asks the server once',
