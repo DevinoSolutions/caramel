@@ -1316,6 +1316,21 @@ jobs:
             echo "**Manual submit required** — App Store Connect still needs a version created and submitted for review before customers get it."
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # The archive steps' -allowProvisioningUpdates mints a fresh "Apple
+      # Development: Created via API" certificate whenever the keychain holds
+      # no valid one (the imported APPLE_DEV_CERT_P12 dates from 2025-05), and
+      # its private key dies with this runner. Ten of them piled up (v1.2.0 to
+      # v1.4.12, one per run) until Apple's development-certificate cap made
+      # every Safari release from v1.4.13 fail at archive with "Your account has
+      # reached the maximum number of certificates". `always()` because a run
+      # that fails after archiving has minted one too. The script only revokes
+      # serials found in THIS runner's keychains, so other certificates on the
+      # shared team account can never match.
+      - name: Revoke this run's throwaway development certificate
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: node .github/workflows/scripts/revoke-run-dev-certs.mjs "/tmp/AuthKey_${ASC_KEY_ID}.p8"
+
   github_release:
     name: '🏷️ Publish GitHub Release'
     needs:
