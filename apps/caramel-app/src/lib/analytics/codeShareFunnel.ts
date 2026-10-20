@@ -64,7 +64,14 @@ export const CODE_SHARE_FUNNEL_STEP_REASONS = {
     ],
     apply_observed: [],
     store_accepted: [],
-    store_not_accepted: ['not-committed', 'store-error', 'not-tied-to-code'],
+    store_not_accepted: [
+        // `not-committed` is retired: old installed builds still send it.
+        'not-committed',
+        'store-error',
+        'not-tied-to-code',
+        'price-dropped-no-row',
+        'no-signal',
+    ],
     prompt_shown: [],
     prompt_accepted: [],
     prompt_declined: [],
