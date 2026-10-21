@@ -11,7 +11,6 @@ let handler
 let fetchCalls
 let responses // queue of fetch results, consumed in order
 let sessionData
-let onRemoved
 let localData
 
 function installWorkerRealm() {
@@ -51,9 +50,7 @@ function installWorkerRealm() {
     stub.runtime.lastError = undefined
     const listeners = []
     stub.runtime.onMessage.addListener = fn => listeners.push(fn)
-    stub.tabs.onRemoved.addListener = fn => {
-        onRemoved = fn
-    }
+    stub.tabs.onRemoved.addListener = () => {}
     globalThis.ServiceWorkerGlobalScope = {
         [Symbol.hasInstance]: () => true,
     }
@@ -86,7 +83,6 @@ beforeEach(async () => {
     fetchCalls = []
     responses = []
     sessionData = {}
-    onRemoved = null
     globalThis.fetch = async (url, opts) => {
         fetchCalls.push({ url: String(url), opts })
         const next = responses.shift()

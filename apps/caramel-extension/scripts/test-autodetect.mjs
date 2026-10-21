@@ -256,14 +256,21 @@ function reloadingCart(pickOnly = false) {
                 note = 'Discount applied'
             } else note = 'Sorry, ' + code + ' is not a valid code.'
         }
-        const box =
-            (pickOnly
-                ? PICK_ONLY_FIELD
-                : '<label for="in">Discount code</label><input id="in" name="discount_code" type="text">') +
-            '<button id="btn" type="submit">Apply</button>'
+        const total = `<div class="row"><span>Total</span> <span id="tot">$${applied ? '90.00' : '100.00'}</span></div>`
+        if (!pickOnly)
+            return SHELL(`
+${total}
+<form method="post" action="/cart" class="promo"><label for="in">Discount code</label><input id="in" name="discount_code" type="text"><button id="btn" type="submit">Apply</button><div class="note">${note}</div></form>`)
+        // A box the rules miss, like PICK_ONLY_BOX: no form around it (the
+        // rules read a form with a submit as a promo box). The Apply click
+        // posts the code itself, so the store still reloads once per code.
+        const post =
+            "var f=document.createElement('form');f.method='post';f.action='/cart';" +
+            "var i=document.createElement('input');i.name='field_7';i.value=document.getElementById('in').value;" +
+            'f.appendChild(i);document.body.appendChild(f);f.submit()'
         return SHELL(`
-<div class="row"><span>Total</span> <span id="tot">$${applied ? '90.00' : '100.00'}</span></div>
-<form method="post" action="/cart" class="promo">${box}<div class="note">${note}</div></form>`)
+${total}
+<div class="f">${PICK_ONLY_FIELD}<button id="btn" type="button" onclick="${post}">Apply</button><div class="note">${note}</div></div>`)
     }
     return { posts, serve }
 }
