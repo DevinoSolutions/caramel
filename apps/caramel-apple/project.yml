@@ -1,0 +1,120 @@
+# SOURCE OF TRUTH for apps/caramel-apple/Caramel.xcodeproj (T-4904).
+#
+# The .xcodeproj is GENERATED from this file by XcodeGen (version pinned in
+# scripts/generate-project.sh) and the generated project plus the Info.plist /
+# entitlements files XcodeGen writes are COMMITTED, so a clone opens in Xcode
+# as-is. Never hand-edit Caramel.xcodeproj: edit this file and regenerate. CI
+# (.github/workflows/release-apple-app.yml) regenerates on every PR touching this
+# directory and fails if the committed project differs.
+#
+# One App Store Connect app, 6741873881, bundle com.devino.Caramel: the iOS
+# container app plus the Safari Web Extension (com.devino.Caramel.Extension,
+# the same extension bundle id the converter-built releases already use).
+# The extension's resources are the WXT build
+# apps/caramel-extension/.output/safari-mv3, copied into the .appex by the
+# "Copy WXT Safari build" phase below. They are never committed.
+#
+# TODO(T-4905): a macOS target at parity (same bundle id, universal purchase)
+# is not wired yet; the converter-built macOS app keeps shipping from
+# release-extension.yml until it is.
+name: Caramel
+options:
+  bundleIdPrefix: com.devino
+  createIntermediateGroups: true
+  deploymentTarget:
+    iOS: '16.4' # MV3 floor, same as IOS_DEPLOYMENT_FLOOR in release-extension.yml
+settings:
+  base:
+    MARKETING_VERSION: '1.5.0' # the tag apple-v1.5.0 must match this (asserted in release-apple-app.yml)
+    CURRENT_PROJECT_VERSION: '1' # overridden at archive time by the CI build-number scheme
+    SWIFT_VERSION: '5.0'
+    CODE_SIGN_STYLE: Automatic # DEVELOPMENT_TEAM is passed on the xcodebuild command line from the APPLE_TEAM_ID secret
+    TARGETED_DEVICE_FAMILY: '1,2'
+    SUPPORTS_MACCATALYST: NO
+targets:
+  Caramel:
+    type: application
+    platform: iOS
+    sources:
+      - path: App
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: Caramel
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # Export compliance: the app and extension ship no crypto of their own
+        # (HTTPS through Apple's OS networking), the same answer release-extension.yml stamps.
+        ITSAppUsesNonExemptEncryption: false
+        LSRequiresIPhoneOS: true
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+    entitlements:
+      path: App/Caramel.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.devino.Caramel
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.devino.Caramel
+        PRODUCT_NAME: Caramel
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    dependencies:
+      - target: CaramelExtension
+        embed: true
+  CaramelExtension:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Extension
+    info:
+      path: Extension/Info.plist
+      properties:
+        CFBundleDisplayName: Caramel
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.Safari.web-extension
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).SafariWebExtensionHandler
+    entitlements:
+      path: Extension/CaramelExtension.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.devino.Caramel
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.devino.Caramel.Extension
+        PRODUCT_NAME: Caramel Extension
+        # The copy phase reads the WXT build from outside the target's own inputs.
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+    postCompileScripts:
+      - name: Copy WXT Safari build
+        # Files land at the bundle's resource root, which is where Safari looks
+        # for manifest.json (the .appex root on iOS). Fails loudly when the WXT
+        # build has not been produced. CARAMEL_SAFARI_BUILD_DIR overrides the path.
+        script: |
+          set -euo pipefail
+          src="${CARAMEL_SAFARI_BUILD_DIR:-${SRCROOT}/../caramel-extension/.output/safari-mv3}"
+          dest="${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}"
+          if [ ! -f "${src}/manifest.json" ]; then
+            echo "error: ${src}/manifest.json is missing. Build the extension first: pnpm --filter caramel-extension exec wxt build, then derive .output/safari-mv3 (apps/caramel-apple/scripts/derive-safari-build.sh)." >&2
+            exit 1
+          fi
+          mkdir -p "${dest}"
+          rsync -a --exclude='.DS_Store' "${src}/" "${dest}/"
+        basedOnDependencyAnalysis: false
+schemes:
+  Caramel:
+    build:
+      targets:
+        Caramel: all
+    run:
+      config: Debug
+    archive:
+      config: Release

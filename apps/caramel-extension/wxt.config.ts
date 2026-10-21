@@ -29,13 +29,13 @@ import { FIREFOX_NAME, NAME, SUMMARY } from './scripts/store-listing.mjs'
 
 type EnvironmentName = keyof typeof ENVIRONMENTS
 
-// The site's favicon mark, the white italic C on the orange rounded square
-// (apps/caramel-app/public/icons/caramel-icon-192.png, same as favicon.ico),
-// unaltered and filling the canvas. Rendered from its 600 px master
-// (public/square_caramel_logo.png) with the favicon's corner radius scaled;
-// 192 is the favicon file itself. Owner direction 2026-10-06: the 1.4.5 header
-// wordmark was unreadable at icon size; never redesign the mark. 48 and 128
-// are the sizes the extensions page and the store tile ask for.
+// Every toolbar and store icon is the Caramel icon in the Discord-server-logo
+// look (owner direction 2026-10-20, T-4981; supersedes the 2026-10-06 flat
+// favicon C): the wordmark's script C in glossy cream on the orange squircle.
+// All of them are rasterised straight from the vector master by
+// brand/generate-icons.py (brand/icon-master.svg), never resized from another
+// PNG, so regenerate with that script rather than editing /icons/*.png. 48 and
+// 128 are the sizes the extensions page and the store tile ask for.
 const ICONS = {
     16: '/icons/16.png',
     19: '/icons/19.png',

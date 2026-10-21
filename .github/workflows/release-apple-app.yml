@@ -1,0 +1,349 @@
+name: Release – Apple App (iOS container + Safari extension)
+
+# Builds apps/caramel-apple (the committed Xcode project: SwiftUI container app
+# + the Safari Web Extension whose resources are the WXT build), archives it,
+# signs it, uploads it to TestFlight and attaches the build to the INTERNAL
+# TestFlight group "Devino". TestFlight ONLY: nothing here creates, edits or
+# submits an App Store version or sends anything to App Review. The existing
+# App Store versions (1.4.x) and their builds are never touched: the attach
+# step addresses one build by (marketing version, build number) and refuses
+# anything whose pre-release version is not the one this run built.
+#
+# Triggers (owner pushes the tags; agents never do):
+#   - tag `apple-v<MARKETING_VERSION>` (must equal MARKETING_VERSION in
+#     apps/caramel-apple/project.yml; `v*` tags belong to release-extension.yml)
+#   - workflow_dispatch (the workflow file must exist on the default branch)
+#   - pull_request touching apps/caramel-apple: builds and archives UNSIGNED and
+#     verifies the committed Xcode project matches project.yml. It never signs
+#     or uploads, so CI proves the build before anything can ship.
+#
+# Secrets reused from release-extension.yml (names only): ASC_KEY_ID,
+# ASC_ISSUER_ID, ASC_API_KEY_BASE64, APPLE_TEAM_ID, APPLE_CERT_P12,
+# APPLE_CERT_PASSWORD, APPLE_DEV_CERT_P12, APPLE_DEV_CERT_PASSWORD,
+# KEYCHAIN_PASSWORD, APPLE_ID, APPLE_APP_PASSWORD. Repository variable:
+# SAFARI_BUNDLE_ID (com.devino.Caramel).
+#
+# Build number (CFBundleVersion): highest iOS build already on the app + 1,
+# read from the App Store Connect API (asc-testflight.mjs next-build-number).
+# That is the same rule release-extension.yml uses, so both workflows continue
+# one monotonic line and a new build can never collide with an existing one.
+
+on:
+  push:
+    tags: ['apple-v*']
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'apps/caramel-apple/**'
+      - '.github/workflows/release-apple-app.yml'
+      - '.github/workflows/scripts/asc-testflight.mjs'
+
+concurrency:
+  group: release-apple-app-${{ github.event_name == 'pull_request' && github.ref || 'release' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  BUNDLE_ID: ${{ vars.SAFARI_BUNDLE_ID || 'com.devino.Caramel' }}
+  EXTENSION_DIR: ${{ vars.WORKING_DIRECTORY || 'apps/caramel-extension' }}
+  APPLE_DIR: apps/caramel-apple
+  TESTFLIGHT_GROUP: Devino
+  # The MV3 floor lives in project.yml (deploymentTarget.iOS); asserted after archive.
+  IOS_DEPLOYMENT_FLOOR: '16.4'
+  ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+  ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+
+jobs:
+  apple:
+    name: ${{ github.event_name == 'pull_request' && 'Build + archive (unsigned, no upload)' || 'Archive, sign, upload to TestFlight' }}
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      # project.yml is the one version authority for the Apple app. A tag must
+      # say exactly that version, so a stale tag can never ship a different one.
+      - name: Resolve and guard the marketing version
+        id: version
+        run: |
+          set -euo pipefail
+          version=$(sed -nE "s/^ *MARKETING_VERSION: *'?([0-9]+\.[0-9]+\.[0-9]+)'?.*/\1/p" "${APPLE_DIR}/project.yml" | head -1)
+          if [ -z "$version" ]; then
+            echo "::error::Could not read MARKETING_VERSION (X.Y.Z) from ${APPLE_DIR}/project.yml."
+            exit 1
+          fi
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "apple-v${version}" ]; then
+            echo "::error::Tag '${GITHUB_REF_NAME}' does not match project.yml MARKETING_VERSION — expected 'apple-v${version}'."
+            exit 1
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "Apple app marketing version: ${version}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      # The committed project must be exactly what project.yml generates with the
+      # pinned XcodeGen. On drift the freshly generated files are uploaded so the
+      # fix is a copy, not a guess; the step after it fails the job.
+      - name: Regenerate the Xcode project from project.yml
+        run: ${{ env.APPLE_DIR }}/scripts/generate-project.sh
+
+      - name: Detect drift between the committed and generated project
+        id: drift
+        run: |
+          set -euo pipefail
+          if [ -n "$(git status --porcelain -- "${APPLE_DIR}")" ]; then
+            git status --short -- "${APPLE_DIR}"
+            git diff --stat -- "${APPLE_DIR}"
+            echo "drift=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "drift=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload the generated project (drift diagnostics)
+        if: steps.drift.outputs.drift == 'true'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-caramel-apple
+          path: |
+            ${{ env.APPLE_DIR }}/Caramel.xcodeproj
+            ${{ env.APPLE_DIR }}/App/Info.plist
+            ${{ env.APPLE_DIR }}/App/Caramel.entitlements
+            ${{ env.APPLE_DIR }}/Extension/Info.plist
+            ${{ env.APPLE_DIR }}/Extension/CaramelExtension.entitlements
+
+      - name: Fail on project drift
+        if: steps.drift.outputs.drift == 'true'
+        run: |
+          echo "::error::${APPLE_DIR} does not match what project.yml generates. Run ${APPLE_DIR}/scripts/generate-project.sh on a Mac (or take the 'generated-caramel-apple' artifact of this run) and commit the result."
+          exit 1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install extension dependencies
+        run: pnpm install --frozen-lockfile --filter "caramel-extension..."
+
+      # No `--mode`: production is WXT's default, and a development-stamped build
+      # would point real users' extensions at the dev deployment.
+      - name: Build the extension (WXT)
+        run: pnpm --filter caramel-extension run build
+
+      - name: Derive .output/safari-mv3
+        run: ${{ env.APPLE_DIR }}/scripts/derive-safari-build.sh
+
+      - name: Install jq
+        run: command -v jq >/dev/null 2>&1 || brew install jq
+
+      # Everything below here signs or talks to App Store Connect; none of it
+      # runs for pull requests (fork PRs would not have the secrets anyway).
+      - name: Install App Store Connect API key
+        if: github.event_name != 'pull_request'
+        env:
+          ASC_API_KEY_BASE64: ${{ secrets.ASC_API_KEY_BASE64 }}
+        run: |
+          set -euo pipefail
+          echo "${ASC_API_KEY_BASE64}" | base64 --decode > "/tmp/AuthKey_${ASC_KEY_ID}.p8"
+          ls -l "/tmp/AuthKey_${ASC_KEY_ID}.p8"
+
+      - name: Resolve the next TestFlight build number
+        id: build_number
+        env:
+          ASC_KEY_PATH: /tmp/AuthKey_${{ secrets.ASC_KEY_ID }}.p8
+          ASC_BUNDLE_ID: ${{ env.BUNDLE_ID }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            number=1
+          else
+            number=$(node .github/workflows/scripts/asc-testflight.mjs next-build-number)
+          fi
+          echo "number=${number}" >> "$GITHUB_OUTPUT"
+          echo "CFBundleVersion for this run: ${number}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Import distribution cert
+        if: github.event_name != 'pull_request'
+        uses: apple-actions/import-codesign-certs@v2
+        with:
+          p12-file-base64: ${{ secrets.APPLE_CERT_P12 }}
+          p12-password: ${{ secrets.APPLE_CERT_PASSWORD }}
+          keychain: signing_temp
+          keychain-password: ${{ secrets.KEYCHAIN_PASSWORD }}
+
+      - name: Import development cert
+        if: github.event_name != 'pull_request'
+        uses: apple-actions/import-codesign-certs@v2
+        with:
+          create-keychain: false
+          keychain: signing_temp
+          p12-file-base64: ${{ secrets.APPLE_DEV_CERT_P12 }}
+          p12-password: ${{ secrets.APPLE_DEV_CERT_PASSWORD }}
+          keychain-password: ${{ secrets.KEYCHAIN_PASSWORD }}
+
+      - name: Archive (unsigned, pull request)
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          xcodebuild archive \
+            -project "${APPLE_DIR}/Caramel.xcodeproj" \
+            -scheme Caramel \
+            -destination "generic/platform=iOS" \
+            -configuration Release \
+            -archivePath "${RUNNER_TEMP}/Caramel.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            MARKETING_VERSION="${{ steps.version.outputs.version }}" \
+            CURRENT_PROJECT_VERSION="${{ steps.build_number.outputs.number }}"
+
+      - name: Archive (signed)
+        if: github.event_name != 'pull_request'
+        run: |
+          set -euo pipefail
+          xcodebuild archive \
+            -project "${APPLE_DIR}/Caramel.xcodeproj" \
+            -scheme Caramel \
+            -destination "generic/platform=iOS" \
+            -configuration Release \
+            -archivePath "${RUNNER_TEMP}/Caramel.xcarchive" \
+            CODE_SIGN_STYLE=Automatic \
+            DEVELOPMENT_TEAM="${{ secrets.APPLE_TEAM_ID }}" \
+            MARKETING_VERSION="${{ steps.version.outputs.version }}" \
+            CURRENT_PROJECT_VERSION="${{ steps.build_number.outputs.number }}" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "/tmp/AuthKey_${ASC_KEY_ID}.p8" \
+            -authenticationKeyID "${ASC_KEY_ID}" \
+            -authenticationKeyIssuerID "${ASC_ISSUER_ID}"
+
+      # Prove what actually landed in the archive instead of trusting the
+      # project: the extension must carry the WXT build at its resource root
+      # (Safari reads manifest.json there), both bundles must carry the
+      # version/build/floor, and the app must carry the export-compliance key
+      # (without it every upload sits in TestFlight as "Missing Compliance").
+      - name: Assert the archive contents
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          BUILD: ${{ steps.build_number.outputs.number }}
+        run: |
+          set -euo pipefail
+          archive="${RUNNER_TEMP}/Caramel.xcarchive"
+          app="${archive}/Products/Applications/Caramel.app"
+          appex="${app}/PlugIns/Caramel Extension.appex"
+          plist() { /usr/libexec/PlistBuddy -c "Print :$2" "$1"; }
+          expect() { # file key expected
+            actual=$(plist "$1" "$2")
+            if [ "$actual" != "$3" ]; then
+              echo "::error::$1 has $2='${actual}', expected '$3'."
+              exit 1
+            fi
+            echo "ok: $(basename "$(dirname "$1")")/$(basename "$1") $2=${actual}"
+          }
+          [ -d "$app" ] || { echo "::error::No Caramel.app in the archive."; exit 1; }
+          [ -d "$appex" ] || { echo "::error::The extension is not embedded in the app (PlugIns/Caramel Extension.appex)."; exit 1; }
+
+          expect "$app/Info.plist" CFBundleIdentifier "${BUNDLE_ID}"
+          expect "$appex/Info.plist" CFBundleIdentifier "${BUNDLE_ID}.Extension"
+          for bundle in "$app" "$appex"; do
+            expect "$bundle/Info.plist" CFBundleShortVersionString "${VERSION}"
+            expect "$bundle/Info.plist" CFBundleVersion "${BUILD}"
+            expect "$bundle/Info.plist" MinimumOSVersion "${IOS_DEPLOYMENT_FLOOR}"
+          done
+          expect "$app/Info.plist" ITSAppUsesNonExemptEncryption false
+          expect "$appex/Info.plist" NSExtension:NSExtensionPointIdentifier com.apple.Safari.web-extension
+
+          [ -f "$appex/manifest.json" ] || { echo "::error::The extension carries no manifest.json at its bundle root: the WXT build was not copied in."; exit 1; }
+          jq -e '.manifest_version == 3' "$appex/manifest.json" >/dev/null || { echo "::error::manifest.json is not MV3."; exit 1; }
+          echo "ok: extension manifest $(jq -er '"\(.name) \(.version)"' "$appex/manifest.json")"
+
+      - name: Assert the App Group entitlement on both signed bundles
+        if: github.event_name != 'pull_request'
+        run: |
+          set -euo pipefail
+          archive="${RUNNER_TEMP}/Caramel.xcarchive"
+          for bundle in \
+            "${archive}/Products/Applications/Caramel.app" \
+            "${archive}/Products/Applications/Caramel.app/PlugIns/Caramel Extension.appex"; do
+            entitlements=$(codesign -d --entitlements - --xml "$bundle" 2>/dev/null)
+            if ! grep -q "group.com.devino.Caramel" <<<"$entitlements"; then
+              echo "::error::${bundle} is not signed with the group.com.devino.Caramel App Group."
+              exit 1
+            fi
+            echo "ok: ${bundle} carries group.com.devino.Caramel"
+          done
+
+      - name: Write exportOptions
+        if: github.event_name != 'pull_request'
+        run: |
+          cat > "${RUNNER_TEMP}/exportOptions.plist" <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>teamID</key><string>${{ secrets.APPLE_TEAM_ID }}</string>
+          </dict>
+          </plist>
+          EOF
+
+      - name: Export the ipa
+        if: github.event_name != 'pull_request'
+        run: |
+          set -euo pipefail
+          xcodebuild -exportArchive \
+            -archivePath "${RUNNER_TEMP}/Caramel.xcarchive" \
+            -exportOptionsPlist "${RUNNER_TEMP}/exportOptions.plist" \
+            -exportPath "${RUNNER_TEMP}/Exported" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "/tmp/AuthKey_${ASC_KEY_ID}.p8" \
+            -authenticationKeyID "${ASC_KEY_ID}" \
+            -authenticationKeyIssuerID "${ASC_ISSUER_ID}"
+          ls -l "${RUNNER_TEMP}/Exported"
+
+      - name: Upload the ipa to TestFlight
+        if: github.event_name != 'pull_request'
+        env:
+          ALTOOL_USER: ${{ secrets.APPLE_ID }}
+          ALTOOL_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          ipa=$(find "${RUNNER_TEMP}/Exported" -name '*.ipa' -print -quit)
+          [ -n "$ipa" ] || { echo "::error::Export produced no .ipa."; exit 1; }
+          xcrun altool --upload-app -f "$ipa" -t ios \
+            -u "$ALTOOL_USER" -p "$ALTOOL_PASSWORD" --verbose
+
+      # Waits for App Store Connect to finish processing the upload, adds it to
+      # the internal group and verifies the group's own state. Never touches an
+      # App Store version, never submits for review.
+      - name: Attach the build to the internal TestFlight group
+        if: github.event_name != 'pull_request'
+        env:
+          ASC_KEY_PATH: /tmp/AuthKey_${{ secrets.ASC_KEY_ID }}.p8
+          ASC_BUNDLE_ID: ${{ env.BUNDLE_ID }}
+        run: >-
+          node .github/workflows/scripts/asc-testflight.mjs attach-build
+          "${{ steps.version.outputs.version }}"
+          "${{ steps.build_number.outputs.number }}"
+          "${TESTFLIGHT_GROUP}"
+
+      # `-allowProvisioningUpdates` mints a throwaway "Apple Development: Created
+      # via API" certificate whenever the keychain holds no valid one, and its
+      # key dies with this runner; unrevoked they hit Apple's cap and break every
+      # later release. `always()` because a run that fails after archiving has
+      # minted one too. Only certificates found in THIS runner's keychains are
+      # revoked (same script release-extension.yml uses).
+      - name: Revoke this run's throwaway development certificate
+        if: always() && github.event_name != 'pull_request'
+        run: node .github/workflows/scripts/revoke-run-dev-certs.mjs "/tmp/AuthKey_${ASC_KEY_ID}.p8"

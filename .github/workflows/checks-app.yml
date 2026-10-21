@@ -313,7 +313,7 @@ jobs:
   e2e-pr:
     name: E2E & Visual Regression (PR)
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # Playwright does not support ubuntu 26.04 (T-5003)
     # DevinoSolutions/artifact/upload@v1 authenticates to the self-hosted store with a
     # GitHub OIDC token, so this job needs `id-token: write`. A job-level block
     # REPLACES the workflow-level one, hence `contents: read` is restated here.
@@ -405,7 +405,7 @@ jobs:
   e2e-push:
     name: E2E & Visual Regression (push)
     if: github.event_name == 'push'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # Playwright does not support ubuntu 26.04 (T-5003)
     # DevinoSolutions/artifact/upload@v1 authenticates to the self-hosted store with a
     # GitHub OIDC token, so this job needs `id-token: write`. A job-level block
     # REPLACES the workflow-level one, hence `contents: read` is restated here.
