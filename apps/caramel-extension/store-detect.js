@@ -18,6 +18,7 @@
 // comment noise in the pre-port sources. Every imported binding below is read
 // at CALL time, never during module evaluation, so no TDZ hazard exists.
 import {
+    caramelOwnHost,
     caramelRecordSaving,
     caramelSendMessage,
     currentBrowser,
@@ -39,8 +40,8 @@ import {
 } from './coupon-apply.js'
 import {
     caramelCouponBoxDiscoveryOn,
-    caramelLoadFinder,
     caramelLoadedFinder,
+    caramelLoadFinder,
 } from './coupon-box-finder-loader.js'
 import { fetchCoupons } from './coupon-fetch.js'
 import { reportOutcome, startApplyingCoupons } from './coupon-runner.js'
@@ -612,8 +613,6 @@ async function _platformCartUsable() {
  * difference between helping here and staying silent. */
 // Exported for tests/configless-store.test.mjs, which drives the apply flow
 // with exactly this record.
-// caramelNoConfig: the finder's pick modes and learned boxes apply only to a
-// store with no served config (coupon-box-discovery.js isServed).
 export function caramelConfiglessRecord(hostname) {
     return { domain: hostname, caramelNoConfig: true }
 }
@@ -655,7 +654,7 @@ export async function isCheckout() {
     if (!rec)
         return (
             (await _platformCartUsable()) ||
-            (await _finderMayOffer(location.hostname, false))
+            (await _finderMayOffer(location.hostname))
         )
     // VISIBLE, not merely present: themes ship hidden coupon markup on
     // non-checkout pages, and some configs point showInput at site-wide
@@ -694,9 +693,12 @@ export async function isCheckout() {
         })
         return true
     }
+    // A store with a config never runs auto-detect: its config is the only
+    // description of its box we act on. The finder is asked only for a
+    // record that says it has none.
     return (
         (await _platformCartUsable()) ||
-        (await _finderMayOffer(rec.domain, true))
+        (rec.caramelNoConfig === true && (await _finderMayOffer(rec.domain)))
     )
 }
 
@@ -708,11 +710,9 @@ export async function isCheckout() {
  * still requires codes for the domain before the prompt appears. Detection
  * never clicks anything: opening a folded box waits for the shopper's tap.
  * A box the server picked earlier in this tab counts too, found again by name
- * (caramelFinderSeesKeptPick): a cart that reloads to show each answer. So
- * does, on a store with no config (served false), a box this install saw the
- * store answer through before; in llm_only the rules' box does not count
+ * (caramelFinderSeesKeptPick): a cart that reloads to show each answer
  * (caramelFinderSees). */
-async function _finderSeesBox(domain, served) {
+async function _finderSeesBox(domain) {
     if (!caramelStoreListKnown() || !_caramelCartIntentSignal()) return false
     if (!(await caramelCouponBoxDiscoveryOn())) return false
     // Loaded only here, with the flag on and no box a config describes. A
@@ -720,7 +720,7 @@ async function _finderSeesBox(domain, served) {
     const finder = await caramelLoadFinder()
     if (!finder) return false
     try {
-        return await finder.caramelFinderSees(domain, served)
+        return await finder.caramelFinderSees(domain)
     } catch (e) {
         log('FINDER_FAILED', { error: String(e) })
         return false
@@ -733,8 +733,8 @@ async function _finderSeesBox(domain, served) {
  * keeps asking _finderSeesBox alone: the server is asked once per store per
  * tab session, so a page after the ask continues only on a box the rules see
  * or the pick it kept. */
-async function _finderMayOffer(domain, served) {
-    if (await _finderSeesBox(domain, served)) return true
+async function _finderMayOffer(domain) {
+    if (await _finderSeesBox(domain)) return true
     if (!caramelStoreListKnown() || !_caramelCartIntentSignal()) return false
     if (!(await caramelCouponBoxDiscoveryOn())) return false
     const finder = await caramelLoadFinder()
@@ -846,8 +846,10 @@ async function _caramelContinueRun(rec, finder = false) {
         return false
     }
     if (!runRec) return stop('no record')
-    if (finder) {
-        if (!(await _finderSeesBox(runRec.domain, !!rec))) return stop('no box')
+    // A store with a config goes on only on its config's box, whatever the
+    // page before ran: auto-detect never runs for it.
+    if (finder && (!rec || rec.caramelNoConfig === true)) {
+        if (!(await _finderSeesBox(runRec.domain))) return stop('no box')
     } else {
         const box = pickBestMatch(rec.couponInput)
         const toggle = rec.showInput ? pickBestMatch(rec.showInput) : null
@@ -926,9 +928,9 @@ async function _resumePendingSubmit() {
             currency: caramelCurrencyCode(),
             couponId: pending.id,
         })
-        // A finder box the store answered through: remembered (store with
-        // no config only; the run left its box for this page).
-        if (pending.finder) caramelLoadedFinder()?.caramelFinderLearnResumed()
+        // A finder box the code worked through, on a store with no config:
+        // saved as the store's config (the run held its box for this page).
+        if (pending.finder) caramelLoadedFinder()?.caramelFinderConfirmedResumed()
         showFinalModal(saved, pending.code)
         return true
     }
@@ -1032,7 +1034,7 @@ const _caramelPromptUp = () =>
         'caramel-small-prompt',
         'caramel-testing-overlay',
         'caramel-final-overlay',
-    ].some(id => document.getElementById(id))
+    ].some(id => caramelOwnHost(id))
 
 async function _caramelSecondLook() {
     window.__caramel_second_look?.()
@@ -1098,7 +1100,7 @@ export async function startCheckoutDetection() {
     // re-detection now (the address bar moved, coupon-runner.js) must not take
     // the attempt it is in the middle of as if a reload had ended it. What the
     // loop left is the loop's to finish.
-    const applying = !!document.getElementById('caramel-testing-overlay')
+    const applying = !!caramelOwnHost('caramel-testing-overlay')
     if (applying) log('HANDOFF_RESUME_SKIPPED_WHILE_APPLYING', {})
     // A discount-link apply reloads the page so the store's own UI shows the
     // applied code; finish that flow on the fresh document by showing the
@@ -1185,9 +1187,9 @@ export async function startCheckoutDetection() {
         caramelNoteCheckoutForCapture(rec)
         // Don't re-prompt if the prompt is already up or we're mid-apply.
         if (
-            document.getElementById('caramel-small-prompt') ||
-            document.getElementById('caramel-testing-overlay') ||
-            document.getElementById('caramel-final-overlay')
+            caramelOwnHost('caramel-small-prompt') ||
+            caramelOwnHost('caramel-testing-overlay') ||
+            caramelOwnHost('caramel-final-overlay')
         )
             return
         // Require the coupon box (or its reveal toggle) to be VISIBLE, not just
@@ -1205,9 +1207,9 @@ export async function startCheckoutDetection() {
             getCachedCodes(rec).then(codes => {
                 if (
                     !codes.length ||
-                    document.getElementById('caramel-small-prompt') ||
-                    document.getElementById('caramel-testing-overlay') ||
-                    document.getElementById('caramel-final-overlay')
+                    caramelOwnHost('caramel-small-prompt') ||
+                    caramelOwnHost('caramel-testing-overlay') ||
+                    caramelOwnHost('caramel-final-overlay')
                 )
                     return
                 insertCaramelPrompt(rec)

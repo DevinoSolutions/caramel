@@ -1,30 +1,22 @@
-// owns: the names a confirmed coupon box is saved under, and the per-install
-// memory of those boxes (caramelBoxSelectors, caramelLearnedOutcome).
+// owns: the stable CSS selectors a coupon box the finder found is named by
+// (caramelStableSelector, caramelBoxSelectors), and the small selector
+// grammar they are built in and read with (caramelSelectorAllowed,
+// caramelOne, caramelRiskyControl).
 //
-// A store with no config, where the finder found a box and the store ANSWERED
-// a code typed into it (the total dropped, or the store replied about the
-// code), has that box remembered: on the next visit it is tried first
-// (coupon-box-discovery.js learnedRecord), through every check a fresh pick
-// goes through. This module is not in the content-script bundle: the build
-// ships it as assets/coupon-box-learned.js (wxt.config.ts) and the finder
-// imports it only on a store with no config, when it is about to remember
-// something. No imports of its own, so the shipped file is the measured one.
-// The memory itself is read and written only by the background
-// (caramelLearnedRead, caramelLearnedOutcome), for the host of the tab that
-// asks: a page cannot name another store, nor write the memory at all.
+// A store with no config, where the finder found a box and a code typed into
+// it lowered the total, has that box saved as the store's config
+// (coupon-box-discovery.js savable; background.js couponBoxSave). This
+// module names the box for that save. It is not in the content-script
+// bundle: the build ships it as assets/coupon-box-selectors.js
+// (wxt.config.ts) and the finder imports it only on a store with no config,
+// once it has a box. No imports of its own, so the shipped file is the
+// measured one. The background reads the same rules before it sends a save.
 //
-// What is saved is CSS selectors, the form store configs use, built from what
+// What is named is CSS selectors, the form store configs use, built from what
 // a store's markup calls the element: an id that is not generated, its name,
 // aria-label, placeholder or test id, else a short path from the nearest
 // element that has one. Never page text the shopper typed, a code, or a price.
 
-// The memory: domain -> { v, input, apply, toggle, enterOnly, source,
-// confirmedAt, failures }, oldest use first (object key order is insertion
-// order for these keys), at most MAX_DOMAINS of them.
-export const LEARNED_KEY = 'caramel_learned_boxes'
-export const MAX_DOMAINS = 200
-// Two failed uses in a row and the box is forgotten: normal detection runs.
-export const MAX_FAILURES = 2
 // The server refuses a longer selector; one this long is no stable name.
 export const MAX_SELECTOR = 200
 
@@ -79,7 +71,7 @@ const usable = v =>
     !REFUSED.test(v) &&
     !PRIVATE.test(v)
 
-/* The only selectors a learned box is built from or read with, the same rule
+/* The only selectors a saved box is built from or read with, the same rule
  * on both sides: compound parts of a tag, #id, .class,
  * [id|name|type|aria-label|placeholder|data-*="plain value"],
  * :first-of-type and :nth-of-type(n) (n up to 99), joined by spaces or ">".
@@ -90,8 +82,8 @@ const usable = v =>
  * serves, so nothing built here is refused there. Anything
  * else (:has(), any other pseudo-class, a wildcard, a sibling combinator, an
  * unquoted or escaped value) is refused before any query runs: a selector
- * served by the server, or read back from storage, is data, and an expensive
- * or odd one is never evaluated. */
+ * served by the server is data, and an expensive or odd one is never
+ * evaluated. */
 // The longest selector the server serves.
 export const MAX_READ_SELECTOR = 256
 const TAG_RE = /[a-z][a-z0-9-]*/iy
@@ -131,7 +123,7 @@ function partsOf(css) {
     }
 }
 
-// Exported for tests/coupon-box-learned.test.mjs.
+// Exported for tests/coupon-box-selectors.test.mjs.
 export function caramelSelectorAllowed(css) {
     return partsOf(css) !== null && !holdsPersonalData(css)
 }
@@ -139,7 +131,7 @@ export function caramelSelectorAllowed(css) {
 /* The one element `css` finds in `doc`, or null: a selector outside the
  * grammar is never queried, and one that finds two elements (a gift-card
  * field beside the box) names neither. */
-// Called from coupon-box-discovery.js.
+// Exported for tests/coupon-box-selectors.test.mjs.
 export function caramelOne(doc, css) {
     if (!caramelSelectorAllowed(css)) return null
     try {
@@ -182,7 +174,7 @@ function ownNames(el) {
 // (at most three steps, so four parts with the anchor) down from the nearest
 // ancestor that has a unique name of its own. Every answer is checked: it is
 // in the grammar and finds exactly this element.
-// Exported for tests/coupon-box-learned.test.mjs.
+// Exported for tests/coupon-box-selectors.test.mjs.
 export function caramelStableSelector(el) {
     if (!el || el.nodeType !== 1) return null
     for (const css of ownNames(el)) if (only(el, css)) return css
@@ -213,39 +205,16 @@ export function caramelStableSelector(el) {
 // The selectors for one box: its input, its apply button (null when the box
 // applies on Enter) and the toggle that opened it (null when it was showing).
 // null when any part of it has no stable name: half a box is not a box.
-// Exported for tests/coupon-box-learned.test.mjs.
+// Exported for tests/coupon-box-selectors.test.mjs.
 export function caramelBoxSelectors(input, button, toggle) {
     const box = {
         input: caramelStableSelector(input),
         apply: button ? caramelStableSelector(button) : null,
         toggle: toggle ? caramelStableSelector(toggle) : null,
-        enterOnly: !button,
     }
     if (!box.input || (button && !box.apply) || (toggle && !box.toggle))
         return null
     return box
-}
-
-/* What a run carries to remember its box: the domain, the box's selectors
- * (`box` already saved ones, or [input, button, toggle] elements to name),
- * where it came from, and whether it came from memory (this install's or the
- * server's): only such a box is reported as failed. null when the box has no
- * stable name. */
-// Called from coupon-box-discovery.js.
-export function caramelLearnable(domain, box, source, learned) {
-    if (Array.isArray(box)) box = caramelBoxSelectors(...box)
-    if (!box) return null
-    return {
-        domain,
-        box: {
-            input: box.input,
-            apply: box.apply || null,
-            toggle: box.toggle || null,
-            enterOnly: !!box.enterOnly,
-        },
-        source,
-        learned: !!learned,
-    }
 }
 
 // Words that name a control that spends money or changes the cart, never one
@@ -294,8 +263,8 @@ const COUPON_WORDS = new Set([
 
 /* Whether an APPLY or TOGGLE selector names a control that could place an
  * order, pay, or delete something (RISKY_CONTROL_WORDS). The same rule the
- * server refuses a report with (couponBoxSelector.ts isRiskyControlSelector),
- * so such a box is never remembered here nor sent.
+ * server refuses a save with (couponBoxSelector.ts isRiskyControlSelector),
+ * so such a box is never sent.
  *
  * Only the LAST part is read, the element that is clicked: its tag, id,
  * classes and attribute VALUES. Ancestors are not (WooCommerce's own apply
@@ -304,7 +273,7 @@ const COUPON_WORDS = new Set([
  * part also names a coupon word (COUPON_WORDS). A selector outside the
  * grammar is read whole. The coupon field itself is not checked (typing into
  * it clicks nothing). */
-// Exported for tests/coupon-box-learned.test.mjs.
+// Exported for tests/coupon-box-selectors.test.mjs.
 export function caramelRiskyControl(css) {
     const parts = partsOf(css)
     const words = (parts ? parts[parts.length - 1] : String(css))
@@ -323,113 +292,4 @@ export function caramelRiskyControl(css) {
               : null
         return risky !== null && !(namesCoupon && CHECKOUT_RISKY.has(risky))
     })
-}
-
-// What the memory accepts, whoever asks: a domain, a box whose every
-// selector is in the grammar (caramelSelectorAllowed, so at most
-// MAX_READ_SELECTOR characters each) and whose apply and toggle name no
-// control that pays, orders or removes (caramelRiskyControl), a source the
-// finder writes, and an outcome. Anything else is refused before storage is
-// read: a value that reached here from a page never lands in the memory.
-const SOURCES = ['rules', 'llm', 'server_learned']
-const OUTCOMES = ['confirmed', 'failed']
-const DOMAIN_RE = /^[a-z0-9.-]{1,253}$/
-const optional = css =>
-    css == null || (caramelSelectorAllowed(css) && !caramelRiskyControl(css))
-// Exported for tests/coupon-box-learned.test.mjs.
-export const caramelLearnedValid = (domain, box, source, outcome) =>
-    typeof domain === 'string' &&
-    DOMAIN_RE.test(domain) &&
-    !!box &&
-    typeof box === 'object' &&
-    caramelSelectorAllowed(box.input) &&
-    optional(box.apply) &&
-    optional(box.toggle) &&
-    SOURCES.includes(source) &&
-    OUTCOMES.includes(outcome)
-
-/* The box saved for `domain` in `area` (storage.local), or null. Only an
- * entry the memory could have written is returned. */
-// Called from background.js.
-export async function caramelLearnedRead(area, domain) {
-    const b = (await read(area))[domain]
-    return b?.v === 1 && caramelLearnedValid(domain, b, b.source, 'confirmed')
-        ? b
-        : null
-}
-
-const same = (a, b) =>
-    !!a &&
-    a.input === b.input &&
-    (a.apply || null) === (b.apply || null) &&
-    (a.toggle || null) === (b.toggle || null) &&
-    !!a.enterOnly === !!b.enterOnly
-
-const read = area =>
-    new Promise((resolve, reject) => {
-        area.get([LEARNED_KEY], items => {
-            const err = globalThis.chrome?.runtime?.lastError
-            if (err) reject(new Error(err.message || String(err)))
-            else resolve(items?.[LEARNED_KEY] || {})
-        })
-    })
-const write = (area, map) =>
-    new Promise((resolve, reject) => {
-        area.set({ [LEARNED_KEY]: map }, () => {
-            const err = globalThis.chrome?.runtime?.lastError
-            if (err) reject(new Error(err.message || String(err)))
-            else resolve()
-        })
-    })
-
-/* Record what one use of a box taught us, in `area` (storage.local).
- *   confirmed: the box is saved (or refreshed) for `domain` with no failures,
- *              and becomes the most recently used;
- *   failed:    if it is the box saved for `domain`, one more failure, and on
- *              the second it is forgotten. A failure of some other box says
- *              nothing about the saved one, which is left as it was.
- * Past MAX_DOMAINS, the least recently used domains are forgotten.
- * Returns what happened: 'saved' | 'failed' | 'dropped' | 'kept', or
- * 'refused' for anything caramelLearnedValid does not accept. Throws when
- * storage refuses, so the caller can say so. The background is the one
- * writer, one write at a time (background.js saveLearned). */
-// Called from background.js.
-export async function caramelLearnedOutcome(
-    area,
-    domain,
-    box,
-    source,
-    outcome,
-    now,
-) {
-    if (!caramelLearnedValid(domain, box, source, outcome)) return 'refused'
-    const map = await read(area)
-    const was = map[domain]
-    let result = 'kept'
-    if (outcome === 'confirmed') {
-        delete map[domain]
-        map[domain] = {
-            v: 1,
-            input: box.input,
-            apply: box.apply || null,
-            toggle: box.toggle || null,
-            enterOnly: !!box.enterOnly,
-            source,
-            confirmedAt: now,
-            failures: 0,
-        }
-        result = 'saved'
-    } else if (same(was, box)) {
-        const failures = (Number(was.failures) || 0) + 1
-        delete map[domain]
-        if (failures < MAX_FAILURES) {
-            map[domain] = { ...was, failures }
-            result = 'failed'
-        } else result = 'dropped'
-    } else return result
-    const keys = Object.keys(map)
-    for (const k of keys.slice(0, Math.max(0, keys.length - MAX_DOMAINS)))
-        delete map[k]
-    await write(area, map)
-    return result
 }

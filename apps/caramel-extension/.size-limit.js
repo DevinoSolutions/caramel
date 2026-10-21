@@ -308,8 +308,8 @@ module.exports = [
         brotli: false,
     },
     {
-        name: 'coupon-box-learned.js (loaded on demand, minified)',
-        path: '.size-cache/coupon-box-learned.min.js',
+        name: 'coupon-box-selectors.js (loaded on demand, minified)',
+        path: '.size-cache/coupon-box-selectors.min.js',
         // 2026-10-16 — measured 3.55 kB minified. Not injected on every page:
         // the finder imports it only on a store with no config, to name a box
         // it may remember (stable selectors) and to save and report what a

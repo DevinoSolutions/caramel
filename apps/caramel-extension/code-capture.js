@@ -55,6 +55,7 @@ import {
     caramelGetSettings,
     caramelOnCodeSharingConsentChanged,
     caramelOnSettingsChanged,
+    caramelOwnHost,
     caramelSendMessage,
     caramelSetCodeSharingConsent,
     caramelSiteIsPaused,
@@ -333,7 +334,7 @@ function _unmarkShared(code) {
  * while it runs muddies every reading the loop takes — not a moment to judge
  * anything. */
 function _runnerIsApplying() {
-    return !!document.getElementById('caramel-testing-overlay')
+    return !!caramelOwnHost('caramel-testing-overlay')
 }
 
 function _fieldLooksLikeAPromoBox(input) {

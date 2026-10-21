@@ -17,6 +17,15 @@ import {
 } from '../code-sharing-consent.js'
 import { trustedClick, trustedKey } from './_trusted-events.mjs'
 
+// The runner's apply overlay as the runner makes it: marked as ours
+// (UI-helpers.js createCaramelShadowHost), which the page cannot do.
+async function ourOverlay() {
+    const { caramelMarkOwnHost } = await import('../caramel-base.js')
+    const overlay = caramelMarkOwnHost(document.createElement('div'))
+    overlay.id = 'caramel-testing-overlay'
+    return overlay
+}
+
 /**
  * code-capture.js — a code the SHOPPER types is shared with Caramel only when
  * the store visibly accepts it AND the shopper has explicitly consented.
@@ -440,12 +449,39 @@ describe('what must never leave the page', () => {
     it('nothing while the runner is applying (its overlay is up)', async () => {
         await armed()
         storeAnswers(true)
-        const overlay = document.createElement('div')
-        overlay.id = 'caramel-testing-overlay'
-        document.body.appendChild(overlay)
+        document.body.appendChild(await ourOverlay())
         shopperTypes('SAVE10')
         shopperClicksApply()
         await settle(600)
+
+        expect(sent).toEqual([])
+    })
+
+    // The store's page can create an element with our overlay's id. Before
+    // 2026-10-20 that alone paused capture: a code the shopper applied by hand
+    // was never shared.
+    it("a page element with the overlay's id is not our runner applying", async () => {
+        await armed()
+        storeAnswers(true)
+        const fake = document.createElement('div')
+        fake.id = 'caramel-testing-overlay'
+        document.body.appendChild(fake)
+        shopperTypes('SAVE10')
+        shopperClicksApply()
+
+        await vi.waitFor(() => expect(sent).toHaveLength(1), LONG)
+    })
+
+    it('our overlay placed after a page element with its id is still found', async () => {
+        await armed()
+        storeAnswers(true)
+        const fake = document.createElement('div')
+        fake.id = 'caramel-testing-overlay'
+        document.body.appendChild(fake)
+        document.body.appendChild(await ourOverlay())
+        shopperTypes('SAVE10')
+        shopperClicksApply()
+        await settle(2200)
 
         expect(sent).toEqual([])
     })
@@ -456,9 +492,7 @@ describe('what must never leave the page', () => {
         shopperTypes('SAVE10')
         shopperClicksApply()
         await settle(30)
-        const overlay = document.createElement('div')
-        overlay.id = 'caramel-testing-overlay'
-        document.body.appendChild(overlay)
+        document.body.appendChild(await ourOverlay())
         await settle(2200)
 
         expect(sent).toEqual([])

@@ -166,6 +166,29 @@ export const logError = (where, err) => {
     if (CARAMEL_ENV.verbose) console.error('Caramel:', where, err)
 }
 
+/* --------------------------------------------------  our own UI hosts */
+// The prompt, the apply overlay and the result card are found by their id,
+// and the store's page can create an element with the same id. Before
+// 2026-10-20 that alone was taken as our apply loop running: the result card
+// after a discount-link reload was skipped, the prompt never came back and
+// code capture paused. A host now counts only if createCaramelShadowHost
+// marked it. The mark is set from the content script, so it lives in the
+// extension's own JS world and a page script cannot put it on its element.
+// Every element with the id is checked: getElementById returns the first one
+// in the document, and a page element placed earlier would hide ours.
+const CARAMEL_OWN_HOST_MARK = '__caramelOwnHost'
+
+export function caramelMarkOwnHost(host) {
+    host[CARAMEL_OWN_HOST_MARK] = true
+    return host
+}
+
+export function caramelOwnHost(id) {
+    for (const el of document.querySelectorAll(`[id="${id}"]`))
+        if (el[CARAMEL_OWN_HOST_MARK] === true) return el
+    return null
+}
+
 /* --------------------------------------------------  worker messaging */
 // Every content-script call into the background worker used to be written as
 // `await new Promise(res => runtime.sendMessage(msg, res))`, which has two

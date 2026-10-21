@@ -19,6 +19,8 @@
 
 import {
     caramelGetSession,
+    caramelMarkOwnHost,
+    caramelOwnHost,
     caramelPromptAllowed,
     currentBrowser,
     log,
@@ -296,7 +298,7 @@ export function caramelTopBarBottom() {
  * root carrying the shared stylesheet. NOT appended — callers build into
  * `root`, wire listeners, then append the host, fully styled. */
 async function createCaramelShadowHost(id) {
-    const host = document.createElement('div')
+    const host = caramelMarkOwnHost(document.createElement('div'))
     host.id = id
     host.style.cssText = CARAMEL_HOST_CSS[id] || ''
     const root = host.attachShadow({ mode: 'open' })
@@ -404,21 +406,13 @@ export function caramelMarkPromptDismissed() {
 
 // Called from store-detect.js.
 export async function insertCaramelPrompt(domainRecord) {
-    if (
-        document.getElementById('caramel-small-prompt') ||
-        _caramelPromptInFlight
-    )
-        return
+    if (caramelOwnHost('caramel-small-prompt') || _caramelPromptInFlight) return
     // The user already said "not now" on this tab. Honour it.
     if (caramelPromptDismissedHere()) return
     // User preference gate (popup settings): auto-apply off, or this site
     // paused → no passive prompt. Popup-initiated applies bypass this.
     if (!(await caramelPromptAllowed(location.hostname))) return
-    if (
-        document.getElementById('caramel-small-prompt') ||
-        _caramelPromptInFlight
-    )
-        return
+    if (caramelOwnHost('caramel-small-prompt') || _caramelPromptInFlight) return
     _caramelPromptInFlight = true
     let made
     try {
@@ -590,7 +584,7 @@ ${noLoading ? '' : loadingHTML}`
 /* Updates the testing modal's status text + progress bar width. */
 // Called from coupon-runner.js.
 export async function updateTestingModal(currentIndex, total, code) {
-    const host = document.getElementById('caramel-testing-overlay')
+    const host = caramelOwnHost('caramel-testing-overlay')
     const root = host && host.shadowRoot
     if (!root) return
 
@@ -607,7 +601,7 @@ export async function updateTestingModal(currentIndex, total, code) {
 }
 // Called from coupon-runner.js + store-detect.js.
 export function hideTestingModal() {
-    const host = document.getElementById('caramel-testing-overlay')
+    const host = caramelOwnHost('caramel-testing-overlay')
     if (host) {
         if (host.__caramelOnKey)
             document.removeEventListener('keydown', host.__caramelOnKey)

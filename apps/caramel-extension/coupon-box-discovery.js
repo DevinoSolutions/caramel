@@ -5,9 +5,10 @@
 // content-script bundle.
 //
 // Most stores we hold codes for are reached through a config row: a set of
-// selectors someone wrote for that store. Two cases have no usable row: a
-// store nobody has written one for, and a store whose page changed under it.
-// In both, the shopper used to be handed the codes to copy and paste.
+// selectors someone wrote for that store. A store nobody has written one for
+// has none, and its shopper used to be handed the codes to copy and paste.
+// Only such a store is ever read here: a store with a config never runs
+// auto-detect (isServed), even when its config no longer matches the page.
 //
 // This module reads the page the way a shopper does: the field whose own name,
 // label or heading says coupon/promo/discount/voucher (in the languages our
@@ -1708,20 +1709,14 @@ function shownPositiveTotal(doc) {
  * data-caramel-found so the apply flow reaches them through the same selector
  * machinery it uses for a config row, and sets caramelFound so the verdict
  * holds them to the money rule. Returns null when anything is missing: the
- * caller then keeps its own copy-the-codes answer. */
-//
-// On a store with no config (rec.caramelNoConfig), two things come first: a
-// box this install saw the store answer through before (learnedRecord), and,
-// per the server's couponBoxPickMode, the server's pick:
-//   · rules_first: the rules, then the server only when they find nothing;
-//   · llm_first: the server first, then the rules when it names no usable box
-//     (no box, no pick, a refusal, a timeout, an error);
-//   · llm_only: the server alone. The rules never find the box, so a miss is
-//     a miss; the checks on the pick and the money rule still run.
-// A store with a served config is always rules_first and never reads or saves
-// a learned box.
+ * caller then keeps its own copy-the-codes answer. The rules look first; the
+ * server's pick is asked only when they find no box (caramelPickedRecord). */
 // Called from coupon-runner.js.
 export async function caramelDiscoveredRecord(rec, doc = document) {
+    if (isServed(rec)) {
+        log('FINDER_SKIPPED', { reason: 'the store has a config' })
+        return null
+    }
     const totalRow = findTotalRow(doc)
     const total = totalRow?.el
     // A row whose amount the price reader cannot parse ("12.00" with no
@@ -1729,17 +1724,6 @@ export async function caramelDiscoveredRecord(rec, doc = document) {
     if (!total || !readableTotal(total)) {
         log('FINDER_NO_TOTAL', {})
         return null
-    }
-    const served = isServed(rec)
-    const mode = await pickMode(served)
-    if (!served) {
-        const learned = await learnedRecord(rec, doc, mode)
-        if (learned) return learned
-    }
-    if (mode !== RULES_FIRST) {
-        const picked = await caramelPickedRecord(rec, doc, mode)
-        if (picked || mode === LLM_ONLY) return picked
-        log('FINDER_PICK_FALLBACK', { mode })
     }
     let found = caramelDiscoverCouponBox(doc)
     const opened = found.inputVisible ? null : found.toggle
@@ -1772,16 +1756,95 @@ export async function caramelDiscoveredRecord(rec, doc = document) {
     }
     if (!found.inputVisible || !confident(found)) {
         log('FINDER_NO_BOX', { reasons: found.reasons })
-        // In llm_first the server was asked above: this finds only a pick it
-        // kept for this page.
-        return caramelPickedRecord(rec, doc, mode)
+        return caramelPickedRecord(rec, doc)
     }
     log('FINDER_PICKED', { reasons: found.reasons })
-    return learnable(finderRecord(rec, found, totalRow, opened), 'rules', {
+    return savable(
+        finderRecord(rec, found, totalRow, opened),
         found,
         opened,
-    })
+        totalRow.el,
+    )
 }
+
+// A record for a store with a config (anything but caramelConfiglessRecord's
+// stand-in): the finder never runs for it.
+const isServed = rec => rec?.caramelNoConfig !== true
+
+/* ------------------------------------------- saving a box as a store config */
+// A box the finder found on a store with no config, through which a code then
+// took money off the total, is saved as that store's config
+// (background.js couponBoxSave, POST /api/extension/coupon-box-save): the next
+// shopper's extension reads it from the store list like any other config, and
+// the finder never runs on that store again.
+//
+// What is saved is the box's selectors only (coupon-box-selectors.js: stable
+// names, each checked to find exactly its element, nothing that looks like
+// personal data): never a code, a price or page text. A box with no stable
+// name, or whose apply or toggle names an order, pay or delete control, is not
+// saved; the shopper's run is the same either way.
+const SELECTORS_MODULE = 'assets/coupon-box-selectors.js'
+
+/* The record, with the box to save when a code works through it. Its box is
+ * also held by the background for this tab, for the page a submit reloads to
+ * (caramelFinderConfirmedResumed): never in the page's own storage. */
+async function savable(record, found, opened, totalEl) {
+    if (isServed(record)) return record
+    let box
+    try {
+        const m = await import(
+            /* @vite-ignore */ currentBrowser.runtime.getURL(SELECTORS_MODULE)
+        )
+        const parts = m.caramelBoxSelectors(found.input, found.button, opened)
+        const total = totalEl ? m.caramelStableSelector(totalEl) : null
+        if (
+            parts &&
+            !(parts.apply && m.caramelRiskyControl(parts.apply)) &&
+            !(parts.toggle && m.caramelRiskyControl(parts.toggle))
+        )
+            box = { ...parts, total }
+    } catch (err) {
+        log('FINDER_SAVE_UNAVAILABLE', { error: String(err?.message || err) })
+        return record
+    }
+    if (!box) {
+        log('FINDER_SAVE_NO_NAME', {})
+        return record
+    }
+    caramelTabHandoff('set', 'box_save', box)
+    return { ...record, caramelSave: box }
+}
+
+/* A code took money off the total through the box this run found: save it as
+ * the store's config, once per run. Nothing here can touch the shopper's run;
+ * the answer is logged either way. */
+// Called from coupon-runner.js.
+export function caramelFinderConfirmed(rec) {
+    const box = rec?.caramelSave
+    if (!box || rec.caramelSaveSent) return
+    rec.caramelSaveSent = true
+    return sendSave(box)
+}
+
+/* The page a submit reloaded to measured the total drop: the box the run held
+ * for this tab and this site is saved. */
+// Called from store-detect.js.
+export async function caramelFinderConfirmedResumed() {
+    const box = (await caramelTabHandoff('take', 'box_save'))?.value
+    if (box && typeof box.input === 'string') return sendSave(box)
+}
+
+const sendSave = box =>
+    caramelSendMessage({ action: 'couponBoxSave', box })
+        .then(resp =>
+            log('FINDER_SAVE', {
+                saved: resp?.saved === true,
+                reason: resp?.reason || resp?.skipped || resp?.error || null,
+            }),
+        )
+        .catch(err =>
+            log('FINDER_SAVE_FAILED', { error: String(err?.message || err) }),
+        )
 
 // The record for a box the finder settled on: `found` holds a visible input
 // and its button, `opened` the toggle clicked to reveal them (or null).
@@ -1937,9 +2000,9 @@ function refindPick(doc, k) {
     }
 }
 
-/* A box someone else named (the server's pick, a pick kept from the last
- * page, a box remembered here or by other installs) passes the coupon-word
- * checks a box the rules find passes, on top of the click guards. */
+/* A box someone else named (the server's pick, or a pick kept from the last
+ * page) passes the coupon-word checks a box the rules find passes, on top of
+ * the click guards. */
 
 // Its field: what the rules would accept (scoreInput: a coupon word in its
 // own name, label, placeholder or aria-label, or in the short region around
@@ -2006,10 +2069,10 @@ const okToggle = t =>
 const okButton = (b, input) =>
     clickable(b) && applyLike(b) && b !== input && !navigatesAway(b)
 
-// A learned box names its apply by a selector, and a selector can name
-// anything on the page (#place-order, button[name=checkout], an add-to-cart).
-// So its apply says apply (okButton), or it is an arrow or an icon with no
-// words in the box's own small panel (ownsBox): sharing the field's form is not
+// The server names a pick's apply button, and a pick can name anything on
+// the page (#place-order, button[name=checkout], an add-to-cart). So its
+// apply says apply (okButton), or it is an arrow or an icon with no words in
+// the box's own small panel (ownsBox): sharing the field's form is not
 // enough, a form can hold the whole cart. Never one whose label speaks of
 // checkout, paying, continuing, buying or adding to the cart. Its name, id and
 // data attributes refuse it the same way, with one exception: many real apply
@@ -2022,7 +2085,7 @@ const NAMES_COUPON_RE = /coupon|promo|discount|reduction|voucher|apply/
 const CART_NAMESPACE_RE =
     /check ?out|warenkorb|panier|carrito|carrello|winkelwagen|koszyk|cesta/g
 const refuses = words => NEVER_CLICK.test(words) || isDanger(words)
-function learnedApply(b, input, positional = false) {
+function namedApply(b, input) {
     if (!b || !input) return false
     const text = norm([buttonLabel(b), ariaOf(b), b.title, b.value].join(' '))
     const label = norm(
@@ -2055,31 +2118,29 @@ function learnedApply(b, input, positional = false) {
         clickable(b) &&
         b !== input &&
         !navigatesAway(b) &&
-        !positional &&
         ownsBox(b, input)
     )
 }
 
-// A plain pick's button (the server named it by its place in this page's
-// outline): one that says apply, or, as for a learned box, a wordless arrow or
-// icon in the box's own small panel whose name, id, class and data attributes
-// refuse nothing. Many stores ship only an icon beside the field.
-const pickApply = (b, input) => okButton(b, input) || learnedApply(b, input)
+// A pick's button (the server named it by its place in this page's outline):
+// one that says apply, or a wordless arrow or icon in the box's own small
+// panel whose name, id, class and data attributes refuse nothing. Many stores
+// ship only an icon beside the field.
+const pickApply = (b, input) => okButton(b, input) || namedApply(b, input)
 
 // The apply button for `input`: the one named, else the one the rules see
-// beside it. With `own` (every named box: a pick, a kept pick, a learned box)
-// either is used only when it is this box's own: in its form, or in its small
-// panel. A page that re-drew the box beside a gift-card form must not lend it
-// that form's button.
-// strict (llm_only): the named button only, never one the rules find.
+// beside it. With `own` (every named box: a pick or a kept pick) either is
+// used only when it is this box's own: in its form, or in its small panel. A
+// page that re-drew the box beside a gift-card form must not lend it that
+// form's button.
 // reveal: the toggle that opened the box, never its button.
-function applyButtonFor(input, button, own, strict, reveal = null) {
+function applyButtonFor(input, button, own, reveal = null) {
     const ok = b =>
         b &&
         b !== reveal &&
         !navigatesAway(b) &&
         (!own || (b.form ? b.form === input.form : ownsBox(b, input)))
-    return [button, !strict && findButton(input, reveal)?.el].find(ok) || null
+    return [button, findButton(input, reveal)?.el].find(ok) || null
 }
 
 /* The rules see no box, but this tab's kept pick names one here: the cart
@@ -2087,55 +2148,38 @@ function applyButtonFor(input, button, own, strict, reveal = null) {
  * says yes only where the run could go on: a box with its button (or none,
  * for a box kept as applying on Enter), or the toggle that opened it. */
 // Called from store-detect.js.
-export async function caramelFinderSeesKeptPick(
-    domain,
-    doc = document,
-    strict = false,
-) {
+export async function caramelFinderSeesKeptPick(domain, doc = document) {
     const k =
         (await caramelCouponBoxLlmOn()) &&
         (await keptPick(domain || doc.location?.hostname, doc))
     if (!k || !shownPositiveTotal(doc)) return false
-    const sees = boxShows(refindPick(doc, k), k.e, strict)
+    const sees = boxShows(refindPick(doc, k), k.e)
     if (sees) log('FINDER_SEES_KEPT', {})
     return sees
 }
 
 /* Can the finder see a box a run could use on this page, without touching
- * it? The rules' box (never in llm_only, where the rules find nothing), the
- * pick kept from the last page in this tab, or, on a store with no config, a
- * box this install remembers. `served`: the store has a served config, so it
- * is rules_first and never reads a learned box. */
+ * it? The rules' box, or the pick kept from the last page in this tab. */
 // Called from store-detect.js.
-export async function caramelFinderSees(domain, served, doc = document) {
-    const mode = await pickMode(served)
+export async function caramelFinderSees(domain, doc = document) {
     return (
-        (mode !== LLM_ONLY && caramelFinderSeesBox(doc)) ||
-        (await caramelFinderSeesKeptPick(domain, doc, mode === LLM_ONLY)) ||
-        (!served && (await learnedSees(doc, mode)))
+        caramelFinderSeesBox(doc) ||
+        (await caramelFinderSeesKeptPick(domain, doc))
     )
 }
 
 // Could a run go on with these elements, without clicking anything? A
 // showing box with its own button (or none, for a box that applies on Enter),
 // or the toggle that opens it.
-function boxShows(
-    { input, button, toggle, learned, applyPositional },
-    enterOnly,
-    strict,
-) {
-    // A learned box whose apply is not an apply button is not offered.
-    if (learned && button && !learnedApply(button, input, applyPositional))
-        return false
+function boxShows({ input, button, toggle }, enterOnly) {
     return (
         (typeableInput(input) &&
             visible(input) &&
             couponInput(input) &&
             (!!applyButtonFor(
                 input,
-                (learned || pickApply(button, input)) && button,
+                pickApply(button, input) && button,
                 true,
-                strict,
             ) ||
                 !!enterOnly)) ||
         okToggle(toggle)
@@ -2175,7 +2219,7 @@ function clickable(el) {
 }
 
 // Ask the server once, from an outline of the page. null on any miss.
-async function askPick(domain, doc, served) {
+async function askPick(domain, doc) {
     let outline, elements
     try {
         const { caramelPageOutline } = await import(
@@ -2192,7 +2236,7 @@ async function askPick(domain, doc, served) {
     let answer
     try {
         answer = await caramelSendMessage(
-            { action: 'couponBoxPick', domain, outline, served },
+            { action: 'couponBoxPick', domain, outline },
             PICK_WAIT_MS,
         )
     } catch (err) {
@@ -2206,24 +2250,6 @@ async function askPick(domain, doc, served) {
         })
         return null
     }
-    // A box other installs saw this store answer through is named by
-    // selectors (under `box`, the shape the report carried), not by places in
-    // this page's outline; its index fields are null. Each selector must be in
-    // the learned-box grammar and find exactly one element here
-    // (learnedEls); everything after this point checks it like any pick.
-    if (answer.source === 'learned' && answer.box) {
-        // A store with a served config never uses a learned box.
-        if (served) {
-            log('FINDER_PICK_MISS', { learned: 'served config' })
-            return null
-        }
-        try {
-            return { learned: true, ...(await learnedEls(doc, answer.box)) }
-        } catch (err) {
-            log('FINDER_PICK_MISS', { learned: String(err?.message || err) })
-            return null
-        }
-    }
     return {
         answer,
         input: pickedEl(elements, answer.input),
@@ -2233,9 +2259,8 @@ async function askPick(domain, doc, served) {
     }
 }
 
-// Called from caramelDiscoveredRecord: after the rules found no box, or, in
-// the llm modes, before them.
-async function caramelPickedRecord(rec, doc, mode) {
+// Called from caramelDiscoveredRecord, after the rules found no box.
+async function caramelPickedRecord(rec, doc) {
     if (!(await caramelCouponBoxLlmOn())) return null
     const domain = pickKey(rec.domain || doc.location?.hostname)
     if (!domain) return null
@@ -2245,21 +2270,18 @@ async function caramelPickedRecord(rec, doc, mode) {
     else {
         if (await pickAsked(domain)) return null
         await rememberPick(domain)
-        picked = await askPick(domain, doc, isServed(rec))
+        picked = await askPick(domain, doc)
         if (!picked) return null
     }
-    const learned = kept ? !!kept.l : !!picked.learned
     // Every pick's button is the box's own (in its form, or its small
-    // panel): a far-away "Apply credit" is someone else's apply, whether the
-    // model named it or other installs did.
-    const got = await checkedPick(doc, picked, true, mode === LLM_ONLY)
+    // panel): a far-away "Apply credit" is someone else's apply.
+    const got = await checkedPick(doc, picked, true)
     if (!got) return null
     const { found, opened, total } = got
     log('FINDER_PICK_USED', {
         confidence: picked.answer?.confidence ?? null,
         toggle: !!opened,
         kept: !!kept,
-        learned,
         reasons: found.reasons || null,
     })
     // Kept only when each name finds exactly this element again, here: a name
@@ -2272,8 +2294,6 @@ async function caramelPickedRecord(rec, doc, mode) {
         t: pickName(opened, 't'),
         // Applies on Enter: there is no button to find again.
         ...(found.button ? {} : { e: 1 }),
-        // A box other installs confirmed, not the model's pick.
-        ...(learned ? { l: 1 } : {}),
     }
     const again = refindPick(doc, k)
     if (
@@ -2283,21 +2303,15 @@ async function caramelPickedRecord(rec, doc, mode) {
         again.toggle === (k.t ? opened : null)
     )
         await rememberPick(domain, k)
-    return learnable(
-        finderRecord(rec, found, total, opened),
-        learned ? 'server_learned' : 'llm',
-        { found, opened, learned },
-    )
+    return savable(finderRecord(rec, found, total, opened), found, opened, total?.el)
 }
 
-/* Check a box someone else named (the server's pick, a pick kept from the
- * last page, a box remembered from an earlier visit) on this page, before
- * anything is touched. `picked` holds the elements and whether the box
- * applies on Enter; `own` asks that a button be the box's own (in its form,
- * or its small panel); `strict` (llm_only) that the rules find nothing, not
- * even the box a named toggle reveals or a button beside the named input.
- * Returns { found, opened, total } or null. */
-async function checkedPick(doc, picked, own, strict) {
+/* Check a box someone else named (the server's pick, or a pick kept from the
+ * last page) on this page, before anything is touched. `picked` holds the
+ * elements and whether the box applies on Enter; `own` asks that a button be
+ * the box's own (in its form, or its small panel). Returns
+ * { found, opened, total } or null. */
+async function checkedPick(doc, picked, own) {
     // The cart may have re-rendered while the server answered: the baseline is
     // the total as it is now, and with no readable total nothing can be
     // measured.
@@ -2309,19 +2323,9 @@ async function checkedPick(doc, picked, own, strict) {
 
     let { input, button, toggle } = picked
     if (!typeableInput(input) || !couponInput(input)) input = null
-    // A learned box whose apply is not an apply button is refused whole: no
-    // button of the rules' is swapped in, and normal detection runs instead.
-    if (
-        picked.learned &&
-        button &&
-        !learnedApply(button, input, picked.applyPositional)
-    ) {
-        log('FINDER_PICK_UNUSABLE', { input: !!input, apply: 'refused' })
-        return null
-    }
-    if (!picked.learned && !pickApply(button, input)) button = null
+    if (!pickApply(button, input)) button = null
     if (!okToggle(toggle)) toggle = null
-    const buttonFor = el => applyButtonFor(el, button, own, strict, toggle)
+    const buttonFor = el => applyButtonFor(el, button, own, toggle)
 
     // A usable pick: an input with its button, or the named input when no
     // button was named (a box that applies on Enter). A button that was named
@@ -2346,7 +2350,7 @@ async function checkedPick(doc, picked, own, strict) {
             // now see.
             if (input && visible(input) && typeableInput(input))
                 found = { input, button: buttonFor(input) }
-            else if (!strict) {
+            else {
                 // The rules never take a link that leaves the page
                 // (findButton), nor the toggle just clicked as the button.
                 const rules = caramelDiscoverCouponBox(doc, toggle)
@@ -2365,225 +2369,6 @@ async function checkedPick(doc, picked, own, strict) {
     }
     return { found, opened, total }
 }
-
-/* ------------------------------------------------------- learned boxes */
-// A box the store answered through (the total dropped, or the store replied
-// about the code) on a store with no config is remembered for this install
-// (coupon-box-learned.js keeps the memory: storage.local, at most 200
-// domains, forgotten after two failed uses in a row), and, while the
-// couponBoxLlm flag is on, reported to the server, which serves a box several
-// installs confirmed back as a pick (source 'learned', askPick).
-//
-// What is saved and sent is the box's selectors and where it came from:
-// never page text, a code or a price.
-const LEARNED_MODULE = 'assets/coupon-box-learned.js'
-const isServed = rec => rec?.caramelNoConfig !== true
-
-const loadLearned = () =>
-    import(/* @vite-ignore */ currentBrowser.runtime.getURL(LEARNED_MODULE))
-
-// The box this install remembers for this tab's own store, or null. The
-// background keeps the memory (behind its own flag) and answers only for the
-// host of the tab that asks.
-async function learnedBox() {
-    try {
-        const b = (await caramelSendMessage({ action: 'couponBoxLearnedBox' }))
-            ?.box
-        return b?.v === 1 && typeof b.input === 'string' ? b : null
-    } catch (err) {
-        log('FINDER_LEARNED_UNREADABLE', { error: String(err?.message || err) })
-        return null
-    }
-}
-
-// A learned box's elements, each the one element its selector finds
-// (coupon-box-learned.js caramelOne: a selector outside the learned-box
-// grammar is never queried). Rejects when the module does not load.
-const POSITIONAL_RE = /:(?:nth|first)-of-type/
-async function learnedEls(doc, b) {
-    const { caramelOne } = await loadLearned()
-    return {
-        input: caramelOne(doc, b.input),
-        button: caramelOne(doc, b.apply),
-        toggle: caramelOne(doc, b.toggle),
-        enterOnly: b.enterOnly === true && !b.apply,
-        learned: true,
-        // Named by its place among its siblings: a count that changes (one
-        // more line in the cart) names another element.
-        applyPositional: POSITIONAL_RE.test(b.apply || ''),
-    }
-}
-
-// llm_only lets the server alone find a box: a box the rules found once is
-// not used then.
-const learnedFor = async mode => {
-    const b = await learnedBox()
-    return b && !(mode === LLM_ONLY && b.source === 'rules') ? b : null
-}
-
-/* Tried first on a store with no config. A box that no longer resolves here,
- * or fails the checks, counts as a failed use (two and it is forgotten), and
- * detection goes on as if there were none. */
-async function learnedRecord(rec, doc, mode) {
-    const b = await learnedFor(mode)
-    if (!b) return null
-    // Off the cart (a run started from the popup on another page) nothing
-    // can be measured and no box is expected: not a use of the box at all.
-    if (!shownPositiveTotal(doc)) return null
-    let els
-    try {
-        els = await learnedEls(doc, b)
-    } catch (err) {
-        // Nothing was tried: not a failed use of the box.
-        log('FINDER_LEARN_UNAVAILABLE', { error: String(err?.message || err) })
-        return null
-    }
-    const got = await checkedPick(doc, els, true, mode === LLM_ONLY)
-    if (!got) {
-        log('FINDER_LEARNED_UNUSABLE', {})
-        // Only this install's memory: whether it applies here is not news
-        // about the box for anyone else.
-        learnOutcome({ box: b, source: b.source }, 'failed', null, false)
-        return null
-    }
-    // A named toggle can reveal a box the rules then pick, and a stale button
-    // name gives way to the button the rules see beside the box (checkedPick):
-    // then what runs is the rules' find, not the remembered box.
-    const now = await learnedEls(doc, b)
-    const same =
-        got.found.input === now.input &&
-        (got.found.button || null) === (b.apply ? now.button : null)
-    log('FINDER_LEARNED_USED', { source: b.source, same })
-    return learnable(
-        finderRecord(rec, got.found, got.total, got.opened),
-        same ? b.source : 'rules',
-        same ? { ...got, learned: true, box: b } : got,
-    )
-}
-
-/* Can a remembered box be used here, without touching anything? For the
- * prompt and the reload chain, the same question caramelFinderSeesKeptPick
- * answers for a kept pick. */
-async function learnedSees(doc, mode) {
-    const b = await learnedFor(mode)
-    if (!b || !shownPositiveTotal(doc)) return false
-    let els
-    try {
-        els = await learnedEls(doc, b)
-    } catch (err) {
-        log('FINDER_LEARN_UNAVAILABLE', { error: String(err?.message || err) })
-        return false
-    }
-    const sees = boxShows(els, els.enterOnly, mode === LLM_ONLY)
-    if (sees) log('FINDER_SEES_LEARNED', {})
-    return sees
-}
-
-/* Give a record on a store with no config what it needs to remember its box:
- * the box's selectors (built by coupon-box-learned.js, each checked to find
- * exactly its element) and where it came from. A box with no stable name is
- * not remembered, and the record is returned either way. */
-async function learnable(record, source, { found, opened, learned, box }) {
-    if (isServed(record)) return record
-    const domain = pickKey(record.domain)
-    let l
-    try {
-        l = (await loadLearned()).caramelLearnable(
-            domain,
-            box || [found.input, found.button, opened],
-            source,
-            learned,
-        )
-    } catch (err) {
-        log('FINDER_LEARN_UNAVAILABLE', { error: String(err?.message || err) })
-        return record
-    }
-    if (!l) {
-        log('FINDER_LEARN_NO_NAME', {})
-        return record
-    }
-    // Held by the background for this tab, for the page a submit reloads to
-    // (caramelFinderLearnResumed): never in the page's own storage.
-    caramelSendMessage({ action: 'couponBoxLearnHold', l }).catch(err =>
-        log('FINDER_LEARN_HOLD_FAILED', { error: String(err?.message || err) }),
-    )
-    return { ...record, caramelLearn: l }
-}
-
-/* What a run taught us about its box. `confirmed` with its evidence
- * ('total_dropped' or 'store_answered'), once per run; `failed` only for a
- * box that came from memory (this install's or the server's) and got no
- * answer from the store at all. Saved for this install, then reported to the
- * server; both results are logged, and neither can touch the shopper's run. */
-// Called from coupon-runner.js.
-// A run reports once, except that a total that dropped after the store
-// only answered (a reply, then a code that worked) is the stronger evidence
-// and is reported too.
-export function caramelFinderLearn(rec, outcome, evidence = null) {
-    const l = rec?.caramelLearn
-    if (!l || (outcome === 'failed' && !l.learned)) return
-    const stronger =
-        l.done === 'store_answered' &&
-        outcome === 'confirmed' &&
-        evidence === 'total_dropped'
-    if (l.done && !stronger) return
-    l.done = evidence || outcome
-    return learnOutcome(l, outcome, evidence, true)
-}
-
-/* The page a submit reloaded to measured the total drop: the box the run
- * used is confirmed. */
-// Called from store-detect.js.
-// The box is the one the background held for this tab and this host (a
-// page cannot write it); the store is always this page's own.
-export async function caramelFinderLearnResumed() {
-    let l = null
-    try {
-        l = (await caramelSendMessage({ action: 'couponBoxLearnTake' }))?.l
-    } catch (err) {
-        log('FINDER_LEARN_HOLD_FAILED', { error: String(err?.message || err) })
-    }
-    if (l?.box)
-        return caramelFinderLearn(
-            {
-                caramelLearn: {
-                    box: l.box,
-                    source: l.source,
-                    learned: l.learned,
-                },
-            },
-            'confirmed',
-            'total_dropped',
-        )
-}
-
-// Saved by the background for this tab's own store, then, with `report`,
-// reported to the server (background.js couponBoxLearnedMessage). Logged
-// either way; nothing here can touch the shopper's run.
-const learnOutcome = (l, outcome, evidence, report) =>
-    caramelSendMessage({
-        action: 'couponBoxLearned',
-        box: l.box,
-        source: l.source,
-        evidence,
-        outcome,
-        report,
-    })
-        .then(resp =>
-            log('FINDER_LEARNED_SAVED', {
-                outcome,
-                saved: resp?.saved || null,
-                ok: resp?.ok === true,
-                recorded: resp?.recorded === true,
-                error: resp?.error || resp?.skipped || resp?.reason || null,
-            }),
-        )
-        .catch(err =>
-            log('FINDER_LEARNED_SAVE_FAILED', {
-                outcome,
-                error: String(err?.message || err),
-            }),
-        )
 
 // What a box IS, by its most stable name: the field name the server reads,
 // then its id, then the words it carries. Only that one name is compared, so
@@ -2782,36 +2567,19 @@ function readableTotal(el) {
     return caramelFindMoney(el.innerText || '').length > 0
 }
 
-/* May the finder ask the server to pick a box the rules missed, and in which
- * order (the server's couponBoxPickMode)? Read the same way, from the
- * couponBoxLlm flag: any failure to ask is off, and off, or a mode this build
- * does not know, is rules_first. */
-const RULES_FIRST = 'rules_first'
-const LLM_ONLY = 'llm_only'
-const PICK_MODES = [RULES_FIRST, 'llm_first', LLM_ONLY]
+/* May the finder ask the server to pick a box the rules missed? Read from the
+ * couponBoxLlm flag once per page: any failure to ask is off. */
 let _llm = null
-function llmFlags() {
+function caramelCouponBoxLlmOn() {
     if (!_llm)
         _llm = caramelSendMessage({ action: 'couponBoxLlmEnabled' })
-            .then(resp => {
-                const on = resp?.enabled === true
-                return {
-                    on,
-                    mode:
-                        on && PICK_MODES.includes(resp.mode)
-                            ? resp.mode
-                            : RULES_FIRST,
-                }
-            })
+            .then(resp => resp?.enabled === true)
             .catch(err => {
                 log('FINDER_PICK_FLAG', { error: String(err?.message || err) })
-                return { on: false, mode: RULES_FIRST }
+                return false
             })
     return _llm
 }
-const caramelCouponBoxLlmOn = () => llmFlags().then(f => f.on)
-// The mode for a record: a store with a served config is always rules_first.
-const pickMode = served => (served ? RULES_FIRST : llmFlags().then(f => f.mode))
 
 // Test seam: forget the per-page answers.
 export function _caramelResetDiscoveryFlag() {

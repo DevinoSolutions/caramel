@@ -7,7 +7,7 @@ import {
     it,
     vi,
 } from 'vitest'
-import { initCaramelBase } from '../caramel-base.js'
+import { caramelMarkOwnHost, initCaramelBase } from '../caramel-base.js'
 import {
     _caramelResetCachedCodes,
     getDomainRecord,
@@ -85,7 +85,9 @@ vi.mock('../UI-helpers.js', async importOriginal => ({
     ...(await importOriginal()),
     insertCaramelPrompt: async rec => {
         prompted.push(rec)
-        const pill = document.createElement('div')
+        // Marked as ours, the way the real prompt is: a page element with
+        // this id is not our prompt.
+        const pill = caramelMarkOwnHost(document.createElement('div'))
         pill.id = 'caramel-small-prompt'
         document.body.appendChild(pill)
     },

@@ -23,6 +23,9 @@ import { EXT_ROOT } from './_entry-modules.mjs'
 import { finderOnlyGetURL } from './_finder-asset.mjs'
 import { tabHandoffBackground } from './_tab-handoff-background.mjs'
 // The background's side of the per-tab handoffs (see the helper).
+// The stand-in record of a store with no config (store-detect.js
+// caramelConfiglessRecord): the only record the finder reads.
+const NO_CONFIG = { domain: 'shop.test', caramelNoConfig: true }
 const handoffs = tabHandoffBackground()
 
 // The promo-box finder: when no config describes a store's promo box, it reads
@@ -380,9 +383,7 @@ describe('the finder never takes a control that is not a code', () => {
             const clicks = watchReveal()
 
             expect(caramelFinderSeesBox()).toBe(false)
-            expect(
-                await caramelDiscoveredRecord({ domain: 'shop.test' }),
-            ).toBeNull()
+            expect(await caramelDiscoveredRecord(NO_CONFIG)).toBeNull()
             expect(clicks()).toBe(0)
         })
 
@@ -390,7 +391,7 @@ describe('the finder never takes a control that is not a code', () => {
         document.body.innerHTML = folded('Have a promo code?')
         const clicks = watchReveal()
 
-        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+        const rec = await caramelDiscoveredRecord(NO_CONFIG)
 
         expect(clicks()).toBe(1)
         expect(document.querySelector(rec.couponInput)?.id).toBe('dc')
@@ -650,9 +651,7 @@ describe('the reveal toggle is never a checkout submit', () => {
         })
 
         expect(caramelFinderSeesBox()).toBe(false)
-        expect(
-            await caramelDiscoveredRecord({ domain: 'shop.test' }),
-        ).toBeNull()
+        expect(await caramelDiscoveredRecord(NO_CONFIG)).toBeNull()
         expect(clicks).toBe(0)
     })
 
@@ -670,9 +669,7 @@ describe('the reveal toggle is never a checkout submit', () => {
         })
 
         expect(caramelFinderSeesBox()).toBe(false)
-        expect(
-            await caramelDiscoveredRecord({ domain: 'shop.test' }),
-        ).toBeNull()
+        expect(await caramelDiscoveredRecord(NO_CONFIG)).toBeNull()
         expect(submits).toBe(0)
     })
 
@@ -684,7 +681,7 @@ describe('the reveal toggle is never a checkout submit', () => {
             document.getElementById('panel').style.display = ''
         })
 
-        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+        const rec = await caramelDiscoveredRecord(NO_CONFIG)
 
         expect(document.querySelector(rec.couponInput)?.id).toBe('pc')
     })
@@ -694,7 +691,7 @@ describe('the record the apply flow runs on', () => {
     it('marks the picks and holds them to the money rule', async () => {
         document.body.innerHTML = PROMO_BOX + TOTAL
 
-        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+        const rec = await caramelDiscoveredRecord(NO_CONFIG)
 
         expect(rec.caramelFound).toBe(true)
         expect(document.querySelector(rec.couponInput)?.id).toBe('dc')
@@ -711,7 +708,7 @@ describe('the record the apply flow runs on', () => {
     it('remembers the total row it measured, so a re-render finds only that row', async () => {
         document.body.innerHTML = PROMO_BOX + TOTAL
 
-        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+        const rec = await caramelDiscoveredRecord(NO_CONFIG)
 
         expect(rec.caramelTotalLabel).toBe('total')
         expect(rec.caramelTotalRows).toBe(1)
@@ -738,9 +735,7 @@ describe('the record the apply flow runs on', () => {
 
         expect(caramelFindOrderTotal()).not.toBeNull()
         expect(caramelFinderSeesBox()).toBe(false)
-        expect(
-            await caramelDiscoveredRecord({ domain: 'shop.test' }),
-        ).toBeNull()
+        expect(await caramelDiscoveredRecord(NO_CONFIG)).toBeNull()
     })
 
     it("watches for the store's answer just outside the box's own row too", async () => {
@@ -750,7 +745,7 @@ describe('the record the apply flow runs on', () => {
             '</div></div><p id="msg"></p></aside>' +
             TOTAL
 
-        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+        const rec = await caramelDiscoveredRecord(NO_CONFIG)
 
         expect(
             document
@@ -759,11 +754,13 @@ describe('the record the apply flow runs on', () => {
         ).toBe(true)
     })
 
-    it('carries none of the stale config fields it did not find', async () => {
+    it('a store with a config gets no record, and nothing on its page is marked', async () => {
         document.body.innerHTML = PROMO_BOX + TOTAL
 
         const rec = await caramelDiscoveredRecord({
             domain: 'shop.test',
+            couponInput: '#gone',
+            couponSubmit: '#gone-too',
             couponRemove: '.remove',
             dismissButton: '.close',
             successIndicator: '.ok',
@@ -771,23 +768,14 @@ describe('the record the apply flow runs on', () => {
             showInput: '.show',
         })
 
-        for (const k of [
-            'couponRemove',
-            'dismissButton',
-            'successIndicator',
-            'errorIndicator',
-        ])
-            expect(rec[k]).toBeNull()
-        // Its toggle is only ever the one the finder itself marks.
-        expect(rec.showInput).toBe('[data-caramel-found="toggle"]')
+        expect(rec).toBeNull()
+        expect(document.querySelector('[data-caramel-found]')).toBeNull()
     })
 
     it('no readable total, no record: there would be nothing honest to measure', async () => {
         document.body.innerHTML = PROMO_BOX
 
-        expect(
-            await caramelDiscoveredRecord({ domain: 'shop.test' }),
-        ).toBeNull()
+        expect(await caramelDiscoveredRecord(NO_CONFIG)).toBeNull()
         expect(caramelFinderSeesBox()).toBe(false)
     })
 
@@ -802,7 +790,7 @@ describe('the record the apply flow runs on', () => {
         })
 
         expect(caramelFinderSeesBox()).toBe(true)
-        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+        const rec = await caramelDiscoveredRecord(NO_CONFIG)
 
         expect(document.querySelector(rec.couponInput)?.id).toBe('pc')
         expect(document.querySelector(rec.couponSubmit)?.id).toBe('pa')
@@ -823,7 +811,7 @@ describe('the record the apply flow runs on', () => {
             document.getElementById('panel').style.display = ''
         })
 
-        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+        const rec = await caramelDiscoveredRecord(NO_CONFIG)
 
         expect(document.querySelector(rec.couponInput)?.id).toBe('pc')
         expect(document.querySelector(rec.showInput)?.id).toBe('tg')
@@ -841,7 +829,7 @@ describe('finding the same box again after the store re-draws it', () => {
 
     it('never takes a gift-card box while ours is disabled for the request', async () => {
         document.body.innerHTML = PROMO_BOX + GIFT + TOTAL
-        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+        const rec = await caramelDiscoveredRecord(NO_CONFIG)
         // The store re-draws the promo box disabled while it answers.
         document.querySelector('.promo').outerHTML = PROMO_BOX.replace(
             'type="text"',
@@ -858,7 +846,7 @@ describe('finding the same box again after the store re-draws it', () => {
 
     it('marks the new box when the store keeps the old one hidden', async () => {
         document.body.innerHTML = PROMO_BOX + TOTAL
-        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+        const rec = await caramelDiscoveredRecord(NO_CONFIG)
         const old = document.querySelector('.promo')
         old.style.display = 'none'
         old.insertAdjacentHTML(
@@ -877,7 +865,7 @@ describe('finding the same box again after the store re-draws it', () => {
             `<div id="panel"${open ? '' : ' style="display:none"'}>` +
             '<input id="pc" name="promo_code" type="text"><button id="pa">Apply</button></div></div>'
         document.body.innerHTML = FOLDED(true) + TOTAL
-        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+        const rec = await caramelDiscoveredRecord(NO_CONFIG)
         // WooCommerce: every answer re-draws the cart, the promo panel folded.
         document.querySelector('.cpn').outerHTML = FOLDED(false)
 
@@ -893,7 +881,7 @@ describe('finding the same box again after the store re-draws it', () => {
             `<div class="${cls}"><input class="${cls}-input" type="text"${extra}>` +
             '<button type="button">Apply</button></div>'
         document.body.innerHTML = BOX('promo') + TOTAL
-        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+        const rec = await caramelDiscoveredRecord(NO_CONFIG)
         expect(rec).not.toBeNull()
         document.querySelector('.promo').outerHTML = BOX('promo', ' disabled')
         document.body.insertAdjacentHTML('beforeend', BOX('voucher'))
@@ -906,7 +894,7 @@ describe('finding the same box again after the store re-draws it', () => {
 
     it('knows its own box after the store writes its answer into the label', async () => {
         document.body.innerHTML = PROMO_BOX + TOTAL
-        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+        const rec = await caramelDiscoveredRecord(NO_CONFIG)
         document.querySelector('.promo').outerHTML = PROMO_BOX.replace(
             'Discount code</label>',
             'Discount code <span>Invalid code</span></label>',
@@ -922,7 +910,7 @@ describe('finding the same box again after the store re-draws it', () => {
             `<div class="promo"><input id="${id}" placeholder="Discount code" type="text">` +
             '<button id="ap" type="button">Apply</button></div>'
         document.body.innerHTML = BOX(':r1:') + TOTAL
-        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+        const rec = await caramelDiscoveredRecord(NO_CONFIG)
         document.querySelector('.promo').outerHTML = BOX(':r2:')
 
         expect(caramelRemarkFoundBox(false, rec)).toBe(true)
@@ -933,7 +921,7 @@ describe('finding the same box again after the store re-draws it', () => {
         const BOX =
             '<div class="promo"><input id="coupon1234" type="text"><button id="ap" type="button">Apply</button></div>'
         document.body.innerHTML = BOX + TOTAL
-        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+        const rec = await caramelDiscoveredRecord(NO_CONFIG)
         document.querySelector('.promo').outerHTML = BOX
 
         expect(rec?.caramelInputSig).toBe('i:coupon1234')
@@ -942,7 +930,7 @@ describe('finding the same box again after the store re-draws it', () => {
 
     it('never opens the re-drawn box with a toggle that is not its own', async () => {
         document.body.innerHTML = PROMO_BOX + TOTAL
-        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+        const rec = await caramelDiscoveredRecord(NO_CONFIG)
         // The store hides our box; a gift-card fold sits elsewhere on the page.
         document.querySelector('.promo').style.display = 'none'
         document.body.insertAdjacentHTML(
@@ -979,7 +967,7 @@ describe('a promo box folded behind a checkbox', () => {
         wire()
 
         expect(caramelFinderSeesBox()).toBe(true)
-        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+        const rec = await caramelDiscoveredRecord(NO_CONFIG)
 
         expect(document.querySelector(rec.couponInput)?.id).toBe('dc')
         expect(document.querySelector(rec.showInput)?.id).toBe('cb')
@@ -994,9 +982,7 @@ describe('a promo box folded behind a checkbox', () => {
             TOTAL
 
         expect(caramelFinderSeesBox()).toBe(false)
-        expect(
-            await caramelDiscoveredRecord({ domain: 'shop.test' }),
-        ).toBeNull()
+        expect(await caramelDiscoveredRecord(NO_CONFIG)).toBeNull()
         expect(document.getElementById('gb').checked).toBe(false)
     })
 
@@ -1014,10 +1000,7 @@ describe('a promo box folded behind a checkbox', () => {
                 TOTAL
 
             expect(caramelFinderSeesBox(), words).toBe(false)
-            expect(
-                await caramelDiscoveredRecord({ domain: 'shop.test' }),
-                words,
-            ).toBeNull()
+            expect(await caramelDiscoveredRecord(NO_CONFIG), words).toBeNull()
             expect(document.getElementById('nl').checked, words).toBe(false)
         }
     })
@@ -1041,7 +1024,7 @@ describe('a promo box folded behind a checkbox', () => {
                     : 'none'
             })
 
-            const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+            const rec = await caramelDiscoveredRecord(NO_CONFIG)
 
             expect(document.querySelector(rec?.couponInput)?.id, words).toBe(
                 'dc',
@@ -1058,9 +1041,7 @@ describe('a promo box folded behind a checkbox', () => {
             '<button id="ap" type="button">Apply</button></div></div>' +
             TOTAL
 
-        expect(
-            await caramelDiscoveredRecord({ domain: 'shop.test' }),
-        ).toBeNull()
+        expect(await caramelDiscoveredRecord(NO_CONFIG)).toBeNull()
         expect(document.getElementById('r0').checked).toBe(true)
     })
 
@@ -1075,7 +1056,7 @@ describe('a promo box folded behind a checkbox', () => {
                 : ''
         })
 
-        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+        const rec = await caramelDiscoveredRecord(NO_CONFIG)
 
         expect(document.querySelector(rec.couponInput)?.id).toBe('dc')
         expect(document.querySelector(rec.showInput)?.id).toBe('lb')
@@ -1090,9 +1071,7 @@ describe('a promo box folded behind a checkbox', () => {
             '<button id="ap" type="button">Apply</button></div></div>' +
             TOTAL
 
-        expect(
-            await caramelDiscoveredRecord({ domain: 'shop.test' }),
-        ).toBeNull()
+        expect(await caramelDiscoveredRecord(NO_CONFIG)).toBeNull()
         expect(document.getElementById('cb').checked).toBe(false)
     })
 })
@@ -1622,7 +1601,7 @@ describe('the finder reads a page in bounded time, whatever text it holds', () =
             TOTAL
 
         const t0 = performance.now()
-        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+        const rec = await caramelDiscoveredRecord(NO_CONFIG)
         const ms = performance.now() - t0
 
         // Letters only: not an id a framework generates, so it names the box.

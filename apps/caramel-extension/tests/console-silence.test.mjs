@@ -35,9 +35,6 @@ const SHIPPED_TO_STRANGERS = [
     'caramel-base.js',
     'dom-utils.js',
     'coupon-box-finder-loader.js',
-    // The service worker reads and writes the learned-box memory through it;
-    // the finder also loads it on demand in the store's page.
-    'coupon-box-learned.js',
     'store-detect.js',
     'coupon-apply.js',
     'code-capture.js',
@@ -56,12 +53,14 @@ const SHIPPED_TO_STRANGERS = [
 // Not in any entrypoint's import graph, but shipped and run in the store's
 // page all the same: the build copies them beside the bundle, and the content
 // script imports the finder by URL when it is about to run it, and the finder
-// the outline when it asks the server for a box (wxt.config.ts).
+// the outline when it asks the server for a box and the selector builder when
+// it names a box to save (wxt.config.ts).
 // porkbun-alert-shim.js is the same kind of case: its own MAIN-world entry
 // (entrypoints/porkbun-alert.content.ts), run in porkbun.com's page.
 const LOADED_ON_DEMAND = [
     FINDER_SOURCE,
     'coupon-box-outline.js',
+    'coupon-box-selectors.js',
     'porkbun-alert-shim.js',
 ]
 
