@@ -16,8 +16,10 @@ const { recordUsageMock } = vi.hoisted(() => ({
 }))
 vi.mock('@/lib/couponSignals', () => ({ recordUsage: recordUsageMock }))
 
-// The catalog gate (couponsRepo.couponExists): ids 41..43 are catalog rows, the
-// rest are unknown. Its SQL is pinned in coupons-report.test.ts, which shares it.
+// MOCK (test double, named ...Mock): stands in for the catalog gate
+// couponsRepo.couponExists. Ids 41..43 are catalog rows, the rest are unknown.
+// Its real SQL is pinned in coupons-report.test.ts and run against Postgres in
+// tests/integration/coupon-report.itest.ts; nothing here proves the query.
 const { couponExistsMock, catalogIds } = vi.hoisted(() => {
     const catalogIds = new Set<string>()
     return {

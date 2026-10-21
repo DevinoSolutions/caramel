@@ -568,6 +568,47 @@ describe('POST /api/coupons/[id]/report — anonymous behavior (characterization
         expect(prismaMock.$queryRaw).not.toHaveBeenCalled()
     })
 
+    it('at a full dedupe table, probing unknown ids evicts at most ONE honest slot, however many probes', async () => {
+        resetReportDedupeForTests({ maxKeys: 2 })
+        const honest = ['198.51.100.1', '198.51.100.2']
+        for (const ip of honest) {
+            await POST(
+                reportRequest(
+                    KNOWN_COUPON,
+                    { outcome: 'failed' },
+                    undefined,
+                    ip,
+                ),
+            )
+        }
+        // 20 probes from a third address, each for a fresh unknown id.
+        for (let id = 999000400; id < 999000420; id++) {
+            const res = await POST(
+                reportRequest(
+                    String(id),
+                    { outcome: 'failed' },
+                    undefined,
+                    '198.51.100.3',
+                ),
+            )
+            expect(res.status).toBe(404)
+        }
+
+        let stillDeduped = 0
+        for (const ip of honest) {
+            const res = await POST(
+                reportRequest(
+                    KNOWN_COUPON,
+                    { outcome: 'failed' },
+                    undefined,
+                    ip,
+                ),
+            )
+            if ((await res.json()).deduped === true) stillDeduped++
+        }
+        expect(stillDeduped).toBeGreaterThanOrEqual(1)
+    })
+
     it('a failing existence lookup is a 500 (loud, to Sentry) and frees the slot for the retry', async () => {
         prismaMock.$queryRaw.mockRejectedValueOnce(new Error('db down'))
         const failed = await POST(

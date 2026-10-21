@@ -21,6 +21,10 @@ import {
  * real status comes back instead of the fire-and-forget answer. A failed send
  * is shown inline and stays retryable — nothing is remembered as voted until
  * the server said yes. Wording mirrors the website card (CouponFeedback.tsx).
+ *
+ * A 404 means the code left the catalog since the popup listed it: not a
+ * failure, so it is not logged and not retryable. The prompt says so and the
+ * pending record is cleared, so it is not asked again on the next open.
  */
 
 const BUTTONS: ReadonlyArray<{ vote: Vote; label: string }> = [
@@ -30,6 +34,7 @@ const BUTTONS: ReadonlyArray<{ vote: Vote; label: string }> = [
 
 const RATE_LIMITED_MESSAGE = 'Too many answers just now. Try again in a minute.'
 const GENERIC_FAILURE_MESSAGE = "Couldn't send that. Try again."
+const NO_LONGER_LISTED_MESSAGE = 'That code is no longer listed.'
 
 export function DidItWorkPrompt({
     pending,
@@ -43,6 +48,7 @@ export function DidItWorkPrompt({
     onDismiss: () => void
 }) {
     const [done, setDone] = useState<Vote | null>(null)
+    const [noLongerListed, setNoLongerListed] = useState(false)
     const [busy, setBusy] = useState(false)
     const [errorText, setErrorText] = useState<string | null>(null)
     // Synchronous double-click guard: `busy` only updates on the next render.
@@ -52,8 +58,8 @@ export function DidItWorkPrompt({
     // thanks, which is also the live region, so it is both read and kept.
     const thanksRef = useRef<HTMLParagraphElement>(null)
     useEffect(() => {
-        if (done !== null) thanksRef.current?.focus()
-    }, [done])
+        if (done !== null || noLongerListed) thanksRef.current?.focus()
+    }, [done, noLongerListed])
 
     const send = async (vote: Vote) => {
         if (inFlight.current) return
@@ -67,6 +73,13 @@ export function DidItWorkPrompt({
                 outcome: vote,
                 awaitResult: true,
             })
+            if (resp.status === 404) {
+                await clearPendingVote(currentBrowser).catch((err: Error) =>
+                    logError('clearPendingVote', err),
+                )
+                setNoLongerListed(true)
+                return
+            }
             if (resp.error) {
                 throw Object.assign(new Error(resp.error), {
                     status: resp.status,
@@ -102,7 +115,7 @@ export function DidItWorkPrompt({
 
     return (
         <div id="didItWorkPrompt" className="coupon-vote">
-            {done === null && (
+            {done === null && !noLongerListed && (
                 <div
                     role="group"
                     aria-labelledby={questionId}
@@ -154,7 +167,9 @@ export function DidItWorkPrompt({
                     ? 'Thanks! Your answer helps other shoppers.'
                     : done === 'failed'
                       ? `Thanks! We've hidden ${pending.code} for you.`
-                      : errorText}
+                      : noLongerListed
+                        ? NO_LONGER_LISTED_MESSAGE
+                        : errorText}
             </p>
         </div>
     )
