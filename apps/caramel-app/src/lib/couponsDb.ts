@@ -156,6 +156,11 @@ export const CouponIdRowSchema = z.object({
     id: couponIdSchema,
 })
 
+/** `SELECT EXISTS(...) AS known` — couponsRepo.couponExists. */
+export const CouponExistsRowSchema = z.object({
+    known: z.boolean(),
+})
+
 /** `SELECT (EXISTS(...) OR EXISTS(...)) AS known` — couponsRepo.isKnownStore. */
 export const KnownStoreRowSchema = z.object({
     known: z.boolean(),

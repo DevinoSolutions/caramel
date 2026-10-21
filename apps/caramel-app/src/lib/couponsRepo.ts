@@ -42,6 +42,7 @@ import {
     VISIBLE_COUPON_STATUSES,
 } from '@/lib/coupons'
 import {
+    CouponExistsRowSchema,
     CouponIdRowSchema,
     type CouponListRow,
     CouponListRowSchema,
@@ -878,6 +879,36 @@ export async function expireCoupons(ids: string[]): Promise<number> {
         WHERE id IN (${Prisma.join(ids)}) AND expired = FALSE
     `)
     return affected
+}
+
+/**
+ * Is `id` a row of the app-owned catalog? The gate the two signal writers
+ * (POST /api/coupons/[id]/report, POST /api/coupons/increment) run BEFORE
+ * writing coupon_signals, which carries no FK to `coupons` on purpose (so an
+ * aggregate can outlive a tombstoned coupon) and so would otherwise upsert a row
+ * for ANY numeric id: unbounded table growth, and a failure count pre-seeded on
+ * an id the catalog (or the shopper sequence) has not issued yet.
+ *
+ * Status-agnostic on purpose: any `coupons` row counts, hidden ('invalid'),
+ * 'expired' and `expired = TRUE` rows included. A signal never changes
+ * visibility (DESIGN.md (q): it only reorders what visibleCouponsWhere() already
+ * lists), so one on a hidden row is harmless and bounded by the catalog size,
+ * while refusing it would 404 an honest shopper whose cached store page (or an
+ * in-flight apply) predates a tombstone, and drop the evidence if ingest later
+ * revives the row. Only an id that is not a catalog row at all is refused.
+ */
+export async function couponExists(id: string): Promise<boolean> {
+    const [row] = parseCouponRows(
+        CouponExistsRowSchema,
+        await prisma.$queryRaw(
+            Prisma.sql`SELECT EXISTS (SELECT 1 FROM coupons WHERE id = ${id}) AS known`,
+        ),
+        'coupon-signal.coupon-exists',
+    )
+    if (!row) {
+        throw new Error('couponExists: existence query returned no row')
+    }
+    return row.known
 }
 
 /**

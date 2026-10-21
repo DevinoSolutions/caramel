@@ -13,7 +13,8 @@ import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 //
 // ANNOUNCED FAKE, not a canned mock: `coupons` and `coupon_reports` are backed
 // by tiny in-memory tables below, so the route's per-day dedup and its
-// catalog-existence guard are genuinely EXERCISED. A canned
+// catalog-existence gate (couponsRepo.couponExists, a `$queryRaw` whose composed
+// `.sql` is asserted below) are genuinely EXERCISED. A canned
 // `findFirst: async () => null` would let a deleted dedup check pass every
 // assertion here. The real query SHAPE is pinned separately (see "the dedup
 // lookup is scoped to…"), because a fake can only ever prove the logic, never
@@ -28,9 +29,9 @@ const { prismaMock, txMock, reportRows, catalogIds, getSessionMock } =
             createdAt: Date
         }
         const rows: ReportRow[] = []
-        // Catalog ids that "exist" — coupon_reports.coupon_id carries a real FK
-        // to `coupons` (coupon_signals deliberately carries none), so an id
-        // absent from this set is the unknown-coupon case.
+        // Catalog ids that "exist" — coupon_signals deliberately carries no FK
+        // to `coupons`, so the route gates on couponExists; an id absent from
+        // this set is the unknown-coupon case (404, nothing written).
         const ids = new Set<string>()
 
         const signalUpsert = vi.fn(
@@ -50,11 +51,6 @@ const { prismaMock, txMock, reportRows, catalogIds, getSessionMock } =
 
         const tx = {
             couponSignal: { upsert: txSignalUpsert },
-            coupon: {
-                findUnique: vi.fn(async (args: { where: { id: string } }) =>
-                    ids.has(args.where.id) ? { id: args.where.id } : null,
-                ),
-            },
             couponReport: {
                 findFirst: vi.fn(
                     async (args: {
@@ -100,6 +96,13 @@ const { prismaMock, txMock, reportRows, catalogIds, getSessionMock } =
             catalogIds: ids,
             txMock: tx,
             prismaMock: {
+                // couponExists: the id is the first bound value of the composed
+                // Prisma.sql, the answer is the `known` column.
+                $queryRaw: vi.fn(
+                    async (query: { sql: string; values: unknown[] }) => [
+                        { known: ids.has(String(query.values[0])) },
+                    ],
+                ),
                 // The anonymous path writes the signal through the singleton
                 // client directly; the signed-in path writes it through `tx`.
                 // Keeping the two upsert spies SEPARATE is what lets a test
@@ -168,13 +171,14 @@ beforeEach(() => {
     resetReportDedupeForTests()
     prismaMock.couponSignal.upsert.mockClear()
     prismaMock.$transaction.mockClear()
+    prismaMock.$queryRaw.mockClear()
     txMock.couponSignal.upsert.mockClear()
-    txMock.coupon.findUnique.mockClear()
     txMock.couponReport.findFirst.mockClear()
     txMock.couponReport.create.mockClear()
     reportRows.length = 0
     catalogIds.clear()
     catalogIds.add(KNOWN_COUPON)
+    catalogIds.add('43')
     anonymous()
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(new Date('2026-08-09T12:00:00.000Z'))
@@ -492,18 +496,90 @@ describe('POST /api/coupons/[id]/report — anonymous behavior (characterization
         expect(await retry.json()).toEqual({ ok: true })
     })
 
-    it('an id that is well-formed but absent from the catalog still writes the signal (coupon_signals has no FK)', async () => {
+    it('an id that is well-formed but absent from the catalog → 404, NO signal written, no transaction', async () => {
         catalogIds.clear() // nothing exists in the catalog
 
         const res = await POST(
             reportRequest('999000404', { outcome: 'worked' }),
         )
 
-        expect(res.status).toBe(200)
+        expect(res.status).toBe(404)
+        expect(await res.json()).toEqual({ error: 'Unknown coupon' })
+        expect(prismaMock.couponSignal.upsert).not.toHaveBeenCalled()
+        expect(prismaMock.$transaction).not.toHaveBeenCalled()
+    })
+
+    it('an unknown id does not consume the dedupe slot: once the coupon exists the same reporter still counts', async () => {
+        catalogIds.clear()
+        const miss = await POST(
+            reportRequest('999000404', { outcome: 'failed' }),
+        )
+        expect(miss.status).toBe(404)
+
+        catalogIds.add('999000404')
+        const hit = await POST(
+            reportRequest('999000404', { outcome: 'failed' }),
+        )
+
+        expect(hit.status).toBe(200)
+        expect(await hit.json()).toEqual({ ok: true })
         expect(prismaMock.couponSignal.upsert).toHaveBeenCalledTimes(1)
-        expect(prismaMock.couponSignal.upsert.mock.calls[0]![0].where).toEqual({
-            couponId: '999000404',
-        })
+    })
+
+    it('probing unknown ids can never fill the dedupe table: every probe frees its slot', async () => {
+        catalogIds.clear()
+        resetReportDedupeForTests({ maxKeys: 2 })
+        for (let id = 999000400; id < 999000410; id++) {
+            const res = await POST(
+                reportRequest(String(id), { outcome: 'failed' }),
+            )
+            expect(res.status).toBe(404)
+        }
+        // The two-key table is empty, not full of probes: a real report from
+        // the same reporter is tracked as a first report, then deduped.
+        catalogIds.add(KNOWN_COUPON)
+        const first = await POST(
+            reportRequest(KNOWN_COUPON, { outcome: 'failed' }),
+        )
+        const second = await POST(
+            reportRequest(KNOWN_COUPON, { outcome: 'failed' }),
+        )
+        expect(await first.json()).toEqual({ ok: true })
+        expect(await second.json()).toEqual({ ok: true, deduped: true })
+    })
+
+    it('the existence check is one status-agnostic primary-key lookup, bound (never inlined) and run after the dedupe', async () => {
+        await POST(reportRequest(KNOWN_COUPON, { outcome: 'worked' }))
+
+        expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(1)
+        const query = prismaMock.$queryRaw.mock.calls[0]![0]
+        expect(query.sql).toContain('FROM coupons WHERE id = ?')
+        expect(query.values).toEqual([KNOWN_COUPON])
+        // Hidden ('invalid') and expired rows are catalog rows too: no status or
+        // expired predicate, so a stale cached card's vote is not an error.
+        expect(query.sql).not.toMatch(/status|expired/i)
+
+        // A tracked duplicate answers from memory, with no database round trip.
+        prismaMock.$queryRaw.mockClear()
+        const dup = await POST(
+            reportRequest(KNOWN_COUPON, { outcome: 'worked' }),
+        )
+        expect(await dup.json()).toEqual({ ok: true, deduped: true })
+        expect(prismaMock.$queryRaw).not.toHaveBeenCalled()
+    })
+
+    it('a failing existence lookup is a 500 (loud, to Sentry) and frees the slot for the retry', async () => {
+        prismaMock.$queryRaw.mockRejectedValueOnce(new Error('db down'))
+        const failed = await POST(
+            reportRequest(KNOWN_COUPON, { outcome: 'worked' }),
+        )
+        expect(failed.status).toBe(500)
+        expect(prismaMock.couponSignal.upsert).not.toHaveBeenCalled()
+
+        const retry = await POST(
+            reportRequest(KNOWN_COUPON, { outcome: 'worked' }),
+        )
+        expect(await retry.json()).toEqual({ ok: true })
     })
 })
 
@@ -666,23 +742,18 @@ describe('POST /api/coupons/[id]/report — signed-in attribution (coupon_report
         ])
     })
 
-    it('an unknown coupon id → 200 with the signal written and NO insert attempted (the FK would raise, not 500)', async () => {
+    it('an unknown coupon id → 404 for a signed-in reporter too: no transaction, no signal, no attribution row', async () => {
         signedInAs('user-1')
-        catalogIds.clear() // the id passes /^\d{1,18}$/ but no catalog row exists
+        catalogIds.clear() // the id is well-formed but no catalog row exists
 
         const res = await POST(
             reportRequest('999000404', { outcome: 'worked' }, 'Bearer good'),
         )
 
-        expect(res.status).toBe(200)
-        expect(await res.json()).toEqual({ ok: true })
-        // Signals behavior for an unknown id is UNCHANGED (no FK on that table).
-        expect(txMock.couponSignal.upsert).toHaveBeenCalledTimes(1)
-        expect(txMock.couponSignal.upsert.mock.calls[0]![0].where).toEqual({
-            couponId: '999000404',
-        })
-        // The existence check runs BEFORE the insert, so the FK never fires.
-        expect(txMock.coupon.findUnique).toHaveBeenCalledTimes(1)
+        expect(res.status).toBe(404)
+        expect(await res.json()).toEqual({ error: 'Unknown coupon' })
+        expect(prismaMock.$transaction).not.toHaveBeenCalled()
+        expect(txMock.couponSignal.upsert).not.toHaveBeenCalled()
         expect(txMock.couponReport.create).not.toHaveBeenCalled()
         expect(reportRows).toEqual([])
     })
