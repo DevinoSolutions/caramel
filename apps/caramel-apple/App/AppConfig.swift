@@ -19,5 +19,5 @@ enum AppConfig {
     /// on the code exchange. MUST equal NATIVE_APP_REDIRECT_URI in
     /// apps/caramel-app/src/lib/auth/extensionOAuthRedirect.ts (the server
     /// accepts this one exact string).
-    static let signInRedirectURI = "(signInCallbackScheme)://auth/callback"
+    static let signInRedirectURI = "\(signInCallbackScheme)://auth/callback"
 }

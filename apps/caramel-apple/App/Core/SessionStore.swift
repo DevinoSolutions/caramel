@@ -1,4 +1,6 @@
 import AuthenticationServices
+import CryptoKit
+import Security
 import SwiftUI
 
 enum SignInError: LocalizedError {
@@ -8,6 +10,7 @@ enum SignInError: LocalizedError {
     case missingCode
     case stateMismatch
     case unexpectedCallback
+    case randomUnavailable
 
     var errorDescription: String? {
         switch self {
@@ -17,7 +20,37 @@ enum SignInError: LocalizedError {
         case .missingCode: return "The sign-in did not return a code. Please try again."
         case .stateMismatch: return "The sign-in response did not match the request. Please try again."
         case .unexpectedCallback: return "The sign-in returned to an unexpected address. Please try again."
+        case .randomUnavailable: return "This device could not generate a secure sign-in key. Please try again."
         }
+    }
+}
+
+/// PKCE (RFC 7636, S256) for the sign-in. The app's callback scheme can be
+/// claimed by another app on the device, so the code that comes back on it is
+/// only redeemable with a secret that never travels through the scheme: the
+/// app sends the SHA-256 of a random verifier when it starts the flow (the
+/// challenge) and reveals the verifier only in the direct exchange request.
+/// The verifier lives in memory for the one sign-in and is never stored.
+struct PKCE {
+    let verifier: String
+    let challenge: String
+
+    static func generate() throws -> PKCE {
+        var bytes = [UInt8](repeating: 0, count: 32)
+        guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {
+            throw SignInError.randomUnavailable
+        }
+        let verifier = base64URL(Data(bytes))
+        let challenge = base64URL(Data(SHA256.hash(data: Data(verifier.utf8))))
+        return PKCE(verifier: verifier, challenge: challenge)
+    }
+
+    /// Base64url without padding (RFC 4648 section 5), the form PKCE uses.
+    private static func base64URL(_ data: Data) -> String {
+        data.base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
     }
 }
 
@@ -68,11 +101,17 @@ final class WebSignIn: NSObject, ASWebAuthenticationPresentationContextProviding
     /// anything else did not come from the flow we started.
     static func code(from callback: URL, expectedState: String) throws -> String {
         // The whole redirect target, not just the scheme: any URL on our scheme
-        // would otherwise pass as the sign-in answer.
+        // would otherwise pass as the sign-in answer. It must be
+        // AppConfig.signInRedirectURI, ignoring only the query we asked for.
         guard let components = URLComponents(url: callback, resolvingAgainstBaseURL: false),
-              components.scheme == AppConfig.signInCallbackScheme,
-              components.host == "auth",
-              components.path == "/callback"
+              let expected = URLComponents(string: AppConfig.signInRedirectURI),
+              components.scheme == expected.scheme,
+              components.host == expected.host,
+              components.path == expected.path,
+              components.port == nil,
+              components.user == nil,
+              components.password == nil,
+              components.fragment == nil
         else { throw SignInError.unexpectedCallback }
         let items = components.queryItems ?? []
         func value(_ name: String) -> String? { items.first(where: { $0.name == name })?.value }
@@ -124,13 +163,19 @@ final class SessionStore: ObservableObject {
         errorMessage = nil
         defer { isSigningIn = false }
         do {
-            let start = try await api.oauthAuthorize(provider: provider)
+            let pkce = try PKCE.generate()
+            let start = try await api.oauthAuthorize(provider: provider, codeChallenge: pkce.challenge)
             guard let url = URL(string: start.authorizationUrl) else {
                 throw SignInError.couldNotStartSheet
             }
             let callback = try await webSignIn.authenticate(url: url)
             let code = try WebSignIn.code(from: callback, expectedState: start.state)
-            let result = try await api.oauthExchange(provider: provider, code: code, state: start.state)
+            let result = try await api.oauthExchange(
+                provider: provider,
+                code: code,
+                state: start.state,
+                codeVerifier: pkce.verifier
+            )
             try SharedSessionKeychain.write(result.token)
             token = result.token
             username = result.username

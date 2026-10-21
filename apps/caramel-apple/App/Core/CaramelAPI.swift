@@ -219,23 +219,29 @@ extension CaramelAPI {
     /// GET /api/extension/oauth/authorize with the app's own redirect URI
     /// (AppConfig.signInRedirectURI). The provider ends on the web app's
     /// /redirect hop, which bounces to that URI and closes the sheet.
-    func oauthAuthorize(provider: OAuthProvider) async throws -> OAuthAuthorizeResponse {
+    /// `codeChallenge` is the PKCE S256 challenge (PKCE.generate): the server
+    /// requires it for the app redirect and will only redeem the code with the
+    /// matching verifier, so another app that claims the URL scheme cannot.
+    func oauthAuthorize(provider: OAuthProvider, codeChallenge: String) async throws -> OAuthAuthorizeResponse {
         try await get(
             "/api/extension/oauth/authorize",
             query: [
                 URLQueryItem(name: "provider", value: provider.rawValue),
                 URLQueryItem(name: "redirect_uri", value: AppConfig.signInRedirectURI),
+                URLQueryItem(name: "code_challenge", value: codeChallenge),
+                URLQueryItem(name: "code_challenge_method", value: "S256"),
             ]
         )
     }
 
     /// POST /api/extension/oauth. Trades the code the sheet returned for a session bearer.
-    func oauthExchange(provider: OAuthProvider, code: String, state: String) async throws -> OAuthSessionResult {
+    func oauthExchange(provider: OAuthProvider, code: String, state: String, codeVerifier: String) async throws -> OAuthSessionResult {
         let body = try JSONEncoder().encode([
             "provider": provider.rawValue,
             "code": code,
             "state": state,
             "redirectUri": AppConfig.signInRedirectURI,
+            "codeVerifier": codeVerifier,
         ])
         let (data, _) = try await send("POST", "/api/extension/oauth", body: body)
         return try decode(OAuthSessionResult.self, from: data, method: "POST", path: "/api/extension/oauth")
