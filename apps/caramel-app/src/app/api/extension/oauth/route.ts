@@ -1,6 +1,7 @@
 import { handleRouteError } from '@/lib/api/handleRouteError'
 import { preflight, withRoute } from '@/lib/api/withRoute'
 import { getAppleClientSecret } from '@/lib/auth/appleClientSecret'
+import { googleRedirectUriFor } from '@/lib/auth/extensionOAuthRedirect'
 import {
     ExtensionOAuthEmailRequiredError,
     mintExtensionSession,
@@ -176,7 +177,12 @@ export const POST = withRoute(
                             code,
                             client_id: googleClientId,
                             client_secret: googleClientSecret,
-                            redirect_uri: redirectUri,
+                            // Must equal what /authorize told Google: the
+                            // app's scheme was swapped for our /redirect hop.
+                            redirect_uri: googleRedirectUriFor(
+                                redirectUri,
+                                baseURL,
+                            ),
                             grant_type: 'authorization_code',
                         }),
                     },

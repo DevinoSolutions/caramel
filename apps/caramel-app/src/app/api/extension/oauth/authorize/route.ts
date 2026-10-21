@@ -2,7 +2,9 @@ import type { FirstTouchRecord } from '@/lib/analytics/firstTouchRecord'
 import { handleRouteError } from '@/lib/api/handleRouteError'
 import { preflight, withRoute } from '@/lib/api/withRoute'
 import {
+    googleRedirectUriFor,
     isAllowedExtensionRedirectUri,
+    isNativeAppRedirectUri,
     reportRejectedExtensionRedirect,
 } from '@/lib/auth/extensionOAuthRedirect'
 import {
@@ -124,6 +126,16 @@ export const GET = withRoute(
         }
         const nonce = nonceParam ?? undefined
 
+        // The native app never polls: its result comes back on the redirect.
+        // A nonce in the state would make /redirect take the Safari branch and
+        // swallow the code, so the combination is refused rather than guessed.
+        if (nonce !== undefined && isNativeAppRedirectUri(redirectUri)) {
+            return NextResponse.json(
+                { error: 'nonce is not supported with the app redirect_uri' },
+                { status: 400 },
+            )
+        }
+
         const baseURL = env.BETTER_AUTH_URL || BASE_URL
 
         // Never sign a state (or build a provider URL) for a destination that
@@ -193,7 +205,14 @@ export const GET = withRoute(
                     'https://accounts.google.com/o/oauth2/v2/auth',
                 )
                 oauthUrl.searchParams.set('client_id', googleClientId)
-                oauthUrl.searchParams.set('redirect_uri', redirectUri) // Use extension's redirect URI directly
+                // Extensions: their redirect URI, directly. The native app's
+                // custom scheme is not one Google accepts, so for the app
+                // Google is sent to our own /redirect hop, which bounces the
+                // code to the app (googleRedirectUriFor).
+                oauthUrl.searchParams.set(
+                    'redirect_uri',
+                    googleRedirectUriFor(redirectUri, baseURL),
+                )
                 oauthUrl.searchParams.set('response_type', 'code')
                 oauthUrl.searchParams.set('scope', 'openid email profile')
                 oauthUrl.searchParams.set('access_type', 'offline')

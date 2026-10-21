@@ -1,6 +1,7 @@
 import { withRoute } from '@/lib/api/withRoute'
 import {
     isAllowedExtensionRedirectUri,
+    isNativeAppRedirectUri,
     reportRejectedExtensionRedirect,
 } from '@/lib/auth/extensionOAuthRedirect'
 import { forwardClientIpHeaders } from '@/lib/clientIp'
@@ -234,6 +235,16 @@ async function handleSafariCallback(
     )
 }
 
+/** Sends the browser on to `target`. The extensions keep the default 307, as
+ * before. The native app gets a 303: Apple's callback is a form POST, and a 307
+ * would make the browser re-POST to a custom-scheme URL, whereas the sheet
+ * (ASWebAuthenticationSession) intercepts a plain GET navigation to its scheme. */
+function redirectTo(destination: string, target: URL): NextResponse {
+    return isNativeAppRedirectUri(destination)
+        ? NextResponse.redirect(target.toString(), 303)
+        : NextResponse.redirect(target.toString())
+}
+
 /**
  * This endpoint handles redirects from OAuth providers (including form_post from Apple)
  * and forwards the authorization code to the extension's redirect URI
@@ -283,6 +294,19 @@ async function handleRedirect(req: NextRequest) {
         }
     }
 
+    // The native app's Google leg: Google redirects (GET) straight here with
+    // OUR signed state and no envelope or query param, so the destination can
+    // only come from the state's own payload. Taken ONLY when it is exactly the
+    // app's redirect URI; an unsigned-read destination of any other shape is
+    // still ignored, so a hand-made state cannot steer the code anywhere new
+    // (and the allowlist check below runs on the result regardless).
+    if (!extensionRedirectUri && originalState) {
+        const stateRedirect = readSignedStatePayload(originalState).redirectUri
+        if (stateRedirect && isNativeAppRedirectUri(stateRedirect)) {
+            extensionRedirectUri = stateRedirect
+        }
+    }
+
     // COMPATIBILITY SHIM — TODO(safari-shim-removal). A nonce inside the signed
     // state means the caller is the shipped Safari build, which has no redirect
     // URI to be sent back to and is polling instead. Returns null for every
@@ -307,7 +331,7 @@ async function handleRedirect(req: NextRequest) {
             const errorUrl = new URL(extensionRedirectUri)
             errorUrl.searchParams.set('error', error)
             if (originalState) errorUrl.searchParams.set('state', originalState)
-            return NextResponse.redirect(errorUrl.toString())
+            return redirectTo(extensionRedirectUri, errorUrl)
         }
         if (extensionRedirectUri) {
             reportRejectedExtensionRedirect({
@@ -357,7 +381,7 @@ async function handleRedirect(req: NextRequest) {
     redirectUrl.searchParams.set('code', code)
     if (originalState) redirectUrl.searchParams.set('state', originalState)
 
-    return NextResponse.redirect(redirectUrl.toString())
+    return redirectTo(extensionRedirectUri, redirectUrl)
 }
 
 // No cors/rateLimit/origin/apiKey/body concerns — this is a server-to-
