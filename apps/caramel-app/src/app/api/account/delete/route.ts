@@ -62,36 +62,36 @@ import { z } from 'zod'
 // person (distinct id = the user id) here, or on a queue, once it exists.
 const DELETE_CONFIRMATION = 'DELETE'
 
-/** The verification_tokens rows that belong to this account (see above). */
+/** better-auth's email-OTP identifier is `${type}-otp-${email}` (toOTPIdentifier
+ * in better-auth/dist/plugins/email-otp/utils.mjs, v1.6.23). The change-email
+ * type embeds a second address and cannot be listed exactly. */
+const EMAIL_OTP_TYPES = ['sign-in', 'email-verification', 'forget-password']
+
+/** The verification_tokens rows that belong to this account (see above): the
+ * rows keyed by the user id in `value` (core better-auth writes
+ * `reset-password:<token>` and `delete-account-<token>` that way) and the
+ * rows whose identifier IS this account's address in one of the exact forms
+ * better-auth writes. EXACT identifiers only, never a suffix match: another
+ * person's `a-<address>` must survive. The address is folded (lower case) and
+ * matched case-sensitively; `mode: 'insensitive'` compiles to an unescaped
+ * ILIKE (see siteSuggestionIdentity.ts). */
 function verificationWhere(args: {
     userId: string
     email: string | null
 }): Prisma.VerificationWhereInput {
+    if (!args.email) return { value: args.userId }
+    const email = foldRequesterEmail(args.email)
     return {
         OR: [
             { value: args.userId },
-            // The bare address, or better-auth's `<purpose>-<address>` /
-            // `<purpose>:<address>` forms: anchored at the END so another
-            // person's address that merely contains this one is left alone.
-            // The FOLDED (lower-case) address, matched exactly and
-            // case-sensitively (no `mode: 'insensitive'`, which compiles to an
-            // unescaped ILIKE: see siteSuggestionIdentity.ts): better-auth
-            // lower-cases the address it stores.
-            ...(args.email
-                ? [
-                      { identifier: foldRequesterEmail(args.email) },
-                      {
-                          identifier: {
-                              endsWith: `-${foldRequesterEmail(args.email)}`,
-                          },
-                      },
-                      {
-                          identifier: {
-                              endsWith: `:${foldRequesterEmail(args.email)}`,
-                          },
-                      },
-                  ]
-                : []),
+            {
+                identifier: {
+                    in: [
+                        email,
+                        ...EMAIL_OTP_TYPES.map(type => `${type}-otp-${email}`),
+                    ],
+                },
+            },
         ],
     }
 }

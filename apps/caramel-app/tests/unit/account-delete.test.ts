@@ -151,9 +151,16 @@ describe('POST /api/account/delete', () => {
         expect(erase.where).toEqual({
             OR: [
                 { value: USER_ID },
-                { identifier: 'shopper@example.com' },
-                { identifier: { endsWith: '-shopper@example.com' } },
-                { identifier: { endsWith: ':shopper@example.com' } },
+                {
+                    identifier: {
+                        in: [
+                            'shopper@example.com',
+                            'sign-in-otp-shopper@example.com',
+                            'email-verification-otp-shopper@example.com',
+                            'forget-password-otp-shopper@example.com',
+                        ],
+                    },
+                },
             ],
         })
     })

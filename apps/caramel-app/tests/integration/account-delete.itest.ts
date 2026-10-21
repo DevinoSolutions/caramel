@@ -191,7 +191,7 @@ describe('POST /api/account/delete — what the real foreign keys do', () => {
                     expiresAt: farFuture,
                 },
                 {
-                    identifier: `sign-in-otp-${USER_EMAIL}`,
+                    identifier: `email-verification-otp-${USER_EMAIL}`,
                     value: 'acct-delete-itest-by-otp',
                     expiresAt: farFuture,
                 },
@@ -206,7 +206,23 @@ describe('POST /api/account/delete — what the real foreign keys do', () => {
                     expiresAt: farFuture,
                 },
                 {
-                    // Merely CONTAINS the user's address: not theirs.
+                    // Another person's address that merely ENDS with this one
+                    // (hyphen, colon and plain-prefix variants): not theirs.
+                    identifier: `a-${USER_EMAIL}`,
+                    value: 'acct-delete-itest-lookalike-hyphen',
+                    expiresAt: farFuture,
+                },
+                {
+                    identifier: `a:${USER_EMAIL}`,
+                    value: 'acct-delete-itest-lookalike-colon',
+                    expiresAt: farFuture,
+                },
+                {
+                    identifier: `sign-in-otp-a-${USER_EMAIL}`,
+                    value: 'acct-delete-itest-lookalike-otp',
+                    expiresAt: farFuture,
+                },
+                {
                     identifier: `x${USER_EMAIL}`,
                     value: 'acct-delete-itest-lookalike',
                     expiresAt: farFuture,
@@ -271,6 +287,9 @@ describe('POST /api/account/delete — what the real foreign keys do', () => {
         expect(remaining.map(r => r.value).sort()).toEqual([
             'acct-delete-itest-bystander',
             'acct-delete-itest-lookalike',
+            'acct-delete-itest-lookalike-colon',
+            'acct-delete-itest-lookalike-hyphen',
+            'acct-delete-itest-lookalike-otp',
         ])
 
         // The bystander and their data are intact.
