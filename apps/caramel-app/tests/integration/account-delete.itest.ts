@@ -240,6 +240,7 @@ describe('POST /api/account/delete — what the real foreign keys do', () => {
         expect(await res.json()).toEqual({
             deleted: true,
             scrubbed: { siteSuggestions: 2 },
+            appleRevocation: 'not_applicable',
         })
 
         // The user and everything that cascades.
@@ -314,6 +315,7 @@ describe('POST /api/account/delete — what the real foreign keys do', () => {
         expect(await second.json()).toEqual({
             deleted: false,
             scrubbed: { siteSuggestions: 0 },
+            appleRevocation: 'not_applicable',
         })
     })
 })

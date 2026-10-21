@@ -9,6 +9,7 @@ import {
 import { POST as oauthPOST } from '@/app/api/extension/oauth/route'
 import { POST as suggestPOST } from '@/app/api/sites/suggest/route'
 import { POST as sourcesPOST } from '@/app/api/sources/route'
+import { decryptOAuthToken } from '@/lib/auth/oauthTokenCrypto'
 import { NextRequest } from 'next/server'
 import { createHmac } from 'node:crypto'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -58,6 +59,11 @@ const { envMock, OAUTH_STATE_SECRET, KNOWN_ORIGIN } = vi.hoisted(() => {
                 | undefined,
             APPLE_CLIENT_ID: 'test-apple-client-id' as string | undefined,
             BETTER_AUTH_URL: 'http://localhost:58000',
+            // oauthTokenCrypto.ts encrypts the stored access/refresh tokens.
+            BETTER_AUTH_SECRET: 'route-pipeline-test-auth-secret' as
+                | string
+                | undefined,
+            JWT_SECRET: undefined as string | undefined,
             CHROME_EXTENSION_ORIGIN: KNOWN_ORIGIN as string | undefined,
             FIREFOX_EXTENSION_ORIGIN: undefined as string | undefined,
             SAFARI_EXTENSION_ORIGIN: undefined as string | undefined,
@@ -229,6 +235,7 @@ async function defaultFetchImpl(input: RequestInfo | URL): Promise<Response> {
     if (url.includes('appleid.apple.com/auth/token')) {
         return jsonResponse({
             access_token: 'apple-access-token',
+            refresh_token: 'r.apple-refresh-token.0.abc',
             id_token: buildAppleIdToken({
                 sub: 'apple-user-id',
                 email: 'appleuser@example.com',
@@ -411,6 +418,14 @@ describe('extension/oauth (exchange) — mint characterization (F-007 4a/4b/4c)'
             emailVerified: true,
             status: 'ACTIVE_USER',
         })
+        // T-5065: Apple's refresh token from the code exchange is persisted
+        // (encrypted) so account deletion can revoke the grant.
+        const storedRefresh = prismaMock.account.create.mock.calls[0][0].data
+            .refreshToken as string
+        expect(storedRefresh).not.toContain('apple-refresh-token')
+        expect(await decryptOAuthToken(storedRefresh)).toBe(
+            'r.apple-refresh-token.0.abc',
+        )
     })
 
     it('Apple, no email + no existing account: 400 "Email is required for Apple sign-in..." (unchanged message)', async () => {

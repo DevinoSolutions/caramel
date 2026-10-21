@@ -138,6 +138,44 @@ function _caramelRemoveRowText(btn) {
     return ''
 }
 
+/* A product line in the cart, by the markup the common platforms give it:
+ * Shopify's <cart-remove-button> and data-line-item keys, BigCommerce's
+ * data-cart-itemid, WooCommerce's tr.cart_item, and the usual class names. */
+const CARAMEL_CART_LINE_SEL =
+    'cart-remove-button, [data-cart-item], [data-cart-itemid], [data-cart-item-key], [data-line-item], [data-line-item-key], .cart-item, .cart__item, .cart-line-item, tr.cart__row, tr.cart_item, .woocommerce-cart-form__cart-item'
+/* A field that changes how many of a product are in the cart. Only a product
+ * line carries one; a discount row never does. */
+const CARAMEL_LINE_QTY_SEL =
+    'input[name*="quantity" i], input[name^="updates"], select[name*="quantity" i], [data-quantity-input]'
+
+/* Does this remove button belong to a product line rather than to a discount?
+ * Its label cannot say: Shopify labels a line's button "Remove <product name>",
+ * which the forbidden-control guard does not read as a cart change, and a line
+ * that carries a line-level discount even shows our code in its text. So look
+ * at where it sits: inside a known line container, or a few levels under an
+ * ancestor holding exactly ONE quantity field. The climb stops as soon as the
+ * ancestor holds another candidate, the coupon box, or several quantity
+ * fields: past that point we are in the container shared by every line and the
+ * discount row, and a quantity field there says nothing about this button. */
+function _caramelInCartLine(btn, candidates, couponInput) {
+    try {
+        if (btn.closest?.(CARAMEL_CART_LINE_SEL)) return true
+        let node = btn.parentElement
+        for (let up = 0; up < 4 && node; up++) {
+            if (candidates.some(c => c !== btn && node.contains(c))) break
+            if (couponInput && node.contains(couponInput)) break
+            const qty = node.querySelectorAll(CARAMEL_LINE_QTY_SEL).length
+            if (qty > 1) break
+            if (qty === 1) return true
+            node = node.parentElement
+        }
+    } catch {
+        // An unreadable ancestor chain is not evidence the button is safe.
+        return true
+    }
+    return false
+}
+
 /* Try to remove the coupon WE just applied. Returns true if a remove button was
  * clicked. Caller should wait for the cart to update.
  *
@@ -166,7 +204,22 @@ export async function removeAppliedCoupon(rec, options) {
         _isVisible(b) && !b.disabled && !caramelIsForbiddenControl(b)
     // qAll (not raw querySelectorAll) so an XPath couponRemove selector is
     // evaluated correctly instead of throwing a SyntaxError that aborts removal.
-    const candidates = qAll(sel).filter(usable)
+    const visible = qAll(sel).filter(usable)
+    // A broad couponRemove ([aria-label*="Remove"] is on 865 served Shopify
+    // configs) also matches every product line's own button. Clicking one
+    // takes the product out of the shopper's cart, so those never count.
+    const couponInput = qOne(rec.couponInput)
+    const candidates = visible.filter(
+        b => !_caramelInCartLine(b, visible, couponInput),
+    )
+    if (visible.length && !candidates.length) {
+        log('REMOVE_REFUSED_CART_LINE', {
+            code: ourCode,
+            candidates: visible.length,
+            reason: 'every remove button the selector found sits in a product line — clicking one would take a product out of the cart',
+        })
+        return false
+    }
     if (candidates.length) {
         let btn = ourCode
             ? candidates.find(b =>

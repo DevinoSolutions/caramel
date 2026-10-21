@@ -82,6 +82,30 @@ vi.mock('@sentry/nextjs', () => ({
     setUser: vi.fn(),
 }))
 
+// TEST DOUBLE for the Apple revoke (its own behaviour, form fields and failure
+// reporting are pinned in apple-token-revocation.test.ts). Here only the
+// route's contract with it: tokens read BEFORE the transaction, revoke called
+// AFTER the commit and only for the request that deleted, a failed revoke
+// reported but never a failed request.
+const { loadTargetsMock, revokeGrantsMock, callOrder } = vi.hoisted(() => {
+    const callOrder: string[] = []
+    return {
+        callOrder,
+        loadTargetsMock: vi.fn(async (_userId: string) => {
+            callOrder.push('load')
+            return [] as { refreshToken: string | null; accessToken: null }[]
+        }),
+        revokeGrantsMock: vi.fn(
+            async (_targets: readonly unknown[]) =>
+                'not_applicable' as 'not_applicable' | 'revoked' | 'failed',
+        ),
+    }
+})
+vi.mock('@/lib/auth/appleTokenRevocation', () => ({
+    loadAppleRevocationTargets: loadTargetsMock,
+    revokeAppleGrants: revokeGrantsMock,
+}))
+
 const USER_ID = 'user-under-test'
 const USER_EMAIL = 'Shopper@Example.com'
 
@@ -95,14 +119,22 @@ function deleteRequest(body: unknown, headers: Record<string, string> = {}) {
 
 beforeEach(() => {
     vi.clearAllMocks()
+    callOrder.length = 0
+    loadTargetsMock.mockImplementation(async () => {
+        callOrder.push('load')
+        return []
+    })
+    revokeGrantsMock.mockImplementation(async () => {
+        callOrder.push('revoke')
+        return 'not_applicable'
+    })
     getSessionMock.mockResolvedValue({
         user: { id: USER_ID, email: USER_EMAIL },
     })
-    transactionMock.mockResolvedValue([
-        { count: 2 },
-        { count: 1 },
-        { count: 1 },
-    ])
+    transactionMock.mockImplementation(async () => {
+        callOrder.push('transaction')
+        return [{ count: 2 }, { count: 1 }, { count: 1 }]
+    })
 })
 
 describe('POST /api/account/delete', () => {
@@ -113,6 +145,7 @@ describe('POST /api/account/delete', () => {
         expect(await res.json()).toEqual({
             deleted: true,
             scrubbed: { siteSuggestions: 2 },
+            appleRevocation: 'not_applicable',
         })
         expect(prismaMock.user.deleteMany).toHaveBeenCalledWith({
             where: { id: USER_ID },
@@ -189,6 +222,82 @@ describe('POST /api/account/delete', () => {
         expect(await res.json()).toEqual({
             deleted: false,
             scrubbed: { siteSuggestions: 0 },
+            appleRevocation: 'not_applicable',
+        })
+        // The winner of the race owns the revoke.
+        expect(revokeGrantsMock).not.toHaveBeenCalled()
+    })
+
+    describe('Sign in with Apple revocation (T-5065)', () => {
+        const appleTargets = [
+            { refreshToken: 'stored-token', accessToken: null },
+        ]
+
+        it('reads the Apple tokens BEFORE the transaction and revokes them AFTER it commits', async () => {
+            loadTargetsMock.mockImplementation(async () => {
+                callOrder.push('load')
+                return appleTargets
+            })
+            revokeGrantsMock.mockImplementation(async () => {
+                callOrder.push('revoke')
+                return 'revoked'
+            })
+
+            const res = await POST(deleteRequest({ confirm: 'DELETE' }))
+
+            expect(res.status).toBe(200)
+            expect(await res.json()).toMatchObject({
+                deleted: true,
+                appleRevocation: 'revoked',
+            })
+            expect(callOrder).toEqual(['load', 'transaction', 'revoke'])
+            expect(loadTargetsMock).toHaveBeenCalledWith(USER_ID)
+            expect(revokeGrantsMock).toHaveBeenCalledWith(appleTargets)
+        })
+
+        it('a user with no Apple account still goes through the same calls and gets not_applicable', async () => {
+            const res = await POST(deleteRequest({ confirm: 'DELETE' }))
+
+            expect(await res.json()).toMatchObject({
+                appleRevocation: 'not_applicable',
+            })
+            expect(revokeGrantsMock).toHaveBeenCalledWith([])
+        })
+
+        it('a failed revoke is surfaced in the response, and the completed deletion stays a 200', async () => {
+            loadTargetsMock.mockResolvedValue(appleTargets)
+            revokeGrantsMock.mockResolvedValue('failed')
+
+            const res = await POST(deleteRequest({ confirm: 'DELETE' }))
+
+            expect(res.status).toBe(200)
+            expect(await res.json()).toEqual({
+                deleted: true,
+                scrubbed: { siteSuggestions: 2 },
+                appleRevocation: 'failed',
+            })
+        })
+
+        it('a failed transaction revokes nothing (the account still exists)', async () => {
+            loadTargetsMock.mockResolvedValue(appleTargets)
+            transactionMock.mockRejectedValue(new Error('connection reset'))
+
+            const res = await POST(deleteRequest({ confirm: 'DELETE' }))
+
+            expect(res.status).toBe(500)
+            expect(revokeGrantsMock).not.toHaveBeenCalled()
+        })
+
+        it('an unauthenticated or unconfirmed request neither reads nor revokes tokens', async () => {
+            getSessionMock.mockResolvedValue(null)
+            await POST(deleteRequest({ confirm: 'DELETE' }))
+            getSessionMock.mockResolvedValue({
+                user: { id: USER_ID, email: USER_EMAIL },
+            })
+            await POST(deleteRequest({ confirm: 'nope' }))
+
+            expect(loadTargetsMock).not.toHaveBeenCalled()
+            expect(revokeGrantsMock).not.toHaveBeenCalled()
         })
     })
 
