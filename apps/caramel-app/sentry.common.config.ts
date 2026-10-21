@@ -41,8 +41,10 @@ export function initSentry(
         // from errors, transactions (incl. span urls) and breadcrumbs, whatever
         // the SDK or a call site put there. The rejected-redirect scrub then
         // also drops the whole query string of its own events.
-        beforeSend: event =>
-            scrubRejectedRedirectEvent(scrubSentryEvent(event)),
+        beforeSend: event => {
+            const scrubbed = scrubSentryEvent(event)
+            return scrubbed && scrubRejectedRedirectEvent(scrubbed)
+        },
         beforeSendTransaction: scrubSentryEvent,
         beforeBreadcrumb: scrubSentryBreadcrumb,
         ...customOptions,

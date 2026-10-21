@@ -10,13 +10,20 @@
 // What never leaves the process: Authorization / Cookie / Set-Cookie headers,
 // Bearer tokens, OAuth `code` / `state` / `id_token` / `access_token` (and any
 // other token-, secret-, session- or password-shaped param) in URLs, query
-// strings and fragments, URL userinfo, e-mail addresses and raw IPs. What stays:
+// strings and fragments, URL userinfo, bare JWTs, e-mail addresses and raw IPs
+// (v4 and v6) in any string. What stays:
 // route, method, status, tags, release, the user id (set explicitly via
 // Sentry.setUser, never an e-mail), trace ids and everything not matched below.
 //
 // Deliberately light on imports (types only) so the Sentry init files can use
 // it. Mutates in place and returns the same object, which is what the Sentry
 // hooks expect.
+//
+// Two safety rules for the walk. It only descends into plain objects and
+// arrays: a live SDK object (the Scope / Client under
+// `sdkProcessingMetadata`) has getter-only fields and is not ours to rewrite,
+// and `sdkProcessingMetadata` is never entered at all. And a hook that fails
+// inside never lets the event through unscrubbed: it logs and drops it.
 import type { Breadcrumb, ErrorEvent, init } from '@sentry/nextjs'
 
 // @sentry/nextjs re-exports ErrorEvent but not TransactionEvent; take the type
@@ -30,6 +37,8 @@ type Scrubbable = ErrorEvent | TransactionEvent
 
 export const FILTERED = '[Filtered]'
 const FILTERED_EMAIL = '[Filtered email]'
+const FILTERED_JWT = '[Filtered jwt]'
+const FILTERED_IP = '[Filtered ip]'
 
 /** Deeper than any real event; a guard against cycles, not a feature. */
 const MAX_DEPTH = 20
@@ -94,6 +103,12 @@ const SENSITIVE_OBJECT_KEYS: ReadonlySet<string> = new Set([
     'idtoken',
     'sessiontoken',
     'bearer',
+    'clientaddress',
+    'networkpeeraddress',
+    'xclientip',
+    'trueclientip',
+    'xclusterclientip',
+    'fastlyclientip',
     'email',
     'useremail',
     'ip',
@@ -107,7 +122,13 @@ const SENSITIVE_OBJECT_KEYS: ReadonlySet<string> = new Set([
 ])
 
 function normalizeKey(key: string): string {
-    return key.toLowerCase().replace(/[-_]/g, '')
+    return key.toLowerCase().replace(/[-_.]/g, '')
+}
+
+/** Span attributes are dotted (`http.request.header.cookie`), so the last
+ * segment is checked as well as the whole key. */
+function lastSegment(key: string): string {
+    return key.slice(key.lastIndexOf('.') + 1)
 }
 
 function safeDecode(value: string): string {
@@ -127,26 +148,83 @@ function isSensitiveParamName(rawName: string): boolean {
 }
 
 function isSensitiveObjectKey(key: string): boolean {
-    return SENSITIVE_OBJECT_KEYS.has(normalizeKey(key))
+    return (
+        SENSITIVE_OBJECT_KEYS.has(normalizeKey(key)) ||
+        SENSITIVE_OBJECT_KEYS.has(normalizeKey(lastSegment(key)))
+    )
 }
 
 const PARAM_PAIR = /(^|[?&#])([\w.%[\]-]+)=([^&#\s"'<>]*)/g
 const BEARER_TOKEN = /\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{8,}/gi
 const URL_USERINFO = /(\b[a-z][a-z0-9+.-]*:\/\/)[^\s/@?#]+@/gi
+/** Three base64url parts starting with the `{"` header: a JWT anywhere. */
+const BARE_JWT = /\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]*/g
+/** `"id_token":"..."` / `'code': '...'` inside a string (a JSON body in a message). */
+const JSON_STRING_PAIR = /(["'])([\w.-]+)\1(\s*:\s*)(["'])((?:\\.|(?!\4).)*)\4/g
+/** The domain must start with a letter and end in a letters-only label, so
+ * `pkg@1.4.17-beta.rc` and `foo@1.2.3-rc.beta/x.js` are not e-mails. */
 const EMAIL =
-    /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g
+    /[A-Za-z0-9._%+-]+@[A-Za-z][A-Za-z0-9-]*(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g
+const OCTET = '(?:25[0-5]|2[0-4]\\d|1?\\d?\\d)'
+/** Dotted quad, not part of a longer number, path or version (`Chrome/120.0.0.0`,
+ * `v1.2.3.4`, `1.2.3.4.5`). */
+const IPV4 = new RegExp(
+    `(?<![\\w./@-])(?:${OCTET}\\.){3}${OCTET}(?![\\w]|\\.\\d)`,
+    'g',
+)
+const IPV6 =
+    /(?<![\w:])(?:(?:[0-9a-f]{1,4}:){7}[0-9a-f]{1,4}|(?:[0-9a-f]{1,4}:){1,7}:(?:[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){0,5})?|::(?:[0-9a-f]{1,4}:){0,6}[0-9a-f]{1,4})(?![\w:])/gi
 
-/** Redact credentials and e-mail addresses inside free text: a URL, a query
- * string, an error message, a breadcrumb line. Text without any of them is
- * returned unchanged. */
+/** Redact credentials, e-mail addresses and IPs inside free text: a URL, a
+ * query string, an error message, a breadcrumb line. Text without any of them
+ * is returned unchanged. */
 export function redactSensitiveText(text: string): string {
     return text
         .replace(URL_USERINFO, `$1${FILTERED}@`)
-        .replace(PARAM_PAIR, (match, lead: string, name: string) =>
-            isSensitiveParamName(name) ? `${lead}${name}=${FILTERED}` : match,
+        .replace(
+            PARAM_PAIR,
+            (match, lead: string, name: string, value: string) => {
+                if (isSensitiveParamName(name)) {
+                    return `${lead}${name}=${FILTERED}`
+                }
+                // A non-credential param can still carry a whole URL
+                // (`?next=%2Fcb%3Fcode%3Dabc`): if the decoded value holds a
+                // credential, the value goes.
+                const decoded = safeDecode(value)
+                if (
+                    decoded !== value &&
+                    redactSensitiveText(decoded) !== decoded
+                ) {
+                    return `${lead}${name}=${FILTERED}`
+                }
+                return match
+            },
+        )
+        .replace(
+            JSON_STRING_PAIR,
+            (
+                match,
+                keyQuote: string,
+                name: string,
+                colon: string,
+                quote: string,
+            ) =>
+                isSensitiveParamName(name)
+                    ? `${keyQuote}${name}${keyQuote}${colon}${quote}${FILTERED}${quote}`
+                    : match,
         )
         .replace(BEARER_TOKEN, `$1 ${FILTERED}`)
+        .replace(BARE_JWT, FILTERED_JWT)
         .replace(EMAIL, FILTERED_EMAIL)
+        .replace(IPV4, FILTERED_IP)
+        .replace(IPV6, FILTERED_IP)
+}
+
+/** Only plain data is walked and rewritten; class instances (Scope, Client,
+ * Date, Error, ...) are left alone. */
+function isPlainObject(value: object): value is Record<string, unknown> {
+    const proto: unknown = Object.getPrototypeOf(value)
+    return proto === Object.prototype || proto === null
 }
 
 function scrubNode(node: unknown, depth: number): unknown {
@@ -160,8 +238,11 @@ function scrubNode(node: unknown, depth: number): unknown {
         }
         return list
     }
-    const record = node as Record<string, unknown>
+    if (!isPlainObject(node)) return node
+    const record = node
     for (const key of Object.keys(record)) {
+        // Live SDK state (scopes, client): not event data, never entered.
+        if (key === 'sdkProcessingMetadata') continue
         const value = record[key]
         if (value === null || value === undefined) continue
         record[key] = isSensitiveObjectKey(key)
@@ -219,18 +300,43 @@ function scrubUser(user: NonNullable<ErrorEvent['user']>): void {
     delete user.username
 }
 
-/** Scrub one error or transaction event. Everything below `event` is walked, so
- * request, extra, contexts, breadcrumbs, exception values and spans (`http.url`,
- * `url.query`, span descriptions) are all covered. */
-export function scrubSentryEvent<T extends Scrubbable>(event: T): T {
-    if (event.request) scrubRequest(event.request)
-    if (event.user) scrubUser(event.user)
-    scrubNode(event, 0)
-    return event
+function reportScrubFailure(hook: string, error: unknown): void {
+    // Name and message only: the event payload is what must not be logged.
+    const reason =
+        error instanceof Error
+            ? `${error.name}: ${error.message}`
+            : 'non-Error throw'
+    console.error(
+        `[sentry-pii-scrub] ${hook} failed, dropping it unsent: ${reason}`,
+    )
 }
 
-/** beforeBreadcrumb: fetch / xhr / navigation URLs and console lines. */
-export function scrubSentryBreadcrumb(breadcrumb: Breadcrumb): Breadcrumb {
-    scrubNode(breadcrumb, 0)
-    return breadcrumb
+/** Scrub one error or transaction event. Everything below `event` is walked, so
+ * request, extra, contexts, breadcrumbs, exception values and spans (`http.url`,
+ * `url.query`, span descriptions) are all covered. Returns null (drops the
+ * event) if scrubbing itself fails: an unscrubbed event is never sent. */
+export function scrubSentryEvent<T extends Scrubbable>(event: T): T | null {
+    try {
+        if (event.request) scrubRequest(event.request)
+        if (event.user) scrubUser(event.user)
+        scrubNode(event, 0)
+        return event
+    } catch (error) {
+        reportScrubFailure('beforeSend', error)
+        return null
+    }
+}
+
+/** beforeBreadcrumb: fetch / xhr / navigation URLs and console lines. Returns
+ * null (drops the breadcrumb) if scrubbing fails. */
+export function scrubSentryBreadcrumb(
+    breadcrumb: Breadcrumb,
+): Breadcrumb | null {
+    try {
+        scrubNode(breadcrumb, 0)
+        return breadcrumb
+    } catch (error) {
+        reportScrubFailure('beforeBreadcrumb', error)
+        return null
+    }
 }

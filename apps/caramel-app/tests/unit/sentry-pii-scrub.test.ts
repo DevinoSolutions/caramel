@@ -5,9 +5,10 @@ import {
     scrubSentryEvent,
 } from '@/lib/sentryPiiScrub'
 import type { Breadcrumb, ErrorEvent, init } from '@sentry/nextjs'
+import * as Sentry from '@sentry/nextjs'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 // T-5535 M5 / L6. With `sendDefaultPii: true` the SDK attached request headers
 // (Authorization, Cookie), the OAuth callback query (`?code=…&state=…`) and the
@@ -34,6 +35,15 @@ const SECRETS = [
     'victim@example.com',
     '203.0.113.7',
 ]
+
+/** scrubSentryEvent, asserting the event was kept (not dropped). */
+function scrubbed<T extends Parameters<typeof scrubSentryEvent>[0]>(
+    event: T,
+): T {
+    const out = scrubSentryEvent(event)
+    if (out === null) throw new Error('event was dropped by the scrubber')
+    return out
+}
 
 function expectNoSecrets(value: unknown): void {
     const serialized = JSON.stringify(value)
@@ -105,11 +115,11 @@ function errorEvent(): ErrorEvent {
 
 describe('scrubSentryEvent: error events', () => {
     it('removes every secret from the serialized event', () => {
-        expectNoSecrets(scrubSentryEvent(errorEvent()))
+        expectNoSecrets(scrubbed(errorEvent()))
     })
 
     it('drops credential headers, keeps the useful ones', () => {
-        const { request } = scrubSentryEvent(errorEvent())
+        const { request } = scrubbed(errorEvent())
         expect(request?.headers?.['Authorization']).toBe(FILTERED)
         expect(request?.headers?.['Cookie']).toBe(FILTERED)
         expect(request?.headers?.['Set-Cookie']).toBe(FILTERED)
@@ -122,7 +132,7 @@ describe('scrubSentryEvent: error events', () => {
     })
 
     it('redacts only the credential params of the URL and query string', () => {
-        const { request } = scrubSentryEvent(errorEvent())
+        const { request } = scrubbed(errorEvent())
         expect(request?.url).toBe(
             `https://grabcaramel.com/api/auth/callback/google?code=${FILTERED}&state=${FILTERED}&scope=email&utm_source=ad`,
         )
@@ -139,7 +149,7 @@ describe('scrubSentryEvent: error events', () => {
             state: 'SECRET-STATE',
             page: '2',
         }
-        const objectOut = scrubSentryEvent(asObject).request?.query_string
+        const objectOut = scrubbed(asObject).request?.query_string
         expect(objectOut).toEqual({
             code: FILTERED,
             state: FILTERED,
@@ -151,14 +161,14 @@ describe('scrubSentryEvent: error events', () => {
             ['id_token', 'SECRET-ID-TOKEN'],
             ['page', '2'],
         ]
-        expect(scrubSentryEvent(asPairs).request?.query_string).toEqual([
+        expect(scrubbed(asPairs).request?.query_string).toEqual([
             ['id_token', FILTERED],
             ['page', '2'],
         ])
     })
 
     it('keeps the user id, tags, release and numeric extras for triage', () => {
-        const out = scrubSentryEvent(errorEvent())
+        const out = scrubbed(errorEvent())
         expect(out.user).toEqual({ id: 'user_1' })
         expect(out.tags).toEqual({
             route: '/api/auth/callback/[provider]',
@@ -180,7 +190,7 @@ describe('scrubSentryEvent: error events', () => {
     })
 
     it('redacts URLs inside messages, exception values and breadcrumbs', () => {
-        const out = scrubSentryEvent(errorEvent())
+        const out = scrubbed(errorEvent())
         expect(out.message).toContain(`code=${FILTERED}`)
         expect(out.message).toContain('utm_source=ad')
         expect(out.exception?.values?.[0]?.value).toContain(
@@ -232,11 +242,11 @@ describe('scrubSentryEvent: transactions', () => {
     })
 
     it('removes secrets from the trace context and every span', () => {
-        expectNoSecrets(scrubSentryEvent(transaction()))
+        expectNoSecrets(scrubbed(transaction()))
     })
 
     it('keeps trace ids, op, status and the transaction name', () => {
-        const out = scrubSentryEvent(transaction())
+        const out = scrubbed(transaction())
         expect(out.transaction).toBe('GET /api/auth/callback/[provider]')
         expect(out.contexts?.trace).toMatchObject({
             trace_id: 'a'.repeat(32),
@@ -324,5 +334,175 @@ describe('Sentry init wiring', () => {
             expect(source).toMatch(/beforeSendTransaction:\s*scrubSentryEvent/)
             expect(source).toMatch(/beforeBreadcrumb:\s*scrubSentryBreadcrumb/)
         }
+    })
+})
+
+describe('redactSensitiveText: IPs, JWTs, JSON, nested URLs, e-mails', () => {
+    it('redacts IPv4 and IPv6 addresses but not versions or UA strings', () => {
+        expect(redactSensitiveText('connect ECONNREFUSED 10.0.0.5:5432')).toBe(
+            'connect ECONNREFUSED [Filtered ip]:5432',
+        )
+        expect(
+            redactSensitiveText('from fe80::1 and 2001:db8::ff00:42:8329'),
+        ).toBe('from [Filtered ip] and [Filtered ip]')
+        expect(redactSensitiveText('peer ::1 refused')).toBe(
+            'peer [Filtered ip] refused',
+        )
+        for (const keep of [
+            'Chrome/120.0.0.0',
+            'release v1.2.3.4',
+            'sdk 10.65.0',
+            'build 1.2.3.4.5',
+            'at 12:30:45 on Foo::bar',
+        ]) {
+            expect(redactSensitiveText(keep)).toBe(keep)
+        }
+    })
+
+    it('redacts bare JWTs, JSON-in-string pairs and nested encoded URLs', () => {
+        const jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abcdefghijk'
+        expect(redactSensitiveText(`bad token ${jwt} here`)).toBe(
+            'bad token [Filtered jwt] here',
+        )
+        expect(
+            redactSensitiveText(
+                'body {"code":"SECRET-CODE","id_token":"SECRET-ID-TOKEN","page":"2"}',
+            ),
+        ).toBe(
+            `body {"code":"${FILTERED}","id_token":"${FILTERED}","page":"2"}`,
+        )
+        expect(
+            redactSensitiveText('/x?next=%2Fcb%3Fcode%3DSECRET-CODE&a=1'),
+        ).toBe(`/x?next=${FILTERED}&a=1`)
+        expect(redactSensitiveText('/x?next=%2Fstores%2Famazon&a=1')).toBe(
+            '/x?next=%2Fstores%2Famazon&a=1',
+        )
+    })
+
+    it('does not mangle package@version strings, still redacts e-mails', () => {
+        for (const keep of [
+            'caramel@1.4.17-beta.rc',
+            'pnpm/foo@1.2.3-rc.beta/x.js',
+            '@sentry/nextjs@10.65.0',
+        ]) {
+            expect(redactSensitiveText(keep)).toBe(keep)
+        }
+        expect(redactSensitiveText('mail victim@example.com now')).toBe(
+            'mail [Filtered email] now',
+        )
+    })
+})
+
+describe('scrubSentryEvent: more keys', () => {
+    it('filters client-IP headers and dotted span attribute keys', () => {
+        const event = errorEvent()
+        event.request!.headers = {
+            'X-Client-IP': '203.0.113.7',
+            'True-Client-IP': '203.0.113.7',
+            'User-Agent': 'ua',
+        }
+        event.extra = {
+            'http.request.header.cookie': ['sid=SECRET-COOKIE'],
+            'http.request.header.authorization': 'Bearer SECRET-BEARER',
+            'http.response.header.set-cookie': 'a=SECRET-COOKIE',
+            'client.address': '203.0.113.7',
+            'http.response.status_code': 200,
+        }
+        const out = scrubbed(event)
+        expect(out?.request?.headers).toEqual({
+            'X-Client-IP': FILTERED,
+            'True-Client-IP': FILTERED,
+            'User-Agent': 'ua',
+        })
+        expect(out?.extra).toEqual({
+            'http.request.header.cookie': FILTERED,
+            'http.request.header.authorization': FILTERED,
+            'http.response.header.set-cookie': FILTERED,
+            'client.address': FILTERED,
+            'http.response.status_code': 200,
+        })
+    })
+})
+
+describe('scrubSentryEvent: SDK-owned objects and failures', () => {
+    afterEach(() => {
+        vi.restoreAllMocks()
+    })
+
+    it('leaves the live Scope and Client under sdkProcessingMetadata alone', async () => {
+        const dsn = 'https://pubkey@o1.ingest.example.com/1'
+        Sentry.init({
+            dsn,
+            tracesSampleRate: 1,
+            integrations: [],
+            transport: () => ({
+                send: async () => ({}),
+                flush: async () => true,
+            }),
+        })
+        const client = Sentry.getClient()
+        expect(client).toBeDefined()
+        const scope = new Sentry.Scope()
+        scope.setClient(client!)
+        const event = {
+            type: 'transaction' as const,
+            transaction: 'GET /cb',
+            request: { url: CALLBACK },
+            sdkProcessingMetadata: {
+                capturedSpanScope: scope,
+                capturedSpanIsolationScope: scope,
+            },
+        }
+        const out = scrubbed(event)
+        expect(out).toBe(event)
+        expect(out?.request?.url).toContain(`code=${FILTERED}`)
+        expect(out?.sdkProcessingMetadata.capturedSpanScope).toBe(scope)
+        expect(client!.getOptions().dsn).toBe(dsn)
+        expect(client!.getDsn()?.publicKey).toBe('pubkey')
+        await Sentry.close()
+    })
+
+    it('only rewrites plain objects and arrays', () => {
+        class Holder {
+            get locked(): string {
+                return 'https://x/?code=SECRET-CODE'
+            }
+        }
+        const holder = new Holder()
+        const event = errorEvent()
+        event.extra = { holder, list: [{ url: CALLBACK }] }
+        const out = scrubbed(event)
+        expect(out?.extra?.['holder']).toBe(holder)
+        expect(JSON.stringify(out?.extra?.['list'])).not.toContain(
+            'SECRET-CODE',
+        )
+    })
+
+    it('drops the event, loudly and without its payload, if scrubbing throws', () => {
+        const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+        const event = errorEvent()
+        Object.defineProperty(event, 'request', {
+            get() {
+                throw new Error('boom')
+            },
+        })
+        expect(scrubSentryEvent(event)).toBeNull()
+        expect(error).toHaveBeenCalledTimes(1)
+        const logged = String(error.mock.calls[0]?.[0])
+        expect(logged).toContain('beforeSend')
+        expect(logged).toContain('boom')
+        expect(logged).not.toContain('SECRET')
+    })
+
+    it('drops the breadcrumb if scrubbing throws', () => {
+        vi.spyOn(console, 'error').mockImplementation(() => {})
+        const crumb: Breadcrumb = { category: 'fetch' }
+        Object.defineProperty(crumb, 'data', {
+            enumerable: true,
+            get() {
+                throw new Error('boom')
+            },
+        })
+        expect(scrubSentryBreadcrumb(crumb)).toBeNull()
     })
 })
