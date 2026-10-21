@@ -4,7 +4,7 @@ import {
     scrubSentryBreadcrumb,
     scrubSentryEvent,
 } from '@/lib/sentryPiiScrub'
-import type { Breadcrumb, ErrorEvent, TransactionEvent } from '@sentry/nextjs'
+import type { Breadcrumb, ErrorEvent, init } from '@sentry/nextjs'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -15,6 +15,12 @@ import { describe, expect, it } from 'vitest'
 // `extra`. These tests feed representative events through the scrubber and
 // check two things: every secret below is gone from the serialized event, and
 // the fields triage actually uses survive.
+
+type TransactionEvent = Parameters<
+    NonNullable<
+        NonNullable<Parameters<typeof init>[0]>['beforeSendTransaction']
+    >
+>[0]
 
 const SECRETS = [
     'SECRET-CODE',

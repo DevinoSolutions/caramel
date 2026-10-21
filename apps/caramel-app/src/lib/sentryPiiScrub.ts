@@ -17,7 +17,16 @@
 // Deliberately light on imports (types only) so the Sentry init files can use
 // it. Mutates in place and returns the same object, which is what the Sentry
 // hooks expect.
-import type { Breadcrumb, ErrorEvent, TransactionEvent } from '@sentry/nextjs'
+import type { Breadcrumb, ErrorEvent, init } from '@sentry/nextjs'
+
+// @sentry/nextjs re-exports ErrorEvent but not TransactionEvent; take the type
+// from the hook that receives it.
+type TransactionEvent = Parameters<
+    NonNullable<
+        NonNullable<Parameters<typeof init>[0]>['beforeSendTransaction']
+    >
+>[0]
+type Scrubbable = ErrorEvent | TransactionEvent
 
 export const FILTERED = '[Filtered]'
 const FILTERED_EMAIL = '[Filtered email]'
@@ -209,8 +218,6 @@ function scrubUser(user: NonNullable<ErrorEvent['user']>): void {
     delete user.email
     delete user.username
 }
-
-type Scrubbable = ErrorEvent | TransactionEvent
 
 /** Scrub one error or transaction event. Everything below `event` is walked, so
  * request, extra, contexts, breadcrumbs, exception values and spans (`http.url`,
