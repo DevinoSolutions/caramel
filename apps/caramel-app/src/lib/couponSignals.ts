@@ -55,12 +55,18 @@ export type CouponFailureWriter = Pick<
  */
 export const REPORTER_WEIGHT = { account: 2, network: 1 } as const
 
+/** Domain separator: the auth secret is never used raw for a second purpose. */
+const REPORTER_KEY_DOMAIN = 'caramel:coupon-reporter:v1'
+
 /**
  * The reporter as stored in coupon_signal_reporters: an HMAC-SHA256 of its
- * identity under the app's auth secret (the same secret env.ts already forces
- * to exist), so the table holds no raw IP or user id and a leaked copy cannot
- * be reversed by trying every IPv4 address. 32 hex chars (128 bits) is plenty
- * to tell reporters of one coupon apart.
+ * identity under a key DERIVED from the app's auth secret
+ * (HMAC(secret, REPORTER_KEY_DOMAIN); env.ts already forces the secret to
+ * exist), so the table holds no raw IP or user id and a leaked copy cannot be
+ * reversed by trying every IPv4 address. 32 hex chars (128 bits) is plenty to
+ * tell reporters of one coupon apart. Rotating the auth secret changes every
+ * hash, which only resets reporter identities (each reporter counts afresh):
+ * acceptable.
  */
 export function reporterHash(reporter: ReportReporter): string {
     const secret = env.BETTER_AUTH_SECRET ?? env.JWT_SECRET
@@ -71,10 +77,10 @@ export function reporterHash(reporter: ReportReporter): string {
     }
     const identity =
         reporter.kind === 'user' ? `u:${reporter.userId}` : `i:${reporter.ip}`
-    return createHmac('sha256', secret)
-        .update(`coupon-signal-reporter:${identity}`)
-        .digest('hex')
-        .slice(0, 32)
+    const key = createHmac('sha256', secret)
+        .update(REPORTER_KEY_DOMAIN)
+        .digest()
+    return createHmac('sha256', key).update(identity).digest('hex').slice(0, 32)
 }
 
 /** A reporter's weight toward a failure quorum. */
@@ -212,6 +218,35 @@ async function recordFailedIn(
     await tx.couponSignalReporter.deleteMany({
         where: { couponId, outcome: 'failed', lastAt: { lt: windowStart } },
     })
+    await sweepExpiredReporters(tx, now, windowStart)
+}
+
+/** A global retention sweep runs at most this often per process. */
+const REPORTER_SWEEP_INTERVAL_MS = 60 * 60 * 1000
+let nextReporterSweepAt = 0
+
+/**
+ * Retention: reporter rows are pseudonymous IP/user-derived data and are kept
+ * only for FAILING_WINDOW_MS (30 days). recordFailed prunes the coupon it
+ * writes, but a coupon nobody reports again would keep its rows forever, so this
+ * bounded sweep (one DELETE, at most hourly per process, riding a write) removes
+ * every expired row. A failure here propagates like any other write failure.
+ */
+async function sweepExpiredReporters(
+    tx: CouponFailureWriter,
+    now: Date,
+    windowStart: Date,
+): Promise<void> {
+    if (now.getTime() < nextReporterSweepAt) return
+    nextReporterSweepAt = now.getTime() + REPORTER_SWEEP_INTERVAL_MS
+    await tx.couponSignalReporter.deleteMany({
+        where: { lastAt: { lt: windowStart } },
+    })
+}
+
+/** Test-only: make the next recordFailed run the global retention sweep. */
+export function resetReporterSweepForTests(): void {
+    nextReporterSweepAt = 0
 }
 
 /** The trust overlay attachSignals merges onto each coupon (ISO strings; null/0 when we hold no signal). */

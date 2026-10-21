@@ -15,8 +15,10 @@ import {
     recordWorked,
     reporterHash,
     reporterWeight,
+    resetReporterSweepForTests,
 } from '@/lib/couponSignals'
 import { NextRequest } from 'next/server'
+import { createHmac } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // T-5535 M3: a code is sunk / collapsed by a QUORUM of distinct weighted
@@ -107,16 +109,18 @@ function makeFakeDb() {
             deleteMany: vi.fn(
                 async (args: {
                     where: {
-                        couponId: string
-                        outcome: string
+                        couponId?: string
+                        outcome?: string
                         lastAt: { lt: Date }
                     }
                 }) => {
                     let count = 0
                     reporters.forEach((r, key) => {
                         if (
-                            r.couponId === args.where.couponId &&
-                            r.outcome === args.where.outcome &&
+                            (args.where.couponId === undefined ||
+                                r.couponId === args.where.couponId) &&
+                            (args.where.outcome === undefined ||
+                                r.outcome === args.where.outcome) &&
                             r.lastAt < args.where.lastAt.lt
                         ) {
                             reporters.delete(key)
@@ -211,6 +215,7 @@ const fail = (reporter: ReportReporter) =>
     recordFailed(COUPON, null, reporter, db.tx as never)
 
 beforeEach(() => {
+    resetReporterSweepForTests()
     db = makeFakeDb()
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(new Date('2026-10-21T12:00:00.000Z'))
@@ -294,6 +299,33 @@ describe('failure quorum: forged anonymous reports cannot sink a code', () => {
         expect(db.reporters.size).toBe(1)
     })
 
+    it('retention: an expired reporter of a coupon nobody reports again is swept by a later report elsewhere, at most hourly', async () => {
+        await recordFailed('77', null, anon(1), db.tx as never)
+        expect(db.reporters.size).toBe(1)
+
+        vi.setSystemTime(Date.now() + FAILING_WINDOW_MS + 60_000)
+        await recordFailed(COUPON, null, anon(2), db.tx as never)
+        // Coupon 77's row is past 30 days and nothing reported 77 again, yet it is gone.
+        expect(
+            Array.from(db.reporters.values()).map(row => row.couponId),
+        ).toEqual([COUPON])
+
+        // The sweep is throttled: an expired row planted right after waits.
+        const hashOfStale = reporterHash(anon(3))
+        db.reporters.set('stale', {
+            couponId: '88',
+            outcome: 'failed',
+            reporterHash: hashOfStale,
+            weight: 1,
+            lastAt: new Date(Date.now() - FAILING_WINDOW_MS - 1000),
+        })
+        await recordFailed(COUPON, null, anon(4), db.tx as never)
+        expect(db.reporters.has('stale')).toBe(true)
+        vi.setSystemTime(Date.now() + 61 * 60 * 1000)
+        await recordFailed(COUPON, null, anon(5), db.tx as never)
+        expect(db.reporters.has('stale')).toBe(false)
+    })
+
     it('runs in one transaction when handed a plain client', async () => {
         const transaction = vi.fn(
             async (fn: (tx: typeof db.tx) => Promise<unknown>) => fn(db.tx),
@@ -320,6 +352,23 @@ describe('reporter identity as stored', () => {
         expect(reporterHash(account('user-secret-1'))).not.toContain(
             'user-secret-1',
         )
+    })
+
+    it('the hash key is derived with a domain separator, never the raw auth secret', () => {
+        const secret = 'vitest-fixture-better-auth-secret'
+        const rawKeyed = createHmac('sha256', secret)
+            .update('i:203.0.113.1')
+            .digest('hex')
+            .slice(0, 32)
+        const derivedKey = createHmac('sha256', secret)
+            .update('caramel:coupon-reporter:v1')
+            .digest()
+        const expected = createHmac('sha256', derivedKey)
+            .update('i:203.0.113.1')
+            .digest('hex')
+            .slice(0, 32)
+        expect(reporterHash(anon(1))).toBe(expected)
+        expect(reporterHash(anon(1))).not.toBe(rawKeyed)
     })
 
     it('weights an account above an anonymous network', () => {
