@@ -7,6 +7,7 @@ enum SignInError: LocalizedError {
     case providerRefused
     case missingCode
     case stateMismatch
+    case unexpectedCallback
 
     var errorDescription: String? {
         switch self {
@@ -15,6 +16,7 @@ enum SignInError: LocalizedError {
         case .providerRefused: return "The sign-in was cancelled or refused."
         case .missingCode: return "The sign-in did not return a code. Please try again."
         case .stateMismatch: return "The sign-in response did not match the request. Please try again."
+        case .unexpectedCallback: return "The sign-in returned to an unexpected address. Please try again."
         }
     }
 }
@@ -44,6 +46,9 @@ final class WebSignIn: NSObject, ASWebAuthenticationPresentationContextProviding
                 }
             }
             session.presentationContextProvider = self
+            // A fresh browsing context: the shared Safari cookies would keep the
+            // previous Apple/Google account selected after a sign-out or delete.
+            session.prefersEphemeralWebBrowserSession = true
             activeSession = session
             if !session.start() {
                 continuation.resume(throwing: SignInError.couldNotStartSheet)
@@ -62,7 +67,14 @@ final class WebSignIn: NSObject, ASWebAuthenticationPresentationContextProviding
     /// the web app echoes the signed state it issued, so a callback carrying
     /// anything else did not come from the flow we started.
     static func code(from callback: URL, expectedState: String) throws -> String {
-        let items = URLComponents(url: callback, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        // The whole redirect target, not just the scheme: any URL on our scheme
+        // would otherwise pass as the sign-in answer.
+        guard let components = URLComponents(url: callback, resolvingAgainstBaseURL: false),
+              components.scheme == AppConfig.signInCallbackScheme,
+              components.host == "auth",
+              components.path == "/callback"
+        else { throw SignInError.unexpectedCallback }
+        let items = components.queryItems ?? []
         func value(_ name: String) -> String? { items.first(where: { $0.name == name })?.value }
         if value("error") != nil { throw SignInError.providerRefused }
         guard value("state") == expectedState else { throw SignInError.stateMismatch }
@@ -136,12 +148,15 @@ final class SessionStore: ObservableObject {
     /// never stuck signed in, and the failure is shown rather than swallowed.
     func signOut() async {
         let bearer = token
+        errorMessage = nil
         clearLocalSession()
         guard let bearer = bearer else { return }
         do {
             try await api.revokeSession(bearer: bearer)
         } catch {
-            errorMessage = "Signed out on this device, but the server could not end the session: \(error.localizedDescription)"
+            // Append: clearLocalSession may already have set a keychain error.
+            let revokeFailure = "Signed out on this device, but the server could not end the session: \(error.localizedDescription)"
+            errorMessage = [errorMessage, revokeFailure].compactMap { $0 }.joined(separator: "\n")
         }
     }
 
@@ -153,6 +168,12 @@ final class SessionStore: ObservableObject {
         guard let bearer = token else { return false }
         do {
             try await api.deleteAccount(bearer: bearer)
+        } catch let error as APIError where error.isUnauthorized {
+            // The session is already dead, so there is nothing left to delete
+            // under it: end the local session as validate() does.
+            clearLocalSession()
+            errorMessage = "Your session expired. Please sign in again."
+            return false
         } catch {
             errorMessage = "Could not delete your account: \(error.localizedDescription)"
             return false
