@@ -930,7 +930,8 @@ async function _resumePendingSubmit() {
         })
         // A finder box the code worked through, on a store with no config:
         // saved as the store's config (the run held its box for this page).
-        if (pending.finder) caramelLoadedFinder()?.caramelFinderConfirmedResumed()
+        if (pending.finder)
+            caramelLoadedFinder()?.caramelFinderConfirmedResumed()
         showFinalModal(saved, pending.code)
         return true
     }

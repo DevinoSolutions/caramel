@@ -2303,7 +2303,12 @@ async function caramelPickedRecord(rec, doc) {
         again.toggle === (k.t ? opened : null)
     )
         await rememberPick(domain, k)
-    return savable(finderRecord(rec, found, total, opened), found, opened, total?.el)
+    return savable(
+        finderRecord(rec, found, total, opened),
+        found,
+        opened,
+        total?.el,
+    )
 }
 
 /* Check a box someone else named (the server's pick, or a pick kept from the
