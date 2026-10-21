@@ -308,6 +308,9 @@ model Source {
 // one reporter from 3 reporters, which is what a failure quorum needs. NO FK to
 // coupons, like coupon_signals (an aggregate may outlive a tombstoned coupon).
 // Written by couponSignals.recordFailed only.
+// reporter_hash 'legacy' marks the one synthetic row per coupon seeded by migration
+// 20261021213000 to grandfather codes already sunk under the old raw-count rule;
+// it ages out and is cleared by a success like any other reporter row.
 // TODO(T-4372): outcome 'worked' is not written yet. The "Verified needs 2
 // distinct reporters" rule lands on this same table with the same reporter_hash.
 model CouponSignalReporter {
