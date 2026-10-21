@@ -40,6 +40,7 @@ import {
 } from './coupon-apply.js'
 import {
     caramelCouponBoxDiscoveryOn,
+    caramelLoadedFinder,
     caramelLoadFinder,
 } from './coupon-box-finder-loader.js'
 import { fetchCoupons } from './coupon-fetch.js'
@@ -692,7 +693,13 @@ export async function isCheckout() {
         })
         return true
     }
-    return (await _platformCartUsable()) || (await _finderMayOffer(rec.domain))
+    // A store with a config never runs auto-detect: its config is the only
+    // description of its box we act on. The finder is asked only for a
+    // record that says it has none.
+    return (
+        (await _platformCartUsable()) ||
+        (rec.caramelNoConfig === true && (await _finderMayOffer(rec.domain)))
+    )
 }
 
 /* No config describes a promo box here, but a shopper could still see one.
@@ -839,7 +846,9 @@ async function _caramelContinueRun(rec, finder = false) {
         return false
     }
     if (!runRec) return stop('no record')
-    if (finder) {
+    // A store with a config goes on only on its config's box, whatever the
+    // page before ran: auto-detect never runs for it.
+    if (finder && (!rec || rec.caramelNoConfig === true)) {
         if (!(await _finderSeesBox(runRec.domain))) return stop('no box')
     } else {
         const box = pickBestMatch(rec.couponInput)
@@ -919,6 +928,9 @@ async function _resumePendingSubmit() {
             currency: caramelCurrencyCode(),
             couponId: pending.id,
         })
+        // A finder box the code worked through, on a store with no config:
+        // saved as the store's config (the run held its box for this page).
+        if (pending.finder) caramelLoadedFinder()?.caramelFinderConfirmedResumed()
         showFinalModal(saved, pending.code)
         return true
     }

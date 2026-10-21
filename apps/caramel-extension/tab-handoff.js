@@ -31,6 +31,10 @@ export const TAB_HANDOFFS = {
     // That the server was asked for a store's box in this tab, and the names
     // of a usable pick for the next page: kept for a shopping session.
     box_pick: 12 * 60 * 60 * 1000,
+    // A box the finder found on a store with no config, until the page its
+    // submit reloads to shows the code worked and the box is saved as the
+    // store's config (coupon-box-discovery.js caramelFinderConfirmedResumed).
+    box_save: 2 * 60 * 1000,
 }
 // Measured in UTF-8 bytes, not characters.
 const MAX_BYTES = 4096

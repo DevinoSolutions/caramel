@@ -44,6 +44,10 @@
  *   K  as J, with a box the rules miss
  *      and the server names              -> one pick asked and kept across the
  *                                           reloads, the true saving
+ *   N  configured store whose selectors
+ *      match nothing, a box the rules
+ *      would find, both flags ON         -> no prompt: auto-detect never runs
+ *                                           for a store with a config
  *
  * Run: pnpm test:autodetect          (default: .output/chrome-mv3-dev)
  *      CARAMEL_EXT_DIR=<dir> pnpm test:autodetect
@@ -362,6 +366,7 @@ async function runScenario({
     serve = null,
     flags,
     pickPlan = null,
+    config = CONFIG,
     expectPrompt = true,
     assert,
 }) {
@@ -392,7 +397,7 @@ async function runScenario({
             })
         })
 
-        const opts = { flags, pickPlan, config: CONFIG }
+        const opts = { flags, pickPlan, config }
         let sw =
             ctx.serviceWorkers()[0] ||
             (await ctx.waitForEvent('serviceworker', { timeout: 30_000 }))
@@ -543,7 +548,7 @@ async function runScenario({
             'the porkbun alert shim is not injected here',
             state.alertShim === false,
         )
-        assert({ modal, state, savings, picks, worked })
+        assert({ modal, state, savings, picks, worked, logs })
     } finally {
         await ctx.close()
     }
@@ -873,6 +878,40 @@ const SCENARIOS = [
             },
         }
     })(),
+    {
+        // The store renamed its promo field: the config names one that is not
+        // on the page any more. A store with a config never runs auto-detect,
+        // so the box the rules would find here is never offered or used.
+        name: 'N configured store whose selectors match nothing, both flags on — auto-detect never runs',
+        host: 'shop-with-a-stale-config.example',
+        path: '/cart',
+        page: finderPage(RULES_BOX),
+        config: {
+            ...CONFIG,
+            domain: 'shop-with-a-stale-config.example',
+            couponInput: '#old_coupon_field',
+            showInput: '#old_toggle',
+        },
+        flags: true,
+        // A plan that would name the box, so "no pick" cannot pass by
+        // accident.
+        pickPlan: { input: 'textbox', button: 'button "Apply"' },
+        expectPrompt: false,
+        assert: ({ state, savings, picks, logs }) => {
+            check('never asks the server for a pick', picks.length === 0)
+            check(
+                'the finder never runs',
+                !logs.some(l => /FINDER_/.test(l)),
+                logs
+                    .filter(l => /FINDER_/.test(l))
+                    .slice(0, 2)
+                    .join(' | '),
+            )
+            check('the finder marks nothing', state.found === 0)
+            check('types nothing', state.submits.length === 0)
+            check('banks nothing', savings.length === 0)
+        },
+    },
 ]
 
 console.log(`extension under test: ${EXT}`)

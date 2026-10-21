@@ -15,6 +15,9 @@ import { caramelConfiglessRecord, getDomainRecord } from '../store-detect.js'
 import { FINDER_ASSET, FINDER_FILE } from './_finder-asset.mjs'
 import { tabHandoffBackground } from './_tab-handoff-background.mjs'
 // The background's side of the per-tab handoffs (see the helper).
+// The stand-in record of a store with no config (store-detect.js
+// caramelConfiglessRecord): the only record the finder reads.
+const NO_CONFIG = { domain: 'shop.test', caramelNoConfig: true }
 const handoffs = tabHandoffBackground()
 
 // The server's pick: when the finder's rules see a total but no promo box, the
@@ -251,9 +254,7 @@ describe('nothing is asked unless both flags are on', () => {
     it('no readable total: nothing could be measured, so nothing is asked', async () => {
         document.body.innerHTML = BARE_BOX
 
-        expect(await caramelDiscoveredRecord({ domain: 'shop.test' })).toBe(
-            null,
-        )
+        expect(await caramelDiscoveredRecord(NO_CONFIG)).toBe(null)
         expect(pickCalls).toHaveLength(0)
     })
 
@@ -308,7 +309,7 @@ describe('a usable pick runs through the normal apply flow', () => {
         })
         answer = req => box(null, null, idx(req.outline, TOGGLE))
 
-        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+        const rec = await caramelDiscoveredRecord(NO_CONFIG)
 
         expect(toggleClicks).toBe(1)
         expect(orderClicks).toBe(0)
@@ -328,9 +329,7 @@ describe('a usable pick runs through the normal apply flow', () => {
             .addEventListener('click', () => toggleClicks++)
         answer = req => box(null, null, idx(req.outline, TOGGLE))
 
-        expect(await caramelDiscoveredRecord({ domain: 'shop.test' })).toBe(
-            null,
-        )
+        expect(await caramelDiscoveredRecord(NO_CONFIG)).toBe(null)
         expect(toggleClicks).toBe(1)
     })
 })
@@ -367,9 +366,7 @@ describe('a pick is checked on the page before anything is touched', () => {
         document.getElementById('po').addEventListener('click', () => clicks++)
         answer = req => box(null, null, idx(req.outline, /Place order/))
 
-        expect(await caramelDiscoveredRecord({ domain: 'shop.test' })).toBe(
-            null,
-        )
+        expect(await caramelDiscoveredRecord(NO_CONFIG)).toBe(null)
         expect(clicks).toBe(0)
     })
 
@@ -395,7 +392,7 @@ describe('a pick is checked on the page before anything is touched', () => {
                     : box(idx(req.outline, /textbox/), rm)
             }
 
-            const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+            const rec = await caramelDiscoveredRecord(NO_CONFIG)
 
             expect(outline).toContain('button "Remove"')
             expect(rec).toBeNull()
@@ -437,9 +434,7 @@ describe('a pick is checked on the page before anything is touched', () => {
         document.body.innerHTML = BARE_BOX + TOTAL
         answer = box(999, 1000)
 
-        expect(await caramelDiscoveredRecord({ domain: 'shop.test' })).toBe(
-            null,
-        )
+        expect(await caramelDiscoveredRecord(NO_CONFIG)).toBe(null)
     })
 })
 
@@ -447,11 +442,11 @@ describe('one ask per store per tab session', () => {
     it('a "no box" answer is remembered, on this page and the next', async () => {
         document.body.innerHTML = BARE_BOX + TOTAL
 
-        await caramelDiscoveredRecord({ domain: 'shop.test' })
-        await caramelDiscoveredRecord({ domain: 'shop.test' })
+        await caramelDiscoveredRecord(NO_CONFIG)
+        await caramelDiscoveredRecord(NO_CONFIG)
         // A new page in the same tab: only the session remembers.
         _caramelResetDiscoveryFlag()
-        await caramelDiscoveredRecord({ domain: 'shop.test' })
+        await caramelDiscoveredRecord(NO_CONFIG)
 
         expect(pickCalls).toHaveLength(1)
     })
@@ -461,12 +456,8 @@ describe('one ask per store per tab session', () => {
         answer = req =>
             box(idx(req.outline, /textbox/), idx(req.outline, /button "Go"/))
 
-        expect(
-            await caramelDiscoveredRecord({ domain: 'shop.test' }),
-        ).not.toBeNull()
-        expect(
-            await caramelDiscoveredRecord({ domain: 'shop.test' }),
-        ).not.toBeNull()
+        expect(await caramelDiscoveredRecord(NO_CONFIG)).not.toBeNull()
+        expect(await caramelDiscoveredRecord(NO_CONFIG)).not.toBeNull()
         expect(pickCalls).toHaveLength(1)
     })
 })
@@ -572,7 +563,7 @@ describe('a box the server says has no apply button (it applies on Enter)', () =
             '" name="discount_code" type="text"></div>'
         document.body.innerHTML = labelled('dc') + TOTAL
         answer = req => box(idx(req.outline, /textbox/), null)
-        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+        const rec = await caramelDiscoveredRecord(NO_CONFIG)
         expect(rec).not.toBeNull()
 
         // The store replaces the whole section to show its answer.
@@ -602,7 +593,7 @@ describe('a box the server says has no apply button (it applies on Enter)', () =
         const pickAndRedraw = async html => {
             document.body.innerHTML = promo('dc') + TOTAL
             answer = req => box(idx(req.outline, /textbox/), null)
-            const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+            const rec = await caramelDiscoveredRecord(NO_CONFIG)
             expect(rec).not.toBeNull()
             document.body.innerHTML = html + TOTAL
             return rec
@@ -727,7 +718,7 @@ describe('an input-only pick, driven by the real apply flow', () => {
             document.querySelector('.row').lastChild.textContent = '$90.00'
         })
 
-        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+        const rec = await caramelDiscoveredRecord(NO_CONFIG)
         expect(rec).not.toBeNull()
         const res = await realApplyCoupon('SAVE20', rec)
 
@@ -757,7 +748,7 @@ describe('an input-only pick, driven by the real apply flow', () => {
             answer = req => box(idx(req.outline, /textbox/), null)
             const seen = watch()
 
-            const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+            const rec = await caramelDiscoveredRecord(NO_CONFIG)
             // The pick itself is accepted: it is the apply that refuses.
             expect(rec).not.toBeNull()
             const res = await realApplyCoupon('SAVE20', rec)
@@ -817,9 +808,7 @@ describe('a pick never clicks a control that is not a code', () => {
             answer = req =>
                 box(null, null, idx(req.outline, new RegExp(reveal)))
 
-            expect(
-                await caramelDiscoveredRecord({ domain: 'shop.test' }),
-            ).toBeNull()
+            expect(await caramelDiscoveredRecord(NO_CONFIG)).toBeNull()
             expect(clicks).toBe(0)
         })
 })
@@ -864,7 +853,7 @@ describe('an apply button never leaves the page', () => {
         })
         answer = req => box(null, null, idx(req.outline, TOGGLE))
 
-        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+        const rec = await caramelDiscoveredRecord(NO_CONFIG)
 
         expect(linkClicks).toBe(0)
         expect(rec?.couponSubmit ?? null).toBeNull()
@@ -884,7 +873,7 @@ describe('the total is read again once the server has answered', () => {
             return pick
         }
 
-        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+        const rec = await caramelDiscoveredRecord(NO_CONFIG)
 
         const total = document.querySelector(rec.priceContainer)
         expect(total?.isConnected).toBe(true)
@@ -933,7 +922,7 @@ describe('a box the server names is judged in bounded time, whatever text sits b
             box(idx(req.outline, /textbox/), idx(req.outline, /button "Go/))
 
         const t0 = performance.now()
-        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+        const rec = await caramelDiscoveredRecord(NO_CONFIG)
         const ms = performance.now() - t0
 
         expect(pickCalls).toHaveLength(1)
@@ -958,7 +947,7 @@ describe('a box the server names is judged in bounded time, whatever text sits b
         answer = req => box(null, null, idx(req.outline, TOGGLE))
 
         const t0 = performance.now()
-        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+        const rec = await caramelDiscoveredRecord(NO_CONFIG)
         const ms = performance.now() - t0
 
         expect(pickCalls).toHaveLength(1)
@@ -986,10 +975,10 @@ describe('a pick is kept, by name, for the next page in the tab', () => {
     it('the reloaded cart gets the same box and button, with no second ask', async () => {
         document.body.innerHTML = BARE_BOX + TOTAL
         pickBareBox()
-        await caramelDiscoveredRecord({ domain: 'shop.test' })
+        await caramelDiscoveredRecord(NO_CONFIG)
 
         reload(BARE_BOX + TOTAL)
-        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+        const rec = await caramelDiscoveredRecord(NO_CONFIG)
 
         expect(pickCalls).toHaveLength(1)
         expect(document.querySelector(rec.couponInput)?.id).toBe('x')
@@ -1009,11 +998,11 @@ describe('a pick is kept, by name, for the next page in the tab', () => {
         document.body.innerHTML = FOLDED + TOTAL
         wire()
         answer = req => box(null, null, idx(req.outline, TOGGLE))
-        await caramelDiscoveredRecord({ domain: 'shop.test' })
+        await caramelDiscoveredRecord(NO_CONFIG)
 
         reload(FOLDED + TOTAL)
         const clicks = wire()
-        const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+        const rec = await caramelDiscoveredRecord(NO_CONFIG)
 
         expect(pickCalls).toHaveLength(1)
         expect(clicks()).toBe(1)
@@ -1024,28 +1013,24 @@ describe('a pick is kept, by name, for the next page in the tab', () => {
     it('a name two elements now carry is no answer: nothing is used and nothing asked', async () => {
         document.body.innerHTML = BARE_BOX + TOTAL
         pickBareBox()
-        await caramelDiscoveredRecord({ domain: 'shop.test' })
+        await caramelDiscoveredRecord(NO_CONFIG)
 
         // The same field name twice (a gift-card box built from the same
         // template): either could be the one, so neither is.
         reload(BARE_BOX + BARE_BOX.replace('id="x"', 'id="y"') + TOTAL)
 
-        expect(await caramelDiscoveredRecord({ domain: 'shop.test' })).toBe(
-            null,
-        )
+        expect(await caramelDiscoveredRecord(NO_CONFIG)).toBe(null)
         expect(pickCalls).toHaveLength(1)
     })
 
     it('a page without the box: no record, and the server is still not asked again', async () => {
         document.body.innerHTML = BARE_BOX + TOTAL
         pickBareBox()
-        await caramelDiscoveredRecord({ domain: 'shop.test' })
+        await caramelDiscoveredRecord(NO_CONFIG)
 
         reload('<input name="search" type="text">' + TOTAL)
 
-        expect(await caramelDiscoveredRecord({ domain: 'shop.test' })).toBe(
-            null,
-        )
+        expect(await caramelDiscoveredRecord(NO_CONFIG)).toBe(null)
         expect(pickCalls).toHaveLength(1)
     })
 
@@ -1056,15 +1041,11 @@ describe('a pick is kept, by name, for the next page in the tab', () => {
             '<button type="button">Go</button></div>'
         document.body.innerHTML = WORDLESS + TOTAL
         pickBareBox()
-        expect(
-            await caramelDiscoveredRecord({ domain: 'shop.test' }),
-        ).not.toBeNull()
+        expect(await caramelDiscoveredRecord(NO_CONFIG)).not.toBeNull()
 
         reload(WORDLESS + TOTAL)
 
-        expect(await caramelDiscoveredRecord({ domain: 'shop.test' })).toBe(
-            null,
-        )
+        expect(await caramelDiscoveredRecord(NO_CONFIG)).toBe(null)
         expect(pickCalls).toHaveLength(1)
     })
 
@@ -1072,23 +1053,19 @@ describe('a pick is kept, by name, for the next page in the tab', () => {
         document.body.innerHTML = BARE_BOX + TOTAL
         // Only a button: no input, no toggle.
         answer = req => box(null, idx(req.outline, /button "Go"/))
-        expect(await caramelDiscoveredRecord({ domain: 'shop.test' })).toBe(
-            null,
-        )
+        expect(await caramelDiscoveredRecord(NO_CONFIG)).toBe(null)
 
         reload(BARE_BOX + TOTAL)
         pickBareBox()
 
-        expect(await caramelDiscoveredRecord({ domain: 'shop.test' })).toBe(
-            null,
-        )
+        expect(await caramelDiscoveredRecord(NO_CONFIG)).toBe(null)
         expect(pickCalls).toHaveLength(1)
     })
 
     it('a kept button that is now a link to another page is never used', async () => {
         document.body.innerHTML = BARE_BOX + TOTAL
         pickBareBox()
-        await caramelDiscoveredRecord({ domain: 'shop.test' })
+        await caramelDiscoveredRecord(NO_CONFIG)
 
         // After the reload "Go" is a link to another page.
         reload(
@@ -1098,9 +1075,7 @@ describe('a pick is kept, by name, for the next page in the tab', () => {
                 TOTAL,
         )
 
-        expect(await caramelDiscoveredRecord({ domain: 'shop.test' })).toBe(
-            null,
-        )
+        expect(await caramelDiscoveredRecord(NO_CONFIG)).toBe(null)
         expect(await caramelFinderSeesKeptPick('shop.test')).toBe(false)
     })
 
@@ -1141,9 +1116,7 @@ describe('a pick is kept, by name, for the next page in the tab', () => {
             '<button id="go" type="button">Go</button></div>'
         document.body.innerHTML = BOX + TOTAL
         pickBareBox()
-        expect(
-            await caramelDiscoveredRecord({ domain: 'shop.test' }),
-        ).not.toBeNull()
+        expect(await caramelDiscoveredRecord(NO_CONFIG)).not.toBeNull()
 
         // After the reload only the gift-card field wears those words.
         reload(
@@ -1153,9 +1126,7 @@ describe('a pick is kept, by name, for the next page in the tab', () => {
                 TOTAL,
         )
 
-        expect(await caramelDiscoveredRecord({ domain: 'shop.test' })).toBe(
-            null,
-        )
+        expect(await caramelDiscoveredRecord(NO_CONFIG)).toBe(null)
         expect(await caramelFinderSeesKeptPick('shop.test')).toBe(false)
         expect(pickCalls).toHaveLength(1)
     })
@@ -1166,29 +1137,23 @@ describe('a pick is kept, by name, for the next page in the tab', () => {
         // Two inputs named field_7: one hidden, so the box is still usable here.
         answer = req =>
             box(idx(req.outline, /textbox/), idx(req.outline, /button "Go"/))
-        expect(
-            await caramelDiscoveredRecord({ domain: 'shop.test' }),
-        ).not.toBeNull()
+        expect(await caramelDiscoveredRecord(NO_CONFIG)).not.toBeNull()
 
         reload(BARE_BOX + TOTAL)
 
-        expect(await caramelDiscoveredRecord({ domain: 'shop.test' })).toBe(
-            null,
-        )
+        expect(await caramelDiscoveredRecord(NO_CONFIG)).toBe(null)
     })
 
     it('another page of the store does not use it: the pick belongs to the cart it was made on', async () => {
         document.body.innerHTML = BARE_BOX + TOTAL
         pickBareBox()
-        await caramelDiscoveredRecord({ domain: 'shop.test' })
+        await caramelDiscoveredRecord(NO_CONFIG)
 
         window.history.replaceState({}, '', '/checkout')
         reload(BARE_BOX + TOTAL)
 
         expect(await caramelFinderSeesKeptPick('shop.test')).toBe(false)
-        expect(await caramelDiscoveredRecord({ domain: 'shop.test' })).toBe(
-            null,
-        )
+        expect(await caramelDiscoveredRecord(NO_CONFIG)).toBe(null)
         expect(pickCalls).toHaveLength(1)
     })
 
@@ -1198,7 +1163,7 @@ describe('a pick is kept, by name, for the next page in the tab', () => {
             document.getElementById('panel').style.display = ''
         })
         answer = req => box(null, null, idx(req.outline, TOGGLE))
-        await caramelDiscoveredRecord({ domain: 'shop.test' })
+        await caramelDiscoveredRecord(NO_CONFIG)
 
         // The same toggle, inside a closed drawer.
         reload('<div style="display:none">' + FOLDED + '</div>' + TOTAL)
@@ -1208,9 +1173,7 @@ describe('a pick is kept, by name, for the next page in the tab', () => {
         })
 
         expect(await caramelFinderSeesKeptPick('shop.test')).toBe(false)
-        expect(await caramelDiscoveredRecord({ domain: 'shop.test' })).toBe(
-            null,
-        )
+        expect(await caramelDiscoveredRecord(NO_CONFIG)).toBe(null)
         expect(clicks).toBe(0)
     })
 
@@ -1225,9 +1188,7 @@ describe('a pick is kept, by name, for the next page in the tab', () => {
             document.getElementById('panel').style.display = ''
         })
         answer = req => box(null, null, idx(req.outline, TOGGLE))
-        expect(
-            await caramelDiscoveredRecord({ domain: 'shop.test' }),
-        ).not.toBeNull()
+        expect(await caramelDiscoveredRecord(NO_CONFIG)).not.toBeNull()
 
         // After the reload the same words sit inside the form's submit button.
         reload(
@@ -1242,23 +1203,19 @@ describe('a pick is kept, by name, for the next page in the tab', () => {
         })
 
         expect(await caramelFinderSeesKeptPick('shop.test')).toBe(false)
-        expect(await caramelDiscoveredRecord({ domain: 'shop.test' })).toBe(
-            null,
-        )
+        expect(await caramelDiscoveredRecord(NO_CONFIG)).toBe(null)
         expect(submits).toBe(0)
     })
 
     it('the reload chain is not told "yes" for a box it could not use: the box is there, its button is not', async () => {
         document.body.innerHTML = BARE_BOX + TOTAL
         pickBareBox()
-        await caramelDiscoveredRecord({ domain: 'shop.test' })
+        await caramelDiscoveredRecord(NO_CONFIG)
 
         reload('<div class="f">' + PROMO_FIELD + '</div>' + TOTAL)
 
         expect(await caramelFinderSeesKeptPick('shop.test')).toBe(false)
-        expect(await caramelDiscoveredRecord({ domain: 'shop.test' })).toBe(
-            null,
-        )
+        expect(await caramelDiscoveredRecord(NO_CONFIG)).toBe(null)
     })
 
     it('a store asked in this tab with nothing usable is not asked again and has nothing kept', async () => {
@@ -1267,23 +1224,19 @@ describe('a pick is kept, by name, for the next page in the tab', () => {
         pickBareBox()
 
         expect(await caramelFinderSeesKeptPick('shop.test')).toBe(false)
-        expect(await caramelDiscoveredRecord({ domain: 'shop.test' })).toBe(
-            null,
-        )
+        expect(await caramelDiscoveredRecord(NO_CONFIG)).toBe(null)
         expect(pickCalls).toHaveLength(0)
     })
 
     it('the pick is not used once the flag is off', async () => {
         document.body.innerHTML = BARE_BOX + TOTAL
         pickBareBox()
-        await caramelDiscoveredRecord({ domain: 'shop.test' })
+        await caramelDiscoveredRecord(NO_CONFIG)
 
         reload(BARE_BOX + TOTAL)
         llmOn = false
 
-        expect(await caramelDiscoveredRecord({ domain: 'shop.test' })).toBe(
-            null,
-        )
+        expect(await caramelDiscoveredRecord(NO_CONFIG)).toBe(null)
         expect(await caramelFinderSeesKeptPick('shop.test')).toBe(false)
     })
 
@@ -1298,12 +1251,10 @@ describe('a pick is kept, by name, for the next page in the tab', () => {
         it('the reloaded cart gets the same box, its own submit, with no second ask', async () => {
             document.body.innerHTML = INPUT_ONLY + TOTAL
             pickInputOnly()
-            expect(
-                await caramelDiscoveredRecord({ domain: 'shop.test' }),
-            ).not.toBeNull()
+            expect(await caramelDiscoveredRecord(NO_CONFIG)).not.toBeNull()
 
             reload(INPUT_ONLY + TOTAL)
-            const rec = await caramelDiscoveredRecord({ domain: 'shop.test' })
+            const rec = await caramelDiscoveredRecord(NO_CONFIG)
 
             expect(pickCalls).toHaveLength(1)
             expect(document.querySelector(rec.couponInput)?.id).toBe('x')
@@ -1314,7 +1265,7 @@ describe('a pick is kept, by name, for the next page in the tab', () => {
         it('the reload chain sees it, and clicks nothing', async () => {
             document.body.innerHTML = INPUT_ONLY + TOTAL
             pickInputOnly()
-            await caramelDiscoveredRecord({ domain: 'shop.test' })
+            await caramelDiscoveredRecord(NO_CONFIG)
 
             reload(INPUT_ONLY + TOTAL)
 
@@ -1324,14 +1275,12 @@ describe('a pick is kept, by name, for the next page in the tab', () => {
         it('a box kept WITH a button is never used as Enter-only once the button is gone', async () => {
             document.body.innerHTML = BARE_BOX + TOTAL
             pickBareBox()
-            await caramelDiscoveredRecord({ domain: 'shop.test' })
+            await caramelDiscoveredRecord(NO_CONFIG)
 
             reload(INPUT_ONLY + TOTAL)
 
             expect(await caramelFinderSeesKeptPick('shop.test')).toBe(false)
-            expect(await caramelDiscoveredRecord({ domain: 'shop.test' })).toBe(
-                null,
-            )
+            expect(await caramelDiscoveredRecord(NO_CONFIG)).toBe(null)
             expect(pickCalls).toHaveLength(1)
         })
     })
@@ -1340,7 +1289,7 @@ describe('a pick is kept, by name, for the next page in the tab', () => {
         it('sees the box on the reloaded cart', async () => {
             document.body.innerHTML = BARE_BOX + TOTAL
             pickBareBox()
-            await caramelDiscoveredRecord({ domain: 'shop.test' })
+            await caramelDiscoveredRecord(NO_CONFIG)
             reload(BARE_BOX + TOTAL)
 
             expect(await caramelFinderSeesKeptPick('shop.test')).toBe(true)
@@ -1352,7 +1301,7 @@ describe('a pick is kept, by name, for the next page in the tab', () => {
                 document.getElementById('panel').style.display = ''
             })
             answer = req => box(null, null, idx(req.outline, TOGGLE))
-            await caramelDiscoveredRecord({ domain: 'shop.test' })
+            await caramelDiscoveredRecord(NO_CONFIG)
 
             reload(FOLDED + TOTAL)
             let clicks = 0
@@ -1369,7 +1318,7 @@ describe('a pick is kept, by name, for the next page in the tab', () => {
             expect(await caramelFinderSeesKeptPick('shop.test')).toBe(false)
 
             pickBareBox()
-            await caramelDiscoveredRecord({ domain: 'shop.test' })
+            await caramelDiscoveredRecord(NO_CONFIG)
             expect(await caramelFinderSeesKeptPick('other.test')).toBe(false)
 
             reload(BARE_BOX)
@@ -1400,18 +1349,16 @@ describe('the pick memory is the extension’s, never the page’s', () => {
         document.body.innerHTML = GIFT + TOTAL
 
         expect(await caramelFinderSeesKeptPick('shop.test')).toBe(false)
-        expect(await caramelDiscoveredRecord({ domain: 'shop.test' })).toBe(
-            null,
-        )
+        expect(await caramelDiscoveredRecord(NO_CONFIG)).toBe(null)
     })
 
     it('a page that clears its storage does not buy a second ask', async () => {
         document.body.innerHTML = BARE_BOX + TOTAL
-        await caramelDiscoveredRecord({ domain: 'shop.test' })
+        await caramelDiscoveredRecord(NO_CONFIG)
 
         sessionStorage.clear()
         _caramelResetDiscoveryFlag()
-        await caramelDiscoveredRecord({ domain: 'shop.test' })
+        await caramelDiscoveredRecord(NO_CONFIG)
 
         expect(pickCalls).toHaveLength(1)
     })

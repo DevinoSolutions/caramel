@@ -247,7 +247,7 @@ const FEATURES_CACHE_KEY = 'caramel_features'
 const FEATURES_TTL_ON_MS = 6 * 60 * 60 * 1000
 const FEATURES_TTL_OFF_MS = 30 * 60 * 1000
 let _featuresInflight = null // Promise<entry> while a fetch is running
-let _featuresMemo = null // { shopperCodeCapture, couponBoxDiscovery, couponBoxLlm, ts }
+let _featuresMemo = null // { shopperCodeCapture, couponBoxDiscovery, couponBoxLlm, couponBoxSave, ts }
 
 function _readFeaturesSession() {
     return new Promise(resolve => {
@@ -300,6 +300,8 @@ async function _fetchFeatures() {
         couponBoxDiscovery: json.couponBoxDiscovery === true,
         // The same rule for the server pick (POST coupon-box-pick).
         couponBoxLlm: json.couponBoxLlm === true,
+        // The same rule for saving a found box as a store's config.
+        couponBoxSave: json.couponBoxSave === true,
         ts: Date.now(),
     }
     _writeFeaturesSession(_featuresMemo)
@@ -394,6 +396,99 @@ async function couponBoxPick({ domain, outline }) {
     )
     if (!r.ok) return { error: `HTTP ${r.status}` }
     return r.json()
+}
+
+/* Saves a promo box the finder found, on a store with no config, as that
+ * store's config: a code typed into it took money off the total
+ * (coupon-box-discovery.js caramelFinderConfirmed). The server files it under
+ * the store the host belongs to, only when that store has no config at all
+ * (POST /api/extension/coupon-box-save). The host is the sender's own top
+ * document, never the message's: a page cannot save a box for another site.
+ * Sent only while the server's couponBoxSave flag is on, and once per host per
+ * browser session. The body is the box's selectors and the host: no code, no
+ * price, nothing about the shopper. Answers { saved, reason } or { skipped } /
+ * { error }; nothing here reaches the shopper. */
+const COUPON_BOX_SAVED_KEY = 'caramel_box_saved'
+const _boxSaveHosts = new Set()
+const BOX_PARTS = ['input', 'apply', 'toggle', 'total']
+function _boxSaveBody(box) {
+    if (!box || typeof box !== 'object') return null
+    const out = {}
+    for (const part of BOX_PARTS) {
+        const v = box[part] ?? null
+        if (v !== null && (typeof v !== 'string' || !v || v.length > 256))
+            return null
+        out[part] = v
+    }
+    return out.input ? out : null
+}
+async function _boxSavedHosts() {
+    try {
+        const area = currentBrowser.storage?.session
+        if (!area) return []
+        const got = await new Promise(resolve =>
+            area.get([COUPON_BOX_SAVED_KEY], res =>
+                resolve(res?.[COUPON_BOX_SAVED_KEY]),
+            ),
+        )
+        return Array.isArray(got) ? got : []
+    } catch {
+        return []
+    }
+}
+function _rememberBoxSaved(hosts) {
+    try {
+        currentBrowser.storage?.session?.set({
+            [COUPON_BOX_SAVED_KEY]: hosts.slice(-200),
+        })
+    } catch {
+        // session storage unavailable in this runtime: memory-only.
+    }
+}
+async function couponBoxSave({ box }, sender) {
+    if (sender?.frameId !== 0) return { skipped: 'not the top document' }
+    let host
+    try {
+        host = new URL(sender?.tab?.url || sender?.url).hostname.toLowerCase()
+    } catch {
+        return { skipped: 'no tab' }
+    }
+    if (!host) return { skipped: 'no tab' }
+    const body = _boxSaveBody(box)
+    if (!body) return { skipped: 'invalid box' }
+    let on = false
+    try {
+        on = (await _features()).couponBoxSave === true
+    } catch (err) {
+        logError('features', err)
+    }
+    if (!on) return { skipped: 'disabled' }
+    const saved = await _boxSavedHosts()
+    if (_boxSaveHosts.has(host) || saved.includes(host))
+        return { skipped: 'already sent' }
+    _boxSaveHosts.add(host)
+    let r
+    try {
+        r = await fetchWithTimeout(
+            caramelUrl('api/extension/coupon-box-save'),
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ host, box: body }),
+            },
+        )
+    } catch (err) {
+        // Never reached the server: the next confirmed run may try again.
+        _boxSaveHosts.delete(host)
+        return { error: String(err) }
+    }
+    const j = await r.json().catch(() => ({}))
+    if (r.status === 429 || r.status >= 500) {
+        _boxSaveHosts.delete(host)
+        return { error: `HTTP ${r.status}` }
+    }
+    _rememberBoxSaved([...saved, host])
+    return { saved: j.saved === true, reason: j.reason ?? null }
 }
 
 function _forgetFeatures() {
@@ -1107,6 +1202,14 @@ export function initBackground() {
                         sendResponse({ error: String(err) })
                     })
 
+                return true
+            } else if (message.action === 'couponBoxSave') {
+                couponBoxSave(message, sender)
+                    .then(resp => sendResponse(resp))
+                    .catch(err => {
+                        logError('couponBoxSave', err)
+                        sendResponse({ error: String(err) })
+                    })
                 return true
             } else if (message.action === 'tabHandoff') {
                 tabHandoff(message, sender)

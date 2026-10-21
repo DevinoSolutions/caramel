@@ -5,9 +5,10 @@
 // content-script bundle.
 //
 // Most stores we hold codes for are reached through a config row: a set of
-// selectors someone wrote for that store. Two cases have no usable row: a
-// store nobody has written one for, and a store whose page changed under it.
-// In both, the shopper used to be handed the codes to copy and paste.
+// selectors someone wrote for that store. A store nobody has written one for
+// has none, and its shopper used to be handed the codes to copy and paste.
+// Only such a store is ever read here: a store with a config never runs
+// auto-detect (isServed), even when its config no longer matches the page.
 //
 // This module reads the page the way a shopper does: the field whose own name,
 // label or heading says coupon/promo/discount/voucher (in the languages our
@@ -1712,6 +1713,10 @@ function shownPositiveTotal(doc) {
  * server's pick is asked only when they find no box (caramelPickedRecord). */
 // Called from coupon-runner.js.
 export async function caramelDiscoveredRecord(rec, doc = document) {
+    if (isServed(rec)) {
+        log('FINDER_SKIPPED', { reason: 'the store has a config' })
+        return null
+    }
     const totalRow = findTotalRow(doc)
     const total = totalRow?.el
     // A row whose amount the price reader cannot parse ("12.00" with no
@@ -1754,8 +1759,92 @@ export async function caramelDiscoveredRecord(rec, doc = document) {
         return caramelPickedRecord(rec, doc)
     }
     log('FINDER_PICKED', { reasons: found.reasons })
-    return finderRecord(rec, found, totalRow, opened)
+    return savable(
+        finderRecord(rec, found, totalRow, opened),
+        found,
+        opened,
+        totalRow.el,
+    )
 }
+
+// A record for a store with a config (anything but caramelConfiglessRecord's
+// stand-in): the finder never runs for it.
+const isServed = rec => rec?.caramelNoConfig !== true
+
+/* ------------------------------------------- saving a box as a store config */
+// A box the finder found on a store with no config, through which a code then
+// took money off the total, is saved as that store's config
+// (background.js couponBoxSave, POST /api/extension/coupon-box-save): the next
+// shopper's extension reads it from the store list like any other config, and
+// the finder never runs on that store again.
+//
+// What is saved is the box's selectors only (coupon-box-selectors.js: stable
+// names, each checked to find exactly its element, nothing that looks like
+// personal data): never a code, a price or page text. A box with no stable
+// name, or whose apply or toggle names an order, pay or delete control, is not
+// saved; the shopper's run is the same either way.
+const SELECTORS_MODULE = 'assets/coupon-box-selectors.js'
+
+/* The record, with the box to save when a code works through it. Its box is
+ * also held by the background for this tab, for the page a submit reloads to
+ * (caramelFinderConfirmedResumed): never in the page's own storage. */
+async function savable(record, found, opened, totalEl) {
+    if (isServed(record)) return record
+    let box
+    try {
+        const m = await import(
+            /* @vite-ignore */ currentBrowser.runtime.getURL(SELECTORS_MODULE)
+        )
+        const parts = m.caramelBoxSelectors(found.input, found.button, opened)
+        const total = totalEl ? m.caramelStableSelector(totalEl) : null
+        if (
+            parts &&
+            !(parts.apply && m.caramelRiskyControl(parts.apply)) &&
+            !(parts.toggle && m.caramelRiskyControl(parts.toggle))
+        )
+            box = { ...parts, total }
+    } catch (err) {
+        log('FINDER_SAVE_UNAVAILABLE', { error: String(err?.message || err) })
+        return record
+    }
+    if (!box) {
+        log('FINDER_SAVE_NO_NAME', {})
+        return record
+    }
+    caramelTabHandoff('set', 'box_save', box)
+    return { ...record, caramelSave: box }
+}
+
+/* A code took money off the total through the box this run found: save it as
+ * the store's config, once per run. Nothing here can touch the shopper's run;
+ * the answer is logged either way. */
+// Called from coupon-runner.js.
+export function caramelFinderConfirmed(rec) {
+    const box = rec?.caramelSave
+    if (!box || rec.caramelSaveSent) return
+    rec.caramelSaveSent = true
+    return sendSave(box)
+}
+
+/* The page a submit reloaded to measured the total drop: the box the run held
+ * for this tab and this site is saved. */
+// Called from store-detect.js.
+export async function caramelFinderConfirmedResumed() {
+    const box = (await caramelTabHandoff('take', 'box_save'))?.value
+    if (box && typeof box.input === 'string') return sendSave(box)
+}
+
+const sendSave = box =>
+    caramelSendMessage({ action: 'couponBoxSave', box })
+        .then(resp =>
+            log('FINDER_SAVE', {
+                saved: resp?.saved === true,
+                reason: resp?.reason || resp?.skipped || resp?.error || null,
+            }),
+        )
+        .catch(err =>
+            log('FINDER_SAVE_FAILED', { error: String(err?.message || err) }),
+        )
 
 // The record for a box the finder settled on: `found` holds a visible input
 // and its button, `opened` the toggle clicked to reveal them (or null).
@@ -2214,7 +2303,7 @@ async function caramelPickedRecord(rec, doc) {
         again.toggle === (k.t ? opened : null)
     )
         await rememberPick(domain, k)
-    return finderRecord(rec, found, total, opened)
+    return savable(finderRecord(rec, found, total, opened), found, opened, total?.el)
 }
 
 /* Check a box someone else named (the server's pick, or a pick kept from the

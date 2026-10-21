@@ -34,6 +34,7 @@ import {
 } from './coupon-apply.js'
 import {
     caramelCouponBoxDiscoveryOn,
+    caramelLoadedFinder,
     caramelLoadFinder,
 } from './coupon-box-finder-loader.js'
 import {
@@ -804,13 +805,16 @@ export async function startApplyingCoupons(rec, options) {
             _box = pickBestMatch(rec.couponInput)
         }
     }
-    // No config describes a box we can see. Before handing the codes over to
-    // copy, let the finder look (coupon-box-discovery.js; off unless the
-    // server's couponBoxDiscovery flag is on). It returns a record aimed at
-    // the box it found, or null and this page keeps its copy-the-codes answer.
-    // Never while the store list is unknown: this may be a configured store.
+    // A store with no config, and no box we can see. Before handing the codes
+    // over to copy, let the finder look (coupon-box-discovery.js; off unless
+    // the server's couponBoxDiscovery flag is on). It returns a record aimed
+    // at the box it found, or null and this page keeps its copy-the-codes
+    // answer. A store with a config never runs it, even when its box is not
+    // on this page: its config is the only box we act on. Never while the
+    // store list is unknown either: this may be a configured store.
     if (
         (!_box || !_isVisible(_box)) &&
+        rec.caramelNoConfig === true &&
         caramelStoreListKnown() &&
         (await caramelCouponBoxDiscoveryOn())
     ) {
@@ -1037,6 +1041,11 @@ export async function startApplyingCoupons(rec, options) {
                 }
             }
         }
+
+        // The total dropped through a box the finder found on a store with no
+        // config: that box is saved as the store's config
+        // (coupon-box-discovery.js; a no-op for any other box).
+        if (res.success) caramelLoadedFinder()?.caramelFinderConfirmed(rec)
 
         if (res.success) {
             // Real success — keep this code applied, stop here.

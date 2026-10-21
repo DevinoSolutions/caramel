@@ -31,11 +31,10 @@ import { FINDER_ASSET, FINDER_FILE } from './_finder-asset.mjs'
 // identical. Only the UI layer is stubbed, to record what the shopper would
 // be shown.
 //
-// They also pin where that promise ends today, so it is a decision rather
-// than a surprise: a configured store whose selectors match NOTHING on the
-// page falls through to the finder (that is the finder's second purpose, see
-// coupon-runner.js "No config describes a box we can see"), and with the pick
-// flag on that page asks the server too.
+// The promise holds for a configured store whose selectors match NOTHING on
+// the page too: a store with a config never runs auto-detect. Its page ends
+// where it always did, with the codes to copy: the finder and the pick are
+// never loaded, never asked, and no box they would see is ever typed into.
 
 const FLAG_SETS = [
     { discovery: false, llm: false },
@@ -415,79 +414,95 @@ describe('a configured store whose box the shopper can reach', () => {
     })
 })
 
-describe('where the promise ends today: a configured store whose selectors match nothing', () => {
-    // A stale config: the store renamed its field. The flags DO change what
-    // happens here, by design (the finder exists to rescue exactly this).
+describe('a configured store whose selectors match nothing: the codes to copy, under every flag combination', () => {
+    // A stale config: the store renamed its field. The flags change nothing
+    // here either: a store with a config never runs auto-detect.
     const STALE = () => ({
         ...MAGENTO(),
         couponInput: '#old_coupon_field',
         showInput: '#old_toggle',
     })
+    // A box the finder's rules would take, and the server's pick a box too.
     const BARE = `
 <div class="row"><span>Total</span><span>$120.00</span></div>
-<div class="f"><input id="x" name="field_7" type="text"><button id="go" type="button">Go</button></div>`
+<div class="promo"><label for="dc">Discount code</label>
+  <input id="dc" name="discount_code" type="text">
+  <button id="ap" type="button">Apply</button></div>`
 
-    it('flags off: the codes are handed over to copy, and nothing is asked', async () => {
-        flags = FLAG_SETS[0]
-        document.body.innerHTML = BARE
-        rec = STALE()
-        trace = {
-            messages: [],
-            prompts: [],
-            modals: [],
-            savings: [],
-            page: [],
-            urls: [],
-        }
-        // The list was read: this record is its row for this store.
-        getDomainRecord.cache = [rec]
-        _caramelResetDiscoveryFlag()
-        _caramelResetFinderLoad()
-        sessionStorage.clear()
-        await startApplyingCoupons(rec)
-        expect(asked(trace, 'couponBoxPick')).toEqual([])
-        expect(trace.urls).not.toContain(FINDER_ASSET)
-        expect(trace.urls).not.toContain('assets/coupon-box-outline.js')
-        expect(trace.modals.at(-1).message).toMatch(
-            /couldn't find the promo box/,
-        )
-    })
+    for (const f of FLAG_SETS)
+        it(`discovery ${f.discovery ? 'on' : 'off'}, pick ${f.llm ? 'on' : 'off'}: nothing asked, nothing loaded, nothing typed`, async () => {
+            flags = f
+            document.body.innerHTML = BARE
+            const typed = []
+            document
+                .getElementById('ap')
+                .addEventListener('click', () =>
+                    typed.push(document.getElementById('dc').value),
+                )
+            rec = STALE()
+            trace = {
+                messages: [],
+                prompts: [],
+                modals: [],
+                savings: [],
+                page: [],
+                urls: [],
+            }
+            // The list was read: this record is its row for this store.
+            getDomainRecord.cache = [rec]
+            _caramelResetDiscoveryFlag()
+            _caramelResetFinderLoad()
+            sessionStorage.clear()
+            await startApplyingCoupons(rec)
+            expect(asked(trace, 'couponBoxDiscoveryEnabled')).toEqual([])
+            expect(asked(trace, 'couponBoxLlmEnabled')).toEqual([])
+            expect(asked(trace, 'couponBoxPick')).toEqual([])
+            expect(trace.urls).not.toContain(FINDER_ASSET)
+            expect(trace.urls).not.toContain('assets/coupon-box-outline.js')
+            expect(typed).toEqual([])
+            expect(document.querySelector('[data-caramel-found]')).toBeNull()
+            expect(trace.savings).toEqual([])
+            expect(trace.modals.at(-1).message).toMatch(
+                /couldn't find the promo box/,
+            )
+        })
 
-    it('both flags on: the server IS asked for this configured store (documented behaviour, not an accident)', async () => {
-        flags = FLAG_SETS[3]
-        document.body.innerHTML = BARE
-        rec = STALE()
-        trace = {
-            messages: [],
-            prompts: [],
-            modals: [],
-            savings: [],
-            page: [],
-            urls: [],
-        }
-        // The list was read: this record is its row for this store.
-        getDomainRecord.cache = [rec]
-        _caramelResetDiscoveryFlag()
-        _caramelResetFinderLoad()
-        sessionStorage.clear()
-        await startApplyingCoupons(rec)
-        expect(asked(trace, 'couponBoxPick')).toHaveLength(1)
-        expect(trace.urls.filter(u => u === FINDER_ASSET)).toHaveLength(1)
-        // A "no box" answer still ends exactly where flags-off did.
-        expect(trace.modals.at(-1).message).toMatch(
-            /couldn't find the promo box/,
-        )
-        expect(trace.savings).toEqual([])
-    })
+    // Detection: the prompt's own question (isCheckout) never asks the
+    // finder for a configured store either.
+    for (const f of FLAG_SETS)
+        it(`detection, discovery ${f.discovery ? 'on' : 'off'}, pick ${f.llm ? 'on' : 'off'}: the finder is never asked whether to offer`, async () => {
+            flags = f
+            trace = {
+                messages: [],
+                prompts: [],
+                modals: [],
+                savings: [],
+                page: [],
+                urls: [],
+            }
+            getDomainRecord.cache = null
+            _caramelResetCachedCodes()
+            _caramelResetDiscoveryFlag()
+            _caramelResetFinderLoad()
+            sessionStorage.clear()
+            window.history.replaceState({}, '', '/checkout/cart/')
+            rec = STALE()
+            document.body.innerHTML = BARE
+
+            await tryInitialize()
+
+            expect(asked(trace, 'couponBoxDiscoveryEnabled')).toEqual([])
+            expect(asked(trace, 'couponBoxPick')).toEqual([])
+            expect(trace.urls).not.toContain(FINDER_ASSET)
+            expect(trace.prompts).toEqual([])
+        }, 20000)
 })
 
-describe('a stale config with the finder on: deliberate behaviour, pinned', () => {
+describe('a stale config with the finder on: the config is tried, the finder never', () => {
     // The store renamed its promo field; the config still names the old one
-    // and still names a toggle that exists. With the finder on, this page is
-    // allowed to fall through to it. Three things make that safe, and each is
-    // pinned here: the config's own selectors are always tried first, the
-    // finder starts only after they are proven to give no usable box, and a
-    // saving is recorded only when the total really drops.
+    // and still names a toggle that exists. The config's own selectors are
+    // tried, as they always were, and then the page ends with the codes to
+    // copy: the box the finder would see is never typed into.
     const STALE_WITH_TOGGLE = () => ({
         ...MAGENTO(),
         couponInput: '#old_coupon_field',
@@ -516,9 +531,7 @@ describe('a stale config with the finder on: deliberate behaviour, pinned', () =
         Document.prototype.querySelectorAll = realQsa
     })
 
-    // `answer`: 'drop' takes $12 off for SAVE12; 'says-yes' prints an
-    // accepted message for every code and the total never moves.
-    async function visit(answer) {
+    async function visit() {
         flags = FLAG_SETS[3]
         trace = {
             messages: [],
@@ -528,7 +541,7 @@ describe('a stale config with the finder on: deliberate behaviour, pinned', () =
             page: [],
             urls: [],
         }
-        getDomainRecord.cache = []
+        getDomainRecord.cache = [STALE_WITH_TOGGLE()]
         _caramelResetCachedCodes()
         _caramelResetDiscoveryFlag()
         _caramelResetFinderLoad()
@@ -542,21 +555,8 @@ describe('a stale config with the finder on: deliberate behaviour, pinned', () =
         document.getElementById('place-order').addEventListener('click', () => {
             trace.page.push('ORDER')
         })
-        const btn = document.getElementById('ap')
-        btn.addEventListener('click', () => {
-            const code = document.getElementById('dc').value
-            trace.page.push('apply:' + code)
-            setTimeout(() => {
-                const msg = document.createElement('div')
-                msg.className = 'note'
-                if (answer === 'drop' && code === 'SAVE12') {
-                    document.getElementById('total-num').textContent = '108.00'
-                    msg.textContent = 'Discount applied'
-                } else {
-                    msg.textContent = `Coupon ${code} applied!`
-                }
-                btn.parentElement.appendChild(msg)
-            }, 5)
+        document.getElementById('ap').addEventListener('click', () => {
+            trace.page.push('apply:' + document.getElementById('dc').value)
         })
         const send = chrome.runtime.sendMessage
         chrome.runtime.sendMessage = (message, cb) => {
@@ -573,43 +573,24 @@ describe('a stale config with the finder on: deliberate behaviour, pinned', () =
         return trace
     }
 
-    it("(a) + (b): the config's box and toggle are tried, and proven useless, before the finder is asked", async () => {
-        const run = await visit('drop')
-        const finderAt = seq.indexOf('finder-asked')
-        expect(finderAt).toBeGreaterThan(-1)
-        const before = seq.slice(0, finderAt)
-        // Looked up, toggle clicked, looked up again after the toggle: all of
-        // it before the finder's flag is even asked.
-        expect(before[0]).toBe('config-box-lookup')
-        expect(before).toContain('config-toggle-clicked')
-        expect(before.lastIndexOf('config-box-lookup')).toBeGreaterThan(
-            before.indexOf('config-toggle-clicked'),
-        )
-        // The finder ran here, on the box the rules see, and the code the
-        // store took is the one recorded.
-        expect(run.page).toContain('apply:SAVE12')
-        expect(run.page).not.toContain('ORDER')
+    it("the config's box and toggle are tried; the finder and the pick are never asked or loaded", async () => {
+        const run = await visit()
+        expect(seq[0]).toBe('config-box-lookup')
+        expect(seq).toContain('config-toggle-clicked')
+        expect(seq).not.toContain('finder-asked')
+        expect(seq).not.toContain('pick-asked')
+        expect(run.urls).not.toContain(FINDER_ASSET)
+        expect(run.urls).not.toContain('assets/coupon-box-outline.js')
     }, 20000)
 
-    it('(c) the total really drops: one $12 saving, reported as worked once', async () => {
-        const run = await visit('drop')
-        expect(run.savings).toEqual([{ code: 'SAVE12', amount: 12 }])
-        expect(
-            asked(run, 'reportOutcome').filter(m => m.outcome === 'worked'),
-        ).toHaveLength(1)
-    }, 20000)
-
-    it('(c) the store SAYS "applied" but the total never moves: no saving, nothing reported as worked', async () => {
-        const run = await visit('says-yes')
+    it('the box the finder would see is never typed into: no saving, nothing reported as worked, the codes to copy', async () => {
+        const run = await visit()
+        expect(run.page).toEqual([])
+        expect(document.querySelector('[data-caramel-found]')).toBeNull()
+        expect(run.savings).toEqual([])
         expect(
             asked(run, 'reportOutcome').filter(m => m.outcome === 'worked'),
         ).toEqual([])
-        expect(run.savings).toEqual([])
-        expect(run.modals.at(-1).amount).toBe(0)
-        // Both codes were really tried in the box the finder found.
-        expect(run.page.filter(e => e.startsWith('apply:'))).toEqual([
-            'apply:SAVE12',
-            'apply:SECOND10',
-        ])
-    }, 60000)
+        expect(run.modals.at(-1).message).toMatch(/couldn't find the promo box/)
+    }, 20000)
 })
