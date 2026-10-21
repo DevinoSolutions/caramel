@@ -2,6 +2,7 @@ import {
     GET as redirectGET,
     POST as redirectPOST,
 } from '@/app/api/extension/oauth/redirect/route'
+import { codeBoundToState } from '@/lib/auth/extensionOAuthCodeBinding'
 import { NextRequest } from 'next/server'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -20,9 +21,19 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 // these exact shapes; this suite is that proof frozen so it cannot regress.
 // Codes below are fake strings — nothing is exchanged.
 const { envMock } = vi.hoisted(() => ({
-    envMock: { CHROME_EXTENSION_ORIGIN: undefined as string | undefined },
+    envMock: {
+        CHROME_EXTENSION_ORIGIN: undefined as string | undefined,
+        EXTENSION_OAUTH_STATE_SECRET: 'test-oauth-state-secret-guard',
+    },
 }))
 vi.mock('@/lib/env', () => ({ env: envMock }))
+// The route's per-IP throttle is pinned in extension-oauth-code-binding.test.ts;
+// this suite fires dozens of requests from one test IP and is about WHERE the
+// code may go, not how often.
+vi.mock('@/lib/rateLimit', async importOriginal => ({
+    ...(await importOriginal<typeof import('@/lib/rateLimit')>()),
+    checkRateLimit: vi.fn(async () => null),
+}))
 vi.mock('@/lib/env.client', () => ({ BASE_URL: 'https://localhost:58000' }))
 
 const EXT = 'https://gaimofgglbackoimfjopicmbmnlccfoe.chromiumapp.org/'
@@ -98,7 +109,13 @@ describe('extension OAuth redirect — where the code is allowed to go', () => {
             expect(res.status).toBeLessThan(400)
             const loc = new URL(res.headers.get('location') ?? '')
             expect(loc.origin + loc.pathname).toBe(EXT)
-            expect(loc.searchParams.get('code')).toBe('FAKE_CODE')
+            // The provider's code, bound to the state it arrived with.
+            expect(
+                codeBoundToState(
+                    loc.searchParams.get('code') ?? '',
+                    'signed-state',
+                ),
+            ).toBe('FAKE_CODE')
             expect(loc.searchParams.get('state')).toBe('signed-state')
         })
 
@@ -257,7 +274,12 @@ describe('extension OAuth redirect — where the code is allowed to go', () => {
             })
             const loc = new URL(res.headers.get('location') ?? '')
             expect(loc.origin + loc.pathname).toBe(EXT)
-            expect(loc.searchParams.get('code')).toBe('FAKE_CODE')
+            expect(
+                codeBoundToState(
+                    loc.searchParams.get('code') ?? '',
+                    'the-signed-state',
+                ),
+            ).toBe('FAKE_CODE')
             expect(loc.searchParams.get('state')).toBe('the-signed-state')
         })
 

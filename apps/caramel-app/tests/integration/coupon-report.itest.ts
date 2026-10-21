@@ -197,26 +197,54 @@ describe('POST /api/coupons/[id]/report — attribution against real pg :58005',
         ).toBe(2)
     })
 
-    it('an id absent from the catalog → 200 with the signal written and NO report row (the FK is real)', async () => {
-        const res = await POST(reportRequest(ABSENT_ID, { outcome: 'worked' }))
+    it('an id absent from the catalog → 404 on BOTH signal routes, with no coupon_signals row and no report row', async () => {
+        const report = await POST(
+            reportRequest(ABSENT_ID, { outcome: 'worked' }),
+        )
+        const failed = await POST(
+            reportRequest(ABSENT_ID, { outcome: 'failed' }, '203.0.113.2'),
+        )
+        const use = await incrementPOST(incrementRequest(ABSENT_ID))
 
-        expect(res.status).toBe(200)
-        expect(await res.json()).toEqual({ ok: true })
+        expect(report.status).toBe(404)
+        expect(failed.status).toBe(404)
+        expect(use.status).toBe(404)
         expect(
             await prisma.couponReport.count({ where: { couponId: ABSENT_ID } }),
         ).toBe(0)
-        // Unchanged from before attribution existed: coupon_signals has no FK,
-        // so an unknown id still gets its aggregate row.
-        const signal = await prisma.couponSignal.findUnique({
-            where: { couponId: ABSENT_ID },
-        })
-        expect(signal?.lastWorkedAt).toBeInstanceOf(Date)
+        // coupon_signals has no FK, so before the couponExists gate this id got
+        // an aggregate row from each of the three requests.
+        expect(
+            await prisma.couponSignal.findUnique({
+                where: { couponId: ABSENT_ID },
+            }),
+        ).toBeNull()
     })
 
-    it('the FK the route precheck exists for is REAL — a direct insert for that same absent id is rejected by Postgres', async () => {
-        // Red-proof for the precheck: without it the route would hand this exact
-        // insert to the driver and the request would 500. coupon_signals is the
-        // control — it takes the same unknown id without complaint.
+    it('a hidden (invalid) and an expired catalog row are still catalog rows: their signal is accepted', async () => {
+        await prisma.coupon.update({
+            where: { id: KNOWN_ID },
+            data: { status: 'invalid', expired: true },
+        })
+
+        const report = await POST(
+            reportRequest(KNOWN_ID, { outcome: 'failed' }),
+        )
+        const use = await incrementPOST(incrementRequest(KNOWN_ID))
+
+        expect(report.status).toBe(200)
+        expect(use.status).toBe(200)
+        const signal = await prisma.couponSignal.findUniqueOrThrow({
+            where: { couponId: KNOWN_ID },
+        })
+        expect(signal.failCount).toBe(1)
+        expect(signal.workCount).toBe(1)
+    })
+
+    it('coupon_reports carries a REAL FK while coupon_signals carries none — a direct insert for that same absent id is rejected by Postgres', async () => {
+        // Why the couponExists gate matters: coupon_signals is the control — it
+        // takes the same unknown id without complaint, so only the gate keeps
+        // an arbitrary id out of it. coupon_reports, by contrast, has a real FK.
         await expect(
             prisma.couponReport.create({
                 data: { couponId: ABSENT_ID, userId, outcome: 'worked' },

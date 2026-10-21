@@ -8,13 +8,26 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 // coupon_signals via recordUsage(). Mock recordUsage (the app Postgres write)
 // and drive the exported POST directly, mirroring coupons-report.test.ts:
 // prove the /^\d{1,18}$/ id gate, that a valid call forwards the id as a STRING
-// to recordUsage and returns 200 {ok:true} (no 404 — the signal is keyed
-// independently of catalog-row existence), and that the origin + rate-limit
+// to recordUsage and returns 200 {ok:true}, that an id which is not a catalog
+// row is a 404 that counts nothing and keeps its dedupe slot free, and that the origin + rate-limit
 // wiring still short-circuits before anything is written.
 const { recordUsageMock } = vi.hoisted(() => ({
     recordUsageMock: vi.fn(async () => undefined),
 }))
 vi.mock('@/lib/couponSignals', () => ({ recordUsage: recordUsageMock }))
+
+// MOCK (test double, named ...Mock): stands in for the catalog gate
+// couponsRepo.couponExists. Ids 41..43 are catalog rows, the rest are unknown.
+// Its real SQL is pinned in coupons-report.test.ts and run against Postgres in
+// tests/integration/coupon-report.itest.ts; nothing here proves the query.
+const { couponExistsMock, catalogIds } = vi.hoisted(() => {
+    const catalogIds = new Set<string>()
+    return {
+        catalogIds,
+        couponExistsMock: vi.fn(async (id: string) => catalogIds.has(id)),
+    }
+})
+vi.mock('@/lib/couponsRepo', () => ({ couponExists: couponExistsMock }))
 
 // The route resolves an optional session (it picks the reporter the dedupe
 // keys on); this stands in for the whole auth graph.
@@ -72,6 +85,9 @@ function incrementRequest(opts: {
 
 beforeEach(() => {
     resetReportDedupeForTests()
+    catalogIds.clear()
+    for (const id of ['41', '42', '43']) catalogIds.add(id)
+    couponExistsMock.mockClear()
     getSessionMock.mockReset()
     getSessionMock.mockResolvedValue(null)
     recordUsageMock.mockReset()
@@ -213,6 +229,51 @@ describe('POST /api/coupons/increment — app-owned usage counter (W4-D2)', () =
         const retry = await POST(incrementRequest({ query: '?id=42' }))
         expect(await retry.json()).toEqual({ ok: true })
         expect(recordUsageMock).toHaveBeenCalledTimes(2)
+    })
+
+    it('an id that is not a catalog row → 404, nothing counted, and the dedupe slot is not consumed', async () => {
+        const miss = await POST(incrementRequest({ query: '?id=999000404' }))
+
+        expect(miss.status).toBe(404)
+        expect(await miss.json()).toEqual({ error: 'Unknown coupon' })
+        expect(recordUsageMock).not.toHaveBeenCalled()
+
+        // Once the coupon exists, the same reporter's first use still counts:
+        // the 404 above gave its slot back.
+        catalogIds.add('999000404')
+        const hit = await POST(incrementRequest({ query: '?id=999000404' }))
+        expect(await hit.json()).toEqual({ ok: true })
+        expect(recordUsageMock).toHaveBeenCalledWith('999000404')
+    })
+
+    it('probing unknown ids can never fill the dedupe table', async () => {
+        resetReportDedupeForTests({ maxKeys: 2 })
+        for (let id = 999000400; id < 999000410; id++) {
+            const res = await POST(incrementRequest({ query: `?id=${id}` }))
+            expect(res.status).toBe(404)
+        }
+        const first = await POST(incrementRequest({ query: '?id=42' }))
+        const second = await POST(incrementRequest({ query: '?id=42' }))
+        expect(await first.json()).toEqual({ ok: true })
+        expect(await second.json()).toEqual({ ok: true, deduped: true })
+    })
+
+    it('a tracked duplicate is answered from memory, without a catalog lookup', async () => {
+        await POST(incrementRequest({ query: '?id=42' }))
+        couponExistsMock.mockClear()
+        const dup = await POST(incrementRequest({ query: '?id=42' }))
+        expect(await dup.json()).toEqual({ ok: true, deduped: true })
+        expect(couponExistsMock).not.toHaveBeenCalled()
+    })
+
+    it('a failing catalog lookup is a 500 (loud) and frees the slot for the retry', async () => {
+        couponExistsMock.mockRejectedValueOnce(new Error('db down'))
+        const failed = await POST(incrementRequest({ query: '?id=42' }))
+        expect(failed.status).toBe(500)
+        expect(recordUsageMock).not.toHaveBeenCalled()
+
+        const retry = await POST(incrementRequest({ query: '?id=42' }))
+        expect(await retry.json()).toEqual({ ok: true })
     })
 
     it('a rate-limited request → 429 (rate-limit wiring), nothing recorded', async () => {

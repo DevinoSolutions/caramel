@@ -60,8 +60,10 @@ const { prismaMock, prismaState } = vi.hoisted(() => {
                     data: Record<string, unknown>
                 }) => ({ id: where.id, ...data }),
             ),
+            deleteMany: vi.fn(async () => ({ count: 1 })),
         },
         session: {
+            deleteMany: vi.fn(async () => ({ count: 1 })),
             create: vi.fn(
                 async ({ data }: { data: Record<string, unknown> }) => ({
                     id: 'new-session-id',
@@ -98,10 +100,15 @@ beforeEach(() => {
         prismaMock.account.findUnique,
         prismaMock.account.create,
         prismaMock.account.update,
+        prismaMock.account.deleteMany,
         prismaMock.session.create,
+        prismaMock.session.deleteMany,
     ]) {
         fn.mockClear()
     }
+    prismaMock.user.findFirst.mockImplementation(
+        async () => prismaState.existingUser,
+    )
 })
 
 describe('mintExtensionSession — google and apple produce the SAME shape (the finding: no per-provider divergence)', () => {
@@ -474,5 +481,138 @@ describe('mintExtensionSession — returning user gets a FRESH profile in the re
         // result was discarded). Now the response carries the fresh values.
         expect(result.username).toBe('New Name')
         expect(result.image).toBe('https://example.com/new.png')
+    })
+})
+
+// Security audit 2026-10-21 (T-5449). The lookup used one findFirst over
+// (email OR provider account), and linking a provider to an UNVERIFIED account
+// marked it verified while keeping whatever a stranger had set up on it.
+describe('mintExtensionSession — which account a provider sign-in lands on', () => {
+    type Where = { email?: string; accounts?: unknown }
+    /** Answers the provider-link lookup and the email lookup separately. */
+    function usersBy({
+        linked,
+        byEmail,
+    }: {
+        linked: Record<string, unknown> | null
+        byEmail: Record<string, unknown> | null
+    }) {
+        prismaMock.user.findFirst.mockImplementation((async ({
+            where,
+        }: {
+            where: Where
+        }) => (where.accounts ? linked : byEmail)) as never)
+    }
+
+    const google = {
+        provider: 'google' as const,
+        providerUser: {
+            id: 'google-id-1',
+            email: 'owner@example.com',
+            emailVerified: true,
+        },
+        tokens: { accessToken: 'at' },
+    }
+
+    it('M1: the user the provider account is linked to wins over a different user holding the email', async () => {
+        const linked = {
+            id: 'linked-user',
+            email: 'old@example.com',
+            emailVerified: true,
+            username: null,
+            name: 'Linked',
+            image: null,
+            accounts: [],
+        }
+        usersBy({
+            linked,
+            byEmail: {
+                ...linked,
+                id: 'email-user',
+                email: 'owner@example.com',
+            },
+        })
+        prismaState.existingUser = linked
+
+        await mintExtensionSession(google)
+
+        expect(prismaMock.user.update).toHaveBeenCalledWith(
+            expect.objectContaining({ where: { id: 'linked-user' } }),
+        )
+        expect(prismaMock.session.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({ userId: 'linked-user' }),
+        })
+    })
+
+    it('H3: claiming an UNVERIFIED account by email drops its password login and sessions first', async () => {
+        const squatted = {
+            id: 'squatted-user',
+            email: 'owner@example.com',
+            emailVerified: false,
+            username: null,
+            name: null,
+            image: null,
+            accounts: [],
+        }
+        usersBy({ linked: null, byEmail: squatted })
+        prismaState.existingUser = squatted
+
+        await mintExtensionSession(google)
+
+        expect(prismaMock.account.deleteMany).toHaveBeenCalledWith({
+            where: { userId: 'squatted-user', providerId: 'credential' },
+        })
+        expect(prismaMock.session.deleteMany).toHaveBeenCalledWith({
+            where: { userId: 'squatted-user' },
+        })
+        // ...before the owner's own session is minted, which must survive.
+        const purgeOrder =
+            prismaMock.session.deleteMany.mock.invocationCallOrder[0]
+        const mintOrder = prismaMock.session.create.mock.invocationCallOrder[0]
+        expect(purgeOrder).toBeLessThan(mintOrder)
+        expect(prismaMock.account.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({
+                providerId: 'google',
+                userId: 'squatted-user',
+            }),
+        })
+    })
+
+    it('a VERIFIED account claimed by email keeps its password and sessions', async () => {
+        const owner = {
+            id: 'owner-user',
+            email: 'owner@example.com',
+            emailVerified: true,
+            username: null,
+            name: null,
+            image: null,
+            accounts: [],
+        }
+        usersBy({ linked: null, byEmail: owner })
+        prismaState.existingUser = owner
+
+        await mintExtensionSession(google)
+
+        expect(prismaMock.account.deleteMany).not.toHaveBeenCalled()
+        expect(prismaMock.session.deleteMany).not.toHaveBeenCalled()
+    })
+
+    it('a returning sign-in through an already-linked provider purges nothing, verified or not', async () => {
+        const linked = {
+            id: 'linked-user',
+            email: 'owner@example.com',
+            emailVerified: false,
+            username: null,
+            name: null,
+            image: null,
+            accounts: [],
+        }
+        usersBy({ linked, byEmail: linked })
+        prismaState.existingUser = linked
+
+        await mintExtensionSession(google)
+
+        expect(prismaMock.account.deleteMany).not.toHaveBeenCalled()
+        expect(prismaMock.session.deleteMany).not.toHaveBeenCalled()
     })
 })

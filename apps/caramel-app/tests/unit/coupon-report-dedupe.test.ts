@@ -9,10 +9,11 @@ import * as Sentry from '@sentry/nextjs'
 import { NextRequest } from 'next/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-// The per-reporter report dedupe is an in-memory Map with a hard key cap:
-// past the cap it FAILS OPEN (accept, untracked) and warns Sentry at most once
-// an hour. These pins cover the window, the cap, the sweep and the report
-// throttle with an injected clock and a tiny cap.
+// The per-reporter report dedupe is an in-memory Map with a hard key cap: past
+// the cap it sweeps expired keys, then EVICTS the oldest key (the dedupe never
+// switches off) and warns Sentry at most once an hour. These pins cover the
+// window, the cap, the sweep, the eviction and the report throttle with an
+// injected clock and a tiny cap.
 vi.mock('@sentry/nextjs', () => ({ captureMessage: vi.fn() }))
 
 const HOUR = 60 * 60 * 1000
@@ -130,76 +131,82 @@ describe('report kinds', () => {
     })
 })
 
-describe('failed-report dedupe key cap (fail open)', () => {
-    it('at the cap a NEW reporter is admitted untracked, so its repeat is admitted too', () => {
+describe('failed-report dedupe key cap (evict oldest, never off)', () => {
+    it('at the cap a NEW reporter is TRACKED (its repeat is deduped) and the oldest key is evicted', () => {
         resetReportDedupeForTests({ maxKeys: 2 })
         expect(admitReport('failed', ip(1), '7', T0)).toBe(true)
-        expect(admitReport('failed', ip(2), '7', T0)).toBe(true)
+        expect(admitReport('failed', ip(2), '7', T0 + 1)).toBe(true)
 
-        // Table full: fail open, and nothing was tracked for ip(3).
-        expect(admitReport('failed', ip(3), '7', T0)).toBe(true)
-        expect(admitReport('failed', ip(3), '7', T0)).toBe(true)
-        // The two tracked reporters are still deduped: the cap never refuses a
-        // report, it only stops tracking new ones.
-        expect(admitReport('failed', ip(1), '7', T0)).toBe(false)
-        expect(admitReport('failed', ip(2), '7', T0)).toBe(false)
+        // Table full: ip(3) is admitted AND tracked, so its repeat is refused.
+        expect(admitReport('failed', ip(3), '7', T0 + 2)).toBe(true)
+        expect(admitReport('failed', ip(3), '7', T0 + 3)).toBe(false)
+        // ip(1), the oldest, was evicted to make room: it counts once more.
+        // ip(2) is still tracked.
+        expect(admitReport('failed', ip(2), '7', T0 + 4)).toBe(false)
+        expect(admitReport('failed', ip(1), '7', T0 + 5)).toBe(true)
     })
 
-    it('never refuses an honest report because the table is full', () => {
-        resetReportDedupeForTests({ maxKeys: 1 })
-        expect(admitReport('failed', ip(1), '7', T0)).toBe(true)
-        for (let n = 2; n < 50; n++) {
-            expect(admitReport('failed', ip(n), '7', T0)).toBe(true)
+    it('a flood past the cap never switches the dedupe off: the most recent reporters stay deduped', () => {
+        resetReportDedupeForTests({ maxKeys: 3 })
+        for (let n = 1; n <= 50; n++) {
+            expect(admitReport('failed', ip(n), '7', T0 + n)).toBe(true)
+        }
+        // Every one of the last three is tracked.
+        for (let n = 48; n <= 50; n++) {
+            expect(admitReport('failed', ip(n), '7', T0 + 100)).toBe(false)
         }
     })
 
-    it('a full table is swept for expired keys (at most once a minute), freeing room to track again', () => {
+    it('a full table is swept for expired keys (at most once a minute) before anything is evicted', () => {
         resetReportDedupeForTests({ maxKeys: 2 })
         admitReport('failed', ip(1), '7', T0)
-        admitReport('failed', ip(2), '7', T0)
+        admitReport('failed', ip(2), '7', T0 + 1)
 
         // A day later both are expired; the sweep makes room, so ip(3) is
-        // TRACKED this time (its repeat is rejected).
-        const later = T0 + DAY + 1
+        // tracked without evicting a live key and no cap warning fires.
+        const later = T0 + DAY + 2
         expect(admitReport('failed', ip(3), '7', later)).toBe(true)
         expect(admitReport('failed', ip(3), '7', later)).toBe(false)
+        expect(Sentry.captureMessage).not.toHaveBeenCalled()
     })
 
-    it('does not re-sweep a full table more than once a minute', () => {
+    it('does not re-sweep a full table more than once a minute, but still tracks each newcomer by evicting', () => {
         resetReportDedupeForTests({ maxKeys: 1 })
         admitReport('failed', ip(1), '7', T0)
 
-        // Full, nothing expired yet: the sweep runs, finds nothing, fails open.
+        // Full, nothing expired yet: the sweep runs, finds nothing, ip(1) is
+        // evicted so ip(2) is tracked.
         const sweptAt = T0 + DAY - 10 * 1000
         expect(admitReport('failed', ip(2), '7', sweptAt)).toBe(true)
+        expect(admitReport('failed', ip(2), '7', sweptAt + 1)).toBe(false)
 
-        // ip(1) has now expired, but the last sweep was only 11s ago: no
-        // re-sweep, the table still reads full, ip(3) is untracked.
-        const tooSoon = T0 + DAY + 1
-        expect(admitReport('failed', ip(3), '7', tooSoon)).toBe(true)
-        expect(admitReport('failed', ip(3), '7', tooSoon)).toBe(true)
-
-        // A minute after the last sweep the expired key is reclaimed and the
-        // next new reporter is tracked again.
-        const swept = sweptAt + 60 * 1000
-        expect(admitReport('failed', ip(4), '7', swept)).toBe(true)
-        expect(admitReport('failed', ip(4), '7', swept)).toBe(false)
+        // ip(2) has not expired and the last sweep was seconds ago: ip(3)
+        // evicts it and is tracked in its place.
+        const soon = sweptAt + 2
+        expect(admitReport('failed', ip(3), '7', soon)).toBe(true)
+        expect(admitReport('failed', ip(3), '7', soon + 1)).toBe(false)
     })
 
-    it('an expired entry for the SAME key is overwritten in place even when the table is full', () => {
-        resetReportDedupeForTests({ maxKeys: 1 })
+    it('an expired entry for the SAME key is re-taken in place even when the table is full, evicting nothing', () => {
+        resetReportDedupeForTests({ maxKeys: 2 })
         admitReport('failed', ip(1), '7', T0)
+        admitReport('failed', ip(2), '7', T0 + 5)
         const later = T0 + DAY + 1
+        // ip(1) expired exactly; ip(2) is still live (expires T0 + 5 + DAY).
         expect(admitReport('failed', ip(1), '7', later)).toBe(true)
         expect(admitReport('failed', ip(1), '7', later)).toBe(false)
+        expect(admitReport('failed', ip(2), '7', later)).toBe(false)
     })
 
-    it('reports the cap to Sentry once per hour, not once per request', () => {
+    it('reports the cap to Sentry once per hour, not once per request, naming the eviction', () => {
         resetReportDedupeForTests({ maxKeys: 1 })
         admitReport('failed', ip(1), '7', T0)
 
         for (let n = 2; n < 10; n++) admitReport('failed', ip(n), '7', T0 + n)
         expect(Sentry.captureMessage).toHaveBeenCalledTimes(1)
+        expect(vi.mocked(Sentry.captureMessage).mock.calls[0]![0]).toContain(
+            'evicting oldest',
+        )
         expect(
             vi.mocked(Sentry.captureMessage).mock.calls[0]![1],
         ).toMatchObject({ level: 'warning' })
@@ -208,6 +215,19 @@ describe('failed-report dedupe key cap (fail open)', () => {
         expect(Sentry.captureMessage).toHaveBeenCalledTimes(1)
         admitReport('failed', ip(21), '7', T0 + HOUR + 100)
         expect(Sentry.captureMessage).toHaveBeenCalledTimes(2)
+    })
+
+    it('the cap warning carries route context and no reporter or coupon identity', () => {
+        resetReportDedupeForTests({ maxKeys: 1 })
+        admitReport('failed', ip(1), 'coupon-secret-7', T0)
+        admitReport('failed', ip(2), 'coupon-secret-7', T0 + 1)
+
+        const payload = JSON.stringify(
+            vi.mocked(Sentry.captureMessage).mock.calls,
+        )
+        expect(payload).toContain('coupons/report')
+        expect(payload).not.toContain('203.0.113')
+        expect(payload).not.toContain('coupon-secret-7')
     })
 
     it('stays silent while under the cap', () => {

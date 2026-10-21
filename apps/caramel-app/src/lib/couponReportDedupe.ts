@@ -32,11 +32,18 @@
 //
 // BOUNDED: a Map entry per (reporter, coupon) must not grow without limit across
 // rotating addresses and coupon ids, because this app has had memory/slowness
-// outages. There are no per-key timers: entries are plain
-// expiries, swept lazily. At the cap the dedupe FAILS OPEN: the report is
-// accepted without being tracked (a forger gets no throttle while the table is
-// full, but no honest report is ever refused), and one throttled Sentry warning
-// per hour per kind says the cap is being hit.
+// outages. There are no per-key timers: entries are plain expiries, swept
+// lazily. At the cap the dedupe NEVER switches off: a full table is first swept
+// of expired keys, and if it is still full the OLDEST tracked key is evicted to
+// make room, so the newest reporter is always tracked and no honest report is
+// ever refused. Every key lives exactly WINDOW_MS, so the Map's insertion order
+// is also its expiry order and the first key is the oldest. The cost: a flood of
+// 50k fresh keys inside one window can push an older reporter's slot out, which
+// lets that one reporter count once more. That takes 50k distinct reporter and
+// coupon pairs inside 24h, each past the per-IP rate limit, so it is accepted
+// (the old behaviour, accepting every report untracked once full, gave a forger
+// no throttle at all). One throttled Sentry warning per hour per kind says the
+// cap is being hit.
 //
 // ONE TABLE PER KIND, each with its own cap. Every successful apply sends a
 // 'worked' report and a use, so honest success traffic is the bulk of the keys;
@@ -145,24 +152,33 @@ function sweepExpired(table: KindTable, now: number): void {
     table.lastSweepAt = now
 }
 
+/** Drop the first (oldest-inserted, soonest-expiring) key. */
+function evictOldest(table: KindTable): void {
+    const oldest = table.expiryByKey.keys().next()
+    if (!oldest.done) table.expiryByKey.delete(oldest.value)
+}
+
 function reportCapHit(kind: ReportKind, table: KindTable, now: number): void {
     if (now < table.nextCapReportAt) return
     table.nextCapReportAt = now + CAP_REPORT_INTERVAL_MS
-    Sentry.captureMessage('coupon report dedupe table is full: failing open', {
-        level: 'warning',
-        tags: {
-            route: ROUTE_OF_KIND[kind],
-            budget: 'report-dedupe',
-            reportKind: kind,
+    Sentry.captureMessage(
+        'coupon report dedupe table is full: evicting oldest',
+        {
+            level: 'warning',
+            tags: {
+                route: ROUTE_OF_KIND[kind],
+                budget: 'report-dedupe',
+                reportKind: kind,
+            },
+            extra: { maxKeys: maxKeysPerKind, windowMs: WINDOW_MS },
         },
-        extra: { maxKeys: maxKeysPerKind, windowMs: WINDOW_MS },
-    })
+    )
 }
 
 /**
  * True when this report should be recorded: the first report of `kind` for
- * (reporter, couponId) in the window (it takes the slot), or ANY report while the
- * table is full (fail open, untracked). False only for a tracked duplicate.
+ * (reporter, couponId) in the window (it takes the slot, evicting the oldest
+ * tracked key when the table is full). False only for a tracked duplicate.
  */
 export function admitReport(
     kind: ReportKind,
@@ -182,10 +198,12 @@ export function admitReport(
         sweepExpired(table, now)
     }
     if (table.expiryByKey.size >= maxKeysPerKind && expiresAt === undefined) {
+        evictOldest(table)
         reportCapHit(kind, table, now)
-        return true
     }
-    // An expired entry for this very key is overwritten in place.
+    // Delete first so a re-taken (expired) key moves to the back: the Map's
+    // insertion order must stay its expiry order for evictOldest.
+    table.expiryByKey.delete(key)
     table.expiryByKey.set(key, now + WINDOW_MS)
     return true
 }
@@ -196,11 +214,11 @@ export function admitReport(
  * never landed.
  *
  * Known and accepted: the delete does not check WHICH request set the slot. A
- * request admitted untracked while the table was full, whose write then fails,
- * can free a slot that a later request from the same reporter took and whose
- * write did land, so one more report from that reporter would count. That needs
- * a full table plus failing writes, and costs at most one extra count per failed
- * write. The extension sends each report once and never retries.
+ * slot can have been evicted and re-taken by a later request from the same
+ * reporter whose write did land; freeing it then lets one more report from that
+ * reporter count. That needs a full table plus failing writes, and costs at most
+ * one extra count per failed write. The extension sends each report once and
+ * never retries.
  */
 export function releaseReport(
     kind: ReportKind,

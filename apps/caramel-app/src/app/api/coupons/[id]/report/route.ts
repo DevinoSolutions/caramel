@@ -9,6 +9,7 @@ import {
     recordWorked,
     type CouponSignalWriter,
 } from '@/lib/couponSignals'
+import { couponExists } from '@/lib/couponsRepo'
 import prisma from '@/lib/prisma'
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
@@ -21,6 +22,10 @@ import { z } from 'zod'
 // via withRoute, and — like increment — NO CORS / NO OPTIONS export: the MV3
 // extension fetches with host_permissions, so its request bypasses CORS
 // entirely (adding CORS/OPTIONS here would be dead ceremony).
+//
+// An id that is not a row of the catalog is a 404 and writes nothing
+// (couponsRepo.couponExists, status-agnostic: see its doc comment). coupon_signals
+// carries no FK, so without the gate any numeric id minted a signal row.
 //
 // Writes ONLY app-owned tables — the aggregate `coupon_signals` (through
 // couponSignals.ts) and, for a signed-in caller, the attributed
@@ -95,6 +100,18 @@ export const POST = withRoute(
         }
 
         try {
+            // An unknown id writes no signal and gives its dedupe slot back, so
+            // a forger probing random ids cannot fill the table with slots no
+            // report ever used. The slot is taken BEFORE this lookup so a
+            // tracked duplicate stays a database-free no-op.
+            if (!(await couponExists(id))) {
+                releaseReport(body.outcome, reporter, id)
+                return NextResponse.json(
+                    { error: 'Unknown coupon' },
+                    { status: 404 },
+                )
+            }
+
             // The aggregate signal write — identical for every caller, so the
             // signed-in path can never end up writing a DIFFERENT signal than the
             // anonymous one.
@@ -104,10 +121,8 @@ export const POST = withRoute(
                     : recordFailed(id, body.storeReason ?? null, client)
 
             if (!userId) {
-                // Anonymous — unchanged from before attribution existed: ONE
-                // statement, no transaction, no catalog lookup. This is the
-                // extension's high-volume path and a BEGIN/COMMIT round-trip around
-                // a single upsert would buy nothing. Nothing is written to
+                // Anonymous: ONE signal statement, no transaction (after the
+                // catalog check above, a PK lookup). Nothing is written to
                 // coupon_reports for an anonymous report — DELIBERATE, not an
                 // oversight: coupon_reports is ATTRIBUTION, and every row in it
                 // names a user. Anonymous volume is already fully counted by the
@@ -130,18 +145,9 @@ export const POST = withRoute(
                 // that empties the in-memory window.
                 await writeSignal(tx)
 
-                // coupon_reports.coupon_id carries a real FK to `coupons`
-                // (coupon_signals deliberately carries none, so an aggregate can
-                // outlive a tombstoned coupon). An id that isn't in the catalog
-                // therefore CANNOT be attributed — check first rather than letting
-                // the insert raise a foreign-key violation, which would 500 a
-                // request that used to return 200. The signal above still lands,
-                // exactly as it does for an unknown id today.
-                const coupon = await tx.coupon.findUnique({
-                    where: { id },
-                    select: { id: true },
-                })
-                if (!coupon) return
+                // coupon_reports.coupon_id carries a real FK to `coupons`; the
+                // couponExists gate above already proved the row exists, so the
+                // insert below cannot raise a foreign-key violation.
 
                 // One attributed report per (user, coupon, UTC day). Postgres
                 // cannot express a UNIQUE on date_trunc('day', created_at), so this
