@@ -1,6 +1,10 @@
 import * as Sentry from '@sentry/nextjs'
 import { SENTRY_RELEASE } from './src/lib/buildInfo'
 import { scrubRejectedRedirectEvent } from './src/lib/rejectedRedirectEventScrub'
+import {
+    scrubSentryBreadcrumb,
+    scrubSentryEvent,
+} from './src/lib/sentryPiiScrub'
 
 const isProd = process.env.NODE_ENV === 'production'
 
@@ -23,10 +27,24 @@ export function initSentry(
         // tests/unit/sentry-traces-sample-rate.test.ts holds the ceiling.
         tracesSampleRate: 0.05,
         debug: false,
-        sendDefaultPii: true,
-        // sendDefaultPii attaches the request URL + query string; for the OAuth
-        // callback reports that query is `?code=…&state=…`. Strip it there.
-        beforeSend: scrubRejectedRedirectEvent,
+        // OFF on purpose (T-5535 M5; it was `true`). On, the SDK attaches the
+        // caller's IP, the Cookie / Authorization headers and the request URL
+        // with its `?code=…&state=…` OAuth query to every event. Off loses only
+        // the IP, cookies, request bodies and a few headers; triage here runs
+        // on route / method / status tags, the release, the trace id and the
+        // user id, all of which stay (the id is set explicitly by
+        // Sentry.setUser, which sendDefaultPii never governed). Off is also
+        // the SDK default, so no integration quietly turns it back on.
+        sendDefaultPii: false,
+        // Defence in depth on top of the flag: sentryPiiScrub strips
+        // credential-shaped headers, params, bearer tokens, e-mails and IPs
+        // from errors, transactions (incl. span urls) and breadcrumbs, whatever
+        // the SDK or a call site put there. The rejected-redirect scrub then
+        // also drops the whole query string of its own events.
+        beforeSend: event =>
+            scrubRejectedRedirectEvent(scrubSentryEvent(event)),
+        beforeSendTransaction: scrubSentryEvent,
+        beforeBreadcrumb: scrubSentryBreadcrumb,
         ...customOptions,
     })
 }

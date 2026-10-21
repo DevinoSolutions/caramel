@@ -2,6 +2,7 @@ import { defersAnalytics, onFirstActivity } from '@/lib/afterPageLoad'
 import { browserSignalsTrackingOptOut } from '@/lib/analytics/trackingOptOut'
 import { SENTRY_RELEASE } from '@/lib/buildInfo'
 import { INJECTED_SCRIPT_DENY_URLS } from '@/lib/sentryInjectedScriptNoise'
+import { scrubSentryBreadcrumb, scrubSentryEvent } from '@/lib/sentryPiiScrub'
 import * as Sentry from '@sentry/nextjs'
 
 // Next.js only loads client instrumentation from `instrumentation-client.ts`.
@@ -83,6 +84,14 @@ if (process.env.NODE_ENV === 'production' && dsn) {
         // its throws are not ours (CARAMEL-Z, lib/sentryInjectedScriptNoise.ts).
         // Matched on the frame that threw, so our own errors still report.
         denyUrls: INJECTED_SCRIPT_DENY_URLS,
+        // The browser never sent default PII (the flag is off here as on the
+        // server, see sentry.common.config.ts), but the page URL, Referer and
+        // fetch / navigation breadcrumbs of the sign-in callback pages carry
+        // `?code=…&state=…`; strip those before they leave the browser.
+        sendDefaultPii: false,
+        beforeSend: scrubSentryEvent,
+        beforeSendTransaction: scrubSentryEvent,
+        beforeBreadcrumb: scrubSentryBreadcrumb,
         debug: false,
     })
     if (!browserSignalsTrackingOptOut()) {
