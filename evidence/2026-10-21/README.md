@@ -30,3 +30,10 @@ Headed stealth-browser checks of grabcaramel.com (prod, release fb6dcde) and dev
 
 ## PR #404 (T-5535 M4) local headed proof
 - `pr404-3-quiet-404-card.png`: unknown coupon id → report 404 → quiet "That code is no longer listed." note, no error, no telemetry. Prod check follows the deploy.
+
+## #403 (T-5535 M5) + #404 (T-5535 M4) LIVE on prod 5ae6de5 (deploy 22:00–22:03Z)
+- Backups first: 2026-10-21T19-54-18-307Z and 2026-10-21T21-05-20-946Z. Rollback = fb6dcde.
+- health, /, /login, /coupons/stores all 200 (0.19–0.36 s).
+- `pr403-prod-login.png`: prod /login?code=PROBE403CODE&state=PROBE403STATE in a headed clone. The live client reports release 5ae6de5 and sendDefaultPii false. A handled probe error carrying the URL, an email and an IP became Sentry CARAMEL-2C with the message "…/login?code=[Filtered]&state=[Filtered] contact [Filtered email] from [Filtered ip]", Users 0, no request headers. CARAMEL-2C was resolved as test data. No other new issues in the 30 min after the deploy.
+- #404: curl POST /api/coupons/999999999/report → 404 {"error":"Unknown coupon"}.
+- `pr404-prod-quiet-404.png`: on the prod /coupons/ebay.com card, the report was rewritten to id 999999999 and other coupon POSTs were blocked (no prod write). "Yes, it worked" sent one 404 and showed the quiet note "That code is no longer listed." The buttons were gone, no vote was kept in localStorage, and there was no uvf marker.
