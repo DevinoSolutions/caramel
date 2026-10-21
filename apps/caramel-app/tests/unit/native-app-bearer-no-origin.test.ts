@@ -32,6 +32,7 @@ const { prismaMock } = vi.hoisted(() => ({
             findUnique: vi.fn(async () => ({ savingsSyncEnabled: true })),
             deleteMany: vi.fn(() => ({ op: 'user' })),
         },
+        account: { findMany: vi.fn(async () => []) },
         verification: { deleteMany: vi.fn(() => ({ op: 'verification' })) },
         savingsEvent: { deleteMany: vi.fn() },
         favoriteStore: { deleteMany: vi.fn() },

@@ -2,6 +2,7 @@ import {
     ExtensionOAuthEmailRequiredError,
     mintExtensionSession,
 } from '@/lib/auth/extensionOAuthSession'
+import { decryptOAuthToken } from '@/lib/auth/oauthTokenCrypto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // F-007 — extensionOAuthSession unit tests (PLAN-F-007.md §Test
@@ -13,7 +14,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 // covering shapes route-pipeline.test.ts doesn't (e.g. account-token
 // refresh on re-auth). The token every mint returns is the RAW session
 // token — the module's dead bearer self-fetch was deleted (NF-07), so
-// there is no fetch (and no env read) anywhere in the mint.
+// there is no fetch anywhere in the mint. (The only env read is the auth
+// secret oauthTokenCrypto.ts encrypts the stored access/refresh tokens with;
+// vitest.config.ts supplies BETTER_AUTH_SECRET and the REAL crypto runs here.)
 
 const { prismaMock, prismaState } = vi.hoisted(() => {
     const prismaState = {
@@ -151,13 +154,20 @@ describe('mintExtensionSession — google and apple produce the SAME shape (the 
                 status: 'ACTIVE_USER',
             })
             expect(prismaMock.account.create).toHaveBeenCalledTimes(1)
-            expect(prismaMock.account.create.mock.calls[0][0].data).toEqual({
+            const created = prismaMock.account.create.mock.calls[0][0].data
+            expect(created).toEqual({
                 providerId: provider,
                 accountId: providerUser.id,
                 userId: 'new-user-id',
-                accessToken: 'at',
+                accessToken: expect.any(String),
+                refreshToken: null,
                 idToken: 'it',
             })
+            // Access token is encrypted at rest, never stored as handed over.
+            expect(created.accessToken).not.toBe('at')
+            expect(await decryptOAuthToken(created.accessToken as string)).toBe(
+                'at',
+            )
             expect(prismaMock.session.create).toHaveBeenCalledTimes(1)
             expect(prismaMock.session.create.mock.calls[0][0].data.userId).toBe(
                 'new-user-id',
@@ -266,12 +276,102 @@ describe('mintExtensionSession — google and apple produce the SAME shape (the 
             })
 
             expect(prismaMock.account.create).not.toHaveBeenCalled()
-            expect(prismaMock.account.update).toHaveBeenCalledWith({
-                where: { id: 'existing-account-id' },
-                data: { accessToken: 'new-at', idToken: 'new-it' },
-            })
+            expect(prismaMock.account.update).toHaveBeenCalledTimes(1)
+            const update = prismaMock.account.update.mock.calls[0][0]
+            expect(update.where).toEqual({ id: 'existing-account-id' })
+            expect(update.data.idToken).toBe('new-it')
+            expect(update.data.accessToken).not.toBe('new-at')
+            expect(
+                await decryptOAuthToken(update.data.accessToken as string),
+            ).toBe('new-at')
         },
     )
+})
+
+describe('mintExtensionSession — Apple refresh token persisted for revocation (T-5065)', () => {
+    const providerUser = {
+        id: 'apple-id-1',
+        email: 'apple-user@example.com',
+        emailVerified: true,
+    }
+
+    it('a new account stores the refresh token ENCRYPTED, so account deletion can revoke it', async () => {
+        await mintExtensionSession({
+            provider: 'apple',
+            providerUser,
+            tokens: {
+                accessToken: 'at',
+                refreshToken: 'r.apple-refresh.0.abc',
+                idToken: 'it',
+            },
+        })
+
+        const created = prismaMock.account.create.mock.calls[0][0].data
+        expect(created.refreshToken).toEqual(expect.any(String))
+        expect(created.refreshToken).not.toContain('apple-refresh')
+        expect(await decryptOAuthToken(created.refreshToken as string)).toBe(
+            'r.apple-refresh.0.abc',
+        )
+    })
+
+    it('a re-sign-in replaces the stored refresh token, encrypted', async () => {
+        prismaState.existingUser = {
+            id: 'existing-user-id',
+            email: 'apple-user@example.com',
+            name: 'Existing',
+            username: null,
+            image: null,
+            emailVerified: true,
+        }
+        prismaState.existingAccount = {
+            id: 'existing-account-id',
+            accessToken: 'old-at',
+            refreshToken: 'old-encrypted-refresh',
+            idToken: 'old-it',
+        }
+
+        await mintExtensionSession({
+            provider: 'apple',
+            providerUser,
+            tokens: {
+                accessToken: 'at',
+                refreshToken: 'r.new.0.abc',
+                idToken: 'it',
+            },
+        })
+
+        const data = prismaMock.account.update.mock.calls[0][0].data
+        expect(await decryptOAuthToken(data.refreshToken as string)).toBe(
+            'r.new.0.abc',
+        )
+    })
+
+    it('a re-sign-in that returns no refresh token keeps the one already stored', async () => {
+        prismaState.existingUser = {
+            id: 'existing-user-id',
+            email: 'apple-user@example.com',
+            name: 'Existing',
+            username: null,
+            image: null,
+            emailVerified: true,
+        }
+        prismaState.existingAccount = {
+            id: 'existing-account-id',
+            accessToken: 'old-at',
+            refreshToken: 'old-encrypted-refresh',
+            idToken: 'old-it',
+        }
+
+        await mintExtensionSession({
+            provider: 'apple',
+            providerUser,
+            tokens: { accessToken: 'at', idToken: 'it' },
+        })
+
+        expect(
+            prismaMock.account.update.mock.calls[0][0].data.refreshToken,
+        ).toBe('old-encrypted-refresh')
+    })
 })
 
 describe('mintExtensionSession — no email, no existing account', () => {

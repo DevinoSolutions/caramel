@@ -1,4 +1,9 @@
 import { withRoute } from '@/lib/api/withRoute'
+import {
+    loadAppleRevocationTargets,
+    revokeAppleGrants,
+    type AppleRevocationOutcome,
+} from '@/lib/auth/appleTokenRevocation'
 import prisma from '@/lib/prisma'
 import {
     foldRequesterEmail,
@@ -48,12 +53,14 @@ import { z } from 'zod'
 // arriving together, both authenticated) reaches here twice, and deleteMany
 // makes the second a no-op answered with `deleted: false` rather than an error.
 //
-// NOT done here, by design of what is stored: Sign in with Apple token
-// revocation. Apple wants the grant revoked when an account is deleted, which
-// needs the refresh token, and extensionOAuthSession.ts does not persist one
-// (only the short-lived access and id tokens).
-// TODO(T-4906): persist Apple's refresh token at mint and call
-// appleid.apple.com/auth/revoke from here.
+// SIGN IN WITH APPLE (T-5065, App Review 5.1.1(v)): the Apple tokens are read
+// from the accounts row BEFORE the transaction (the cascade removes it) and
+// revoked at appleid.apple.com/auth/revoke AFTER it commits
+// (appleTokenRevocation.ts). A revoke that fails does NOT fail the request: the
+// account is already gone and a 5xx would only make the client retry into a
+// 401. The failure goes to Sentry (never silent) and the response says so in
+// `appleRevocation` ('not_applicable' | 'revoked' | 'failed'); a user without
+// an Apple account triggers no call at all.
 //
 // Also NOT done: deleting the user's PostHog person. posthogServer.ts holds a
 // capture-only client (project token, no personal API key), and a person delete
@@ -116,6 +123,9 @@ export const POST = withRoute(
         const userId = session.user.id
         const email = session.user.email ?? null
 
+        // Before the delete: the accounts cascade away with the user.
+        const appleTargets = await loadAppleRevocationTargets(userId)
+
         const [siteSuggestions, , users] = await prisma.$transaction([
             prisma.siteSuggestion.updateMany({
                 where: siteSuggestionIdentityWhere({ userId, email }),
@@ -127,9 +137,17 @@ export const POST = withRoute(
             prisma.user.deleteMany({ where: { id: userId } }),
         ])
 
+        const deleted = users.count > 0
+        // Only the request that actually deleted the user revokes; the loser of
+        // a double-submit race leaves it to the winner.
+        const appleRevocation: AppleRevocationOutcome = deleted
+            ? await revokeAppleGrants(appleTargets)
+            : 'not_applicable'
+
         return NextResponse.json({
-            deleted: users.count > 0,
+            deleted,
             scrubbed: { siteSuggestions: siteSuggestions.count },
+            appleRevocation,
         })
     },
 )

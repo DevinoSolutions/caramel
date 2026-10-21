@@ -349,7 +349,7 @@ export const POST = withRoute(
                 }
 
                 const tokens = await tokenResponse.json()
-                const { access_token, id_token } = tokens
+                const { access_token, refresh_token, id_token } = tokens
 
                 // Decode ID token to get user info
                 // Apple's ID token is a JWT that contains user information
@@ -417,6 +417,9 @@ export const POST = withRoute(
                         },
                         tokens: {
                             accessToken: access_token,
+                            // Kept so account deletion can revoke the Apple grant
+                            // (T-5065, appleTokenRevocation.ts).
+                            refreshToken: refresh_token,
                             idToken: id_token,
                         },
                         attribution,

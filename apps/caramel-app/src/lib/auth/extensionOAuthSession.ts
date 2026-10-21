@@ -32,6 +32,7 @@ import {
     NO_EXTENSION_ATTRIBUTION,
     type ExtensionSignupAttribution,
 } from '@/lib/auth/extensionSignupAttribution'
+import { encryptOAuthToken } from '@/lib/auth/oauthTokenCrypto'
 import { recordSignup } from '@/lib/auth/signupCapture'
 import prisma from '@/lib/prisma'
 import { randomBytes } from 'crypto'
@@ -52,6 +53,9 @@ export interface ExtensionOAuthProviderUser {
 
 export interface ExtensionOAuthTokens {
     accessToken?: string | null
+    /** Apple's code exchange returns one; its account-deletion revoke
+     * (appleTokenRevocation.ts) needs it. Google's branch does not pass one. */
+    refreshToken?: string | null
     idToken?: string | null
 }
 
@@ -188,13 +192,20 @@ export async function mintExtensionSession({
         },
     })
 
+    // Access and refresh tokens are encrypted at rest exactly as better-auth's
+    // own callback stores them (`account.encryptOAuthTokens`, see
+    // oauthTokenCrypto.ts); the id token stays plain text, as it does there.
+    const accessToken = await encryptOAuthToken(tokens.accessToken)
+    const refreshToken = await encryptOAuthToken(tokens.refreshToken)
+
     if (!account) {
         await prisma.account.create({
             data: {
                 providerId: provider,
                 accountId: providerUser.id,
                 userId: user.id,
-                accessToken: tokens.accessToken || null,
+                accessToken,
+                refreshToken,
                 idToken: tokens.idToken || null,
             },
         })
@@ -202,7 +213,8 @@ export async function mintExtensionSession({
         await prisma.account.update({
             where: { id: account.id },
             data: {
-                accessToken: tokens.accessToken || account.accessToken,
+                accessToken: accessToken ?? account.accessToken,
+                refreshToken: refreshToken ?? account.refreshToken,
                 idToken: tokens.idToken || account.idToken,
             },
         })
