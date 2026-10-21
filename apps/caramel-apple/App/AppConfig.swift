@@ -10,8 +10,14 @@ enum AppConfig {
     /// listed in Info.plist BGTaskSchedulerPermittedIdentifiers via project.yml).
     static let alertsTaskIdentifier = "com.devino.Caramel.alerts-refresh"
 
-    /// Scheme handed to ASWebAuthenticationSession. Nothing redirects to it yet.
-    /// TODO(T-4906): the web OAuth flow ends on an HTML page, not on an app
-    /// redirect, so the sheet is closed by the app once /poll yields the token.
-    static let signInCallbackScheme = "caramel-signin"
+    /// Scheme handed to ASWebAuthenticationSession as callbackURLScheme. The
+    /// sheet closes itself when the web flow redirects to it, so it needs no
+    /// Info.plist URL type and no apple-app-site-association.
+    static let signInCallbackScheme = "com.devino.caramel"
+
+    /// The redirect_uri sent to /api/extension/oauth/authorize and quoted back
+    /// on the code exchange. MUST equal NATIVE_APP_REDIRECT_URI in
+    /// apps/caramel-app/src/lib/auth/extensionOAuthRedirect.ts (the server
+    /// accepts this one exact string).
+    static let signInRedirectURI = "(signInCallbackScheme)://auth/callback"
 }

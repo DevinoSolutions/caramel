@@ -192,36 +192,52 @@ extension CaramelAPI {
         return data
     }
 
+    /// POST /api/account/delete. Deletes the account itself (the user, every
+    /// session including this bearer, linked sign-ins and synced data).
+    func deleteAccount(bearer: String) async throws {
+        let body = try JSONEncoder().encode(["confirm": "DELETE"])
+        _ = try await send("POST", "/api/account/delete", body: body, bearer: bearer)
+    }
+
+    /// DELETE /api/extension/session. Revokes THIS bearer on the server
+    /// (idempotent: an already-dead token is still a 200).
+    func revokeSession(bearer: String) async throws {
+        _ = try await send("DELETE", "/api/extension/session", bearer: bearer)
+    }
+
     /// POST /api/account/data/delete. Removes synced savings, followed stores
-    /// and reports; it does NOT delete the account (see AccountView).
+    /// and reports; it does NOT delete the account (see deleteAccount).
     func deleteSyncedData(bearer: String) async throws {
         let body = try JSONEncoder().encode(["confirm": "DELETE"])
         _ = try await send("POST", "/api/account/data/delete", body: body, bearer: bearer)
     }
 }
 
-// MARK: - Sign-in routes (the existing extension OAuth flow, Safari nonce variant)
+// MARK: - Sign-in routes (the extension OAuth flow with the app's redirect URI)
 
 extension CaramelAPI {
-    /// GET /api/extension/oauth/authorize. The redirect target is the web
-    /// app's own /redirect hop (the only destination the nonce flow accepts);
-    /// the exchange then happens server-side and the app collects the result
-    /// from /poll.
-    func oauthAuthorize(provider: OAuthProvider, nonce: String) async throws -> OAuthAuthorizeResponse {
+    /// GET /api/extension/oauth/authorize with the app's own redirect URI
+    /// (AppConfig.signInRedirectURI). The provider ends on the web app's
+    /// /redirect hop, which bounces to that URI and closes the sheet.
+    func oauthAuthorize(provider: OAuthProvider) async throws -> OAuthAuthorizeResponse {
         try await get(
             "/api/extension/oauth/authorize",
             query: [
                 URLQueryItem(name: "provider", value: provider.rawValue),
-                URLQueryItem(name: "redirect_uri", value: baseURL.appendingPathComponent("api/extension/oauth/redirect").absoluteString),
-                URLQueryItem(name: "nonce", value: nonce),
+                URLQueryItem(name: "redirect_uri", value: AppConfig.signInRedirectURI),
             ]
         )
     }
 
-    /// GET /api/extension/oauth/poll. nil while the sign-in is still pending (204).
-    func oauthPoll(nonce: String) async throws -> OAuthPollResult? {
-        let (data, status) = try await send("GET", "/api/extension/oauth/poll", query: [URLQueryItem(name: "nonce", value: nonce)])
-        if status == 204 { return nil }
-        return try decode(OAuthPollResult.self, from: data, method: "GET", path: "/api/extension/oauth/poll")
+    /// POST /api/extension/oauth. Trades the code the sheet returned for a session bearer.
+    func oauthExchange(provider: OAuthProvider, code: String, state: String) async throws -> OAuthSessionResult {
+        let body = try JSONEncoder().encode([
+            "provider": provider.rawValue,
+            "code": code,
+            "state": state,
+            "redirectUri": AppConfig.signInRedirectURI,
+        ])
+        let (data, _) = try await send("POST", "/api/extension/oauth", body: body)
+        return try decode(OAuthSessionResult.self, from: data, method: "POST", path: "/api/extension/oauth")
     }
 }

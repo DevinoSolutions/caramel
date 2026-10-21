@@ -12,6 +12,7 @@ struct AccountView: View {
     @State private var isExporting = false
     @State private var confirmingDelete = false
     @State private var deleteMessage: String?
+    @State private var confirmingAccountDelete = false
 
     var body: some View {
         NavigationStack {
@@ -37,6 +38,12 @@ struct AccountView: View {
             .task(id: session.token) {
                 guard session.isSignedIn else { return }
                 await loadOverview()
+            }
+            .alert("Delete your account?", isPresented: $confirmingAccountDelete) {
+                Button("Delete account", role: .destructive) { Task { await deleteAccount() } }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This permanently deletes your Caramel account, your sign-ins and all your synced data, and signs you out everywhere, including the Safari extension. This cannot be undone.")
             }
             .alert("Delete your synced data?", isPresented: $confirmingDelete) {
                 Button("Delete", role: .destructive) { Task { await deleteData() } }
@@ -122,16 +129,17 @@ struct AccountView: View {
             if let deleteMessage = deleteMessage {
                 Text(deleteMessage).font(.footnote).foregroundStyle(.secondary)
             }
-            // TODO(T-4906): Apple App Review guideline 5.1.1(v) requires in-app
-            // account deletion. The only existing route (POST
-            // /api/account/data/delete) deletes the synced data, NOT the
-            // account or login, so a true "Delete account" button waits on a
-            // web endpoint that removes the user and revokes their sessions.
+            // Apple App Review guideline 5.1.1(v): in-app account deletion.
+            Button(role: .destructive) {
+                confirmingAccountDelete = true
+            } label: {
+                Label("Delete my account", systemImage: "person.crop.circle.badge.xmark")
+            }
         } header: {
             Text("Your data")
         }
         Section {
-            Button("Sign out", role: .destructive) { session.signOut() }
+            Button("Sign out", role: .destructive) { Task { await session.signOut() } }
         }
     }
 
@@ -184,6 +192,15 @@ struct AccountView: View {
             exportedFile = url
         } catch {
             exportError = error.localizedDescription
+        }
+    }
+
+    private func deleteAccount() async {
+        // On success the session is cleared and the view swaps to the signed-out
+        // state; on failure SessionStore.errorMessage shows the banner.
+        if await session.deleteAccount() {
+            exportedFile = nil
+            await favorites.refresh()
         }
     }
 

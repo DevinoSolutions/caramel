@@ -97,13 +97,15 @@ enum OAuthProvider: String {
     case google
 }
 
-/// GET /api/extension/oauth/authorize
+/// GET /api/extension/oauth/authorize. `state` is the signed state the
+/// provider will hand back on the redirect; the app checks the callback echoes it.
 struct OAuthAuthorizeResponse: Decodable {
     let authorizationUrl: String
+    let state: String
 }
 
-/// GET /api/extension/oauth/poll (200)
-struct OAuthPollResult: Decodable {
+/// POST /api/extension/oauth (200): the minted session.
+struct OAuthSessionResult: Decodable {
     let token: String
     let username: String?
     let image: String?
