@@ -6,7 +6,7 @@ import {
     NATIVE_APP_REDIRECT_URI,
 } from '@/lib/auth/extensionOAuthRedirect'
 import { NextRequest } from 'next/server'
-import { createHmac } from 'node:crypto'
+import { createHash, createHmac } from 'node:crypto'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 // The native iOS app's OAuth redirect target (T-4906): the app opens
@@ -73,6 +73,11 @@ vi.mock('@sentry/nextjs', () => ({
     setUser: vi.fn(),
 }))
 
+// A real PKCE pair, as the app derives it: base64url(SHA-256(verifier)).
+const VERIFIER = 'a'.repeat(20) + 'B'.repeat(20) + '-._~0123456789'
+const CHALLENGE = createHash('sha256').update(VERIFIER).digest('base64url')
+const OTHER_VERIFIER = 'z'.repeat(50)
+
 const APP = NATIVE_APP_REDIRECT_URI
 const EXT = 'https://gaimofgglbackoimfjopicmbmnlccfoe.chromiumapp.org/'
 const BASE = 'https://grabcaramel.test'
@@ -94,8 +99,17 @@ function redirect(params: Record<string, string>) {
     )
 }
 
-function signState(redirectUri: string, provider = 'google'): string {
-    const data = JSON.stringify({ provider, redirectUri, iat: Date.now() })
+function signState(
+    redirectUri: string,
+    provider = 'google',
+    codeChallenge?: string,
+): string {
+    const data = JSON.stringify({
+        provider,
+        redirectUri,
+        ...(codeChallenge ? { codeChallenge } : {}),
+        iat: Date.now(),
+    })
     const sig = createHmac('sha256', OAUTH_STATE_SECRET)
         .update(data)
         .digest('base64url')
@@ -135,7 +149,11 @@ describe('isAllowedExtensionRedirectUri — the app redirect URI', () => {
 
 describe('GET /api/extension/oauth/authorize — the app redirect URI', () => {
     it('sends Google to the registered /redirect hop, with the app URI in the signed state', async () => {
-        const res = await authorize({ provider: 'google', redirect_uri: APP })
+        const res = await authorize({
+            provider: 'google',
+            redirect_uri: APP,
+            code_challenge: CHALLENGE,
+        })
         expect(res.status).toBe(200)
         const { authorizationUrl, state } = (await res.json()) as {
             authorizationUrl: string
@@ -154,10 +172,48 @@ describe('GET /api/extension/oauth/authorize — the app redirect URI', () => {
         ) as { redirectUri: string; nonce?: string }
         expect(payload.redirectUri).toBe(APP)
         expect(payload.nonce).toBeUndefined()
+        // PKCE: the challenge is signed into the state for the exchange.
+        expect((payload as { codeChallenge?: string }).codeChallenge).toBe(
+            CHALLENGE,
+        )
+    })
+
+    it.each([
+        ['absent', {}],
+        ['too short', { code_challenge: 'abc' }],
+        ['not base64url', { code_challenge: '+'.repeat(43) }],
+        [
+            'a plain (non-S256) method',
+            { code_challenge: CHALLENGE, code_challenge_method: 'plain' },
+        ],
+    ])(
+        'refuses the app URI when the code_challenge is %s',
+        async (_l, extra) => {
+            const res = await authorize({
+                provider: 'google',
+                redirect_uri: APP,
+                ...extra,
+            })
+            expect(res.status).toBe(400)
+        },
+    )
+
+    it('accepts an explicit S256 method', async () => {
+        const res = await authorize({
+            provider: 'google',
+            redirect_uri: APP,
+            code_challenge: CHALLENGE,
+            code_challenge_method: 'S256',
+        })
+        expect(res.status).toBe(200)
     })
 
     it('sends Apple to /redirect with the app URI in the {r,s} envelope', async () => {
-        const res = await authorize({ provider: 'apple', redirect_uri: APP })
+        const res = await authorize({
+            provider: 'apple',
+            redirect_uri: APP,
+            code_challenge: CHALLENGE,
+        })
         expect(res.status).toBe(200)
         const { authorizationUrl } = (await res.json()) as {
             authorizationUrl: string
@@ -176,6 +232,7 @@ describe('GET /api/extension/oauth/authorize — the app redirect URI', () => {
         const res = await authorize({
             provider: 'google',
             redirect_uri: APP,
+            code_challenge: CHALLENGE,
             nonce: '3f2b8c1e-5a47-4d6b-9e10-7c2d4a8b9f01',
         })
         expect(res.status).toBe(400)
@@ -185,15 +242,30 @@ describe('GET /api/extension/oauth/authorize — the app redirect URI', () => {
         const res = await authorize({
             provider: 'google',
             redirect_uri: `${APP}?next=https://evil.example`,
+            code_challenge: CHALLENGE,
         })
         expect(res.status).toBe(400)
     })
 
-    it('leaves the extension flow alone: Google still gets the extension URI itself', async () => {
-        const res = await authorize({ provider: 'google', redirect_uri: EXT })
-        const { authorizationUrl } = (await res.json()) as {
+    it('leaves the extension flow alone: Google still gets the extension URI itself, and no challenge is demanded or signed', async () => {
+        const res = await authorize({
+            provider: 'google',
+            redirect_uri: EXT,
+            // Even if one is sent, an extension state never carries it.
+            code_challenge: CHALLENGE,
+        })
+        const { authorizationUrl, state } = (await res.json()) as {
             authorizationUrl: string
+            state: string
         }
+        const payload = JSON.parse(
+            Buffer.from(state.split('.')[0]!, 'base64url').toString(),
+        ) as Record<string, unknown>
+        expect(Object.keys(payload).sort()).toEqual([
+            'iat',
+            'provider',
+            'redirectUri',
+        ])
         expect(new URL(authorizationUrl).searchParams.get('redirect_uri')).toBe(
             EXT,
         )
@@ -277,7 +349,11 @@ describe('POST /api/extension/oauth — exchanging the app flow', () => {
         vi.stubGlobal('fetch', fetchMock)
     })
 
-    const exchange = (redirectUri: string, state: string) =>
+    const exchange = (
+        redirectUri: string,
+        state: string,
+        codeVerifier?: string,
+    ) =>
         oauthPOST(
             new NextRequest(`${BASE}/api/extension/oauth`, {
                 method: 'POST',
@@ -287,6 +363,7 @@ describe('POST /api/extension/oauth — exchanging the app flow', () => {
                     code: 'auth-code',
                     state,
                     redirectUri,
+                    ...(codeVerifier ? { codeVerifier } : {}),
                 }),
             }),
         )
@@ -300,16 +377,51 @@ describe('POST /api/extension/oauth — exchanging the app flow', () => {
     }
 
     it("quotes the /redirect hop to Google's token endpoint for the app URI, the value /authorize used", async () => {
-        const res = await exchange(APP, signState(APP))
+        const res = await exchange(
+            APP,
+            signState(APP, 'google', CHALLENGE),
+            VERIFIER,
+        )
         expect(res.status).toBe(200)
         expect(await res.json()).toMatchObject({ token: 'session-token' })
         expect(tokenRedirectUri()).toBe(INTERMEDIATE)
     })
 
-    it('still quotes the extension URI itself for an extension', async () => {
+    it('still quotes the extension URI itself for an extension, with no verifier', async () => {
         const res = await exchange(EXT, signState(EXT))
         expect(res.status).toBe(200)
         expect(tokenRedirectUri()).toBe(EXT)
+    })
+
+    it('ignores a verifier sent by an extension', async () => {
+        const res = await exchange(EXT, signState(EXT), OTHER_VERIFIER)
+        expect(res.status).toBe(200)
+    })
+
+    it.each([
+        ['no verifier', undefined],
+        ['a verifier that does not match the challenge', OTHER_VERIFIER],
+        ['a malformed (too short) verifier', 'short'],
+    ])(
+        'refuses the app exchange with %s, before any provider call',
+        async (_l, verifier) => {
+            const res = await exchange(
+                APP,
+                signState(APP, 'google', CHALLENGE),
+                verifier,
+            )
+            expect(res.status).toBe(400)
+            expect(await res.json()).toEqual({
+                error: 'Invalid or missing code_verifier',
+            })
+            expect(fetchMock).not.toHaveBeenCalled()
+        },
+    )
+
+    it('refuses an app exchange whose state carries no challenge (a state we would never have issued)', async () => {
+        const res = await exchange(APP, signState(APP), VERIFIER)
+        expect(res.status).toBe(400)
+        expect(fetchMock).not.toHaveBeenCalled()
     })
 
     it('rejects an app exchange whose state was signed for another redirect URI', async () => {

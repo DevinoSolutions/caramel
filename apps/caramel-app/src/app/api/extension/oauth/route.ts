@@ -1,7 +1,10 @@
 import { handleRouteError } from '@/lib/api/handleRouteError'
 import { preflight, withRoute } from '@/lib/api/withRoute'
 import { getAppleClientSecret } from '@/lib/auth/appleClientSecret'
-import { googleRedirectUriFor } from '@/lib/auth/extensionOAuthRedirect'
+import {
+    googleRedirectUriFor,
+    isNativeAppRedirectUri,
+} from '@/lib/auth/extensionOAuthRedirect'
 import {
     ExtensionOAuthEmailRequiredError,
     mintExtensionSession,
@@ -10,6 +13,7 @@ import {
     resolveExtensionAttribution,
     type ExtensionSignupAttribution,
 } from '@/lib/auth/extensionSignupAttribution'
+import { codeVerifierMatchesChallenge } from '@/lib/auth/nativeAppPkce'
 import { env } from '@/lib/env'
 import { BASE_URL } from '@/lib/env.client'
 import { createHmac, timingSafeEqual } from 'crypto'
@@ -28,6 +32,8 @@ interface OAuthStatePayload {
      * put them in the POST body). Unvalidated shape here: re-validated on read.
      */
     attribution?: { iid?: unknown; firstTouch?: unknown }
+    /** The native app's PKCE S256 challenge, signed in by /authorize. */
+    codeChallenge?: unknown
 }
 
 /** The state's payload when its signature, provider, redirect URI and age all hold; else null. */
@@ -101,6 +107,10 @@ const OAuthExchangeBodySchema = z.object({
     // attribution pipeline.
     iid: z.unknown().optional(),
     firstTouch: z.unknown().optional(),
+    // The native app's PKCE verifier (nativeAppPkce.ts). Required for the app
+    // redirect URI, ignored for every other client; its shape and match are
+    // checked in the handler so a bad one is a 400, like a bad state.
+    codeVerifier: z.string().optional(),
 })
 
 // CORS TIGHTENS here: was any `chrome-extension://…` / `moz-extension://…`
@@ -133,6 +143,24 @@ export const POST = withRoute(
                 { error: 'Invalid or expired OAuth state' },
                 { status: 400 },
             )
+        }
+
+        // The app's custom-scheme redirect can be intercepted by another app on
+        // the device, so its code is only good with the verifier whose hash
+        // /authorize signed into the state. Checked BEFORE any provider call, so
+        // a wrong verifier does not even spend the authorization code.
+        if (isNativeAppRedirectUri(redirectUri)) {
+            const challenge = verifiedState.codeChallenge
+            if (
+                typeof challenge !== 'string' ||
+                !body.codeVerifier ||
+                !codeVerifierMatchesChallenge(body.codeVerifier, challenge)
+            ) {
+                return NextResponse.json(
+                    { error: 'Invalid or missing code_verifier' },
+                    { status: 400 },
+                )
+            }
         }
 
         // The body's fields win; the signed state carries the Safari flow's.

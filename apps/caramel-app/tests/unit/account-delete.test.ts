@@ -32,6 +32,11 @@ const { prismaMock, transactionMock } = vi.hoisted(() => {
                     }) => ({ op: 'suggestions' }),
                 ),
             },
+            verification: {
+                deleteMany: vi.fn((_args: { where: unknown }) => ({
+                    op: 'verification',
+                })),
+            },
             user: {
                 deleteMany: vi.fn((_args: { where: { id: string } }) => ({
                     op: 'user',
@@ -93,7 +98,11 @@ beforeEach(() => {
     getSessionMock.mockResolvedValue({
         user: { id: USER_ID, email: USER_EMAIL },
     })
-    transactionMock.mockResolvedValue([{ count: 2 }, { count: 1 }])
+    transactionMock.mockResolvedValue([
+        { count: 2 },
+        { count: 1 },
+        { count: 1 },
+    ])
 })
 
 describe('POST /api/account/delete', () => {
@@ -114,10 +123,11 @@ describe('POST /api/account/delete', () => {
         await POST(deleteRequest({ confirm: 'DELETE' }))
 
         expect(transactionMock).toHaveBeenCalledTimes(1)
-        // The batch is [suggestions scrub, user delete], in that order: the
-        // scrub needs the email the user row carries.
+        // The batch is [suggestions scrub, verification erase, user delete],
+        // in that order: the scrub needs the email the user row carries.
         expect(transactionMock.mock.calls[0]![0]).toEqual([
             { op: 'suggestions' },
+            { op: 'verification' },
             { op: 'user' },
         ])
         const scrub = prismaMock.siteSuggestion.updateMany.mock.calls[0]![0]
@@ -134,6 +144,20 @@ describe('POST /api/account/delete', () => {
         })
     })
 
+    it('erases the one-time tokens that name the account (reset value = user id, identifier = address), anchored so another address is left alone', async () => {
+        await POST(deleteRequest({ confirm: 'DELETE' }))
+
+        const erase = prismaMock.verification.deleteMany.mock.calls[0]![0]
+        expect(erase.where).toEqual({
+            OR: [
+                { value: USER_ID },
+                { identifier: 'shopper@example.com' },
+                { identifier: { endsWith: '-shopper@example.com' } },
+                { identifier: { endsWith: ':shopper@example.com' } },
+            ],
+        })
+    })
+
     it('leaves the cascades to the schema: no hand-written deletes of dependants', async () => {
         await POST(deleteRequest({ confirm: 'DELETE' }))
 
@@ -145,8 +169,12 @@ describe('POST /api/account/delete', () => {
         expect(prismaMock.user.delete).not.toHaveBeenCalled()
     })
 
-    it('is idempotent when the user row is already gone (a lost race): 200, deleted false', async () => {
-        transactionMock.mockResolvedValue([{ count: 0 }, { count: 0 }])
+    it('a lost race (the user row already gone) is a no-op answered 200 with deleted false', async () => {
+        transactionMock.mockResolvedValue([
+            { count: 0 },
+            { count: 0 },
+            { count: 0 },
+        ])
 
         const res = await POST(deleteRequest({ confirm: 'DELETE' }))
 

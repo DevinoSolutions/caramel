@@ -11,6 +11,7 @@ import {
     attributionForOAuthState,
     extensionAttributionFromQuery,
 } from '@/lib/auth/extensionSignupAttribution'
+import { isValidCodeChallenge } from '@/lib/auth/nativeAppPkce'
 import { env } from '@/lib/env'
 import { BASE_URL } from '@/lib/env.client'
 import { isValidNonce } from '@/lib/extension-oauth-nonce'
@@ -48,6 +49,11 @@ const createSignedState = (payload: {
     // (not null) when absent, so an attribution-less state is byte-identical to
     // what it was before.
     attribution?: { iid?: string; firstTouch?: FirstTouchRecord }
+    // The native app's PKCE S256 challenge (nativeAppPkce.ts), signed into the
+    // state so the exchange can demand the matching verifier. Present ONLY for
+    // the app redirect URI; omitted (not null) for every other client, so their
+    // signed payload is byte-identical to what it was.
+    codeChallenge?: string
 }) => {
     if (!OAUTH_STATE_SECRET) {
         throw new Error('EXTENSION_OAUTH_STATE_SECRET is not configured')
@@ -136,6 +142,32 @@ export const GET = withRoute(
             )
         }
 
+        // The app's custom scheme is claimable by other apps on the device, so
+        // its code is only redeemable with the PKCE verifier whose hash is
+        // signed into the state here (nativeAppPkce.ts). Required for the app
+        // URI; ignored for every other redirect URI (the extensions do not
+        // send one, and signing it would change their state).
+        let codeChallenge: string | undefined
+        if (isNativeAppRedirectUri(redirectUri)) {
+            const challenge = searchParams.get('code_challenge')
+            const method = searchParams.get('code_challenge_method')
+            if (!challenge || !isValidCodeChallenge(challenge)) {
+                return NextResponse.json(
+                    {
+                        error: 'code_challenge (S256, base64url, 43 characters) is required with the app redirect_uri',
+                    },
+                    { status: 400 },
+                )
+            }
+            if (method !== null && method !== 'S256') {
+                return NextResponse.json(
+                    { error: 'code_challenge_method must be S256' },
+                    { status: 400 },
+                )
+            }
+            codeChallenge = challenge
+        }
+
         const baseURL = env.BETTER_AUTH_URL || BASE_URL
 
         // Never sign a state (or build a provider URL) for a destination that
@@ -176,6 +208,7 @@ export const GET = withRoute(
                 provider,
                 redirectUri,
                 nonce,
+                codeChallenge,
                 attribution:
                     installId || firstTouch
                         ? {
