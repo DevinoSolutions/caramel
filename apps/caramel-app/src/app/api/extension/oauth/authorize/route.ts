@@ -2,13 +2,16 @@ import type { FirstTouchRecord } from '@/lib/analytics/firstTouchRecord'
 import { handleRouteError } from '@/lib/api/handleRouteError'
 import { preflight, withRoute } from '@/lib/api/withRoute'
 import {
+    googleRedirectUriFor,
     isAllowedExtensionRedirectUri,
+    isNativeAppRedirectUri,
     reportRejectedExtensionRedirect,
 } from '@/lib/auth/extensionOAuthRedirect'
 import {
     attributionForOAuthState,
     extensionAttributionFromQuery,
 } from '@/lib/auth/extensionSignupAttribution'
+import { isValidCodeChallenge } from '@/lib/auth/nativeAppPkce'
 import { env } from '@/lib/env'
 import { BASE_URL } from '@/lib/env.client'
 import { isValidNonce } from '@/lib/extension-oauth-nonce'
@@ -46,6 +49,11 @@ const createSignedState = (payload: {
     // (not null) when absent, so an attribution-less state is byte-identical to
     // what it was before.
     attribution?: { iid?: string; firstTouch?: FirstTouchRecord }
+    // The native app's PKCE S256 challenge (nativeAppPkce.ts), signed into the
+    // state so the exchange can demand the matching verifier. Present ONLY for
+    // the app redirect URI; omitted (not null) for every other client, so their
+    // signed payload is byte-identical to what it was.
+    codeChallenge?: string
 }) => {
     if (!OAUTH_STATE_SECRET) {
         throw new Error('EXTENSION_OAUTH_STATE_SECRET is not configured')
@@ -124,6 +132,42 @@ export const GET = withRoute(
         }
         const nonce = nonceParam ?? undefined
 
+        // The native app never polls: its result comes back on the redirect.
+        // A nonce in the state would make /redirect take the Safari branch and
+        // swallow the code, so the combination is refused rather than guessed.
+        if (nonce !== undefined && isNativeAppRedirectUri(redirectUri)) {
+            return NextResponse.json(
+                { error: 'nonce is not supported with the app redirect_uri' },
+                { status: 400 },
+            )
+        }
+
+        // The app's custom scheme is claimable by other apps on the device, so
+        // its code is only redeemable with the PKCE verifier whose hash is
+        // signed into the state here (nativeAppPkce.ts). Required for the app
+        // URI; ignored for every other redirect URI (the extensions do not
+        // send one, and signing it would change their state).
+        let codeChallenge: string | undefined
+        if (isNativeAppRedirectUri(redirectUri)) {
+            const challenge = searchParams.get('code_challenge')
+            const method = searchParams.get('code_challenge_method')
+            if (!challenge || !isValidCodeChallenge(challenge)) {
+                return NextResponse.json(
+                    {
+                        error: 'code_challenge (S256, base64url, 43 characters) is required with the app redirect_uri',
+                    },
+                    { status: 400 },
+                )
+            }
+            if (method !== null && method !== 'S256') {
+                return NextResponse.json(
+                    { error: 'code_challenge_method must be S256' },
+                    { status: 400 },
+                )
+            }
+            codeChallenge = challenge
+        }
+
         const baseURL = env.BETTER_AUTH_URL || BASE_URL
 
         // Never sign a state (or build a provider URL) for a destination that
@@ -164,6 +208,7 @@ export const GET = withRoute(
                 provider,
                 redirectUri,
                 nonce,
+                codeChallenge,
                 attribution:
                     installId || firstTouch
                         ? {
@@ -193,7 +238,14 @@ export const GET = withRoute(
                     'https://accounts.google.com/o/oauth2/v2/auth',
                 )
                 oauthUrl.searchParams.set('client_id', googleClientId)
-                oauthUrl.searchParams.set('redirect_uri', redirectUri) // Use extension's redirect URI directly
+                // Extensions: their redirect URI, directly. The native app's
+                // custom scheme is not one Google accepts, so for the app
+                // Google is sent to our own /redirect hop, which bounces the
+                // code to the app (googleRedirectUriFor).
+                oauthUrl.searchParams.set(
+                    'redirect_uri',
+                    googleRedirectUriFor(redirectUri, baseURL),
+                )
                 oauthUrl.searchParams.set('response_type', 'code')
                 oauthUrl.searchParams.set('scope', 'openid email profile')
                 oauthUrl.searchParams.set('access_type', 'offline')
