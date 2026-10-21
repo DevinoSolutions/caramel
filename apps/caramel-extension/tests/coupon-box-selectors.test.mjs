@@ -5,6 +5,7 @@ import {
     caramelRiskyControl,
     caramelSelectorAllowed,
     caramelStableSelector,
+    caramelTotalSelector,
 } from '../coupon-box-selectors.js'
 
 // The coupon-box selector builder (coupon-box-selectors.js): the selectors a
@@ -436,5 +437,38 @@ describe('caramelBoxSelectors', () => {
             '<input name="coupon"><button>Apply</button><button>Apply</button>',
         )
         expect(caramelBoxSelectors($('input'), $('button'), null)).toBeNull()
+    })
+})
+
+describe('caramelTotalSelector', () => {
+    beforeEach(() => page(''))
+
+    it('a total row with a stable name of its own is named itself', () => {
+        page(
+            '<div data-testid="order-total"><span>Total</span> <span>$100.00</span></div>',
+        )
+        expect(caramelTotalSelector($('div'))).toBe(
+            'div[data-testid="order-total"]',
+        )
+    })
+
+    it('a bare row is named by the one element that holds the amount', () => {
+        page(
+            '<div class="item">Mug</div>' +
+                '<div class="row"><span>Total</span> <span id="tot">$100.00</span></div>',
+        )
+        expect(caramelTotalSelector($('.row'))).toBe('span#tot')
+    })
+
+    it('a bare row with two amounts in it names nothing', () => {
+        page(
+            '<div class="row"><span>Total</span> <s id="was">$120.00</s> <span id="tot">$100.00</span></div>',
+        )
+        expect(caramelTotalSelector($('.row'))).toBeNull()
+    })
+
+    it('an amount with no stable name names nothing', () => {
+        page('<div class="row"><span>Total</span> <span>$100.00</span></div>')
+        expect(caramelTotalSelector($('.row'))).toBeNull()
     })
 })

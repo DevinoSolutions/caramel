@@ -420,7 +420,7 @@ function _boxSaveBody(box) {
             return null
         out[part] = v
     }
-    return out.input ? out : null
+    return out.input && out.total ? out : null
 }
 async function _boxSavedHosts() {
     try {

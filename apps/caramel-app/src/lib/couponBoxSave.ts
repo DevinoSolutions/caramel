@@ -57,8 +57,10 @@ export const couponBoxSaveRequestSchema = z
                 apply: clickedSelectorSchema.nullable(),
                 // The control that had to be opened to reveal the box, if any.
                 toggle: clickedSelectorSchema.nullable(),
-                // The order-total element the saving was read from.
-                total: selectorSchema.nullable(),
+                // The order-total element the saving was read from. Required:
+                // the next shopper's run measures the saving there, and a box
+                // whose total cannot be read again cannot prove a code works.
+                total: selectorSchema,
             })
             .strict(),
     })

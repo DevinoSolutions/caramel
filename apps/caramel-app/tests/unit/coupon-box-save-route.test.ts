@@ -152,6 +152,7 @@ describe('POST /api/extension/coupon-box-save', () => {
         ['a :has() selector', goodBody({ input: 'form:has(input)' })],
         ['an XPath', goodBody({ input: '//input[@id="promo"]' })],
         ['an email in a selector', goodBody({ total: '[data-user="a@b.co"]' })],
+        ['no order total', goodBody({ total: null })],
         [
             'a long number in a value',
             goodBody({ apply: '[data-phone="5551234567"]' }),

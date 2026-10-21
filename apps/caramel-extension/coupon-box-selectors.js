@@ -202,6 +202,23 @@ export function caramelStableSelector(el) {
     return null
 }
 
+/* The order total the finder measured, named for the save. The row first;
+ * a row with no stable name of its own (a bare <div> under the page body) is
+ * named by the one element inside it that holds the amount, which is the text
+ * a config's price container is read from. null when neither has a stable
+ * name, or the row holds more than one amount and which one is the total is
+ * not certain. */
+// Exported for tests/coupon-box-selectors.test.mjs.
+export function caramelTotalSelector(row) {
+    const own = caramelStableSelector(row)
+    if (own || !row || row.nodeType !== 1) return own
+    const amount = el => /\d/.test(el.textContent || '')
+    const leaves = [...row.querySelectorAll('*')].filter(
+        el => amount(el) && ![...el.children].some(amount),
+    )
+    return leaves.length === 1 ? caramelStableSelector(leaves[0]) : null
+}
+
 // The selectors for one box: its input, its apply button (null when the box
 // applies on Enter) and the toggle that opened it (null when it was showing).
 // null when any part of it has no stable name: half a box is not a box.

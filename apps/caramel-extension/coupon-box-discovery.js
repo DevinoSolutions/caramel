@@ -1796,9 +1796,13 @@ async function savable(record, found, opened, totalEl) {
             /* @vite-ignore */ currentBrowser.runtime.getURL(SELECTORS_MODULE)
         )
         const parts = m.caramelBoxSelectors(found.input, found.button, opened)
-        const total = totalEl ? m.caramelStableSelector(totalEl) : null
+        // The total is part of the box: the next shopper's run reads the
+        // saving there, and a box whose total cannot be found again cannot
+        // prove a code works.
+        const total = totalEl ? m.caramelTotalSelector(totalEl) : null
         if (
             parts &&
+            total &&
             !(parts.apply && m.caramelRiskyControl(parts.apply)) &&
             !(parts.toggle && m.caramelRiskyControl(parts.toggle))
         )

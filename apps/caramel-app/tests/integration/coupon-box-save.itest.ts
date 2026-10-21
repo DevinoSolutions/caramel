@@ -193,7 +193,7 @@ describe('coupon-box save: the saved row is served like a pipeline row', () => {
             input: '#discount',
             apply: null,
             toggle: null,
-            total: null,
+            total: '.order-total',
         })
         expect(res.status).toBe(200)
 
@@ -201,12 +201,13 @@ describe('coupon-box save: the saved row is served like a pipeline row', () => {
             domain: store,
             couponInput: '#discount',
             couponSubmit: '#discount',
+            priceContainer: '.order-total',
         })
         const row = await storedRow(store)
         expect(row).toMatchObject({
             showInputXpath: null,
             dismissButtonXpath: null,
-            priceContainerXpath: null,
+            priceContainerXpath: '.order-total',
             successIndicatorXpath: null,
             errorIndicatorXpath: null,
             couponRemoveXpath: null,

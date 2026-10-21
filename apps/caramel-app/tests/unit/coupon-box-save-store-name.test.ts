@@ -106,14 +106,14 @@ describe('storeConfigFromBox', () => {
                 input: '#code',
                 apply: null,
                 toggle: '.have-code',
-                total: null,
+                total: '.order-total',
             }),
         ).toEqual({
             storeName: 'example.com',
             couponInputXpath: '#code',
             applyButtonXpath: '#code',
             showInputXpath: '.have-code',
-            priceContainerXpath: null,
+            priceContainerXpath: '.order-total',
         })
     })
 })
