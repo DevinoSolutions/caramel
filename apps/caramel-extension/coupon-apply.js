@@ -452,6 +452,42 @@ export function _caramelSentencesOf(text) {
 }
 // How long the total gets to move after a refusal-shaped sentence appears.
 const CARAMEL_ANSWER_GRACE_MS = 1500
+// How a finder-picked box's total settles before the verdict: read every
+// CARAMEL_FINDER_READ_MS; an unmoved total is settled on two equal reads, a
+// moved one must hold for CARAMEL_FINDER_HOLD_MS of equal reads; never more
+// than CARAMEL_FINDER_SETTLE_READS reads in all.
+const CARAMEL_FINDER_READ_MS = 250
+const CARAMEL_FINDER_HOLD_MS = 1500
+const CARAMEL_FINDER_HOLD_READS =
+    CARAMEL_FINDER_HOLD_MS / CARAMEL_FINDER_READ_MS
+const CARAMEL_FINDER_SETTLE_READS = 12
+// How long a disabled Apply button gets to be enabled after the code is typed.
+const CARAMEL_APPLY_ENABLE_WAIT_MS = 1500
+
+// A store's fresh sentence that refuses THIS code: it names the code, or says
+// the code is invalid, expired, unknown. A caveat printed as a code applies
+// ("Limit one offer per order", "Promo code applied. Cannot be combined with
+// other offers.") is not one — the total decides those.
+const _CARAMEL_REFUSES_CODE_RE =
+    /\b(invalid|not valid|isn.t valid|is not an? valid|no longer valid|expired|not recogni[sz]ed|does not exist|doesn.t exist|not found|incorrect (code|coupon|promo|voucher)|unknown (code|coupon|promo|voucher)|ung[üu]ltig|abgelaufen|no es v[aá]lido|n.est pas valide|non valid[oa]|ongeldig)\b/i
+// Judged sentence by sentence: "SAVE20 applied! Cannot be combined with other
+// offers." names the code in a sentence that accepts it, and refuses nothing.
+export function _caramelRefusesTheCode(text, code) {
+    const c = String(code || '')
+        .trim()
+        .toLowerCase()
+    return _caramelSentencesOf(String(text || '')).some(s => {
+        if (_CARAMEL_ACCEPTED_RE.test(s) && !_CARAMEL_NEGATION_RE.test(s))
+            return false
+        if (_CARAMEL_REFUSES_CODE_RE.test(s)) return true
+        return (
+            c.length >= 3 &&
+            s.toLowerCase().includes(c) &&
+            _CARAMEL_NEGATION_RE.test(s) &&
+            !/\bcombin|\bstack/i.test(s)
+        )
+    })
+}
 
 function _caramelRejectionSentences(scope) {
     const tidy = t => (t || '').trim().replace(/\s+/g, ' ')
@@ -813,13 +849,27 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
     // For a finder-picked box the total is the whole verdict: let it settle
     // (two equal reads in a row) so a number caught mid-render is not read as
     // the store's answer, and make sure the marker points at a live row.
+    //
+    // A total that MOVED is held longer (CARAMEL_FINDER_HOLD_MS of equal
+    // reads): a cart that re-prices line by line shows a lower number for a
+    // moment — the total without its shipping line — before the store's real
+    // answer lands and it is back where it was. Two reads a quarter second
+    // apart took that moment for a saving, told the shopper so, and saved the
+    // box as a proven one for every later shopper on the store. An unmoved
+    // total settles as before, so a refused code costs nothing more.
     if (rec.caramelFound && hasPriceCfg) {
         let last = caramelFinderTotalNow(rec)
-        for (let t = 0; t < 8; t++) {
-            await sleep(250)
+        let held = 0
+        for (let t = 0; t < CARAMEL_FINDER_SETTLE_READS; t++) {
+            await sleep(CARAMEL_FINDER_READ_MS)
             const now = caramelFinderTotalNow(rec)
-            if (Number.isFinite(now) && now === last) break
-            last = now
+            if (!Number.isFinite(now) || now !== last) {
+                held = 0
+                last = now
+                continue
+            }
+            if (now === original) break
+            if (++held >= CARAMEL_FINDER_HOLD_READS) break
         }
     }
 
@@ -905,6 +955,25 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
         // A drop read off a new deduction line, beside the store's own fresh
         // rejection of the code, is not a saving (see finderTotal).
         if (rec.caramelNetted && errorIsNew) priceDropped = false
+        // Nor is a drop beside the store's fresh refusal of THIS code, on a
+        // box the finder picked: the store said the code is not valid and
+        // something else (its own promotion landing) moved the total. Money
+        // still wins over a caveat ("Limit one offer per order"), which
+        // _caramelRefusesTheCode leaves alone.
+        if (
+            rec.caramelFound &&
+            errorIsNew &&
+            _caramelRefusesTheCode(errorMsg, code)
+        ) {
+            log('AUTO_INSERT_DROP_BESIDE_REFUSAL', {
+                code,
+                text: opts?.redact
+                    ? '[redacted]'
+                    : String(errorMsg).slice(0, 140),
+                reason: 'the total moved while the store refused this code — not this code’s saving',
+            })
+            priceDropped = false
+        }
     }
     // Success rules (in priority order):
     //  1. price dropped                       → real win
@@ -1057,6 +1126,18 @@ export async function applyCoupon(code, rec) {
            by the agent's HARD VALIDATION 2 step. */
         setInputValue(input, code)
         if (applyBtn !== input) {
+            // A store that enables Apply only once the field has text does
+            // so on the framework's next tick, after the input event we just
+            // dispatched. A click in the same tick lands on a still-disabled
+            // button and nothing is submitted; the shopper's own click comes
+            // much later and never meets this.
+            if (applyBtn.disabled) {
+                const until = performance.now() + CARAMEL_APPLY_ENABLE_WAIT_MS
+                while (applyBtn.disabled && performance.now() < until)
+                    await sleep(50)
+                if (applyBtn.disabled)
+                    log('AUTO_INSERT_APPLY_STILL_DISABLED', { code })
+            }
             try {
                 const r = applyBtn.getBoundingClientRect()
                 const cx = r.x + r.width / 2

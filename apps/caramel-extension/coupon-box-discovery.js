@@ -85,6 +85,8 @@ const STRONG = [
     'rebate',
     'alennus',
     'rabattkod',
+    'クーポン',
+    '割引コード',
 ]
 // Weak on their own: "code" is also a postcode, "gift" also a gift message.
 const WEAK = ['code', 'gift card', 'giftcard', 'gift-card', 'certificate']
@@ -148,6 +150,7 @@ const APPLY_WORDS = [
     'einlösen',
     'aplicar',
     'appliquer',
+    '適用',
     'applica',
     'toepassen',
     'zastosuj',
@@ -245,9 +248,54 @@ function visible(el) {
     return true
 }
 
+// The labels that name THIS field. `el.labels` resolves a label[for] to the
+// FIRST element carrying the id, so a form a store draws twice with the same
+// ids (a mobile copy hidden on desktop, then the copy the shopper sees — SFCC
+// SFRA carts do) hands every label to the hidden copy and none to the shown
+// one. A label[for] names the id holder nearest to it in the tree instead;
+// a page with unique ids reads exactly as before.
+// An id longer than ID_MAX is no label target (a 40 KiB one is a page read in
+// bounded time, see the tests): those keep the spec's own resolution.
+const ID_MAX = 200
+const quoteId = id => id.replace(/["\\]/g, '\\$&')
+function ownLabels(el) {
+    const out = []
+    for (const l of el.labels || [])
+        if (!l.htmlFor || l.contains(el) || nearestIdHolder(l) === el)
+            out.push(l)
+    if (el.id && el.id.length <= ID_MAX)
+        for (const l of el.ownerDocument.querySelectorAll(
+            `label[for="${quoteId(el.id)}"]`,
+        ))
+            if (!out.includes(l) && nearestIdHolder(l) === el) out.push(l)
+    return out
+}
+
+// Of the elements carrying the id a label names, the one whose common
+// ancestor with the label is nearest. One holder (the normal page) is it.
+function nearestIdHolder(label) {
+    if (label.htmlFor.length > ID_MAX) return label.control
+    const holders = label.ownerDocument.querySelectorAll(
+        `[id="${quoteId(label.htmlFor)}"]`,
+    )
+    if (holders.length < 2) return holders[0] || null
+    let best = null
+    let bestUp = Infinity
+    for (const h of holders) {
+        let up = 0
+        for (let p = label.parentElement; p; p = p.parentElement, up++)
+            if (p.contains(h)) break
+        if (up < bestUp) {
+            best = h
+            bestUp = up
+        }
+    }
+    return best
+}
+
 function labelText(el) {
     const parts = []
-    for (const l of el.labels || []) parts.push(textOf(l))
+    for (const l of ownLabels(el)) parts.push(textOf(l))
     const lb = el.getAttribute('aria-labelledby')
     if (lb) {
         for (const id of lb.split(/\s+/)) {
@@ -311,15 +359,21 @@ function attrText(el) {
 // "first-name" must also meet "customer[first_name]", so _ - . [ ] ( ) / : are
 // boundaries on BOTH sides.
 const SEP = /[_\-.[\]()/:]+/g
+// A word of a script written without spaces (Japanese) is met anywhere in
+// the text: "クーポンコードを入力" holds クーポン with no boundary around it.
+const UNSPACED_RE = /^[\u0080-\u{10ffff}]+$/u
 function has(text, w) {
     const t = ' ' + text.replace(SEP, ' ') + ' '
     const v = w.replace(SEP, ' ')
     return (
         t.includes(' ' + v + ' ') ||
         t.includes(' ' + v + 's ') ||
-        (w.length >= 5 && text.includes(w))
+        ((w.length >= 5 || UNSPACED_RE.test(w)) && text.includes(w))
     )
 }
+// A field about the shopper's standing, not a code (see scoreInput).
+const ACCOUNT_FIELD_RE =
+    /\b(?:members?|memberships?|loyalty|points?|rewards?|students?|military|veterans?|teachers?)\b/i
 
 /* ---------------------------------------------------------------- inputs */
 // Judged by the PROPERTY, which is what the browser renders: an unknown type
@@ -332,6 +386,14 @@ function scoreInputs(doc) {
         if (c) candidates.push(c)
     }
     candidates.sort((a, b) => b.score - a.score)
+    // A field drawn twice (the same words, one copy hidden): the copy the
+    // shopper can see is the box, whatever the hidden copy scored on its
+    // surroundings — a hidden control never wins over a visible one.
+    const top = candidates[0]
+    if (top && !top.visible) {
+        const i = candidates.findIndex(c => c.visible && c.attrs === top.attrs)
+        if (i > 0) candidates.unshift(...candidates.splice(i, 1))
+    }
     return candidates
 }
 
@@ -359,6 +421,19 @@ function scoreInput(el) {
     let score = 0
     const strongAttr = STRONG.filter(w => has(attrs, w))
     const strongLabel = STRONG.filter(w => has(label, w))
+    // A field whose own words name a member, a loyalty or rewards account, a
+    // student or military status is a lookup of who the shopper is, never a
+    // coupon box — however much the heading above it says "discount". Its
+    // own words naming a coupon ("Member discount code") keep it; the code
+    // phrases are taken out first so "Promo or rewards code" is not refused.
+    if (
+        !strongAttr.length &&
+        !strongLabel.length &&
+        ACCOUNT_FIELD_RE.test(
+            withoutCodePhrases((attrs + ' ' + label).replace(SEP, ' ')),
+        )
+    )
+        return null
     // Context is weaker evidence than the field's own words, and two
     // contexts lie: a newsletter blurb ("special offers, exclusive
     // promotions") and a gift-card widget ("Redeem" beside "Gift Card").
@@ -447,7 +522,8 @@ function scoreInput(el) {
         strongLabel.length ||
         strongCtx.length ||
         reasons.includes('form-action')
-    if (score > 0 && evidence) return { el, score, reasons, visible: vis }
+    if (score > 0 && evidence)
+        return { el, score, reasons, visible: vis, attrs }
     return null
 }
 
@@ -461,6 +537,10 @@ const buttonLabel = el =>
             el.textContent,
     )
 const isDanger = text => DANGER.some(w => has(text, w))
+// Words that say a control is about a code: the coupon vocabulary, or "code"
+// itself.
+const namesACode = text =>
+    STRONG.some(w => has(text, w)) || has(text, 'code') || has(text, 'codes')
 // Every kind of field a button could belong to: a submit/button input is a
 // button, not a field.
 const FIELDS =
@@ -477,7 +557,10 @@ const FIELDS =
 const NOT_AN_APPLY_RE =
     /\b(?:remove|delete|trash|qty|quantity|plus|minus|(?:in|de)cre(?:ase|ment)|check ?out|place ?order|pay(?:pal)?|buy|purchase|sign ?(?:in|up)|log ?in|subscribe|wishlist)\b/i
 function wordlessApply(btn, input) {
-    if (!ownsBox(btn, input) || NEVER_CLICK.test(buttonLabel(btn))) return false
+    const label = buttonLabel(btn)
+    if (!ownsBox(btn, input) || NEVER_CLICK.test(label)) return false
+    // A button that only says "Add" is a product control (see scoreButton).
+    if (/^add$/i.test(label)) return false
     for (const attr of [
         btn.getAttribute('name'),
         btn.id,
@@ -510,9 +593,14 @@ function scoreButton(btn, input, level) {
         return null
     if (isDanger(text) && !APPLY_VERBS.some(w => has(text, w))) return null
     const said = norm([text, ariaOf(btn), btn.title, btn.value].join(' '))
-    if (!APPLY_WORDS.some(w => has(said, w)) && !wordlessApply(btn, input))
+    // "Add" applies a code only beside a code word ("Add promo code"): a bare
+    // "Add" on a cross-sell row under the box puts a product in the cart.
+    const applyWords = APPLY_WORDS.filter(
+        w => w !== 'add' || namesACode(said + ' ' + attrs),
+    )
+    if (!applyWords.some(w => has(said, w)) && !wordlessApply(btn, input))
         return null
-    const applyHit = APPLY_WORDS.filter(w => has(text, w) || has(attrs, w))
+    const applyHit = applyWords.filter(w => has(text, w) || has(attrs, w))
     if (applyHit.length) {
         s += 40
         reasons.push('apply:' + applyHit[0])
@@ -1193,9 +1281,12 @@ function findToggle(doc, input) {
 // last one in document order (the bottom line of a summary). A cart with no
 // total row at all is read by its subtotal; never when a total row exists.
 const TOTAL_LABEL =
-    /^(order |estimated |grand |cart |basket |bag |your )?total( due| to pay| \(.*\))?:?$|^total\b|^(est\.?|estimated) (order )?total|^order total|^amount due|^total à payer|^gesamt|^summe|^totale/i
+    /^(order |estimated |grand |cart |basket |bag |your )?total( due| to pay| \(.*\))?:?$|^total\b|^(est\.?|estimated) (order )?total|^order total|^amount due|^total à payer|^gesamt|^summe|^totale|^合計/i
+// A total before tax ("Gesamtnettosumme", "Total excl. VAT", "Total HT") is
+// not what the shopper pays: it loses to the gross total, and a cart that
+// shows only a net total shows no total. "incl. VAT" rows are gross and stay.
 const TOTAL_NOT =
-    /sub[- ]?total|sav(ed?|ings?)\b|discount|items? total|total items|shipping|tax|points|weight|qty|quantity|calculated/i
+    /sub[- ]?total|sav(ed?|ings?)\b|discount|items? total|total items|shipping|tax|points|weight|qty|quantity|calculated|netto|\bnet\b|\bex(cl|kl)\b|\bex\.? ?(vat|btw|ust)\b|excluding|exclusief|zzgl|ohne (mwst|ust|steuer)|\bht\b|hors taxes?|sans tva|sin iva|imponibile/i
 const SUB_LABEL =
     /^(order |cart |merchandise |product |est\.? |estimated )?sub[- ]?total( \(.*\))?:?$|^product total:?$/i
 const SUB_NOT = /sav(ed?|ings?)\b|discount|shipping|tax|points/i
@@ -1254,7 +1345,10 @@ function scanTotalRows(
     doc,
     LABEL,
     NOT,
-    { root = doc.body, words = /total|amount due|gesamt|summe|totale/i } = {},
+    {
+        root = doc.body,
+        words = /total|amount due|gesamt|summe|totale|合計/i,
+    } = {},
 ) {
     const hits = []
     const labels = new Set()

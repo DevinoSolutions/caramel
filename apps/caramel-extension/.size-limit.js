@@ -130,7 +130,13 @@ module.exports = [
         // 2026-10-19, raised 97 -> 98 kB: the trusted-input guard, the stop
         // mark and the handoff note above joined the bundle with the server
         // pick mode and the on-demand finder. Measured 97.85 kB.
-        limit: '98 KB',
+        // 2026-10-22, raised 98 -> 101 kB: main's #401 (removing our coupon
+        // never clicks a product line's remove) took it to 98.74 kB, then the
+        // apply flow on a box the finder found: it waits for an Apply the
+        // store enables a tick after typing, holds a moved total before
+        // calling it a saving, and refuses a drop beside the store's fresh
+        // refusal of the code. Measured 99.77 kB.
+        limit: '101 KB',
         brotli: false,
     },
     {
