@@ -23,3 +23,10 @@ Headed stealth-browser checks of grabcaramel.com (prod, release fb6dcde) and dev
 
 ## T-5448 local files (prefix 5448-)
 5448-*.png and 5448-results.txt come from the T-5448 local proof (worktree run), see results.txt.
+
+## T-5888 dev Google client switch (2026-10-21 21:40Z)
+- `t5888-a-app-authorize-chooser.png`: dev /api/extension/oauth/authorize (app redirect, real S256 PKCE) → Google account chooser, client 907782110658-onko… (was redirect_uri_mismatch, see dev-google-authorize-redirect-uri-mismatch.png).
+- `t5888-b-dev-web-signed-in.png`: dev /login → Google → amin@devino.ca → back on dev.grabcaramel.com signed in; get-session 200. Test session deleted afterwards.
+
+## PR #404 (T-5535 M4) local headed proof
+- `pr404-3-quiet-404-card.png`: unknown coupon id → report 404 → quiet "That code is no longer listed." note, no error, no telemetry. Prod check follows the deploy.
