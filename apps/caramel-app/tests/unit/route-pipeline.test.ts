@@ -9,6 +9,10 @@ import {
 import { POST as oauthPOST } from '@/app/api/extension/oauth/route'
 import { POST as suggestPOST } from '@/app/api/sites/suggest/route'
 import { POST as sourcesPOST } from '@/app/api/sources/route'
+import {
+    bindCodeToState,
+    codeBoundToState,
+} from '@/lib/auth/extensionOAuthCodeBinding'
 import { decryptOAuthToken } from '@/lib/auth/oauthTokenCrypto'
 import { NextRequest } from 'next/server'
 import { createHmac } from 'node:crypto'
@@ -295,7 +299,17 @@ function exchangeRequest(
             'content-type': 'application/json',
             ...(origin ? { origin } : {}),
         },
-        body: JSON.stringify(body),
+        body: JSON.stringify(
+            // Apple's code always reaches the client through our /redirect
+            // hop, which binds it to the state it came back with
+            // (extensionOAuthCodeBinding.ts); a test of the exchange sends it
+            // in the shape the client really holds.
+            body.provider === 'apple' &&
+                typeof body.code === 'string' &&
+                typeof body.state === 'string'
+                ? { ...body, code: bindCodeToState(body.code, body.state) }
+                : body,
+        ),
     })
 }
 
@@ -733,7 +747,7 @@ describe('extension/oauth/authorize — CORS + rate-limit (F-007)', () => {
     })
 })
 
-describe('extension/oauth/redirect — error boundary, no rate-limit (F-007)', () => {
+describe('extension/oauth/redirect — error boundary (F-007)', () => {
     it('GET with code+state -> redirects to the extension redirect URI', async () => {
         const req = new NextRequest(
             'http://localhost/api/extension/oauth/redirect?code=abc&state=xyz&extension_redirect=' +
@@ -747,7 +761,13 @@ describe('extension/oauth/redirect — error boundary, no rate-limit (F-007)', (
         expect(location).toContain(
             'gaimofgglbackoimfjopicmbmnlccfoe.chromiumapp.org',
         )
-        expect(location).toContain('code=abc')
+        // The code travels bound to the state it arrived with.
+        expect(
+            codeBoundToState(
+                new URL(location ?? '').searchParams.get('code') ?? '',
+                'xyz',
+            ),
+        ).toBe('abc')
     })
 
     it('missing code -> 400', async () => {

@@ -2,6 +2,10 @@ import { handleRouteError } from '@/lib/api/handleRouteError'
 import { preflight, withRoute } from '@/lib/api/withRoute'
 import { getAppleClientSecret } from '@/lib/auth/appleClientSecret'
 import {
+    codeBoundToState,
+    isBoundCode,
+} from '@/lib/auth/extensionOAuthCodeBinding'
+import {
     googleRedirectUriFor,
     isNativeAppRedirectUri,
 } from '@/lib/auth/extensionOAuthRedirect'
@@ -10,81 +14,28 @@ import {
     mintExtensionSession,
 } from '@/lib/auth/extensionOAuthSession'
 import {
+    verifiedExtensionOAuthState,
+    type ExtensionOAuthStatePayload,
+} from '@/lib/auth/extensionOAuthState'
+import {
     resolveExtensionAttribution,
     type ExtensionSignupAttribution,
 } from '@/lib/auth/extensionSignupAttribution'
 import { codeVerifierMatchesChallenge } from '@/lib/auth/nativeAppPkce'
 import { env } from '@/lib/env'
 import { BASE_URL } from '@/lib/env.client'
-import { createHmac, timingSafeEqual } from 'crypto'
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 
-const OAUTH_STATE_SECRET = env.EXTENSION_OAUTH_STATE_SECRET
-
-interface OAuthStatePayload {
-    provider: string
-    redirectUri: string
-    iat: number
-    /**
-     * The Safari flow's install id + first-touch record, signed into the state
-     * by /authorize (its exchange runs server-side, so the extension cannot
-     * put them in the POST body). Unvalidated shape here: re-validated on read.
-     */
-    attribution?: { iid?: unknown; firstTouch?: unknown }
-    /** The native app's PKCE S256 challenge, signed in by /authorize. */
-    codeChallenge?: unknown
-}
-
-/** The state's payload when its signature, provider, redirect URI and age all hold; else null. */
+/** The state's payload when its signature, age, provider and redirect URI all hold; else null. */
 function verifySignedState(
     state: string,
     expected: { provider: 'google' | 'apple'; redirectUri: string },
-): OAuthStatePayload | null {
-    if (!OAUTH_STATE_SECRET) {
-        console.error('EXTENSION_OAUTH_STATE_SECRET is not configured')
-        return null
-    }
-
-    const [payloadB64, sig] = state.split('.')
-    if (!payloadB64 || !sig) return null
-
-    let payloadJson: string
-    try {
-        payloadJson = Buffer.from(payloadB64, 'base64url').toString()
-    } catch {
-        return null
-    }
-
-    const expectedSig = createHmac('sha256', OAUTH_STATE_SECRET)
-        .update(payloadJson)
-        .digest('base64url')
-
-    const sigBuf = Buffer.from(sig)
-    const expectedBuf = Buffer.from(expectedSig)
-
-    if (sigBuf.length !== expectedBuf.length) {
-        return null
-    }
-
-    if (!timingSafeEqual(sigBuf, expectedBuf)) {
-        return null
-    }
-
-    let payload: OAuthStatePayload
-    try {
-        payload = JSON.parse(payloadJson)
-    } catch {
-        return null
-    }
-
+): ExtensionOAuthStatePayload | null {
+    const payload = verifiedExtensionOAuthState(state)
+    if (!payload) return null
     if (payload.provider !== expected.provider) return null
     if (payload.redirectUri !== expected.redirectUri) return null
-
-    if (typeof payload.iat !== 'number') return null
-    const maxAgeMs = 5 * 60 * 1000
-    if (Date.now() - payload.iat > maxAgeMs) return null
-
     return payload
 }
 
@@ -163,6 +114,29 @@ export const POST = withRoute(
             }
         }
 
+        // A code that came back through our own /redirect hop is bound to the
+        // state it arrived with (extensionOAuthCodeBinding.ts). Every hop flow
+        // is exchanged under the same provider redirect_uri, so this binding is
+        // the only thing stopping a code issued to one flow (the app's, with
+        // its PKCE challenge) from being redeemed under another flow's state.
+        // A code that never touched the hop is Google's binding to enforce.
+        const baseURL = env.BETTER_AUTH_URL || BASE_URL
+        const hopUri = `${baseURL}/api/extension/oauth/redirect`
+        const codeCameThroughHop =
+            provider === 'apple' ||
+            googleRedirectUriFor(redirectUri, baseURL) === hopUri
+        const providerCode = codeCameThroughHop
+            ? codeBoundToState(code, state)
+            : isBoundCode(code)
+              ? null
+              : code
+        if (!providerCode) {
+            return NextResponse.json(
+                { error: 'Authorization code does not belong to this sign-in' },
+                { status: 400 },
+            )
+        }
+
         // The body's fields win; the signed state carries the Safari flow's.
         const bodyAttribution = resolveExtensionAttribution(
             { iid: body.iid, firstTouch: body.firstTouch },
@@ -179,8 +153,6 @@ export const POST = withRoute(
         }
 
         try {
-            const baseURL = env.BETTER_AUTH_URL || BASE_URL
-
             if (provider === 'google') {
                 // Exchange authorization code for tokens directly with Google
                 const googleClientId = env.GOOGLE_CLIENT_ID
@@ -202,7 +174,7 @@ export const POST = withRoute(
                             'Content-Type': 'application/x-www-form-urlencoded',
                         },
                         body: new URLSearchParams({
-                            code,
+                            code: providerCode,
                             client_id: googleClientId,
                             client_secret: googleClientSecret,
                             // Must equal what /authorize told Google: the
@@ -323,7 +295,7 @@ export const POST = withRoute(
                             'Content-Type': 'application/x-www-form-urlencoded',
                         },
                         body: new URLSearchParams({
-                            code,
+                            code: providerCode,
                             client_id: appleClientId,
                             client_secret: appleClientSecret,
                             redirect_uri: intermediateRedirectUri, // Use intermediate URI, not extension URI

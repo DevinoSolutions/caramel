@@ -2,6 +2,10 @@ import { GET as authorizeGET } from '@/app/api/extension/oauth/authorize/route'
 import { GET as redirectGET } from '@/app/api/extension/oauth/redirect/route'
 import { POST as oauthPOST } from '@/app/api/extension/oauth/route'
 import {
+    bindCodeToState,
+    codeBoundToState,
+} from '@/lib/auth/extensionOAuthCodeBinding'
+import {
     isAllowedExtensionRedirectUri,
     NATIVE_APP_REDIRECT_URI,
 } from '@/lib/auth/extensionOAuthRedirect'
@@ -279,7 +283,9 @@ describe('GET /api/extension/oauth/redirect — bouncing to the app', () => {
         expect(res.status).toBe(303)
         const target = new URL(res.headers.get('location')!)
         expect(`${target.protocol}//${target.host}${target.pathname}`).toBe(APP)
-        expect(target.searchParams.get('code')).toBe('GOOGLE_CODE')
+        expect(
+            codeBoundToState(target.searchParams.get('code') ?? '', state),
+        ).toBe('GOOGLE_CODE')
         expect(target.searchParams.get('state')).toBe(state)
     })
 
@@ -291,7 +297,9 @@ describe('GET /api/extension/oauth/redirect — bouncing to the app', () => {
         })
         expect(res.status).toBe(303)
         const target = new URL(res.headers.get('location')!)
-        expect(target.searchParams.get('code')).toBe('APPLE_CODE')
+        expect(
+            codeBoundToState(target.searchParams.get('code') ?? '', inner),
+        ).toBe('APPLE_CODE')
         expect(target.searchParams.get('state')).toBe(inner)
     })
 
@@ -324,7 +332,7 @@ describe('GET /api/extension/oauth/redirect — bouncing to the app', () => {
         })
         expect(res.status).toBe(307)
         expect(res.headers.get('location')).toBe(
-            `${EXT}?code=C&state=plain-state`,
+            `${EXT}?code=${bindCodeToState('C', 'plain-state')}&state=plain-state`,
         )
     })
 })
@@ -360,7 +368,13 @@ describe('POST /api/extension/oauth — exchanging the app flow', () => {
                 headers: { 'content-type': 'application/json' },
                 body: JSON.stringify({
                     provider: 'google',
-                    code: 'auth-code',
+                    // The app's code reaches it through our /redirect hop,
+                    // which binds it to the state it came back with; an
+                    // extension's comes straight from Google, unbound.
+                    code:
+                        redirectUri === APP
+                            ? bindCodeToState('auth-code', state)
+                            : 'auth-code',
                     state,
                     redirectUri,
                     ...(codeVerifier ? { codeVerifier } : {}),

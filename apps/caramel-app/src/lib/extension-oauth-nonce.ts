@@ -89,13 +89,27 @@ function sweepExpired(now: number): void {
     for (const key of stale) store.delete(key)
 }
 
+/** The most results held at once. Each one comes from a signed state and a
+ * real provider callback, so honest traffic sits orders of magnitude below
+ * this; the cap only bounds memory if that ever stops being true. */
+export const NONCE_STORE_MAX_ENTRIES = 5000
+
+/** Stores a result for /poll. False when the store is full: the caller then
+ * reports a failed sign-in rather than a success nobody can collect. */
 export function setNonceResult(
     nonce: string,
     value: Omit<NonceEntry, 'expiresAt'>,
-): void {
+): boolean {
     const now = Date.now()
     sweepExpired(now)
+    if (!store.has(nonce) && store.size >= NONCE_STORE_MAX_ENTRIES) {
+        console.error(
+            `extension OAuth nonce store full (${store.size}); refusing a new entry`,
+        )
+        return false
+    }
     store.set(nonce, { ...value, expiresAt: now + TTL_MS })
+    return true
 }
 
 /** One-shot read: a hit is deleted whether or not it had expired, so a nonce
