@@ -127,6 +127,12 @@ model CouponSignal {
   lastFailedAt   DateTime? @map("last_failed_at")
   workCount      Int       @default(0) @map("work_count")
   failCount      Int       @default(0) @map("fail_count")
+  // Quorum weight of the failed reports since the last success: the sum of
+  // coupon_signal_reporters.weight over DISTINCT reporters (couponSignals.recordFailed
+  // recomputes it on every admitted failed report). fail_count is the raw count
+  // and no longer decides anything; the sink/collapse rules read this instead
+  // (coupons.ts FAILING_MIN_FAIL_WEIGHT / KEEPS_FAILING_MIN_FAIL_WEIGHT).
+  failWeight     Int       @default(0) @map("fail_weight")
   lastFailReason String?   @map("last_fail_reason")
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at")
@@ -295,6 +301,29 @@ model Source {
 /// createdAt) index exists to make the app-side per-day check a cheap lookup.
 /// Until that check ships, this table accepts repeat reports. TODO: enforce
 /// one-report-per-user-per-coupon-per-day in app logic (later PR).
+// One row per (coupon, outcome, distinct reporter): who reported a coupon, as a
+// salted hash of the reporter identity (couponReportDedupe.ts: signed-in user,
+// else the Cloudflare edge address cut to its /64), never the raw IP or user id.
+// coupon_signals is one aggregate row per coupon and cannot tell 3 reports from
+// one reporter from 3 reporters, which is what a failure quorum needs. NO FK to
+// coupons, like coupon_signals (an aggregate may outlive a tombstoned coupon).
+// Written by couponSignals.recordFailed only.
+// TODO(T-4372): outcome 'worked' is not written yet. The "Verified needs 2
+// distinct reporters" rule lands on this same table with the same reporter_hash.
+model CouponSignalReporter {
+  couponId     String   @map("coupon_id")
+  outcome      String
+  reporterHash String   @map("reporter_hash")
+  // How much this reporter's report counts toward a quorum: 1 for an anonymous
+  // network, 2 for a signed-in account (couponSignals.ts REPORTER_WEIGHT).
+  weight       Int
+  lastAt       DateTime @default(now()) @map("last_at")
+
+  @@id([couponId, outcome, reporterHash])
+  @@index([couponId, outcome, lastAt])
+  @@map("coupon_signal_reporters")
+}
+
 model CouponReport {
   id        String   @id @default(cuid())
   // FK into the app-owned catalog with CASCADE: a report about a coupon row

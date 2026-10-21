@@ -120,6 +120,7 @@ describe('GET /api/coupons — list+count (CouponListRow + TotalCountRow)', () =
             lastWorkedAt: null,
             lastFailedAt: null,
             failCount: 0,
+            failWeight: 0,
             keepsFailing: false,
         })
         expect(body.total).toBe(1)

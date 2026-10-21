@@ -1,6 +1,9 @@
 import { POST } from '@/app/api/coupons/[id]/report/route'
 import { POST as incrementPOST } from '@/app/api/coupons/increment/route'
 import { resetReportDedupeForTests } from '@/lib/couponReportDedupe'
+import { attachSignals } from '@/lib/couponSignals'
+import { isRecentlyFailing } from '@/lib/coupons'
+import { listStoreCoupons } from '@/lib/couponsRepo'
 import prisma from '@/lib/prisma'
 import { NextRequest } from 'next/server'
 import {
@@ -99,6 +102,9 @@ async function cleanup() {
     await prisma.couponReport.deleteMany({
         where: { couponId: { in: ALL_COUPON_IDS } },
     })
+    await prisma.couponSignalReporter.deleteMany({
+        where: { couponId: { in: ALL_COUPON_IDS } },
+    })
     await prisma.couponSignal.deleteMany({
         where: { couponId: { in: ALL_COUPON_IDS } },
     })
@@ -176,6 +182,64 @@ describe('POST /api/coupons/[id]/report — attribution against real pg :58005',
             where: { couponId: KNOWN_ID },
         })
         expect(signal?.failCount).toBe(2)
+    })
+
+    it('QUORUM: three distinct anonymous failed reports do not sink a code, the fourth does; forged forwarded-for headers add no reporters', async () => {
+        getSessionMock.mockImplementation(async () => null)
+        const failedFrom = (headers: Record<string, string>) =>
+            POST(
+                new NextRequest(
+                    `http://localhost/api/coupons/${KNOWN_ID}/report`,
+                    {
+                        method: 'POST',
+                        headers: {
+                            'content-type': 'application/json',
+                            ...headers,
+                        },
+                        body: JSON.stringify({ outcome: 'failed' }),
+                    },
+                ),
+            )
+        const weight = async () =>
+            (
+                await prisma.couponSignal.findUniqueOrThrow({
+                    where: { couponId: KNOWN_ID },
+                })
+            ).failWeight
+
+        for (const n of [10, 11, 12]) {
+            await failedFrom({ 'cf-connecting-ip': `203.0.113.${n}` })
+        }
+        expect(await weight()).toBe(3)
+
+        // A flood of forged client headers WITHOUT the edge header is one
+        // reporter, however many addresses it claims.
+        for (const n of [1, 2, 3, 4, 5]) {
+            await failedFrom({ 'x-forwarded-for': `198.51.100.${n}` })
+        }
+        expect(await weight()).toBe(4)
+
+        const { coupons } = await listStoreCoupons(ITEST_SITE, 20)
+        const row = coupons.find(c => c.id === KNOWN_ID)
+        expect(row).toBeDefined()
+        const [overlaid] = await attachSignals([{ id: KNOWN_ID }])
+        expect(overlaid?.failWeight).toBe(4)
+        expect(isRecentlyFailing(overlaid!)).toBe(true)
+    })
+
+    it('QUORUM: the honest single report still records, and does not sink', async () => {
+        getSessionMock.mockImplementation(async () => null)
+        const res = await POST(
+            reportRequest(KNOWN_ID, { outcome: 'failed' }, '203.0.113.20'),
+        )
+        expect(res.status).toBe(200)
+        const signal = await prisma.couponSignal.findUniqueOrThrow({
+            where: { couponId: KNOWN_ID },
+        })
+        expect(signal.failCount).toBe(1)
+        expect(signal.failWeight).toBe(1)
+        expect(signal.lastFailedAt).toBeInstanceOf(Date)
+        expect(isRecentlyFailing(signal)).toBe(false)
     })
 
     it('a report already stored YESTERDAY does not block today (the window is the UTC day, not "ever")', async () => {

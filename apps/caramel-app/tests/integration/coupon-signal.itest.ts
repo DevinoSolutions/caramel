@@ -1,4 +1,9 @@
-import { attachSignals, recordFailed, recordWorked } from '@/lib/couponSignals'
+import {
+    attachSignals,
+    recordFailed,
+    recordWorked,
+    reporterHash,
+} from '@/lib/couponSignals'
 import prisma from '@/lib/prisma'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
 
@@ -15,6 +20,9 @@ const UNSEEDED_ID = '999000004'
 const ALL_IDS = [WORKED_ID, FAILED_ID, SEEDED_ID, UNSEEDED_ID]
 
 async function cleanup() {
+    await prisma.couponSignalReporter.deleteMany({
+        where: { couponId: { in: ALL_IDS } },
+    })
     await prisma.couponSignal.deleteMany({
         where: { couponId: { in: ALL_IDS } },
     })
@@ -45,14 +53,33 @@ describe('couponSignals (real prisma, live pg :58005)', () => {
         expect(second?.workCount).toBe(0)
     })
 
-    it('recordFailed sets failCount, lastFailedAt and lastFailReason', async () => {
-        await recordFailed(FAILED_ID, 'Minimum spend not met')
+    it('recordFailed sets failCount, failWeight, lastFailedAt and lastFailReason, and stores a hashed reporter', async () => {
+        const reporter = { kind: 'ip', ip: '203.0.113.50' } as const
+        await recordFailed(FAILED_ID, 'Minimum spend not met', reporter)
         const row = await prisma.couponSignal.findUnique({
             where: { couponId: FAILED_ID },
         })
         expect(row?.failCount).toBe(1)
+        expect(row?.failWeight).toBe(1)
         expect(row?.lastFailedAt).toBeInstanceOf(Date)
         expect(row?.lastFailReason).toBe('Minimum spend not met')
+        const reporters = await prisma.couponSignalReporter.findMany({
+            where: { couponId: FAILED_ID },
+        })
+        expect(reporters).toHaveLength(1)
+        expect(reporters[0]?.reporterHash).toBe(reporterHash(reporter))
+        expect(reporters[0]?.reporterHash).not.toContain('203.0.113')
+    })
+
+    it('the same reporter failing a coupon twice is ONE reporter in the quorum', async () => {
+        const reporter = { kind: 'ip', ip: '203.0.113.51' } as const
+        await recordFailed(FAILED_ID, null, reporter)
+        await recordFailed(FAILED_ID, null, reporter)
+        const row = await prisma.couponSignal.findUnique({
+            where: { couponId: FAILED_ID },
+        })
+        expect(row?.failCount).toBe(2)
+        expect(row?.failWeight).toBe(1)
     })
 
     it('attachSignals returns lastWorkedAt (ISO) for a seeded id and null for an unseeded one', async () => {
@@ -72,6 +99,7 @@ describe('couponSignals (real prisma, live pg :58005)', () => {
                 lastWorkedAt: seeded?.lastWorkedAt?.toISOString() ?? null,
                 lastFailedAt: null,
                 failCount: 0,
+                failWeight: 0,
                 keepsFailing: false,
             },
             {
@@ -79,6 +107,7 @@ describe('couponSignals (real prisma, live pg :58005)', () => {
                 lastWorkedAt: null,
                 lastFailedAt: null,
                 failCount: 0,
+                failWeight: 0,
                 keepsFailing: false,
             },
         ])

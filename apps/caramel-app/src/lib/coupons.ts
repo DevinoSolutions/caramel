@@ -288,8 +288,17 @@ export function couponBadge(
 // is still presentation only: the code is in the response and in the HTML, and
 // one later success un-collapses it.
 
-/** Failures needed before a code sinks: one failed attempt is noise (a flaky checkout, a minimum-spend miss). */
-export const FAILING_MIN_FAIL_COUNT = 2
+/**
+ * Failure QUORUM needed before a code sinks, in reporter weight (not raw
+ * reports): the sum of the weights of the DISTINCT reporters whose failure is
+ * newer than the last success (couponSignals.ts recordFailed keeps it in
+ * coupon_signals.fail_weight). An anonymous network weighs 1, a signed-in
+ * account 2 (couponSignals.ts REPORTER_WEIGHT), so it takes 4 anonymous
+ * networks, or 2 accounts, or an account plus 2 networks. One failed attempt is
+ * noise (a flaky checkout, a minimum-spend miss), and three forged anonymous
+ * reports (the old threshold was 2 raw reports) must not be enough.
+ */
+export const FAILING_MIN_FAIL_WEIGHT = 4
 
 /** A failure older than this no longer counts: codes get fixed and stores change. */
 export const FAILING_WINDOW_DAYS = 30
@@ -299,7 +308,7 @@ export const FAILING_WINDOW_MS = FAILING_WINDOW_DAYS * 24 * 60 * 60 * 1000
 
 /** The coupon_signals fields isRecentlyFailing reads (attachSignals' output shape). */
 export type FailureSignal = {
-    failCount?: number | null
+    failWeight?: number | null
     lastFailedAt?: string | Date | null
     lastWorkedAt?: string | Date | null
 }
@@ -311,9 +320,9 @@ function timestampMs(value: string | Date | null | undefined): number | null {
 }
 
 /**
- * True when shoppers/the extension have reported this code failing repeatedly
- * and recently: at least FAILING_MIN_FAIL_COUNT failures in total, the latest
- * one within FAILING_WINDOW_MS, and no success reported since that latest
+ * True when shoppers/the extension have reported this code failing and
+ * recently: a failure quorum of at least FAILING_MIN_FAIL_WEIGHT, the latest
+ * failure within FAILING_WINDOW_MS, and no success reported since that latest
  * failure (a success at or after it resets the code). Pure: absent or
  * unparseable timestamps mean "no signal", never "failing".
  */
@@ -321,7 +330,7 @@ export function isRecentlyFailing(
     signal: FailureSignal,
     now: number = Date.now(),
 ): boolean {
-    if ((signal.failCount ?? 0) < FAILING_MIN_FAIL_COUNT) return false
+    if ((signal.failWeight ?? 0) < FAILING_MIN_FAIL_WEIGHT) return false
     const failedAge = workedAgeMs(signal.lastFailedAt, now)
     if (failedAge === null || failedAge > FAILING_WINDOW_MS) return false
     const failedAt = timestampMs(signal.lastFailedAt)
@@ -330,17 +339,16 @@ export function isRecentlyFailing(
 }
 
 /**
- * Failures needed before a code is COLLAPSED (not merely sunk): a third report
- * on top of the two that sink it. Higher than FAILING_MIN_FAIL_COUNT because
- * collapsing is the stronger presentation, and one forged pair of anonymous
- * reports must not be enough to tuck a code away.
+ * Failure quorum needed before a code is COLLAPSED (not merely sunk): two more
+ * anonymous networks (or one more account) on top of what sinks it. Higher than
+ * FAILING_MIN_FAIL_WEIGHT because collapsing is the stronger presentation.
  */
-export const KEEPS_FAILING_MIN_FAIL_COUNT = 3
+export const KEEPS_FAILING_MIN_FAIL_WEIGHT = 6
 
 /**
  * True when a code is recently failing (isRecentlyFailing: window and
  * no-success-since rules included) AND has at least
- * KEEPS_FAILING_MIN_FAIL_COUNT failures. The web store page and the extension
+ * KEEPS_FAILING_MIN_FAIL_WEIGHT of failure quorum. The web store page and the extension
  * popup collapse these behind a "N codes reported not working" disclosure. It
  * is a presentation flag over shopper/extension reports: it never changes a
  * catalog status, and one later success clears it (the failure is no longer
@@ -352,7 +360,7 @@ export function keepsFailing(
 ): boolean {
     return (
         isRecentlyFailing(signal, now) &&
-        (signal.failCount ?? 0) >= KEEPS_FAILING_MIN_FAIL_COUNT
+        (signal.failWeight ?? 0) >= KEEPS_FAILING_MIN_FAIL_WEIGHT
     )
 }
 

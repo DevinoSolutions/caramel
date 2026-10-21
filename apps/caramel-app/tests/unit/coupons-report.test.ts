@@ -50,7 +50,20 @@ const { prismaMock, txMock, reportRows, catalogIds, getSessionMock } =
         )
 
         const tx = {
-            couponSignal: { upsert: txSignalUpsert },
+            // recordFailed's quorum bookkeeping (couponSignals.ts). This file
+            // pins the ROUTE's wiring, so these are canned test doubles; the
+            // quorum arithmetic itself is pinned in coupon-failure-quorum.test.ts
+            // against an in-memory reporters table, and in the integration suite
+            // against real Postgres.
+            couponSignal: {
+                upsert: txSignalUpsert,
+                update: vi.fn(async () => ({})),
+            },
+            couponSignalReporter: {
+                upsert: vi.fn(async () => ({})),
+                aggregate: vi.fn(async () => ({ _sum: { weight: 1 } })),
+                deleteMany: vi.fn(async () => ({ count: 0 })),
+            },
             couponReport: {
                 findFirst: vi.fn(
                     async (args: {
@@ -218,8 +231,8 @@ describe('POST /api/coupons/[id]/report — app-owned trust signal (W1)', () => 
         )
 
         expect(res.status).toBe(200)
-        expect(prismaMock.couponSignal.upsert).toHaveBeenCalledTimes(1)
-        const arg = prismaMock.couponSignal.upsert.mock.calls[0]![0]
+        expect(txMock.couponSignal.upsert).toHaveBeenCalledTimes(1)
+        const arg = txMock.couponSignal.upsert.mock.calls[0]![0]
         expect(arg.create).toMatchObject({
             couponId: KNOWN_COUPON,
             failCount: 1,
@@ -351,7 +364,7 @@ describe('POST /api/coupons/[id]/report — anonymous behavior (characterization
             )
         }
 
-        expect(prismaMock.couponSignal.upsert).toHaveBeenCalledTimes(3)
+        expect(txMock.couponSignal.upsert).toHaveBeenCalledTimes(3)
     })
 
     it('a second FAILED report from the SAME IP for the SAME coupon is a 2xx no-op ({ok:true, deduped:true}): nothing written, no error', async () => {
@@ -367,7 +380,7 @@ describe('POST /api/coupons/[id]/report — anonymous behavior (characterization
             expect(dup.status).toBe(200)
             expect(await dup.json()).toEqual({ ok: true, deduped: true })
         }
-        expect(prismaMock.couponSignal.upsert).toHaveBeenCalledTimes(1)
+        expect(txMock.couponSignal.upsert).toHaveBeenCalledTimes(1)
     })
 
     it('the dedupe is per (IP, coupon): the same IP can still report a DIFFERENT coupon failing', async () => {
@@ -375,7 +388,7 @@ describe('POST /api/coupons/[id]/report — anonymous behavior (characterization
         const other = await POST(reportRequest('43', { outcome: 'failed' }))
 
         expect(await other.json()).toEqual({ ok: true })
-        expect(prismaMock.couponSignal.upsert).toHaveBeenCalledTimes(2)
+        expect(txMock.couponSignal.upsert).toHaveBeenCalledTimes(2)
     })
 
     it('a worked report from an IP that already reported failed is not blocked', async () => {
@@ -385,7 +398,10 @@ describe('POST /api/coupons/[id]/report — anonymous behavior (characterization
         )
 
         expect(await worked.json()).toEqual({ ok: true })
-        expect(prismaMock.couponSignal.upsert).toHaveBeenCalledTimes(2)
+        expect(
+            prismaMock.couponSignal.upsert.mock.calls.length +
+                txMock.couponSignal.upsert.mock.calls.length,
+        ).toBe(2)
     })
 
     it('a WORKED report does not consume the failed slot: worked first, then the first failed report from that IP still counts', async () => {
@@ -395,7 +411,10 @@ describe('POST /api/coupons/[id]/report — anonymous behavior (characterization
         )
 
         expect(await failed.json()).toEqual({ ok: true })
-        expect(prismaMock.couponSignal.upsert).toHaveBeenCalledTimes(2)
+        expect(
+            prismaMock.couponSignal.upsert.mock.calls.length +
+                txMock.couponSignal.upsert.mock.calls.length,
+        ).toBe(2)
     })
 
     it('a deduped signed-in failed report opens no transaction and writes nothing', async () => {
@@ -462,14 +481,12 @@ describe('POST /api/coupons/[id]/report — anonymous behavior (characterization
         )
 
         expect(await res.json()).toEqual({ ok: true })
-        expect(prismaMock.couponSignal.upsert).toHaveBeenCalledTimes(1)
-        expect(txMock.couponSignal.upsert).toHaveBeenCalledTimes(1)
+        expect(prismaMock.couponSignal.upsert).not.toHaveBeenCalled()
+        expect(txMock.couponSignal.upsert).toHaveBeenCalledTimes(2)
     })
 
     it('a failed write frees the slot: the retry from the same IP is NOT deduped', async () => {
-        prismaMock.couponSignal.upsert.mockRejectedValueOnce(
-            new Error('db down'),
-        )
+        txMock.couponSignal.upsert.mockRejectedValueOnce(new Error('db down'))
         const failed = await POST(
             reportRequest(KNOWN_COUPON, { outcome: 'failed' }),
         )
@@ -523,7 +540,7 @@ describe('POST /api/coupons/[id]/report — anonymous behavior (characterization
 
         expect(hit.status).toBe(200)
         expect(await hit.json()).toEqual({ ok: true })
-        expect(prismaMock.couponSignal.upsert).toHaveBeenCalledTimes(1)
+        expect(txMock.couponSignal.upsert).toHaveBeenCalledTimes(1)
     })
 
     it('probing unknown ids can never fill the dedupe table: every probe frees its slot', async () => {

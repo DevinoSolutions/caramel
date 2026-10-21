@@ -49,7 +49,7 @@
 // 'worked' report and a use, so honest success traffic is the bulk of the keys;
 // in one shared table it could fill the cap and switch off the 'failed' dedupe,
 // which is the one that stops a code being flagged by a single reporter.
-import { getClientIp } from '@/lib/rateLimit'
+import { readEdgeClientIp } from '@/lib/clientIp'
 import * as Sentry from '@sentry/nextjs'
 import type { NextRequest } from 'next/server'
 
@@ -93,18 +93,37 @@ export type ReportReporter =
     | { kind: 'ip'; ip: string }
 
 /**
+ * The one anonymous reporter every request WITHOUT the Cloudflare edge header
+ * counts as. Such a request reached the app around the edge (direct origin
+ * hit, local dev, e2e), so its X-Real-IP / X-Forwarded-For are client input
+ * and must not mint identities: forging them would otherwise make as many
+ * "distinct reporters" as the caller likes. Collapsing them into one is the
+ * safe direction (they can never reach a quorum alone); the cost is that an
+ * environment with no Cloudflare in front sees all its anonymous shoppers as a
+ * single reporter. To exercise distinct anonymous reporters locally, send
+ * CF-Connecting-IP yourself.
+ */
+export const NO_EDGE_REPORTER_NETWORK = 'no-edge-header'
+
+/**
  * The reporter a request counts as: its signed-in user, else its client
- * network (getClientIp, the same address the rate limiter uses, with an IPv6
- * address cut to its /64). Both report routes call this, so a shopper is one
- * reporter on both.
+ * network (the Cloudflare edge address, readEdgeClientIp, with an IPv6 address
+ * cut to its /64; NO_EDGE_REPORTER_NETWORK when the edge header is absent).
+ * Both report routes call this, so a shopper is one reporter on both. This is
+ * deliberately NOT getClientIp (the rate limiter's key): the limiter may fall
+ * back to forgeable headers, an identity that decides what other shoppers see
+ * may not.
  */
 export function reporterFor(
     userId: string | null,
     req: NextRequest,
 ): ReportReporter {
-    return userId
-        ? { kind: 'user', userId }
-        : { kind: 'ip', ip: reporterNetwork(getClientIp(req)) }
+    if (userId) return { kind: 'user', userId }
+    const edgeIp = readEdgeClientIp(req.headers)
+    return {
+        kind: 'ip',
+        ip: edgeIp ? reporterNetwork(edgeIp) : NO_EDGE_REPORTER_NETWORK,
+    }
 }
 
 /**

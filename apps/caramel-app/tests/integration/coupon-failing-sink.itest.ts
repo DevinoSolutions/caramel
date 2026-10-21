@@ -22,6 +22,7 @@ type Fixture = {
     rating: number
     signal?: {
         failCount: number
+        failWeight: number // the failure quorum (coupon_signals.fail_weight)
         lastFailedAt: number // ms ago
         lastWorkedAt?: number // ms ago
     }
@@ -29,36 +30,46 @@ type Fixture = {
 
 // Listed in expected ranking order WITHOUT any sinking (rating DESC).
 const FIXTURES: Fixture[] = [
-    // Failing: 3 failures, the latest an hour ago, never worked.
+    // Keeps failing: a collapse-level quorum (weight 6), the latest failure an hour ago, never worked.
     {
         id: '988000001',
         rating: 5,
-        signal: { failCount: 3, lastFailedAt: HOUR },
+        signal: { failCount: 3, failWeight: 6, lastFailedAt: HOUR },
     },
     { id: '988000002', rating: 4 },
     // Reset: failures, then a success AFTER the last one.
     {
         id: '988000003',
         rating: 3,
-        signal: { failCount: 5, lastFailedAt: 2 * DAY, lastWorkedAt: DAY },
+        signal: {
+            failCount: 5,
+            failWeight: 5,
+            lastFailedAt: 2 * DAY,
+            lastWorkedAt: DAY,
+        },
     },
     // Expired: failures, but the latest is outside the 30-day window.
     {
         id: '988000004',
         rating: 2,
-        signal: { failCount: 4, lastFailedAt: 40 * DAY },
+        signal: { failCount: 4, failWeight: 4, lastFailedAt: 40 * DAY },
     },
-    // Noise: a single recent failure.
+    // Noise: a single recent failure (below the quorum).
     {
         id: '988000005',
         rating: 1,
-        signal: { failCount: 1, lastFailedAt: HOUR },
+        signal: { failCount: 1, failWeight: 1, lastFailedAt: HOUR },
     },
     // Failing: the success pre-dates the latest failure.
     {
         id: '988000006',
         rating: 0.5,
-        signal: { failCount: 2, lastFailedAt: HOUR, lastWorkedAt: 5 * DAY },
+        signal: {
+            failCount: 2,
+            failWeight: 4,
+            lastFailedAt: HOUR,
+            lastWorkedAt: 5 * DAY,
+        },
     },
 ]
 const IDS = FIXTURES.map(f => f.id)
@@ -88,6 +99,7 @@ beforeAll(async () => {
                 data: {
                     couponId: f.id,
                     failCount: f.signal.failCount,
+                    failWeight: f.signal.failWeight,
                     lastFailedAt: new Date(now - f.signal.lastFailedAt),
                     lastWorkedAt:
                         f.signal.lastWorkedAt === undefined
@@ -154,7 +166,7 @@ describe('failing codes sink (real pg)', () => {
         expect(tail).toEqual(failingByTs)
     })
 
-    it('keepsFailing (the field /api/coupons ships) is true only for the 3-failure code, and that code is the list tail', async () => {
+    it('keepsFailing (the field /api/coupons ships) is true only for the collapse-quorum code, and that code is the list tail', async () => {
         const { coupons } = await listStoreCoupons(SITE, 20)
         const decorated = await attachSignals(coupons)
 

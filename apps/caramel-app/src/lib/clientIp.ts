@@ -59,6 +59,23 @@ export function readClientIp(headers: Headers): string | null {
 }
 
 /**
+ * The visitor's IP as the Cloudflare edge reports it, or null when the request
+ * did not carry CF-Connecting-IP. For identities that must not be forgeable
+ * (the coupon report quorum, couponReportDedupe.ts): Cloudflare overwrites a
+ * client-supplied CF-Connecting-IP, so a value here came from the edge, while
+ * X-Real-IP and X-Forwarded-For are plain client input on any request that
+ * did not pass through a proxy that rewrites them. A null means the request
+ * reached the app without the edge (a direct origin hit, local dev, e2e); the
+ * caller must not mint an identity from the fallback headers. The residual
+ * risk named on CLIENT_IP_HEADERS stays: a caller that bypasses Cloudflare can
+ * still forge this header, which only the origin firewall closes.
+ */
+export function readEdgeClientIp(headers: Headers): string | null {
+    const value = headers.get(CLIENT_IP_HEADERS[0])?.trim()
+    return value ? value : null
+}
+
+/**
  * Copy every client-IP header present on `from` onto `to`. For a server-side
  * hop that re-issues the visitor's request to our own API (the Safari OAuth
  * shim's exchange call): the inner request is metered by readClientIp too, so

@@ -151,6 +151,7 @@ describe('CouponCard: keeps-failing codes lose the green Verified badge', () => 
                     ...verified,
                     keepsFailing: true,
                     failCount: 4,
+                    failWeight: 6,
                     lastFailedAt: hoursAgo(2),
                 }}
                 index={0}
@@ -167,6 +168,7 @@ describe('CouponCard: keeps-failing codes lose the green Verified badge', () => 
                     ...verified,
                     keepsFailing: false,
                     failCount: 2,
+                    failWeight: 4,
                     lastFailedAt: hoursAgo(2),
                 }}
                 index={0}

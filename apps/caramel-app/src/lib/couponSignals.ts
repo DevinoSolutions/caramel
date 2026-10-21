@@ -15,17 +15,21 @@
 // (which fires BOTH report{worked} AND increment) never double-counts:
 //   recordWorked → lastWorkedAt   (last successful-apply time)
 //   recordUsage  → workCount      (successful-use counter)
-//   recordFailed → failCount + lastFailedAt + lastFailReason
+//   recordFailed → failCount + failWeight + lastFailedAt + lastFailReason
+//                  (+ the reporter's coupon_signal_reporters row)
 //
 // It writes ONLY our own Postgres (DATABASE_URL) via prisma. It NEVER touches
 // the external read-only caramel_coupons catalog (couponsDb.ts) — the whole
 // point of the trust loop is to own this signal ourselves rather than mirror
 // (or mutate) the externally-owned catalog. Signals are keyed by the catalog
 // coupon id as a string, matching the app's Coupon.id: string.
-import { keepsFailing } from '@/lib/coupons'
+import type { ReportReporter } from '@/lib/couponReportDedupe'
+import { FAILING_WINDOW_MS, keepsFailing } from '@/lib/coupons'
+import { env } from '@/lib/env'
 import prisma from '@/lib/prisma'
-import type { Prisma } from '@prisma/client'
+import type { Prisma, PrismaClient } from '@prisma/client'
 import * as Sentry from '@sentry/nextjs'
+import { createHmac } from 'node:crypto'
 
 /**
  * The only slice of the Prisma client these writers need. Satisfied by BOTH the
@@ -36,6 +40,49 @@ import * as Sentry from '@sentry/nextjs'
  * than a second, independently-written copy of it.
  */
 export type CouponSignalWriter = Pick<Prisma.TransactionClient, 'couponSignal'>
+
+/** What recordFailed needs on top: the per-reporter rows its quorum is counted from. */
+export type CouponFailureWriter = Pick<
+    Prisma.TransactionClient,
+    'couponSignal' | 'couponSignalReporter'
+>
+
+/**
+ * How much one distinct reporter counts toward a failure quorum. A signed-in
+ * account costs a verified email, an anonymous network costs a proxy address,
+ * so an account counts double. coupons.ts FAILING_MIN_FAIL_WEIGHT /
+ * KEEPS_FAILING_MIN_FAIL_WEIGHT are the thresholds these add up against.
+ */
+export const REPORTER_WEIGHT = { account: 2, network: 1 } as const
+
+/**
+ * The reporter as stored in coupon_signal_reporters: an HMAC-SHA256 of its
+ * identity under the app's auth secret (the same secret env.ts already forces
+ * to exist), so the table holds no raw IP or user id and a leaked copy cannot
+ * be reversed by trying every IPv4 address. 32 hex chars (128 bits) is plenty
+ * to tell reporters of one coupon apart.
+ */
+export function reporterHash(reporter: ReportReporter): string {
+    const secret = env.BETTER_AUTH_SECRET ?? env.JWT_SECRET
+    if (!secret) {
+        // env.ts's refine() makes this unreachable; a loud throw beats hashing
+        // under an empty key if that ever changes.
+        throw new Error('reporterHash: no BETTER_AUTH_SECRET or JWT_SECRET')
+    }
+    const identity =
+        reporter.kind === 'user' ? `u:${reporter.userId}` : `i:${reporter.ip}`
+    return createHmac('sha256', secret)
+        .update(`coupon-signal-reporter:${identity}`)
+        .digest('hex')
+        .slice(0, 32)
+}
+
+/** A reporter's weight toward a failure quorum. */
+export function reporterWeight(reporter: ReportReporter): number {
+    return reporter.kind === 'user'
+        ? REPORTER_WEIGHT.account
+        : REPORTER_WEIGHT.network
+}
 
 /**
  * Extension reported this coupon worked at checkout — stamp the last-worked
@@ -73,28 +120,97 @@ export async function recordUsage(couponId: string): Promise<void> {
     })
 }
 
-/** Extension reported this coupon failed — bump the fail counter, stamp the time + the (already-bounded) store/verifier reason. */
+/**
+ * A reporter said this coupon failed. Records, in ONE transaction (a singleton
+ * client is wrapped, a transaction client is joined):
+ *   1. the reporter's coupon_signal_reporters row (one per distinct reporter,
+ *      re-stamped when the same reporter reports again after the dedupe window);
+ *   2. the aggregate: failCount (raw count), lastFailedAt, the (already
+ *      bounded) store/verifier reason;
+ *   3. failWeight, recomputed as the sum of the weights of the DISTINCT
+ *      reporters whose failure is newer than the last success and inside
+ *      FAILING_WINDOW_MS. This is what sinks and collapses a code, not
+ *      failCount: three forged anonymous reports are three reporters of weight
+ *      1 and stay under FAILING_MIN_FAIL_WEIGHT.
+ * Reporters older than the window are pruned on the way. Two concurrent first
+ * reports can each recompute without seeing the other's row (read committed);
+ * the weight then under-counts until the next report, which errs toward not
+ * sinking a code.
+ */
 export async function recordFailed(
     couponId: string,
-    reason?: string | null,
-    client: CouponSignalWriter = prisma,
+    reason: string | null | undefined,
+    reporter: ReportReporter,
+    client: CouponFailureWriter | PrismaClient = prisma,
 ): Promise<void> {
+    if ('$transaction' in client) {
+        await client.$transaction(tx =>
+            recordFailedIn(couponId, reason ?? null, reporter, tx),
+        )
+        return
+    }
+    await recordFailedIn(couponId, reason ?? null, reporter, client)
+}
+
+async function recordFailedIn(
+    couponId: string,
+    reason: string | null,
+    reporter: ReportReporter,
+    tx: CouponFailureWriter,
+): Promise<void> {
+    const now = new Date()
+    const hash = reporterHash(reporter)
+    const weight = reporterWeight(reporter)
+    await tx.couponSignalReporter.upsert({
+        where: {
+            couponId_outcome_reporterHash: {
+                couponId,
+                outcome: 'failed',
+                reporterHash: hash,
+            },
+        },
+        create: {
+            couponId,
+            outcome: 'failed',
+            reporterHash: hash,
+            weight,
+            lastAt: now,
+        },
+        update: { weight, lastAt: now },
+    })
     // `reason` is already length-bounded by the report route's zod body schema
     // (trim().max(200)); passed straight through — no second-guessing a value
     // the boundary already validated.
-    await client.couponSignal.upsert({
+    const signal = await tx.couponSignal.upsert({
         where: { couponId },
         create: {
             couponId,
             failCount: 1,
-            lastFailedAt: new Date(),
-            lastFailReason: reason ?? null,
+            lastFailedAt: now,
+            lastFailReason: reason,
         },
         update: {
             failCount: { increment: 1 },
-            lastFailedAt: new Date(),
-            lastFailReason: reason ?? null,
+            lastFailedAt: now,
+            lastFailReason: reason,
         },
+        select: { lastWorkedAt: true },
+    })
+    const windowStart = new Date(now.getTime() - FAILING_WINDOW_MS)
+    const since =
+        signal.lastWorkedAt && signal.lastWorkedAt > windowStart
+            ? signal.lastWorkedAt
+            : windowStart
+    const total = await tx.couponSignalReporter.aggregate({
+        where: { couponId, outcome: 'failed', lastAt: { gt: since } },
+        _sum: { weight: true },
+    })
+    await tx.couponSignal.update({
+        where: { couponId },
+        data: { failWeight: total._sum.weight ?? 0 },
+    })
+    await tx.couponSignalReporter.deleteMany({
+        where: { couponId, outcome: 'failed', lastAt: { lt: windowStart } },
     })
 }
 
@@ -103,6 +219,8 @@ export type CouponSignalOverlay = {
     lastWorkedAt: string | null
     lastFailedAt: string | null
     failCount: number
+    /** The failure quorum (coupon_signals.fail_weight) isRecentlyFailing / keepsFailing read; the card evaluates isRecentlyFailing client-side over this. */
+    failWeight: number
     /** coupons.ts keepsFailing(), decided server-side so the popup and the web agree. */
     keepsFailing: boolean
 }
@@ -111,6 +229,7 @@ const NO_SIGNAL: CouponSignalOverlay = {
     lastWorkedAt: null,
     lastFailedAt: null,
     failCount: 0,
+    failWeight: 0,
     keepsFailing: false,
 }
 
@@ -148,6 +267,7 @@ export async function attachSignals<T extends { id: string }>(
                 lastWorkedAt: true,
                 lastFailedAt: true,
                 failCount: true,
+                failWeight: true,
             },
         })
         const signalById = new Map(
@@ -161,6 +281,7 @@ export async function attachSignals<T extends { id: string }>(
                 lastWorkedAt: signal?.lastWorkedAt?.toISOString() ?? null,
                 lastFailedAt: signal?.lastFailedAt?.toISOString() ?? null,
                 failCount: signal?.failCount ?? 0,
+                failWeight: signal?.failWeight ?? 0,
                 keepsFailing: signal ? keepsFailing(signal) : false,
             }
         })

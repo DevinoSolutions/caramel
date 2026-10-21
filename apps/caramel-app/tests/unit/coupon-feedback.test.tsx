@@ -249,7 +249,7 @@ describe('CouponCard — "Reported not working" hint', () => {
             <CouponCard
                 coupon={{
                     ...baseCoupon,
-                    failCount: 3,
+                    failWeight: 4,
                     lastFailedAt: iso(5 * HOUR),
                 }}
                 index={0}
@@ -259,10 +259,10 @@ describe('CouponCard — "Reported not working" hint', () => {
         expect(screen.getByText('Reported not working 5h ago')).toBeTruthy()
     })
 
-    it('does not show for a single failure, an old failure, or no signal', () => {
+    it('does not show for a sub-quorum (3 anonymous reporters), an old failure, or no signal', () => {
         for (const signal of [
-            { failCount: 1, lastFailedAt: iso(HOUR) },
-            { failCount: 9, lastFailedAt: iso(40 * DAY) },
+            { failWeight: 3, lastFailedAt: iso(HOUR) },
+            { failWeight: 9, lastFailedAt: iso(40 * DAY) },
             {},
         ]) {
             const { unmount } = render(
@@ -278,7 +278,7 @@ describe('CouponCard — "Reported not working" hint', () => {
             <CouponCard
                 coupon={{
                     ...baseCoupon,
-                    failCount: 4,
+                    failWeight: 4,
                     lastFailedAt: iso(HOUR),
                     lastWorkedAt: iso(2 * DAY),
                 }}
@@ -295,7 +295,7 @@ describe('CouponCard — "Reported not working" hint', () => {
             <CouponCard
                 coupon={{
                     ...baseCoupon,
-                    failCount: 4,
+                    failWeight: 4,
                     lastFailedAt: iso(2 * DAY),
                     lastWorkedAt: iso(2 * HOUR),
                 }}
@@ -313,7 +313,7 @@ describe('CouponCard — "Reported not working" hint', () => {
                 coupon={{
                     ...baseCoupon,
                     status: 'pending',
-                    failCount: 3,
+                    failWeight: 4,
                     lastFailedAt: iso(10 * 60 * 1000),
                     lastWorkedAt: iso(20 * 60 * 1000),
                 }}
@@ -330,7 +330,7 @@ describe('CouponCard — "Reported not working" hint', () => {
             <CouponCard
                 coupon={{
                     ...baseCoupon,
-                    failCount: 2,
+                    failWeight: 4,
                     lastFailedAt: iso(HOUR),
                 }}
                 index={0}

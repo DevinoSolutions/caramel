@@ -16,6 +16,7 @@ const { prismaMock, signalState } = vi.hoisted(() => {
             lastWorkedAt: Date | null
             lastFailedAt?: Date | null
             failCount?: number
+            failWeight?: number
         }[],
     }
     return {
@@ -44,6 +45,7 @@ const NO_SIGNAL = {
     lastWorkedAt: null,
     lastFailedAt: null,
     failCount: 0,
+    failWeight: 0,
     keepsFailing: false,
 }
 
@@ -77,6 +79,7 @@ describe('attachSignals (app-owned lastWorkedAt merge)', () => {
                 lastWorkedAt: worked.toISOString(),
                 lastFailedAt: null,
                 failCount: 0,
+                failWeight: 0,
                 keepsFailing: false,
             },
             { id: '2', code: 'B', ...NO_SIGNAL },
@@ -91,6 +94,7 @@ describe('attachSignals (app-owned lastWorkedAt merge)', () => {
                 lastWorkedAt: null,
                 lastFailedAt: failed,
                 failCount: 4,
+                failWeight: 6,
             },
         ]
 
@@ -101,12 +105,13 @@ describe('attachSignals (app-owned lastWorkedAt merge)', () => {
             lastWorkedAt: null,
             lastFailedAt: failed.toISOString(),
             failCount: 4,
-            // 4 failures, the latest recent, no success since.
+            failWeight: 6,
+            // A collapse-level quorum, the latest recent, no success since.
             keepsFailing: true,
         })
     })
 
-    it('keepsFailing is false for a failing-but-not-yet-repeated code (2 failures), and once a later success resets it', async () => {
+    it('keepsFailing is false for a sink-only quorum (weight 4), and once a later success resets it', async () => {
         const failed = new Date(Date.now() - 60 * 60 * 1000)
         const workedAfter = new Date(Date.now() - 60 * 1000)
         signalState.rows = [
@@ -115,18 +120,21 @@ describe('attachSignals (app-owned lastWorkedAt merge)', () => {
                 lastWorkedAt: null,
                 lastFailedAt: failed,
                 failCount: 2,
+                failWeight: 4,
             },
             {
                 couponId: '2',
                 lastWorkedAt: null,
                 lastFailedAt: failed,
                 failCount: 3,
+                failWeight: 6,
             },
             {
                 couponId: '3',
                 lastWorkedAt: workedAfter,
                 lastFailedAt: failed,
                 failCount: 9,
+                failWeight: 12,
             },
         ]
 
@@ -144,6 +152,7 @@ describe('attachSignals (app-owned lastWorkedAt merge)', () => {
             lastWorkedAt: true,
             lastFailedAt: true,
             failCount: true,
+            failWeight: true,
         })
     })
 
