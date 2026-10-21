@@ -41,6 +41,11 @@ export interface SupportedStoresPayload {
 
 let cached: SupportedStoresPayload | null = null
 let inFlight: Promise<SupportedStoresPayload> | null = null
+// Bumped by every reset. A build keeps the generation it started under and
+// fills the cache only if no reset came since: a build that read the table
+// BEFORE a reset holds rows the reset was meant to replace, and storing it
+// would serve the pre-reset payload for a whole TTL.
+let generation = 0
 
 async function build(): Promise<SupportedStoresPayload> {
     // One row per store, highest-priority active config that has xpath
@@ -81,14 +86,16 @@ export async function getSupportedStoresPayload(
 ): Promise<SupportedStoresPayload> {
     if (cached && now - cached.builtAt < SUPPORTED_STORES_TTL_MS) return cached
     if (!inFlight) {
-        inFlight = build()
+        const startedUnder = generation
+        const pending: Promise<SupportedStoresPayload> = build()
             .then(fresh => {
-                cached = fresh
+                if (startedUnder === generation) cached = fresh
                 return fresh
             })
             .finally(() => {
-                inFlight = null
+                if (inFlight === pending) inFlight = null
             })
+        inFlight = pending
     }
     try {
         return await inFlight
@@ -100,6 +107,7 @@ export async function getSupportedStoresPayload(
 
 /** Drop the cached payload (tests; after an ingest store-config upsert). */
 export function resetSupportedStoresCache(): void {
+    generation += 1
     cached = null
     inFlight = null
 }

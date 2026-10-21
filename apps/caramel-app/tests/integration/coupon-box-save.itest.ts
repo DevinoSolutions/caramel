@@ -28,6 +28,7 @@ vi.mock('@/lib/rateLimit', async importOriginal => {
 
 import { POST } from '@/app/api/extension/coupon-box-save/route'
 import {
+    AUTO_DETECT_CONFIG_MAX_AGE_DAYS,
     AUTO_DETECT_ORIGIN,
     applyCatalogRows,
 } from '@/lib/catalog/applyCatalogRows'
@@ -137,9 +138,6 @@ describe('coupon-box save: the saved row is served like a pipeline row', () => {
         const saved = newStore()
         const pipeline = newStore()
         await knownStore(saved)
-
-        // Warm the cache first: the save must drop it.
-        await getSupportedStoresPayload()
 
         const res = await save(`www.${saved}`)
         expect(res.status).toBe(200)
@@ -393,6 +391,100 @@ describe('applyCatalogRows: a pipeline push replaces a saved row whole', () => {
             origin: null,
         })
         expect((await save(store)).status).toBe(409)
+    })
+})
+
+describe('coupon-box save: a saved box expires', () => {
+    const DAY_MS = 24 * 60 * 60 * 1000
+    const daysAgo = (days: number) => new Date(Date.now() - days * DAY_MS)
+
+    async function backdate(storeName: string, updatedAt: Date) {
+        await prisma.storeConfig.update({
+            where: { storeName },
+            data: { updatedAt },
+        })
+        resetSupportedStoresCache()
+    }
+
+    it('PAIR: a saved box older than the max age is no longer served; one just inside it still is', async () => {
+        const expired = newStore()
+        const fresh = newStore()
+        await knownStore(expired)
+        await knownStore(fresh)
+        expect((await save(expired)).status).toBe(200)
+        expect((await save(fresh)).status).toBe(200)
+
+        await backdate(expired, daysAgo(AUTO_DETECT_CONFIG_MAX_AGE_DAYS + 1))
+        await backdate(fresh, daysAgo(AUTO_DETECT_CONFIG_MAX_AGE_DAYS - 1))
+
+        expect(await supportedEntry(expired)).toBeUndefined()
+        expect(await supportedEntry(fresh)).toBeDefined()
+        const names = (await listSupportedStoreConfigs()).map(r => r.store_name)
+        expect(names).not.toContain(expired)
+        expect(names).toContain(fresh)
+    })
+
+    it('an expired saved box is replaced whole by the next proven save', async () => {
+        const store = newStore()
+        await knownStore(store)
+        expect((await save(store)).status).toBe(200)
+        await backdate(store, daysAgo(AUTO_DETECT_CONFIG_MAX_AGE_DAYS + 5))
+
+        const res = await save(`www.${store}`, {
+            input: '#new-code',
+            apply: null,
+            toggle: null,
+            total: '.new-total',
+        })
+        expect(res.status).toBe(200)
+        expect(await res.json()).toEqual({ saved: true, store })
+
+        const row = await storedRow(store)
+        expect(row).toMatchObject({
+            couponInputXpath: '#new-code',
+            applyButtonXpath: '#new-code',
+            showInputXpath: null,
+            priceContainerXpath: '.new-total',
+            origin: AUTO_DETECT_ORIGIN,
+        })
+        expect(row!.updatedAt.getTime()).toBeGreaterThan(Date.now() - DAY_MS)
+        expect(await supportedEntry(store)).toEqual({
+            domain: store,
+            couponInput: '#new-code',
+            couponSubmit: '#new-code',
+            priceContainer: '.new-total',
+        })
+    })
+
+    it('a saved box still inside the max age refuses a second save and is not touched', async () => {
+        const store = newStore()
+        await knownStore(store)
+        expect((await save(store)).status).toBe(200)
+        await backdate(store, daysAgo(AUTO_DETECT_CONFIG_MAX_AGE_DAYS - 1))
+        const before = await storedRow(store)
+
+        const res = await save(store, { ...BOX, input: '#other' })
+        expect(res.status).toBe(409)
+        expect(await storedRow(store)).toEqual(before)
+    })
+
+    it('the max age never applies to a pipeline row: a two-year-old pipeline config is served and refuses a save', async () => {
+        const store = newStore()
+        await knownStore(store)
+        await pushConfigs([
+            {
+                store_name: store,
+                coupon_input_xpath: '//input[@id="code"]',
+                apply_button_xpath: '//button[@id="go"]',
+                updated_at: daysAgo(730),
+            },
+        ])
+        resetSupportedStoresCache()
+
+        expect(await supportedEntry(store)).toBeDefined()
+        const before = await storedRow(store)
+        expect((await save(store)).status).toBe(409)
+        expect(await storedRow(store)).toEqual(before)
     })
 })
 

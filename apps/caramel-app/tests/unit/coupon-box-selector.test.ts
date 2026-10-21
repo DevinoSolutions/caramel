@@ -13,8 +13,6 @@ describe('coupon box selector grammar', () => {
     it.each([
         '#promo',
         '.promo-code',
-        'input',
-        '*',
         'input#promo.coupon',
         'input[name="promo"]',
         'input[name=promo]',
@@ -27,24 +25,31 @@ describe('coupon box selector grammar', () => {
         '[data-action]',
         'form#cart > input[name="code"]',
         'div.promo input',
-        'label + input',
-        'h2 ~ div > button',
         'form .row > div input',
-        'li:first-child > input',
-        'li:nth-of-type(2) input',
-        'tr:nth-child(12) button',
-        'input:not([type="hidden"])',
-        'button:not(.disabled)',
-        'button:last-of-type',
+        'button.apply:not(.disabled)',
         '.-x-promo',
         '#_code',
         'input[name=""]',
+        'label + input#code',
+        'li:first-child > input[name="code"]',
+        'tr:nth-child(12) button.apply',
+        'input.code:not([type="hidden"])',
+        'form#cart button:last-of-type',
     ])('accepts %s', selector => {
         expect(isCouponBoxSelector(selector)).toBe(true)
     })
 
     it.each([
         ['empty', ''],
+        // No id, class or attribute outside :not(): names an element by tag
+        // and position alone (the site search, for `input`).
+        ['a bare type', 'input'],
+        ['the universal selector', '*'],
+        ['a type path', 'div > input'],
+        ['a sibling path', 'label + input'],
+        ['positions only', 'li:nth-of-type(2) input'],
+        ['an attribute only inside :not', 'input:not([type="hidden"])'],
+        ['a pseudo-class only', '*:first-child'],
         ['too long', `#${'a'.repeat(256)}`],
         ['a selector list', '#a, #b'],
         [':has(', 'form:has(input)'],
@@ -121,7 +126,7 @@ describe('coupon box selector grammar', () => {
         'input[data-step="12345"]',
         'input[data-price="19.99"]',
         '#promo-2024',
-        'li:nth-child(12) input',
+        'ul.cart li:nth-child(12) input',
         'input[placeholder="Enter code (e.g. SAVE10)"]',
         // Ids and classes name an element; stores generate long numbers in
         // them, and they carry no value about the shopper.

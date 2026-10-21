@@ -98,7 +98,7 @@ beforeEach(() => {
 })
 
 describe('POST /api/extension/coupon-box-save', () => {
-    it('saves the box under the catalog store, mapped to the store_configs columns, then drops the supported-stores cache', async () => {
+    it('saves the box under the catalog store, mapped to the store_configs columns, and leaves the supported-stores cache alone (an anonymous save must not force a rebuild)', async () => {
         const res = await post(goodBody())
 
         expect(res.status).toBe(200)
@@ -115,7 +115,7 @@ describe('POST /api/extension/coupon-box-save', () => {
             priceContainerXpath: '.order-total',
         })
         expect(servedMock).toHaveBeenCalledWith('www.shop-example.com')
-        expect(resetCacheMock).toHaveBeenCalledTimes(1)
+        expect(resetCacheMock).not.toHaveBeenCalled()
         expect(res.headers.get('cache-control')).toBe('private, no-store')
     })
 

@@ -206,10 +206,10 @@ async function handlePick(req: NextRequest): Promise<PickExit> {
         return exit(
             handleRouteError(error, {
                 req,
-                message:
-                    error instanceof Error
-                        ? error.message
-                        : 'coupon-box pick failed',
+                // Never the error's own text: it can carry database, driver
+                // or model-provider detail, and this route answers anonymous
+                // callers.
+                message: 'coupon-box pick failed',
                 status: 500,
             }),
             'server_error',

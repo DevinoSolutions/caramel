@@ -9,7 +9,6 @@ import {
     storeConfigFromBox,
 } from '@/lib/couponBoxSave'
 import { hasServedStoreConfig } from '@/lib/couponsRepo'
-import { resetSupportedStoresCache } from '@/lib/supportedStoresCache'
 import { NextResponse, type NextRequest } from 'next/server'
 
 // POST /api/extension/coupon-box-save — the extension background saves a
@@ -107,9 +106,11 @@ async function handleSave(req: NextRequest): Promise<NextResponse> {
         if (!inserted) {
             return json({ saved: false, reason: 'has_config' }, 409)
         }
-        // Serve the new row on the next supported-stores read, not after the
-        // cache's TTL (the ingest route does the same after a push).
-        resetSupportedStoresCache()
+        // The cache is NOT reset here: it reaches the new row within its TTL
+        // (minutes), installed extensions cache the store list for an hour
+        // anyway, and a reset per accepted save would let anonymous callers
+        // force one full rebuild of the list (seconds of blocked event loop)
+        // per request.
         console.info('[coupon-box-save] saved an auto-detected coupon box', {
             store,
             host,
@@ -119,10 +120,9 @@ async function handleSave(req: NextRequest): Promise<NextResponse> {
         console.error('[coupon-box-save] save failed', error, { host })
         return handleRouteError(error, {
             req,
-            message:
-                error instanceof Error
-                    ? error.message
-                    : 'coupon box save failed',
+            // Never the error's own text: it can carry database host, driver
+            // and SQL detail, and this route answers anonymous callers.
+            message: 'coupon box save failed',
             status: 500,
         })
     }

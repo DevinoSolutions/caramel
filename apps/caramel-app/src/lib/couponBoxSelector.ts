@@ -144,7 +144,22 @@ function holdsPersonalData(selector: string): boolean {
 /** Whether `selector` is inside the coupon box grammar above and holds
  * nothing that looks like personal data. */
 export function isCouponBoxSelector(selector: string): boolean {
-    return compoundsOf(selector) !== null && !holdsPersonalData(selector)
+    return (
+        compoundsOf(selector) !== null &&
+        isAnchored(selector) &&
+        !holdsPersonalData(selector)
+    )
+}
+
+/** Whether a selector inside the grammar names something by an id, a class or
+ * an attribute outside `:not(...)`. Without one it names an element by tag and
+ * position alone (`*`, `input`, `label + input`, `li:nth-of-type(2) input`):
+ * `input` is the page's first field, usually the site search. The extension
+ * never emits such a selector (caramelStableSelector always starts from an
+ * element's own id, name or label, or a path down from an ancestor that has
+ * one), so the save refuses it rather than file it as a store's config. */
+function isAnchored(selector: string): boolean {
+    return /[#.[]/.test(selector.replace(/:not\([^)]*\)/g, ''))
 }
 
 // Words that name a control that spends money or changes the cart, never one

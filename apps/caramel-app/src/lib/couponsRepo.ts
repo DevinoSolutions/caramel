@@ -34,6 +34,7 @@
 // `getBaseDomain`/domain-validation 400s, response envelopes, cache
 // headers, `hasMore`/`active` computed fields, and auth/rate-limit/origin
 // gates all stay in the calling route (`withRoute` config + the route body).
+import { STORE_CONFIG_STILL_SERVED_SQL } from '@/lib/catalog/applyCatalogRows'
 import {
     FAILING_MIN_FAIL_COUNT,
     FAILING_WINDOW_DAYS,
@@ -813,6 +814,7 @@ export async function listSupportedStoreConfigs(): Promise<StoreConfigRow[]> {
         FROM store_configs
         WHERE coupon_input_xpath IS NOT NULL
           AND apply_button_xpath IS NOT NULL
+          AND ${STORE_CONFIG_STILL_SERVED_SQL}
         ORDER BY store_name
     `)
     return parseCouponRows(
@@ -1022,6 +1024,7 @@ export async function hasServedStoreConfig(host: string): Promise<boolean> {
                 SELECT 1 FROM store_configs
                 WHERE coupon_input_xpath IS NOT NULL
                   AND apply_button_xpath IS NOT NULL
+                  AND ${STORE_CONFIG_STILL_SERVED_SQL}
                   AND (
                       store_name = ANY(${servedConfigCandidates(lowered)}::text[])
                       OR split_part(store_name, '.', 1) = ${shopLabel}
