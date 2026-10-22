@@ -300,8 +300,14 @@ async function recordFailedIn(
 
 /** A global retention sweep runs at most this often per process. */
 const REPORTER_SWEEP_INTERVAL_MS = 60 * 60 * 1000
+/** After a FAILED or timed-out sweep the next unforced try waits this long. */
+const REPORTER_SWEEP_BACKOFF_MS = 5 * 60 * 1000
+/** A sweep that has not settled by now is reported and abandoned. */
+const REPORTER_SWEEP_TIMEOUT_MS = 60 * 1000
+const REPORTER_SWEEP_AREA = 'couponSignals.sweepExpiredReporters'
 let nextReporterSweepAt = 0
 let reporterSweepInFlight: Promise<void> | null = null
+let reporterSweepGeneration = 0
 
 /**
  * Retention: reporter rows are pseudonymous IP/user-derived data and are kept
@@ -311,13 +317,18 @@ let reporterSweepInFlight: Promise<void> | null = null
  * after its write has committed (not awaited: the response never waits for
  * retention), and the hourly timer in couponReporterRetention.ts, which keeps
  * the promise true in quiet periods. One DELETE, at most hourly per process,
- * and at most ONE in flight: while a sweep is slow or failing, every other
- * caller gets the running sweep's promise instead of starting its own DELETE.
+ * and at most ONE in flight: while a sweep is running, every other caller gets
+ * the running sweep's promise instead of starting its own DELETE
+ * (single-flight is per module instance, so per bundle that loads this file).
  * It is deliberately outside the report's transaction (a retention failure
- * must not roll back a report that was valid) and it never rejects: a failure
- * is captured to Sentry and logged loudly, and the schedule only advances
- * after a sweep SUCCEEDS, so the next caller retries it. `force` skips the
- * hourly throttle (the timer's own cadence is the throttle there).
+ * must not roll back a report that was valid) and it never rejects. A failure
+ * is captured to Sentry and logged loudly and the next unforced try waits 5
+ * minutes, so a persistent failure costs one attempt per 5 minutes, not one
+ * per report. A DELETE that has not settled after 60 s is reported to Sentry
+ * (tagged timeout), abandoned and backed off the same way; the generation
+ * counter makes sure that if it settles later it cannot touch the state of a
+ * newer sweep. `force` skips the throttle and the backoff (the timer's own
+ * hourly cadence is the throttle there).
  */
 export function sweepExpiredReporters(
     options: { force?: boolean } = {},
@@ -327,28 +338,64 @@ export function sweepExpiredReporters(
     if (!options.force && now.getTime() < nextReporterSweepAt) {
         return Promise.resolve()
     }
-    reporterSweepInFlight = runReporterSweep(now).finally(() => {
-        reporterSweepInFlight = null
+    const generation = ++reporterSweepGeneration
+    const sweep = runReporterSweep(now, generation).finally(() => {
+        if (reporterSweepGeneration === generation) reporterSweepInFlight = null
     })
-    return reporterSweepInFlight
+    reporterSweepInFlight = sweep
+    return sweep
 }
 
-async function runReporterSweep(now: Date): Promise<void> {
+async function runReporterSweep(now: Date, generation: number): Promise<void> {
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined
+    const timedOut = new Promise<'timeout'>(resolve => {
+        timeoutHandle = setTimeout(
+            () => resolve('timeout'),
+            REPORTER_SWEEP_TIMEOUT_MS,
+        )
+    })
+    const deletion = prisma.couponSignalReporter.deleteMany({
+        where: {
+            lastAt: { lt: new Date(now.getTime() - FAILING_WINDOW_MS) },
+        },
+    })
     try {
-        await prisma.couponSignalReporter.deleteMany({
-            where: {
-                lastAt: { lt: new Date(now.getTime() - FAILING_WINDOW_MS) },
-            },
-        })
-        nextReporterSweepAt = now.getTime() + REPORTER_SWEEP_INTERVAL_MS
+        const outcome = await Promise.race([deletion, timedOut])
+        if (outcome === 'timeout') {
+            const error = new Error(
+                `reporter retention sweep did not settle within ${REPORTER_SWEEP_TIMEOUT_MS} ms`,
+            )
+            Sentry.captureException(error, {
+                tags: { area: REPORTER_SWEEP_AREA, timeout: 'true' },
+            })
+            console.error('[couponSignals]', error.message)
+            // A late rejection of the abandoned DELETE is still reported.
+            deletion.catch((late: unknown) => {
+                Sentry.captureException(late, {
+                    tags: { area: REPORTER_SWEEP_AREA, late: 'true' },
+                })
+            })
+            if (reporterSweepGeneration === generation) {
+                nextReporterSweepAt = now.getTime() + REPORTER_SWEEP_BACKOFF_MS
+            }
+            return
+        }
+        if (reporterSweepGeneration === generation) {
+            nextReporterSweepAt = now.getTime() + REPORTER_SWEEP_INTERVAL_MS
+        }
     } catch (error) {
         Sentry.captureException(error, {
-            tags: { area: 'couponSignals.sweepExpiredReporters' },
+            tags: { area: REPORTER_SWEEP_AREA },
         })
         console.error(
-            '[couponSignals] reporter retention sweep failed (will retry on the next call):',
+            '[couponSignals] reporter retention sweep failed (retrying in 5 minutes):',
             error,
         )
+        if (reporterSweepGeneration === generation) {
+            nextReporterSweepAt = now.getTime() + REPORTER_SWEEP_BACKOFF_MS
+        }
+    } finally {
+        clearTimeout(timeoutHandle)
     }
 }
 
@@ -356,6 +403,7 @@ async function runReporterSweep(now: Date): Promise<void> {
 export function resetReporterSweepForTests(): void {
     nextReporterSweepAt = 0
     reporterSweepInFlight = null
+    reporterSweepGeneration = 0
 }
 
 /** The trust overlay attachSignals merges onto each coupon (ISO strings; null/0 when we hold no signal). */

@@ -422,14 +422,16 @@ describe('failure quorum: forged anonymous reports cannot sink a code', () => {
         expect(db.reporters.has('stale')).toBe(false)
     })
 
-    it('a failing sweep is reported loudly (Sentry + console) and does NOT advance the schedule: the next call retries', async () => {
+    it('a failing sweep is reported loudly (Sentry + console) and backs off 5 minutes: a call inside the window starts no DELETE, one after it retries', async () => {
         const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
         vi.mocked(Sentry.captureException).mockClear()
+        sweepClient.deleteMany.mockClear()
         sweepClient.deleteMany.mockRejectedValueOnce(new Error('db down'))
 
         await sweepExpiredReporters()
         expect(Sentry.captureException).toHaveBeenCalledTimes(1)
         expect(errorSpy).toHaveBeenCalled()
+        expect(sweepClient.deleteMany).toHaveBeenCalledTimes(1)
 
         db.reporters.set('stale', {
             couponId: '88',
@@ -438,9 +440,109 @@ describe('failure quorum: forged anonymous reports cannot sink a code', () => {
             weight: 1,
             lastAt: new Date(Date.now() - FAILING_WINDOW_MS - 1000),
         })
+        vi.setSystemTime(Date.now() + 4 * 60 * 1000)
         await sweepExpiredReporters()
+        expect(sweepClient.deleteMany).toHaveBeenCalledTimes(1)
+        expect(db.reporters.has('stale')).toBe(true)
+
+        vi.setSystemTime(Date.now() + 61 * 1000)
+        await sweepExpiredReporters()
+        expect(sweepClient.deleteMany).toHaveBeenCalledTimes(2)
         expect(db.reporters.has('stale')).toBe(false)
         errorSpy.mockRestore()
+    })
+
+    describe('a DELETE that hangs', () => {
+        beforeEach(() => {
+            vi.useFakeTimers({
+                toFake: ['Date', 'setTimeout', 'clearTimeout'],
+            })
+            vi.setSystemTime(new Date('2026-10-21T12:00:00.000Z'))
+        })
+
+        it('is reported after 60 s (Sentry tagged timeout), frees the in-flight slot and backs off 5 minutes', async () => {
+            const errorSpy = vi
+                .spyOn(console, 'error')
+                .mockImplementation(() => {})
+            vi.mocked(Sentry.captureException).mockClear()
+            sweepClient.deleteMany.mockClear()
+            sweepClient.deleteMany.mockImplementationOnce(
+                () => new Promise<{ count: number }>(() => {}),
+            )
+
+            const hung = sweepExpiredReporters()
+            const shared = sweepExpiredReporters()
+            expect(sweepClient.deleteMany).toHaveBeenCalledTimes(1)
+            await vi.advanceTimersByTimeAsync(59_000)
+            expect(Sentry.captureException).not.toHaveBeenCalled()
+
+            await vi.advanceTimersByTimeAsync(2_000)
+            await Promise.all([hung, shared])
+            expect(Sentry.captureException).toHaveBeenCalledTimes(1)
+            expect(
+                vi.mocked(Sentry.captureException).mock.calls[0]![1],
+            ).toMatchObject({
+                tags: {
+                    area: 'couponSignals.sweepExpiredReporters',
+                    timeout: 'true',
+                },
+            })
+
+            // In-flight slot is free but the backoff holds for 5 minutes.
+            await sweepExpiredReporters()
+            expect(sweepClient.deleteMany).toHaveBeenCalledTimes(1)
+            await vi.advanceTimersByTimeAsync(5 * 60 * 1000)
+            await sweepExpiredReporters()
+            expect(sweepClient.deleteMany).toHaveBeenCalledTimes(2)
+            errorSpy.mockRestore()
+        })
+
+        it('a late settle of the abandoned DELETE cannot touch a NEWER sweep', async () => {
+            const errorSpy = vi
+                .spyOn(console, 'error')
+                .mockImplementation(() => {})
+            sweepClient.deleteMany.mockClear()
+            let settleOld: (value: { count: number }) => void = () => {}
+            let settleNew: (value: { count: number }) => void = () => {}
+            sweepClient.deleteMany
+                .mockImplementationOnce(
+                    () =>
+                        new Promise<{ count: number }>(resolve => {
+                            settleOld = resolve
+                        }),
+                )
+                .mockImplementationOnce(
+                    () =>
+                        new Promise<{ count: number }>(resolve => {
+                            settleNew = resolve
+                        }),
+                )
+
+            const old = sweepExpiredReporters()
+            await vi.advanceTimersByTimeAsync(61_000)
+            await old
+
+            await vi.advanceTimersByTimeAsync(5 * 60 * 1000)
+            const newer = sweepExpiredReporters()
+            expect(sweepClient.deleteMany).toHaveBeenCalledTimes(2)
+
+            // The old DELETE finally answers while the newer one is running:
+            // the newer sweep is still the single in-flight one.
+            settleOld({ count: 0 })
+            await vi.advanceTimersByTimeAsync(0)
+            void sweepExpiredReporters()
+            expect(sweepClient.deleteMany).toHaveBeenCalledTimes(2)
+
+            // And the newer sweep still completes and sets the hourly throttle.
+            settleNew({ count: 0 })
+            await newer
+            await sweepExpiredReporters()
+            expect(sweepClient.deleteMany).toHaveBeenCalledTimes(2)
+            await vi.advanceTimersByTimeAsync(61 * 60 * 1000)
+            await sweepExpiredReporters()
+            expect(sweepClient.deleteMany).toHaveBeenCalledTimes(3)
+            errorSpy.mockRestore()
+        })
     })
 
     it('concurrent triggers share ONE sweep: a slow or failing DELETE is never stampeded', async () => {
