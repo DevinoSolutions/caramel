@@ -87,7 +87,7 @@
         "@types/three": "0.185.1",
         "@typescript-eslint/parser": "8.40.0",
         "autoprefixer": "10.4.21",
-        "eslint-config-next": "16.0.3",
+        "eslint-config-next": "16.4.2",
         "jsdom": "29.1.1",
         "knip": "5.70.2",
         "postcss": "8.5.6",
