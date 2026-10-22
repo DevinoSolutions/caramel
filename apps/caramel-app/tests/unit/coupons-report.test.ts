@@ -563,7 +563,8 @@ describe('POST /api/coupons/[id]/report — anonymous behavior (characterization
 
         expect(hit.status).toBe(200)
         expect(await hit.json()).toEqual({ ok: true })
-        expect(txMock.$queryRaw).toHaveBeenCalledTimes(1)
+        // One statement per attempt: the miss, then the write that landed.
+        expect(txMock.$queryRaw).toHaveBeenCalledTimes(2)
     })
 
     it('probing unknown ids can never fill the dedupe table: every probe frees its slot', async () => {
@@ -828,7 +829,7 @@ describe('POST /api/coupons/[id]/report — signed-in attribution (coupon_report
         ])
     })
 
-    it('an unknown coupon id → 404 for a signed-in reporter too: no transaction, no signal, no attribution row', async () => {
+    it('an unknown coupon id → 404 for a signed-in reporter too: one statement that wrote nothing, no attribution row', async () => {
         signedInAs('user-1')
         catalogIds.clear() // the id is well-formed but no catalog row exists
 
@@ -838,8 +839,8 @@ describe('POST /api/coupons/[id]/report — signed-in attribution (coupon_report
 
         expect(res.status).toBe(404)
         expect(await res.json()).toEqual({ error: 'Unknown coupon' })
-        expect(prismaMock.$transaction).not.toHaveBeenCalled()
-        expect(txMock.$queryRaw).not.toHaveBeenCalled()
+        expect(txMock.$queryRaw).toHaveBeenCalledTimes(1)
+        expect(txMock.couponReport.findFirst).not.toHaveBeenCalled()
         expect(txMock.couponReport.create).not.toHaveBeenCalled()
         expect(reportRows).toEqual([])
     })
