@@ -41,6 +41,7 @@ const signalOverlay: typeof attachSignals = async rows =>
                 : null,
         lastFailedAt: null,
         failCount: 0,
+        failWeight: row.id === 'hidden' ? 6 : 0,
         keepsFailing: row.id === 'hidden',
     }))
 
