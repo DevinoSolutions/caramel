@@ -9,13 +9,21 @@
  *
  *   trustedClick(el)                 // a real click on el
  *   trustedKey(document, 'Escape')   // a real key press
+ *
+ * jsdom 30 keeps a wrapper's internal object in a private class field (it used
+ * to be a symbol-keyed property), so it is read through jsdom's own
+ * implForWrapper, the same function its generated bindings use.
  */
-const implOf = o => {
-    const sym = Object.getOwnPropertySymbols(o).find(
-        s => s.description === 'impl',
-    )
-    if (!sym) throw new Error('not a jsdom object')
-    return o[sym]
+import { createRequire } from 'node:module'
+
+const { implForWrapper } = createRequire(import.meta.url)(
+    'jsdom/lib/generated/idl/utils.js',
+)
+
+export const implOf = o => {
+    const impl = implForWrapper(o)
+    if (!impl) throw new Error('not a jsdom object')
+    return impl
 }
 
 export function dispatchTrusted(target, event) {
