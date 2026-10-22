@@ -147,12 +147,10 @@ describe('COUPON_BOX_PICK_DAILY_CAP=0 (the soft kill switch)', () => {
     it('refuses the very first uncached model call with 429 and never calls the model', async () => {
         vi.resetModules()
         envMock.COUPON_BOX_PICK_DAILY_CAP = 0
-        const { POST: zeroPost } = await import(
-            '@/app/api/extension/coupon-box-pick/route'
-        )
-        const { COUPON_BOX_PICK_BUDGET: zeroBudget } = await import(
-            '@/lib/couponBoxPickBudget'
-        )
+        const { POST: zeroPost } =
+            await import('@/app/api/extension/coupon-box-pick/route')
+        const { COUPON_BOX_PICK_BUDGET: zeroBudget } =
+            await import('@/lib/couponBoxPickBudget')
         expect(zeroBudget.daily).toBe(0)
 
         const res = await postWith(zeroPost, freshDomain())

@@ -89,8 +89,7 @@ const tables: Record<ReportKind, KindTable> = {
 }
 
 export type ReportReporter =
-    | { kind: 'user'; userId: string }
-    | { kind: 'ip'; ip: string }
+    { kind: 'user'; userId: string } | { kind: 'ip'; ip: string }
 
 /**
  * The one anonymous reporter every request WITHOUT the Cloudflare edge header

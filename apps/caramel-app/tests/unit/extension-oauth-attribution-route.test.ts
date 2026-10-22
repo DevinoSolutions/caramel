@@ -25,8 +25,7 @@ const { envMock, OAUTH_STATE_SECRET, KNOWN_ORIGIN } = vi.hoisted(() => {
             EXTENSION_OAUTH_STATE_SECRET: OAUTH_STATE_SECRET as string,
             GOOGLE_CLIENT_ID: 'test-google-client-id' as string | undefined,
             GOOGLE_CLIENT_SECRET: 'test-google-client-secret' as
-                | string
-                | undefined,
+                string | undefined,
             APPLE_CLIENT_ID: undefined as string | undefined,
             BETTER_AUTH_URL: 'http://localhost:58000',
             CHROME_EXTENSION_ORIGIN: KNOWN_ORIGIN as string | undefined,

@@ -36,8 +36,7 @@ const { envMock, OAUTH_STATE_SECRET } = vi.hoisted(() => {
             EXTENSION_OAUTH_STATE_SECRET: OAUTH_STATE_SECRET as string,
             GOOGLE_CLIENT_ID: 'test-google-client-id' as string | undefined,
             GOOGLE_CLIENT_SECRET: 'test-google-client-secret' as
-                | string
-                | undefined,
+                string | undefined,
             APPLE_CLIENT_ID: 'test.apple.client' as string | undefined,
             BETTER_AUTH_URL: 'https://grabcaramel.test',
             CHROME_EXTENSION_ORIGIN: undefined as string | undefined,

@@ -432,6 +432,7 @@ async function main() {
                     },
                     storage: { sync: { get: (_, cb) => cb && cb({}) } },
                 }
+                // oxlint-disable-next-line no-eval -- 2026-10-22: global-scope eval of the bundled content-script graph inside the test page is the point of this harness (oxlint 1.89 started flagging indirect eval).
                 ;(0, eval)(driverSource)
             }, driverSource)
 

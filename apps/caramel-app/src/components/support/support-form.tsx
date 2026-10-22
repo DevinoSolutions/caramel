@@ -11,10 +11,7 @@ import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
 export type SupportFeedbackType =
-    | 'problem'
-    | 'feature_request'
-    | 'question'
-    | 'other'
+    'problem' | 'feature_request' | 'question' | 'other'
 
 const TYPE_OPTIONS: { value: SupportFeedbackType; label: string }[] = [
     { value: 'problem', label: 'Problem' },

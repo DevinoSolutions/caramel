@@ -249,10 +249,7 @@ export async function listSiteSuggestions(
 /** Why an id did NOT move. Reported per id so the caller can tell "I sent a
  * stale list" (`already`/`backwards`) from "I sent a wrong id" (`not_found`). */
 export type SiteSuggestionRefusalReason =
-    | 'not_found'
-    | 'already'
-    | 'backwards'
-    | 'raced'
+    'not_found' | 'already' | 'backwards' | 'raced'
 
 export interface SiteSuggestionRefusal {
     id: string
@@ -435,10 +432,7 @@ async function pendingNoticeIds(ids: string[]): Promise<string[]> {
 // ---------------------------------------------------------------------------
 
 export type SiteSuggestionNotifyOutcome =
-    | 'sent'
-    | 'already_notified'
-    | 'not_eligible'
-    | 'failed'
+    'sent' | 'already_notified' | 'not_eligible' | 'failed'
 
 export interface SiteSuggestionNotifyResult {
     id: string

@@ -870,7 +870,7 @@ function sectionWords(el) {
         .map(wordsOf)
     let head = ''
     for (let n = el; !head && n !== box; n = n.parentElement)
-        for (let s = n; !head && (s = s.previousElementSibling); ) {
+        for (let s = n; !head && (s = s.previousElementSibling);) {
             const h = s.matches(HEADING) ? s : s.querySelector(HEADING)
             if (
                 h &&

@@ -108,10 +108,7 @@ interface CouponBoxRefusedButton {
 }
 
 export type CouponBoxPickResult =
-    | CouponBoxFound
-    | CouponBoxAbsent
-    | CouponBoxNoPick
-    | CouponBoxRefusedButton
+    CouponBoxFound | CouponBoxAbsent | CouponBoxNoPick | CouponBoxRefusedButton
 
 type CachedAnswer =
     | Omit<CouponBoxFound, 'cached'>

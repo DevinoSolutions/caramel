@@ -37,9 +37,7 @@ const { envMock } = vi.hoisted(() => ({
         SENDLY_API_KEY: 'sk_test_key' as string | undefined,
         SENDLY_FROM_EMAIL: 'no_reply@grabcaramel.com',
         EMAIL_DELIVERY_HEALTH_ENABLED: undefined as
-            | 'true'
-            | 'false'
-            | undefined,
+            'true' | 'false' | undefined,
         EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES: 60,
     },
 }))

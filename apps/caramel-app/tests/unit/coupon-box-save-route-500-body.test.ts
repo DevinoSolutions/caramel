@@ -10,11 +10,9 @@ const { envMock, knownMock, servedMock, insertMock } = vi.hoisted(() => ({
     envMock: {} as Record<string, unknown>,
     knownMock: vi.fn(async (): Promise<string[]> => ['shop-example.com']),
     servedMock: vi.fn(async () => false),
-    insertMock: vi.fn(
-        async (): Promise<{ inserted: boolean }> => ({
-            inserted: true,
-        }),
-    ),
+    insertMock: vi.fn(async (): Promise<{ inserted: boolean }> => ({
+        inserted: true,
+    })),
 }))
 vi.mock('@/lib/env', async importOriginal => {
     const actual = await importOriginal<typeof import('@/lib/env')>()

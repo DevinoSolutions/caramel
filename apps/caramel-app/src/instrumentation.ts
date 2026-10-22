@@ -18,9 +18,8 @@ export async function register() {
 
     // Analytics requests are proxied to PostHog; see the module for why each
     // proxied response needs more than Node's default 10 listeners.
-    const { raiseListenerCeilingForProxiedResponses } = await import(
-        '@/lib/proxiedResponseListenerCeiling'
-    )
+    const { raiseListenerCeilingForProxiedResponses } =
+        await import('@/lib/proxiedResponseListenerCeiling')
     raiseListenerCeilingForProxiedResponses()
 
     await import('../sentry.server.config')
@@ -47,9 +46,8 @@ export async function register() {
     // not just Apple) or at the first Apple sign-in. Throws -> the boot fails
     // loudly and the deploy never goes healthy. Never logs the key.
     if (env.APPLE_CLIENT_ID) {
-        const { getAppleClientSecret } = await import(
-            '@/lib/auth/appleClientSecret'
-        )
+        const { getAppleClientSecret } =
+            await import('@/lib/auth/appleClientSecret')
         getAppleClientSecret()
         console.log(
             '[boot] apple client secret signed from APPLE_PRIVATE_KEY (Sign in with Apple ENABLED)',
@@ -85,9 +83,8 @@ export async function register() {
     // as the PostHog helper above (never load it into the edge runtime), and
     // the decision is LOGGED either way so "is the check running?" is never a
     // guess.
-    const { startEmailDeliveryHealthMonitor } = await import(
-        '@/lib/emailDeliveryHealthMonitor'
-    )
+    const { startEmailDeliveryHealthMonitor } =
+        await import('@/lib/emailDeliveryHealthMonitor')
     const decision = startEmailDeliveryHealthMonitor()
     console.log(
         `[boot] email delivery health ${decision.enabled ? 'ENABLED' : 'DISABLED'} — ${decision.reason}`,
@@ -96,9 +93,8 @@ export async function register() {
     // Retention of the hashed coupon-report reporter rows (30 days, promised by
     // the privacy policy): the route sweeps on writes, this hourly timer covers
     // quiet periods. Same pattern and same reasons as the monitor above.
-    const { startCouponReporterRetentionSweep } = await import(
-        '@/lib/couponReporterRetention'
-    )
+    const { startCouponReporterRetentionSweep } =
+        await import('@/lib/couponReporterRetention')
     const retention = startCouponReporterRetentionSweep()
     console.log(
         `[boot] coupon reporter retention sweep ${retention.enabled ? 'ENABLED' : 'DISABLED'} — ${retention.reason}`,
