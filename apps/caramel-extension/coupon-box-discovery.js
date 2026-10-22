@@ -896,7 +896,8 @@ function sectionWords(el) {
 function spendsPoints(el) {
     const own = controlWords(el)
     const ownWords = withoutCodePhrases(own).replace(REDEEM_WORDS_RE, '')
-    if (LOYALTY_RE.test(ownWords) || STORE_CREDIT_RE.test(ownWords)) return true
+    if (LOYALTY_RE.test(ownWords)) return true
+    if (STORE_CREDIT_RE.test(ownWords) && !creditOnlyInItsName(el)) return true
     if (REDEEM_FOR_A_CODE_RE.test(own)) return true
     if (CODE_WORD_RE.test(own)) return false
     const beside = wordsBeside(el)
@@ -920,6 +921,20 @@ function spendsPoints(el) {
         !namesCouponCode(beside) &&
         (STORE_CREDIT_RE.test(near) || giftOnly(beside))
     )
+}
+
+// "Credit" only in a control's id or name, while the words the shopper reads
+// on it name a code: the store's name for its code box, not a balance.
+// Measured on uncommongoods.com 2026-10-22: the promo box's "apply" button is
+// #cart-credits-submit-button, aria-label "Submit Uncommon Credit Code", and
+// read as store credit it lost the box to codes-to-copy. A label that itself
+// says credit ("Apply credit", "Use store credit") is still refused.
+function creditOnlyInItsName(el) {
+    const read = [wordsOf(el), ariaOf(el), el.value, el.title]
+        .join(' ')
+        .slice(0, RULE_WORDS_MAX)
+    const readWords = withoutCodePhrases(read).replace(REDEEM_WORDS_RE, '')
+    return CODE_WORD_RE.test(read) && !STORE_CREDIT_RE.test(readWords)
 }
 
 // A field that takes points or store credit rather than a code ("Points to

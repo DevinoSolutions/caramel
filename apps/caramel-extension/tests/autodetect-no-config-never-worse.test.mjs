@@ -1291,6 +1291,48 @@ describe('store credit, a gift card or a balance is never spent by the finder or
         expect(t.savings).toEqual([{ code: 'SAVE20', amount: 20 }])
     })
 
+    // Measured on uncommongoods.com 2026-10-22, markup trimmed: the cart's
+    // promo box ("Apply a promo code", field "Promo Code") has an "apply"
+    // button whose aria-label says "Submit Uncommon Credit Code". "Credit"
+    // read as store credit refused the button, so neither the rules nor the
+    // server's correct pick could use the box and the shopper got codes to
+    // copy. A credit CODE is a code the shopper types, not a balance.
+    const CREDIT_CODE_BOX =
+        '<div class="panel"><h4>Apply a promo code</h4>' +
+        '<div class="input-group"><label for="input-id-w13keza"><span>Promo Code</span></label>' +
+        '<input id="input-id-w13keza" type="text" maxlength="10" autocomplete="off" aria-label="Promo Code">' +
+        '<button id="cart-credits-submit-button" type="button" aria-label="Submit Uncommon Credit Code" class="btn-secondary"> apply </button>' +
+        '</div></div>'
+    it('a promo box whose apply button is labelled "Submit ... Credit Code": the code goes in', async () => {
+        freshPage(CREDIT_CODE_BOX + TOTAL)
+        wireStore('input-id-w13keza', 'cart-credits-submit-button', 'drop')
+        answer = req =>
+            pick(idx(req.outline, /textbox/), idx(req.outline, /button /))
+        await run()
+        expect(t.page[0]).toBe('submit:cart-credits-submit-button:SAVE20')
+        expect(t.savings).toEqual([{ code: 'SAVE20', amount: 20 }])
+    })
+    // Credit in the name alone is forgiven only when the label names a code.
+    for (const [label, name] of [
+        ['Use credit', 'cart-credits-submit-button'],
+        ['Apply credits', 'cart-credits-submit-button'],
+        ['Apply', 'cart-credits-submit-button'],
+        ['Submit', 'store_credit_apply'],
+    ])
+        it(`"${label}" named ${name} beside a bare field is still never clicked`, async () => {
+            freshPage(
+                '<div class="f"><input id="x" name="field_7" type="text">' +
+                    `<button id="spend" name="${name}" type="button">${label}</button></div>` +
+                    TOTAL,
+            )
+            watch('spend')
+            wireStore('x', 'spend', 'drop')
+            answer = req =>
+                pick(idx(req.outline, /textbox/), idx(req.outline, /button /))
+            await run()
+            nothingSpent()
+        })
+
     it('a box the server names in a section headed "Credit card": a payment method, not credit, so the code goes in', async () => {
         freshPage(
             '<section><h3>Credit card</h3>' +
