@@ -325,6 +325,12 @@ export function _caramelCouponAreaText(rec) {
         parts.push(textOf(scope))
         scope = scope.parentElement
     }
+    // A found box is also answered in the page's alert regions
+    // (_caramelPageAlertSaying): what they already said is not our answer.
+    if (rec?.caramelFound) {
+        for (const el of document.querySelectorAll(_CARAMEL_PAGE_ALERTS))
+            parts.push(textOf(el))
+    }
     // Joined with a sentinel, not a space: two adjacent chunks must not be
     // able to form a phrase neither of them contained, or a store message
     // that straddles the boundary would read as text we had seen before and
@@ -602,6 +608,33 @@ function detectCouponError(rec, baseline, code, priorText) {
         }
         scope = scope.parentElement
     }
+    return rec.caramelFound ? _caramelPageAlertSaying(priorText) : null
+}
+
+// A page's alert regions: where a cart that answers far from the box puts its
+// answer.
+const _CARAMEL_PAGE_ALERTS =
+    '[role="alert"], [aria-live="assertive"], [aria-live="polite"]'
+
+// The store refusing a code in an alert region of the page rather than beside
+// the box. pureformulas.com, measured live 2026-10-22: a refused code is
+// answered only by one banner at the top of the cart ("Oops! This code can't
+// be applied. …"), outside the five levels read around the box, so the run saw
+// no answer and stopped after two codes. Only for a box the finder picked (a
+// config names its own errorIndicator), and only a sentence that is about a
+// code and was not on the page before we submitted: a stock or shipping
+// notice in the same region is not the store's answer to us.
+function _caramelPageAlertSaying(priorText) {
+    for (const el of document.querySelectorAll(_CARAMEL_PAGE_ALERTS)) {
+        if (!_isVisible(el)) continue
+        const said = _caramelSmallestSaying(el, priorText)
+        if (
+            said &&
+            _caramelNamesCoupon(said) &&
+            caramelQuoteIsAttributable(said, priorText)
+        )
+            return said
+    }
     return null
 }
 
@@ -801,6 +834,21 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
                     await sleep(200)
                 }
                 return 'answer-timeout'
+            })(),
+        )
+    }
+    // A found box whose store answers in a page alert instead
+    // (_caramelPageAlertSaying): that answer ends the wait too.
+    if (rec.caramelFound) {
+        waiters.push(
+            (async () => {
+                const startedAt = performance.now()
+                while (performance.now() - startedAt < APPLY_WAIT_MS) {
+                    await sleep(200)
+                    if (_caramelPageAlertSaying(priorAreaText))
+                        return 'answered'
+                }
+                return 'alert-timeout'
             })(),
         )
     }

@@ -363,3 +363,94 @@ describe('reading the verdict off the total', () => {
         expect(_caramelRefusesTheCode(null, 'SAVE20')).toBe(false)
     })
 })
+
+describe("the store's answer in a page-wide alert, far from the box", () => {
+    // pureformulas.com, measured live 2026-10-22: the cart answers a refused
+    // code in one banner at the top of the page
+    // (main > section > div.pfCart > div.container > div.alert[role=alert]),
+    // nowhere near the box. Reading only around the box found nothing, the
+    // run saw no answer from the store, and stopped after two codes as if the
+    // checkout took no input at all.
+    const SAID =
+        "Oops! This code can't be applied. Possible reasons include exclusions on certain brands or products, order total not meeting the minimum requirement, prior use, or Autoship orders not qualifying."
+    // Six wrappers: the banner sits further from the field than the five
+    // levels the box's own area is read over.
+    const deep = inner =>
+        '<div><div><div><div><div><div>' +
+        inner +
+        '</div></div></div></div></div></div>'
+    const page = alert =>
+        '<main><div class="pfCart"><div class="container">' +
+        `<div id="alert" class="alert alert-error" role="alert" aria-live="polite">${alert}</div>` +
+        '</div>' +
+        deep(PROMO_BOX + TOTAL) +
+        '</div></main>'
+    const storeAlerts = text =>
+        document.getElementById('ap').addEventListener('click', () => {
+            setTimeout(() => {
+                document.getElementById('alert').textContent = text
+            }, 100)
+        })
+
+    it(
+        "a refusal that appears in the page's alert after the submit is the store's answer",
+        async () => {
+            document.body.innerHTML = page('')
+            storeAlerts(SAID)
+
+            const rec = await caramelDiscoveredRecord(NO_CONFIG)
+            expect(rec?.caramelFound).toBe(true)
+            const res = await applyCoupon('SAVE20', rec)
+
+            expect(res.errorMsg).toBe(SAID)
+            expect(res.errorIsNew).toBe(true)
+            expect(res.success).toBe(false)
+        },
+        SLOW,
+    )
+
+    it(
+        'the same refusal already showing before the submit is not quoted as our answer',
+        async () => {
+            document.body.innerHTML = page(SAID)
+
+            const rec = await caramelDiscoveredRecord(NO_CONFIG)
+            const res = await applyCoupon('SAVE20', rec)
+
+            expect(res.errorIsNew).toBe(false)
+        },
+        SLOW,
+    )
+
+    it(
+        'an alert about something other than a code is not read as a refusal',
+        async () => {
+            document.body.innerHTML = page('')
+            storeAlerts('This item is no longer available.')
+
+            const rec = await caramelDiscoveredRecord(NO_CONFIG)
+            const res = await applyCoupon('SAVE20', rec)
+
+            expect(res.errorMsg).toBe(null)
+        },
+        SLOW,
+    )
+
+    it(
+        'a box from a config keeps reading only its own area',
+        async () => {
+            document.body.innerHTML = page('')
+            storeAlerts(SAID)
+
+            const res = await applyCoupon('SAVE20', {
+                domain: 'shop.test',
+                couponInput: '#dc',
+                couponSubmit: '#ap',
+                priceContainer: '#tot',
+            })
+
+            expect(res.errorMsg).toBe(null)
+        },
+        SLOW,
+    )
+})
