@@ -45,6 +45,15 @@ enum ScreenshotLaunch {
 
     private static let storePrefix = "store:"
 
+    /// True when the capture workflow launched the app. The unsigned simulator
+    /// build has no keychain entitlement (OSStatus -34018), so the Account tab
+    /// hides that environment-only error banner in screenshots; real launches
+    /// never pass the argument and always show it.
+    static var isActive: Bool { value(after: "-screenshotTab") != nil }
+
+    /// Text typed into the Search tab, so the shot shows results instead of the A-Z browse list.
+    static var searchQuery: String? { value(after: "-screenshotSearchQuery") }
+
     /// The tab to open on; `store:DOMAIN` opens the Deals tab.
     static var initialTab: RootTab? {
         guard let raw = value(after: "-screenshotTab") else { return nil }

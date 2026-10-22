@@ -40,6 +40,7 @@ env:
   APPLE_DIR: apps/caramel-apple
   STORE_DOMAIN: ${{ inputs.store_domain || 'yesglasses.com' }}
   # Stores seeded into the Saved tab (the screenshot shows them as saved).
+  SEARCH_QUERY: glasses
   SAVED_STORES: yesglasses.com,humehealth.com,bumbleandbumble.com
   SHOTS_DIR: ${{ github.workspace }}/screenshots
 
@@ -142,7 +143,7 @@ jobs:
 
             shoot get-started -screenshotTab onboarding
             shoot deals -screenshotTab deals
-            shoot search -screenshotTab search
+            shoot search -screenshotTab search -screenshotSearchQuery "${SEARCH_QUERY}"
             shoot store -screenshotTab "store:${STORE_DOMAIN}"
             shoot saved -screenshotTab saved -screenshotSavedStores "${SAVED_STORES}"
             shoot account -screenshotTab account

@@ -17,7 +17,7 @@ struct AccountView: View {
     var body: some View {
         NavigationStack {
             List {
-                if let message = session.errorMessage {
+                if let message = session.errorMessage, !ScreenshotLaunch.isActive {
                     Section { ErrorBanner(message: message, retryTitle: "Dismiss") { session.errorMessage = nil } }
                 }
                 if session.isSignedIn {
