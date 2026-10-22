@@ -3,7 +3,12 @@ name: CI Checks – Extension
 on:
   push:
     branches: [main, dev]
+    # T-5447: docs-only changes skip the workflow. Safe because main has no
+    # required status checks (a skipped workflow would leave a required check
+    # "Expected" forever).
+    paths-ignore: ['docs/**', '**/*.md']
   pull_request:
+    paths-ignore: ['docs/**', '**/*.md']
 
 env:
   # Fork PRs never receive repository `vars`, so this must fall back to the real
@@ -56,10 +61,23 @@ jobs:
       # strict tsc, no any; `wxt prepare` generates .wxt/ types first.
       - name: Type-check WXT surfaces
         run: pnpm run type-check
-      # Proves the WXT build runs and lands the files the manifest promises
-      # (the parity harness above asserts the manifest references resolve).
-      - name: Build the store package
-        run: pnpm run build
+      # T-5447: the extension is built ONCE per run, by the parity harness
+      # above (which runs `wxt build` for chrome production, firefox
+      # production and chrome development and asserts the files the manifest
+      # promises are there). The two chrome outputs are handed to the e2e job
+      # as an artifact instead of being rebuilt there. A separate
+      # `pnpm run build` step used to rebuild the same chrome production
+      # output a second time; it is gone.
+      - name: Upload chrome builds for the e2e job
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: extension-chrome-builds
+          path: |
+            ${{ env.WORKING_DIRECTORY }}/.output/chrome-mv3
+            ${{ env.WORKING_DIRECTORY }}/.output/chrome-mv3-dev
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 1
 
   # ─────────────────────────────────────────────────────────────
   # Extension E2E (E-02) — real Chromium + unpacked extension + local app
@@ -75,6 +93,8 @@ jobs:
   e2e:
     name: extension e2e
     if: github.event_name == 'pull_request'
+    # Needs the chrome builds that `checks` uploads.
+    needs: lint_and_build
     runs-on: ubuntu-24.04 # Playwright does not support ubuntu 26.04 (T-5003)
     timeout-minutes: 15
     services:
@@ -111,6 +131,16 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      # Chrome production (.output/chrome-mv3) and development
+      # (.output/chrome-mv3-dev) builds from the `checks` job; nothing below
+      # rebuilds them. upload-artifact keeps the path relative to the common
+      # root, so restore into the package's .output directory.
+      - name: Download chrome builds
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: extension-chrome-builds
+          path: ${{ env.WORKING_DIRECTORY }}/.output
 
       # test-extension.mjs imports `playwright` from the extension workspace
       # (its own devDependency), so the browser install must run there too.
@@ -157,6 +187,9 @@ jobs:
       # The MV3 service worker needs a headed Chromium (the suite launches
       # headless:false) — xvfb provides the display on the runner.
       - name: Run extension e2e suite
+        env:
+          # Use the downloaded dev build instead of rebuilding it (T-5447).
+          CARAMEL_EXT_PREBUILT: '1'
         run: |
           sudo apt-get -yqq install xvfb
           xvfb-run --auto-servernum pnpm --filter caramel-extension test:e2e
@@ -171,9 +204,6 @@ jobs:
       # Covers the two things the unit suite structurally cannot — inventing a
       # savings figure, and clicking a checkout's order button — because
       # savings-plausibility.test.mjs stubs applyCoupon out entirely.
-      - name: Build the store package
-        run: pnpm --filter caramel-extension run build
-
       # Loads that PRODUCTION package in a real Chrome and asserts which
       # deployment it resolved to. Nothing else in CI does: the guards below
       # need a development stamp, and the e2e suite points its copy at the
@@ -182,16 +212,13 @@ jobs:
       - name: Smoke the store package (production stamp, real browser)
         run: xvfb-run --auto-servernum pnpm --filter caramel-extension exec node scripts/smoke-package.mjs ./.output/chrome-mv3 production
 
-      # …and a second, DEVELOPMENT-stamped build for the guards to drive.
-      # Several guard checks assert on the extension's own diagnostic markers
-      # (AUTO_INSERT_BASELINE_NARROWED, _REFUSED_CONTROL, _EARLY_EXIT), which
+      # The guards drive a DEVELOPMENT-stamped build (downloaded above, not
+      # rebuilt). Several guard checks assert on the extension's own diagnostic
+      # markers (AUTO_INSERT_BASELINE_NARROWED, _REFUSED_CONTROL, _EARLY_EXIT), which
       # a shipped build deliberately does not print — console-silence.test.mjs
       # exists to keep our internals out of a shopper's store console. Same
       # module graph either way; only the __CARAMEL_ENV__ stamp differs, and
       # the production build is still smoked above.
-      - name: Build the bundle the guards drive (development stamp)
-        run: pnpm --filter caramel-extension run build:dev
-
       - name: Run extension guard suite (dev-stamped build)
         run: xvfb-run --auto-servernum pnpm --filter caramel-extension test:guards
 

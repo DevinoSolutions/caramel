@@ -41,6 +41,7 @@ import { build as esbuild } from 'esbuild'
 import { execSync } from 'node:child_process'
 import {
     cpSync,
+    existsSync,
     mkdtempSync,
     readdirSync,
     readFileSync,
@@ -70,12 +71,23 @@ const TEST_PASSWORD = 'test1234'
  * against the remote deployment.
  */
 function stagePatchedExtensionCopy() {
-    console.log('[test] building .output/chrome-mv3-dev (dev stamp)…')
-    execSync('npx wxt build --mode development', {
-        cwd: EXT_PATH,
-        stdio: 'inherit',
-        shell: true,
-    })
+    // CI sets CARAMEL_EXT_PREBUILT=1 to hand this suite the dev build the
+    // checks job already made (T-5447). Locally the build always runs, so a
+    // stale .output can never be tested by accident.
+    const prebuilt = process.env.CARAMEL_EXT_PREBUILT === '1'
+    if (prebuilt && !existsSync(path.join(DEV_OUT, 'manifest.json'))) {
+        throw new Error(
+            `CARAMEL_EXT_PREBUILT=1 but ${DEV_OUT} has no manifest.json`,
+        )
+    }
+    if (!prebuilt) {
+        console.log('[test] building .output/chrome-mv3-dev (dev stamp)…')
+        execSync('npx wxt build --mode development', {
+            cwd: EXT_PATH,
+            stdio: 'inherit',
+            shell: true,
+        })
+    }
 
     const dest = mkdtempSync(path.join(tmpdir(), 'caramel-ext-patched-'))
     cpSync(DEV_OUT, dest, { recursive: true })

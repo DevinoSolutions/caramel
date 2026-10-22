@@ -3,8 +3,15 @@ name: CI Checks – App
 on:
   push:
     branches: [main, dev]
+    # T-5447: docs-only changes skip the whole workflow. Safe because main has
+    # no required status checks (a skipped workflow would otherwise leave a
+    # required check "Expected" forever). Deliberately NOT `evals/**`: that dir
+    # holds .ts eval code that lint/typecheck cover; its .md is caught by the
+    # `**/*.md` entry. The nightly `schedule` trigger is unaffected.
+    paths-ignore: ['docs/**', '**/*.md']
   pull_request:
     branches: [main, dev]
+    paths-ignore: ['docs/**', '**/*.md']
   schedule:
     # Nightly re-audit of prod deps so a new CVE on an unchanged pin surfaces
     # even with no push. Only the `audit` job runs on this trigger.
@@ -19,24 +26,73 @@ concurrency:
 
 jobs:
   # ─────────────────────────────────────────────────────────────
-  # Code Quality Checks (lint, prettier, typecheck, knip)
+  # Static checks, folded (lint, prettier, prettier-root, oxlint, knip)
+  # ─────────────────────────────────────────────────────────────
+  # T-5447: these five used to be matrix legs, each paying its own checkout +
+  # pnpm install + `pnpm doctor`. They are all read-only static gates over the
+  # same tree, so they now share ONE install and run as separate steps (a step
+  # that fails still names the failing gate; later steps are skipped, so fix
+  # forward one gate at a time). Every step runs the exact command the matrix
+  # leg ran. No required status checks are configured on main (branch
+  # protection 404, rulesets empty), so the old per-leg contexts are not load-
+  # bearing; typecheck and unit stay separate jobs because they need the Prisma
+  # client and are the slow legs.
+  static-checks:
+    name: static checks
+    # Schedule runs the nightly dependency audit only — skip the quality jobs.
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate dependencies
+        run: pnpm doctor
+
+      - name: Run lint
+        working-directory: ./apps/caramel-app
+        run: pnpm lint
+
+      - name: Run prettier
+        working-directory: ./apps/caramel-app
+        run: pnpm prettier-check
+
+      # oxlint runs from the repo root (both apps), not per-app.
+      - name: Run oxlint
+        run: pnpm lint:oxlint
+
+      # prettier-root checks repo-root + .github files (workflows YAML, root
+      # package.json, README, issue templates) that the per-app prettier step
+      # doesn't cover — runs from the repo root, like oxlint.
+      - name: Run root prettier-check
+        run: pnpm prettier-check:root
+
+      - name: Run knip
+        working-directory: ./apps/caramel-app
+        run: pnpm knip
+
+  # ─────────────────────────────────────────────────────────────
+  # typecheck + unit (need the generated Prisma client)
   # ─────────────────────────────────────────────────────────────
   test-matrix:
     name: ${{ matrix.task }}
-    # Schedule runs the nightly dependency audit only — skip the quality matrix.
     if: github.event_name != 'schedule'
     strategy:
       matrix:
-        task:
-          [
-            'lint',
-            'prettier',
-            'typecheck',
-            'knip',
-            'unit',
-            'oxlint',
-            'prettier-root',
-          ]
+        task: ['typecheck', 'unit']
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -63,23 +119,8 @@ jobs:
       # through the couponsRepo read layer, so the `unit` job needs the generated
       # client present too or collection fails with "Cannot find module
       # '.prisma/client/default'". (integration/e2e jobs generate explicitly.)
-      - if: matrix.task == 'typecheck' || matrix.task == 'unit'
-        name: Generate Prisma Client
+      - name: Generate Prisma Client
         run: pnpm --filter caramel-app exec prisma generate
-
-      # oxlint runs from the repo root (both apps), not per-app like the rest
-      # of this matrix — kept in the same matrix so it reports as its own
-      # "oxlint" status check, sibling to lint/prettier/typecheck/knip.
-      - if: matrix.task == 'oxlint'
-        name: Run oxlint
-        run: pnpm lint:oxlint
-
-      # prettier-root checks repo-root + .github files (workflows YAML, root
-      # package.json, README, issue templates) that the per-app prettier task
-      # doesn't cover — runs from the repo root, like oxlint.
-      - if: matrix.task == 'prettier-root'
-        name: Run root prettier-check
-        run: pnpm prettier-check:root
 
       # The repo's own eslint rules (tools/eslint-rules/) are tested from the
       # repo root with node:test, not from apps/caramel-app with vitest: the
@@ -90,15 +131,11 @@ jobs:
         name: Run eslint rule tests
         run: pnpm test:eslint-rules
 
-      - if: matrix.task != 'oxlint' && matrix.task != 'prettier-root'
-        name: Run ${{ matrix.task }}
+      - name: Run ${{ matrix.task }}
         working-directory: ./apps/caramel-app
         run: |
           case ${{ matrix.task }} in
-            lint)      pnpm lint ;;
-            prettier)  pnpm prettier-check ;;
             typecheck) pnpm tsc --noEmit ;;
-            knip)      pnpm knip ;;
             unit)      pnpm test ;;
           esac
 
