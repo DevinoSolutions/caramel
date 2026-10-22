@@ -34,13 +34,18 @@ enum AppConfig {
 /// (.github/workflows/apple-app-screenshots.yml) launches the simulator build
 /// with `-screenshotTab <onboarding|deals|search|saved|account|store:DOMAIN>` so
 /// it can photograph each screen without UI tests, and optionally
-/// `-screenshotSavedStores a.com,b.com` to seed the Saved tab. Without these
-/// arguments (every real launch) all of it is inert.
+/// `-screenshotSavedStores a.com,b.com` to seed the Saved tab. Compiled in only
+/// under DEBUG (the capture workflow builds Debug): in a Release/App Store build
+/// every accessor returns nil/false, so no launch argument can reach any of it.
 enum ScreenshotLaunch {
     private static func value(after flag: String) -> String? {
+#if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
         guard let index = arguments.firstIndex(of: flag), arguments.indices.contains(index + 1) else { return nil }
         return arguments[index + 1]
+#else
+        return nil
+#endif
     }
 
     private static let storePrefix = "store:"
@@ -68,9 +73,11 @@ enum ScreenshotLaunch {
         return domain.isEmpty ? nil : domain
     }
 
-    /// Writes the saved-stores list before FavoritesStore reads it.
+    /// Writes the saved-stores list before FavoritesStore reads it. Only inside a
+    /// capture launch (`-screenshotTab` present): the list lives in the real App
+    /// Group defaults, and FavoritesStore pushes it to a signed-in account.
     static func seedSavedStoresIfRequested() {
-        guard let raw = value(after: "-screenshotSavedStores") else { return }
+        guard isActive, let raw = value(after: "-screenshotSavedStores") else { return }
         let stores = raw.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces).lowercased() }.filter { !$0.isEmpty }
         AppGroup.defaults.set(stores, forKey: AppGroup.Key.savedStores)
     }

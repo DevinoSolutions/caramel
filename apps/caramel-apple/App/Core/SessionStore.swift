@@ -123,7 +123,8 @@ final class WebSignIn: NSObject, ASWebAuthenticationPresentationContextProviding
 }
 
 /// The signed-in state. The bearer lives in the shared keychain
-/// (SharedSessionKeychain) so the Safari extension can read the same sign-in.
+/// (SharedSessionKeychain). TODO(T-5059): the Safari extension does not read that
+/// item yet (native messaging is not wired), so today it keeps its own sign-in.
 @MainActor
 final class SessionStore: ObservableObject {
     @Published private(set) var token: String?

@@ -7,8 +7,8 @@ name: Apple App – App Store screenshots (iOS Simulator)
 # `appstore-screenshots` artifact. Nothing is signed, uploaded to App Store
 # Connect or sent to review; it only reads grabcaramel.com's public read-only APIs.
 #
-# The app is driven by launch arguments (ScreenshotLaunch in AppConfig.swift),
-# not UI tests: `-screenshotTab onboarding|deals|search|saved|account|store:DOMAIN`.
+# The app is driven by launch arguments (ScreenshotLaunch in AppConfig.swift,
+# compiled in only under DEBUG, hence the Debug build below), not UI tests: `-screenshotTab onboarding|deals|search|saved|account|store:DOMAIN`.
 #
 # Triggers:
 #   - workflow_dispatch (the workflow file must exist on the default branch)
@@ -21,7 +21,7 @@ on:
       store_domain:
         description: 'Store shown on the store-detail screenshot (text only in the app)'
         required: false
-        default: 'yesglasses.com'
+        default: 'humehealth.com'
         type: string
   pull_request:
     paths:
@@ -38,10 +38,10 @@ permissions:
 env:
   BUNDLE_ID: com.devino.Caramel
   APPLE_DIR: apps/caramel-apple
-  STORE_DOMAIN: ${{ inputs.store_domain || 'yesglasses.com' }}
+  STORE_DOMAIN: ${{ inputs.store_domain || 'humehealth.com' }}
   # Stores seeded into the Saved tab (the screenshot shows them as saved).
   SEARCH_QUERY: glasses
-  SAVED_STORES: yesglasses.com,humehealth.com,bumbleandbumble.com
+  SAVED_STORES: humehealth.com,yesglasses.com,bumbleandbumble.com
   SHOTS_DIR: ${{ github.workspace }}/screenshots
 
 jobs:
@@ -113,6 +113,31 @@ jobs:
           [ -n "$ipad" ] || { echo "::error::No available 'iPad Pro 13-inch' simulator on this runner image."; exit 1; }
           echo "IPHONE_UDID=${iphone}" >> "$GITHUB_ENV"
           echo "IPAD_UDID=${ipad}" >> "$GITHUB_ENV"
+
+      # App Store content rules: nothing shown may mention free shipping/gifts or a
+      # competitor. The app lists exactly what these public APIs return, so check
+      # them first and fail with the offender instead of shipping a bad frame.
+      # Fix a failure by passing another store_domain (or re-running when the live
+      # Deals feed has rotated).
+      - name: Check the captured content is clean
+        run: |
+          set -euo pipefail
+          pattern='free|honey|rakuten|capital ?one'
+          base="https://grabcaramel.com"
+          store=$(curl -fsS "${base}/api/coupons?site=${STORE_DOMAIN}&limit=50" | jq -c '.coupons[:12][] | [.code, .title, .description]')
+          deals=$(curl -fsS "${base}/api/coupons/recently-worked" | jq -c '.coupons[] | [.code, .title, .storeDomain]')
+          [ -n "$store" ] || { echo "::error::No coupons returned for ${STORE_DOMAIN}."; exit 1; }
+          [ -n "$deals" ] || { echo "::error::The recently-worked feed returned no coupons."; exit 1; }
+          status=0
+          for feed in store deals; do
+            hits=$(grep -Ei "$pattern" <<<"${!feed}" || true)
+            if [ -n "$hits" ]; then
+              echo "::error::The $feed screenshot would show banned wording (free / honey / rakuten / capital one):"
+              echo "$hits"
+              status=1
+            fi
+          done
+          exit "$status"
 
       - name: Capture the screenshots
         run: |

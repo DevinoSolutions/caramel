@@ -78,7 +78,7 @@ struct OnboardingView: View {
             }
         case .notDetected:
             Label {
-                Text("Turn Caramel on in Safari").font(.headline)
+                Text("Not turned on yet").font(.headline)
             } icon: {
                 Image(systemName: "exclamationmark.circle").foregroundStyle(.orange)
             }
