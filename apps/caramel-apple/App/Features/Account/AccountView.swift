@@ -26,11 +26,19 @@ struct AccountView: View {
                     signedOutSection
                 }
                 Section("About") {
-                    Link(destination: URL(string: "https://grabcaramel.com/profile")!) {
-                        Label("Your account on the web", systemImage: "safari")
+                    Link(destination: AppConfig.supportURL) {
+                        Label("Help & support", systemImage: "questionmark.circle")
                     }
-                    Link(destination: URL(string: "https://grabcaramel.com")!) {
-                        Label("grabcaramel.com", systemImage: "globe")
+                    Link(destination: AppConfig.privacyPolicyURL) {
+                        Label("Privacy policy", systemImage: "hand.raised")
+                    }
+                    Link(destination: AppConfig.websiteURL) {
+                        Label("Website", systemImage: "globe")
+                    }
+                    if session.isSignedIn {
+                        Link(destination: AppConfig.webAccountURL) {
+                            Label("Your account on the web", systemImage: "safari")
+                        }
                     }
                 }
             }
@@ -84,7 +92,8 @@ struct AccountView: View {
                 }
             }
         } footer: {
-            Text("One sign-in covers the app and the Safari extension.")
+            // TODO(T-5059): once native messaging shares the sign-in with the Safari extension, say so here.
+            Text("The Safari extension has its own sign-in; signing in here does not sign it in.")
         }
     }
 

@@ -8,6 +8,7 @@ struct CaramelApp: App {
     @StateObject private var extensionStatus = ExtensionStatus()
 
     init() {
+        ScreenshotLaunch.seedSavedStoresIfRequested() // App Store screenshot capture only; inert without its launch argument
         let session = SessionStore()
         _session = StateObject(wrappedValue: session)
         _favorites = StateObject(wrappedValue: FavoritesStore(session: session))

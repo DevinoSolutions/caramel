@@ -6,9 +6,15 @@ struct DealsView: View {
 
     @State private var worked: LoadState<[RecentlyWorkedCoupon]> = .idle
     @State private var topStores: LoadState<[String]> = .idle
+    // Starts non-empty only for App Store screenshot capture (ScreenshotLaunch.storeDomain).
+    @State private var path: NavigationPath = {
+        var path = NavigationPath()
+        if let domain = ScreenshotLaunch.storeDomain { path.append(domain) }
+        return path
+    }()
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             List {
                 Section("Codes that just worked") {
                     switch worked {

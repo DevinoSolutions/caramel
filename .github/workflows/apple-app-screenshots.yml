@@ -1,0 +1,178 @@
+name: Apple App – App Store screenshots (iOS Simulator)
+
+# Photographs the native container app (apps/caramel-apple) for the App Store
+# listing: a 6.9" iPhone and a 13" iPad simulator, real iOS status bar
+# (9:41, full wifi/cellular/battery), native screens only (no browser chrome, no
+# third-party logos; the app shows store names as text). Uploads the PNGs as the
+# `appstore-screenshots` artifact. Nothing is signed, uploaded to App Store
+# Connect or sent to review; it only reads grabcaramel.com's public read-only APIs.
+#
+# The app is driven by launch arguments (ScreenshotLaunch in AppConfig.swift),
+# not UI tests: `-screenshotTab onboarding|deals|search|saved|account|store:DOMAIN`.
+#
+# Triggers:
+#   - workflow_dispatch (the workflow file must exist on the default branch)
+#   - pull_request touching apps/caramel-apple or this file, so the PR itself
+#     proves the capture works and produces the artifact.
+
+on:
+  workflow_dispatch:
+    inputs:
+      store_domain:
+        description: 'Store shown on the store-detail screenshot (text only in the app)'
+        required: false
+        default: 'yesglasses.com'
+        type: string
+  pull_request:
+    paths:
+      - 'apps/caramel-apple/**'
+      - '.github/workflows/apple-app-screenshots.yml'
+
+concurrency:
+  group: apple-app-screenshots-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  BUNDLE_ID: com.devino.Caramel
+  APPLE_DIR: apps/caramel-apple
+  STORE_DOMAIN: ${{ inputs.store_domain || 'yesglasses.com' }}
+  # Stores seeded into the Saved tab (the screenshot shows them as saved).
+  SAVED_STORES: yesglasses.com,humehealth.com,bumbleandbumble.com
+  SHOTS_DIR: ${{ github.workspace }}/screenshots
+
+jobs:
+  screenshots:
+    name: Capture App Store screenshots (iPhone 6.9" + iPad 13")
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install extension dependencies
+        run: pnpm install --frozen-lockfile --filter "caramel-extension..."
+
+      # The Xcode project embeds the WXT build (copy phase fails without it).
+      - name: Build the extension (WXT)
+        run: pnpm --filter caramel-extension run build
+
+      - name: Derive .output/safari-mv3
+        run: ${{ env.APPLE_DIR }}/scripts/derive-safari-build.sh
+
+      - name: Install jq
+        run: command -v jq >/dev/null 2>&1 || brew install jq
+
+      - name: Build the app for the iOS Simulator (unsigned)
+        run: |
+          set -euo pipefail
+          xcodebuild build \
+            -project "${APPLE_DIR}/Caramel.xcodeproj" \
+            -scheme Caramel \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination "generic/platform=iOS Simulator" \
+            -derivedDataPath "${RUNNER_TEMP}/DerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
+          app="${RUNNER_TEMP}/DerivedData/Build/Products/Debug-iphonesimulator/Caramel.app"
+          [ -d "$app" ] || { echo "::error::Simulator build produced no Caramel.app at ${app}."; exit 1; }
+          echo "APP_PATH=${app}" >> "$GITHUB_ENV"
+
+      - name: Pick the simulators
+        run: |
+          set -euo pipefail
+          xcrun simctl list devices available
+          pick() { # jq name regex -> newest matching available device UDID
+            xcrun simctl list devices available -j | jq -r --arg re "$1" '
+              [.devices | to_entries[] | select(.key | test("iOS")) | . as $rt
+                | $rt.value[] | select(.name | test($re)) | {rt: $rt.key, name: .name, udid: .udid}]
+              | sort_by(.rt, .name) | last | .udid // empty'
+          }
+          iphone=$(pick '^iPhone [0-9]+ Pro Max$')
+          ipad=$(pick '^iPad Pro 13-inch')
+          [ -n "$iphone" ] || { echo "::error::No available 'iPhone NN Pro Max' simulator on this runner image."; exit 1; }
+          [ -n "$ipad" ] || { echo "::error::No available 'iPad Pro 13-inch' simulator on this runner image."; exit 1; }
+          echo "IPHONE_UDID=${iphone}" >> "$GITHUB_ENV"
+          echo "IPAD_UDID=${ipad}" >> "$GITHUB_ENV"
+
+      - name: Capture the screenshots
+        run: |
+          set -euo pipefail
+          mkdir -p "${SHOTS_DIR}"
+
+          capture() { # label udid
+            label="$1"; udid="$2"
+            xcrun simctl boot "$udid"
+            xcrun simctl bootstatus "$udid" -b
+            # A real-looking status bar: 9:41, wifi + cellular full, battery 100%.
+            xcrun simctl status_bar "$udid" override \
+              --time 9:41 --dataNetwork wifi --wifiMode active --wifiBars 3 \
+              --cellularMode active --cellularBars 4 --batteryState charged --batteryLevel 100
+            xcrun simctl install "$udid" "${APP_PATH}"
+
+            n=0
+            shoot() { # name [extra launch args...]
+              name="$1"; shift
+              n=$((n + 1))
+              xcrun simctl terminate "$udid" "${BUNDLE_ID}" >/dev/null 2>&1 || true
+              xcrun simctl launch "$udid" "${BUNDLE_ID}" "$@"
+              sleep 10 # network content (prod read-only APIs) has to land
+              out="${SHOTS_DIR}/${label}-$(printf '%02d' "$n")-${name}.png"
+              xcrun simctl io "$udid" screenshot --type=png "$out"
+              echo "captured ${out}: $(sips -g pixelWidth -g pixelHeight "$out" | awk '/pixel/ {printf "%s ", $2}')"
+            }
+
+            shoot get-started -screenshotTab onboarding
+            shoot deals -screenshotTab deals
+            shoot search -screenshotTab search
+            shoot store -screenshotTab "store:${STORE_DOMAIN}"
+            shoot saved -screenshotTab saved -screenshotSavedStores "${SAVED_STORES}"
+            shoot account -screenshotTab account
+
+            xcrun simctl status_bar "$udid" clear
+            xcrun simctl shutdown "$udid"
+          }
+
+          capture iphone-6.9 "${IPHONE_UDID}"
+          capture ipad-13 "${IPAD_UDID}"
+
+      # App Store Connect accepts these exact sizes for the 6.9" iPhone and the
+      # 13" iPad slots; anything else means the wrong simulator was picked.
+      - name: Assert the screenshot sizes
+        run: |
+          set -euo pipefail
+          status=0
+          for f in "${SHOTS_DIR}"/*.png; do
+            w=$(sips -g pixelWidth "$f" | awk '/pixelWidth/ {print $2}')
+            h=$(sips -g pixelHeight "$f" | awk '/pixelHeight/ {print $2}')
+            case "$(basename "$f"):${w}x${h}" in
+              iphone-6.9-*:1320x2868|iphone-6.9-*:1290x2796|ipad-13-*:2064x2752) echo "ok: $(basename "$f") ${w}x${h}" ;;
+              *) echo "::error::$(basename "$f") is ${w}x${h}, not an accepted App Store size."; status=1 ;;
+            esac
+          done
+          exit "$status"
+
+      - name: Upload the screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: appstore-screenshots
+          path: ${{ env.SHOTS_DIR }}/*.png
+          if-no-files-found: error
