@@ -24,6 +24,7 @@
 // cache is per process. resetSupportedStoresCache() exists for tests and
 // for the ingest route, which drops the entry after a store-config upsert
 // so a freshly pushed selector is served without waiting out the TTL.
+import { AUTO_DETECT_ORIGIN } from '@/lib/catalog/applyCatalogRows'
 import { listSupportedStoreConfigs } from '@/lib/couponsRepo'
 import { requiredCapabilityFor } from '@/lib/extensionCapabilityGates'
 import { createHash } from 'node:crypto'
@@ -61,6 +62,11 @@ async function build(): Promise<SupportedStoresPayload> {
         successIndicator: r.success_indicator_xpath ?? undefined,
         errorIndicator: r.error_indicator_xpath ?? undefined,
         couponRemove: r.coupon_remove_xpath ?? undefined,
+        // A box the extension found and saved names no place where the store
+        // answers, so the extension reads its answer the way it reads a found
+        // box's (coupon-apply.js, rec.savedBox). Sent only when true: the other
+        // ~3000 entries stay byte-identical.
+        savedBox: r.origin === AUTO_DETECT_ORIGIN ? true : undefined,
         requires: requiredCapabilityFor(r.store_name) ?? undefined,
     }))
     // Gated stores leave `supported` entirely (extensionCapabilityGates.ts).

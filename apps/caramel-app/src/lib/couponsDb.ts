@@ -289,6 +289,9 @@ export const StoreConfigRowSchema = z.object({
     success_indicator_xpath: z.string().nullable(),
     error_indicator_xpath: z.string().nullable(),
     coupon_remove_xpath: z.string().nullable(),
+    // Who wrote the row: NULL = the coupons pipeline, 'auto_detect' = a box the
+    // extension found and saved (schema.prisma `origin`).
+    origin: z.string().nullish(),
 })
 export type StoreConfigRow = z.infer<typeof StoreConfigRowSchema>
 

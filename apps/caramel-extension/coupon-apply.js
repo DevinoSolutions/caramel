@@ -534,6 +534,22 @@ function _caramelSmallestSaying(scope, priorText) {
     return best && best.length <= 200 ? best : null
 }
 
+// A box the extension found on an earlier visit and saved as the store's
+// config (the feed marks it `savedBox`, supportedStoresCache.ts) names no
+// place where the store answers, exactly like a box the finder picks now. Its
+// answer is read the same way: a refusal sentence beside the box or in a page
+// alert ends the wait and is quoted on its own. Measured on bumbleandbumble.com
+// (2026-10-22): read as a plain config, every refused code waited the full 10s
+// and was quoted with the Apply button's label ("apply. The offer code … is
+// not valid."). Only the READING is shared: the total and the success rules
+// of a saved box stay a config's (rec.caramelFound is the finder's alone).
+function _caramelReadsLikeFound(rec) {
+    return (
+        rec?.caramelFound === true ||
+        (rec?.savedBox === true && !rec.errorIndicator)
+    )
+}
+
 function detectCouponError(rec, baseline, code, priorText, alertsBefore) {
     // baseline is what snapshotErrorState() returned BEFORE the apply.
     // code is the coupon string we just tried.
@@ -574,7 +590,8 @@ function detectCouponError(rec, baseline, code, priorText, alertsBefore) {
     const input = pickBestMatch(rec.couponInput)
     if (!input) return null
     let scope = input.parentElement
-    const saysNo = rec.caramelFound
+    const readsLikeFound = _caramelReadsLikeFound(rec)
+    const saysNo = readsLikeFound
         ? _caramelFinderSaysNo
         : t => GENERIC_ERROR_TEXT_RE.test(t)
     for (let d = 0; d < 5 && scope; d++) {
@@ -588,7 +605,7 @@ function detectCouponError(rec, baseline, code, priorText, alertsBefore) {
             // whatever sits near the words, a form field's own error included.
             // A level whose saying element is the field's own error goes on
             // climbing: the store's refusal may sit one level up.
-            if (rec.caramelFound) {
+            if (readsLikeFound) {
                 const said = _caramelSmallestSaying(scope, priorText)
                 if (said) return said
                 scope = scope.parentElement
@@ -602,7 +619,7 @@ function detectCouponError(rec, baseline, code, priorText, alertsBefore) {
         }
         scope = scope.parentElement
     }
-    return rec.caramelFound ? _caramelPageAlertSaying(alertsBefore) : null
+    return readsLikeFound ? _caramelPageAlertSaying(alertsBefore) : null
 }
 
 // A page's alert regions: where a cart that answers far from the box puts its
@@ -716,7 +733,9 @@ export function caramelSnapshotCart(rec, code = '') {
     const beforeAppliedNodes = caramelAcceptedRowCount(appliedSel)
     const errorBaseline = snapshotErrorState(rec)
     const priorAreaText = _caramelCouponAreaText(rec)
-    const alertsBefore = rec?.caramelFound ? _caramelPageAlertsNow() : null
+    const alertsBefore = _caramelReadsLikeFound(rec)
+        ? _caramelPageAlertsNow()
+        : null
     return {
         hasPriceCfg,
         original,
@@ -848,9 +867,34 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
             })(),
         )
     }
-    // A found box whose store answers in a page alert instead
+    // A saved box (_caramelReadsLikeFound) has no rec.caramelAnswer: the
+    // refusal is looked for around its input on each read, by the very reader
+    // the verdict uses below, so the wait and the verdict agree on what the
+    // store said. Only a sentence that was not there before we submitted ends
+    // the wait.
+    if (_caramelReadsLikeFound(rec) && !rec.caramelFound) {
+        waiters.push(
+            (async () => {
+                const startedAt = performance.now()
+                while (performance.now() - startedAt < APPLY_WAIT_MS) {
+                    await sleep(200)
+                    const said = detectCouponError(
+                        rec,
+                        errorBaseline,
+                        code,
+                        priorAreaText,
+                        null,
+                    )
+                    if (said && caramelQuoteIsAttributable(said, priorAreaText))
+                        return 'answered'
+                }
+                return 'answer-timeout'
+            })(),
+        )
+    }
+    // A found or saved box whose store answers in a page alert instead
     // (_caramelPageAlertSaying): that answer ends the wait too.
-    if (rec.caramelFound) {
+    if (_caramelReadsLikeFound(rec)) {
         waiters.push(
             (async () => {
                 const startedAt = performance.now()
@@ -893,11 +937,13 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
     // A refusal-shaped sentence can come a moment before the total it
     // belongs with ("Limit one offer per order" printed as the code applies).
     // Give the total a short grace to move before the verdict is read.
-    if (via === 'answered' && rec.caramelFound && hasPriceCfg) {
+    if (via === 'answered' && _caramelReadsLikeFound(rec) && hasPriceCfg) {
         const startedAt = performance.now()
         while (performance.now() - startedAt < CARAMEL_ANSWER_GRACE_MS) {
             await sleep(250)
-            const now = caramelFinderTotalNow(rec)
+            const now = rec.caramelFound
+                ? caramelFinderTotalNow(rec)
+                : getPrice(rec.priceContainer, { returnLargest: true })
             if (Number.isFinite(now) && now !== original) break
         }
     }

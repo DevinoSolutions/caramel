@@ -811,7 +811,8 @@ export async function listSupportedStoreConfigs(): Promise<StoreConfigRow[]> {
                price_container_xpath,
                success_indicator_xpath,
                error_indicator_xpath,
-               coupon_remove_xpath
+               coupon_remove_xpath,
+               origin
         FROM store_configs
         WHERE coupon_input_xpath IS NOT NULL
           AND apply_button_xpath IS NOT NULL
