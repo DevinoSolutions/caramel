@@ -57,6 +57,33 @@ const filtersResponse = {
     json: async () => ({ sites: [], discountTypes: [] }),
 }
 
+// Reach loadMore through the component's IntersectionObserver fallback.
+class FiringObserver {
+    constructor(private cb: (entries: { isIntersecting: boolean }[]) => void) {}
+    observe() {
+        this.cb([{ isIntersecting: true }])
+    }
+    disconnect() {}
+    unobserve() {}
+}
+
+// load-more's finally block parks setIsLoadingMore(false) behind a
+// MIN_LOADING_DELAY_MS setTimeout. Under real timers it can outlive the test and
+// fire after jsdom is torn down (T-6309), so every load-more test arms fake
+// timers here and drains them with drainLoadMore() before it ends.
+function armLoadMore() {
+    vi.stubGlobal('IntersectionObserver', FiringObserver)
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+}
+
+// Flush the fetch promises, run the min-loading-delay timer, assert none is left.
+async function drainLoadMore() {
+    await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000)
+    })
+    expect(vi.getTimerCount()).toBe(0)
+}
+
 beforeEach(() => {
     class MockIntersectionObserver {
         observe() {}
@@ -275,17 +302,7 @@ describe('CouponsSection groups keeps-failing codes at the end of a store list',
                 })
             },
         )
-        class FiringObserver {
-            constructor(
-                private cb: (entries: { isIntersecting: boolean }[]) => void,
-            ) {}
-            observe() {
-                this.cb([{ isIntersecting: true }])
-            }
-            disconnect() {}
-            unobserve() {}
-        }
-        vi.stubGlobal('IntersectionObserver', FiringObserver)
+        armLoadMore()
 
         render(
             <CouponsSection
@@ -300,9 +317,8 @@ describe('CouponsSection groups keeps-failing codes at the end of a store list',
         // Coupon 1 is first seen healthy (page 1) then flagged (page 2): the
         // first occurrence wins, so it stays in the main list and is not
         // duplicated into the disclosure.
-        await screen.findByRole('button', {
-            name: '1 code reported not working',
-        })
+        await drainLoadMore()
+        screen.getByRole('button', { name: '1 code reported not working' })
         expect(screen.getAllByText('Title 1')).toHaveLength(1)
         expect(screen.getAllByText('Title 2')).toHaveLength(1)
         expect(
@@ -375,23 +391,7 @@ describe('CouponsSection groups keeps-failing codes at the end of a store list',
                 })
             },
         )
-        // Reach loadMore through the component's IntersectionObserver fallback.
-        class FiringObserver {
-            constructor(
-                private cb: (entries: { isIntersecting: boolean }[]) => void,
-            ) {}
-            observe() {
-                this.cb([{ isIntersecting: true }])
-            }
-            disconnect() {}
-            unobserve() {}
-        }
-        vi.stubGlobal('IntersectionObserver', FiringObserver)
-        // load-more's finally block parks setIsLoadingMore(false) behind a
-        // MIN_LOADING_DELAY_MS setTimeout. Under real timers it can outlive the
-        // test and fire after jsdom is torn down (T-6309), so fake timers own
-        // it and the test drains it before ending.
-        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+        armLoadMore()
 
         render(
             <CouponsSection
@@ -403,10 +403,7 @@ describe('CouponsSection groups keeps-failing codes at the end of a store list',
             />,
         )
 
-        // Flush the fetch promises, then run the min-loading-delay timer.
-        await act(async () => {
-            await vi.advanceTimersByTimeAsync(1000)
-        })
+        await drainLoadMore()
 
         const button = screen.getByRole('button', {
             name: '2 codes reported not working',
@@ -416,8 +413,6 @@ describe('CouponsSection groups keeps-failing codes at the end of a store list',
             String(u),
         )
         expect(urls.some(u => u.includes('page=2'))).toBe(true)
-        // Guard: no timer may outlive the test.
-        expect(vi.getTimerCount()).toBe(0)
     })
 
     it('a site-less browse list leaves flagged codes in place (no grouping, no disclosure)', () => {
