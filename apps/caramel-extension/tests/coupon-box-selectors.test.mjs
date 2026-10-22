@@ -472,3 +472,68 @@ describe('caramelTotalSelector', () => {
         expect(caramelTotalSelector($('.row'))).toBeNull()
     })
 })
+
+describe('a script-hook class (js-…) as the last name', () => {
+    // bumbleandbumble.com, measured live 2026-10-22: TEXT15 took $5.25 off
+    // a $35.00 bag through a box auto-detect found, and the box was never
+    // saved, because the order total has no id, name or test id on it or
+    // near it. Its markup, trimmed:
+    const BUMBLE_TOTAL =
+        '<section class="checkout-panel checkout-panel--order-total">' +
+        '<header class="checkout-panel__header order-total-content clearfix">' +
+        '<h2>Total</h2>' +
+        '<div class="total value order-summary-content__value order-summary-content__value--total js-total-cost">$29.75</div>' +
+        '</header></section>'
+
+    it('names the bumbleandbumble.com order total by its hook class', () => {
+        page(BUMBLE_TOTAL)
+        expect(caramelTotalSelector($('.total'))).toBe('div.js-total-cost')
+    })
+
+    it('a row holding two amounts is still not named by its hook class', () => {
+        page('<div class="js-totals"><s>$120.00</s> <span>$100.00</span></div>')
+        expect(caramelTotalSelector($('div'))).toBeNull()
+    })
+
+    it('a row with a hook class and an id on its amount is named by the id', () => {
+        page('<div class="js-totals"><span id="tot">$100.00</span></div>')
+        expect(caramelTotalSelector($('div'))).toBe('span#tot')
+    })
+
+    it.each([
+        ['a styling class', '<button class="btn apply">Apply</button>'],
+        [
+            'a hook class with a digit',
+            '<button class="js-btn-2">Apply</button>',
+        ],
+        [
+            'a hook class for a state',
+            '<button class="js-is-active">Apply</button>',
+        ],
+        [
+            'a hook class for visibility',
+            '<button class="js-hidden">Apply</button>',
+        ],
+        [
+            'a hook class two elements share',
+            '<button class="js-apply">Apply</button><button class="js-apply">Apply</button>',
+        ],
+    ])('%s is no name', (_, html) => {
+        page(html)
+        expect(caramelStableSelector($('button'))).toBeNull()
+    })
+
+    it('a box button with only a hook class is named by it', () => {
+        page('<button class="btn js-apply-offer">Apply</button>')
+        expect(caramelStableSelector($('button'))).toBe('button.js-apply-offer')
+    })
+
+    it('any other name beats a hook class', () => {
+        page('<button class="js-apply-offer" name="apply">Apply</button>')
+        expect(caramelStableSelector($('button'))).toBe('button[name="apply"]')
+    })
+
+    it('a hook-class name is in the grammar the server accepts', () => {
+        expect(caramelSelectorAllowed('div.js-total-cost')).toBe(true)
+    })
+})

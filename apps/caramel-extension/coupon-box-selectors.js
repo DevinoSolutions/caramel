@@ -176,6 +176,9 @@ function ownNames(el) {
 // in the grammar and finds exactly this element.
 // Exported for tests/coupon-box-selectors.test.mjs.
 export function caramelStableSelector(el) {
+    return named(el) || hookClassSelector(el)
+}
+function named(el) {
     if (!el || el.nodeType !== 1) return null
     for (const css of ownNames(el)) if (only(el, css)) return css
     const steps = []
@@ -202,6 +205,28 @@ export function caramelStableSelector(el) {
     return null
 }
 
+// A class a store's own scripts find the element by (js-…), the last name
+// tried: bumbleandbumble.com, measured live 2026-10-22, marks its order total
+// <div class="total value … js-total-cost"> with no id, name or test id on it
+// or near it, so a box whose code had just taken $5.25 off was never saved.
+// Only a hook class: a styling class (row, total, value) is shared by other
+// elements on a fuller cart and would then name nothing. Never one holding a
+// digit (a generated hash) or naming the element's state, which is not there
+// on the next render. Unique on the page, like every other name.
+const HOOK_CLASS = /^js-[A-Za-z][A-Za-z_-]{1,57}$/
+const STATE_WORD =
+    /(?:^|-)(?:is|has)-|active|selected|checked|disabled|hidden|visible|open|closed|show|focus|hover|load|process|empty|invalid|error|current|expand|collaps|animat/i
+function hookClassSelector(el) {
+    if (!el || el.nodeType !== 1) return null
+    const tag = el.tagName.toLowerCase()
+    for (const c of el.classList) {
+        if (!HOOK_CLASS.test(c) || STATE_WORD.test(c.slice(3))) continue
+        const css = only(el, `${tag}.${c}`)
+        if (css) return css
+    }
+    return null
+}
+
 /* The order total the finder measured, named for the save. The row first;
  * a row with no stable name of its own (a bare <div> under the page body) is
  * named by the one element inside it that holds the amount, which is the text
@@ -210,13 +235,21 @@ export function caramelStableSelector(el) {
  * not certain. */
 // Exported for tests/coupon-box-selectors.test.mjs.
 export function caramelTotalSelector(row) {
-    const own = caramelStableSelector(row)
+    const own = named(row)
     if (own || !row || row.nodeType !== 1) return own
     const amount = el => /\d/.test(el.textContent || '')
     const leaves = [...row.querySelectorAll('*')].filter(
         el => amount(el) && ![...el.children].some(amount),
     )
-    return leaves.length === 1 ? caramelStableSelector(leaves[0]) : null
+    // The row may be the amount itself (<div class="js-total-cost">$35.00</div>).
+    const amounts = leaves.length ? leaves : amount(row) ? [row] : []
+    if (amounts.length !== 1) return null
+    // A hook class only once the row is known to hold the one amount.
+    return (
+        named(amounts[0]) ||
+        hookClassSelector(row) ||
+        hookClassSelector(amounts[0])
+    )
 }
 
 // The selectors for one box: its input, its apply button (null when the box
