@@ -172,6 +172,7 @@ describe('listSupportedStoreConfigs — flattened store_configs (real pg :58005)
             success_indicator_xpath: '//div[@data-testid="coupon-success"]',
             error_indicator_xpath: '//div[@data-testid="coupon-error"]',
             coupon_remove_xpath: null,
+            origin: null,
         })
     })
 })

@@ -133,8 +133,8 @@ afterAll(async () => {
     await prisma.$disconnect()
 })
 
-describe('coupon-box save: the saved row is served like a pipeline row', () => {
-    it('PAIR: a saved box and a pipeline config with the same selectors come back from supported-stores in exactly the same shape', async () => {
+describe('coupon-box save: the saved row is served like a pipeline row, marked savedBox', () => {
+    it('PAIR: a saved box and a pipeline config with the same selectors come back from supported-stores in the same shape, the saved one marked savedBox', async () => {
         const saved = newStore()
         const pipeline = newStore()
         await knownStore(saved)
@@ -163,22 +163,26 @@ describe('coupon-box save: the saved row is served like a pipeline row', () => {
             couponSubmit: BOX.apply,
             showInput: BOX.toggle,
             priceContainer: BOX.total,
+            savedBox: true,
         })
+        // The mark is the only difference: it tells the extension to read the
+        // store's answer like a found box's (T-6310).
         expect({ ...savedEntry, domain: null }).toEqual({
             ...pipelineEntry,
             domain: null,
+            savedBox: true,
         })
 
         // The repo read the payload is built from: same columns, same values.
         const rows = await listSupportedStoreConfigs()
         const savedRow = rows.find(r => r.store_name === saved)
         const pipelineRow = rows.find(r => r.store_name === pipeline)
-        expect({ ...savedRow, store_name: null }).toEqual({
+        expect({ ...savedRow, store_name: null, origin: null }).toEqual({
             ...pipelineRow,
             store_name: null,
         })
 
-        // Only `origin` tells them apart, and it never leaves the database.
+        // Only `origin` tells them apart; the feed carries it as savedBox.
         expect((await storedRow(saved))?.origin).toBe(AUTO_DETECT_ORIGIN)
         expect((await storedRow(pipeline))?.origin).toBeNull()
     })
@@ -200,6 +204,7 @@ describe('coupon-box save: the saved row is served like a pipeline row', () => {
             couponInput: '#discount',
             couponSubmit: '#discount',
             priceContainer: '.order-total',
+            savedBox: true,
         })
         const row = await storedRow(store)
         expect(row).toMatchObject({
@@ -453,6 +458,7 @@ describe('coupon-box save: a saved box expires', () => {
             couponInput: '#new-code',
             couponSubmit: '#new-code',
             priceContainer: '.new-total',
+            savedBox: true,
         })
     })
 
