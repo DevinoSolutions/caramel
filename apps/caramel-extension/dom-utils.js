@@ -1,4 +1,4 @@
-// owns: DOM visibility/wait helpers, price parsing, CSS/XPath query helpers, the mid-attempt navigation handoff (_isVisible, waitForVisible, pickBestMatch, waitForElement, waitForTextChange, waitUntilReady, getPrice, _isXPath, qOne, qAll, caramel{Mark,Clear,Take}PendingSubmit, caramel{Hold,Take}AppliedWin)
+// owns: DOM visibility/wait helpers, price parsing, CSS/XPath query helpers, the mid-attempt navigation handoff (_isVisible, waitForVisible, pickBestMatch, waitForElement, waitForTotalChange, waitUntilReady, getPrice, _isXPath, qOne, qAll, caramel{Mark,Clear,Take}PendingSubmit, caramel{Hold,Take}AppliedWin)
 // load after: caramel-base.js
 //
 // ES module since the WXT P1 port (2026-08-12). Module scope replaces the
@@ -258,20 +258,27 @@ export function waitForElement(sel, timeout = 4000) {
 }
 // Called from other split content-script files (cross-file content-script
 // call — oxlint's per-file analysis can't see it).
-export function waitForTextChange(el, timeout = 3000) {
-    return new Promise((res, rej) => {
-        const start = el.textContent
-        const mo = new MutationObserver(() => {
-            if (el.textContent !== start) {
-                mo.disconnect()
-                res('text-changed')
-            }
-        })
-        mo.observe(el, { characterData: true, childList: true, subtree: true })
-        setTimeout(() => {
-            mo.disconnect()
-            rej('waitForTextChange timeout')
-        }, timeout)
+//
+// Resolves 'text-changed' once the total named by `find()` reads differently
+// from `startText`, or 'price-nochange' after `timeout`. The total is found
+// afresh on every look: a store that answers by drawing a new total element
+// leaves the old one unchanged forever, so watching the element we started
+// with waited out the whole timeout on a code that worked. Measured on a
+// saved box at bumbleandbumble.com (2026-10-22): the store replaced its total
+// about 2s after Apply, and every code then took the full 10s. A reading with
+// no digit in it ("Updating…", an empty row mid-render) is not the store's
+// answer yet, so it does not end the wait.
+export function waitForTotalChange(find, startText, timeout = 3000) {
+    return new Promise(res => {
+        const startedAt = performance.now()
+        ;(function look() {
+            const now = find()?.textContent
+            if (now != null && now !== startText && /\d/.test(now))
+                return res('text-changed')
+            if (performance.now() - startedAt >= timeout)
+                return res('price-nochange')
+            setTimeout(look, 150)
+        })()
     })
 }
 /* ---------- UI readiness helper ---------- */

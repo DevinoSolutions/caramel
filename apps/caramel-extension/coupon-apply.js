@@ -18,7 +18,7 @@ import {
     pickBestMatch,
     qAll,
     qOne,
-    waitForTextChange,
+    waitForTotalChange,
     waitForVisible,
 } from './dom-utils.js'
 
@@ -780,14 +780,14 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
         }
         return 'timeout-' + maxMs + 'ms'
     }
-    let priceEl = null
-    if (hasPriceCfg) {
-        priceEl =
-            qOne(rec.priceContainer) ||
-            document.getElementById(
-                rec.priceContainer.match(/\[id=['"]([^'"]+)['"]\]/)?.[1] || '',
-            )
-    }
+    // Looked up again on every read (waitForTotalChange): a store may answer
+    // by drawing a new total element.
+    const findPriceEl = () =>
+        qOne(rec.priceContainer) ||
+        document.getElementById(
+            rec.priceContainer.match(/\[id=['"]([^'"]+)['"]\]/)?.[1] || '',
+        )
+    const priceEl = hasPriceCfg ? findPriceEl() : null
     const waiters = [waitForCartSignal(APPLY_WAIT_MS)]
     // A box the finder picked has no error or success selector of its own.
     // Two waiters stand in for them:
@@ -877,18 +877,15 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
         )
     }
     // A price-watch timeout means "the total didn't change" — that's a
-    // no-signal outcome, NOT a coupon error. Let it RESOLVE (swallow the
-    // reject) so a failed apply falls through to the real committed / error-
-    // text detection below, instead of aborting into the catch with a
-    // synthetic "waitForTextChange timeout" errorMsg. That synthetic error
-    // was being misread by the loop as a cart "signal" (sawSignal=true),
-    // defeating the no-signal early-exit and making dead checkouts churn all
-    // 8 codes (~80-100s) instead of bailing after ~2 (~20s).
+    // no-signal outcome, NOT a coupon error, so the waiter RESOLVES
+    // 'price-nochange' and a failed apply falls through to the real
+    // committed / error-text detection below. A synthetic timeout error was
+    // once misread by the loop as a cart "signal" (sawSignal=true), defeating
+    // the no-signal early-exit and making dead checkouts churn all 8 codes
+    // (~80-100s) instead of bailing after ~2 (~20s).
     if (priceEl)
         waiters.push(
-            waitForTextChange(priceEl, APPLY_WAIT_MS).catch(
-                () => 'price-nochange',
-            ),
+            waitForTotalChange(findPriceEl, priceEl.textContent, APPLY_WAIT_MS),
         )
 
     const via = await Promise.race(waiters)
