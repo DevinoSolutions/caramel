@@ -37,3 +37,12 @@ Headed stealth-browser checks of grabcaramel.com (prod, release fb6dcde) and dev
 - `pr403-prod-login.png`: prod /login?code=PROBE403CODE&state=PROBE403STATE in a headed clone. The live client reports release 5ae6de5 and sendDefaultPii false. A handled probe error carrying the URL, an email and an IP became Sentry CARAMEL-2C with the message "…/login?code=[Filtered]&state=[Filtered] contact [Filtered email] from [Filtered ip]", Users 0, no request headers. CARAMEL-2C was resolved as test data. No other new issues in the 30 min after the deploy.
 - #404: curl POST /api/coupons/999999999/report → 404 {"error":"Unknown coupon"}.
 - `pr404-prod-quiet-404.png`: on the prod /coupons/ebay.com card, the report was rewritten to id 999999999 and other coupon POSTs were blocked (no prod write). "Yes, it worked" sent one 404 and showed the quiet note "That code is no longer listed." The buttons were gone, no vote was kept in localStorage, and there was no uvf marker.
+
+## Moved from $TEMP on 2026-10-22 (captured 2026-10-21, headed clones)
+- `pr-m3-1-honest-single-report.png`, `pr-m3-2-quorum-sunk.png`: #405 (M3) local headed checks. One honest "didn't work" report doesn't sink a code; a quorum of distinct reporters does.
+- `pr403-login.png`: #403 login page check.
+- `pr404-1-worked-success.png`, `pr404-2-stale-id-degrades.png`: #404 "Yes, it worked" succeeds on a live id; a stale id degrades quietly.
+- `t5888-dev-client-uris.png`: GCP dev OAuth client caramel-dev-localhost: origins localhost:58000 + dev.grabcaramel.com; old secret ****4IM3 shown Disabled (masked).
+- `t5915-prod-login-signed-in.png`: prod login, signed in.
+- `sendly-activity-transport-test.png`: Sendly activity, "[caramel-coupons] Sendly transport test" DELIVERED.
+- `sendly-activity-daily-stats-real.png`: Sendly activity, "Caramel daily" stats mail DELIVERED to both owners (cropped above a row with a third-party address).
