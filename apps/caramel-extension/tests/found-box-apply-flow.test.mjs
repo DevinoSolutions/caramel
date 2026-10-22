@@ -423,6 +423,34 @@ describe("the store's answer in a page-wide alert, far from the box", () => {
     )
 
     it(
+        "the next refused code's banner, re-drawn with the same words, is the store's answer again",
+        async () => {
+            // Measured live on the same cart: the submit removes the banner
+            // the previous code got, and the store's answer is a NEW banner
+            // with the very same sentence about 2.5s later. Text alone cannot
+            // tell it from the old one; the element can.
+            document.body.innerHTML = page(SAID)
+            document.getElementById('ap').addEventListener('click', () => {
+                setTimeout(() => document.getElementById('alert').remove(), 50)
+                setTimeout(() => {
+                    const fresh = document.createElement('div')
+                    fresh.className = 'alert alert-error'
+                    fresh.setAttribute('role', 'alert')
+                    fresh.textContent = SAID
+                    document.querySelector('.container').prepend(fresh)
+                }, 150)
+            })
+
+            const rec = await caramelDiscoveredRecord(NO_CONFIG)
+            const res = await applyCoupon('SAVE20', rec)
+
+            expect(res.errorMsg).toBe(SAID)
+            expect(res.errorIsNew).toBe(true)
+        },
+        SLOW,
+    )
+
+    it(
         'an alert about something other than a code is not read as a refusal',
         async () => {
             document.body.innerHTML = page('')
