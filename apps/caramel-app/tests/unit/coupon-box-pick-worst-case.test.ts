@@ -132,13 +132,16 @@ const SHAPES: [string, () => string][] = [
     ['many page footers', footersOutline],
 ]
 
-const timed = async (outline: string) => {
-    expect(new TextEncoder().encode(outline).length).toBeLessThanOrEqual(
-        MAX_OUTLINE_BYTES,
-    )
-    chatMock.mockImplementation(async () =>
-        JSON.stringify({ input: 1, button: 2, toggle: 3, confidence: 90 }),
-    )
+// Wall-clock time on a shared CI runner only ever gets NOISIER, never faster
+// (T-6204: 53.7ms and 62ms were seen against a 50ms limit on a pick that takes
+// a few ms). So each input is run RUNS times and the FASTEST run is judged: a
+// runner hiccup hits one run, while a backtracking or quadratic rule is slow
+// on every run (hundreds of ms to seconds at this input size), so the minimum
+// still blows through the limit. The limit stays 50ms.
+const RUNS = 5
+
+const timedOnce = async (outline: string) => {
+    resetCouponBoxPickBudgetForTests()
     const started = performance.now()
     await pickCouponBox({
         domain: `shop-${randomUUID().slice(0, 8)}.example`,
@@ -147,7 +150,42 @@ const timed = async (outline: string) => {
     return performance.now() - started
 }
 
+const timed = async (outline: string) => {
+    expect(new TextEncoder().encode(outline).length).toBeLessThanOrEqual(
+        MAX_OUTLINE_BYTES,
+    )
+    chatMock.mockImplementation(async () =>
+        JSON.stringify({ input: 1, button: 2, toggle: 3, confidence: 90 }),
+    )
+    const runs: number[] = []
+    for (let i = 0; i < RUNS; i++) runs.push(await timedOnce(outline))
+    return Math.min(...runs)
+}
+
 describe('a crafted outline cannot block the server', () => {
+    // Self-check of the guard: a pick that is slow on every run must still
+    // fail it, otherwise the min-of-RUNS rule would have loosened the gate.
+    it('still fails an input that is slow on every run', async () => {
+        const realChat = chatMock.getMockImplementation()
+        const slow = async () => {
+            await new Promise(resolve => setTimeout(resolve, LIMIT_MS + 30))
+            return JSON.stringify({
+                input: 1,
+                button: 2,
+                toggle: 3,
+                confidence: 90,
+            })
+        }
+        const outline = oneNameOutline('a')
+        const runs: number[] = []
+        for (let i = 0; i < RUNS; i++) {
+            chatMock.mockImplementation(slow)
+            runs.push(await timedOnce(outline))
+        }
+        chatMock.mockImplementation(realChat ?? (async () => '{}'))
+        expect(Math.min(...runs)).toBeGreaterThanOrEqual(LIMIT_MS)
+    })
+
     it.each(NAMES)(
         `a name of %s is read in under ${LIMIT_MS}ms`,
         async (_, name) => {
