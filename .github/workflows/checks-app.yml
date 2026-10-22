@@ -3,15 +3,19 @@ name: CI Checks – App
 on:
   push:
     branches: [main, dev]
-    # T-5447: docs-only changes skip the whole workflow. Safe because main has
-    # no required status checks (a skipped workflow would otherwise leave a
-    # required check "Expected" forever). Deliberately NOT `evals/**`: that dir
-    # holds .ts eval code that lint/typecheck cover; its .md is caught by the
-    # `**/*.md` entry. The nightly `schedule` trigger is unaffected.
-    paths-ignore: ['docs/**', '**/*.md']
+    # T-5447: changes under docs/ alone skip the whole workflow. Safe because
+    # main has no required status checks (a skipped workflow would otherwise
+    # leave a required check "Expected" forever) and docs/** holds only md and
+    # media that no gate or test reads. Deliberately NOT `**/*.md`: prettier
+    # checks md in the app, extension and root, repo-integrity.test.ts guards
+    # the root-file allowlist (a stray NOTES.md), and agent-setup.test.ts reads
+    # plugins/caramel/skills/caramel-coupons/SKILL.md. Deliberately NOT
+    # `evals/**`: apps/caramel-app/evals/ holds .ts eval code that lint and
+    # typecheck cover. The nightly `schedule` trigger is unaffected.
+    paths-ignore: ['docs/**']
   pull_request:
     branches: [main, dev]
-    paths-ignore: ['docs/**', '**/*.md']
+    paths-ignore: ['docs/**']
   schedule:
     # Nightly re-audit of prod deps so a new CVE on an unchanged pin surfaces
     # even with no push. Only the `audit` job runs on this trigger.
@@ -67,20 +71,24 @@ jobs:
         run: pnpm lint
 
       - name: Run prettier
+        if: ${{ !cancelled() }}
         working-directory: ./apps/caramel-app
         run: pnpm prettier-check
 
       # oxlint runs from the repo root (both apps), not per-app.
       - name: Run oxlint
+        if: ${{ !cancelled() }}
         run: pnpm lint:oxlint
 
       # prettier-root checks repo-root + .github files (workflows YAML, root
       # package.json, README, issue templates) that the per-app prettier step
       # doesn't cover — runs from the repo root, like oxlint.
       - name: Run root prettier-check
+        if: ${{ !cancelled() }}
         run: pnpm prettier-check:root
 
       - name: Run knip
+        if: ${{ !cancelled() }}
         working-directory: ./apps/caramel-app
         run: pnpm knip
 
