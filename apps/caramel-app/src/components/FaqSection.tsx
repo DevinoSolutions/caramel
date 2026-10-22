@@ -1,6 +1,7 @@
 import { DISCORD_INVITE_URL } from '@/lib/brandLinks'
 import { faqItems } from '@/lib/faqItems'
 import { faqPageJsonLd, jsonLdString } from '@/lib/jsonLd'
+import { FAQ_COPY } from '@/lib/marketing/faqContent'
 import { COMPARISON_PATH } from '@/lib/seo/extensionComparison'
 import { HONEY_GUIDE_PATH } from '@/lib/seo/honeyExtensionGuide'
 import Link from 'next/link'
@@ -29,11 +30,10 @@ export default function FaqSection(): React.JSX.Element {
             <div className="relative z-10 mx-auto max-w-7xl px-6 lg:px-8">
                 <div className="mb-16 text-center">
                     <h2 className="mb-8 text-5xl font-extrabold leading-tight tracking-tight text-caramel lg:text-4xl">
-                        Frequently Asked Questions
+                        {FAQ_COPY.heading}
                     </h2>
                     <p className="mx-auto max-w-3xl text-xl leading-relaxed text-gray-600 dark:text-gray-300 lg:text-lg">
-                        Straight answers about affiliate links, pricing, data,
-                        and where Caramel runs
+                        {FAQ_COPY.summary}
                     </p>
                 </div>
 

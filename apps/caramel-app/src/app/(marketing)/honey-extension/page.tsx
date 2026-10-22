@@ -9,6 +9,7 @@ import {
     formatComparisonDate,
     type ComparisonSourceId,
 } from '@/lib/seo/extensionComparison'
+import { GUIDE_BODY, HONEY_GUIDE_BODY } from '@/lib/seo/guidePageCopy'
 import {
     CARAMEL_ROW,
     HONEY_GUIDE_FAQ,
@@ -90,24 +91,18 @@ export default function HoneyExtensionPage() {
             <article className="mx-auto max-w-4xl">
                 <header className="pb-10">
                     <h1 className="mb-4 text-4xl font-extrabold tracking-tight text-gray-900 dark:text-white md:text-3xl">
-                        The Honey extension in {year}: what it does and what
-                        changed
+                        {HONEY_GUIDE_BODY.heading(year)}
                     </h1>
                     <p className={`${bodyText} text-lg`}>
                         {HONEY_GUIDE_SUMMARY}
                         <PageSourceRefs ids={HONEY_GUIDE_SUMMARY_SOURCES} />
                     </p>
                     <p className="mt-4 text-sm text-gray-600 dark:text-gray-400">
-                        Checked on{' '}
+                        {GUIDE_BODY.checkedOn}{' '}
                         <time dateTime={COMPARISON_CHECKED_ON.toISOString()}>
                             {checkedOn}
                         </time>
-                        . Every statement about Honey comes from PayPal&apos;s
-                        own help center, its browser store listings, the browser
-                        stores&apos; own policies, court orders or named news
-                        outlets, numbered in the sources below. Caramel is our
-                        extension, so check those sources rather than taking our
-                        word for it.
+                        {HONEY_GUIDE_BODY.sourceNote}
                     </p>
                 </header>
 
@@ -119,7 +114,7 @@ export default function HoneyExtensionPage() {
                         id="honey-vs-caramel-heading"
                         className={sectionHeading}
                     >
-                        Honey and Caramel side by side
+                        {HONEY_GUIDE_BODY.tableHeading}
                     </h2>
                     <div className="overflow-x-auto rounded-2xl border border-gray-200 dark:border-white/10">
                         <table className="w-full min-w-[36rem] border-collapse text-left text-sm">
@@ -171,8 +166,8 @@ export default function HoneyExtensionPage() {
                     </div>
                     <InstallCallout
                         placement="honey_extension"
-                        lead="Want one with no affiliate code?"
-                        body="Caramel finds and applies coupon codes at checkout. Free, no account, open source."
+                        lead={HONEY_GUIDE_BODY.installLead}
+                        body={GUIDE_BODY.installBody}
                     />
                 </section>
 
@@ -181,7 +176,7 @@ export default function HoneyExtensionPage() {
                     className="pb-12"
                 >
                     <h2 id="honey-timeline-heading" className={sectionHeading}>
-                        What happened with Honey
+                        {GUIDE_BODY.timelineHeading}
                     </h2>
                     <ol className="space-y-4 border-l-2 border-caramel/30 pl-6">
                         {HONEY_TIMELINE.map(event => (
@@ -205,7 +200,7 @@ export default function HoneyExtensionPage() {
 
                 <section aria-labelledby="honey-faq-heading" className="pb-12">
                     <h2 id="honey-faq-heading" className={sectionHeading}>
-                        Questions about the Honey extension
+                        {HONEY_GUIDE_BODY.faqHeading}
                     </h2>
                     <div className="space-y-6">
                         {HONEY_GUIDE_FAQ.map(item => (
@@ -215,29 +210,28 @@ export default function HoneyExtensionPage() {
                                 </h3>
                                 <p className={bodyText}>{item.answer}</p>
                                 <p className="text-xs text-gray-500 dark:text-gray-400">
-                                    Sources
+                                    {GUIDE_BODY.sourcesHeading}
                                     <PageSourceRefs ids={item.sources} />
                                 </p>
                             </div>
                         ))}
                     </div>
                     <p className={`${bodyText} mt-6`}>
-                        Looking past Honey? See how{' '}
+                        {HONEY_GUIDE_BODY.onwardBefore}
                         <Link href="/" className={inlineLink}>
-                            Caramel, the open-source Honey alternative
+                            {HONEY_GUIDE_BODY.homeLink}
                         </Link>
-                        , works, or read{' '}
+                        {HONEY_GUIDE_BODY.onwardBetween}
                         <Link href={COMPARISON_PATH} className={inlineLink}>
-                            the best coupon extensions compared
-                        </Link>{' '}
-                        (Honey, Capital One Shopping, SimplyCodes, Rakuten and
-                        Coupert).
+                            {HONEY_GUIDE_BODY.comparisonLink}
+                        </Link>
+                        {HONEY_GUIDE_BODY.onwardAfter}
                     </p>
                 </section>
 
                 <section aria-labelledby="honey-sources-heading">
                     <h2 id="honey-sources-heading" className={sectionHeading}>
-                        Sources
+                        {GUIDE_BODY.sourcesHeading}
                     </h2>
                     <SourceList order={sourceOrder} />
                 </section>

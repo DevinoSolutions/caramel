@@ -4,6 +4,7 @@ import InstallSurfaceGate from '@/components/growth/InstallSurfaceGate'
 import Loader from '@/components/Loader'
 import { trackGrowthEvent } from '@/lib/analytics/growthEvents'
 import { promptSupportOnFailure } from '@/lib/feedback/promptSupportOnFailure'
+import { COUPONS_BODY } from '@/lib/seo/guidePageCopy'
 import { storeLogoUrl } from '@/lib/storeLogo'
 import type { Coupon, CouponFilters } from '@/types/coupon'
 import { MagnifyingGlassIcon } from '@heroicons/react/24/outline'
@@ -43,7 +44,7 @@ interface CouponsSectionProps {
     pageSize?: number
 }
 
-const DEFAULT_PAGE_SIZE = 5
+const DEFAULT_PAGE_SIZE = COUPONS_BODY.pageSize
 
 export default function CouponsSection({
     defaultFilters,
@@ -91,7 +92,7 @@ export default function CouponsSection({
     const sidebarTitle = storeDomain || 'Caramel'
     const sidebarDescription = storeDomain
         ? `Save at ${storeDomain} with coupon codes. Caramel applies the best deals automatically at checkout.`
-        : "The open-source and privacy-first alternative to Honey. Automatically finds and applies the best coupon codes at checkout — without selling your data or hijacking creators' commissions."
+        : COUPONS_BODY.sidebarDescription
 
     useEffect(() => {
         couponsLengthRef.current = coupons.length
@@ -365,10 +366,10 @@ export default function CouponsSection({
                                 <MagnifyingGlassIcon className="h-8 w-8 text-caramel" />
                             </div>
                             <p className="mb-2 bg-gradient-to-r from-caramel to-orange-600 bg-clip-text text-3xl font-bold text-transparent sm:text-2xl">
-                                No coupons found
+                                {COUPONS_BODY.emptyHeading}
                             </p>
                             <p className="text-gray-600 dark:text-gray-400">
-                                Try adjusting your filters
+                                {COUPONS_BODY.emptyBody}
                             </p>
                         </motion.div>
                     ) : (
@@ -393,10 +394,10 @@ export default function CouponsSection({
                                     className="mt-8 rounded-3xl bg-gradient-to-r from-caramel to-orange-600 p-8 text-center text-white shadow-xl"
                                 >
                                     <p className="text-lg font-semibold">
-                                        You&apos;ve seen all available coupons.
+                                        {COUPONS_BODY.endHeading}
                                     </p>
                                     <p className="mt-2 text-sm opacity-90">
-                                        Check back soon for more deals
+                                        {COUPONS_BODY.endBody}
                                     </p>
                                 </motion.div>
                             }
@@ -467,35 +468,31 @@ export default function CouponsSection({
                     <InstallSurfaceGate>
                         <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-lg dark:border-white/10 dark:bg-darkSurface">
                             <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">
-                                Available on Your Favorite Browser
+                                {COUPONS_BODY.browserHeading}
                             </p>
                             <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">
-                                Start saving with Caramel on any browser!
+                                {COUPONS_BODY.browserBody}
                             </p>
                             <div className="mt-3 grid grid-cols-2 gap-2 text-sm font-medium text-gray-800 dark:text-gray-100">
                                 {[
                                     {
-                                        name: 'Chrome',
+                                        ...COUPONS_BODY.browsers[0],
                                         icon: <FaChrome />,
-                                        href: 'https://chromewebstore.google.com/detail/caramel-trusted-honey-alt/gaimofgglbackoimfjopicmbmnlccfoe',
                                         available: true,
                                     },
                                     {
-                                        name: 'Safari',
+                                        ...COUPONS_BODY.browsers[1],
                                         icon: <FaSafari />,
-                                        href: 'https://apps.apple.com/ke/app/caramel/id6741873881',
                                         available: true,
                                     },
                                     {
-                                        name: 'Firefox',
+                                        ...COUPONS_BODY.browsers[2],
                                         icon: <FaFirefox />,
-                                        href: 'https://addons.mozilla.org/en-US/firefox/addon/grabcaramel/',
                                         available: true,
                                     },
                                     {
-                                        name: 'Edge',
+                                        ...COUPONS_BODY.browsers[3],
                                         icon: <FaEdge />,
-                                        href: 'https://microsoftedge.microsoft.com/addons/detail/caramel/leodahchedhnenmiengkfpmmcdendnof',
                                         available: true,
                                     },
                                 ].map(browser => (
@@ -526,17 +523,16 @@ export default function CouponsSection({
 
                     <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-lg dark:border-white/10 dark:bg-darkSurface">
                         <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">
-                            4,000+ Supported Stores
+                            {COUPONS_BODY.supportedHeading}
                         </p>
                         <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">
-                            From major retailers to niche marketplaces, Caramel
-                            works at thousands of stores.
+                            {COUPONS_BODY.supportedBody}
                         </p>
                         <Link
                             href="/supported-stores"
                             className="mt-4 inline-flex items-center justify-center rounded-full bg-gradient-to-r from-caramel to-orange-600 px-4 py-2 text-xs font-semibold text-white shadow-md transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 dark:focus-visible:ring-offset-darkSurface"
                         >
-                            View All Supported Stores
+                            {COUPONS_BODY.supportedLink}
                         </Link>
                     </div>
                 </aside>

@@ -4,6 +4,10 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { resolveBuildSha } from './scripts/build-sha.mjs'
 import { buildTelemetryRewrites } from './src/lib/analytics/telemetryProxy.mjs'
+import {
+    buildMarkdownHeaders,
+    buildMarkdownRewrites,
+} from './src/lib/seo/markdownTwins/registry.mjs'
 
 const packageRoot = fileURLToPath(new URL('.', import.meta.url))
 const workspaceRoot = path.resolve(packageRoot, '..', '..')
@@ -161,10 +165,14 @@ const nextConfig = {
     // browser sends events to <our origin>/_t/k3v and Next forwards them. Empty
     // when the dataset is not `production` or no host is baked into the build.
     async rewrites() {
-        return buildTelemetryRewrites({
-            dataset: process.env.NEXT_PUBLIC_POSTHOG_DATASET,
-            host: process.env.NEXT_PUBLIC_POSTHOG_HOST,
-        })
+        return {
+            beforeFiles: buildMarkdownRewrites(),
+            afterFiles: buildTelemetryRewrites({
+                dataset: process.env.NEXT_PUBLIC_POSTHOG_DATASET,
+                host: process.env.NEXT_PUBLIC_POSTHOG_HOST,
+            }),
+            fallback: [],
+        }
     },
     async headers() {
         const headers = [{ source: '/:path*', headers: SECURITY_HEADERS }]
@@ -179,7 +187,7 @@ const nextConfig = {
                 headers: [{ key: 'X-Robots-Tag', value: 'noindex, nofollow' }],
             })
         }
-        return headers
+        return [...headers, ...buildMarkdownHeaders()]
     },
 }
 

@@ -1,3 +1,4 @@
+import { DIRECTORY_BODY } from '@/lib/seo/guidePageCopy'
 import type { DirectoryLetter } from '@/lib/seo/storeDirectory'
 import {
     bucketStoresByLetter,
@@ -24,9 +25,12 @@ export default async function StoreLetterStrip({
     if (buckets.length === 0) return null
 
     return (
-        <nav aria-label="Browse stores A–Z" className="mx-auto max-w-4xl pb-16">
+        <nav
+            aria-label={DIRECTORY_BODY.browseHeading}
+            className="mx-auto max-w-4xl pb-16"
+        >
             <h2 className="mb-4 text-2xl font-bold tracking-tight text-gray-900 dark:text-white">
-                Browse stores A–Z
+                {DIRECTORY_BODY.browseHeading}
             </h2>
             <ul className="flex flex-wrap gap-2 [&>li>a[aria-current]]:bg-caramel [&>li>a[aria-current]]:text-white [&>li>a]:inline-flex [&>li>a]:min-w-10 [&>li>a]:justify-center [&>li>a]:rounded-full [&>li>a]:border [&>li>a]:border-gray-100 [&>li>a]:bg-white [&>li>a]:px-3 [&>li>a]:py-1.5 [&>li>a]:text-sm [&>li>a]:font-semibold [&>li>a]:text-gray-800 [&>li>a]:shadow-sm [&>li>a]:transition hover:[&>li>a]:border-orange-200 hover:[&>li>a]:shadow-md focus-visible:[&>li>a]:outline-none focus-visible:[&>li>a]:ring-2 focus-visible:[&>li>a]:ring-caramel dark:[&>li>a]:border-white/10 dark:[&>li>a]:bg-darkSurface dark:[&>li>a]:text-gray-100">
                 {buckets.map(bucket => (
@@ -43,7 +47,7 @@ export default async function StoreLetterStrip({
                     </li>
                 ))}
                 <li>
-                    <a href={directoryPath()}>All stores</a>
+                    <a href={directoryPath()}>{DIRECTORY_BODY.allStores}</a>
                 </li>
             </ul>
         </nav>

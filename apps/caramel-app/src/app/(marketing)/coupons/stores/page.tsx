@@ -1,6 +1,7 @@
 import StoreLetterStrip from '@/components/coupons/store-letter-strip'
 import { BASE_URL } from '@/lib/env.client'
 import { jsonLdString } from '@/lib/jsonLd'
+import { DIRECTORY_BODY, storeDirectorySummary } from '@/lib/seo/guidePageCopy'
 import {
     bucketStoresByLetter,
     directoryLetterLabel,
@@ -70,12 +71,10 @@ export default async function StoreDirectoryIndexPage() {
         <main className="relative min-h-screen px-6 pt-32 dark:bg-darkBg lg:px-8">
             <header className="mx-auto max-w-4xl pb-10">
                 <h1 className="mb-4 text-4xl font-extrabold tracking-tight text-gray-900 dark:text-white md:text-3xl">
-                    All stores with coupon codes, A–Z
+                    {DIRECTORY_BODY.heading}
                 </h1>
                 <p className="leading-relaxed text-gray-600 dark:text-gray-400">
-                    {storeCount > 0
-                        ? `Caramel currently lists live coupon codes for ${storeCount.toLocaleString('en-US')} ${storeCount === 1 ? 'store' : 'stores'}. Pick a letter to see every store that starts with it and how many codes each one has right now.`
-                        : 'Caramel has no stores with live coupon codes right now — new codes are added automatically as they are found.'}
+                    {storeDirectorySummary(storeCount)}
                 </p>
             </header>
             <StoreLetterStrip />
@@ -88,7 +87,7 @@ export default async function StoreDirectoryIndexPage() {
                         id="letters-heading"
                         className="mb-4 text-2xl font-bold tracking-tight text-gray-900 dark:text-white"
                     >
-                        Stores by first letter
+                        {DIRECTORY_BODY.lettersHeading}
                     </h2>
                     <ul className="grid grid-cols-3 gap-3 sm:grid-cols-2 [&>li>a]:flex [&>li>a]:items-baseline [&>li>a]:justify-between [&>li>a]:rounded-2xl [&>li>a]:border [&>li>a]:border-gray-100 [&>li>a]:bg-white [&>li>a]:px-4 [&>li>a]:py-3 [&>li>a]:shadow-sm [&>li>a]:transition hover:[&>li>a]:border-orange-200 hover:[&>li>a]:shadow-md dark:[&>li>a]:border-white/10 dark:[&>li>a]:bg-darkSurface">
                         {buckets.map(bucket => (

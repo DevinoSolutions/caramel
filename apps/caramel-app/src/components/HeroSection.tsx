@@ -1,5 +1,7 @@
 'use client'
 
+import { HOME_HERO_COPY, HOME_WORDMARK_ALT } from '@/lib/marketing/homeContent'
+
 // HeroSection — split hero. On desktop (lg+ = the UNPREFIXED base, since this
 // repo's Tailwind screens are max-width/desktop-first) the existing hero copy
 // aligns LEFT (~55%) and an interactive 3D caramel coupon fills the RIGHT
@@ -516,7 +518,7 @@ export default function HeroSection() {
                         both boxes centre their content on the same axis. */}
                     <h1 className="hero-enter mb-6 flex flex-col items-start text-5xl font-bold tracking-tight lg:w-full lg:items-center lg:text-4xl md:text-3xl">
                         <div className="mb-4 text-gray-700 dark:text-white">
-                            Welcome to
+                            {HOME_HERO_COPY.welcome}
                         </div>
                         <div
                             className="hero-enter-scale relative lg:w-full"
@@ -550,7 +552,7 @@ export default function HeroSection() {
                                 slow link it shares with the page's scripts. */}
                             <Image
                                 src="/full-logo.webp"
-                                alt="Caramel — the open-source coupon extension"
+                                alt={HOME_WORDMARK_ALT}
                                 height={467}
                                 width={1830}
                                 className="max-w-md drop-shadow-lg lg:mx-auto lg:w-full"
@@ -565,7 +567,7 @@ export default function HeroSection() {
                         className="hero-enter mb-10 max-w-xl text-xl leading-relaxed text-gray-600 dark:text-gray-300 lg:mx-auto lg:max-w-2xl lg:text-lg md:text-base"
                         style={{ animationDelay: '0.4s' }}
                     >
-                        The{' '}
+                        {HOME_HERO_COPY.summaryStart}{' '}
                         <m.a
                             href="https://github.com/DevinoSolutions/caramel"
                             target="_blank"
@@ -575,9 +577,9 @@ export default function HeroSection() {
                                 backgroundColor: 'rgba(234, 105, 37, 0.1)',
                             }}
                         >
-                            open-source
+                            {HOME_HERO_COPY.openSource}
                         </m.a>{' '}
-                        and{' '}
+                        {HOME_HERO_COPY.and}{' '}
                         <m.a
                             href="#why-not"
                             className="cursor-pointer rounded px-1 font-semibold text-caramel transition-colors duration-fast ease-motion-out hover:bg-orange-500/10"
@@ -585,10 +587,9 @@ export default function HeroSection() {
                                 backgroundColor: 'rgba(234, 105, 37, 0.1)',
                             }}
                         >
-                            privacy-first
+                            {HOME_HERO_COPY.privacyFirst}
                         </m.a>{' '}
-                        alternative to Honey. Automatically finds and applies
-                        the best coupon codes at checkout —
+                        {HOME_HERO_COPY.summaryMain}
                         <m.a
                             href="#why-not"
                             className="cursor-pointer rounded px-1 font-semibold text-caramel transition-colors duration-fast ease-motion-out hover:bg-orange-500/10"
@@ -597,9 +598,9 @@ export default function HeroSection() {
                             }}
                         >
                             {' '}
-                            without selling your data
+                            {HOME_HERO_COPY.withoutSelling}
                         </m.a>{' '}
-                        or{' '}
+                        {HOME_HERO_COPY.or}{' '}
                         <m.a
                             href="#why-not"
                             className="cursor-pointer rounded px-1 font-semibold text-caramel transition-colors duration-fast ease-motion-out hover:bg-orange-500/10"
@@ -607,7 +608,7 @@ export default function HeroSection() {
                                 backgroundColor: 'rgba(234, 105, 37, 0.1)',
                             }}
                         >
-                            hijacking creatorsʼ commissions
+                            {HOME_HERO_COPY.commissions}
                         </m.a>
                         .
                     </p>
@@ -652,7 +653,7 @@ export default function HeroSection() {
                                 }}
                                 whileTap={{ scale: 0.98 }}
                             >
-                                Install Extension
+                                {HOME_HERO_COPY.install}
                             </m.a>
                         </InstallSurfaceGate>
                         <m.a

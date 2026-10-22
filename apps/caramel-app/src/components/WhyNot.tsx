@@ -1,5 +1,11 @@
 'use client'
 
+import {
+    HOME_HONEY_SOLUTIONS as caramelSolutions,
+    HOME_HONEY_COPY,
+    HOME_HONEY_PROBLEMS,
+} from '@/lib/marketing/homeContent'
+
 import InstallSurfaceGate from '@/components/growth/InstallSurfaceGate'
 import { useReducedMotion } from '@/lib/reducedMotion'
 import { m } from 'framer-motion'
@@ -29,28 +35,16 @@ const VIDEO_THUMBNAIL = `https://i.ytimg.com/vi/${VIDEO_ID}/maxresdefault.jpg`
 // Dec-2024 MegaLag report, Google's 2025 policy update and a Jan-2026
 // admission (claim-integrity pass 2026-09-11); the Caramel-side claims are
 // scoped to what the extension verifiably does.
-const problemsWithHoney = [
-    {
-        title: 'Affiliate Link Hijacking',
-        desc: "Honey was documented replacing creators' affiliate links with its own (MegaLag, December 2024), taking commissions from content creators you want to support",
-        icon: <FaTimesCircle />,
-    },
-    {
-        title: 'Hidden Data Collection',
-        desc: 'Your browsing data, purchase history, and personal information is reportedly collected without clear disclosure',
-        icon: <FaEye />,
-    },
-    {
-        title: 'Creator Revenue Loss',
-        desc: 'YouTubers, bloggers, and influencers lost rightful earnings when Honey overrode their referral links',
-        icon: <FaHandHoldingHeart />,
-    },
-    {
-        title: 'Closed Source Operation',
-        desc: "You can't verify what Honey actually does behind the scenes - their code is closed source, with nothing published for independent audit",
-        icon: <FaShieldAlt />,
-    },
+const problemsWithHoneyIcons = [
+    <FaTimesCircle key="0" />,
+    <FaEye key="1" />,
+    <FaHandHoldingHeart key="2" />,
+    <FaShieldAlt key="3" />,
 ]
+const problemsWithHoney = HOME_HONEY_PROBLEMS.map((item, index) => ({
+    ...item,
+    icon: problemsWithHoneyIcons[index],
+}))
 
 // Paired row-for-row with problemsWithHoney in the comparison grid below.
 // "No Data Selling" is deliberately NOT "zero data collection": the extension
@@ -59,24 +53,6 @@ const problemsWithHoney = [
 // privacy policy) — the honest, verifiable claim is that personal information
 // is never sold or shared with advertisers (claim-verify ruling 2026-07-28,
 // "shared" scoped to advertisers 2026-09-11).
-const caramelSolutions = [
-    {
-        title: 'Respects Creator Links',
-        desc: 'We never override affiliate links - creators keep 100% of their rightful commissions',
-    },
-    {
-        title: 'No Data Selling',
-        desc: 'Your browsing habits stay private - we never sell your personal information or share it with advertisers',
-    },
-    {
-        title: 'Supports Content Creators',
-        desc: 'Help sustain the creators you love while still getting the best deals available',
-    },
-    {
-        title: 'Fully Open Source',
-        desc: 'The extension and web app are public and auditable under the AGPL-3.0 license - see exactly what the extension does',
-    },
-]
 
 export default function WhyNotHoneySection() {
     const [videoLoaded, setVideoLoaded] = useState(false)
@@ -134,7 +110,7 @@ export default function WhyNotHoneySection() {
                     className="mb-20 text-center"
                 >
                     <h2 className="mb-8 text-5xl font-extrabold leading-tight tracking-tight text-caramel lg:text-4xl">
-                        Why Not Just Use Honey?
+                        {HOME_HONEY_COPY.heading}
                     </h2>
                     <p className="mx-auto mb-8 max-w-4xl text-xl leading-relaxed text-gray-600 dark:text-gray-300 lg:text-lg">
                         Reports show{' '}
@@ -239,11 +215,10 @@ export default function WhyNotHoneySection() {
                 >
                     <div className="mb-12 text-center">
                         <h3 className="mb-4 text-3xl font-extrabold tracking-tight text-gray-900 dark:text-white lg:text-2xl">
-                            Honey vs Caramel
+                            {HOME_HONEY_COPY.comparisonHeading}
                         </h3>
                         <p className="mx-auto max-w-2xl text-gray-600 dark:text-gray-400">
-                            The documented problems with Honey — and what
-                            Caramel does instead
+                            {HOME_HONEY_COPY.comparisonSummary}
                         </p>
                     </div>
 
@@ -339,13 +314,10 @@ export default function WhyNotHoneySection() {
                     className="rounded-3xl bg-gradient-to-br from-caramel to-[#c9531a] p-12 text-center text-white shadow-2xl ring-1 ring-inset ring-white/20 dark:border dark:border-caramel/30 dark:bg-caramel/[0.12] dark:bg-none dark:ring-0 lg:p-8 sm:p-6"
                 >
                     <h3 className="mb-6 text-3xl font-semibold tracking-tight text-white lg:text-2xl">
-                        Make the Switch to Caramel
+                        {HOME_HONEY_COPY.switchHeading}
                     </h3>
                     <p className="mx-auto mb-8 max-w-3xl text-lg leading-relaxed text-white/90">
-                        Join thousands of users whoʼve made the switch to
-                        Caramel. Save money while supporting the creators you
-                        love, all with complete transparency and privacy
-                        protection.
+                        {HOME_HONEY_COPY.switchSummary}
                     </p>
                     <div className="flex justify-center gap-6 lg:flex-col lg:items-center lg:gap-4">
                         <InstallSurfaceGate className="contents">

@@ -1,4 +1,5 @@
 import { listTopSites } from '@/lib/couponsRepo'
+import { COUPONS_BODY } from '@/lib/seo/guidePageCopy'
 import Link from 'next/link'
 
 // Server component — the only crawlable internal links to /coupons/[store]
@@ -28,7 +29,7 @@ export default async function PopularStores({
                 id="popular-stores-heading"
                 className="mb-4 text-2xl font-bold tracking-tight text-gray-900 dark:text-white"
             >
-                Popular coupon stores
+                {COUPONS_BODY.popularHeading}
             </h2>
             <ul className="flex flex-wrap gap-3">
                 {sites.map(row => (

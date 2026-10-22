@@ -1,10 +1,13 @@
 'use client'
 
 import {
-    DISCORD_INVITE_URL,
-    GITHUB_REPO_URL,
-    INSTAGRAM_URL,
-} from '@/lib/brandLinks'
+    HOME_CONTRIBUTIONS,
+    HOME_OPEN_SOURCE_COPY,
+    HOME_PLATFORMS,
+    HOME_SECURITY_FEATURES,
+} from '@/lib/marketing/homeContent'
+
+import { DISCORD_INVITE_URL, GITHUB_REPO_URL } from '@/lib/brandLinks'
 import { useReducedMotion } from '@/lib/reducedMotion'
 import { m } from 'framer-motion'
 import {
@@ -22,83 +25,37 @@ import {
 } from 'react-icons/fa'
 import { RiInstagramFill } from 'react-icons/ri'
 
-const platforms = [
-    {
-        name: 'GitHub',
-        href: GITHUB_REPO_URL,
-        desc: 'Explore our open-source code & contribute',
-        icon: <FaGithub />,
-        color: 'from-gray-600 to-gray-800',
-    },
-    {
-        name: 'Discord',
-        href: DISCORD_INVITE_URL,
-        desc: 'Join our developer community',
-        icon: <FaDiscord />,
-        color: 'from-indigo-500 to-purple-600',
-    },
-    {
-        name: 'Instagram',
-        href: INSTAGRAM_URL,
-        desc: 'Follow us for updates & tips',
-        icon: <RiInstagramFill />,
-        color: 'from-pink-500 to-rose-500',
-    },
+const platformsIcons = [
+    <FaGithub key="0" />,
+    <FaDiscord key="1" />,
+    <RiInstagramFill key="2" />,
 ]
+const platforms = HOME_PLATFORMS.map((item, index) => ({
+    ...item,
+    icon: platformsIcons[index],
+}))
 
-const contributions = [
-    {
-        title: 'Code Contributions',
-        desc: 'Help improve our algorithms, add new features, or fix bugs',
-        icon: <FaCode />,
-        action: 'Start Contributing',
-        href: 'https://github.com/DevinoSolutions/caramel/issues/new?assignees=&labels=enhancement&projects=&template=feature-request.md&title=%5BFeature%5D+',
-    },
-    {
-        title: 'Store Requests',
-        desc: 'Request support for new e-commerce platforms and stores',
-        icon: <FaStore />,
-        action: 'Request Store',
-        href: 'https://github.com/DevinoSolutions/caramel/issues/new?assignees=&labels=store-request&projects=&template=store-request.md&title=%5BStore+Request%5D+Add+support+for+',
-    },
-    {
-        title: 'Bug Reports',
-        desc: 'Help us identify and fix issues to improve user experience',
-        icon: <FaBug />,
-        action: 'Report Bug',
-        href: 'https://github.com/DevinoSolutions/caramel/issues/new?assignees=&labels=bug&projects=&template=bug-report.md&title=%5BBug%5D+',
-    },
-    {
-        title: 'Feature Ideas',
-        desc: 'Suggest new features that would benefit the community',
-        icon: <FaLightbulb />,
-        action: 'Suggest Feature',
-        href: 'https://github.com/DevinoSolutions/caramel/issues/new?assignees=&labels=enhancement&projects=&template=feature-request.md&title=%5BFeature%5D+',
-    },
+const contributionsIcons = [
+    <FaCode key="0" />,
+    <FaStore key="1" />,
+    <FaBug key="2" />,
+    <FaLightbulb key="3" />,
 ]
+const contributions = HOME_CONTRIBUTIONS.map((item, index) => ({
+    ...item,
+    icon: contributionsIcons[index],
+}))
 
-const securityFeatures = [
-    {
-        title: 'Open Security Reviews',
-        desc: 'Every change is publicly reviewable',
-        icon: <FaLock />,
-    },
-    {
-        title: 'Transparent Operations',
-        desc: 'All code changes are public and reviewable',
-        icon: <FaEye />,
-    },
-    {
-        title: 'No Ad Tracking',
-        desc: 'We never sell your personal information or share it with advertisers',
-        icon: <FaBan />,
-    },
-    {
-        title: 'Community Oversight',
-        desc: 'Anyone in the world can audit our code',
-        icon: <FaUsers />,
-    },
+const securityFeaturesIcons = [
+    <FaLock key="0" />,
+    <FaEye key="1" />,
+    <FaBan key="2" />,
+    <FaUsers key="3" />,
 ]
+const securityFeatures = HOME_SECURITY_FEATURES.map((item, index) => ({
+    ...item,
+    icon: securityFeaturesIcons[index],
+}))
 
 export default function OpenSourceSection() {
     const reduceMotion = useReducedMotion()
@@ -121,13 +78,10 @@ export default function OpenSourceSection() {
                     className="mb-20 text-center"
                 >
                     <h2 className="mb-8 bg-gradient-to-r from-caramel to-orange-600 bg-clip-text pb-1 text-5xl font-extrabold leading-tight tracking-tight text-transparent lg:text-4xl">
-                        Open Source & Community Driven
+                        {HOME_OPEN_SOURCE_COPY.heading}
                     </h2>
                     <p className="mx-auto max-w-3xl text-xl leading-relaxed text-gray-600 dark:text-gray-300 lg:text-lg">
-                        Transparency is our core. The extension and web app are
-                        open, auditable, and community-driven. Join the
-                        developers building a better alternative to proprietary
-                        extensions.
+                        {HOME_OPEN_SOURCE_COPY.summary}
                     </p>
                 </m.div>
 
@@ -140,7 +94,7 @@ export default function OpenSourceSection() {
                     className="mb-16"
                 >
                     <h3 className="mb-8 text-center text-3xl font-extrabold tracking-tight text-gray-900 dark:text-white lg:text-2xl">
-                        Security Through Transparency
+                        {HOME_OPEN_SOURCE_COPY.securityHeading}
                     </h3>
                     {/* Deliberately COMPACT: this row supports the two richer
                         groups below (Community, Contribution Pathways), so its
@@ -212,7 +166,7 @@ export default function OpenSourceSection() {
                     className="mb-24"
                 >
                     <h3 className="mb-12 text-center text-3xl font-extrabold tracking-tight text-gray-900 dark:text-white lg:text-2xl">
-                        Connect With Our Community
+                        {HOME_OPEN_SOURCE_COPY.communityHeading}
                     </h3>
                     <div className="grid grid-cols-3 gap-8 lg:grid-cols-2 sm:grid-cols-1">
                         {platforms.map((platform, index) => (
@@ -328,7 +282,7 @@ export default function OpenSourceSection() {
                     className="mb-24"
                 >
                     <h3 className="mb-12 text-center text-3xl font-extrabold tracking-tight text-gray-900 dark:text-white lg:text-2xl">
-                        Contribution Pathways
+                        {HOME_OPEN_SOURCE_COPY.contributionHeading}
                     </h3>
                     <div className="grid grid-cols-2 gap-8 sm:grid-cols-1 sm:gap-6">
                         {contributions.map((contribution, index) => (
@@ -449,12 +403,10 @@ export default function OpenSourceSection() {
                     className="rounded-3xl bg-gradient-to-br from-caramel to-[#c9531a] p-12 text-center text-white shadow-2xl ring-1 ring-inset ring-white/20 dark:border dark:border-caramel/30 dark:bg-caramel/[0.12] dark:bg-none dark:ring-0 lg:p-8 sm:p-6"
                 >
                     <h3 className="mb-6 text-3xl font-semibold tracking-tight text-white lg:text-2xl">
-                        Ready to Make a Difference?
+                        {HOME_OPEN_SOURCE_COPY.actionHeading}
                     </h3>
                     <p className="mx-auto mb-8 max-w-2xl text-lg leading-relaxed text-white/90">
-                        Join our mission to create ethical, transparent, and
-                        user-first shopping tools. Your contribution, no matter
-                        how small, helps build a better internet for everyone.
+                        {HOME_OPEN_SOURCE_COPY.actionSummary}
                     </p>
                     <div className="flex justify-center gap-6 lg:flex-col lg:items-center lg:gap-4">
                         <m.a

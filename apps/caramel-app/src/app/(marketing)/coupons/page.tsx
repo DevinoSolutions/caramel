@@ -5,6 +5,7 @@ import { attachSignals } from '@/lib/couponSignals'
 import { listCoupons } from '@/lib/couponsRepo'
 import { BASE_URL } from '@/lib/env.client'
 import { jsonLdString } from '@/lib/jsonLd'
+import { COUPONS_BODY } from '@/lib/seo/guidePageCopy'
 import type { Coupon } from '@/types/coupon'
 import type { Metadata } from 'next'
 
@@ -14,7 +15,7 @@ import type { Metadata } from 'next'
 // never at build time. Same constraint and rationale as sitemap.ts.
 export const dynamic = 'force-dynamic'
 
-const PAGE_SIZE = 5
+const PAGE_SIZE = COUPONS_BODY.pageSize
 
 const title = 'Coupon Codes & Promo Codes for Top Stores | Caramel'
 const description =
@@ -83,8 +84,8 @@ export default async function CouponsPage() {
                 initialCoupons={couponsWithSignals}
                 initialTotal={total}
                 disableInitialFetch
-                heroTitle="Today's Coupon Codes"
-                heroSubtitle="Browse coupon codes, promo codes, and offers for your favorite stores."
+                heroTitle={COUPONS_BODY.heading}
+                heroSubtitle={COUPONS_BODY.summary}
             />
             <PopularStores />
             {/* Server-rendered letter strip into the A–Z directory — the hub's
