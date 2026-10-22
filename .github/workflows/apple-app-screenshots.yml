@@ -155,21 +155,27 @@ jobs:
             xcrun simctl install "$udid" "${APP_PATH}"
 
             n=0
+            app_running() { # a launched app that crashed leaves SpringBoard (the home screen) in the frame
+              xcrun simctl spawn "$udid" launchctl list | grep -F "UIKitApplication:${BUNDLE_ID}[" | awk '$1 != "-" {found = 1} END {exit !found}'
+            }
             shoot() { # name [extra launch args...]
               name="$1"; shift
               n=$((n + 1))
-              xcrun simctl terminate "$udid" "${BUNDLE_ID}" >/dev/null 2>&1 || true
-              xcrun simctl launch "$udid" "${BUNDLE_ID}" "$@"
-              sleep 10 # network content (prod read-only APIs) has to land
               out="${SHOTS_DIR}/${label}-$(printf '%02d' "$n")-${name}.png"
-              xcrun simctl io "$udid" screenshot --type=png "$out"
-              # A blank white frame (a launch that had not drawn yet) compresses to a tiny PNG; retake it.
+              # Relaunch until the app is alive and the frame is not blank (a white frame
+              # compresses to a tiny PNG): a flaky launch must not become a bad store image.
               attempt=1
-              while [ "$(stat -f%z "$out")" -lt 150000 ]; do
-                if [ "$attempt" -ge 3 ]; then echo "::error::${out} stayed blank after ${attempt} captures."; exit 1; fi
+              while true; do
+                xcrun simctl terminate "$udid" "${BUNDLE_ID}" >/dev/null 2>&1 || true
+                xcrun simctl launch "$udid" "${BUNDLE_ID}" "$@"
+                sleep 10 # network content (prod read-only APIs) has to land
+                if app_running; then
+                  xcrun simctl io "$udid" screenshot --type=png "$out"
+                  if app_running && [ "$(stat -f%z "$out")" -ge 150000 ]; then break; fi
+                fi
+                if [ "$attempt" -ge 3 ]; then echo "::error::${out}: the app crashed or drew a blank frame on all ${attempt} launches."; exit 1; fi
+                echo "::warning::${out}: attempt ${attempt} crashed or was blank; relaunching."
                 attempt=$((attempt + 1))
-                sleep 8
-                xcrun simctl io "$udid" screenshot --type=png "$out"
               done
               echo "captured ${out}: $(sips -g pixelWidth -g pixelHeight "$out" | awk '/pixel/ {printf "%s ", $2}')"
             }
