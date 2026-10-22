@@ -1,5 +1,5 @@
 {
-    "$schema": "https://unpkg.com/knip@5/schema.json",
+    "$schema": "https://unpkg.com/knip@6/schema.json",
     "entry": [
         "src/app/**/*.{ts,tsx}",
         "src/instrumentation*.ts",
@@ -8,15 +8,9 @@
     ],
     "project": ["src/**/*.{ts,tsx}", "e2e/**/*.ts", "evals/**/*.ts"],
     "ignore": [
-        "eslint.config.mjs",
         "postcss.config.mjs",
-        "postcss.config.ts",
-        "tailwind.config.ts",
-        "public/sw.js",
         "src/components/StoreButtons.tsx",
-        "src/lib/capitalizeFirst.ts",
-        "src/lib/gtag.ts",
-        "src/lib/securityHelpers/cryptoHelpers.ts"
+        "src/lib/capitalizeFirst.ts"
     ],
     "ignoreDependencies": [
         "@argos-ci/cli",
