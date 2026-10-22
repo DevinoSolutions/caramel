@@ -29,6 +29,10 @@
 // (RULING C′). No write touches the external `caramel_coupons` DB anymore.
 // submitShopperCoupon (owner-directed 2026-10-02) is the THIRD app write: it
 // INSERTs shopper-submitted codes with ids from a reserved sequence.
+// writeWorkedSignal / writeFailedSignal / writeUsageSignal are the aggregate
+// `coupon_signals` upserts couponSignals.ts calls: each is ONE INSERT ... SELECT
+// ... WHERE EXISTS (catalog row) ON CONFLICT statement, so the catalog
+// existence gate and the write are a single round trip.
 //
 // HTTP-only concerns stay OUT of this file by design: param parsing/caps,
 // `getBaseDomain`/domain-validation 400s, response envelopes, cache
@@ -44,10 +48,10 @@ import {
 } from '@/lib/coupons'
 import {
     CatalogStoreNameRowSchema,
-    CouponExistsRowSchema,
     CouponIdRowSchema,
     type CouponListRow,
     CouponListRowSchema,
+    CouponSignalWriteRowSchema,
     type DiscountTypeRow,
     DiscountTypeRowSchema,
     KnownStoreRowSchema,
@@ -885,12 +889,31 @@ export async function expireCoupons(ids: string[]): Promise<number> {
 }
 
 /**
- * Is `id` a row of the app-owned catalog? The gate the two signal writers
- * (POST /api/coupons/[id]/report, POST /api/coupons/increment) run BEFORE
- * writing coupon_signals, which carries no FK to `coupons` on purpose (so an
- * aggregate can outlive a tombstoned coupon) and so would otherwise upsert a row
- * for ANY numeric id: unbounded table growth, and a failure count pre-seeded on
- * an id the catalog (or the shopper sequence) has not issued yet.
+ * The slice of the Prisma client the coupon_signals writers below need: the
+ * singleton and an interactive-transaction client both satisfy it, so
+ * couponSignals.ts runs the same statement inside a caller's transaction.
+ */
+type CouponSignalSqlClient = Pick<Prisma.TransactionClient, '$queryRaw'>
+
+/** The UTC wall-clock `now` the coupon_signals timestamps are stamped with. */
+const SIGNAL_NOW_UTC = Prisma.sql`(NOW() AT TIME ZONE 'UTC')`
+
+/**
+ * ONE statement: `INSERT INTO coupon_signals (...) SELECT ... WHERE EXISTS
+ * (SELECT 1 FROM coupons WHERE id = $id) ON CONFLICT (coupon_id) DO UPDATE ...
+ * RETURNING fail_weight`. The three public writers below supply the column
+ * list, the SELECT list and the DO UPDATE SET; this adds the existence gate.
+ *
+ * Why the gate rides in the write: coupon_signals carries no FK to `coupons` on
+ * purpose (an aggregate may outlive a tombstoned coupon), so an ungated upsert
+ * mints a row for ANY numeric id: unbounded table growth, and a failure count
+ * pre-seeded on an id the catalog (or the shopper sequence) has not issued yet.
+ * A separate existence SELECT before the write doubled the statements on the
+ * extension's highest-volume path (it fires "used" and "worked" together on
+ * every apply). With the check inside the INSERT, an id that is not a catalog
+ * row selects zero rows, inserts nothing, never reaches ON CONFLICT and
+ * RETURNS no row: that is how a caller tells "unknown coupon" (null) from a
+ * write (the row's fail_weight after it).
  *
  * Status-agnostic on purpose: any `coupons` row counts, hidden ('invalid'),
  * 'expired' and `expired = TRUE` rows included. A signal never changes
@@ -899,19 +922,101 @@ export async function expireCoupons(ids: string[]): Promise<number> {
  * while refusing it would 404 an honest shopper whose cached store page (or an
  * in-flight apply) predates a tombstone, and drop the evidence if ingest later
  * revives the row. Only an id that is not a catalog row at all is refused.
+ *
+ * Timestamps are UTC wall-clock (`NOW() AT TIME ZONE 'UTC'`) because the
+ * columns are `timestamp(3)` without a zone that Prisma always writes in UTC;
+ * bare NOW() would shift them on a non-UTC session. `updated_at` is bumped by
+ * hand: `@updatedAt` is Prisma-client behaviour and raw SQL bypasses it.
  */
-export async function couponExists(id: string): Promise<boolean> {
-    const [row] = parseCouponRows(
-        CouponExistsRowSchema,
-        await prisma.$queryRaw(
-            Prisma.sql`SELECT EXISTS (SELECT 1 FROM coupons WHERE id = ${id}) AS known`,
-        ),
-        'coupon-signal.coupon-exists',
+async function writeCouponSignal(
+    client: CouponSignalSqlClient,
+    couponId: string,
+    statement: {
+        insertColumns: Prisma.Sql
+        selectList: Prisma.Sql
+        onConflictSet: Prisma.Sql
+    },
+    queryLabel: string,
+): Promise<{ failWeight: number } | null> {
+    const rows = parseCouponRows(
+        CouponSignalWriteRowSchema,
+        await client.$queryRaw(Prisma.sql`
+            INSERT INTO coupon_signals (${statement.insertColumns})
+            SELECT ${statement.selectList}
+            WHERE EXISTS (SELECT 1 FROM coupons WHERE id = ${couponId}::text)
+            ON CONFLICT (coupon_id) DO UPDATE SET ${statement.onConflictSet}
+            RETURNING fail_weight AS "failWeight"
+        `),
+        queryLabel,
     )
-    if (!row) {
-        throw new Error('couponExists: existence query returned no row')
-    }
-    return row.known
+    return rows[0] ?? null
+}
+
+/**
+ * couponSignals.recordWorked's aggregate write: stamp `last_worked_at` (this
+ * writer owns that field only). Returns the row's `fail_weight` after the
+ * write, or null when `couponId` is not a catalog row (nothing was written).
+ */
+export async function writeWorkedSignal(
+    couponId: string,
+    client: CouponSignalSqlClient = prisma,
+): Promise<{ failWeight: number } | null> {
+    return writeCouponSignal(
+        client,
+        couponId,
+        {
+            insertColumns: Prisma.sql`coupon_id, last_worked_at, created_at, updated_at`,
+            selectList: Prisma.sql`${couponId}::text, ${SIGNAL_NOW_UTC}, ${SIGNAL_NOW_UTC}, ${SIGNAL_NOW_UTC}`,
+            onConflictSet: Prisma.sql`last_worked_at = EXCLUDED.last_worked_at, updated_at = EXCLUDED.updated_at`,
+        },
+        'coupon-signal.write-worked',
+    )
+}
+
+/**
+ * couponSignals.recordFailed's aggregate write: raw `fail_count`,
+ * `last_failed_at` and the bounded `last_fail_reason` (the caller recomputes
+ * fail_weight from the reporter rows afterwards). Returns the row's
+ * `fail_weight` after the write, or null when `couponId` is not a catalog row
+ * (nothing was written).
+ */
+export async function writeFailedSignal(
+    couponId: string,
+    reason: string | null,
+    client: CouponSignalSqlClient = prisma,
+): Promise<{ failWeight: number } | null> {
+    return writeCouponSignal(
+        client,
+        couponId,
+        {
+            insertColumns: Prisma.sql`coupon_id, fail_count, last_failed_at, last_fail_reason, created_at, updated_at`,
+            selectList: Prisma.sql`${couponId}::text, 1, ${SIGNAL_NOW_UTC}, ${reason}::text, ${SIGNAL_NOW_UTC}, ${SIGNAL_NOW_UTC}`,
+            onConflictSet: Prisma.sql`fail_count = coupon_signals.fail_count + 1, last_failed_at = EXCLUDED.last_failed_at, last_fail_reason = EXCLUDED.last_fail_reason, updated_at = EXCLUDED.updated_at`,
+        },
+        'coupon-signal.write-failed',
+    )
+}
+
+/**
+ * couponSignals.recordUsage's write: bump `work_count` (this writer owns that
+ * counter only; no timestamp, a use is not a "worked at" stamp). Returns the
+ * row's `fail_weight` after the write, or null when `couponId` is not a
+ * catalog row (nothing was written).
+ */
+export async function writeUsageSignal(
+    couponId: string,
+    client: CouponSignalSqlClient = prisma,
+): Promise<{ failWeight: number } | null> {
+    return writeCouponSignal(
+        client,
+        couponId,
+        {
+            insertColumns: Prisma.sql`coupon_id, work_count, created_at, updated_at`,
+            selectList: Prisma.sql`${couponId}::text, 1, ${SIGNAL_NOW_UTC}, ${SIGNAL_NOW_UTC}`,
+            onConflictSet: Prisma.sql`work_count = coupon_signals.work_count + 1, updated_at = EXCLUDED.updated_at`,
+        },
+        'coupon-signal.write-usage',
+    )
 }
 
 /**

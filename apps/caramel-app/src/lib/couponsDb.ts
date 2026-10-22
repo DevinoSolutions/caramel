@@ -156,9 +156,10 @@ export const CouponIdRowSchema = z.object({
     id: couponIdSchema,
 })
 
-/** `SELECT EXISTS(...) AS known` — couponsRepo.couponExists. */
-export const CouponExistsRowSchema = z.object({
-    known: z.boolean(),
+/** `... RETURNING fail_weight AS "failWeight"` — couponsRepo's coupon_signals
+ *  writers (writeWorkedSignal / writeFailedSignal / writeUsageSignal). */
+export const CouponSignalWriteRowSchema = z.object({
+    failWeight: z.number().int(),
 })
 
 /** `SELECT (EXISTS(...) OR EXISTS(...)) AS known` — couponsRepo.isKnownStore. */

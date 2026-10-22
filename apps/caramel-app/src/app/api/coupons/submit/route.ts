@@ -277,7 +277,20 @@ const submitRoute = withRoute(
             // and the extension retries/logs it. Re-stamping on a retry is
             // idempotent (an upsert of lastWorkedAt).
             // TODO: checkout worked-stamps are client-asserted; weight/cap per user before trusting them for ranking.
-            await recordWorked(result.couponId, { kind: 'user', userId })
+            if (
+                !(await recordWorked(result.couponId, {
+                    kind: 'user',
+                    userId,
+                }))
+            ) {
+                // recordWorked refuses an id that is not a catalog row. This one
+                // was just inserted (or found listed) a moment ago, so it was
+                // deleted in between: surface it, never claim a stamp that did
+                // not land.
+                throw new Error(
+                    `coupons/submit: recordWorked found no catalog row for coupon ${result.couponId}`,
+                )
+            }
         }
 
         return respond(

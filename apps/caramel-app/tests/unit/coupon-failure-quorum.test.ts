@@ -69,6 +69,7 @@ type ReporterRow = {
 
 function makeFakeDb() {
     const signals = new Map<string, SignalRow>()
+    const unknownCoupons = new Set<string>()
     const reporters = new Map<string, ReporterRow>()
     const keyOf = (w: {
         couponId: string
@@ -156,51 +157,38 @@ function makeFakeDb() {
                 },
             ),
         },
+        // The aggregate coupon_signals write is ONE raw statement that is also
+        // the catalog existence gate (couponsRepo.writeCouponSignal). This
+        // emulates it from the composed SQL: the first bound value is the
+        // coupon id, the second a failure's reason. An id in `unknownCoupons`
+        // returns no row and writes nothing, exactly as `INSERT ... SELECT ...
+        // WHERE EXISTS ... RETURNING` does for an id that is not a catalog row.
+        $queryRaw: vi.fn(async (query: { sql: string; values: unknown[] }) => {
+            const couponId = String(query.values[0])
+            if (unknownCoupons.has(couponId)) return []
+            const now = new Date()
+            const row: SignalRow = {
+                couponId,
+                failCount: 0,
+                failWeight: 0,
+                lastFailedAt: null,
+                lastWorkedAt: null,
+                lastFailReason: null,
+                ...signals.get(couponId),
+            }
+            if (query.sql.includes('fail_count')) {
+                row.failCount += 1
+                row.lastFailedAt = now
+                row.lastFailReason = query.values[1] as string | null
+            } else if (query.sql.includes('last_worked_at')) {
+                row.lastWorkedAt = now
+            } else {
+                throw new Error(`unexpected signal statement: ${query.sql}`)
+            }
+            signals.set(couponId, row)
+            return [{ failWeight: row.failWeight }]
+        }),
         couponSignal: {
-            upsert: vi.fn(
-                async (args: {
-                    where: { couponId: string }
-                    create: Partial<SignalRow>
-                    update: Record<string, unknown>
-                }) => {
-                    const existing = signals.get(args.where.couponId)
-                    const row: SignalRow = existing
-                        ? { ...existing }
-                        : {
-                              couponId: args.where.couponId,
-                              failCount: 0,
-                              failWeight: 0,
-                              lastFailedAt: null,
-                              lastWorkedAt: null,
-                              lastFailReason: null,
-                              ...args.create,
-                          }
-                    if (existing) {
-                        for (const [field, value] of Object.entries(
-                            args.update,
-                        )) {
-                            if (
-                                value &&
-                                typeof value === 'object' &&
-                                'increment' in value
-                            ) {
-                                ;(row as Record<string, unknown>)[field] =
-                                    (row as unknown as Record<string, number>)[
-                                        field
-                                    ]! +
-                                    Number(
-                                        (value as { increment: number })
-                                            .increment,
-                                    )
-                            } else {
-                                ;(row as Record<string, unknown>)[field] = value
-                            }
-                        }
-                    }
-                    signals.set(row.couponId, row)
-                    return row
-                },
-            ),
             update: vi.fn(
                 async (args: {
                     where: { couponId: string }
@@ -218,7 +206,7 @@ function makeFakeDb() {
     sweepClient.deleteMany.mockImplementation(async args =>
         tx.couponSignalReporter.deleteMany(args as never),
     )
-    return { signals, reporters, tx }
+    return { signals, reporters, tx, unknownCoupons }
 }
 
 const anon = (n: number): ReportReporter => ({
@@ -609,6 +597,38 @@ describe('failure quorum: forged anonymous reports cannot sink a code', () => {
         expect(sweepClient.deleteMany).toHaveBeenCalledTimes(1)
         await sweepExpiredReporters({ force: true })
         expect(sweepClient.deleteMany).toHaveBeenCalledTimes(2)
+    })
+
+    it('an id that is not a catalog row records nothing and resolves false: no signal row, no reporter row, no recompute', async () => {
+        db.unknownCoupons.add('999000404')
+
+        expect(
+            await recordFailed(
+                '999000404',
+                'min spend',
+                anon(1),
+                db.tx as never,
+            ),
+        ).toBe(false)
+        expect(
+            await recordWorked('999000404', account('user-1'), db.tx as never),
+        ).toBe(false)
+
+        expect(db.signals.size).toBe(0)
+        expect(db.reporters.size).toBe(0)
+        expect(db.tx.couponSignalReporter.upsert).not.toHaveBeenCalled()
+        expect(db.tx.couponSignalReporter.deleteMany).not.toHaveBeenCalled()
+        expect(db.tx.couponSignal.update).not.toHaveBeenCalled()
+        // One statement each: the INSERT ... WHERE EXISTS that detected it.
+        expect(db.tx.$queryRaw).toHaveBeenCalledTimes(2)
+    })
+
+    it('a known id resolves true, and a failure costs exactly one aggregate statement', async () => {
+        expect(await fail(anon(1))).toBe(true)
+        expect(await recordWorked(COUPON, anon(2), db.tx as never)).toBe(true)
+        // One aggregate statement per report (the fail, then the worked): the
+        // existence check is part of it, not a statement of its own.
+        expect(db.tx.$queryRaw).toHaveBeenCalledTimes(2)
     })
 
     it('runs in one transaction when handed a plain client', async () => {

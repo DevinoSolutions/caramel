@@ -10,7 +10,6 @@ import {
     sweepExpiredReporters,
     type CouponFailureWriter,
 } from '@/lib/couponSignals'
-import { couponExists } from '@/lib/couponsRepo'
 import prisma from '@/lib/prisma'
 import type { PrismaClient } from '@prisma/client'
 import { NextResponse } from 'next/server'
@@ -25,9 +24,12 @@ import { z } from 'zod'
 // extension fetches with host_permissions, so its request bypasses CORS
 // entirely (adding CORS/OPTIONS here would be dead ceremony).
 //
-// An id that is not a row of the catalog is a 404 and writes nothing
-// (couponsRepo.couponExists, status-agnostic: see its doc comment). coupon_signals
-// carries no FK, so without the gate any numeric id minted a signal row.
+// An id that is not a row of the catalog is a 404 and writes nothing. The check
+// is part of the aggregate write itself (couponsRepo.writeCouponSignal: an
+// INSERT ... SELECT ... WHERE EXISTS statement, status-agnostic, see its doc
+// comment), so a known id costs ONE statement, not an existence lookup plus a
+// write. coupon_signals carries no FK, so without the gate any numeric id
+// minted a signal row.
 //
 // Writes ONLY app-owned tables — the aggregate `coupon_signals` (through
 // couponSignals.ts) and, for a signed-in caller, the attributed
@@ -101,22 +103,23 @@ export const POST = withRoute(
             return NextResponse.json({ ok: true, deduped: true })
         }
 
-        try {
-            // An unknown id writes no signal and gives its dedupe slot back, so
-            // a forger probing random ids cannot fill the table with slots no
-            // report ever used. The slot is taken BEFORE this lookup so a
-            // tracked duplicate stays a database-free no-op.
-            if (!(await couponExists(id))) {
-                releaseReport(body.outcome, reporter, id)
-                return NextResponse.json(
-                    { error: 'Unknown coupon' },
-                    { status: 404 },
-                )
-            }
+        // An unknown id writes no signal and gives its dedupe slot back, so a
+        // forger probing random ids cannot fill the table with slots no report
+        // ever used. The slot is taken BEFORE the write so a tracked duplicate
+        // stays a database-free no-op.
+        const unknownCoupon = () => {
+            releaseReport(body.outcome, reporter, id)
+            return NextResponse.json(
+                { error: 'Unknown coupon' },
+                { status: 404 },
+            )
+        }
 
+        try {
             // The aggregate signal write — identical for every caller, so the
             // signed-in path can never end up writing a DIFFERENT signal than the
-            // anonymous one.
+            // anonymous one. Resolves false when the id is not a catalog row
+            // (nothing written).
             const writeSignal = (client: CouponFailureWriter | PrismaClient) =>
                 body.outcome === 'worked'
                     ? recordWorked(id, reporter, client)
@@ -129,8 +132,7 @@ export const POST = withRoute(
 
             if (!userId) {
                 // Anonymous: no transaction opened HERE (both writers wrap
-                // their own quorum bookkeeping in one), after the catalog check
-                // above. Nothing is written to
+                // their own quorum bookkeeping in one). Nothing is written to
                 // coupon_reports for an anonymous report — DELIBERATE, not an
                 // oversight: coupon_reports is ATTRIBUTION, and every row in it
                 // names a user. Anonymous volume is already fully counted by the
@@ -139,7 +141,7 @@ export const POST = withRoute(
                 // the extension's highest-volume path. (The column is nullable
                 // because the schema was written before this call; a reader may
                 // assume user_id IS NOT NULL for every row this route creates.)
-                await writeSignal(prisma)
+                if (!(await writeSignal(prisma))) return unknownCoupon()
                 // Retention of reporter rows, AFTER the write committed. Not
                 // awaited: the response never waits for retention, and the sweep
                 // never rejects (a failure is captured to Sentry and retried).
@@ -150,16 +152,16 @@ export const POST = withRoute(
             // Signed in: the signal and the attribution are ONE atomic unit, so a
             // failure can never leave a counted report with no attribution (or the
             // reverse) for a client that will retry.
-            await prisma.$transaction(async tx => {
+            const recorded = await prisma.$transaction(async tx => {
                 // Written on every report that got past the per-reporter dedupe
                 // above, exactly as for an anonymous report. The per-day dedup
                 // below applies to the ATTRIBUTION ONLY, and survives a restart
                 // that empties the in-memory window.
-                await writeSignal(tx)
+                if (!(await writeSignal(tx))) return false
 
                 // coupon_reports.coupon_id carries a real FK to `coupons`; the
-                // couponExists gate above already proved the row exists, so the
-                // insert below cannot raise a foreign-key violation.
+                // signal write above just proved the row exists, so the insert
+                // below cannot raise a foreign-key violation.
 
                 // One attributed report per (user, coupon, UTC day). Postgres
                 // cannot express a UNIQUE on date_trunc('day', created_at), so this
@@ -175,12 +177,14 @@ export const POST = withRoute(
                     },
                     select: { id: true },
                 })
-                if (alreadyReportedToday) return
+                if (alreadyReportedToday) return true
 
                 await tx.couponReport.create({
                     data: { couponId: id, userId, outcome: body.outcome },
                 })
+                return true
             })
+            if (!recorded) return unknownCoupon()
             void sweepExpiredReporters()
 
             return NextResponse.json({ ok: true })

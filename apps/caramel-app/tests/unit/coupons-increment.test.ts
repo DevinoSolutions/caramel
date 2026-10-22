@@ -11,23 +11,22 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 // to recordUsage and returns 200 {ok:true}, that an id which is not a catalog
 // row is a 404 that counts nothing and keeps its dedupe slot free, and that the origin + rate-limit
 // wiring still short-circuits before anything is written.
-const { recordUsageMock } = vi.hoisted(() => ({
-    recordUsageMock: vi.fn(async () => undefined),
-}))
-vi.mock('@/lib/couponSignals', () => ({ recordUsage: recordUsageMock }))
-
-// MOCK (test double, named ...Mock): stands in for the catalog gate
-// couponsRepo.couponExists. Ids 41..43 are catalog rows, the rest are unknown.
-// Its real SQL is pinned in coupons-report.test.ts and run against Postgres in
-// tests/integration/coupon-report.itest.ts; nothing here proves the query.
-const { couponExistsMock, catalogIds } = vi.hoisted(() => {
+//
+// MOCK (test double, named ...Mock): recordUsage is the WHOLE write AND the
+// catalog gate (it resolves false for an id that is not a catalog row: the
+// existence check is folded into its single INSERT ... WHERE EXISTS statement,
+// couponsRepo.writeUsageSignal). Ids 41..43 are catalog rows, the rest are
+// unknown. The real SQL is pinned in couponsRepo.test.ts and run against
+// Postgres in tests/integration/coupon-report.itest.ts; nothing here proves
+// the query.
+const { recordUsageMock, catalogIds } = vi.hoisted(() => {
     const catalogIds = new Set<string>()
     return {
         catalogIds,
-        couponExistsMock: vi.fn(async (id: string) => catalogIds.has(id)),
+        recordUsageMock: vi.fn(async (id: string) => catalogIds.has(id)),
     }
 })
-vi.mock('@/lib/couponsRepo', () => ({ couponExists: couponExistsMock }))
+vi.mock('@/lib/couponSignals', () => ({ recordUsage: recordUsageMock }))
 
 // The route resolves an optional session (it picks the reporter the dedupe
 // keys on); this stands in for the whole auth graph.
@@ -87,11 +86,10 @@ beforeEach(() => {
     resetReportDedupeForTests()
     catalogIds.clear()
     for (const id of ['41', '42', '43']) catalogIds.add(id)
-    couponExistsMock.mockClear()
     getSessionMock.mockReset()
     getSessionMock.mockResolvedValue(null)
     recordUsageMock.mockReset()
-    recordUsageMock.mockResolvedValue(undefined)
+    recordUsageMock.mockImplementation(async id => catalogIds.has(id))
     checkRateLimitMock.mockReset()
     checkRateLimitMock.mockResolvedValue(null)
 })
@@ -236,14 +234,27 @@ describe('POST /api/coupons/increment — app-owned usage counter (W4-D2)', () =
 
         expect(miss.status).toBe(404)
         expect(await miss.json()).toEqual({ error: 'Unknown coupon' })
-        expect(recordUsageMock).not.toHaveBeenCalled()
+        // The ONE write statement is also the existence check: it ran once and
+        // reported the id unknown (false), with no separate lookup before it.
+        expect(recordUsageMock).toHaveBeenCalledTimes(1)
+        expect(recordUsageMock).toHaveBeenCalledWith('999000404')
 
         // Once the coupon exists, the same reporter's first use still counts:
         // the 404 above gave its slot back.
         catalogIds.add('999000404')
         const hit = await POST(incrementRequest({ query: '?id=999000404' }))
         expect(await hit.json()).toEqual({ ok: true })
-        expect(recordUsageMock).toHaveBeenCalledWith('999000404')
+        expect(recordUsageMock).toHaveBeenCalledTimes(2)
+    })
+
+    it('the same unknown id twice is a 404 both times, never deduped (the slot is released on the 404 path)', async () => {
+        const first = await POST(incrementRequest({ query: '?id=999000404' }))
+        const second = await POST(incrementRequest({ query: '?id=999000404' }))
+
+        expect(first.status).toBe(404)
+        expect(second.status).toBe(404)
+        expect(await second.json()).toEqual({ error: 'Unknown coupon' })
+        expect(recordUsageMock).toHaveBeenCalledTimes(2)
     })
 
     it('probing unknown ids can never fill the dedupe table', async () => {
@@ -258,19 +269,19 @@ describe('POST /api/coupons/increment — app-owned usage counter (W4-D2)', () =
         expect(await second.json()).toEqual({ ok: true, deduped: true })
     })
 
-    it('a tracked duplicate is answered from memory, without a catalog lookup', async () => {
+    it('a tracked duplicate is answered from memory, without touching the database', async () => {
         await POST(incrementRequest({ query: '?id=42' }))
-        couponExistsMock.mockClear()
+        recordUsageMock.mockClear()
         const dup = await POST(incrementRequest({ query: '?id=42' }))
         expect(await dup.json()).toEqual({ ok: true, deduped: true })
-        expect(couponExistsMock).not.toHaveBeenCalled()
+        expect(recordUsageMock).not.toHaveBeenCalled()
     })
 
-    it('a failing catalog lookup is a 500 (loud) and frees the slot for the retry', async () => {
-        couponExistsMock.mockRejectedValueOnce(new Error('db down'))
+    it('a failing write is a 500 (loud) and frees the slot for the retry', async () => {
+        recordUsageMock.mockRejectedValueOnce(new Error('db down'))
         const failed = await POST(incrementRequest({ query: '?id=42' }))
         expect(failed.status).toBe(500)
-        expect(recordUsageMock).not.toHaveBeenCalled()
+        expect(recordUsageMock).toHaveBeenCalledTimes(1)
 
         const retry = await POST(incrementRequest({ query: '?id=42' }))
         expect(await retry.json()).toEqual({ ok: true })

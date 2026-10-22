@@ -13,6 +13,9 @@ import {
     listStoreSitemapEntries,
     requestSource,
     submitShopperCoupon,
+    writeFailedSignal,
+    writeUsageSignal,
+    writeWorkedSignal,
 } from '@/lib/couponsRepo'
 import {
     SHOPPER_COUPON_DESCRIPTION,
@@ -1011,5 +1014,108 @@ describe('submitShopperCoupon (THIRD sanctioned write: shopper-submitted codes)'
         await expect(submitShopperCoupon(ARGS)).rejects.toThrow(
             /submitShopperCoupon/,
         )
+    })
+})
+
+describe('coupon_signals writers: the catalog existence check is folded into the one write statement', () => {
+    const WRITERS = [
+        {
+            name: 'writeWorkedSignal',
+            write: (client?: Parameters<typeof writeWorkedSignal>[1]) =>
+                writeWorkedSignal('42', client),
+            values: ['42', '42'],
+            owns: 'last_worked_at = EXCLUDED.last_worked_at',
+        },
+        {
+            name: 'writeFailedSignal',
+            write: (client?: Parameters<typeof writeFailedSignal>[2]) =>
+                writeFailedSignal('42', 'min spend', client),
+            values: ['42', 'min spend', '42'],
+            owns: 'fail_count = coupon_signals.fail_count + 1',
+        },
+        {
+            name: 'writeUsageSignal',
+            write: (client?: Parameters<typeof writeUsageSignal>[1]) =>
+                writeUsageSignal('42', client),
+            values: ['42', '42'],
+            owns: 'work_count = coupon_signals.work_count + 1',
+        },
+    ] as const
+
+    for (const writer of WRITERS) {
+        describe(writer.name, () => {
+            it('is ONE INSERT ... SELECT ... WHERE EXISTS (catalog row) ON CONFLICT ... RETURNING statement, ids bound never inlined', async () => {
+                mockRows(
+                    sql => sql.includes('INSERT INTO coupon_signals'),
+                    [{ failWeight: 0 }],
+                )
+
+                await writer.write()
+
+                expect(capturedQueries).toHaveLength(1)
+                expect(capturedQueries[0]).toMatch(
+                    /INSERT INTO coupon_signals \([^)]+\)\s+SELECT[\s\S]*WHERE EXISTS \(SELECT 1 FROM coupons WHERE id = \?::text\)\s+ON CONFLICT \(coupon_id\) DO UPDATE SET[\s\S]*RETURNING fail_weight AS "failWeight"/,
+                )
+                expect(capturedQueries[0]).toContain(writer.owns)
+                expect(capturedValues[0]).toEqual(writer.values)
+                // Status-agnostic: a hidden or expired catalog row is still a
+                // catalog row, so a stale cached card's vote is not an error.
+                expect(capturedQueries[0]).not.toMatch(/status|expired/i)
+                // UTC wall-clock into timestamp(3) columns, like the other
+                // app writes in this file.
+                expect(capturedQueries[0]).toContain(
+                    "(NOW() AT TIME ZONE 'UTC')",
+                )
+                expect(capturedQueries[0]).toContain(
+                    'updated_at = EXCLUDED.updated_at',
+                )
+            })
+
+            it('resolves the written row (its fail_weight) when the id is a catalog row', async () => {
+                mockRows(
+                    sql => sql.includes('INSERT INTO coupon_signals'),
+                    [{ failWeight: 4 }],
+                )
+
+                expect(await writer.write()).toEqual({ failWeight: 4 })
+            })
+
+            it('resolves null when the statement returns no row: the id is not a catalog row and nothing was written', async () => {
+                mockRows(sql => sql.includes('INSERT INTO coupon_signals'), [])
+
+                expect(await writer.write()).toBeNull()
+                expect(capturedQueries).toHaveLength(1)
+            })
+
+            it('a returned row that drifts from the schema is a loud error, never a silent write', async () => {
+                mockRows(
+                    sql => sql.includes('INSERT INTO coupon_signals'),
+                    [{ failWeight: 'lots' }],
+                )
+
+                await expect(writer.write()).rejects.toThrow(/schema drift/)
+            })
+
+            it('runs on the transaction client it is handed, not the singleton', async () => {
+                const txQueryRaw = vi.fn(async () => [{ failWeight: 0 }])
+
+                await writer.write({ $queryRaw: txQueryRaw } as never)
+
+                expect(txQueryRaw).toHaveBeenCalledTimes(1)
+                expect(capturedQueries).toHaveLength(0)
+            })
+        })
+    }
+
+    it('the failed writer binds a null reason as null (typed text), never the string "null"', async () => {
+        mockRows(
+            sql => sql.includes('INSERT INTO coupon_signals'),
+            [{ failWeight: 0 }],
+        )
+
+        await writeFailedSignal('42', null)
+
+        expect(capturedValues[0]).toEqual(['42', null, '42'])
+        expect(capturedQueries[0]).toContain('?::text')
     })
 })

@@ -37,6 +37,7 @@ async function cleanup() {
         where: { couponId: { in: IDS } },
     })
     await prisma.couponSignal.deleteMany({ where: { couponId: { in: IDS } } })
+    await prisma.coupon.deleteMany({ where: { id: { in: IDS } } })
 }
 
 async function runMigrationSeed() {
@@ -61,6 +62,21 @@ async function overlay(id: string) {
 
 beforeAll(async () => {
     await cleanup()
+    // coupon_signals has no FK, so the writers gate themselves on a catalog row
+    // (couponsRepo.writeCouponSignal): the live writers below need real rows.
+    // 'pending' keeps them out of the status='valid' census other suites count.
+    for (const id of IDS) {
+        await prisma.coupon.create({
+            data: {
+                id,
+                code: `LEGACY-QUORUM-${id}`,
+                site: 'legacy-quorum-itest.example',
+                title: 'legacy quorum itest coupon',
+                description: 'synthetic row for the legacy quorum itest',
+                status: 'pending',
+            },
+        })
+    }
     const now = Date.now()
     const seed = (
         couponId: string,

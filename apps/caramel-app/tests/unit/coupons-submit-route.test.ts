@@ -42,7 +42,7 @@ const {
         }) => ({ couponId: '900000000000000001', created: true }),
     ),
     recordWorkedMock: vi.fn(
-        async (_couponId: string, _reporter: unknown) => {},
+        async (_couponId: string, _reporter: unknown) => true,
     ),
     checkRateLimitMock: vi.fn(async () => null as unknown),
     captureMock: vi.fn(async (_args: CapturedEvent) => true),
@@ -124,7 +124,7 @@ beforeEach(() => {
         created: true,
     }))
     recordWorkedMock.mockReset()
-    recordWorkedMock.mockImplementation(async () => {})
+    recordWorkedMock.mockImplementation(async () => true)
     checkRateLimitMock.mockReset()
     checkRateLimitMock.mockImplementation(async () => null)
     captureMock.mockReset()
@@ -563,6 +563,24 @@ describe('POST /api/coupons/submit — checkout source', () => {
         recordWorkedMock.mockImplementation(async () => {
             throw new Error('signals table unavailable')
         })
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+        const res = await POST(
+            submitRequest({
+                site: 'ebay.com',
+                code: 'SAVE10',
+                source: 'checkout',
+                consent: VALID_CONSENT,
+            }),
+        )
+
+        expect(res.status).toBe(500)
+        errorSpy.mockRestore()
+    })
+
+    it('recordWorked finding no catalog row (false) is NOT swallowed either: 500, never a "worked" that did not land', async () => {
+        envMock.SHOPPER_CODE_CAPTURE_ENABLED = true
+        recordWorkedMock.mockImplementation(async () => false)
         const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
         const res = await POST(

@@ -276,8 +276,9 @@ describe('POST /api/coupons/[id]/report — attribution against real pg :58005',
         expect(
             await prisma.couponReport.count({ where: { couponId: ABSENT_ID } }),
         ).toBe(0)
-        // coupon_signals has no FK, so before the couponExists gate this id got
-        // an aggregate row from each of the three requests.
+        // coupon_signals has no FK, so before the existence check was folded into
+        // the write (INSERT ... SELECT ... WHERE EXISTS) this id got an
+        // aggregate row from each of the three requests.
         expect(
             await prisma.couponSignal.findUnique({
                 where: { couponId: ABSENT_ID },
@@ -306,9 +307,9 @@ describe('POST /api/coupons/[id]/report — attribution against real pg :58005',
     })
 
     it('coupon_reports carries a REAL FK while coupon_signals carries none — a direct insert for that same absent id is rejected by Postgres', async () => {
-        // Why the couponExists gate matters: coupon_signals is the control — it
-        // takes the same unknown id without complaint, so only the gate keeps
-        // an arbitrary id out of it. coupon_reports, by contrast, has a real FK.
+        // Why the folded existence check matters: coupon_signals is the control —
+        // it takes the same unknown id without complaint, so only the gate in
+        // the write keeps an arbitrary id out of it. coupon_reports, by contrast, has a real FK.
         await expect(
             prisma.couponReport.create({
                 data: { couponId: ABSENT_ID, userId, outcome: 'worked' },

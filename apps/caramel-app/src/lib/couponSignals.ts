@@ -6,7 +6,12 @@
 // /api/coupons/[id]/report (worked/failed outcomes → recordWorked/recordFailed)
 // and POST /api/coupons/increment (a use → recordUsage, W4-D2) — and read back
 // by attachSignals() to surface "Just worked" / "Worked Xh ago" on the web
-// card + popup. The ONE other reader is couponsRepo.listRecentlyWorkedCoupons:
+// card + popup. The aggregate row's upsert is the one statement couponsRepo
+// owns (writeWorkedSignal / writeFailedSignal / writeUsageSignal: an INSERT ...
+// SELECT ... WHERE EXISTS (catalog row) ON CONFLICT, so the unknown-coupon
+// check and the write are one round trip); this module calls it and owns the
+// per-reporter quorum rows around it. The ONE other reader is
+// couponsRepo.listRecentlyWorkedCoupons:
 // a read-only SQL JOIN of coupon_signals onto the catalog (the landing page's
 // "Codes that just worked"), which lives in couponsRepo because every
 // catalog-joining query does. No other module may write this table.
@@ -25,6 +30,11 @@
 // coupon id as a string, matching the app's Coupon.id: string.
 import type { ReportReporter } from '@/lib/couponReportDedupe'
 import { FAILING_WINDOW_MS, keepsFailing } from '@/lib/coupons'
+import {
+    writeFailedSignal,
+    writeUsageSignal,
+    writeWorkedSignal,
+} from '@/lib/couponsRepo'
 import { env } from '@/lib/env'
 import prisma from '@/lib/prisma'
 import type { Prisma, PrismaClient } from '@prisma/client'
@@ -38,11 +48,14 @@ import { createHmac } from 'node:crypto'
  * which pairs the coupon_signals writes with a `coupon_reports` insert) passes
  * its `tx` and gets the exact same write rather than an independent copy of it.
  * Both writers also accept the singleton client and then open their own
- * transaction. Covers the per-reporter rows the failure quorum is counted from.
+ * transaction. `$queryRaw` carries the aggregate upsert
+ * (couponsRepo.writeWorkedSignal / writeFailedSignal, one statement that is also
+ * the catalog existence gate); the two models are the per-reporter rows the
+ * failure quorum is counted from.
  */
 export type CouponFailureWriter = Pick<
     Prisma.TransactionClient,
-    'couponSignal' | 'couponSignalReporter'
+    '$queryRaw' | 'couponSignal' | 'couponSignalReporter'
 >
 
 /**
@@ -146,32 +159,32 @@ async function recomputeFailWeight(
  * coupon with no failures stores nothing about the reporter: a success older
  * than every failure never counts for anything. One transaction (a singleton
  * client is wrapped, a transaction client is joined).
+ *
+ * Resolves true when the signal was written, false when `couponId` is not a
+ * catalog row (couponsRepo.writeWorkedSignal folds that existence check into
+ * its single upsert statement): nothing was written, and the caller owns the
+ * unknown-coupon response.
  */
 export async function recordWorked(
     couponId: string,
     reporter: ReportReporter,
     client: CouponFailureWriter | PrismaClient = prisma,
-): Promise<void> {
+): Promise<boolean> {
     if ('$transaction' in client) {
-        await client.$transaction(tx => recordWorkedIn(couponId, reporter, tx))
-        return
+        return client.$transaction(tx => recordWorkedIn(couponId, reporter, tx))
     }
-    await recordWorkedIn(couponId, reporter, client)
+    return recordWorkedIn(couponId, reporter, client)
 }
 
 async function recordWorkedIn(
     couponId: string,
     reporter: ReportReporter,
     tx: CouponFailureWriter,
-): Promise<void> {
+): Promise<boolean> {
     const now = new Date()
-    const signal = await tx.couponSignal.upsert({
-        where: { couponId },
-        create: { couponId, lastWorkedAt: now },
-        update: { lastWorkedAt: now },
-        select: { failWeight: true },
-    })
-    if (signal.failWeight <= 0) return
+    const signal = await writeWorkedSignal(couponId, tx)
+    if (!signal) return false
+    if (signal.failWeight <= 0) return true
     const hash = reporterHash(reporter)
     const weight = reporterWeight(reporter)
     await tx.couponSignalReporter.upsert({
@@ -192,6 +205,7 @@ async function recordWorkedIn(
         update: { weight, lastAt: now },
     })
     await recomputeFailWeight(tx, couponId, now)
+    return true
 }
 
 /**
@@ -201,15 +215,17 @@ async function recordWorkedIn(
  * old external `coupons.times_used` UPDATE (RULING C′): touching the external
  * catalog would bump its `updated_at` and, under the ingest only-if-newer rule
  * (`excluded.updated_at >= coupons.updated_at`), freeze every future pipeline
- * push for that row. Keyed by coupon id independently of catalog-row existence,
- * so the upsert always succeeds. This writer owns `workCount` only.
+ * push for that row. Keyed by coupon id with no FK to the catalog, so the
+ * existence gate is part of the write itself (see the true/false result below).
+ * This writer owns `workCount` only.
+ *
+ * Resolves true when the use was counted, false when `couponId` is not a
+ * catalog row (couponsRepo.writeUsageSignal folds that existence check into
+ * its single upsert statement): nothing was written, and the caller owns the
+ * unknown-coupon response.
  */
-export async function recordUsage(couponId: string): Promise<void> {
-    await prisma.couponSignal.upsert({
-        where: { couponId },
-        create: { couponId, workCount: 1 },
-        update: { workCount: { increment: 1 } },
-    })
+export async function recordUsage(couponId: string): Promise<boolean> {
+    return (await writeUsageSignal(couponId)) !== null
 }
 
 /**
@@ -228,20 +244,24 @@ export async function recordUsage(couponId: string): Promise<void> {
  * global retention sweep (sweepExpiredReporters) runs outside the transaction.
  * Concurrent reports of one coupon serialise on the coupon_signals upsert's row
  * lock, so the recompute that follows sees all of them (see recomputeFailWeight).
+ *
+ * Resolves true when the failure was recorded, false when `couponId` is not a
+ * catalog row (couponsRepo.writeFailedSignal folds that existence check into
+ * its single upsert statement): nothing was written, no reporter row included,
+ * and the caller owns the unknown-coupon response.
  */
 export async function recordFailed(
     couponId: string,
     reason: string | null | undefined,
     reporter: ReportReporter,
     client: CouponFailureWriter | PrismaClient = prisma,
-): Promise<void> {
+): Promise<boolean> {
     if ('$transaction' in client) {
-        await client.$transaction(tx =>
+        return client.$transaction(tx =>
             recordFailedIn(couponId, reason ?? null, reporter, tx),
         )
-        return
     }
-    await recordFailedIn(couponId, reason ?? null, reporter, client)
+    return recordFailedIn(couponId, reason ?? null, reporter, client)
 }
 
 async function recordFailedIn(
@@ -249,7 +269,7 @@ async function recordFailedIn(
     reason: string | null,
     reporter: ReportReporter,
     tx: CouponFailureWriter,
-): Promise<void> {
+): Promise<boolean> {
     const now = new Date()
     const hash = reporterHash(reporter)
     const weight = reporterWeight(reporter)
@@ -257,21 +277,10 @@ async function recordFailedIn(
     // (trim().max(200)); passed straight through — no second-guessing a value
     // the boundary already validated.
     // The aggregate upsert comes FIRST: its row lock serialises concurrent
-    // reports of this coupon before the quorum is recomputed.
-    await tx.couponSignal.upsert({
-        where: { couponId },
-        create: {
-            couponId,
-            failCount: 1,
-            lastFailedAt: now,
-            lastFailReason: reason,
-        },
-        update: {
-            failCount: { increment: 1 },
-            lastFailedAt: now,
-            lastFailReason: reason,
-        },
-    })
+    // reports of this coupon before the quorum is recomputed. It is also the
+    // catalog existence gate: an unknown id writes nothing (reporter row
+    // included) and the whole report is refused.
+    if (!(await writeFailedSignal(couponId, reason, tx))) return false
     await tx.couponSignalReporter.upsert({
         where: {
             couponId_outcome_reporterHash: {
@@ -296,6 +305,7 @@ async function recordFailedIn(
             lastAt: { lt: new Date(now.getTime() - FAILING_WINDOW_MS) },
         },
     })
+    return true
 }
 
 /** A global retention sweep runs at most this often per process. */

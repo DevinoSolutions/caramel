@@ -4,7 +4,11 @@ import * as Sentry from '@sentry/nextjs'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 // couponSignals unit pins. Mocks @/lib/prisma (the app Postgres the signal
-// table lives in) so each writer/merger is tested in isolation:
+// table lives in) so each writer/merger is tested in isolation. The aggregate
+// write is ONE raw `INSERT ... SELECT ... WHERE EXISTS (catalog row) ON
+// CONFLICT` statement (couponsRepo.writeWorkedSignal / writeUsageSignal), so
+// its pins read the composed `.sql`; an empty result is an id that is not a
+// catalog row:
 //   * attachSignals — the "merge, not SQL join" boundary (empty-in short-
 //     circuits, matching ids → ISO string, unheld/null → null).
 //   * recordWorked / recordUsage — the W4-D2 field split: each upsert owns
@@ -28,14 +32,13 @@ const { prismaMock, signalState } = vi.hoisted(() => {
                     async (_args: { where: unknown; select: unknown }) =>
                         signalState.rows,
                 ),
-                upsert: vi.fn(
-                    async (args: {
-                        where: { couponId: string }
-                        create: Record<string, unknown>
-                        update: Record<string, unknown>
-                    }) => ({ couponId: args.where.couponId }),
-                ),
             },
+            $queryRaw: vi.fn(
+                async (_query: {
+                    sql: string
+                    values: unknown[]
+                }): Promise<unknown[]> => [{ failWeight: 0 }],
+            ),
         },
     }
 })
@@ -53,7 +56,7 @@ const NO_SIGNAL = {
 beforeEach(() => {
     signalState.rows = []
     prismaMock.couponSignal.findMany.mockClear()
-    prismaMock.couponSignal.upsert.mockClear()
+    prismaMock.$queryRaw.mockClear()
 })
 
 describe('attachSignals (app-owned lastWorkedAt merge)', () => {
@@ -212,18 +215,21 @@ describe('attachSignals (app-owned lastWorkedAt merge)', () => {
 describe('recordWorked (owns lastWorkedAt ONLY — W4-D2 split)', () => {
     const anon: ReportReporter = { kind: 'ip', ip: '203.0.113.9' }
 
-    /** A transaction client whose coupon_signals row carries `failWeight`. */
-    function txWith(failWeight: number) {
+    /**
+     * A transaction client whose coupon_signals row carries `failWeight`
+     * (null: the id is not a catalog row, so the aggregate statement returns
+     * no row).
+     */
+    function txWith(failWeight: number | null) {
         return {
+            $queryRaw: vi.fn(
+                async (_query: {
+                    sql: string
+                    values: unknown[]
+                }): Promise<unknown[]> =>
+                    failWeight === null ? [] : [{ failWeight }],
+            ),
             couponSignal: {
-                upsert: vi.fn(
-                    async (_args: {
-                        where: { couponId: string }
-                        create: Record<string, unknown>
-                        update: Record<string, unknown>
-                        select: Record<string, unknown>
-                    }) => ({ failWeight }),
-                ),
                 update: vi.fn(async () => ({})),
             },
             couponSignalReporter: {
@@ -237,20 +243,29 @@ describe('recordWorked (owns lastWorkedAt ONLY — W4-D2 split)', () => {
         }
     }
 
-    it('upserts lastWorkedAt on both create and update, and NEVER touches workCount', async () => {
+    it('stamps lastWorkedAt on both insert and conflict in ONE statement, and NEVER touches workCount', async () => {
         const tx = txWith(0)
-        await recordWorked('42', anon, tx as never)
+        expect(await recordWorked('42', anon, tx as never)).toBe(true)
 
-        expect(tx.couponSignal.upsert).toHaveBeenCalledTimes(1)
-        const arg = tx.couponSignal.upsert.mock.calls[0]![0]
-        expect(arg.where).toEqual({ couponId: '42' })
-        expect(arg.create).toMatchObject({ couponId: '42' })
-        expect(arg.create.lastWorkedAt).toBeInstanceOf(Date)
-        expect(arg.create).not.toHaveProperty('workCount')
-        expect(arg.update.lastWorkedAt).toBeInstanceOf(Date)
+        expect(tx.$queryRaw).toHaveBeenCalledTimes(1)
+        const query = tx.$queryRaw.mock.calls[0]![0]
+        expect(query.values).toEqual(['42', '42'])
+        expect(query.sql).toContain(
+            'INSERT INTO coupon_signals (coupon_id, last_worked_at, created_at, updated_at)',
+        )
+        expect(query.sql).toContain('last_worked_at = EXCLUDED.last_worked_at')
         // The whole point of the split: a "worked" report must not bump the
         // counter, or a successful apply (report + increment) double-counts.
-        expect(arg.update).not.toHaveProperty('workCount')
+        expect(query.sql).not.toContain('work_count')
+    })
+
+    it('an id that is not a catalog row resolves false and stores nothing, not even the reporter', async () => {
+        const tx = txWith(null)
+        expect(await recordWorked('999', anon, tx as never)).toBe(false)
+
+        expect(tx.$queryRaw).toHaveBeenCalledTimes(1)
+        expect(tx.couponSignalReporter.upsert).not.toHaveBeenCalled()
+        expect(tx.couponSignal.update).not.toHaveBeenCalled()
     })
 
     it('a coupon with no failure quorum stores nothing about the reporter', async () => {
@@ -277,16 +292,23 @@ describe('recordWorked (owns lastWorkedAt ONLY — W4-D2 split)', () => {
 })
 
 describe('recordUsage (owns workCount ONLY — W4-D2, replaces coupons.times_used)', () => {
-    it('upserts create:{workCount:1} / update:{workCount:{increment:1}} with NO timestamp', async () => {
-        await recordUsage('42')
+    it('inserts work_count 1 / bumps it by one on conflict, in ONE statement, with NO worked-at stamp', async () => {
+        expect(await recordUsage('42')).toBe(true)
 
-        expect(prismaMock.couponSignal.upsert).toHaveBeenCalledTimes(1)
-        const arg = prismaMock.couponSignal.upsert.mock.calls[0]![0]
-        expect(arg.where).toEqual({ couponId: '42' })
-        expect(arg.create).toEqual({ couponId: '42', workCount: 1 })
-        expect(arg.update).toEqual({ workCount: { increment: 1 } })
+        expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(1)
+        const query = prismaMock.$queryRaw.mock.calls[0]![0]
+        expect(query.values).toEqual(['42', '42'])
+        expect(query.sql).toContain(
+            'work_count = coupon_signals.work_count + 1',
+        )
         // A use is not a trust "worked-at" stamp — recordWorked owns that.
-        expect(arg.create).not.toHaveProperty('lastWorkedAt')
-        expect(arg.update).not.toHaveProperty('lastWorkedAt')
+        expect(query.sql).not.toContain('last_worked_at')
+    })
+
+    it('an id that is not a catalog row resolves false (the statement returned no row)', async () => {
+        prismaMock.$queryRaw.mockResolvedValueOnce([])
+
+        expect(await recordUsage('999')).toBe(false)
+        expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(1)
     })
 })
