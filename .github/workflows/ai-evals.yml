@@ -38,12 +38,17 @@ on:
     # PLAN-F-012.md's "Human handoff").
     - cron: '0 9 * * *'
   workflow_dispatch:
+    inputs:
+      box_pick_model:
+        description: Model under test for the coupon-box pick eval (overrides the COUPON_BOX_PICK_MODEL variable for this run only)
+        required: false
+        default: ''
 
 permissions:
   contents: read
 
 concurrency:
-  group: ai-evals-${{ github.workflow }}-${{ github.ref }}
+  group: ai-evals-${{ github.workflow }}-${{ github.ref }}-${{ inputs.box_pick_model }}
   cancel-in-progress: true
 
 jobs:
@@ -61,9 +66,12 @@ jobs:
     # never receives repo secrets anyway, but this makes the intent
     # explicit and fails fast with a clear reason instead of a confusing
     # downstream "secret missing" error on every fork PR.
+    # A dispatch that names a box-pick model is a model comparison for the
+    # other job only; it does not re-run (and re-pay for) this suite.
     if: |
-      github.event_name != 'pull_request' ||
-      github.event.pull_request.head.repo.full_name == github.repository
+      (github.event_name != 'workflow_dispatch' || inputs.box_pick_model == '') &&
+      (github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository)
 
     steps:
       - uses: actions/checkout@v4
@@ -176,7 +184,7 @@ jobs:
       - name: Verify OPENROUTER_API_KEY secret and COUPON_BOX_PICK_MODEL variable
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          VAR_COUPON_BOX_PICK_MODEL: ${{ vars.COUPON_BOX_PICK_MODEL }}
+          VAR_COUPON_BOX_PICK_MODEL: ${{ inputs.box_pick_model || vars.COUPON_BOX_PICK_MODEL }}
         run: |
           if [ -z "$OPENROUTER_API_KEY" ]; then
             echo "::error::OPENROUTER_API_KEY secret is not set on this repository. Add it under Settings -> Secrets and variables -> Actions."
