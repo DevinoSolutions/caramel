@@ -594,6 +594,9 @@ function detectCouponError(rec, baseline, code, priorText, alertsBefore) {
     const saysNo = readsLikeFound
         ? _caramelFinderSaysNo
         : t => GENERIC_ERROR_TEXT_RE.test(t)
+    // A sentence that was on the page before we submitted, kept in case
+    // nothing newer turns up (it is then quoted as before, errorIsNew false).
+    let standing = null
     for (let d = 0; d < 5 && scope; d++) {
         const text = (scope.innerText || '').trim()
         if (text && saysNo(text)) {
@@ -604,10 +607,17 @@ function detectCouponError(rec, baseline, code, priorText, alertsBefore) {
             // No such element is no quote: the window would hand over
             // whatever sits near the words, a form field's own error included.
             // A level whose saying element is the field's own error goes on
-            // climbing: the store's refusal may sit one level up.
+            // climbing: the store's refusal may sit one level up. So does a
+            // level whose only such sentence was already there: on
+            // bumbleandbumble.com the fieldset always reads "Discount codes
+            // cannot be combined with other discount codes." and the refusal
+            // ("The offer code … is not valid.") is drawn two levels higher
+            // (measured live 2026-10-22).
             if (readsLikeFound) {
                 const said = _caramelSmallestSaying(scope, priorText)
-                if (said) return said
+                if (said && caramelQuoteIsAttributable(said, priorText))
+                    return said
+                standing ??= said
                 scope = scope.parentElement
                 continue
             }
@@ -619,7 +629,9 @@ function detectCouponError(rec, baseline, code, priorText, alertsBefore) {
         }
         scope = scope.parentElement
     }
-    return readsLikeFound ? _caramelPageAlertSaying(alertsBefore) : null
+    return readsLikeFound
+        ? (_caramelPageAlertSaying(alertsBefore) ?? standing)
+        : null
 }
 
 // A page's alert regions: where a cart that answers far from the box puts its

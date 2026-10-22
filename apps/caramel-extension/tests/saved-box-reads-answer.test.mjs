@@ -147,6 +147,69 @@ describe('a saved box: the store refusing a code', () => {
     )
 })
 
+// bumbleandbumble.com's cart, measured live 2026-10-22: the fieldset around
+// the box always reads a refusal-shaped sentence ("Discount codes cannot be
+// combined…"), and the store's answer is drawn in a message two levels above
+// the form. The reader used to stop at the first sentence it met, the standing
+// one, and never saw the answer.
+describe('a saved box whose fieldset always carries a refusal-shaped line', () => {
+    const STANDING =
+        'Discount codes cannot be combined with other discount codes.'
+    const SAID = 'The offer code newbbwelcome15 is not valid.'
+    beforeEach(() => {
+        document.body.innerHTML =
+            '<div class="panel"><div class="content">' +
+            '<form id="offer_code"><fieldset>' +
+            '<div class="form-item"><input id="dc" type="text"></div>' +
+            '<button id="ap" type="button">Apply</button>' +
+            `<span class="offer-limit">${STANDING}</span>` +
+            '</fieldset></form>' +
+            '<div id="messages"></div>' +
+            '</div></div>' +
+            TOTAL
+        document.getElementById('ap').addEventListener('click', () =>
+            setTimeout(() => {
+                const m = document.createElement('div')
+                m.className = 'single-message'
+                m.textContent = SAID
+                document.getElementById('messages').appendChild(m)
+            }, 150),
+        )
+    })
+
+    it(
+        "the store's answer above the form is read, not the standing line",
+        async () => {
+            const { res, ms } = await timed('NEWBBWELCOME15', SAVED)
+
+            expect(res.success).toBe(false)
+            expect(res.errorMsg).toBe(SAID)
+            expect(res.errorIsNew).toBe(true)
+            expect(ms).toBeLessThan(4000)
+        },
+        SLOW,
+    )
+
+    it(
+        'with no answer, the standing line is still what is quoted, as not ours',
+        async () => {
+            document.getElementById('ap').replaceWith(
+                Object.assign(document.createElement('button'), {
+                    id: 'ap',
+                    type: 'button',
+                    textContent: 'Apply',
+                }),
+            )
+
+            const { res } = await timed('NEWBBWELCOME15', SAVED)
+
+            expect(res.errorMsg).toBe(STANDING)
+            expect(res.errorIsNew).toBe(false)
+        },
+        SLOW,
+    )
+})
+
 describe('a saved box: a code that works', () => {
     it(
         'a lower total wins, even when a refusal-shaped caveat is printed first',
