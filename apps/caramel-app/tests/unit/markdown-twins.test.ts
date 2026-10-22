@@ -4,7 +4,11 @@ import type { attachSignals } from '@/lib/couponSignals'
 import { VISIBLE_COUPON_STATUSES } from '@/lib/coupons'
 import type { CouponListRow } from '@/lib/couponsDb'
 import { listStoreCoupons, type StoreCouponFacts } from '@/lib/couponsRepo'
-import { couponMarkdown, markdownText } from '@/lib/seo/markdownTwins/content'
+import {
+    couponMarkdown,
+    markdownCode,
+    markdownText,
+} from '@/lib/seo/markdownTwins/content'
 import { guidePageBuilders } from '@/lib/seo/markdownTwins/guidePages'
 import {
     buildMarkdownHeaders,
@@ -367,5 +371,16 @@ describe('Markdown document responses', () => {
         expect(markdownText('<script>\n# heading')).toBe(
             '&lt;script&gt; \\# heading',
         )
+    })
+
+    it('writes the code as a code span an agent can copy verbatim', () => {
+        expect(couponMarkdown(coupon('dash', 'AF-12-STAT'))).toContain(
+            'Code: `AF-12-STAT`',
+        )
+        expect(markdownCode('[fake](https://evil.example)')).toBe(
+            '`[fake](https://evil.example)`',
+        )
+        expect(markdownCode('A`B')).toBe('``A`B``')
+        expect(markdownCode('`AB')).toBe('`` `AB ``')
     })
 })

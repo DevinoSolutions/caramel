@@ -73,8 +73,8 @@ describe('guide Markdown catalog parity', () => {
         expect(catalog.attachSignals).toHaveBeenCalledExactlyOnceWith(coupons)
         expect(catalog.listTopSites).toHaveBeenCalledTimes(1)
         expect(catalog.getStoreDirectoryEntries).toHaveBeenCalledTimes(1)
-        expect(page.body.match(/Code: FIRST10/g)).toHaveLength(1)
-        expect(page.body).toContain('Code: STILLPUBLIC')
+        expect(page.body.match(/Code: `FIRST10`/g)).toHaveLength(1)
+        expect(page.body).toContain('Code: `STILLPUBLIC`')
         expect(page.body).not.toContain('DUPLICATE')
         expect(page.body).toContain(
             'https://grabcaramel.com/coupons/example.com',

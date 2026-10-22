@@ -18,6 +18,22 @@ export function markdownText(value: string): string {
         .replace(/\r?\n/g, ' ')
 }
 
+/**
+ * A coupon code as an inline code span, so an agent copies it verbatim: no
+ * backslash escapes (`AF\-12\-STAT` was what markdownText gave), and nothing
+ * inside it is read as Markdown or HTML.
+ */
+export function markdownCode(value: string): string {
+    const code = value.replace(/\r?\n/g, ' ')
+    const longestRun = Math.max(
+        0,
+        ...(code.match(/`+/g) ?? []).map(run => run.length),
+    )
+    const fence = '`'.repeat(longestRun + 1)
+    const pad = code.startsWith('`') || code.endsWith('`') ? ' ' : ''
+    return `${fence}${pad}${code}${pad}${fence}`
+}
+
 export function markdownLink(label: string, url: string): string {
     return `[${markdownText(label)}](${url})`
 }
@@ -45,7 +61,7 @@ export function couponMarkdown(
     const failed = failing ? formatFailedAgo(coupon.lastFailedAt) : null
     return [
         `### ${markdownText(coupon.title)}`,
-        `Code: ${markdownText(coupon.code)}`,
+        `Code: ${markdownCode(coupon.code)}`,
         discount ? `${markdownText(discount)} off` : 'DEAL',
         coupon.description ? markdownText(coupon.description) : '',
         worked ?? failed ?? '',
