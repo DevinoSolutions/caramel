@@ -3,11 +3,11 @@ import CouponsSection from '@/components/coupons/coupons-section'
 import FailingCodesDisclosure from '@/components/coupons/FailingCodesDisclosure'
 import type { Coupon } from '@/types/coupon'
 import {
+    act,
     cleanup,
     fireEvent,
     render,
     screen,
-    waitFor,
     within,
 } from '@testing-library/react'
 import { renderToString } from 'react-dom/server'
@@ -72,6 +72,7 @@ beforeEach(() => {
 
 afterEach(() => {
     cleanup()
+    vi.useRealTimers()
     vi.unstubAllGlobals()
 })
 
@@ -386,6 +387,11 @@ describe('CouponsSection groups keeps-failing codes at the end of a store list',
             unobserve() {}
         }
         vi.stubGlobal('IntersectionObserver', FiringObserver)
+        // load-more's finally block parks setIsLoadingMore(false) behind a
+        // MIN_LOADING_DELAY_MS setTimeout. Under real timers it can outlive the
+        // test and fire after jsdom is torn down (T-6309), so fake timers own
+        // it and the test drains it before ending.
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
 
         render(
             <CouponsSection
@@ -397,16 +403,21 @@ describe('CouponsSection groups keeps-failing codes at the end of a store list',
             />,
         )
 
-        const button = await screen.findByRole('button', {
+        // Flush the fetch promises, then run the min-loading-delay timer.
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(1000)
+        })
+
+        const button = screen.getByRole('button', {
             name: '2 codes reported not working',
         })
         expect(button.getAttribute('aria-expanded')).toBe('false')
-        await waitFor(() => {
-            const urls = (fetch as ReturnType<typeof vi.fn>).mock.calls.map(
-                ([u]) => String(u),
-            )
-            expect(urls.some(u => u.includes('page=2'))).toBe(true)
-        })
+        const urls = (fetch as ReturnType<typeof vi.fn>).mock.calls.map(
+            ([u]) => String(u),
+        )
+        expect(urls.some(u => u.includes('page=2'))).toBe(true)
+        // Guard: no timer may outlive the test.
+        expect(vi.getTimerCount()).toBe(0)
     })
 
     it('a site-less browse list leaves flagged codes in place (no grouping, no disclosure)', () => {
