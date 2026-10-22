@@ -277,7 +277,7 @@ const submitRoute = withRoute(
             // and the extension retries/logs it. Re-stamping on a retry is
             // idempotent (an upsert of lastWorkedAt).
             // TODO: checkout worked-stamps are client-asserted; weight/cap per user before trusting them for ranking.
-            await recordWorked(result.couponId)
+            await recordWorked(result.couponId, { kind: 'user', userId })
         }
 
         return respond(

@@ -85,6 +85,14 @@ describe('privacy policy coverage', () => {
         }
     })
 
+    it('carries the owner-approved coupon-report hash disclosure verbatim (approved 2026-10-21) and no longer claims anonymous-only totals', () => {
+        const normalized = text.replace(/\s+/g, ' ')
+        expect(normalized).toContain(
+            'Coupon results are kept as per-code totals (when a code last worked or failed, and the store’s last error message). To stop fake reports from hiding or reviving a code, each “worked” or “didn’t work” report also keeps a one-way keyed hash of your IP address, or of your account if you are signed in. It cannot be turned back into your IP or account, and it is deleted after 30 days.',
+        )
+        expect(normalized).not.toContain('only as anonymous per-code totals')
+    })
+
     it('carries the owner-approved checkout code sharing sentence verbatim (approved 2026-10-06)', () => {
         const normalized = text.replace(/&quot;/g, '"').replace(/\s+/g, ' ')
         expect(normalized).toContain(

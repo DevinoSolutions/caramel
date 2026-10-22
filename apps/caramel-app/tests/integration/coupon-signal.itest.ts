@@ -36,7 +36,7 @@ afterAll(async () => {
 
 describe('couponSignals (real prisma, live pg :58005)', () => {
     it('recordWorked stamps lastWorkedAt and leaves workCount at 0 (W4-D2 split — increment owns the counter)', async () => {
-        await recordWorked(WORKED_ID)
+        await recordWorked(WORKED_ID, { kind: 'ip', ip: '203.0.113.77' })
         const first = await prisma.couponSignal.findUnique({
             where: { couponId: WORKED_ID },
         })
@@ -45,7 +45,7 @@ describe('couponSignals (real prisma, live pg :58005)', () => {
 
         // A second worked-report re-stamps lastWorkedAt without ever bumping
         // workCount — recordUsage (POST /increment) is the only counter writer.
-        await recordWorked(WORKED_ID)
+        await recordWorked(WORKED_ID, { kind: 'ip', ip: '203.0.113.77' })
         const second = await prisma.couponSignal.findUnique({
             where: { couponId: WORKED_ID },
         })
@@ -83,7 +83,7 @@ describe('couponSignals (real prisma, live pg :58005)', () => {
     })
 
     it('attachSignals returns lastWorkedAt (ISO) for a seeded id and null for an unseeded one', async () => {
-        await recordWorked(SEEDED_ID)
+        await recordWorked(SEEDED_ID, { kind: 'ip', ip: '203.0.113.77' })
         const seeded = await prisma.couponSignal.findUnique({
             where: { couponId: SEEDED_ID },
         })

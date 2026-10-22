@@ -32,16 +32,14 @@ import * as Sentry from '@sentry/nextjs'
 import { createHmac } from 'node:crypto'
 
 /**
- * The only slice of the Prisma client these writers need. Satisfied by BOTH the
- * module-level singleton and an interactive-transaction client, so a caller that
- * must write the signal atomically alongside another row — the report route's
- * signed-in attribution, which pairs a `coupon_signals` upsert with a
- * `coupon_reports` insert — passes its `tx` and gets the exact same write rather
- * than a second, independently-written copy of it.
+ * The only slice of the Prisma client the signal writers need. Satisfied by an
+ * interactive-transaction client, so a caller that must write the signal
+ * atomically alongside another row (the report route's signed-in attribution,
+ * which pairs the coupon_signals writes with a `coupon_reports` insert) passes
+ * its `tx` and gets the exact same write rather than an independent copy of it.
+ * Both writers also accept the singleton client and then open their own
+ * transaction. Covers the per-reporter rows the failure quorum is counted from.
  */
-export type CouponSignalWriter = Pick<Prisma.TransactionClient, 'couponSignal'>
-
-/** What recordFailed needs on top: the per-reporter rows its quorum is counted from. */
 export type CouponFailureWriter = Pick<
     Prisma.TransactionClient,
     'couponSignal' | 'couponSignalReporter'
@@ -91,21 +89,109 @@ export function reporterWeight(reporter: ReportReporter): number {
 }
 
 /**
- * Extension reported this coupon worked at checkout — stamp the last-worked
- * time. Deliberately does NOT bump workCount: a successful apply ALSO fires
- * POST /api/coupons/increment (→ recordUsage), which owns the counter, so
- * bumping it here too would double-count every success. This writer owns
- * `lastWorkedAt` only.
+ * A success needs a QUORUM of its own to clear failure reports: the failure
+ * rows older than a success stop counting only once the distinct reporters who
+ * reported a success AFTER them weigh at least this much (one signed-in account,
+ * or two anonymous networks). One anonymous "worked" must not wipe the failure
+ * quorum, or one forged success would undo any number of honest failures.
+ * Matches the T-4372 "2 distinct reporters" rule.
+ */
+export const CLEARING_WORKED_WEIGHT = 2
+
+/**
+ * Recompute coupon_signals.fail_weight for a coupon from its reporter rows:
+ * the sum of the weights of the DISTINCT reporters whose failure is inside
+ * FAILING_WINDOW_MS and is not cleared by a worked quorum (CLEARING_WORKED_WEIGHT)
+ * reported at or after it. Called by both writers, inside their transaction and
+ * AFTER the coupon_signals upsert, so the upsert's row lock has serialised
+ * concurrent reports of the coupon and this read sees every committed reporter
+ * row (read committed takes a fresh snapshot per statement): no report can be
+ * under-counted.
+ */
+async function recomputeFailWeight(
+    tx: CouponFailureWriter,
+    couponId: string,
+    now: Date,
+): Promise<void> {
+    const windowStart = new Date(now.getTime() - FAILING_WINDOW_MS)
+    const rows = await tx.couponSignalReporter.findMany({
+        where: { couponId, lastAt: { gt: windowStart } },
+        select: { outcome: true, weight: true, lastAt: true },
+    })
+    const worked = rows.filter(row => row.outcome === 'worked')
+    let total = 0
+    for (const failure of rows) {
+        if (failure.outcome !== 'failed') continue
+        const clearing = worked.reduce(
+            (sum, success) =>
+                success.lastAt >= failure.lastAt ? sum + success.weight : sum,
+            0,
+        )
+        if (clearing < CLEARING_WORKED_WEIGHT) total += failure.weight
+    }
+    await tx.couponSignal.update({
+        where: { couponId },
+        data: { failWeight: total },
+    })
+}
+
+/**
+ * A reporter said this coupon worked at checkout — stamp the last-worked time
+ * (it drives "Verified"/"just worked", unchanged). Deliberately does NOT bump
+ * workCount: a successful apply ALSO fires POST /api/coupons/increment
+ * (→ recordUsage), which owns the counter. When the coupon carries a live
+ * failure quorum (fail_weight > 0) the reporter's success is also recorded in
+ * coupon_signal_reporters and the quorum recomputed, so a success clears
+ * failures only once CLEARING_WORKED_WEIGHT of distinct reporters agree. A
+ * coupon with no failures stores nothing about the reporter: a success older
+ * than every failure never counts for anything. One transaction (a singleton
+ * client is wrapped, a transaction client is joined).
  */
 export async function recordWorked(
     couponId: string,
-    client: CouponSignalWriter = prisma,
+    reporter: ReportReporter,
+    client: CouponFailureWriter | PrismaClient = prisma,
 ): Promise<void> {
-    await client.couponSignal.upsert({
+    if ('$transaction' in client) {
+        await client.$transaction(tx => recordWorkedIn(couponId, reporter, tx))
+        return
+    }
+    await recordWorkedIn(couponId, reporter, client)
+}
+
+async function recordWorkedIn(
+    couponId: string,
+    reporter: ReportReporter,
+    tx: CouponFailureWriter,
+): Promise<void> {
+    const now = new Date()
+    const signal = await tx.couponSignal.upsert({
         where: { couponId },
-        create: { couponId, lastWorkedAt: new Date() },
-        update: { lastWorkedAt: new Date() },
+        create: { couponId, lastWorkedAt: now },
+        update: { lastWorkedAt: now },
+        select: { failWeight: true },
     })
+    if (signal.failWeight <= 0) return
+    const hash = reporterHash(reporter)
+    const weight = reporterWeight(reporter)
+    await tx.couponSignalReporter.upsert({
+        where: {
+            couponId_outcome_reporterHash: {
+                couponId,
+                outcome: 'worked',
+                reporterHash: hash,
+            },
+        },
+        create: {
+            couponId,
+            outcome: 'worked',
+            reporterHash: hash,
+            weight,
+            lastAt: now,
+        },
+        update: { weight, lastAt: now },
+    })
+    await recomputeFailWeight(tx, couponId, now)
 }
 
 /**
@@ -133,15 +219,15 @@ export async function recordUsage(couponId: string): Promise<void> {
  *      re-stamped when the same reporter reports again after the dedupe window);
  *   2. the aggregate: failCount (raw count), lastFailedAt, the (already
  *      bounded) store/verifier reason;
- *   3. failWeight, recomputed as the sum of the weights of the DISTINCT
- *      reporters whose failure is newer than the last success and inside
- *      FAILING_WINDOW_MS. This is what sinks and collapses a code, not
+ *   3. failWeight, recomputed by recomputeFailWeight: the sum of the weights of
+ *      the DISTINCT reporters whose failure is inside FAILING_WINDOW_MS and not
+ *      cleared by a worked quorum. This is what sinks and collapses a code, not
  *      failCount: three forged anonymous reports are three reporters of weight
  *      1 and stay under FAILING_MIN_FAIL_WEIGHT.
- * Reporters older than the window are pruned on the way. Two concurrent first
- * reports can each recompute without seeing the other's row (read committed);
- * the weight then under-counts until the next report, which errs toward not
- * sinking a code.
+ * Reporters older than the window are pruned for THIS coupon on the way; the
+ * global retention sweep (sweepExpiredReporters) runs outside the transaction.
+ * Concurrent reports of one coupon serialise on the coupon_signals upsert's row
+ * lock, so the recompute that follows sees all of them (see recomputeFailWeight).
  */
 export async function recordFailed(
     couponId: string,
@@ -167,6 +253,25 @@ async function recordFailedIn(
     const now = new Date()
     const hash = reporterHash(reporter)
     const weight = reporterWeight(reporter)
+    // `reason` is already length-bounded by the report route's zod body schema
+    // (trim().max(200)); passed straight through — no second-guessing a value
+    // the boundary already validated.
+    // The aggregate upsert comes FIRST: its row lock serialises concurrent
+    // reports of this coupon before the quorum is recomputed.
+    await tx.couponSignal.upsert({
+        where: { couponId },
+        create: {
+            couponId,
+            failCount: 1,
+            lastFailedAt: now,
+            lastFailReason: reason,
+        },
+        update: {
+            failCount: { increment: 1 },
+            lastFailedAt: now,
+            lastFailReason: reason,
+        },
+    })
     await tx.couponSignalReporter.upsert({
         where: {
             couponId_outcome_reporterHash: {
@@ -184,41 +289,13 @@ async function recordFailedIn(
         },
         update: { weight, lastAt: now },
     })
-    // `reason` is already length-bounded by the report route's zod body schema
-    // (trim().max(200)); passed straight through — no second-guessing a value
-    // the boundary already validated.
-    const signal = await tx.couponSignal.upsert({
-        where: { couponId },
-        create: {
-            couponId,
-            failCount: 1,
-            lastFailedAt: now,
-            lastFailReason: reason,
-        },
-        update: {
-            failCount: { increment: 1 },
-            lastFailedAt: now,
-            lastFailReason: reason,
-        },
-        select: { lastWorkedAt: true },
-    })
-    const windowStart = new Date(now.getTime() - FAILING_WINDOW_MS)
-    const since =
-        signal.lastWorkedAt && signal.lastWorkedAt > windowStart
-            ? signal.lastWorkedAt
-            : windowStart
-    const total = await tx.couponSignalReporter.aggregate({
-        where: { couponId, outcome: 'failed', lastAt: { gt: since } },
-        _sum: { weight: true },
-    })
-    await tx.couponSignal.update({
-        where: { couponId },
-        data: { failWeight: total._sum.weight ?? 0 },
-    })
+    await recomputeFailWeight(tx, couponId, now)
     await tx.couponSignalReporter.deleteMany({
-        where: { couponId, outcome: 'failed', lastAt: { lt: windowStart } },
+        where: {
+            couponId,
+            lastAt: { lt: new Date(now.getTime() - FAILING_WINDOW_MS) },
+        },
     })
-    await sweepExpiredReporters(tx, now, windowStart)
 }
 
 /** A global retention sweep runs at most this often per process. */
@@ -228,23 +305,37 @@ let nextReporterSweepAt = 0
 /**
  * Retention: reporter rows are pseudonymous IP/user-derived data and are kept
  * only for FAILING_WINDOW_MS (30 days). recordFailed prunes the coupon it
- * writes, but a coupon nobody reports again would keep its rows forever, so this
- * bounded sweep (one DELETE, at most hourly per process, riding a write) removes
- * every expired row. A failure here propagates like any other write failure.
+ * writes, but a coupon nobody reports again would keep its rows forever, so the
+ * report route calls this AFTER its write has committed: one DELETE, at most
+ * hourly per process. It is deliberately outside the report's transaction (a
+ * retention failure must not roll back a report that was valid) and it never
+ * throws into the response: a failure is captured to Sentry and logged loudly,
+ * and the schedule only advances after a sweep SUCCEEDS, so the next report
+ * retries it.
  */
-async function sweepExpiredReporters(
-    tx: CouponFailureWriter,
-    now: Date,
-    windowStart: Date,
+export async function sweepExpiredReporters(
+    now: Date = new Date(),
 ): Promise<void> {
     if (now.getTime() < nextReporterSweepAt) return
-    nextReporterSweepAt = now.getTime() + REPORTER_SWEEP_INTERVAL_MS
-    await tx.couponSignalReporter.deleteMany({
-        where: { lastAt: { lt: windowStart } },
-    })
+    try {
+        await prisma.couponSignalReporter.deleteMany({
+            where: {
+                lastAt: { lt: new Date(now.getTime() - FAILING_WINDOW_MS) },
+            },
+        })
+        nextReporterSweepAt = now.getTime() + REPORTER_SWEEP_INTERVAL_MS
+    } catch (error) {
+        Sentry.captureException(error, {
+            tags: { area: 'couponSignals.sweepExpiredReporters' },
+        })
+        console.error(
+            '[couponSignals] reporter retention sweep failed (will retry on the next report):',
+            error,
+        )
+    }
 }
 
-/** Test-only: make the next recordFailed run the global retention sweep. */
+/** Test-only: make the next sweepExpiredReporters call run. */
 export function resetReporterSweepForTests(): void {
     nextReporterSweepAt = 0
 }

@@ -25,3 +25,6 @@ CREATE TABLE "public"."coupon_signal_reporters" (
 
 -- CreateIndex
 CREATE INDEX "coupon_signal_reporters_coupon_id_outcome_last_at_idx" ON "public"."coupon_signal_reporters"("coupon_id", "outcome", "last_at");
+
+-- CreateIndex
+CREATE INDEX "coupon_signal_reporters_last_at_idx" ON "public"."coupon_signal_reporters"("last_at");

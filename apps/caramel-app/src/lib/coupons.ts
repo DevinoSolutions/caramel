@@ -313,18 +313,15 @@ export type FailureSignal = {
     lastWorkedAt?: string | Date | null
 }
 
-function timestampMs(value: string | Date | null | undefined): number | null {
-    if (!value) return null
-    const ms = typeof value === 'string' ? Date.parse(value) : value.getTime()
-    return Number.isNaN(ms) ? null : ms
-}
-
 /**
  * True when shoppers/the extension have reported this code failing and
- * recently: a failure quorum of at least FAILING_MIN_FAIL_WEIGHT, the latest
- * failure within FAILING_WINDOW_MS, and no success reported since that latest
- * failure (a success at or after it resets the code). Pure: absent or
- * unparseable timestamps mean "no signal", never "failing".
+ * recently: a failure quorum of at least FAILING_MIN_FAIL_WEIGHT and the latest
+ * failure within FAILING_WINDOW_MS. Successes are NOT compared here: a success
+ * clears failures only once a quorum of distinct reporters agree
+ * (couponSignals.ts CLEARING_WORKED_WEIGHT), and that is already folded into
+ * failWeight when the success is reported, so one forged "worked" cannot reset a
+ * code from the client side either. Pure: absent or unparseable timestamps mean
+ * "no signal", never "failing".
  */
 export function isRecentlyFailing(
     signal: FailureSignal,
@@ -332,10 +329,7 @@ export function isRecentlyFailing(
 ): boolean {
     if ((signal.failWeight ?? 0) < FAILING_MIN_FAIL_WEIGHT) return false
     const failedAge = workedAgeMs(signal.lastFailedAt, now)
-    if (failedAge === null || failedAge > FAILING_WINDOW_MS) return false
-    const failedAt = timestampMs(signal.lastFailedAt)
-    const workedAt = timestampMs(signal.lastWorkedAt)
-    return failedAt !== null && (workedAt === null || failedAt > workedAt)
+    return failedAge !== null && failedAge <= FAILING_WINDOW_MS
 }
 
 /**
@@ -346,13 +340,13 @@ export function isRecentlyFailing(
 export const KEEPS_FAILING_MIN_FAIL_WEIGHT = 6
 
 /**
- * True when a code is recently failing (isRecentlyFailing: window and
- * no-success-since rules included) AND has at least
+ * True when a code is recently failing (isRecentlyFailing: window rule
+ * included) AND has at least
  * KEEPS_FAILING_MIN_FAIL_WEIGHT of failure quorum. The web store page and the extension
  * popup collapse these behind a "N codes reported not working" disclosure. It
  * is a presentation flag over shopper/extension reports: it never changes a
- * catalog status, and one later success clears it (the failure is no longer
- * newer than the last success).
+ * catalog status, and a worked quorum clears it (failWeight is recomputed when
+ * the successes are reported).
  */
 export function keepsFailing(
     signal: FailureSignal,

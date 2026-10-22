@@ -124,8 +124,8 @@ const rankingOrderSql = () => Prisma.sql`rating DESC, created_at DESC, id DESC`
 /**
  * SQL twin of coupons.ts's isRecentlyFailing(): true for a coupon whose
  * coupon_signals row holds a failure quorum of at least FAILING_MIN_FAIL_WEIGHT, the latest
- * within FAILING_WINDOW_DAYS and newer than the last success (or no success
- * ever). The numbers come from coupons.ts, so the ordering and the card's hint
+ * within FAILING_WINDOW_DAYS. Successes are folded into fail_weight when they
+ * are reported (couponSignals.recomputeFailWeight). The numbers come from coupons.ts, so the ordering and the card's hint
  * cannot drift apart.
  *
  * A hashed uncorrelated `id IN (SELECT ...)`, not a JOIN: coupon_signals has
@@ -150,7 +150,6 @@ const failingSignalIdsSql = (minFailWeight: number) => Prisma.sql`(id IN (
     SELECT s.coupon_id FROM coupon_signals s
     WHERE s.fail_weight >= ${minFailWeight}
       AND s.last_failed_at > (NOW() AT TIME ZONE 'UTC') - (${FAILING_WINDOW_DAYS}::int * INTERVAL '1 day')
-      AND (s.last_worked_at IS NULL OR s.last_failed_at > s.last_worked_at)
 ))`
 
 /**

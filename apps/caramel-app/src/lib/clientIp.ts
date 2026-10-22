@@ -66,13 +66,34 @@ export function readClientIp(headers: Headers): string | null {
  * X-Real-IP and X-Forwarded-For are plain client input on any request that
  * did not pass through a proxy that rewrites them. A null means the request
  * reached the app without the edge (a direct origin hit, local dev, e2e); the
- * caller must not mint an identity from the fallback headers. The residual
+ * caller must not mint an identity from the fallback headers. A present value
+ * that is not an IP address is treated as missing too. The residual
  * risk named on CLIENT_IP_HEADERS stays: a caller that bypasses Cloudflare can
  * still forge this header, which only the origin firewall closes.
  */
 export function readEdgeClientIp(headers: Headers): string | null {
     const value = headers.get(CLIENT_IP_HEADERS[0])?.trim()
-    return value ? value : null
+    return value && isIpAddress(value) ? value : null
+}
+
+const IPV4 =
+    /^(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/
+
+/**
+ * Is `value` a bare IPv4 or IPv6 address? Import-free on purpose (this module
+ * is shared with auth.ts): IPv6 is checked by asking the URL parser to accept
+ * it as a bracketed host, which only a real IPv6 literal survives. A zone id
+ * (`%eth0`) or a port is not a bare address and is refused.
+ */
+function isIpAddress(value: string): boolean {
+    if (IPV4.test(value)) return true
+    if (!value.includes(':') || value.includes('%')) return false
+    try {
+        // The parser throws on anything that is not an IPv6 literal.
+        return new URL(`http://[${value}]/`).hostname.startsWith('[')
+    } catch {
+        return false
+    }
 }
 
 /**

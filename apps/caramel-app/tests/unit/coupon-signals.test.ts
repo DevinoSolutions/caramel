@@ -1,3 +1,4 @@
+import type { ReportReporter } from '@/lib/couponReportDedupe'
 import { attachSignals, recordUsage, recordWorked } from '@/lib/couponSignals'
 import * as Sentry from '@sentry/nextjs'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -111,7 +112,7 @@ describe('attachSignals (app-owned lastWorkedAt merge)', () => {
         })
     })
 
-    it('keepsFailing is false for a sink-only quorum (weight 4), and once a later success resets it', async () => {
+    it('keepsFailing is false for a sink-only quorum (weight 4) and for a cleared quorum (weight 0), true at the collapse weight even with a later worked stamp', async () => {
         const failed = new Date(Date.now() - 60 * 60 * 1000)
         const workedAfter = new Date(Date.now() - 60 * 1000)
         signalState.rows = [
@@ -129,6 +130,8 @@ describe('attachSignals (app-owned lastWorkedAt merge)', () => {
                 failCount: 3,
                 failWeight: 6,
             },
+            // A worked stamp alone clears nothing (one forged success must not
+            // undo the quorum): only the worked quorum folded into failWeight does.
             {
                 couponId: '3',
                 lastWorkedAt: workedAfter,
@@ -136,11 +139,23 @@ describe('attachSignals (app-owned lastWorkedAt merge)', () => {
                 failCount: 9,
                 failWeight: 12,
             },
+            {
+                couponId: '4',
+                lastWorkedAt: workedAfter,
+                lastFailedAt: failed,
+                failCount: 9,
+                failWeight: 0,
+            },
         ]
 
-        const out = await attachSignals([{ id: '1' }, { id: '2' }, { id: '3' }])
+        const out = await attachSignals([
+            { id: '1' },
+            { id: '2' },
+            { id: '3' },
+            { id: '4' },
+        ])
 
-        expect(out.map(c => c.keepsFailing)).toEqual([false, true, false])
+        expect(out.map(c => c.keepsFailing)).toEqual([false, true, true, false])
     })
 
     it('selects the failure columns but NOT the free-text lastFailReason', async () => {
@@ -195,11 +210,39 @@ describe('attachSignals (app-owned lastWorkedAt merge)', () => {
 })
 
 describe('recordWorked (owns lastWorkedAt ONLY — W4-D2 split)', () => {
-    it('upserts lastWorkedAt on both create and update, and NEVER touches workCount', async () => {
-        await recordWorked('42')
+    const anon: ReportReporter = { kind: 'ip', ip: '203.0.113.9' }
 
-        expect(prismaMock.couponSignal.upsert).toHaveBeenCalledTimes(1)
-        const arg = prismaMock.couponSignal.upsert.mock.calls[0]![0]
+    /** A transaction client whose coupon_signals row carries `failWeight`. */
+    function txWith(failWeight: number) {
+        return {
+            couponSignal: {
+                upsert: vi.fn(
+                    async (_args: {
+                        where: { couponId: string }
+                        create: Record<string, unknown>
+                        update: Record<string, unknown>
+                        select: Record<string, unknown>
+                    }) => ({ failWeight }),
+                ),
+                update: vi.fn(async () => ({})),
+            },
+            couponSignalReporter: {
+                findMany: vi.fn(async () => []),
+                upsert: vi.fn(
+                    async (_args: {
+                        create: { outcome: string; weight: number }
+                    }) => ({}),
+                ),
+            },
+        }
+    }
+
+    it('upserts lastWorkedAt on both create and update, and NEVER touches workCount', async () => {
+        const tx = txWith(0)
+        await recordWorked('42', anon, tx as never)
+
+        expect(tx.couponSignal.upsert).toHaveBeenCalledTimes(1)
+        const arg = tx.couponSignal.upsert.mock.calls[0]![0]
         expect(arg.where).toEqual({ couponId: '42' })
         expect(arg.create).toMatchObject({ couponId: '42' })
         expect(arg.create.lastWorkedAt).toBeInstanceOf(Date)
@@ -208,6 +251,28 @@ describe('recordWorked (owns lastWorkedAt ONLY — W4-D2 split)', () => {
         // The whole point of the split: a "worked" report must not bump the
         // counter, or a successful apply (report + increment) double-counts.
         expect(arg.update).not.toHaveProperty('workCount')
+    })
+
+    it('a coupon with no failure quorum stores nothing about the reporter', async () => {
+        const tx = txWith(0)
+        await recordWorked('42', anon, tx as never)
+
+        expect(tx.couponSignalReporter.upsert).not.toHaveBeenCalled()
+        expect(tx.couponSignal.update).not.toHaveBeenCalled()
+    })
+
+    it('a coupon carrying a failure quorum records the success as a weighted reporter and recomputes', async () => {
+        const tx = txWith(4)
+        await recordWorked(
+            '42',
+            { kind: 'user', userId: 'user-1' },
+            tx as never,
+        )
+
+        expect(tx.couponSignalReporter.upsert).toHaveBeenCalledTimes(1)
+        const arg = tx.couponSignalReporter.upsert.mock.calls[0]![0]
+        expect(arg.create).toMatchObject({ outcome: 'worked', weight: 2 })
+        expect(tx.couponSignal.update).toHaveBeenCalledTimes(1)
     })
 })
 

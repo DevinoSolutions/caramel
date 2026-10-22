@@ -72,7 +72,7 @@ describe('keepsFailing (the collapse threshold, a stricter isRecentlyFailing)', 
         ).toBe(false)
     })
 
-    it('one later success clears it, however many failures piled up', () => {
+    it('a worked stamp alone never clears it: a success clears failures only through the worked quorum folded into failWeight (couponSignals.recomputeFailWeight)', () => {
         expect(
             keepsFailing(
                 {
@@ -82,8 +82,7 @@ describe('keepsFailing (the collapse threshold, a stricter isRecentlyFailing)', 
                 },
                 NOW,
             ),
-        ).toBe(false)
-        // A success BEFORE the last failure does not save it.
+        ).toBe(true)
         expect(
             keepsFailing(
                 {
@@ -94,6 +93,17 @@ describe('keepsFailing (the collapse threshold, a stricter isRecentlyFailing)', 
                 NOW,
             ),
         ).toBe(true)
+        // A cleared quorum is failWeight 0: nothing left to collapse.
+        expect(
+            keepsFailing(
+                {
+                    failWeight: 0,
+                    lastFailedAt: ago(2 * DAY),
+                    lastWorkedAt: ago(DAY),
+                },
+                NOW,
+            ),
+        ).toBe(false)
     })
 
     it('failures outside the 30-day window no longer count', () => {
@@ -165,11 +175,21 @@ describe('isRecentlyFailing', () => {
         ).toBe(true)
     })
 
-    it('a success AFTER the last failure resets it → false', () => {
+    it('a worked stamp AFTER the last failure does not reset it by itself (one forged success must not undo the quorum) → true; a cleared quorum (failWeight 0) → false', () => {
         expect(
             isRecentlyFailing(
                 {
                     failWeight: 9,
+                    lastFailedAt: ago(2 * DAY),
+                    lastWorkedAt: ago(DAY),
+                },
+                NOW,
+            ),
+        ).toBe(true)
+        expect(
+            isRecentlyFailing(
+                {
+                    failWeight: 0,
                     lastFailedAt: ago(2 * DAY),
                     lastWorkedAt: ago(DAY),
                 },
@@ -189,16 +209,6 @@ describe('isRecentlyFailing', () => {
                 NOW,
             ),
         ).toBe(true)
-    })
-
-    it('a success at the very same instant as the failure counts as a reset', () => {
-        const same = ago(DAY)
-        expect(
-            isRecentlyFailing(
-                { failWeight: 5, lastFailedAt: same, lastWorkedAt: same },
-                NOW,
-            ),
-        ).toBe(false)
     })
 
     it('a failure older than the window expires → false; just inside → true', () => {
@@ -318,9 +328,9 @@ describe('failing codes sink in SQL on store-scoped reads (sink, never hide)', (
         expect(order).toContain('FROM coupon_signals s')
         expect(order).toContain('s.fail_weight >= ?')
         expect(order).toContain('s.last_failed_at >')
-        expect(order).toContain(
-            '(s.last_worked_at IS NULL OR s.last_failed_at > s.last_worked_at)',
-        )
+        // A success is NOT compared here: it clears failures through the worked
+        // quorum folded into fail_weight, so one forged success cannot un-sink.
+        expect(order).not.toContain('last_worked_at')
         // false (not failing) sorts first; the ranking order breaks ties.
         expect(order).toMatch(
             /\)\) ASC, rating DESC, created_at DESC, id DESC\s+LIMIT/,

@@ -34,19 +34,12 @@ const { prismaMock, txMock, reportRows, catalogIds, getSessionMock } =
         // this set is the unknown-coupon case (404, nothing written).
         const ids = new Set<string>()
 
-        const signalUpsert = vi.fn(
-            async (args: {
-                where: { couponId: string }
-                create: Record<string, unknown>
-                update: Record<string, unknown>
-            }) => ({ couponId: args.where.couponId }),
-        )
         const txSignalUpsert = vi.fn(
             async (args: {
                 where: { couponId: string }
                 create: Record<string, unknown>
                 update: Record<string, unknown>
-            }) => ({ couponId: args.where.couponId }),
+            }) => ({ couponId: args.where.couponId, failWeight: 0 }),
         )
 
         const tx = {
@@ -60,6 +53,7 @@ const { prismaMock, txMock, reportRows, catalogIds, getSessionMock } =
                 update: vi.fn(async () => ({})),
             },
             couponSignalReporter: {
+                findMany: vi.fn(async () => []),
                 upsert: vi.fn(async () => ({})),
                 aggregate: vi.fn(async () => ({ _sum: { weight: 1 } })),
                 deleteMany: vi.fn(async () => ({ count: 0 })),
@@ -116,11 +110,13 @@ const { prismaMock, txMock, reportRows, catalogIds, getSessionMock } =
                         { known: ids.has(String(query.values[0])) },
                     ],
                 ),
-                // The anonymous path writes the signal through the singleton
-                // client directly; the signed-in path writes it through `tx`.
-                // Keeping the two upsert spies SEPARATE is what lets a test
-                // assert which path a request actually took.
-                couponSignal: { upsert: signalUpsert },
+                // Both paths write the signal through a transaction client (the
+                // writers wrap their own quorum bookkeeping in one); the only
+                // difference between them is the coupon_reports attribution row.
+                // The global retention sweep goes through the singleton client.
+                couponSignalReporter: {
+                    deleteMany: vi.fn(async () => ({ count: 0 })),
+                },
                 $transaction: vi.fn(
                     async (fn: (client: typeof tx) => Promise<unknown>) =>
                         fn(tx),
@@ -182,7 +178,6 @@ function anonymous() {
 
 beforeEach(() => {
     resetReportDedupeForTests()
-    prismaMock.couponSignal.upsert.mockClear()
     prismaMock.$transaction.mockClear()
     prismaMock.$queryRaw.mockClear()
     txMock.couponSignal.upsert.mockClear()
@@ -209,8 +204,8 @@ describe('POST /api/coupons/[id]/report — app-owned trust signal (W1)', () => 
 
         expect(res.status).toBe(200)
         expect(await res.json()).toEqual({ ok: true })
-        expect(prismaMock.couponSignal.upsert).toHaveBeenCalledTimes(1)
-        const arg = prismaMock.couponSignal.upsert.mock.calls[0]![0]
+        expect(txMock.couponSignal.upsert).toHaveBeenCalledTimes(1)
+        const arg = txMock.couponSignal.upsert.mock.calls[0]![0]
         expect(arg.where).toEqual({ couponId: KNOWN_COUPON })
         // W4-D2 split: recordWorked owns lastWorkedAt; recordUsage (POST
         // /increment) owns workCount. A "worked" report must NOT bump workCount,
@@ -251,7 +246,7 @@ describe('POST /api/coupons/[id]/report — app-owned trust signal (W1)', () => 
         expect(await res.json()).toEqual({
             error: 'Invalid or missing coupon ID',
         })
-        expect(prismaMock.couponSignal.upsert).not.toHaveBeenCalled()
+        expect(txMock.couponSignal.upsert).not.toHaveBeenCalled()
     })
 
     it('an invalid outcome → 422 (withRoute body gate), nothing written', async () => {
@@ -260,7 +255,7 @@ describe('POST /api/coupons/[id]/report — app-owned trust signal (W1)', () => 
         )
 
         expect(res.status).toBe(422)
-        expect(prismaMock.couponSignal.upsert).not.toHaveBeenCalled()
+        expect(txMock.couponSignal.upsert).not.toHaveBeenCalled()
     })
 })
 
@@ -269,18 +264,17 @@ describe('POST /api/coupons/[id]/report — app-owned trust signal (W1)', () => 
 // extension sends today (no credential, `origin`-gated only) must behave
 // byte-for-byte as it did before coupon_reports existed.
 describe('POST /api/coupons/[id]/report — anonymous behavior (characterization)', () => {
-    it('no credentials → 200 with the signal written, NO attributed row, and no transaction opened', async () => {
+    it('no credentials → 200 with the signal written, NO attributed row, and only the writers own transaction', async () => {
         const res = await POST(
             reportRequest(KNOWN_COUPON, { outcome: 'worked' }),
         )
 
         expect(res.status).toBe(200)
         expect(await res.json()).toEqual({ ok: true })
-        // The signal goes through the singleton client, exactly as before.
-        expect(prismaMock.couponSignal.upsert).toHaveBeenCalledTimes(1)
-        // Anonymous is the extension's high-volume path: one statement, so no
-        // BEGIN/COMMIT round-trip is paid for it.
-        expect(prismaMock.$transaction).not.toHaveBeenCalled()
+        expect(txMock.couponSignal.upsert).toHaveBeenCalledTimes(1)
+        // The writer wraps its own bookkeeping in ONE transaction, and nothing
+        // else: no coupon_reports row, no second transaction.
+        expect(prismaMock.$transaction).toHaveBeenCalledTimes(1)
         expect(txMock.couponReport.create).not.toHaveBeenCalled()
         expect(reportRows).toEqual([])
     })
@@ -300,7 +294,7 @@ describe('POST /api/coupons/[id]/report — anonymous behavior (characterization
 
         expect(res.status).toBe(200)
         expect(await res.json()).toEqual({ ok: true })
-        expect(prismaMock.couponSignal.upsert).toHaveBeenCalledTimes(1)
+        expect(txMock.couponSignal.upsert).toHaveBeenCalledTimes(1)
         expect(txMock.couponReport.create).not.toHaveBeenCalled()
         expect(reportRows).toEqual([])
     })
@@ -321,10 +315,10 @@ describe('POST /api/coupons/[id]/report — anonymous behavior (characterization
 
         // One write, carrying the FIRST report's time: the repeats 3h later did
         // not move lastWorkedAt.
-        expect(prismaMock.couponSignal.upsert).toHaveBeenCalledTimes(1)
-        expect(prismaMock.couponSignal.upsert.mock.calls[0]![0].update).toEqual(
-            { lastWorkedAt: new Date('2026-08-09T12:00:00.000Z') },
-        )
+        expect(txMock.couponSignal.upsert).toHaveBeenCalledTimes(1)
+        expect(txMock.couponSignal.upsert.mock.calls[0]![0].update).toEqual({
+            lastWorkedAt: new Date('2026-08-09T12:00:00.000Z'),
+        })
     })
 
     it('honest WORKED reports from distinct IPs each count, and the same IP counts again after 24h', async () => {
@@ -349,7 +343,7 @@ describe('POST /api/coupons/[id]/report — anonymous behavior (characterization
         )
 
         expect(await nextDay.json()).toEqual({ ok: true })
-        expect(prismaMock.couponSignal.upsert).toHaveBeenCalledTimes(3)
+        expect(txMock.couponSignal.upsert).toHaveBeenCalledTimes(3)
     })
 
     it('repeat FAILED reports from distinct IPs each count', async () => {
@@ -398,10 +392,7 @@ describe('POST /api/coupons/[id]/report — anonymous behavior (characterization
         )
 
         expect(await worked.json()).toEqual({ ok: true })
-        expect(
-            prismaMock.couponSignal.upsert.mock.calls.length +
-                txMock.couponSignal.upsert.mock.calls.length,
-        ).toBe(2)
+        expect(txMock.couponSignal.upsert).toHaveBeenCalledTimes(2)
     })
 
     it('a WORKED report does not consume the failed slot: worked first, then the first failed report from that IP still counts', async () => {
@@ -411,10 +402,7 @@ describe('POST /api/coupons/[id]/report — anonymous behavior (characterization
         )
 
         expect(await failed.json()).toEqual({ ok: true })
-        expect(
-            prismaMock.couponSignal.upsert.mock.calls.length +
-                txMock.couponSignal.upsert.mock.calls.length,
-        ).toBe(2)
+        expect(txMock.couponSignal.upsert).toHaveBeenCalledTimes(2)
     })
 
     it('a deduped signed-in failed report opens no transaction and writes nothing', async () => {
@@ -481,7 +469,6 @@ describe('POST /api/coupons/[id]/report — anonymous behavior (characterization
         )
 
         expect(await res.json()).toEqual({ ok: true })
-        expect(prismaMock.couponSignal.upsert).not.toHaveBeenCalled()
         expect(txMock.couponSignal.upsert).toHaveBeenCalledTimes(2)
     })
 
@@ -499,9 +486,7 @@ describe('POST /api/coupons/[id]/report — anonymous behavior (characterization
     })
 
     it('a failed WORKED write frees its slot too: the retry is NOT deduped', async () => {
-        prismaMock.couponSignal.upsert.mockRejectedValueOnce(
-            new Error('db down'),
-        )
+        txMock.couponSignal.upsert.mockRejectedValueOnce(new Error('db down'))
         const failed = await POST(
             reportRequest(KNOWN_COUPON, { outcome: 'worked' }),
         )
@@ -522,7 +507,7 @@ describe('POST /api/coupons/[id]/report — anonymous behavior (characterization
 
         expect(res.status).toBe(404)
         expect(await res.json()).toEqual({ error: 'Unknown coupon' })
-        expect(prismaMock.couponSignal.upsert).not.toHaveBeenCalled()
+        expect(txMock.couponSignal.upsert).not.toHaveBeenCalled()
         expect(prismaMock.$transaction).not.toHaveBeenCalled()
     })
 
@@ -632,7 +617,7 @@ describe('POST /api/coupons/[id]/report — anonymous behavior (characterization
             reportRequest(KNOWN_COUPON, { outcome: 'worked' }),
         )
         expect(failed.status).toBe(500)
-        expect(prismaMock.couponSignal.upsert).not.toHaveBeenCalled()
+        expect(txMock.couponSignal.upsert).not.toHaveBeenCalled()
 
         const retry = await POST(
             reportRequest(KNOWN_COUPON, { outcome: 'worked' }),
@@ -659,7 +644,6 @@ describe('POST /api/coupons/[id]/report — signed-in attribution (coupon_report
         // a client that will retry.
         expect(prismaMock.$transaction).toHaveBeenCalledTimes(1)
         expect(txMock.couponSignal.upsert).toHaveBeenCalledTimes(1)
-        expect(prismaMock.couponSignal.upsert).not.toHaveBeenCalled()
         expect(reportRows).toEqual([
             {
                 id: 'report-1',

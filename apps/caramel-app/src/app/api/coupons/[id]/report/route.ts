@@ -7,6 +7,7 @@ import {
 import {
     recordFailed,
     recordWorked,
+    sweepExpiredReporters,
     type CouponFailureWriter,
 } from '@/lib/couponSignals'
 import { couponExists } from '@/lib/couponsRepo'
@@ -118,7 +119,7 @@ export const POST = withRoute(
             // anonymous one.
             const writeSignal = (client: CouponFailureWriter | PrismaClient) =>
                 body.outcome === 'worked'
-                    ? recordWorked(id, client)
+                    ? recordWorked(id, reporter, client)
                     : recordFailed(
                           id,
                           body.storeReason ?? null,
@@ -127,9 +128,9 @@ export const POST = withRoute(
                       )
 
             if (!userId) {
-                // Anonymous: no transaction opened HERE (a worked report is one
-                // upsert; recordFailed wraps its own quorum bookkeeping in one),
-                // after the catalog check above. Nothing is written to
+                // Anonymous: no transaction opened HERE (both writers wrap
+                // their own quorum bookkeeping in one), after the catalog check
+                // above. Nothing is written to
                 // coupon_reports for an anonymous report — DELIBERATE, not an
                 // oversight: coupon_reports is ATTRIBUTION, and every row in it
                 // names a user. Anonymous volume is already fully counted by the
@@ -139,6 +140,9 @@ export const POST = withRoute(
                 // because the schema was written before this call; a reader may
                 // assume user_id IS NOT NULL for every row this route creates.)
                 await writeSignal(prisma)
+                // Retention of reporter rows, AFTER the write committed (it never
+                // throws: a failure is captured to Sentry and retried later).
+                await sweepExpiredReporters()
                 return NextResponse.json({ ok: true })
             }
 
@@ -176,6 +180,7 @@ export const POST = withRoute(
                     data: { couponId: id, userId, outcome: body.outcome },
                 })
             })
+            await sweepExpiredReporters()
 
             return NextResponse.json({ ok: true })
         } catch (error) {

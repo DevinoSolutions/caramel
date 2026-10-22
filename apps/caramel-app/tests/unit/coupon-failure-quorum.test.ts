@@ -11,12 +11,15 @@ import {
     keepsFailing,
 } from '@/lib/coupons'
 import {
+    CLEARING_WORKED_WEIGHT,
     recordFailed,
     recordWorked,
     reporterHash,
     reporterWeight,
     resetReporterSweepForTests,
+    sweepExpiredReporters,
 } from '@/lib/couponSignals'
+import * as Sentry from '@sentry/nextjs'
 import { NextRequest } from 'next/server'
 import { createHmac } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -32,9 +35,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 // EXERCISED rather than asserted against canned answers. A fake proves the
 // logic and never the SQL; tests/integration/coupon-report.itest.ts runs the
 // same scenarios against real Postgres.
-vi.mock('@/lib/prisma', () => {
-    return { default: {} }
-})
+// The global retention sweep (sweepExpiredReporters) uses the singleton client:
+// tests point `sweepClient.deleteMany` at the fake table.
+const { sweepClient } = vi.hoisted(() => ({
+    sweepClient: {
+        deleteMany: vi.fn(
+            async (_args: unknown): Promise<{ count: number }> => ({
+                count: 0,
+            }),
+        ),
+    },
+}))
+vi.mock('@/lib/prisma', () => ({
+    default: { couponSignalReporter: sweepClient },
+}))
+vi.mock('@sentry/nextjs', () => ({ captureException: vi.fn() }))
 
 type SignalRow = {
     couponId: string
@@ -82,6 +97,16 @@ function makeFakeDb() {
                     reporters.set(key, row)
                     return row
                 },
+            ),
+            findMany: vi.fn(
+                async (args: {
+                    where: { couponId: string; lastAt: { gt: Date } }
+                }) =>
+                    Array.from(reporters.values()).filter(
+                        r =>
+                            r.couponId === args.where.couponId &&
+                            r.lastAt > args.where.lastAt.gt,
+                    ),
             ),
             aggregate: vi.fn(
                 async (args: {
@@ -189,6 +214,10 @@ function makeFakeDb() {
             ),
         },
     }
+    // The singleton client's deleteMany reaches the same table.
+    sweepClient.deleteMany.mockImplementation(async args =>
+        tx.couponSignalReporter.deleteMany(args as never),
+    )
     return { signals, reporters, tx }
 }
 
@@ -266,27 +295,92 @@ describe('failure quorum: forged anonymous reports cannot sink a code', () => {
         expect(isRecentlyFailing({ ...stored(), failWeight: 1 })).toBe(false)
     })
 
-    it('a success resets the quorum: failures from before it do not count toward the next one', async () => {
+    const succeed = (reporter: ReportReporter) =>
+        recordWorked(COUPON, reporter, db.tx as never)
+    const minutesLater = (n: number) =>
+        vi.setSystemTime(Date.now() + n * 60_000)
+
+    it('ONE anonymous "worked" does NOT un-sink a code (it would let one forged success undo any number of honest failures)', async () => {
         for (let n = 1; n <= 4; n++) await fail(anon(n))
         expect(isRecentlyFailing(stored())).toBe(true)
 
-        vi.setSystemTime(new Date('2026-10-21T13:00:00.000Z'))
-        await recordWorked(COUPON, {
-            couponSignal: {
-                upsert: async () => {
-                    db.signals.get(COUPON)!.lastWorkedAt = new Date()
-                    return {}
-                },
-            },
-        } as never)
+        minutesLater(5)
+        await succeed(anon(50))
+        expect(stored().failWeight).toBe(4)
+        expect(isRecentlyFailing(stored())).toBe(true)
+        // The success is still recorded as the last-worked stamp ("Verified").
+        expect(stored().lastWorkedAt).toBeInstanceOf(Date)
+    })
+
+    it('two distinct anonymous "worked" reporters clear it; so does ONE signed-in "worked"', async () => {
+        expect(CLEARING_WORKED_WEIGHT).toBe(2)
+        for (let n = 1; n <= 4; n++) await fail(anon(n))
+
+        minutesLater(5)
+        await succeed(anon(50))
+        expect(isRecentlyFailing(stored())).toBe(true)
+        await succeed(anon(51))
+        expect(stored().failWeight).toBe(0)
         expect(isRecentlyFailing(stored())).toBe(false)
 
-        // Two NEW reporters after the success: weight 2, not 2 + the old 4.
-        vi.setSystemTime(new Date('2026-10-21T14:00:00.000Z'))
+        db = makeFakeDb()
+        for (let n = 1; n <= 4; n++) await fail(anon(n))
+        minutesLater(5)
+        await succeed(account('user-9'))
+        expect(stored().failWeight).toBe(0)
+    })
+
+    it('one reporter re-reporting "worked" is still one reporter', async () => {
+        for (let n = 1; n <= 4; n++) await fail(anon(n))
+        minutesLater(5)
+        await succeed(anon(50))
+        minutesLater(1)
+        await succeed(anon(50))
+        expect(stored().failWeight).toBe(4)
+    })
+
+    it('a success only clears the failures BEFORE it: failures after the cleared quorum count afresh', async () => {
+        for (let n = 1; n <= 4; n++) await fail(anon(n))
+        minutesLater(5)
+        await succeed(account('user-9'))
+        expect(stored().failWeight).toBe(0)
+
+        minutesLater(5)
         await fail(anon(10))
         await fail(anon(11))
+        // Two NEW reporters after the success: weight 2, not 2 + the old 4.
         expect(stored().failWeight).toBe(2)
         expect(isRecentlyFailing(stored())).toBe(false)
+    })
+
+    it('a "worked" on a coupon with no failure quorum stores nothing about the reporter (no new personal data)', async () => {
+        await succeed(anon(50))
+        expect(db.reporters.size).toBe(0)
+        expect(stored().lastWorkedAt).toBeInstanceOf(Date)
+    })
+
+    it('a grandfathered legacy failure row resets exactly like any other', async () => {
+        const now = new Date()
+        db.signals.set(COUPON, {
+            couponId: COUPON,
+            failCount: 3,
+            failWeight: 6,
+            lastFailedAt: now,
+            lastWorkedAt: null,
+            lastFailReason: null,
+        })
+        db.reporters.set('legacy', {
+            couponId: COUPON,
+            outcome: 'failed',
+            reporterHash: 'legacy',
+            weight: 6,
+            lastAt: now,
+        })
+        minutesLater(5)
+        await succeed(anon(50))
+        expect(stored().failWeight).toBe(6)
+        await succeed(anon(51))
+        expect(stored().failWeight).toBe(0)
     })
 
     it('a reporter whose failure is older than the window stops counting, and its row is pruned', async () => {
@@ -299,31 +393,54 @@ describe('failure quorum: forged anonymous reports cannot sink a code', () => {
         expect(db.reporters.size).toBe(1)
     })
 
-    it('retention: an expired reporter of a coupon nobody reports again is swept by a later report elsewhere, at most hourly', async () => {
+    it('retention: the global sweep removes an expired reporter of a coupon nobody reports again, at most hourly, and only after it SUCCEEDED does it wait', async () => {
         await recordFailed('77', null, anon(1), db.tx as never)
         expect(db.reporters.size).toBe(1)
-
+        // recordFailed itself no longer sweeps globally (that is outside its
+        // transaction), only its own coupon.
         vi.setSystemTime(Date.now() + FAILING_WINDOW_MS + 60_000)
         await recordFailed(COUPON, null, anon(2), db.tx as never)
-        // Coupon 77's row is past 30 days and nothing reported 77 again, yet it is gone.
+        expect(db.reporters.size).toBe(2)
+
+        await sweepExpiredReporters()
         expect(
             Array.from(db.reporters.values()).map(row => row.couponId),
         ).toEqual([COUPON])
 
-        // The sweep is throttled: an expired row planted right after waits.
-        const hashOfStale = reporterHash(anon(3))
+        // Throttled: an expired row planted right after waits for the hour.
         db.reporters.set('stale', {
             couponId: '88',
             outcome: 'failed',
-            reporterHash: hashOfStale,
+            reporterHash: reporterHash(anon(3)),
             weight: 1,
             lastAt: new Date(Date.now() - FAILING_WINDOW_MS - 1000),
         })
-        await recordFailed(COUPON, null, anon(4), db.tx as never)
+        await sweepExpiredReporters()
         expect(db.reporters.has('stale')).toBe(true)
         vi.setSystemTime(Date.now() + 61 * 60 * 1000)
-        await recordFailed(COUPON, null, anon(5), db.tx as never)
+        await sweepExpiredReporters()
         expect(db.reporters.has('stale')).toBe(false)
+    })
+
+    it('a failing sweep is reported loudly (Sentry + console) and does NOT advance the schedule: the next call retries', async () => {
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+        vi.mocked(Sentry.captureException).mockClear()
+        sweepClient.deleteMany.mockRejectedValueOnce(new Error('db down'))
+
+        await sweepExpiredReporters()
+        expect(Sentry.captureException).toHaveBeenCalledTimes(1)
+        expect(errorSpy).toHaveBeenCalled()
+
+        db.reporters.set('stale', {
+            couponId: '88',
+            outcome: 'failed',
+            reporterHash: reporterHash(anon(3)),
+            weight: 1,
+            lastAt: new Date(Date.now() - FAILING_WINDOW_MS - 1000),
+        })
+        await sweepExpiredReporters()
+        expect(db.reporters.has('stale')).toBe(false)
+        errorSpy.mockRestore()
     })
 
     it('runs in one transaction when handed a plain client', async () => {
@@ -424,6 +541,43 @@ describe('reporter identity ignores forgeable headers', () => {
             userId: 'user-1',
         })
     })
+
+    it.each([
+        ['203.0.113.9'],
+        ['2001:db8::1'],
+        ['::1'],
+        ['::ffff:203.0.113.9'],
+    ])('readEdgeClientIp accepts the IP %s', ip => {
+        expect(readEdgeClientIp(new Headers({ 'cf-connecting-ip': ip }))).toBe(
+            ip,
+        )
+    })
+
+    it.each([
+        ['not-an-ip'],
+        ['203.0.113.9:8080'],
+        ['203.0.113.9, 198.51.100.1'],
+        ['256.1.1.1'],
+        ['1.2.3'],
+        ['[2001:db8::1]'],
+        ['fe80::1%eth0'],
+        ['<script>'],
+        ['a'.repeat(300)],
+    ])(
+        'readEdgeClientIp treats the non-IP %s as missing, so it mints no identity',
+        bad => {
+            const headers = new Headers({ 'cf-connecting-ip': bad })
+            expect(readEdgeClientIp(headers)).toBeNull()
+            expect(
+                reporterFor(
+                    null,
+                    new NextRequest('http://localhost/x', {
+                        headers: { 'cf-connecting-ip': bad },
+                    }),
+                ),
+            ).toEqual({ kind: 'ip', ip: NO_EDGE_REPORTER_NETWORK })
+        },
+    )
 
     it('readEdgeClientIp reads only cf-connecting-ip, trimmed, and null when blank or absent', () => {
         expect(

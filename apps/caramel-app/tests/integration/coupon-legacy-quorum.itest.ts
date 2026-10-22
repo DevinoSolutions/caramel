@@ -139,14 +139,45 @@ describe('legacy sunk codes are grandfathered by the data migration (real pg)', 
         ).toBe(2)
     })
 
-    it('a success clears it: failures from before it, legacy included, no longer count', async () => {
-        await recordWorked(COLLAPSED)
+    it('one anonymous success does NOT clear a legacy quorum; a second distinct reporter does, and later failures count afresh', async () => {
+        await recordWorked(COLLAPSED, reporter(2))
+        expect(
+            (
+                await prisma.couponSignal.findUniqueOrThrow({
+                    where: { couponId: COLLAPSED },
+                })
+            ).failWeight,
+        ).toBe(6)
+
+        await recordWorked(COLLAPSED, reporter(3))
+        const cleared = await prisma.couponSignal.findUniqueOrThrow({
+            where: { couponId: COLLAPSED },
+        })
+        expect(cleared.failWeight).toBe(0)
+        expect((await overlay(COLLAPSED)).keepsFailing).toBe(false)
+
         await new Promise(resolve => setTimeout(resolve, 20))
-        await recordFailed(COLLAPSED, null, reporter(2))
+        await recordFailed(COLLAPSED, null, reporter(4))
         const row = await prisma.couponSignal.findUniqueOrThrow({
             where: { couponId: COLLAPSED },
         })
         expect(row.failWeight).toBe(1)
+    })
+
+    it('a success on a code with no failure quorum stores nothing about its reporter', async () => {
+        await recordWorked(NOISE, reporter(5))
+        expect(
+            await prisma.couponSignalReporter.count({
+                where: { couponId: NOISE },
+            }),
+        ).toBe(0)
+        expect(
+            (
+                await prisma.couponSignal.findUniqueOrThrow({
+                    where: { couponId: NOISE },
+                })
+            ).lastWorkedAt,
+        ).not.toBeNull()
     })
 
     it('it ages out on its own after the 30-day window, and its row is pruned', async () => {

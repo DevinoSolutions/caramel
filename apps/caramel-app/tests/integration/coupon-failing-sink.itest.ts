@@ -1,4 +1,4 @@
-import { attachSignals } from '@/lib/couponSignals'
+import { attachSignals, recordWorked } from '@/lib/couponSignals'
 import { isRecentlyFailing } from '@/lib/coupons'
 import { listCoupons, listStoreCoupons } from '@/lib/couponsRepo'
 import prisma from '@/lib/prisma'
@@ -37,13 +37,14 @@ const FIXTURES: Fixture[] = [
         signal: { failCount: 3, failWeight: 6, lastFailedAt: HOUR },
     },
     { id: '988000002', rating: 4 },
-    // Reset: failures, then a success AFTER the last one.
+    // Cleared: failures, then a worked QUORUM after them folded fail_weight to 0
+    // (a worked stamp alone clears nothing: see couponSignals.recomputeFailWeight).
     {
         id: '988000003',
         rating: 3,
         signal: {
             failCount: 5,
-            failWeight: 5,
+            failWeight: 0,
             lastFailedAt: 2 * DAY,
             lastWorkedAt: DAY,
         },
@@ -60,7 +61,7 @@ const FIXTURES: Fixture[] = [
         rating: 1,
         signal: { failCount: 1, failWeight: 1, lastFailedAt: HOUR },
     },
-    // Failing: the success pre-dates the latest failure.
+    // Failing: the (single) success pre-dates the latest failure and clears nothing.
     {
         id: '988000006',
         rating: 0.5,
@@ -75,6 +76,9 @@ const FIXTURES: Fixture[] = [
 const IDS = FIXTURES.map(f => f.id)
 
 async function cleanup() {
+    await prisma.couponSignalReporter.deleteMany({
+        where: { couponId: { in: IDS } },
+    })
     await prisma.couponSignal.deleteMany({ where: { couponId: { in: IDS } } })
     await prisma.coupon.deleteMany({ where: { id: { in: IDS } } })
 }
@@ -179,11 +183,27 @@ describe('failing codes sink (real pg)', () => {
         expect(decorated).toHaveLength(6)
     })
 
-    it('a later success lifts a failing code back to its ranking position and clears keepsFailing', async () => {
-        await prisma.couponSignal.update({
-            where: { couponId: '988000001' },
-            data: { lastWorkedAt: new Date() },
+    it('a worked quorum lifts a failing code back to its ranking position and clears keepsFailing; one anonymous success alone does not', async () => {
+        // A real failure row backing the fixture's weight 6, so the writers'
+        // recompute has the reporter it would have in production.
+        await prisma.couponSignalReporter.create({
+            data: {
+                couponId: '988000001',
+                outcome: 'failed',
+                reporterHash: 'sink-fixture',
+                weight: 6,
+                lastAt: new Date(Date.now() - HOUR),
+            },
         })
+        await recordWorked('988000001', { kind: 'ip', ip: '203.0.113.50' })
+        {
+            const { coupons } = await listStoreCoupons(SITE, 20)
+            const decorated = await attachSignals(coupons)
+            expect(decorated[decorated.length - 1]?.id).toBe('988000001')
+            expect(decorated.some(c => c.keepsFailing)).toBe(true)
+        }
+
+        await recordWorked('988000001', { kind: 'ip', ip: '203.0.113.51' })
         const { coupons } = await listStoreCoupons(SITE, 20)
         const decorated = await attachSignals(coupons)
 

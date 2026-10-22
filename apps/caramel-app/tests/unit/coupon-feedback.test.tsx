@@ -290,12 +290,12 @@ describe('CouponCard — "Reported not working" hint', () => {
         expect(screen.queryByText(/^worked|just worked/i)).toBeNull()
     })
 
-    it('does not show (and the success line stays) when a success came after the failures', () => {
+    it('does not show (and the success line stays) once a worked quorum cleared the failures (failWeight 0)', () => {
         render(
             <CouponCard
                 coupon={{
                     ...baseCoupon,
-                    failWeight: 4,
+                    failWeight: 0,
                     lastFailedAt: iso(2 * DAY),
                     lastWorkedAt: iso(2 * HOUR),
                 }}

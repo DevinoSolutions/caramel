@@ -41,7 +41,9 @@ const {
             userId: string
         }) => ({ couponId: '900000000000000001', created: true }),
     ),
-    recordWorkedMock: vi.fn(async (_couponId: string) => {}),
+    recordWorkedMock: vi.fn(
+        async (_couponId: string, _reporter: unknown) => {},
+    ),
     checkRateLimitMock: vi.fn(async () => null as unknown),
     captureMock: vi.fn(async (_args: CapturedEvent) => true),
 }))
@@ -415,7 +417,10 @@ describe('POST /api/coupons/submit — checkout source', () => {
             userId: 'user-1',
         })
         expect(recordWorkedMock).toHaveBeenCalledTimes(1)
-        expect(recordWorkedMock).toHaveBeenCalledWith('900000000000000001')
+        expect(recordWorkedMock).toHaveBeenCalledWith('900000000000000001', {
+            kind: 'user',
+            userId: 'user-1',
+        })
         // The write order matters: the row must exist before it is stamped.
         expect(
             submitShopperCouponMock.mock.invocationCallOrder[0]!,
@@ -547,7 +552,10 @@ describe('POST /api/coupons/submit — checkout source', () => {
             created: false,
             status: 'worked',
         })
-        expect(recordWorkedMock).toHaveBeenCalledWith('42')
+        expect(recordWorkedMock).toHaveBeenCalledWith('42', {
+            kind: 'user',
+            userId: 'user-1',
+        })
     })
 
     it('a recordWorked failure is NOT swallowed: the route fails (500) rather than reporting a stamp that never landed', async () => {
