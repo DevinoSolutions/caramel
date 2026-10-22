@@ -24,7 +24,7 @@
             "browserslist": "4.28.7",
             "source-map-js": "1.2.2",
             "fflate@>=0.6.0 <0.6.11": "0.6.11",
-            "dompurify@<3.4.16": "3.4.16",
+            "dompurify@<3.4.17": "3.4.17",
             "brace-expansion@<1.1.21": "1.1.21",
             "brace-expansion@>=2.0.0 <2.1.7": "2.1.7",
             "minimatch@<3.1.4": "3.1.5",
@@ -73,7 +73,7 @@
     },
     "devDependencies": {
         "eslint": "9.31.0",
-        "eslint-config-next": "16.0.3",
+        "eslint-config-next": "16.4.2",
         "eslint-config-prettier": "10.1.5",
         "husky": "9.1.7",
         "lint-staged": "16.4.0",
