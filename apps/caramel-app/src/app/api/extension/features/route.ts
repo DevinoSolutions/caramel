@@ -32,6 +32,11 @@ import { NextResponse } from 'next/server'
 // by (COUPON_BOX_LLM_ENABLED and a configured COUPON_BOX_PICK_MODEL), so the
 // extension never sends an outline to a route that would refuse it.
 //
+// couponBoxSave: may the extension save a promo box it found and proved on a
+// store with no config as that store's config (POST
+// /api/extension/coupon-box-save)? Mirrors COUPON_BOX_SAVE_ENABLED, false by
+// default; the route answers 404 while it is off. Older builds ignore the key.
+//
 // withRoute: public read like extension/supported-stores (rate-limited, no
 // auth/origin gate); cors 'extension' + the OPTIONS preflight mirror
 // extension/me, so a preflighted extension-origin fetch can read it.
@@ -56,5 +61,6 @@ export const GET = withRoute(
             shopperCodeCapture: env.SHOPPER_CODE_CAPTURE_ENABLED,
             couponBoxDiscovery: env.COUPON_BOX_DISCOVERY_ENABLED,
             couponBoxLlm: couponBoxLlmEnabled(),
+            couponBoxSave: env.COUPON_BOX_SAVE_ENABLED,
         }),
 )

@@ -20,7 +20,7 @@ with `ls` or a repo search without knowing the doc structure first.
 | **Redis**                                | Deliberately **NOT provisioned** — the root `docker-compose.yml` is web + postgres ONLY by design (NF-13). Rate limiting is in-memory single-instance (`RateLimiterMemory`), with a documented swap-to-`RateLimiterRedis` TODO deferred until caramel-app runs multi-instance                                                                                                                                                                                                                                                                                                                    | `apps/caramel-app/src/lib/rateLimit.ts`                                                                                |
 | **Sentry** (self-hosted)                 | Error + APM tracing. `org: devino`, `project: caramel`, instance `https://sentry.devino.ca`. Production-only (`sentry.common.config.ts` — no-ops in dev/test)                                                                                                                                                                                                                                                                                                                                                                                                                                    | `apps/caramel-app/sentry.*.config.ts`, `next.config.mjs`                                                               |
 | **OpenRouter**                           | LLM hop for the extension's cart classifier (`/api/classify-cart`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | `apps/caramel-app/src/lib/openrouter.ts`                                                                               |
-| **usesend**                              | Transactional email (`usesend.devino.ca`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | env: `USESEND_*`                                                                                                       |
+| **Sendly**                               | Transactional email (`api.sendly.now`, `sendly-sdk`; the only email transport, useSend/Resend retired)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | env: `SENDLY_*`; `apps/caramel-app/src/lib/email.ts`                                                                   |
 | **External Python verification service** | Scrapes/verifies coupons; the catalog SUPPLIER. **Not in this repo** — it feeds the app catalog through `POST /api/ingest/catalog` (target state), or during migration is read read-only by the `bridge:sync` job. TODO(human): link its repo/runbook here.                                                                                                                                                                                                                                                                                                                                      | n/a                                                                                                                    |
 
 ## Where to look
@@ -381,26 +381,30 @@ only knew about one of them:
 1. **The send is refused.** `sendEmail()` throws, `src/lib/auth/auth.ts` reports
    it to Sentry, flushes and rethrows (`surface: auth-verification-email` /
    `auth-reset-password-email`). Already loud, unchanged.
-2. **The send is ACCEPTED and then fails.** useSend answers `2xx`, SES takes
-   the message, and it is later marked `BOUNCED` / `FAILED` / `COMPLAINED` /
-   `SUPPRESSED` — or it never leaves `QUEUED`. Nothing in the app ever learned
-   about this: grabcaramel.com's useSend log holds 55 `BOUNCED` and 2 `FAILED`
+2. **The send is ACCEPTED and then fails.** Sendly answers `202` (`PENDING`),
+   SES takes the message, and it is later marked `BOUNCED` / `FAILED` /
+   `REJECTED` / `RENDERING_FAILURE` (or the recipient files a spam complaint,
+   `complainedAt`) — or it never leaves `PENDING` / `SENDING`. Nothing in the
+   app ever learned about this: on the previous provider (useSend,
+   retired 2026-10-20) grabcaramel.com's log held 55 `BOUNCED` and 2 `FAILED`
    rows that reached no Sentry issue and no human.
 
 `src/lib/emailDeliveryHealthMonitor.ts` closes (2). Once per interval the server
-reads useSend's OWN send log (`GET /api/v1/emails`, filtered to our sending
-domain via `GET /api/v1/domains`), classifies the window, and raises **exactly
+reads Sendly's OWN email list (`GET /api/emails`, newest first, cursor-paged via
+`sendly.emails.list`; rows whose `from` is not our sending domain are skipped),
+classifies the window, and raises **exactly
 one** Sentry event per bad clock hour:
 
 | Window contains                | Sentry                                                 |
 | ------------------------------ | ------------------------------------------------------ |
-| only `DELIVERED`/`OPENED`/…    | nothing (one `[email-health] ok …` log line)           |
+| only `DELIVERED`/`SENT`/…      | nothing (one `[email-health] ok …` log line)           |
 | any failure status             | `Transactional email delivery degraded`, level `error` |
 | only stuck/delayed sends       | same message, level `warning`                          |
+| page budget ran out (gap)      | `…health check incomplete`, level `warning`            |
 | provider unreachable / refused | `…health check failed`, level `error`                  |
 
-The event carries counts, statuses, the window and the domain id — **never** a
-recipient, subject or body. The send log's PII fields are dropped at the parse
+The event carries counts, statuses, the window and the sender domain — **never** a
+recipient, subject or body. The list rows' PII fields are dropped at the parse
 boundary (`toEmailLogEntry`).
 
 **Schedule.** Caramel has no cron and no worker, so this is an `unref`'d
@@ -411,7 +415,7 @@ one event per clock hour per process. If the web service ever scales past one
 replica, move this to a real scheduler rather than adding a lock.
 
 **Config.** `EMAIL_DELIVERY_HEALTH_ENABLED` is unset by default, which means ON
-in production whenever `USESEND_API_KEY` is set and OFF everywhere else; `false`
+in production whenever `SENDLY_API_KEY` is set and OFF everywhere else; `false`
 opts a prod deploy out, `true` forces it on locally. The window length equals
 `EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES` (default 60). Boot logs the decision
 either way:
@@ -421,22 +425,43 @@ either way:
 ```
 
 **On demand.** The same check runs as a one-shot, from inside the prod container
-or anywhere the `USESEND_*` vars exist (it reads `process.env` directly and does
-NOT need `DATABASE_URL`). Exit code 0 = healthy/skipped, 1 = degraded or
-unreachable:
+or anywhere the `SENDLY_*` vars exist (it reads `process.env` directly and does
+NOT need `DATABASE_URL`). Exit code 0 = healthy/skipped, 1 = degraded, incomplete
+or unreachable:
 
 ```bash
 pnpm --filter caramel-app run email:health -- --minutes 1440
 # [email-health] ok window=… scanned=152 failed=0 delayed=0 stuck=0 (DELIVERED=152)
 ```
 
-**If it reports degraded:** open useSend (`usesend.devino.ca`) for the affected
-window — the counts in the Sentry event tell you which class. `BOUNCED` in bulk
-usually means a recipient-side or reputation problem (check
-`GET /api/v1/analytics/reputation-metrics`); `FAILED` in bulk usually means SES
-or the domain's verification (`GET /api/v1/domains` → `dkimStatus`/`spfDetails`
-must be `SUCCESS`); a pile of stuck `QUEUED` means useSend accepted mail it is
-not draining.
+**Key scopes.** The key needs `emails:send` (sending) and `emails:read` (the
+check lists sent mail); without `emails:read` the check is a permanent `error`
+report.
+
+**Shared project.** grabcaramel.com lives in the shared Sendly "Devino" project
+(other Devino apps send from it too) and a key cannot be limited to one domain.
+So the check is always pinned to `SENDLY_FROM_EMAIL`: the list query is
+narrowed with Sendly's `from` filter (exact match on the bare address), rows
+are re-filtered to the sender domain, and with no usable sender the check
+refuses to run (`error`) instead of scanning the whole project.
+`SENDLY_FROM_EMAIL` is zod-validated as an email address at boot.
+
+**Incomplete coverage.** If the page budget (10 pages x 50 rows) runs out before
+the start of the window, the result is `incomplete` - reported to Sentry (level
+`warning`) and a non-zero exit from `email:health` - never `ok`. A window that
+also contains a bad row stays `degraded`.
+
+**If it reports degraded:** open Sendly (docs: https://docs.sendly.now) for the
+affected window — the counts in the Sentry event tell you which class.
+`BOUNCED` in bulk usually means a recipient-side or reputation problem (Sendly's
+`deliverability` reports: `sendly.deliverability.diagnose`); `FAILED` /
+`REJECTED` in bulk usually means SES or the domain's verification (the domain's
+`dkimStatus`/`spfStatus` must be verified); a pile of stuck `PENDING` /
+`SENDING` means Sendly accepted mail it is not draining.
+
+**Sendly text part.** Sendly's send API takes one HTML `body` and no separate
+plain-text part, so mail goes out HTML-only (a text-only caller is rendered to
+escaped HTML in `src/lib/email.ts`).
 
 ## Privacy-policy commitments (log retention, account deletion)
 
@@ -561,9 +586,15 @@ redeploy. The extension reads the same condition from `GET /api/extension/featur
 `model_ms` when a model was called, `store`, `model`). Requests refused earlier
 by withRoute (non-extension Origin 403, generic rate limit 429) emit nothing.
 `outcome` is one of `box`, `no_box`, `no_pick:disabled`, `no_pick:model_error`,
-`no_pick:unparsable`, `budget_exceeded:client|global|daily`, `too_large`,
+`no_pick:unparsable`, `no_pick:refused_button`,
+`budget_exceeded:client|global|daily`, `too_large`,
 `invalid`, `server_error` (`COUPON_BOX_PICK_OUTCOMES` in
 `src/lib/analytics/couponBoxPickOutcome.ts`).
+`no_pick:refused_button` is the whole answer refused, not only its button. An
+answer that names a good toggle and no input, but also names an apply button
+the server refuses (checkout, place order, a gift card or store credit
+control), is discarded with its toggle: the extension gets nothing for that
+page, though the toggle alone would have opened the box.
 
 Outcome mix, last 24h:
 

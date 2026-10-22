@@ -84,14 +84,26 @@ const serverObjectSchema = z.object({
     // (401) when it's unset. Never shipped to any client.
     INGEST_API_KEY: z.string().optional(),
     UPKUMA_HEALTH_SECRET: z.string().optional(),
-    // Read directly by the usesend-js SDK — not by our own code — but still
-    // part of the validated contract so it's documented and drift-checked.
-    USESEND_BASE_URL: z.string().optional(),
-    USESEND_API_KEY: z.string().optional(),
-    USESEND_FROM_EMAIL: z.string().default('no_reply@grabcaramel.com'),
-    USESEND_FROM_NAME: z.string().default('Caramel'),
+    // Sendly is the ONLY email transport (src/lib/email.ts); useSend and Resend
+    // are retired. The key is optional so a dev/CI boot without email still
+    // starts — sendEmail() throws loudly at send time if it is missing.
+    SENDLY_API_KEY: z.string().optional(),
+    // Leave unset for production (SDK default https://api.sendly.now); only
+    // set to aim the SDK at a staging API.
+    SENDLY_BASE_URL: z.string().optional(),
+    // The BARE sender address (no "Name <...>" form; the display name is
+    // SENDLY_FROM_NAME). It also selects which sends the delivery-health check
+    // reads: grabcaramel.com shares the Sendly "Devino" project with other
+    // Devino apps, so an empty or malformed value must fail the boot here
+    // rather than let the health check scan another app's mail.
+    SENDLY_FROM_EMAIL: z
+        .email({
+            error: 'SENDLY_FROM_EMAIL must be a bare email address such as no_reply@grabcaramel.com',
+        })
+        .default('no_reply@grabcaramel.com'),
+    SENDLY_FROM_NAME: z.string().default('Caramel'),
     // Async email-delivery health (src/lib/emailDeliveryHealthMonitor.ts).
-    // Unset → ON in production whenever USESEND_API_KEY is set, OFF elsewhere.
+    // Unset → ON in production whenever SENDLY_API_KEY is set, OFF elsewhere.
     // 'false' opts a production deploy out; 'true' forces it on in dev/CI.
     // A typo'd value fails the boot instead of silently disabling the check —
     // "it was never running" is exactly the failure this monitor exists to end.
@@ -168,6 +180,16 @@ const serverObjectSchema = z.object({
     // extension may find a store's promo box itself when no config describes
     // it. Same strict two-value enum as SHOPPER_CODE_CAPTURE_ENABLED.
     COUPON_BOX_DISCOVERY_ENABLED: z
+        .enum(['true', 'false'])
+        .default('false')
+        .transform(value => value === 'true'),
+    // Served to the extension as `couponBoxSave` by GET
+    // /api/extension/features. On, a promo box the extension found and proved
+    // on a store with no config may be saved as that store's config through
+    // POST /api/extension/coupon-box-save (couponBoxSave.ts). Off, the route
+    // answers 404 and the extension never calls it. Same strict two-value
+    // enum as SHOPPER_CODE_CAPTURE_ENABLED.
+    COUPON_BOX_SAVE_ENABLED: z
         .enum(['true', 'false'])
         .default('false')
         .transform(value => value === 'true'),

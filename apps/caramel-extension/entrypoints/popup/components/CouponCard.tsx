@@ -93,6 +93,15 @@ export function CouponCard({
                 <div className="coupon-desc">{coupon.description}</div>
             )}
 
+            {coupon.newCustomersOnly && (
+                <div
+                    className="coupon-new-customers"
+                    title="This code works only for a new account at this store."
+                >
+                    New customers only
+                </div>
+            )}
+
             {isRestricted && (
                 <div
                     className="coupon-restriction"

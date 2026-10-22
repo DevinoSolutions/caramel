@@ -2,6 +2,9 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { initCaramelBase } from '../caramel-base.js'
 import { removeAppliedCoupon } from '../coupon-apply.js'
 import { startApplyingCoupons } from '../coupon-runner.js'
+import { tabHandoffBackground } from './_tab-handoff-background.mjs'
+// The background's side of the per-tab handoffs (see the helper).
+const handoffs = tabHandoffBackground()
 
 // A cart that ALREADY has a discount on it is the most expensive thing this
 // flow can get wrong, and the DOM path got it wrong twice over.
@@ -108,7 +111,8 @@ beforeAll(() => {
     // and "no verdict was sent" is pinned as "no message was sent".
     globalThis.chrome = {
         runtime: {
-            sendMessage: msg => {
+            sendMessage: (msg, cb) => {
+                if (handoffs.answers(msg, cb)) return
                 if (msg?.action !== 'reportOutcome') return
                 reportedOutcomes.push({
                     id: msg.id,
@@ -125,6 +129,7 @@ beforeAll(() => {
 })
 
 beforeEach(() => {
+    handoffs.reset()
     document.body.innerHTML =
         '<input id="promo" /><button id="apply">Apply</button><div id="total"></div>'
     setTotalText('Order Total $80.00')

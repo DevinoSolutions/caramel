@@ -11,6 +11,7 @@ let handler
 let fetchCalls
 let responses // queue of fetch results, consumed in order
 let sessionData
+let localData
 
 function installWorkerRealm() {
     const cache = new WeakMap()
@@ -41,7 +42,7 @@ function installWorkerRealm() {
             cb?.()
         },
     })
-    const localData = {}
+    localData = {}
     const syncData = {}
     stub.storage.local = area(() => localData)
     stub.storage.sync = area(() => syncData)
@@ -49,6 +50,7 @@ function installWorkerRealm() {
     stub.runtime.lastError = undefined
     const listeners = []
     stub.runtime.onMessage.addListener = fn => listeners.push(fn)
+    stub.tabs.onRemoved.addListener = () => {}
     globalThis.ServiceWorkerGlobalScope = {
         [Symbol.hasInstance]: () => true,
     }

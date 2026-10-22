@@ -2,6 +2,9 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { initCaramelBase } from '../caramel-base.js'
 import { caramelEstimatedValue, caramelRankByValue } from '../coupon-fetch.js'
 import { startApplyingCoupons } from '../coupon-runner.js'
+import { tabHandoffBackground } from './_tab-handoff-background.mjs'
+// The background's side of the per-tab handoffs (see the helper).
+const handoffs = tabHandoffBackground()
 
 // The pill says "the best code". It was taking the first one.
 //
@@ -103,7 +106,8 @@ beforeAll(() => {
     // and "claims no win" is pinned as "nothing was sent".
     globalThis.chrome = {
         runtime: {
-            sendMessage: msg => {
+            sendMessage: (msg, cb) => {
+                if (handoffs.answers(msg, cb)) return
                 if (msg?.action !== 'reportOutcome') return
                 outcomeCalls.push(
                     msg.storeReason === undefined
@@ -128,6 +132,7 @@ beforeAll(() => {
 // in the real browser.
 
 beforeEach(() => {
+    handoffs.reset()
     document.body.innerHTML = ''
     sessionStorage.clear()
     linkCalls = []
@@ -164,8 +169,8 @@ beforeEach(() => {
     ]
 })
 
-const applied = () =>
-    JSON.parse(sessionStorage.getItem('caramel_applied') || 'null')
+// The discount-link win the background holds for the reloaded page.
+const applied = () => handoffs.peek('applied')
 
 describe('what a coupon is plausibly worth', () => {
     it('scales a percentage against the cart', () => {
@@ -267,8 +272,8 @@ describe('the winner is the best measured total, not the first that moves', () =
     it('banks the bigger saving', async () => {
         await startApplyingCoupons(REC)
 
-        expect(applied().code).toBe('FLASH35')
-        expect(applied().saved).toBeCloseTo(47.25, 2)
+        expect((await applied()).code).toBe('FLASH35')
+        expect((await applied()).saved).toBeCloseTo(47.25, 2)
     })
 
     it('leaves the winning code on the cart, not the last one probed', async () => {
@@ -292,8 +297,8 @@ describe('the winner is the best measured total, not the first that moves', () =
 
         await startApplyingCoupons(REC)
 
-        expect(applied().code).toBe('TREAT22')
-        expect(applied().saved).toBeCloseTo(1.35, 2)
+        expect((await applied()).code).toBe('TREAT22')
+        expect((await applied()).saved).toBeCloseTo(1.35, 2)
     })
 })
 
@@ -319,7 +324,7 @@ describe('what we report is what ended up on the cart', () => {
 
         await startApplyingCoupons(REC)
 
-        expect(applied()).toBeNull()
+        expect(await applied()).toBeNull()
         expect(outcomeCalls).toEqual([])
     })
 
@@ -359,7 +364,7 @@ describe('what we report is what ended up on the cart', () => {
 
         await startApplyingCoupons(REC)
 
-        expect(applied()).toBeNull()
+        expect(await applied()).toBeNull()
     })
 
     it('reports the smaller amount when the re-apply lands for less', async () => {
@@ -368,8 +373,8 @@ describe('what we report is what ended up on the cart', () => {
 
         await startApplyingCoupons(REC)
 
-        expect(applied().code).toBe('FLASH35')
-        expect(applied().saved).toBeCloseTo(10, 2)
+        expect((await applied()).code).toBe('FLASH35')
+        expect((await applied()).saved).toBeCloseTo(10, 2)
     })
 })
 

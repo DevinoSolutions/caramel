@@ -55,9 +55,7 @@ const PrivacyPolicy = () => {
                     <Para>
                         The Caramel extension talks only to Caramel&apos;s own
                         server (grabcaramel.com). The extension itself contains
-                        no ads and no third-party trackers. Its only usage
-                        analytics is an anonymous daily usage count in Google
-                        Chrome, described below.
+                        no ads, no analytics and no third-party trackers.
                     </Para>
                     <Sub>Whether or not you are signed in</Sub>
                     <Bullets
@@ -141,38 +139,6 @@ const PrivacyPolicy = () => {
                                 auto-apply is on, the sites where you paused
                                 Caramel, and your savings-sync and
                                 checkout-sharing choices.
-                            </>,
-                            <>
-                                <strong>
-                                    Daily usage count (Google Chrome only).
-                                </strong>{' '}
-                                When you open the extension&apos;s popup, the
-                                extension sends an anonymous message to our
-                                server (grabcaramel.com) so we can count how
-                                many installations are used each day (by UTC).
-                                Once a day has been counted, nothing more is
-                                sent that day. If it was not counted — for
-                                example because counting is switched off on our
-                                server, or the message failed — the message
-                                still reaches our server, nothing is recorded,
-                                and the extension tries again on a later popup
-                                open no sooner than 30 minutes to 6 hours later.
-                                The message contains only: a random ID that
-                                changes every day, the date, the
-                                extension&apos;s version number, and the browser
-                                name (&quot;chrome&quot;). The daily ID is
-                                derived from a random value that is created when
-                                you first open the popup and never leaves your
-                                browser, so the IDs from different days cannot
-                                be linked to each other or to you. If you are
-                                signed in, your sign-in token travels with the
-                                message as with every other request, and our
-                                server only records whether you were signed in
-                                (yes or no) — never your account, email, the
-                                sites you visit or your coupons. It is not sent
-                                at any other time (not when you browse, switch
-                                tabs or apply coupons), and it is not sent by
-                                Caramel for Firefox, Safari or Microsoft Edge.
                             </>,
                             <>
                                 <strong>
@@ -303,7 +269,6 @@ const PrivacyPolicy = () => {
                             'Run your account: sign-in, favorite stores and, if you turn it on, your savings history.',
                             'Publish codes you choose to share so other shoppers can use them.',
                             'Keep Caramel secure and working: limit abuse, and find and fix errors.',
-                            'Count how many Caramel installations in Google Chrome are used each day, as an anonymous total.',
                             'Find the promo-code box on a cart page when a store’s known rules cannot (an AI model reads the cart-page outline described above).',
                         ]}
                     />
@@ -328,7 +293,7 @@ const PrivacyPolicy = () => {
                     <Bullets
                         items={[
                             'Your settings, kept in your browser’s extension storage. If you use your browser’s sync feature, your browser syncs them to your other devices.',
-                            'Your sign-in session token, your account name, email and profile picture (cached for the popup), a short log of your recent savings, a cached list of supported stores, recent diagnostic timings, and (in Google Chrome) the random value behind the daily usage count and the date it was last counted, kept in the extension’s local storage on this device. The random value is never synced or sent.',
+                            'Your sign-in session token, your account name, email and profile picture (cached for the popup), a short log of your recent savings, a cached list of supported stores, and recent diagnostic timings, kept in the extension’s local storage on this device.',
                             'While Caramel tries codes on a store page, the codes tried and the result are kept in that tab’s session storage, which your browser clears when you close the tab.',
                             'Uninstalling the extension removes everything it stored in your browser.',
                         ]}
@@ -341,8 +306,7 @@ const PrivacyPolicy = () => {
                             'Sign-in sessions expire after 7 days (website sessions are extended while you stay active); signing out ends the session and deletes its record immediately. Records of sessions that expire without signing out, including their IP address and browser type, are kept until you delete your account.',
                             'Cart page summaries are not stored in our database. They are processed to classify your cart, and the result is kept in temporary memory for up to 24 hours so the same cart is not processed twice.',
                             'Cart-page outlines (see “Finding the promo-code box” above) are not stored in our database. The model’s answer, which control is the code box, is kept in temporary memory for up to 24 hours for that store and page shape so the same page is not processed twice, looked up by a one-way hash of the store and outline rather than by the outline itself. Your IP address is used to rate-limit these requests. The outcome event described above is kept in our self-hosted analytics.',
-                            'Coupon results without an account are kept only as anonymous per-code totals (when a code last worked or failed, and the store’s last error message).',
-                            'Daily usage count messages are kept in our self-hosted product analytics (PostHog) with only the fields described above; they are not linked to your account or to each other.',
+                            'Coupon results are kept as per-code totals (when a code last worked or failed, and the store’s last error message). To stop fake reports from hiding or reviving a code, each “worked” or “didn’t work” report also keeps a one-way keyed hash of your IP address, or of your account if you are signed in. It cannot be turned back into your IP or account, and it is deleted after 30 days.',
                             'Shared codes stay published while they are valid; deleting your account removes the link between a shared code and you.',
                             'Server logs, which can include IP addresses and browser type, are kept for up to 90 days for security and troubleshooting.',
                         ]}
@@ -392,8 +356,8 @@ const PrivacyPolicy = () => {
                             </>,
                             <>
                                 <strong>
-                                    UseSend (self-hosted by Devino) and Amazon
-                                    Web Services (Amazon SES)
+                                    Sendly (operated by Devino) and Amazon Web
+                                    Services (Amazon SES)
                                 </strong>
                                 : your email address, to deliver account emails
                                 such as sign-up verification and password
@@ -452,9 +416,7 @@ const PrivacyPolicy = () => {
             content: (
                 <>
                     <Para>
-                        On grabcaramel.com we use the following (the
-                        extension&apos;s only analytics is the anonymous daily
-                        usage count described above):
+                        On grabcaramel.com (not in the extension) we use:
                     </Para>
                     <Bullets
                         items={[

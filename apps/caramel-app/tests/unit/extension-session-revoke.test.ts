@@ -54,6 +54,34 @@ describe('DELETE /api/extension/session — revoking an extension session', () =
         })
     })
 
+    it('revokes a bearer minted by email/password sign-in, which is the SIGNED form', async () => {
+        // /api/extension/login returns better-auth's `<raw>.<signature>`; the
+        // Session row holds only `<raw>`. Keyed by the full string, the delete
+        // matched nothing and the bearer stayed live for 7 days.
+        const raw = 'Ab3dEf6hIj9kLm2nOp5qRs8tUv1wXy4z'
+        const res = await del({
+            authorization: `Bearer ${raw}.u8Ixk2ZqWw7m0nQ1rT9v+eYbC3dF5gH6jK8lM0pN2s=`,
+        })
+
+        expect(res.status).toBe(200)
+        expect(deleteManyMock).toHaveBeenCalledWith({ where: { token: raw } })
+    })
+
+    it('leaves an OAuth-minted (raw, base64url) bearer exactly as presented', async () => {
+        const raw = 'q1_w2-E3r4T5y6U7i8O9p0A1s2D3f4G5h6J7k8L9z0X'
+        await del({ authorization: `Bearer ${raw}` })
+
+        expect(deleteManyMock).toHaveBeenCalledWith({ where: { token: raw } })
+    })
+
+    it('never deletes by an empty token when the bearer starts with a dot', async () => {
+        await del({ authorization: 'Bearer .only-a-signature' })
+
+        for (const call of deleteManyMock.mock.calls) {
+            expect(call[0]?.where?.token).toBeTruthy()
+        }
+    })
+
     it('is idempotent — an already-revoked token still succeeds', async () => {
         deleteManyMock.mockResolvedValue({ count: 0 })
 

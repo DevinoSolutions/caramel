@@ -1,5 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { initCaramelBase } from '../caramel-base.js'
+import { _caramelResetFinderLoad } from '../coupon-box-finder-loader.js'
 import { startApplyingCoupons } from '../coupon-runner.js'
 import {
     caramelMarkPendingSubmit,
@@ -10,6 +11,10 @@ import {
     getDomainRecord,
     startCheckoutDetection,
 } from '../store-detect.js'
+import { finderOnlyGetURL } from './_finder-asset.mjs'
+import { tabHandoffBackground } from './_tab-handoff-background.mjs'
+// The background's side of the per-tab handoffs (see the helper).
+const handoffs = tabHandoffBackground()
 
 // Submitting a promo code on a classic checkout is a form POST: the page
 // navigates and takes the content script, the overlay, and everything the run
@@ -129,7 +134,9 @@ function installChromeStub() {
         }
     }
     stub.runtime.lastError = undefined
+    stub.runtime.getURL = finderOnlyGetURL
     stub.runtime.sendMessage = (message, cb) => {
+        if (handoffs.answers(message, cb)) return
         if (message?.action === 'fetchCoupons') {
             if (typeof cb === 'function') cb({ coupons: couponList })
             return
@@ -163,6 +170,7 @@ beforeAll(() => {
 
 beforeEach(() => {
     sessionStorage.clear()
+    handoffs.reset()
     document.body.innerHTML = ''
     window.history.replaceState({}, '', '/cart')
     finalModalCalls = []
@@ -188,10 +196,10 @@ beforeEach(() => {
 })
 
 describe('dom-utils.js — the pending-submit record', () => {
-    it('round-trips the code, its id, and the prices seen before submitting', () => {
-        caramelMarkPendingSubmit('THEO20', 'c1', [73.9, 59.12])
+    it('round-trips the code, its id, and the prices seen before submitting', async () => {
+        await caramelMarkPendingSubmit('THEO20', 'c1', [73.9, 59.12])
 
-        expect(caramelTakePendingSubmit()).toEqual({
+        expect(await caramelTakePendingSubmit()).toEqual({
             code: 'THEO20',
             id: 'c1',
             prices: [73.9, 59.12],
@@ -200,36 +208,34 @@ describe('dom-utils.js — the pending-submit record', () => {
         })
     })
 
-    it('records no outcome at all — only what was known before the submit', () => {
-        caramelMarkPendingSubmit('THEO20', 'c1', [73.9])
-        const stored = JSON.parse(
-            sessionStorage.getItem('caramel_pending_submit'),
-        )
+    it('records no outcome at all — only what was known before the submit', async () => {
+        await caramelMarkPendingSubmit('THEO20', 'c1', [73.9])
+        const stored = await handoffs.peek('pending_submit')
 
         expect(stored).not.toHaveProperty('saved')
         expect(stored).not.toHaveProperty('success')
     })
 
-    it('is consumed on read, so an attempt is announced once and not again', () => {
-        caramelMarkPendingSubmit('THEO20', 'c1', [73.9])
+    it('is consumed on read, so an attempt is announced once and not again', async () => {
+        await caramelMarkPendingSubmit('THEO20', 'c1', [73.9])
 
-        expect(caramelTakePendingSubmit()).not.toBeNull()
-        expect(caramelTakePendingSubmit()).toBeNull()
+        expect(await caramelTakePendingSubmit()).not.toBeNull()
+        expect(await caramelTakePendingSubmit()).toBeNull()
     })
 
-    it('ignores a record from a visit the user has moved on from', () => {
-        caramelMarkPendingSubmit('THEO20', 'c1', [73.9])
+    it('ignores a record from a visit the user has moved on from', async () => {
+        await caramelMarkPendingSubmit('THEO20', 'c1', [73.9])
 
-        expect(caramelTakePendingSubmit(0)).toBeNull()
+        expect(await caramelTakePendingSubmit(0)).toBeNull()
     })
 
-    it('survives blocked storage without throwing', () => {
-        expect(() =>
+    it('survives blocked storage without throwing', async () => {
+        await expect(
             caramelMarkPendingSubmit('THEO20', 'c1', [Number.NaN]),
-        ).not.toThrow()
+        ).resolves.toBeUndefined()
         // NaN is not JSON — it would have deserialised as null and poisoned the
         // baseline maths, so it never gets stored in the first place.
-        expect(caramelTakePendingSubmit().prices).toEqual([])
+        expect((await caramelTakePendingSubmit()).prices).toEqual([])
     })
 })
 
@@ -256,7 +262,7 @@ describe('coupon-runner.js — the record is written before the submit', () => {
         applyCouponImpl = async () => {
             // Stands in for the form POST: this is the moment the real page
             // navigates and this content script stops existing.
-            inFlight = caramelTakePendingSubmit()
+            inFlight = await caramelTakePendingSubmit()
             return {
                 success: false,
                 newTotal: 73.9,
@@ -273,6 +279,43 @@ describe('coupon-runner.js — the record is written before the submit', () => {
         expect(inFlight.prices).toContain(73.9)
     })
 
+    it('is held by the background before the submit goes out', async () => {
+        // A submit that navigates ends this document: a record still on its
+        // way to the background could be lost with it.
+        const send = chrome.runtime.sendMessage
+        let unanswered = 0
+        chrome.runtime.sendMessage = (message, cb) => {
+            if (message?.action !== 'tabHandoff') return send(message, cb)
+            unanswered++
+            setTimeout(
+                () =>
+                    send(message, r => {
+                        unanswered--
+                        cb?.(r)
+                    }),
+                5,
+            )
+        }
+        let unansweredAtSubmit = null
+        applyCouponImpl = async () => {
+            unansweredAtSubmit = unanswered
+            return {
+                success: false,
+                newTotal: 73.9,
+                committed: false,
+                errorMsg: null,
+            }
+        }
+
+        try {
+            await startApplyingCoupons(RUNNER_REC)
+        } finally {
+            chrome.runtime.sendMessage = send
+        }
+
+        expect(unansweredAtSubmit).toBe(0)
+    })
+
     it('leaves nothing behind when the attempt returns normally', async () => {
         applyCouponImpl = async () => ({
             success: false,
@@ -283,14 +326,14 @@ describe('coupon-runner.js — the record is written before the submit', () => {
 
         await startApplyingCoupons(RUNNER_REC)
 
-        expect(caramelTakePendingSubmit()).toBeNull()
+        expect(await caramelTakePendingSubmit()).toBeNull()
     })
 })
 
 describe('store-detect.js — the page after the navigation', () => {
     it('reports a measured win instead of leaving the user in silence', async () => {
         // $73.90 before, $59.12 after: the real 1800petmeds numbers.
-        caramelMarkPendingSubmit('THEO20', 'c1', [73.9])
+        await caramelMarkPendingSubmit('THEO20', 'c1', [73.9])
         setTotalText('Order Total $59.12')
 
         await startCheckoutDetection()
@@ -302,7 +345,7 @@ describe('store-detect.js — the page after the navigation', () => {
     })
 
     it('banks the measured win and credits the coupon', async () => {
-        caramelMarkPendingSubmit('THEO20', 'c1', [73.9])
+        await caramelMarkPendingSubmit('THEO20', 'c1', [73.9])
         setTotalText('Order Total $59.12')
 
         await startCheckoutDetection()
@@ -314,7 +357,7 @@ describe('store-detect.js — the page after the navigation', () => {
     })
 
     it('does not re-prompt as if the attempt had never happened', async () => {
-        caramelMarkPendingSubmit('THEO20', 'c1', [73.9])
+        await caramelMarkPendingSubmit('THEO20', 'c1', [73.9])
         setTotalText('Order Total $59.12')
 
         await startCheckoutDetection()
@@ -338,7 +381,7 @@ describe('store-detect.js — the page after the navigation', () => {
     }
 
     it('a finder attempt is read by the finder total, never the stale config number', async () => {
-        caramelMarkPendingSubmit('THEO20', 'c1', [110], true)
+        await caramelMarkPendingSubmit('THEO20', 'c1', [110], true)
         setTotalText('$100.00')
         mountFinderTotal('$110.00')
 
@@ -350,7 +393,7 @@ describe('store-detect.js — the page after the navigation', () => {
     })
 
     it('a finder attempt whose total row dropped is a measured win', async () => {
-        caramelMarkPendingSubmit('THEO20', 'c1', [110], true)
+        await caramelMarkPendingSubmit('THEO20', 'c1', [110], true)
         setTotalText('$100.00')
         mountFinderTotal('$99.00')
 
@@ -360,8 +403,29 @@ describe('store-detect.js — the page after the navigation', () => {
         expect(recordedSavings[0].amount).toBeCloseTo(11, 2)
     })
 
+    it('a finder attempt on a page whose finder will not load: no saving, nothing thrown', async () => {
+        caramelMarkPendingSubmit('THEO20', 'c1', [110], true)
+        setTotalText('$100.00')
+        mountFinderTotal('$99.00')
+        const { runtime } = globalThis.chrome
+        _caramelResetFinderLoad()
+        runtime.getURL = () => {
+            throw new Error('Extension context invalidated.')
+        }
+        try {
+            await startCheckoutDetection()
+        } finally {
+            runtime.getURL = finderOnlyGetURL
+            _caramelResetFinderLoad()
+        }
+
+        // The same page as the measured win above: only the finder is gone,
+        // and with it the one reader of the total row the attempt used.
+        expect(recordedSavings).toEqual([])
+    })
+
     it('a finder attempt measured on a subtotal is read on the subtotal after the reload', async () => {
-        caramelMarkPendingSubmit('THEO20', 'c1', [110], 'subtotal')
+        await caramelMarkPendingSubmit('THEO20', 'c1', [110], 'subtotal')
         const row = document.createElement('div')
         row.innerHTML = '<span>Subtotal</span> <span>$99.00</span>'
         Object.defineProperty(row, 'innerText', {
@@ -388,7 +452,7 @@ describe('store-detect.js — the page after the navigation', () => {
     }
 
     it('a finder attempt never banks a $0.00 total the reloaded page shows first', async () => {
-        caramelMarkPendingSubmit('THEO20', 'c1', [100], 'total')
+        await caramelMarkPendingSubmit('THEO20', 'c1', [100], 'total')
         addRow(
             '<span>Order total</span> <span>$0.00</span>',
             'Order total $0.00',
@@ -401,7 +465,7 @@ describe('store-detect.js — the page after the navigation', () => {
 
     it("a finder attempt never reads a line item's own total while the reloaded summary is still loading", async () => {
         // The attempt measured "Order total" with two total rows on the page.
-        caramelMarkPendingSubmit('THEO20', 'c1', [100], {
+        await caramelMarkPendingSubmit('THEO20', 'c1', [100], {
             kind: 'total',
             label: 'order total',
             rows: 2,
@@ -414,16 +478,16 @@ describe('store-detect.js — the page after the navigation', () => {
     })
 
     it('a finder record that names no row kind is still read as a finder total', async () => {
-        caramelMarkPendingSubmit('THEO20', 'c1', [100], {
+        await caramelMarkPendingSubmit('THEO20', 'c1', [100], {
             label: 'order total',
             rows: 1,
         })
 
-        expect(caramelTakePendingSubmit()?.finder).toBe('total')
+        expect((await caramelTakePendingSubmit())?.finder).toBe('total')
     })
 
     it('a finder attempt reads the same total row after the reload', async () => {
-        caramelMarkPendingSubmit('THEO20', 'c1', [100], {
+        await caramelMarkPendingSubmit('THEO20', 'c1', [100], {
             kind: 'total',
             label: 'order total',
             rows: 2,
@@ -442,7 +506,7 @@ describe('store-detect.js — the page after the navigation', () => {
     })
 
     it('claims nothing when the total did not move', async () => {
-        caramelMarkPendingSubmit('THEO20', 'c1', [73.9])
+        await caramelMarkPendingSubmit('THEO20', 'c1', [73.9])
         setTotalText('Order Total $73.90')
 
         await startCheckoutDetection()
@@ -457,7 +521,7 @@ describe('store-detect.js — the page after the navigation', () => {
     it('does not blame the coupon for a page that navigated', async () => {
         // The runner's rule, held here too: only the store's own rejection
         // words count as evidence against a code.
-        caramelMarkPendingSubmit('THEO20', 'c1', [73.9])
+        await caramelMarkPendingSubmit('THEO20', 'c1', [73.9])
         setTotalText('Order Total $73.90')
 
         await startCheckoutDetection()
@@ -466,7 +530,7 @@ describe('store-detect.js — the page after the navigation', () => {
     })
 
     it('offers the OTHER codes, not the one that just failed to move it', async () => {
-        caramelMarkPendingSubmit('THEO20', 'c1', [73.9])
+        await caramelMarkPendingSubmit('THEO20', 'c1', [73.9])
         setTotalText('Order Total $73.90')
 
         await startCheckoutDetection()
@@ -478,7 +542,7 @@ describe('store-detect.js — the page after the navigation', () => {
     it('says it cannot tell, rather than guessing, when nothing is readable', async () => {
         // No price on the page at all — the case where treating "submitted +
         // reloaded" as success would invent a saving.
-        caramelMarkPendingSubmit('THEO20', 'c1', [73.9])
+        await caramelMarkPendingSubmit('THEO20', 'c1', [73.9])
 
         await startCheckoutDetection()
 
@@ -493,7 +557,7 @@ describe('store-detect.js — the page after the navigation', () => {
     it('never turns a price RISE into a saving', async () => {
         // Shipping added after the reload: the tightest-baseline rule has no
         // candidate at or above the new total, so there is no figure to claim.
-        caramelMarkPendingSubmit('THEO20', 'c1', [73.9])
+        await caramelMarkPendingSubmit('THEO20', 'c1', [73.9])
         setTotalText('Order Total $81.40')
 
         await startCheckoutDetection()

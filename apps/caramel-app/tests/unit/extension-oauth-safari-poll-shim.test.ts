@@ -5,6 +5,7 @@ import {
     POST as redirectPOST,
 } from '@/app/api/extension/oauth/redirect/route'
 import { POST as oauthPOST } from '@/app/api/extension/oauth/route'
+import { codeBoundToState } from '@/lib/auth/extensionOAuthCodeBinding'
 import { resetNonceStoreForTests } from '@/lib/extension-oauth-nonce'
 import { NextRequest } from 'next/server'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -53,6 +54,11 @@ const { envMock, KNOWN_ORIGIN, BASE } = vi.hoisted(() => {
             GOOGLE_CLIENT_SECRET: 'test-google-client-secret',
             APPLE_CLIENT_ID: 'test-apple-client-id',
             BETTER_AUTH_URL: BASE,
+            // oauthTokenCrypto.ts encrypts the stored access/refresh tokens.
+            BETTER_AUTH_SECRET: 'safari-shim-test-auth-secret' as
+                | string
+                | undefined,
+            JWT_SECRET: undefined as string | undefined,
             CHROME_EXTENSION_ORIGIN: 'chrome-extension://known-chrome-id',
             FIREFOX_EXTENSION_ORIGIN: undefined as string | undefined,
             SAFARI_EXTENSION_ORIGIN: KNOWN_ORIGIN as string | undefined,
@@ -441,7 +447,13 @@ describe('the Chrome/Firefox redirect path is untouched', () => {
         expect(res.status).toBeLessThan(400)
         const loc = new URL(res.headers.get('location')!)
         expect(loc.origin + loc.pathname).toBe(CHROME_REDIRECT_URI)
-        expect(loc.searchParams.get('code')).toBe('FAKE_CODE')
+        // Bound to the state it came back with (extensionOAuthCodeBinding.ts).
+        expect(
+            codeBoundToState(
+                loc.searchParams.get('code') ?? '',
+                'signed-state-without-nonce',
+            ),
+        ).toBe('FAKE_CODE')
     })
 
     it('still applies the origin guard to a hostile destination', async () => {

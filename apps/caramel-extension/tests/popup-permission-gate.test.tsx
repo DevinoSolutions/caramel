@@ -267,6 +267,13 @@ describe('Safari asks for a different pattern and can refuse the prompt outright
         // for, or nothing at all, so the view carries the menus that always
         // work alongside the button.
         expect(screen.getByText(/For other websites/)).toBeInTheDocument()
+        // iOS 26 Safari (walked 2026-10-19): no "AA" button, and "Always
+        // Allow…" then asks This Website or Every Website; only the second
+        // grants every site, so the copy has to name it.
+        const steps = screen.getByText(/For other websites/).closest('p')
+        expect(steps?.textContent).toContain('Always Allow on Every Website')
+        expect(steps?.textContent).toContain('page menu')
+        expect(steps?.textContent).not.toMatch(/AA/)
 
         fireEvent.click(screen.getByRole('button', { name: 'Enable Caramel' }))
         expect(requestCalls).toEqual([{ origins: ['<all_urls>'] }])

@@ -48,7 +48,7 @@ vi.mock('@/lib/prisma', () => ({
 
 type IngestCoupon = IngestCatalogPayload['coupons'][number]
 
-const TUPLE_WIDTH = 16
+const TUPLE_WIDTH = 17
 const ID_AT = 0
 const CODE_AT = 1
 const SITE_AT = 2
@@ -346,7 +346,7 @@ describe('applyCatalogRows - a pushed id that holds a different coupon is never 
         const calls = txMock.$queryRaw.mock.calls as unknown as Captured[][]
         const select = calls[0]?.[0]
         expect(select?.sql).toMatch(
-            /SELECT id, site, code, expired, status, updated_at FROM coupons/,
+            /SELECT id, site, code, expired, status, updated_at, new_customers_only FROM coupons/,
         )
     })
 

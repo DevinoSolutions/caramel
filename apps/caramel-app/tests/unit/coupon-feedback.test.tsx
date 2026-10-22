@@ -192,6 +192,29 @@ describe('CouponCard — "Did it work?" control', () => {
         expect(screen.getByText('Save 10%')).toBeTruthy()
     })
 
+    it('a 404 (the code left the catalog since the page rendered) is a quiet "no longer listed" note: nothing reported, nothing remembered, no retry', async () => {
+        stubFetch({
+            ok: false,
+            status: 404,
+            json: async () => ({ error: 'Unknown coupon' }),
+        })
+        render(<CouponCard coupon={baseCoupon} index={0} />)
+        await copyCode()
+        fireEvent.click(screen.getByRole('button', { name: 'Yes, it worked' }))
+
+        expect(
+            await screen.findByText('That code is no longer listed.'),
+        ).toBeTruthy()
+        expect(reportMock).not.toHaveBeenCalled()
+        expect(
+            window.localStorage.getItem('caramel:coupon-vote:4242'),
+        ).toBeNull()
+        expect(
+            screen.queryByRole('button', { name: 'Yes, it worked' }),
+        ).toBeNull()
+        expect(screen.queryByText("Couldn't send that. Try again.")).toBeNull()
+    })
+
     it('a 500 shows the generic message and is reported', async () => {
         stubFetch({ ok: false, status: 500, json: async () => ({}) })
         render(<CouponCard coupon={baseCoupon} index={0} />)
@@ -226,7 +249,7 @@ describe('CouponCard — "Reported not working" hint', () => {
             <CouponCard
                 coupon={{
                     ...baseCoupon,
-                    failCount: 3,
+                    failWeight: 4,
                     lastFailedAt: iso(5 * HOUR),
                 }}
                 index={0}
@@ -236,10 +259,10 @@ describe('CouponCard — "Reported not working" hint', () => {
         expect(screen.getByText('Reported not working 5h ago')).toBeTruthy()
     })
 
-    it('does not show for a single failure, an old failure, or no signal', () => {
+    it('does not show for a sub-quorum (3 anonymous reporters), an old failure, or no signal', () => {
         for (const signal of [
-            { failCount: 1, lastFailedAt: iso(HOUR) },
-            { failCount: 9, lastFailedAt: iso(40 * DAY) },
+            { failWeight: 3, lastFailedAt: iso(HOUR) },
+            { failWeight: 9, lastFailedAt: iso(40 * DAY) },
             {},
         ]) {
             const { unmount } = render(
@@ -255,7 +278,7 @@ describe('CouponCard — "Reported not working" hint', () => {
             <CouponCard
                 coupon={{
                     ...baseCoupon,
-                    failCount: 4,
+                    failWeight: 4,
                     lastFailedAt: iso(HOUR),
                     lastWorkedAt: iso(2 * DAY),
                 }}
@@ -267,12 +290,12 @@ describe('CouponCard — "Reported not working" hint', () => {
         expect(screen.queryByText(/^worked|just worked/i)).toBeNull()
     })
 
-    it('does not show (and the success line stays) when a success came after the failures', () => {
+    it('does not show (and the success line stays) once a worked quorum cleared the failures (failWeight 0)', () => {
         render(
             <CouponCard
                 coupon={{
                     ...baseCoupon,
-                    failCount: 4,
+                    failWeight: 0,
                     lastFailedAt: iso(2 * DAY),
                     lastWorkedAt: iso(2 * HOUR),
                 }}
@@ -290,7 +313,7 @@ describe('CouponCard — "Reported not working" hint', () => {
                 coupon={{
                     ...baseCoupon,
                     status: 'pending',
-                    failCount: 3,
+                    failWeight: 4,
                     lastFailedAt: iso(10 * 60 * 1000),
                     lastWorkedAt: iso(20 * 60 * 1000),
                 }}
@@ -307,7 +330,7 @@ describe('CouponCard — "Reported not working" hint', () => {
             <CouponCard
                 coupon={{
                     ...baseCoupon,
-                    failCount: 2,
+                    failWeight: 4,
                     lastFailedAt: iso(HOUR),
                 }}
                 index={0}

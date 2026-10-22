@@ -4,21 +4,22 @@
 //
 // The SYNCHRONOUS half of email failure is already loud: sendEmail() throws and
 // src/lib/auth/auth.ts reports the throw to Sentry, flushes, and rethrows. That
-// only covers the request/response with useSend. It does NOT cover the failure
-// mode that actually loses mail: useSend 2xx-ACCEPTS the send, SES takes it, and
-// the message is later marked BOUNCED / FAILED / COMPLAINED / SUPPRESSED, or
-// simply never leaves QUEUED. Nothing in this app ever learned about that —
-// grabcaramel.com has 55 BOUNCED and 2 FAILED rows in useSend's own log that
-// reached no Sentry issue, no log line, and no human.
+// only covers the request/response with Sendly. It does NOT cover the failure
+// mode that actually loses mail: the provider 2xx-ACCEPTS the send (Sendly
+// answers 202 PENDING), the mail goes on to SES, and the message is later
+// marked BOUNCED / FAILED / REJECTED / complained, or simply never leaves
+// PENDING/SENDING. (On the previous provider, useSend, grabcaramel.com had 55
+// BOUNCED and 2 FAILED rows that reached no Sentry issue, no log line and no
+// human — that is the gap this module exists to close.)
 //
-// This module is the read side of that gap: it asks useSend's OWN send log what
-// happened to the mail we handed it in the last window, and turns a bad window
-// into exactly ONE Sentry event with counts. It is deliberately:
+// This module is the read side of that gap: it asks Sendly's OWN email list
+// what happened to the mail we handed it in the last window, and turns a bad
+// window into exactly ONE Sentry event with counts. It is deliberately:
 //
-//   * PII-free — the log rows carry `to`, `subject`, `html` and `text`. Those
-//     fields are dropped at the parse boundary (toEmailLogEntry) and never
-//     enter a report, a log line or a Sentry event. Only ids, timestamps,
-//     statuses and counts travel.
+//   * PII-free — the list rows carry `subject` (and, on some reads, `to`).
+//     Those fields are dropped at the parse boundary (toEmailLogEntry) and
+//     never enter a report, a log line or a Sentry event. Only ids,
+//     timestamps, statuses, the sender DOMAIN and counts travel.
 //   * config-injected — no `@/lib/env` import, no `server-only`. The caller
 //     (the boot monitor, or scripts/email-delivery-health.ts) supplies the
 //     credentials, so the same code is usable from the Next server, from a
@@ -26,61 +27,92 @@
 //   * never-throwing at the top level — checkEmailDeliveryHealth() returns a
 //     report with status 'error' instead of blowing up a boot or an interval.
 //
-// The useSend API this speaks to (verified against usesend.devino.ca, v1):
-//   GET /api/v1/emails?page=<n>&limit=<n>  -> { data: Row[], count: number }
-//        newest-first; `status` is NOT a supported filter (passing one is
-//        silently ignored), so the window and the status split are done here.
-//   GET /api/v1/domains                    -> Domain[] (id, name)
-// Both are Bearer-authenticated with the same USESEND_API_KEY the SDK uses.
+// SHARED PROJECT: grabcaramel.com lives in the Sendly "Devino" project, which
+// also sends for other Devino apps, and a Sendly key cannot be scoped to one
+// domain. So this check is ALWAYS filtered to the configured sender:
+//
+//   * the provider query is narrowed with the list endpoint's `from` filter
+//     (checked 2026-10-20 against the live API: an EXACT, case-sensitive match
+//     on the bare sender address; a domain-only value matches nothing), so
+//     other apps' mail cannot eat the page budget;
+//   * every returned row is ALSO filtered to the sender DOMAIN here, so a
+//     provider that ever loosens that match cannot leak another app's mail in;
+//   * with no usable sender (empty / not an address) the check REFUSES to run
+//     (status 'error') rather than falling back to scanning the whole project.
+//
+// If the page budget runs out before the window start is reached, the window
+// was not fully covered: that reports 'incomplete' (reported to Sentry, non-zero
+// CLI exit), never 'ok' - a gap in coverage must not read as a clean bill.
+//
+// The Sendly API this speaks to (sendly-sdk 1.1.0, `sendly.emails.list`):
+//   GET /api/emails?limit=<n>&cursor=<c>&from=<address> -> { data: Email[], nextCursor? }
+//        newest-first, cursor-paginated. Row fields used: id, createdAt,
+//        status, from, complainedAt.
+// It needs a key with the `emails:read` scope (sending uses `emails:send`).
+import { Sendly } from 'sendly-sdk'
 
-/** One useSend send-log row, stripped to the fields that carry no PII. */
+/** One Sendly email-list row, stripped to the fields that carry no PII. */
 export interface EmailLogEntry {
     id: string
     createdAt: string
+    /** Sendly's delivery status (PENDING, SENDING, SENT, DELIVERED, …). */
     latestStatus: string
-    domainId: number | null
+    /** Lower-cased domain of the row's `from`; null when it cannot be read. */
+    fromDomain: string | null
+    /** `complainedAt` is set — a spam complaint, which is not a status. */
+    complained: boolean
 }
 
 /**
  * Terminal statuses that mean the message did NOT reach the recipient. Every
- * one of these is a delivery failure we want a human to see.
- * (useSend's EmailStatus enum, failure subset.)
+ * one of these is a delivery failure we want a human to see. (Sendly's
+ * EmailDeliveryStatus enum, failure subset; a spam COMPLAINT is not a status
+ * there — it arrives as `complainedAt` and is counted as a failure separately.)
  */
 export const EMAIL_FAILURE_STATUSES = [
     'FAILED',
     'BOUNCED',
-    'COMPLAINED',
     'REJECTED',
     'RENDERING_FAILURE',
-    'SUPPRESSED',
 ] as const
 
 /** Accepted-but-not-yet-resolved statuses. Stuck here = silently undelivered. */
-export const EMAIL_PENDING_STATUSES = ['QUEUED', 'SCHEDULED', 'SENT'] as const
+export const EMAIL_PENDING_STATUSES = ['PENDING', 'SENDING', 'SENT'] as const
 
 /** Provider says it is trying again. Not a failure yet, but worth a warning. */
-export const EMAIL_DELAYED_STATUSES = ['DELIVERY_DELAYED'] as const
+export const EMAIL_DELAYED_STATUSES = ['DELIVERY_DELAY'] as const
 
 const FAILURE_SET: ReadonlySet<string> = new Set(EMAIL_FAILURE_STATUSES)
 const PENDING_SET: ReadonlySet<string> = new Set(EMAIL_PENDING_STATUSES)
 const DELAYED_SET: ReadonlySet<string> = new Set(EMAIL_DELAYED_STATUSES)
 
 export const DEFAULT_WINDOW_MINUTES = 60
-/** A send still QUEUED/SENT this long after creation is treated as stuck. */
+/** A send still PENDING/SENDING/SENT this long after creation is stuck. */
 export const DEFAULT_STUCK_AFTER_MINUTES = 30
 /**
- * useSend's `/emails` endpoint validates `limit` with a zod `.max(50)` and
- * answers 400 above it — VERIFIED against usesend.devino.ca on 2026-09-16
- * (limit=50 -> 200, limit=51 -> 400 "Number must be less than or equal to 50").
- * A larger page size would make EVERY run come back `status: 'error'`, i.e.
- * exactly the silently-never-ran failure this monitor exists to end, so the
- * cap is enforced here rather than trusted to the caller.
+ * Rows per page. Sendly's list endpoint caps `limit` at 100 (the MCP tool for
+ * the same endpoint answers "expected number to be <=100" at 101 — checked
+ * 2026-10-20); 50 stays well inside it. Enforced here rather than trusted to
+ * the caller: an over-cap page would make EVERY run come back `status:
+ * 'error'`, i.e. exactly the silently-never-ran failure this monitor ends.
  */
 export const MAX_PAGE_SIZE = 50
 /** Hard ceiling so a pathological log can never turn this into a crawl. */
 export const DEFAULT_MAX_PAGES = 10
 
-export type EmailDeliveryHealthStatus = 'ok' | 'degraded' | 'error' | 'skipped'
+/**
+ * ok         every row in the window was read and none is bad.
+ * degraded   a bad row exists (failed / complained / stuck / delayed).
+ * incomplete the page budget ran out before the window start: coverage gap.
+ * error      the check could not run (provider error, unusable sender).
+ * skipped    Sendly is not configured.
+ */
+export type EmailDeliveryHealthStatus =
+    | 'ok'
+    | 'degraded'
+    | 'incomplete'
+    | 'error'
+    | 'skipped'
 
 export interface EmailDeliveryHealthReport {
     status: EmailDeliveryHealthStatus
@@ -88,25 +120,33 @@ export interface EmailDeliveryHealthReport {
     reason?: string
     windowStart: string
     windowEnd: string
-    /** Rows created inside the window (after the domain filter). */
+    /** Rows created inside the window (after the sender-domain filter). */
     scanned: number
     failed: number
     delayed: number
     stuckPending: number
-    /** Count per raw useSend status, for the Sentry event and the log line. */
+    /** Count per raw Sendly status, for the Sentry event and the log line. */
     byStatus: Record<string, number>
-    /** Domain the window was filtered to; null = no filter could be resolved. */
-    domainId: number | null
+    /**
+     * Sender domain the window was filtered to. null only when the check
+     * REFUSED to run (no usable sender address) - it never means "unfiltered".
+     */
+    senderDomain: string | null
     pagesFetched: number
-    /** True when maxPages was hit before the window was fully covered. */
+    /** True when maxPages was hit before the window was fully covered (status 'incomplete'). */
     truncated: boolean
 }
 
 export interface EmailDeliveryHealthConfig {
-    /** useSend base URL WITHOUT the /api/v1 suffix (e.g. https://usesend.x). */
-    baseUrl: string
+    /** Sendly API key with the `emails:read` scope (required to list). */
     apiKey: string
-    /** Sender address; its domain selects which sends are ours. */
+    /** Override the Sendly API base (staging); undefined → SDK default. */
+    baseUrl?: string
+    /**
+     * Bare sender address (`no_reply@grabcaramel.com`). REQUIRED in practice:
+     * it narrows the provider query and selects which sends are ours in the
+     * shared Sendly project. Empty / not an address -> the check errors out.
+     */
     fromEmail?: string
     windowMinutes?: number
     stuckAfterMinutes?: number
@@ -116,79 +156,56 @@ export interface EmailDeliveryHealthConfig {
     fetchImpl?: typeof fetch
 }
 
+/** `"Caramel <no_reply@grabcaramel.com>"` / `"no_reply@x"` -> the bare address. */
+function bareAddress(address: string): string {
+    const match = /<([^>]+)>/.exec(address)
+    return (match ? match[1] : address).trim()
+}
+
 /** `"Caramel <no_reply@grabcaramel.com>"` / `"no_reply@x"` -> `"x"`. */
 export function extractEmailDomain(address: string): string | null {
-    const match = /<([^>]+)>/.exec(address)
-    const bare = (match ? match[1] : address).trim()
+    const bare = bareAddress(address)
     const at = bare.lastIndexOf('@')
     if (at === -1 || at === bare.length - 1) return null
     return bare.slice(at + 1).toLowerCase()
 }
 
 /**
- * Narrow a raw useSend row to the PII-free shape. Returns null for anything
+ * The sender identity the check is pinned to, or null when `fromEmail` is not
+ * a usable address (empty, no local part, no dotted domain, or any whitespace).
+ */
+function resolveSender(
+    fromEmail: string | undefined,
+): { address: string; domain: string } | null {
+    if (!fromEmail) return null
+    const address = bareAddress(fromEmail)
+    if (/\s/.test(address)) return null
+    const at = address.lastIndexOf('@')
+    if (at < 1) return null
+    const domain = extractEmailDomain(address)
+    if (!domain || !domain.includes('.') || domain.startsWith('.')) return null
+    return { address, domain }
+}
+
+/**
+ * Narrow a raw Sendly row to the PII-free shape. Returns null for anything
  * that does not carry the three fields the summary needs — a shape change in
  * the provider becomes "0 rows scanned", never a crash mid-interval.
  */
 export function toEmailLogEntry(row: unknown): EmailLogEntry | null {
     if (typeof row !== 'object' || row === null) return null
     const candidate = row as Record<string, unknown>
-    const { id, createdAt, latestStatus, domainId } = candidate
+    const { id, createdAt, status, from, complainedAt } = candidate
     if (typeof id !== 'string') return null
     if (typeof createdAt !== 'string') return null
-    if (typeof latestStatus !== 'string') return null
+    if (typeof status !== 'string') return null
     return {
         id,
         createdAt,
-        latestStatus,
-        domainId: typeof domainId === 'number' ? domainId : null,
+        latestStatus: status,
+        fromDomain: typeof from === 'string' ? extractEmailDomain(from) : null,
+        complained: typeof complainedAt === 'string' && complainedAt !== '',
     }
-}
-
-async function usesendGet(
-    config: Pick<EmailDeliveryHealthConfig, 'baseUrl' | 'apiKey'>,
-    path: string,
-    fetchImpl: typeof fetch,
-): Promise<unknown> {
-    const base = config.baseUrl.replace(/\/+$/, '')
-    const response = await fetchImpl(`${base}/api/v1${path}`, {
-        headers: { Authorization: `Bearer ${config.apiKey}` },
-    })
-    if (!response.ok) {
-        // Status code only. The body of an error response can echo request
-        // content, and this message ends up in Sentry and in the container log.
-        throw new Error(`useSend GET ${path} failed with ${response.status}`)
-    }
-    return response.json()
-}
-
-/**
- * Resolve the useSend domain id that owns `fromEmail`. Returns null when the
- * address, the domain list or the match is unavailable — the caller then scans
- * every row instead of filtering, which is the safe direction (over-reporting
- * beats missing our own bounces).
- */
-export async function resolveEmailDomainId(
-    config: Pick<EmailDeliveryHealthConfig, 'baseUrl' | 'apiKey' | 'fromEmail'>,
-    fetchImpl: typeof fetch,
-): Promise<number | null> {
-    if (!config.fromEmail) return null
-    const wanted = extractEmailDomain(config.fromEmail)
-    if (!wanted) return null
-    const payload = await usesendGet(config, '/domains', fetchImpl)
-    const list = Array.isArray(payload) ? payload : []
-    for (const entry of list) {
-        if (typeof entry !== 'object' || entry === null) continue
-        const domain = entry as Record<string, unknown>
-        if (
-            typeof domain.name === 'string' &&
-            domain.name.toLowerCase() === wanted &&
-            typeof domain.id === 'number'
-        ) {
-            return domain.id
-        }
-    }
-    return null
 }
 
 interface WindowCollection {
@@ -197,39 +214,44 @@ interface WindowCollection {
     truncated: boolean
 }
 
+function createSendlyClient(config: EmailDeliveryHealthConfig): Sendly {
+    return new Sendly({
+        apiKey: config.apiKey,
+        ...(config.baseUrl ? { baseUrl: config.baseUrl } : {}),
+        ...(config.fetchImpl ? { fetch: config.fetchImpl } : {}),
+    })
+}
+
 /**
- * Page the newest-first send log until the rows predate `windowStart` (or the
- * page budget runs out), keeping only the rows inside the window and — when a
- * domain id was resolved — only the rows sent from our own domain.
+ * Page the newest-first email list (narrowed server-side to the sender address)
+ * until the rows predate `windowStart` or the page budget runs out, keeping
+ * only the rows inside the window that were sent from our own domain.
  */
 export async function collectEmailLogWindow(
     config: EmailDeliveryHealthConfig,
     options: {
         windowStart: Date
         windowEnd: Date
-        domainId: number | null
-        fetchImpl: typeof fetch
+        senderAddress: string
+        senderDomain: string
     },
 ): Promise<WindowCollection> {
+    const client = createSendlyClient(config)
     const pageSize = Math.min(config.pageSize ?? MAX_PAGE_SIZE, MAX_PAGE_SIZE)
     const maxPages = config.maxPages ?? DEFAULT_MAX_PAGES
     const entries: EmailLogEntry[] = []
     let pagesFetched = 0
     let reachedWindowStart = false
+    let cursor: string | undefined
 
     for (let page = 1; page <= maxPages; page++) {
-        const payload = await usesendGet(
-            config,
-            `/emails?page=${page}&limit=${pageSize}`,
-            options.fetchImpl,
-        )
+        const result = await client.emails.list({
+            limit: pageSize,
+            from: options.senderAddress,
+            ...(cursor ? { cursor } : {}),
+        })
         pagesFetched = page
-        const rows =
-            typeof payload === 'object' &&
-            payload !== null &&
-            Array.isArray((payload as { data?: unknown }).data)
-                ? ((payload as { data: unknown[] }).data as unknown[])
-                : []
+        const rows: unknown[] = Array.isArray(result.data) ? result.data : []
         if (rows.length === 0) {
             reachedWindowStart = true
             break
@@ -244,20 +266,16 @@ export async function collectEmailLogWindow(
                 continue
             }
             if (created >= options.windowEnd.getTime()) continue
-            if (
-                options.domainId !== null &&
-                entry.domainId !== options.domainId
-            ) {
-                continue
-            }
+            if (entry.fromDomain !== options.senderDomain) continue
             entries.push(entry)
         }
         if (reachedWindowStart) break
-        if (rows.length < pageSize) {
-            // The log itself ended before the window did.
+        if (!result.nextCursor) {
+            // The list itself ended before the window did.
             reachedWindowStart = true
             break
         }
+        cursor = result.nextCursor
     }
 
     return { entries, pagesFetched, truncated: !reachedWindowStart }
@@ -282,7 +300,7 @@ export function summariseEmailDeliveryWindow(
 
     for (const entry of entries) {
         byStatus[entry.latestStatus] = (byStatus[entry.latestStatus] ?? 0) + 1
-        if (FAILURE_SET.has(entry.latestStatus)) {
+        if (FAILURE_SET.has(entry.latestStatus) || entry.complained) {
             failed++
             continue
         }
@@ -318,6 +336,10 @@ export async function checkEmailDeliveryHealth(
         (config.stuckAfterMinutes ?? DEFAULT_STUCK_AFTER_MINUTES) * 60_000
     const windowEnd = now
     const windowStart = new Date(now.getTime() - windowMinutes * 60_000)
+    // The Sendly project is shared with other Devino apps, so the check is
+    // always pinned to our sender. No usable sender -> refuse (see below).
+    const sender = resolveSender(config.fromEmail)
+    const senderDomain = sender?.domain ?? null
     const base: Pick<
         EmailDeliveryHealthReport,
         | 'windowStart'
@@ -327,7 +349,7 @@ export async function checkEmailDeliveryHealth(
         | 'delayed'
         | 'stuckPending'
         | 'byStatus'
-        | 'domainId'
+        | 'senderDomain'
         | 'pagesFetched'
         | 'truncated'
     > = {
@@ -338,27 +360,35 @@ export async function checkEmailDeliveryHealth(
         delayed: 0,
         stuckPending: 0,
         byStatus: {},
-        domainId: null,
+        senderDomain,
         pagesFetched: 0,
         truncated: false,
     }
 
-    if (!config.baseUrl || !config.apiKey) {
+    if (!config.apiKey) {
         return {
             ...base,
             status: 'skipped',
-            reason: 'useSend is not configured (USESEND_BASE_URL / USESEND_API_KEY)',
+            reason: 'Sendly is not configured (SENDLY_API_KEY)',
         }
     }
 
-    const fetchImpl = config.fetchImpl ?? fetch
+    if (!sender) {
+        return {
+            ...base,
+            status: 'error',
+            reason:
+                'refusing to run unfiltered: the sender address (SENDLY_FROM_EMAIL) is empty or not an email address, ' +
+                'and the Sendly project is shared with other apps',
+        }
+    }
+
     try {
-        const domainId = await resolveEmailDomainId(config, fetchImpl)
         const collected = await collectEmailLogWindow(config, {
             windowStart,
             windowEnd,
-            domainId,
-            fetchImpl,
+            senderAddress: sender.address,
+            senderDomain: sender.domain,
         })
         const summary = summariseEmailDeliveryWindow(collected.entries, {
             now,
@@ -368,18 +398,31 @@ export async function checkEmailDeliveryHealth(
             summary.failed > 0 ||
             summary.stuckPending > 0 ||
             summary.delayed > 0
+        // A bad row outranks a coverage gap (both are reported); a coverage
+        // gap alone must never read as 'ok'.
+        const status: EmailDeliveryHealthStatus = bad
+            ? 'degraded'
+            : collected.truncated
+              ? 'incomplete'
+              : 'ok'
         return {
             ...base,
             ...summary,
-            domainId,
             pagesFetched: collected.pagesFetched,
             truncated: collected.truncated,
-            status: bad ? 'degraded' : 'ok',
+            status,
+            ...(collected.truncated
+                ? {
+                      reason: `page budget exhausted after ${collected.pagesFetched} page(s) before the window start; older rows in the window were not read`,
+                  }
+                : {}),
         }
     } catch (error) {
         return {
             ...base,
             status: 'error',
+            // Status/code only (SendlyError.message is the API's own text and
+            // never echoes our request body); no credential is ever in it.
             reason: error instanceof Error ? error.message : String(error),
         }
     }

@@ -1,5 +1,12 @@
 'use client'
 
+import {
+    HOME_COMPARISONS as comparisonItems,
+    HOME_BROWSERS,
+    HOME_FEATURES,
+    HOME_FEATURES_COPY,
+} from '@/lib/marketing/homeContent'
+
 import InstallSurfaceGate from '@/components/growth/InstallSurfaceGate'
 import { trackGrowthEvent } from '@/lib/analytics/growthEvents'
 import { useReducedMotion } from '@/lib/reducedMotion'
@@ -18,72 +25,29 @@ import {
 } from 'react-icons/fa'
 import { HiCheckCircle, HiXCircle } from 'react-icons/hi'
 
-const features = [
-    {
-        title: 'Automated Coupon Application',
-        desc: 'Saves you money by finding and applying the best coupon codes.',
-        detail: 'We monitor thousands of coupon codes across 4,000+ stores, ensuring you always get the best deal without lifting a finger.',
-        icon: <FaDollarSign />,
-    },
-    {
-        title: 'Privacy-First & Transparent',
-        desc: 'Your data stays yours. We never sell or monetize your personal information.',
-        detail: 'Unlike other extensions, we never sell your data, build ad profiles, or hijack affiliate commissions from content creators.',
-        icon: <FaLock />,
-    },
-    {
-        title: '100% Open Source',
-        desc: 'Our extension and web app are fully public and community-driven.',
-        detail: 'Join our GitHub to contribute features, report issues, or request enhancements. Reviewed in the open by contributors and the community.',
-        icon: <FaStar />,
-    },
-    {
-        title: 'Creator-Friendly',
-        desc: 'We never overwrite affiliate links or steal commissions.',
-        detail: 'Support your favorite content creators while saving money. We ensure affiliate links stay with their rightful owners.',
-        icon: <FaHeart />,
-    },
-    {
-        title: 'Fast & Lightweight',
-        desc: 'Automatic coupon discovery and application at checkout.',
-        detail: 'Our optimized algorithms search and apply coupons at checkout, never slowing down your shopping experience.',
-        icon: <FaBolt />,
-    },
-    {
-        title: 'Cross-Browser Support',
-        desc: 'Works seamlessly across Chrome, Firefox, and more.',
-        detail: 'One extension for Chrome, Firefox, Edge, and Safari. Consistent experience regardless of your browser preference with automatic updates.',
-        icon: <FaGlobe />,
-    },
+const featuresIcons = [
+    <FaDollarSign key="0" />,
+    <FaLock key="1" />,
+    <FaStar key="2" />,
+    <FaHeart key="3" />,
+    <FaBolt key="4" />,
+    <FaGlobe key="5" />,
 ]
+const features = HOME_FEATURES.map((item, index) => ({
+    ...item,
+    icon: featuresIcons[index],
+}))
 
-const comparisonItems = [
-    {
-        title: 'Privacy Protection',
-        other: 'Often opaque data practices',
-        caramel: '100% privacy-first approach',
-    },
-    {
-        title: 'Data Collection',
-        other: 'May track your browsing habits',
-        caramel: 'No ad tracking or data selling',
-    },
-    {
-        title: 'Creator Support',
-        other: 'Hijacked affiliate commissions',
-        caramel: 'Protects creator earnings',
-    },
-    {
-        title: 'Code Transparency',
-        other: 'Closed source & hidden',
-        caramel: 'Fully open source & publicly reviewable',
-    },
-    {
-        title: 'Performance',
-        other: 'Often resource-heavy',
-        caramel: 'Fast & lightweight',
-    },
+const browserIcons = [
+    <FaChrome key="0" />,
+    <FaSafari key="1" />,
+    <FaFirefox key="2" />,
+    <FaEdge key="3" />,
 ]
+const browsers = HOME_BROWSERS.map((browser, index) => ({
+    ...browser,
+    icon: browserIcons[index],
+}))
 
 export default function FeaturesSection() {
     const reduceMotion = useReducedMotion()
@@ -106,11 +70,10 @@ export default function FeaturesSection() {
                     className="mb-20 text-center"
                 >
                     <h2 className="mb-8 text-5xl font-extrabold leading-tight tracking-tight text-caramel lg:text-4xl">
-                        Why Choose Caramel?
+                        {HOME_FEATURES_COPY.heading}
                     </h2>
                     <p className="mx-auto max-w-3xl text-xl leading-relaxed text-gray-600 dark:text-gray-300 lg:text-lg">
-                        The ethical alternative that puts your privacy first
-                        while maximizing your savings
+                        {HOME_FEATURES_COPY.summary}
                     </p>
                 </m.div>
 
@@ -268,11 +231,10 @@ export default function FeaturesSection() {
                 >
                     <div className="mb-12 text-center">
                         <h3 className="mb-4 text-3xl font-extrabold tracking-tight text-gray-900 dark:text-white lg:text-2xl">
-                            Caramel vs Others
+                            {HOME_FEATURES_COPY.comparisonHeading}
                         </h3>
                         <p className="mx-auto max-w-2xl text-gray-600 dark:text-gray-400">
-                            See how we stack up against traditional coupon
-                            extensions
+                            {HOME_FEATURES_COPY.comparisonSummary}
                         </p>
                     </div>
 
@@ -284,10 +246,10 @@ export default function FeaturesSection() {
                             column edges line up. */}
                         <div className="mb-4 grid grid-cols-2">
                             <div className="px-6 text-sm font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400 sm:px-4">
-                                Other Extensions
+                                {HOME_FEATURES_COPY.otherHeading}
                             </div>
                             <div className="px-6 text-sm font-semibold uppercase tracking-wide text-caramel sm:px-4">
-                                Caramel
+                                {HOME_FEATURES_COPY.caramelHeading}
                             </div>
                         </div>
 
@@ -374,38 +336,13 @@ export default function FeaturesSection() {
                         className="rounded-3xl border border-transparent bg-gradient-to-br from-caramel to-[#c9531a] p-12 text-center text-white shadow-lg ring-1 ring-inset ring-white/20 dark:border-caramel/30 dark:bg-caramel/[0.12] dark:bg-none dark:ring-0 lg:p-8"
                     >
                         <h3 className="mb-6 text-3xl font-extrabold tracking-tight lg:text-2xl">
-                            Available on Your Favorite Browser!
+                            {HOME_FEATURES_COPY.browsersHeading}
                         </h3>
                         <p className="mx-auto mb-8 max-w-2xl text-lg leading-relaxed opacity-90">
-                            Start saving with Caramel on any browser!
+                            {HOME_FEATURES_COPY.browsersSummary}
                         </p>
                         <div className="flex justify-center gap-6 lg:gap-4 sm:flex-col sm:items-center sm:gap-4">
-                            {[
-                                {
-                                    name: 'Chrome',
-                                    icon: <FaChrome />,
-                                    href: 'https://chromewebstore.google.com/detail/caramel-trusted-honey-alt/gaimofgglbackoimfjopicmbmnlccfoe',
-                                    available: true,
-                                },
-                                {
-                                    name: 'Safari',
-                                    icon: <FaSafari />,
-                                    href: 'https://apps.apple.com/ke/app/caramel/id6741873881',
-                                    available: true,
-                                },
-                                {
-                                    name: 'Firefox',
-                                    icon: <FaFirefox />,
-                                    href: 'https://addons.mozilla.org/en-US/firefox/addon/grabcaramel/',
-                                    available: true,
-                                },
-                                {
-                                    name: 'Edge',
-                                    icon: <FaEdge />,
-                                    href: 'https://microsoftedge.microsoft.com/addons/detail/caramel/leodahchedhnenmiengkfpmmcdendnof',
-                                    available: true,
-                                },
-                            ].map((browser, index) => (
+                            {browsers.map((browser, index) => (
                                 <m.div
                                     key={browser.name}
                                     initial={{ opacity: 0, y: 20 }}

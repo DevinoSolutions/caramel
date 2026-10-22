@@ -48,6 +48,7 @@ const couponFixture = {
     timesUsed: 5,
     status: 'valid',
     verificationMessage: null,
+    newCustomersOnly: false,
 }
 
 describe('CouponsPage (/coupons index) — server-rendered first page', () => {
@@ -79,6 +80,7 @@ describe('CouponsPage (/coupons index) — server-rendered first page', () => {
                 lastWorkedAt: null,
                 lastFailedAt: null,
                 failCount: 0,
+                failWeight: 0,
                 keepsFailing: false,
             },
         ])

@@ -90,6 +90,7 @@ const couponFixture = {
     timesUsed: 5,
     status: 'valid',
     verificationMessage: null,
+    newCustomersOnly: false,
 }
 
 // listStoreCoupons's list rows carry `isSupplier` (submission_source IS NULL).
@@ -141,6 +142,7 @@ describe('StoreCouponsPage — CouponListRow + TotalCountRow', () => {
                 lastWorkedAt: null,
                 lastFailedAt: null,
                 failCount: 0,
+                failWeight: 0,
                 keepsFailing: false,
             },
         ])
@@ -204,6 +206,7 @@ describe('StoreCouponsPage — CouponListRow + TotalCountRow', () => {
                 lastWorkedAt: null,
                 lastFailedAt: new Date(Date.now() - 60 * 60 * 1000),
                 failCount: 4,
+                failWeight: 6,
             },
         ] as never)
 

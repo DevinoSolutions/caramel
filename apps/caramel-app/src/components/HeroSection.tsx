@@ -1,5 +1,7 @@
 'use client'
 
+import { HOME_HERO_COPY, HOME_WORDMARK_ALT } from '@/lib/marketing/homeContent'
+
 // HeroSection — split hero. On desktop (lg+ = the UNPREFIXED base, since this
 // repo's Tailwind screens are max-width/desktop-first) the existing hero copy
 // aligns LEFT (~55%) and an interactive 3D caramel coupon fills the RIGHT
@@ -330,7 +332,6 @@ function StatCard({
                 delay: 0.5 + index * 0.12,
                 ease: revealEase,
             }}
-            whileHover={reduce ? undefined : { y: -4, scale: 1.03 }}
             className="relative w-32 rounded-2xl bg-gradient-to-br from-caramel to-orange-600 px-5 py-4 text-white shadow-caramel-lg md:w-28"
             style={ticketNotchMask('0.55rem', '50%')}
         >
@@ -504,7 +505,7 @@ export default function HeroSection() {
                         8.6 s mobile LCP PageSpeed measured. Same timings and
                         easing as before, transform-only (see globals.css for
                         why the fade had to go); reduced motion is honoured by
-                        the stylesheet. framer stays for hover/tap/loops. */}
+                        the stylesheet. framer stays for the stat tickets, tap and loops. */}
                     {/* lg:w-full on the h1 and on the wordmark's wrapper
                         (2026-09-26): below lg the wordmark is `w-full`, and
                         both of its ancestors were shrink-to-fit, so until the
@@ -517,14 +518,11 @@ export default function HeroSection() {
                         both boxes centre their content on the same axis. */}
                     <h1 className="hero-enter mb-6 flex flex-col items-start text-5xl font-bold tracking-tight lg:w-full lg:items-center lg:text-4xl md:text-3xl">
                         <div className="mb-4 text-gray-700 dark:text-white">
-                            Welcome to
+                            {HOME_HERO_COPY.welcome}
                         </div>
-                        <m.div
+                        <div
                             className="hero-enter-scale relative lg:w-full"
                             style={{ animationDelay: '0.3s' }}
-                            whileHover={
-                                reduceMotion ? undefined : { scale: 1.02 }
-                            }
                         >
                             {/* unoptimized on purpose: the wordmark is a 40KB
                                 PNG, and a large width makes the optimizer build
@@ -554,7 +552,7 @@ export default function HeroSection() {
                                 slow link it shares with the page's scripts. */}
                             <Image
                                 src="/full-logo.webp"
-                                alt="Caramel — the open-source coupon extension"
+                                alt={HOME_WORDMARK_ALT}
                                 height={467}
                                 width={1830}
                                 className="max-w-md drop-shadow-lg lg:mx-auto lg:w-full"
@@ -562,60 +560,55 @@ export default function HeroSection() {
                                 fetchPriority="high"
                                 unoptimized
                             />
-                        </m.div>
+                        </div>
                     </h1>
 
                     <p
                         className="hero-enter mb-10 max-w-xl text-xl leading-relaxed text-gray-600 dark:text-gray-300 lg:mx-auto lg:max-w-2xl lg:text-lg md:text-base"
                         style={{ animationDelay: '0.4s' }}
                     >
-                        The{' '}
+                        {HOME_HERO_COPY.summaryStart}{' '}
                         <m.a
                             href="https://github.com/DevinoSolutions/caramel"
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="cursor-pointer rounded px-1 font-semibold text-caramel transition-all duration-300 hover:bg-orange-500/10"
+                            className="cursor-pointer rounded px-1 font-semibold text-caramel transition-colors duration-fast ease-motion-out hover:bg-orange-500/10"
                             whileHover={{
                                 backgroundColor: 'rgba(234, 105, 37, 0.1)',
-                                scale: 1.02,
                             }}
                         >
-                            open-source
+                            {HOME_HERO_COPY.openSource}
                         </m.a>{' '}
-                        and{' '}
+                        {HOME_HERO_COPY.and}{' '}
                         <m.a
                             href="#why-not"
-                            className="cursor-pointer rounded px-1 font-semibold text-caramel transition-all duration-300 hover:bg-orange-500/10"
+                            className="cursor-pointer rounded px-1 font-semibold text-caramel transition-colors duration-fast ease-motion-out hover:bg-orange-500/10"
                             whileHover={{
                                 backgroundColor: 'rgba(234, 105, 37, 0.1)',
-                                scale: 1.02,
                             }}
                         >
-                            privacy-first
+                            {HOME_HERO_COPY.privacyFirst}
                         </m.a>{' '}
-                        alternative to Honey. Automatically finds and applies
-                        the best coupon codes at checkout —
+                        {HOME_HERO_COPY.summaryMain}
                         <m.a
                             href="#why-not"
-                            className="cursor-pointer rounded px-1 font-semibold text-caramel transition-all duration-300 hover:bg-orange-500/10"
+                            className="cursor-pointer rounded px-1 font-semibold text-caramel transition-colors duration-fast ease-motion-out hover:bg-orange-500/10"
                             whileHover={{
                                 backgroundColor: 'rgba(234, 105, 37, 0.1)',
-                                scale: 1.02,
                             }}
                         >
                             {' '}
-                            without selling your data
+                            {HOME_HERO_COPY.withoutSelling}
                         </m.a>{' '}
-                        or{' '}
+                        {HOME_HERO_COPY.or}{' '}
                         <m.a
                             href="#why-not"
-                            className="cursor-pointer rounded px-1 font-semibold text-caramel transition-all duration-300 hover:bg-orange-500/10"
+                            className="cursor-pointer rounded px-1 font-semibold text-caramel transition-colors duration-fast ease-motion-out hover:bg-orange-500/10"
                             whileHover={{
                                 backgroundColor: 'rgba(234, 105, 37, 0.1)',
-                                scale: 1.02,
                             }}
                         >
-                            hijacking creatorsʼ commissions
+                            {HOME_HERO_COPY.commissions}
                         </m.a>
                         .
                     </p>
@@ -630,7 +623,7 @@ export default function HeroSection() {
                         <InstallSurfaceGate className="contents">
                             <m.a
                                 href="#install-extension"
-                                className="rounded-full bg-gradient-to-r from-caramel to-orange-600 px-6 py-3 text-sm font-semibold text-black shadow-lg transition-all duration-300 hover:from-orange-600 hover:to-caramel hover:shadow-xl md:w-full md:text-center"
+                                className="rounded-full bg-gradient-to-r from-caramel to-orange-600 px-6 py-3 text-sm font-semibold text-black shadow-lg hover:from-orange-600 hover:to-caramel hover:shadow-xl md:w-full md:text-center"
                                 initial={{
                                     boxShadow: '0 0 10px rgba(234,105,37,0.5)',
                                 }}
@@ -655,34 +648,28 @@ export default function HeroSection() {
                                     ease: 'easeInOut',
                                 }}
                                 whileHover={{
-                                    scale: 1.05,
                                     boxShadow:
                                         '0 20px 40px rgba(234,105,37,0.35)',
                                 }}
-                                whileTap={{ scale: 0.95 }}
+                                whileTap={{ scale: 0.98 }}
                             >
-                                Install Extension
+                                {HOME_HERO_COPY.install}
                             </m.a>
                         </InstallSurfaceGate>
                         <m.a
                             href="https://github.com/DevinoSolutions/caramel"
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="group inline-flex items-center justify-center gap-2 rounded-full border-2 border-caramel/40 bg-transparent px-5 py-3 text-sm font-semibold text-caramel backdrop-blur-sm transition-all duration-300 hover:border-caramel hover:bg-caramel hover:text-white md:w-full"
-                            whileHover={{ scale: 1.05 }}
-                            whileTap={{ scale: 0.95 }}
+                            className="group inline-flex items-center justify-center gap-2 rounded-full border-2 border-caramel/40 bg-transparent px-5 py-3 text-sm font-semibold text-caramel backdrop-blur-sm transition-colors duration-fast ease-motion-out hover:border-caramel hover:bg-caramel hover:text-white md:w-full"
+                            whileTap={{ scale: 0.98 }}
                         >
-                            <FaGithub className="h-4 w-4 transition-transform duration-300 group-hover:rotate-12" />
+                            <FaGithub className="h-4 w-4 transition-transform duration-base ease-motion-out motion-safe:group-hover:rotate-12" />
                             View Source Code
                         </m.a>
                         <m.a
                             href="#features"
-                            className="rounded-full border-2 border-gray-300/60 bg-transparent px-6 py-3 text-sm font-semibold text-gray-700 backdrop-blur-sm transition-all duration-300 hover:border-caramel hover:text-caramel dark:border-gray-600/60 dark:text-gray-300 md:w-full md:text-center"
-                            whileHover={{
-                                scale: 1.05,
-                                borderColor: 'rgb(234, 105, 37)',
-                            }}
-                            whileTap={{ scale: 0.95 }}
+                            className="rounded-full border-2 border-gray-300/60 bg-transparent px-6 py-3 text-sm font-semibold text-gray-700 backdrop-blur-sm transition-colors duration-fast ease-motion-out hover:border-caramel hover:text-caramel dark:border-gray-600/60 dark:text-gray-300 md:w-full md:text-center"
+                            whileTap={{ scale: 0.98 }}
                         >
                             Why Choose Caramel?
                         </m.a>

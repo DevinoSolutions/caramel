@@ -27,6 +27,9 @@ export interface Coupon {
     timesUsed: number
     status?: CouponStatus
     verificationMessage?: string | null
+    // "New customers only" label (owner decision 2026-10-19): the code works
+    // only for a brand-new account. Absent on older payloads = no label.
+    newCustomersOnly?: boolean
     // App-owned trust signal (W1): ISO timestamp of the last extension-reported
     // "worked" outcome, attached in app code by couponSignals.ts's
     // attachSignals() from the coupon_signals table — NOT a column on the
@@ -39,6 +42,10 @@ export interface Coupon {
     // these + lastWorkedAt — shopper/extension reports, not verification.
     lastFailedAt?: string | null
     failCount?: number
+    // The failure QUORUM (distinct reporters, weighted; couponSignals.ts
+    // recordFailed) that isRecentlyFailing / keepsFailing actually read. failCount
+    // above is the raw report count and decides nothing.
+    failWeight?: number
     // coupons.ts keepsFailing(), computed server-side by attachSignals so the
     // website and the extension popup collapse the same codes. false/absent when
     // there is no signal. Presentation only: never a status or a deletion.

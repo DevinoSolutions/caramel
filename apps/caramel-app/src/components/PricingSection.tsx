@@ -1,39 +1,24 @@
 'use client'
 
+import { GITHUB_REPO_URL } from '@/lib/brandLinks'
+import {
+    PRICING_FEATURES as features,
+    PRICING_COPY,
+    PRICING_STATS,
+} from '@/lib/marketing/pricingContent'
 import { motion } from 'framer-motion'
 import { FaDollarSign, FaGithub, FaHeart } from 'react-icons/fa'
 import { HiCheckCircle } from 'react-icons/hi'
 
-const features = [
-    'Automated coupon application at checkout',
-    'Works on 4,000+ supported stores',
-    'Zero ads or data selling',
-    'Open source & community-driven',
-    'Never hijacks affiliate commissions',
-    'Fast, lightweight performance',
-    'Cross-browser support (Chrome, Firefox, Edge, iOS Safari)',
-    'Regular updates & new features',
-    'No credit card required',
-    'No hidden fees ever',
+const statIcons = [
+    <FaDollarSign key="price" />,
+    <FaGithub key="source" />,
+    <FaHeart key="stores" />,
 ]
-
-const stats = [
-    {
-        title: '$0',
-        desc: 'Forever',
-        icon: <FaDollarSign />,
-    },
-    {
-        title: '100%',
-        desc: 'Open Source',
-        icon: <FaGithub />,
-    },
-    {
-        title: '4,000+',
-        desc: 'Stores Supported',
-        icon: <FaHeart />,
-    },
-]
+const stats = PRICING_STATS.map((stat, index) => ({
+    ...stat,
+    icon: statIcons[index],
+}))
 
 export default function PricingSection() {
     return (
@@ -74,15 +59,16 @@ export default function PricingSection() {
                         className="hero-enter-scale mb-6 text-5xl font-bold text-gray-900 dark:text-white lg:text-4xl"
                         style={{ animationDelay: '0.2s' }}
                     >
-                        Simple, Transparent{' '}
-                        <span className="text-caramel">Pricing</span>
+                        {PRICING_COPY.headingPrefix}{' '}
+                        <span className="text-caramel">
+                            {PRICING_COPY.headingEmphasis}
+                        </span>
                     </h1>
                     <p
                         className="hero-enter mx-auto max-w-3xl text-xl text-gray-600 dark:text-gray-300 lg:text-lg"
                         style={{ animationDelay: '0.3s' }}
                     >
-                        No tricks, no hidden fees. Caramel is completely free
-                        and always will be.
+                        {PRICING_COPY.summary}
                     </p>
                 </div>
 
@@ -183,16 +169,15 @@ export default function PricingSection() {
 
                         <div className="relative z-10">
                             <div className="absolute right-0 top-0 rounded-full bg-gradient-to-br from-caramel to-orange-600 px-5 py-2 text-xs font-bold tracking-[0.15em] text-white shadow-lg sm:px-4 sm:py-1.5 sm:text-[0.65rem]">
-                                ALWAYS FREE
+                                {PRICING_COPY.badge}
                             </div>
 
                             <div className="pb-10">
                                 <h3 className="mb-4 text-4xl font-bold text-gray-900 dark:text-white lg:text-3xl sm:text-2xl">
-                                    Free Forever Plan
+                                    {PRICING_COPY.planHeading}
                                 </h3>
                                 <p className="text-xl text-gray-600 dark:text-gray-300 lg:text-lg sm:text-base">
-                                    Everything you need to save money while
-                                    shopping online. No payment required, ever.
+                                    {PRICING_COPY.planSummary}
                                 </p>
                             </div>
 
@@ -239,7 +224,7 @@ export default function PricingSection() {
                             </div>
 
                             <motion.a
-                                href="https://github.com/DevinoSolutions/caramel"
+                                href={GITHUB_REPO_URL}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 whileHover={{ scale: 1.05 }}
@@ -247,7 +232,7 @@ export default function PricingSection() {
                                 className="mx-auto flex w-full max-w-md items-center justify-center gap-3 rounded-full bg-caramel px-10 py-5 text-lg font-bold text-white shadow-lg transition-shadow hover:shadow-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 dark:focus-visible:ring-offset-darkBg lg:px-8 lg:py-4 lg:text-lg sm:px-6 sm:py-4 sm:text-base"
                             >
                                 <FaGithub className="text-2xl" />
-                                Get Started - It's Free
+                                {PRICING_COPY.cta}
                             </motion.a>
 
                             {/* Serial strip: the printed barcode + coupon code
@@ -264,7 +249,7 @@ export default function PricingSection() {
                                     }}
                                 />
                                 <p className="font-mono text-xs tracking-[0.35em] text-gray-500 dark:text-gray-400">
-                                    CARAMEL-FREE-FOREVER
+                                    {PRICING_COPY.serial}
                                 </p>
                             </div>
                         </div>
@@ -280,7 +265,7 @@ export default function PricingSection() {
                     className="mt-20 text-center"
                 >
                     <h3 className="mb-6 text-3xl font-bold text-gray-900 dark:text-white lg:text-2xl sm:text-xl">
-                        Why Is Caramel Free?
+                        {PRICING_COPY.whyHeading}
                     </h3>
                     <div className="mx-auto max-w-3xl space-y-4 text-left text-gray-600 dark:text-gray-300 lg:text-base sm:text-sm">
                         <motion.p
@@ -290,11 +275,9 @@ export default function PricingSection() {
                             transition={{ duration: 0.5, delay: 0.5 }}
                         >
                             <strong className="text-caramel">
-                                We believe in transparency.
+                                {PRICING_COPY.transparencyHeading}
                             </strong>{' '}
-                            Unlike other extensions that monetize your data or
-                            hijack affiliate commissions, Caramel is built in
-                            the open, for the community.
+                            {PRICING_COPY.transparency}
                         </motion.p>
                         <motion.p
                             initial={{ opacity: 0 }}
@@ -303,12 +286,9 @@ export default function PricingSection() {
                             transition={{ duration: 0.5, delay: 0.6 }}
                         >
                             <strong className="text-caramel">
-                                100% Open Source.
+                                {PRICING_COPY.openSourceHeading}
                             </strong>{' '}
-                            Our extension and web app are public on GitHub.
-                            Anyone can audit, contribute, or fork the project.
-                            This transparency ensures we stay true to our
-                            mission.
+                            {PRICING_COPY.openSource}
                         </motion.p>
                         <motion.p
                             initial={{ opacity: 0 }}
@@ -317,11 +297,9 @@ export default function PricingSection() {
                             transition={{ duration: 0.5, delay: 0.7 }}
                         >
                             <strong className="text-caramel">
-                                Your privacy matters.
+                                {PRICING_COPY.privacyHeading}
                             </strong>{' '}
-                            We never sell your data, build ad profiles, or serve
-                            ads. Caramel exists to save you money, not to profit
-                            from your information.
+                            {PRICING_COPY.privacy}
                         </motion.p>
                     </div>
                 </motion.div>

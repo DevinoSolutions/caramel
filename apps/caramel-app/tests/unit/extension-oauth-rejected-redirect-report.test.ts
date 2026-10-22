@@ -255,7 +255,7 @@ describe('flood protection', () => {
     })
 })
 
-describe('request query string scrub (sendDefaultPii)', () => {
+describe('request query string scrub (rejected-redirect events)', () => {
     const ours = () => ({
         tags: { surface: REJECTED_REDIRECT_SURFACE_TAG },
         request: {

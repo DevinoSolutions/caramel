@@ -1,8 +1,8 @@
 import {
-    FAILING_MIN_FAIL_COUNT,
+    FAILING_MIN_FAIL_WEIGHT,
     FAILING_WINDOW_DAYS,
     isRecentlyFailing,
-    KEEPS_FAILING_MIN_FAIL_COUNT,
+    KEEPS_FAILING_MIN_FAIL_WEIGHT,
     keepsFailing,
 } from '@/lib/coupons'
 import { listCoupons, listStoreCoupons } from '@/lib/couponsRepo'
@@ -28,30 +28,34 @@ function ago(ms: number): string {
 
 describe('keepsFailing (the collapse threshold, a stricter isRecentlyFailing)', () => {
     it('the collapse threshold is above the sink threshold', () => {
-        expect(KEEPS_FAILING_MIN_FAIL_COUNT).toBe(3)
-        expect(KEEPS_FAILING_MIN_FAIL_COUNT).toBeGreaterThan(
-            FAILING_MIN_FAIL_COUNT,
+        expect(FAILING_MIN_FAIL_WEIGHT).toBe(4)
+        expect(KEEPS_FAILING_MIN_FAIL_WEIGHT).toBe(6)
+        expect(KEEPS_FAILING_MIN_FAIL_WEIGHT).toBeGreaterThan(
+            FAILING_MIN_FAIL_WEIGHT,
         )
     })
 
-    it('no signal, or a sink-only count (2 failures) → false', () => {
+    it('no signal, or a sink-only quorum → false', () => {
         expect(keepsFailing({}, NOW)).toBe(false)
-        expect(keepsFailing({ failCount: 0, lastFailedAt: null }, NOW)).toBe(
+        expect(keepsFailing({ failWeight: 0, lastFailedAt: null }, NOW)).toBe(
             false,
         )
         expect(
             keepsFailing(
-                { failCount: FAILING_MIN_FAIL_COUNT, lastFailedAt: ago(HOUR) },
+                {
+                    failWeight: FAILING_MIN_FAIL_WEIGHT,
+                    lastFailedAt: ago(HOUR),
+                },
                 NOW,
             ),
         ).toBe(false)
     })
 
-    it('the threshold itself (3 recent failures, no success) → true', () => {
+    it('the threshold itself (a recent quorum, no success) → true', () => {
         expect(
             keepsFailing(
                 {
-                    failCount: KEEPS_FAILING_MIN_FAIL_COUNT,
+                    failWeight: KEEPS_FAILING_MIN_FAIL_WEIGHT,
                     lastFailedAt: ago(HOUR),
                 },
                 NOW,
@@ -60,7 +64,7 @@ describe('keepsFailing (the collapse threshold, a stricter isRecentlyFailing)', 
         expect(
             keepsFailing(
                 {
-                    failCount: KEEPS_FAILING_MIN_FAIL_COUNT - 1,
+                    failWeight: KEEPS_FAILING_MIN_FAIL_WEIGHT - 1,
                     lastFailedAt: ago(HOUR),
                 },
                 NOW,
@@ -68,35 +72,45 @@ describe('keepsFailing (the collapse threshold, a stricter isRecentlyFailing)', 
         ).toBe(false)
     })
 
-    it('one later success clears it, however many failures piled up', () => {
+    it('a worked stamp alone never clears it: a success clears failures only through the worked quorum folded into failWeight (couponSignals.recomputeFailWeight)', () => {
         expect(
             keepsFailing(
                 {
-                    failCount: 50,
+                    failWeight: 50,
                     lastFailedAt: ago(2 * DAY),
                     lastWorkedAt: ago(DAY),
                 },
                 NOW,
             ),
-        ).toBe(false)
-        // A success BEFORE the last failure does not save it.
+        ).toBe(true)
         expect(
             keepsFailing(
                 {
-                    failCount: 4,
+                    failWeight: 8,
                     lastFailedAt: ago(DAY),
                     lastWorkedAt: ago(5 * DAY),
                 },
                 NOW,
             ),
         ).toBe(true)
+        // A cleared quorum is failWeight 0: nothing left to collapse.
+        expect(
+            keepsFailing(
+                {
+                    failWeight: 0,
+                    lastFailedAt: ago(2 * DAY),
+                    lastWorkedAt: ago(DAY),
+                },
+                NOW,
+            ),
+        ).toBe(false)
     })
 
     it('failures outside the 30-day window no longer count', () => {
         expect(
             keepsFailing(
                 {
-                    failCount: 10,
+                    failWeight: 10,
                     lastFailedAt: ago((FAILING_WINDOW_DAYS + 1) * DAY),
                 },
                 NOW,
@@ -105,7 +119,7 @@ describe('keepsFailing (the collapse threshold, a stricter isRecentlyFailing)', 
         expect(
             keepsFailing(
                 {
-                    failCount: 10,
+                    failWeight: 10,
                     lastFailedAt: ago((FAILING_WINDOW_DAYS - 1) * DAY),
                 },
                 NOW,
@@ -115,7 +129,7 @@ describe('keepsFailing (the collapse threshold, a stricter isRecentlyFailing)', 
 
     it('an unparseable timestamp is "no signal", never "keeps failing"', () => {
         expect(
-            keepsFailing({ failCount: 9, lastFailedAt: 'not a date' }, NOW),
+            keepsFailing({ failWeight: 9, lastFailedAt: 'not a date' }, NOW),
         ).toBe(false)
     })
 })
@@ -125,17 +139,17 @@ describe('isRecentlyFailing', () => {
         expect(isRecentlyFailing({}, NOW)).toBe(false)
         expect(
             isRecentlyFailing(
-                { failCount: 0, lastFailedAt: null, lastWorkedAt: null },
+                { failWeight: 0, lastFailedAt: null, lastWorkedAt: null },
                 NOW,
             ),
         ).toBe(false)
     })
 
-    it('a single failure is noise → false; the threshold itself → true', () => {
+    it('one forged anonymous trio (weight 3) is noise → false; the threshold itself → true', () => {
         expect(
             isRecentlyFailing(
                 {
-                    failCount: FAILING_MIN_FAIL_COUNT - 1,
+                    failWeight: FAILING_MIN_FAIL_WEIGHT - 1,
                     lastFailedAt: ago(HOUR),
                 },
                 NOW,
@@ -143,7 +157,10 @@ describe('isRecentlyFailing', () => {
         ).toBe(false)
         expect(
             isRecentlyFailing(
-                { failCount: FAILING_MIN_FAIL_COUNT, lastFailedAt: ago(HOUR) },
+                {
+                    failWeight: FAILING_MIN_FAIL_WEIGHT,
+                    lastFailedAt: ago(HOUR),
+                },
                 NOW,
             ),
         ).toBe(true)
@@ -152,17 +169,27 @@ describe('isRecentlyFailing', () => {
     it('failures with no success ever → true', () => {
         expect(
             isRecentlyFailing(
-                { failCount: 5, lastFailedAt: ago(DAY), lastWorkedAt: null },
+                { failWeight: 5, lastFailedAt: ago(DAY), lastWorkedAt: null },
                 NOW,
             ),
         ).toBe(true)
     })
 
-    it('a success AFTER the last failure resets it → false', () => {
+    it('a worked stamp AFTER the last failure does not reset it by itself (one forged success must not undo the quorum) → true; a cleared quorum (failWeight 0) → false', () => {
         expect(
             isRecentlyFailing(
                 {
-                    failCount: 9,
+                    failWeight: 9,
+                    lastFailedAt: ago(2 * DAY),
+                    lastWorkedAt: ago(DAY),
+                },
+                NOW,
+            ),
+        ).toBe(true)
+        expect(
+            isRecentlyFailing(
+                {
+                    failWeight: 0,
                     lastFailedAt: ago(2 * DAY),
                     lastWorkedAt: ago(DAY),
                 },
@@ -175,7 +202,7 @@ describe('isRecentlyFailing', () => {
         expect(
             isRecentlyFailing(
                 {
-                    failCount: 3,
+                    failWeight: 4,
                     lastFailedAt: ago(DAY),
                     lastWorkedAt: ago(5 * DAY),
                 },
@@ -184,27 +211,17 @@ describe('isRecentlyFailing', () => {
         ).toBe(true)
     })
 
-    it('a success at the very same instant as the failure counts as a reset', () => {
-        const same = ago(DAY)
-        expect(
-            isRecentlyFailing(
-                { failCount: 3, lastFailedAt: same, lastWorkedAt: same },
-                NOW,
-            ),
-        ).toBe(false)
-    })
-
     it('a failure older than the window expires → false; just inside → true', () => {
         const windowMs = FAILING_WINDOW_DAYS * DAY
         expect(
             isRecentlyFailing(
-                { failCount: 10, lastFailedAt: ago(windowMs + 1) },
+                { failWeight: 10, lastFailedAt: ago(windowMs + 1) },
                 NOW,
             ),
         ).toBe(false)
         expect(
             isRecentlyFailing(
-                { failCount: 10, lastFailedAt: ago(windowMs - 1) },
+                { failWeight: 10, lastFailedAt: ago(windowMs - 1) },
                 NOW,
             ),
         ).toBe(true)
@@ -212,12 +229,12 @@ describe('isRecentlyFailing', () => {
 
     it('an unparseable or far-future lastFailedAt → false', () => {
         expect(
-            isRecentlyFailing({ failCount: 4, lastFailedAt: 'garbage' }, NOW),
+            isRecentlyFailing({ failWeight: 4, lastFailedAt: 'garbage' }, NOW),
         ).toBe(false)
         expect(
             isRecentlyFailing(
                 {
-                    failCount: 4,
+                    failWeight: 4,
                     lastFailedAt: new Date(NOW + DAY).toISOString(),
                 },
                 NOW,
@@ -229,7 +246,7 @@ describe('isRecentlyFailing', () => {
         expect(
             isRecentlyFailing(
                 {
-                    failCount: 2,
+                    failWeight: 4,
                     lastFailedAt: new Date(NOW - HOUR),
                     lastWorkedAt: new Date(NOW - 3 * DAY),
                 },
@@ -309,17 +326,17 @@ describe('failing codes sink in SQL on store-scoped reads (sink, never hide)', (
         const order = orderBy(sql)
         expect(order).toMatch(/^ORDER BY \(id IN \(\s*SELECT s\.coupon_id/)
         expect(order).toContain('FROM coupon_signals s')
-        expect(order).toContain('s.fail_count >= ?')
+        expect(order).toContain('s.fail_weight >= ?')
         expect(order).toContain('s.last_failed_at >')
-        expect(order).toContain(
-            '(s.last_worked_at IS NULL OR s.last_failed_at > s.last_worked_at)',
-        )
+        // A success is NOT compared here: it clears failures through the worked
+        // quorum folded into fail_weight, so one forged success cannot un-sink.
+        expect(order).not.toContain('last_worked_at')
         // false (not failing) sorts first; the ranking order breaks ties.
         expect(order).toMatch(
             /\)\) ASC, rating DESC, created_at DESC, id DESC\s+LIMIT/,
         )
         // The thresholds are the coupons.ts constants, bound as parameters.
-        expect(values).toContain(FAILING_MIN_FAIL_COUNT)
+        expect(values).toContain(FAILING_MIN_FAIL_WEIGHT)
         expect(values).toContain(FAILING_WINDOW_DAYS)
     })
 
@@ -333,10 +350,12 @@ describe('failing codes sink in SQL on store-scoped reads (sink, never hide)', (
         expect(order).toMatch(
             /\)\) ASC,\s*\(id IN \(\s*SELECT s\.coupon_id[\s\S]*\)\) ASC, rating DESC, created_at DESC, id DESC\s+LIMIT/,
         )
-        // Each subquery binds its own fail_count threshold, in sink-then-collapse order.
-        expect(values.indexOf(FAILING_MIN_FAIL_COUNT)).toBeGreaterThanOrEqual(0)
-        expect(values.indexOf(KEEPS_FAILING_MIN_FAIL_COUNT)).toBeGreaterThan(
-            values.indexOf(FAILING_MIN_FAIL_COUNT),
+        // Each subquery binds its own fail_weight threshold, in sink-then-collapse order.
+        expect(values.indexOf(FAILING_MIN_FAIL_WEIGHT)).toBeGreaterThanOrEqual(
+            0,
+        )
+        expect(values.indexOf(KEEPS_FAILING_MIN_FAIL_WEIGHT)).toBeGreaterThan(
+            values.indexOf(FAILING_MIN_FAIL_WEIGHT),
         )
     })
 

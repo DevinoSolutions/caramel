@@ -1,5 +1,10 @@
 'use client'
 
+import {
+    HOME_FEATURED_STORES as featuredStores,
+    HOME_STORES_COPY,
+} from '@/lib/marketing/homeContent'
+
 import { useReducedMotion } from '@/lib/reducedMotion'
 import { m } from 'framer-motion'
 import Image from 'next/image'
@@ -35,64 +40,6 @@ const marqueeStyles = `
 // the page with nearly all of the site's organic clicks, linked to no store
 // page in its HTML at all; these eight are stores with live codes in the
 // catalog (checked on prod that day: 22-221 visible codes each).
-const featuredStores = [
-    {
-        name: 'Amazon',
-        domain: 'amazon.com',
-        desc: 'Worldʼs largest online retailer',
-        image: '/amazon.png',
-        category: 'marketplace',
-    },
-    {
-        name: 'eBay',
-        domain: 'ebay.com',
-        desc: 'Auction marketplace for buyers & sellers',
-        image: '/home-stores/ebay.webp',
-        category: 'marketplace',
-    },
-    {
-        name: 'Codecademy',
-        domain: 'codecademy.com',
-        desc: 'Interactive platform to learn coding',
-        image: '/home-stores/codeAcademy.webp',
-        category: 'education',
-    },
-    {
-        name: 'Best Buy',
-        domain: 'bestbuy.com',
-        desc: 'Electronics and tech retailer',
-        image: '/home-stores/bestbuy.webp',
-        category: 'electronics',
-    },
-    {
-        name: 'Target',
-        domain: 'target.com',
-        desc: 'Department store chain',
-        image: '/target.png',
-        category: 'retail',
-    },
-    {
-        name: 'Walmart',
-        domain: 'walmart.com',
-        desc: 'Multinational retail corporation',
-        image: '/home-stores/walmart.webp',
-        category: 'retail',
-    },
-    {
-        name: 'Nike',
-        domain: 'nike.com',
-        desc: 'Athletic footwear and apparel',
-        image: '/home-stores/nike.webp',
-        category: 'fashion',
-    },
-    {
-        name: 'Adidas',
-        domain: 'adidas.com',
-        desc: 'Sports clothing and accessories',
-        image: '/home-stores/adidas.webp',
-        category: 'fashion',
-    },
-]
 
 export default function SupportedSection() {
     const reduceMotion = useReducedMotion()
@@ -115,11 +62,10 @@ export default function SupportedSection() {
                     className="mb-20 text-center"
                 >
                     <h2 className="mb-8 bg-gradient-to-r from-caramel to-orange-600 bg-clip-text pb-1 text-5xl font-extrabold leading-tight tracking-tight text-transparent lg:text-4xl">
-                        4,000+ Supported Stores
+                        {HOME_STORES_COPY.heading}
                     </h2>
                     <p className="max-w mx-auto text-xl leading-relaxed text-gray-600 dark:text-gray-300 lg:text-lg">
-                        From major retailers to niche marketplaces, Caramel
-                        works at thousands of stores.
+                        {HOME_STORES_COPY.summary}
                     </p>
                     <m.div className="mt-8">
                         <m.a
@@ -276,11 +222,10 @@ export default function SupportedSection() {
                     className="rounded-3xl bg-gradient-to-br from-caramel to-[#c9531a] p-12 text-center text-white shadow-2xl ring-1 ring-inset ring-white/20 dark:border dark:border-caramel/30 dark:bg-caramel/[0.12] dark:bg-none dark:shadow-none dark:ring-0 lg:p-8 sm:p-6"
                 >
                     <h3 className="mb-6 text-3xl font-semibold tracking-tight lg:text-2xl">
-                        Donʼt See Your Favorite Store?
+                        {HOME_STORES_COPY.requestHeading}
                     </h3>
                     <p className="mx-auto mb-8 max-w-2xl text-lg leading-relaxed opacity-90">
-                        Weʼre constantly adding new stores to our platform.
-                        Request yours today!
+                        {HOME_STORES_COPY.requestSummary}
                     </p>
                     <m.a
                         href="https://github.com/DevinoSolutions/caramel/issues/new?assignees=&labels=store-request&projects=&template=store-request.md&title=%5BStore+Request%5D+Add+support+for+"

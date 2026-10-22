@@ -77,6 +77,8 @@ const LLMS_TXT = `# Caramel
 
 - [Full version](${origin}/llms-full.txt): the same facts plus the FAQ
   questions and answers and a privacy summary, in one document.
+
+Public pages with a Markdown alternate Link header have a .md twin (home: /index.md); request Accept: text/markdown to read the same content.
 `
 
 export function GET(): Response {

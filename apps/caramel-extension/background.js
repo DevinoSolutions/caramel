@@ -24,6 +24,7 @@ import {
 } from './code-sharing-consent.js'
 import { createActivityRecorder } from './extension-activity.js'
 import { saveInstallId } from './install-attribution.js'
+import { caramelTabHandoffs } from './tab-handoff.js'
 import {
     USAGE_DIAGNOSTICS_CONSENT_KEY,
     deleteTelemetryId,
@@ -33,6 +34,55 @@ import {
     resolveUsageDiagnostics,
     usageDiagnosticsAccepted,
 } from './usage-diagnostics-consent.js'
+
+/* What a content script leaves for the next document of its tab (the
+ * pending submit, the discount-link win, the run across reloads), held here
+ * where the store's page cannot write it (tab-handoff.js). The tab and the
+ * origin are the message sender's, never the message's, and only the tab's
+ * top document, while it is the live one, may hand anything off (a frame is
+ * another site's document, a prerendered or cached one is not the page the
+ * shopper is on). Answers { saved }, { value } for get/take, { cleared }, or
+ * { error }. */
+let _tabHandoffs = null
+const tabHandoffs = () =>
+    (_tabHandoffs ??= caramelTabHandoffs(
+        currentBrowser.storage?.session ?? null,
+    ))
+function senderOrigin(sender) {
+    try {
+        const origin = new URL(sender?.url || sender?.tab?.url).origin
+        return origin === 'null' ? null : origin
+    } catch {
+        return null
+    }
+}
+async function tabHandoff({ op, key, value, expected }, sender) {
+    const tabId = sender?.tab?.id
+    const origin = senderOrigin(sender)
+    if (!Number.isInteger(tabId) || !origin) return { error: 'no tab' }
+    if (sender.frameId !== 0) return { error: 'not the top document' }
+    // documentLifecycle is Chrome's; a browser without it is not asked.
+    if (
+        sender.documentLifecycle !== undefined &&
+        sender.documentLifecycle !== 'active'
+    )
+        return { error: 'not the live document' }
+    const h = tabHandoffs()
+    const refused = saved => {
+        if (saved === 'refused') logError('tabHandoffRefused', `${op} ${key}`)
+        return { saved }
+    }
+    if (op === 'set') return refused(await h.set(tabId, origin, key, value))
+    if (op === 'replace')
+        return refused(await h.replace(tabId, origin, key, value, expected))
+    if (op === 'get') return { value: await h.get(tabId, origin, key) }
+    if (op === 'take') return { value: await h.take(tabId, origin, key) }
+    if (op === 'clear') {
+        await h.clear(tabId, origin, key)
+        return { cleared: true }
+    }
+    return { error: 'unknown op' }
+}
 
 // Assigned by initBackground() instead of at module evaluation: the IIFE throws
 // when neither global exists, which is exactly the case in the Node import
@@ -201,7 +251,7 @@ const FEATURES_CACHE_KEY = 'caramel_features'
 const FEATURES_TTL_ON_MS = 6 * 60 * 60 * 1000
 const FEATURES_TTL_OFF_MS = 30 * 60 * 1000
 let _featuresInflight = null // Promise<entry> while a fetch is running
-let _featuresMemo = null // { shopperCodeCapture, couponBoxDiscovery, couponBoxLlm, ts }
+let _featuresMemo = null // { shopperCodeCapture, couponBoxDiscovery, couponBoxLlm, couponBoxSave, ts }
 
 function _readFeaturesSession() {
     return new Promise(resolve => {
@@ -254,6 +304,8 @@ async function _fetchFeatures() {
         couponBoxDiscovery: json.couponBoxDiscovery === true,
         // The same rule for the server pick (POST coupon-box-pick).
         couponBoxLlm: json.couponBoxLlm === true,
+        // The same rule for saving a found box as a store's config.
+        couponBoxSave: json.couponBoxSave === true,
         ts: Date.now(),
     }
     _writeFeaturesSession(_featuresMemo)
@@ -348,6 +400,99 @@ async function couponBoxPick({ domain, outline }) {
     )
     if (!r.ok) return { error: `HTTP ${r.status}` }
     return r.json()
+}
+
+/* Saves a promo box the finder found, on a store with no config, as that
+ * store's config: a code typed into it took money off the total
+ * (coupon-box-discovery.js caramelFinderConfirmed). The server files it under
+ * the store the host belongs to, only when that store has no config at all
+ * (POST /api/extension/coupon-box-save). The host is the sender's own top
+ * document, never the message's: a page cannot save a box for another site.
+ * Sent only while the server's couponBoxSave flag is on, and once per host per
+ * browser session. The body is the box's selectors and the host: no code, no
+ * price, nothing about the shopper. Answers { saved, reason } or { skipped } /
+ * { error }; nothing here reaches the shopper. */
+const COUPON_BOX_SAVED_KEY = 'caramel_box_saved'
+const _boxSaveHosts = new Set()
+const BOX_PARTS = ['input', 'apply', 'toggle', 'total']
+function _boxSaveBody(box) {
+    if (!box || typeof box !== 'object') return null
+    const out = {}
+    for (const part of BOX_PARTS) {
+        const v = box[part] ?? null
+        if (v !== null && (typeof v !== 'string' || !v || v.length > 256))
+            return null
+        out[part] = v
+    }
+    return out.input && out.total ? out : null
+}
+async function _boxSavedHosts() {
+    try {
+        const area = currentBrowser.storage?.session
+        if (!area) return []
+        const got = await new Promise(resolve =>
+            area.get([COUPON_BOX_SAVED_KEY], res =>
+                resolve(res?.[COUPON_BOX_SAVED_KEY]),
+            ),
+        )
+        return Array.isArray(got) ? got : []
+    } catch {
+        return []
+    }
+}
+function _rememberBoxSaved(hosts) {
+    try {
+        currentBrowser.storage?.session?.set({
+            [COUPON_BOX_SAVED_KEY]: hosts.slice(-200),
+        })
+    } catch {
+        // session storage unavailable in this runtime: memory-only.
+    }
+}
+async function couponBoxSave({ box }, sender) {
+    if (sender?.frameId !== 0) return { skipped: 'not the top document' }
+    let host
+    try {
+        host = new URL(sender?.tab?.url || sender?.url).hostname.toLowerCase()
+    } catch {
+        return { skipped: 'no tab' }
+    }
+    if (!host) return { skipped: 'no tab' }
+    const body = _boxSaveBody(box)
+    if (!body) return { skipped: 'invalid box' }
+    let on = false
+    try {
+        on = (await _features()).couponBoxSave === true
+    } catch (err) {
+        logError('features', err)
+    }
+    if (!on) return { skipped: 'disabled' }
+    const saved = await _boxSavedHosts()
+    if (_boxSaveHosts.has(host) || saved.includes(host))
+        return { skipped: 'already sent' }
+    _boxSaveHosts.add(host)
+    let r
+    try {
+        r = await fetchWithTimeout(
+            caramelUrl('api/extension/coupon-box-save'),
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ host, box: body }),
+            },
+        )
+    } catch (err) {
+        // Never reached the server: the next confirmed run may try again.
+        _boxSaveHosts.delete(host)
+        return { error: String(err) }
+    }
+    const j = await r.json().catch(() => ({}))
+    if (r.status === 429 || r.status >= 500) {
+        _boxSaveHosts.delete(host)
+        return { error: `HTTP ${r.status}` }
+    }
+    _rememberBoxSaved([...saved, host])
+    return { saved: j.saved === true, reason: j.reason ?? null }
 }
 
 function _forgetFeatures() {
@@ -539,6 +684,13 @@ function keepAlive() {
  * fires on every tab switch, nothing user-scoped to gain. */
 const BADGE_CACHE_TTL_MS = 10 * 60 * 1000
 const _badgeCounts = new Map() // domain -> { count, ts }
+// One request per domain at a time: a navigation reports both the URL change
+// and the load completing, and both used to fetch before either was cached.
+const _badgeInFlight = new Map() // domain -> Promise<number>
+// The count shares the per-IP burst budget (20 requests / 2s) with the coupon
+// list a shopper opens at checkout. After a 429 the badge waits as long as the
+// server asked, so it is never the reason that list is refused.
+let _badgePausedUntil = 0
 
 function _setBadge(tabId, count) {
     const text = count > 0 ? (count > 99 ? '99+' : String(count)) : ''
@@ -549,15 +701,35 @@ function _setBadge(tabId, count) {
     }
 }
 
-async function _couponCountFor(domain) {
+function _couponCountFor(domain) {
     const hit = _badgeCounts.get(domain)
-    if (hit && Date.now() - hit.ts < BADGE_CACHE_TTL_MS) return hit.count
+    if (hit && Date.now() - hit.ts < BADGE_CACHE_TTL_MS)
+        return Promise.resolve(hit.count)
+    if (Date.now() < _badgePausedUntil) return Promise.resolve(hit?.count ?? 0)
+    let p = _badgeInFlight.get(domain)
+    if (!p) {
+        p = _fetchCouponCount(domain).finally(() =>
+            _badgeInFlight.delete(domain),
+        )
+        _badgeInFlight.set(domain, p)
+    }
+    return p
+}
+
+async function _fetchCouponCount(domain) {
     const url = new URL(caramelUrl('api/coupons'))
     url.searchParams.set('site', domain)
     url.searchParams.set('limit', '1')
     let count = 0
     try {
         const r = await fetchWithTimeout(url.toString())
+        if (r.status === 429) {
+            const after = Number(r.headers?.get?.('retry-after'))
+            _badgePausedUntil =
+                Date.now() + (after > 0 ? Math.min(after, 600) : 60) * 1000
+            // Not cached: the count is unknown, not zero.
+            return _badgeCounts.get(domain)?.count ?? 0
+        }
         if (r.ok) {
             const json = await r.json()
             count =
@@ -589,11 +761,27 @@ export async function updateBadgeForTab(tabId, tabUrl) {
     _setBadge(tabId, count)
 }
 
-function _caramelOnTabUpdated(tabId, changeInfo, tab) {
+// Exported for tests/badge.test.mjs.
+export function _caramelOnTabActivated({ tabId }) {
+    try {
+        currentBrowser.tabs.get(tabId, tab => {
+            if (currentBrowser.runtime.lastError || !tab) return
+            updateBadgeForTab(tabId, tab.url || '')
+        })
+    } catch (err) {
+        logError('badgeOnActivated', err)
+    }
+}
+
+// Exported for tests/badge.test.mjs.
+export function _caramelOnTabUpdated(tabId, changeInfo, tab) {
     // Fire on navigation commit (URL change) and on load completion —
     // covers SPA address-bar updates that never re-"complete".
     if (!changeInfo.url && changeInfo.status !== 'complete') return
-    updateBadgeForTab(tabId, tab.url || '')
+    // A tab loading out of sight (restored at startup, opened in the
+    // background) is counted when the shopper switches to it, so restoring
+    // twenty tabs does not ask for twenty counts at once.
+    if (tab.active !== false) updateBadgeForTab(tabId, tab.url || '')
     if (!changeInfo.url) return
     // A same-document rewrite can move the shopper into a cart without the
     // content script running again or firing anything it can hear — a store
@@ -665,6 +853,22 @@ export function initBackground() {
     })
 
     currentBrowser.tabs.onUpdated.addListener(_caramelOnTabUpdated)
+    currentBrowser.tabs.onActivated?.addListener(_caramelOnTabActivated)
+
+    // A closed tab's handoffs (tab-handoff.js) are never read again.
+    currentBrowser.tabs.onRemoved?.addListener(tabId =>
+        tabHandoffs()
+            .forgetTab(tabId)
+            .catch(err => logError('tabHandoffForget', err)),
+    )
+    // A tab swapped for a prerendered one gets a new id. Its records are not
+    // moved to it: a run, a pending code or a win is let go rather than
+    // carried into a document that did not ask for it.
+    currentBrowser.tabs.onReplaced?.addListener((_added, removedTabId) =>
+        tabHandoffs()
+            .forgetTab(removedTabId)
+            .catch(err => logError('tabHandoffForget', err)),
+    )
 
     // The user granted us host access (permission-state.js requestAllSites, or
     // the browser's own permissions UI). The popup does not need telling — it
@@ -1011,6 +1215,22 @@ export function initBackground() {
                         sendResponse({ error: String(err) })
                     })
 
+                return true
+            } else if (message.action === 'couponBoxSave') {
+                couponBoxSave(message, sender)
+                    .then(resp => sendResponse(resp))
+                    .catch(err => {
+                        logError('couponBoxSave', err)
+                        sendResponse({ error: String(err) })
+                    })
+                return true
+            } else if (message.action === 'tabHandoff') {
+                tabHandoff(message, sender)
+                    .then(resp => sendResponse(resp))
+                    .catch(err => {
+                        logError('tabHandoff', err)
+                        sendResponse({ error: String(err) })
+                    })
                 return true
             } else if (message.action === 'fetchSupportedStores') {
                 const url = caramelUrl('api/extension/supported-stores')

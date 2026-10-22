@@ -107,6 +107,10 @@ export const CouponListRowSchema = z.object({
     timesUsed: z.coerce.number(),
     status: z.string(),
     verificationMessage: z.string().nullable(),
+    // "New customers only" label (2026-10-19). The column is nullable (NULL =
+    // unknown); the reads select `new_customers_only IS TRUE`, so it is always
+    // a boolean here.
+    newCustomersOnly: z.boolean(),
 })
 export type CouponListRow = z.infer<typeof CouponListRowSchema>
 
@@ -152,9 +156,25 @@ export const CouponIdRowSchema = z.object({
     id: couponIdSchema,
 })
 
+/** `... RETURNING fail_weight AS "failWeight"` — couponsRepo's coupon_signals
+ *  writers (writeWorkedSignal / writeFailedSignal / writeUsageSignal). */
+export const CouponSignalWriteRowSchema = z.object({
+    failWeight: z.number().int(),
+})
+
 /** `SELECT (EXISTS(...) OR EXISTS(...)) AS known` — couponsRepo.isKnownStore. */
 export const KnownStoreRowSchema = z.object({
     known: z.boolean(),
+})
+
+/** `SELECT ... AS name` — couponsRepo.findCatalogStoreNames. */
+export const CatalogStoreNameRowSchema = z.object({
+    name: z.string(),
+})
+
+/** `SELECT EXISTS(...) AS served` — couponsRepo.hasServedStoreConfig. */
+export const ServedStoreConfigRowSchema = z.object({
+    served: z.boolean(),
 })
 
 /** `SELECT COUNT(*)::int AS total` — coupons/route.ts + [store]/page.tsx. */
@@ -270,6 +290,9 @@ export const StoreConfigRowSchema = z.object({
     success_indicator_xpath: z.string().nullable(),
     error_indicator_xpath: z.string().nullable(),
     coupon_remove_xpath: z.string().nullable(),
+    // Who wrote the row: NULL = the coupons pipeline, 'auto_detect' = a box the
+    // extension found and saved (schema.prisma `origin`).
+    origin: z.string().nullish(),
 })
 export type StoreConfigRow = z.infer<typeof StoreConfigRowSchema>
 

@@ -55,6 +55,7 @@ import {
     caramelGetSettings,
     caramelOnCodeSharingConsentChanged,
     caramelOnSettingsChanged,
+    caramelOwnHost,
     caramelSendMessage,
     caramelSetCodeSharingConsent,
     caramelSiteIsPaused,
@@ -182,13 +183,24 @@ export function caramelCaptureAccepted(verdict, code) {
     return verdict.priceDropped === true || rowNamesCode
 }
 
-// Why the store's answer did not count as an acceptance, in the order
-// caramelCaptureAccepted tests it.
+// Why the store's answer did not count as an acceptance. Telemetry vocabulary
+// only: it never decides what is shared (caramelCaptureAccepted does). A new
+// error is checked first, because a store that printed a rejection is a
+// rejection whether or not a row also committed. `not-committed` is retired
+// here (old installed builds still send it, so both mirrors keep accepting it).
 function _captureRefusalReason(verdict) {
-    if (!verdict || verdict.success !== true || verdict.committed !== true)
-        return 'not-committed'
-    if (verdict.errorMsg && verdict.errorIsNew) return 'store-error'
-    return 'not-tied-to-code'
+    if (verdict?.errorMsg && verdict.errorIsNew) return 'store-error'
+    if (verdict?.success === true && verdict.committed === true)
+        return 'not-tied-to-code'
+    // The total dropped but no applied row matched: the structural false
+    // negative of a store config without a row we can read.
+    if (verdict?.priceDropped === true) return 'price-dropped-no-row'
+    // A row appeared and then did not hold (the store took the code and undid
+    // it), or a finder-picked box committed with no drop: a refusal the store
+    // acted out, not silence.
+    if (verdict?.committed === true) return 'committed-no-effect'
+    // No new error, no price drop, and no row that held within the window.
+    return 'no-signal'
 }
 
 // Reports one funnel step to the worker, which drops it unless the shopper
@@ -322,7 +334,7 @@ function _unmarkShared(code) {
  * while it runs muddies every reading the loop takes — not a moment to judge
  * anything. */
 function _runnerIsApplying() {
-    return !!document.getElementById('caramel-testing-overlay')
+    return !!caramelOwnHost('caramel-testing-overlay')
 }
 
 function _fieldLooksLikeAPromoBox(input) {

@@ -75,6 +75,13 @@ beforeEach(async () => {
     setText(document.getElementById('total'), '$100.00')
     vi.resetModules()
     ;({ applyCoupon } = await import('../coupon-apply.js'))
+    // A record marked caramelFound is one the finder built, so the page has
+    // already loaded it: the apply flow reads the total through it.
+    const [{ _caramelUseLoadedFinder }, finder] = await Promise.all([
+        import('../coupon-box-finder-loader.js'),
+        import('../coupon-box-discovery.js'),
+    ])
+    _caramelUseLoadedFinder(finder)
 })
 
 describe('applyCoupon verdict — success rule', () => {
@@ -638,6 +645,44 @@ describe('applyCoupon verdict — success rule', () => {
 // promo section (message, a new input holding the code, a new button). The
 // finder's marks went with the old nodes, so the answer was never seen (the
 // full 10 s wait, no quote) and the next code found no box at all.
+describe('a finder-picked box on a page whose finder is not loaded', () => {
+    // The apply flow reads a finder record's total through the finder. A page
+    // that has not loaded it (or could not) has no way to read that total, so
+    // nothing can be measured: whatever the store prints, it is not a saving.
+    beforeEach(async () => {
+        const { _caramelResetFinderLoad } = await import(
+            '../coupon-box-finder-loader.js'
+        )
+        _caramelResetFinderLoad()
+    })
+
+    it('a price drop is not a success, and nothing throws', async () => {
+        const rec = { ...BASE, priceContainer: '#total', caramelFound: true }
+        respond(() => setText(document.getElementById('total'), '$90.00'))
+
+        const res = await applyCoupon('SAVE10', rec)
+
+        expect(res.success).toBe(false)
+    })
+
+    it('an applied row beside the drop is not a success either', async () => {
+        const rec = {
+            ...BASE,
+            successIndicator: '#applied-row',
+            priceContainer: '#total',
+            caramelFound: true,
+        }
+        respond(() => {
+            mountAppliedRow()
+            setText(document.getElementById('total'), '$90.00')
+        })
+
+        const res = await applyCoupon('SAVE10', rec)
+
+        expect(res.success).toBe(false)
+    })
+})
+
 describe('a finder-picked box the store re-draws to answer', () => {
     const SECTION = msg =>
         '<div class="promo">' +
@@ -699,7 +744,10 @@ describe('a finder-picked box the store re-draws to answer', () => {
 
     it('finds the box again when the store re-draws it between codes', async () => {
         try {
-            const rec = await finderRecord({ domain: 'shop.test' })
+            const rec = await finderRecord({
+                domain: 'shop.test',
+                caramelNoConfig: true,
+            })
             // A cart refresh after our read: the section the next code goes
             // into is not the one the last code went into.
             document.querySelector('.sec').innerHTML = SECTION('')
@@ -719,7 +767,10 @@ describe('a finder-picked box the store re-draws to answer', () => {
         // the next code was judged at 0.7 s with no baseline, and the 5% it
         // took off a moment later was never counted.
         try {
-            const rec = await finderRecord({ domain: 'shop.test' })
+            const rec = await finderRecord({
+                domain: 'shop.test',
+                caramelNoConfig: true,
+            })
             // Fresh markup, as the store's re-render brings: none of our marks.
             const sum = document.querySelector('.row')
             sum.insertAdjacentHTML(
@@ -773,7 +824,10 @@ describe('a finder-picked box the store re-draws to answer', () => {
                 document.body.innerHTML =
                     `<aside class="sec">${SECTION('')}</aside>` + SUMMARY('')
                 addLineOnClick(LINE('Coupon', '-$20.00'))
-                const rec = await finderRecord({ domain: 'shop.test' })
+                const rec = await finderRecord({
+                    domain: 'shop.test',
+                    caramelNoConfig: true,
+                })
 
                 const res = await applyCoupon('SAVE20', rec)
 
@@ -790,7 +844,10 @@ describe('a finder-picked box the store re-draws to answer', () => {
                     `<aside class="sec">${SECTION('')}</aside>` +
                     SUMMARY(LINE('Discount', '-$10.00'))
                 redrawOnClick(c => `Sorry, code "${c}" isn't valid.`)
-                const rec = await finderRecord({ domain: 'shop.test' })
+                const rec = await finderRecord({
+                    domain: 'shop.test',
+                    caramelNoConfig: true,
+                })
 
                 const res = await applyCoupon('NOPE', rec)
 
@@ -808,7 +865,10 @@ describe('a finder-picked box the store re-draws to answer', () => {
                     LINE('Coupon', '-$20.00') +
                         LINE('Coupon TWENTYOFF applied', '-$20.00'),
                 )
-                const rec = await finderRecord({ domain: 'shop.test' })
+                const rec = await finderRecord({
+                    domain: 'shop.test',
+                    caramelNoConfig: true,
+                })
 
                 const res = await applyCoupon('TWENTYOFF', rec)
 
@@ -832,7 +892,10 @@ describe('a finder-picked box the store re-draws to answer', () => {
                 addLineOnClick(
                     LINE('Coupon', '-$20.00', ' style="display:none"'),
                 )
-                const rec = await finderRecord({ domain: 'shop.test' })
+                const rec = await finderRecord({
+                    domain: 'shop.test',
+                    caramelNoConfig: true,
+                })
 
                 const res = await applyCoupon('SAVE20', rec)
 
@@ -864,7 +927,10 @@ describe('a finder-picked box the store re-draws to answer', () => {
                     }, 900)
                 }
                 document.addEventListener('click', clicks)
-                const rec = await finderRecord({ domain: 'shop.test' })
+                const rec = await finderRecord({
+                    domain: 'shop.test',
+                    caramelNoConfig: true,
+                })
 
                 const res = await applyCoupon('SAVE20', rec)
 
@@ -882,7 +948,10 @@ describe('a finder-picked box the store re-draws to answer', () => {
                 addLineOnClick(
                     '<p class="cl"><strong>Discount code</strong> requires a minimum purchase of $50.00</p>',
                 )
-                const rec = await finderRecord({ domain: 'shop.test' })
+                const rec = await finderRecord({
+                    domain: 'shop.test',
+                    caramelNoConfig: true,
+                })
 
                 const res = await applyCoupon('NOPE', rec)
 
@@ -912,7 +981,10 @@ describe('a finder-picked box the store re-draws to answer', () => {
                     }, 900)
                 }
                 document.addEventListener('click', clicks)
-                const rec = await finderRecord({ domain: 'shop.test' })
+                const rec = await finderRecord({
+                    domain: 'shop.test',
+                    caramelNoConfig: true,
+                })
 
                 const res = await applyCoupon('NOPE', rec)
 
@@ -994,7 +1066,10 @@ describe('a finder-picked box the store re-draws to answer', () => {
                     }, 900)
                 }
                 document.addEventListener('click', clicks)
-                const rec = await finderRecord({ domain: 'shop.test' })
+                const rec = await finderRecord({
+                    domain: 'shop.test',
+                    caramelNoConfig: true,
+                })
 
                 const res = await applyCoupon('NOPE', rec)
 
@@ -1015,7 +1090,10 @@ describe('a finder-picked box the store re-draws to answer', () => {
                         LINE('Discount on item one', '-$12.00') +
                         LINE('Discount on item two', '-$8.00'),
                 )
-                const rec = await finderRecord({ domain: 'shop.test' })
+                const rec = await finderRecord({
+                    domain: 'shop.test',
+                    caramelNoConfig: true,
+                })
 
                 const res = await applyCoupon('TWENTYOFF', rec)
 
@@ -1040,7 +1118,10 @@ describe('a finder-picked box the store re-draws to answer', () => {
                     }, 900)
                 }
                 document.addEventListener('click', clicks)
-                const rec = await finderRecord({ domain: 'shop.test' })
+                const rec = await finderRecord({
+                    domain: 'shop.test',
+                    caramelNoConfig: true,
+                })
 
                 const res = await applyCoupon('NOPE', rec)
 
@@ -1058,7 +1139,10 @@ describe('a finder-picked box the store re-draws to answer', () => {
                     c => `Sorry, code "${c}" isn't valid for this order.`,
                     LINE('Promo TWENTYOFF', '-$20.00'),
                 )
-                const rec = await finderRecord({ domain: 'shop.test' })
+                const rec = await finderRecord({
+                    domain: 'shop.test',
+                    caramelNoConfig: true,
+                })
 
                 const res = await applyCoupon('TWENTYOFF', rec)
 
@@ -1077,7 +1161,10 @@ describe('a finder-picked box the store re-draws to answer', () => {
                     null,
                     '<div class="cl"><span>Coupon</span> <span>-\n<div>$20.00 </div></span></div>',
                 )
-                const rec = await finderRecord({ domain: 'shop.test' })
+                const rec = await finderRecord({
+                    domain: 'shop.test',
+                    caramelNoConfig: true,
+                })
 
                 const res = await applyCoupon('TWENTYOFF', rec)
 
@@ -1096,7 +1183,10 @@ describe('a finder-picked box the store re-draws to answer', () => {
                     null,
                     '<div class="cl"><b>Promo code</b> A-1 needs a $50.00 order</div>',
                 )
-                const rec = await finderRecord({ domain: 'shop.test' })
+                const rec = await finderRecord({
+                    domain: 'shop.test',
+                    caramelNoConfig: true,
+                })
 
                 const res = await applyCoupon('NOPE', rec)
 
@@ -1114,7 +1204,10 @@ describe('a finder-picked box the store re-draws to answer', () => {
                     null,
                     '<div class="cl"><b>Promo code</b> once you spend more -$5.00</div>',
                 )
-                const rec = await finderRecord({ domain: 'shop.test' })
+                const rec = await finderRecord({
+                    domain: 'shop.test',
+                    caramelNoConfig: true,
+                })
 
                 const res = await applyCoupon('NOPE', rec)
 
@@ -1133,7 +1226,10 @@ describe('a finder-picked box the store re-draws to answer', () => {
                     '<div class="cl"><span>Promo code</span><span>- $5.00</span>' +
                         '<small>Minimum order $50.00</small></div>',
                 )
-                const rec = await finderRecord({ domain: 'shop.test' })
+                const rec = await finderRecord({
+                    domain: 'shop.test',
+                    caramelNoConfig: true,
+                })
 
                 const res = await applyCoupon('NOPE', rec)
 
@@ -1151,7 +1247,10 @@ describe('a finder-picked box the store re-draws to answer', () => {
                     null,
                     '<div class="cl"><b>Promo code</b> – $5.00 off your next order</div>',
                 )
-                const rec = await finderRecord({ domain: 'shop.test' })
+                const rec = await finderRecord({
+                    domain: 'shop.test',
+                    caramelNoConfig: true,
+                })
 
                 const res = await applyCoupon('NOPE', rec)
 
@@ -1169,7 +1268,10 @@ describe('a finder-picked box the store re-draws to answer', () => {
                     null,
                     '<div class="cl"><b>Promo code</b> SPRING\n- $5.00 off\n- for all items</div>',
                 )
-                const rec = await finderRecord({ domain: 'shop.test' })
+                const rec = await finderRecord({
+                    domain: 'shop.test',
+                    caramelNoConfig: true,
+                })
 
                 const res = await applyCoupon('NOPE', rec)
 
@@ -1184,7 +1286,10 @@ describe('a finder-picked box the store re-draws to answer', () => {
                 document.body.innerHTML =
                     `<aside class="sec">${SECTION('')}</aside>` + SUMMARY('')
                 answerOnClick(null, LINE('Coupons (2)', '$5.00'))
-                const rec = await finderRecord({ domain: 'shop.test' })
+                const rec = await finderRecord({
+                    domain: 'shop.test',
+                    caramelNoConfig: true,
+                })
 
                 const res = await applyCoupon('NOPE', rec)
 
@@ -1198,7 +1303,10 @@ describe('a finder-picked box the store re-draws to answer', () => {
     it('sees the answer in a section that replaced the one it watched', async () => {
         try {
             redrawOnClick(c => `Sorry, code "${c}" isn't valid.`, true)
-            const rec = await finderRecord({ domain: 'shop.test' })
+            const rec = await finderRecord({
+                domain: 'shop.test',
+                caramelNoConfig: true,
+            })
 
             const started = performance.now()
             const res = await applyCoupon('NOPE', rec)
@@ -1238,7 +1346,10 @@ describe('a finder-picked box the store re-draws to answer', () => {
                 }, 4500)
             }
             document.addEventListener('click', clicks)
-            const rec = await finderRecord({ domain: 'shop.test' })
+            const rec = await finderRecord({
+                domain: 'shop.test',
+                caramelNoConfig: true,
+            })
 
             const res = await applyCoupon('SAVE10', rec)
 
@@ -1264,7 +1375,10 @@ describe('a finder-picked box the store re-draws to answer', () => {
                 }, 1800)
             }
             document.addEventListener('click', clicks)
-            const rec = await finderRecord({ domain: 'shop.test' })
+            const rec = await finderRecord({
+                domain: 'shop.test',
+                caramelNoConfig: true,
+            })
 
             const started = performance.now()
             const res = await applyCoupon('NOPE', rec)
@@ -1279,7 +1393,10 @@ describe('a finder-picked box the store re-draws to answer', () => {
     it("reads the store's answer in the section it drew", async () => {
         try {
             redrawOnClick(c => `Sorry, code "${c}" isn't valid.`)
-            const rec = await finderRecord({ domain: 'shop.test' })
+            const rec = await finderRecord({
+                domain: 'shop.test',
+                caramelNoConfig: true,
+            })
 
             const started = performance.now()
             const res = await applyCoupon('NOPE', rec)
@@ -1295,7 +1412,10 @@ describe('a finder-picked box the store re-draws to answer', () => {
     it('puts the next code into the box the store drew', async () => {
         try {
             redrawOnClick(c => `Sorry, code "${c}" isn't valid.`)
-            const rec = await finderRecord({ domain: 'shop.test' })
+            const rec = await finderRecord({
+                domain: 'shop.test',
+                caramelNoConfig: true,
+            })
             await applyCoupon('NOPE', rec)
 
             const res = await applyCoupon('SECOND', rec)
@@ -1339,7 +1459,10 @@ describe('a finder-picked box the store re-draws to answer', () => {
                 }, 150)
             }
             document.addEventListener('click', clicks)
-            const rec = await finderRecord({ domain: 'shop.test' })
+            const rec = await finderRecord({
+                domain: 'shop.test',
+                caramelNoConfig: true,
+            })
             await applyCoupon('NOPE', rec)
 
             const res = await applyCoupon('SECOND', rec)
@@ -1373,7 +1496,10 @@ describe('a finder-picked box the store re-draws to answer', () => {
                 }, 150)
             }
             document.addEventListener('click', clicks)
-            const rec = await finderRecord({ domain: 'shop.test' })
+            const rec = await finderRecord({
+                domain: 'shop.test',
+                caramelNoConfig: true,
+            })
 
             const res = await applyCoupon('NOPE', rec)
 
@@ -1390,7 +1516,10 @@ describe('a finder-picked box the store re-draws to answer', () => {
         it(`reads "${said}" as the refusal it is, without waiting`, async () => {
             try {
                 redrawOnClick(() => said)
-                const rec = await finderRecord({ domain: 'shop.test' })
+                const rec = await finderRecord({
+                    domain: 'shop.test',
+                    caramelNoConfig: true,
+                })
 
                 const started = performance.now()
                 const res = await applyCoupon('NOPE', rec)

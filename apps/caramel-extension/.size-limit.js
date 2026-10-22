@@ -60,7 +60,83 @@ module.exports = [
         // coupon-runner.js) — the cookie reader pinned to the website's
         // schema, the install-id/record storage and the bounded retry.
         // Measured 111.27 -> 114.55 kB (+3.3 kB): one new capability, not prose.
-        limit: '120 KB',
+        // 2026-10-16, raised 120 -> 122 kB: the finder's safety guards (it
+        // never clicks a points, rewards, offers or settings control, judged
+        // by the control's words, its neighbours and its section's name) and
+        // the store lookup's registrable-domain check for hyphen hosts.
+        // Measured 118.05 -> 120.89 kB; 121.47 kB once the finder also never
+        // clicks a control that adds to the cart, buys, adds a gift extra,
+        // updates the cart, subscribes or signs in (noCodeClick, the same
+        // words the server-pick checks use).
+        // 2026-10-17, raised 122 -> 122.5 kB: an apply button with no apply
+        // word on it is taken only in the box's own panel, and never when its
+        // attributes say remove, quantity, checkout, pay, buy, sign in or up,
+        // subscribe or wishlist (wordlessApply). Measured 122.01 kB. The
+        // finder is ~28.5 kB of this bundle on every page; loading it on
+        // demand (coupon-box-finder.js) takes it out and brings this bundle
+        // back down to about 93.7 kB.
+        // 2026-10-17, raised 122.5 -> 123 kB: the finder never spends store
+        // credit, a gift card or a balance, reads every page in bounded time,
+        // and never clicks "Next", "Proceed" or an orders link on the
+        // server's word (the server's never-click list, byte for byte).
+        // Measured 122.58 kB.
+        // 2026-10-17, raised 123 -> 125 kB: stacked on the per-tab pick
+        // memory (a cart that reloads to show each answer keeps the server's
+        // box, found again by name). Measured 124.35 kB.
+        // 2026-10-17, lowered 125 -> 95.5 kB: the finder left this bundle. It
+        // ships as assets/coupon-box-finder.js (its own budget below) and is
+        // loaded only by a page that runs it; what stays is the flag read and
+        // the loader (coupon-box-finder-loader.js). Measured 124.35 -> 94.22
+        // kB (93.68 before the per-tab pick memory, 93.55 before the loader
+        // learned to report a failed load and to refuse a module without the
+        // hand-over), so the limit is measured + ~1.3 kB.
+        // 2026-10-19, raised 95.5 -> 96.5 kB: the second look at a config-less
+        // cart page (a bounded watch for a box or total the store draws after
+        // load) joined this bundle with the finder on demand. Measured
+        // 95.79 kB.
+        // The server-pick branch, measured against the 120 kB bundle that still
+        // held the finder:
+        // 2026-10-16, raised 120 -> 122 kB: the server's pick mode
+        // (rules_first / llm_first / llm_only, and the prompt asking the same
+        // question per mode) and the remembered coupon box (read it first,
+        // check it like any pick, carry it across a reload, hand its outcome
+        // to the module that saves it). Measured 113.05 -> 116.66 kB at first
+        // push, 121.36 kB after the review fixes (the learned-apply gate, the
+        // leave-the-page rule on every path, the setting and section rules);
+        // naming a box ships on demand (coupon-box-learned.js, below), not
+        // here.
+        // 2026-10-17, raised 122 -> 125 kB: a submit that leaves the store
+        // (formaction/form target) is never the apply, a positional or
+        // whole-form wordless apply is refused, and the remembered box is
+        // asked of the background instead of read from page storage.
+        // Measured 122.14 kB; 122.4 kB once the finder's pick memory moved to
+        // the background too (the per-tab handoffs).
+        // 2026-10-17, raised 125 -> 130 kB: this branch merged main through
+        // #348, which brings in the notes above it dated 2026-10-15 (install
+        // attribution, the porkbun capability marker) and the handoff store's
+        // review fixes. Measured 128.46 kB.
+        // 2026-10-19, raised 96.5 -> 97 kB: the server pick mode and the
+        // remembered coupon box joined the on-demand finder. Their content
+        // script share (the mode read, the learned-box handoff, the resumed
+        // learn) stays in this bundle; the finder itself ships on demand.
+        // Measured 96.05 kB.
+        // PR #369, on its own branch against the 120 kB bundle that still
+        // held the finder:
+        // 2026-10-17 (review of PR #369), raised 120 -> 122 kB: every control
+        // in the injected UI acts only on the shopper's own (trusted) input,
+        // a cancel leaves a stop mark the next page reads before it claims a
+        // hop, and a note of which handoffs may exist lets a page with nothing
+        // pending skip asking the background. Measured 118.2 -> 119.84 kB.
+        // 2026-10-19, raised 97 -> 98 kB: the trusted-input guard, the stop
+        // mark and the handoff note above joined the bundle with the server
+        // pick mode and the on-demand finder. Measured 97.85 kB.
+        // 2026-10-22, raised 98 -> 101 kB: main's #401 (removing our coupon
+        // never clicks a product line's remove) took it to 98.74 kB, then the
+        // apply flow on a box the finder found: it waits for an Apply the
+        // store enables a tick after typing, holds a moved total before
+        // calling it a saving, and refuses a drop beside the store's fresh
+        // refusal of the code. Measured 99.77 kB.
+        limit: '101 KB',
         brotli: false,
     },
     {
@@ -86,14 +162,6 @@ module.exports = [
         // 2026-10-15: the sign-in sends the install's attribution (the exchange
         // body fields, the Safari authorize query and the unreadable-storage
         // report). Measured 10.81 kB, still under the unchanged 11 kB budget.
-        // 2026-10-13, raised 11 -> 12 kB: recordPopupActivity (the popup
-        // half of the Google Chrome daily-active ping — one message to the
-        // worker, never a fetch from the popup) on top of main's 1.4.11
-        // popup growth left 1.2% headroom. Measured 10.87 kB.
-        // 2026-10-18, merging main (1.4.15) back to 11 kB: main's Safari web
-        // sign-in moved the in-popup OAuth poll client out of this group, so
-        // with recordPopupActivity on top it measures 8.1 kB — the 12 kB
-        // raise above is no longer needed.
         limit: '11 KB',
         brotli: false,
     },
@@ -159,23 +227,44 @@ module.exports = [
         // through unnoticed. Measured 12.38 kB after the review fixes (id minted
         // only on accept, the consent re-read, device-local consent), so the
         // limit is measured + ~0.3 kB.
-        // 2026-10-13, raised 10 -> 13 kB: extension-activity.js joined
-        // this group (the Google Chrome daily-active ping's worker half —
-        // seed + SHA-256 daily id, the once-per-UTC-day state, the bounded
-        // disabled/failure cooldowns, the serialized in-flight attempt) plus
-        // the popup-only recordExtensionActivity route in background.js.
-        // Measured 11.96 kB after merging main's code-sharing consent (was
-        // 9.29 kB): one new feature, not prose.
-        // 2026-10-14, raised 13 -> 14 kB on merging main's coupon-box
-        // discovery + pick routes into the daily-active ping (the two raises
-        // above were each measured without the other). Measured 13.04 kB:
-        // the sum of both features, not prose.
-        // 2026-10-18, raised 14 -> 15.2 kB on merging main (1.4.15): the
-        // daily-active ping on top of main's opt-in funnel diagnostics, install
-        // attribution and telemetry-id fix (main's 12.7 kB and this branch's
-        // 14 kB were each measured without the other). Measured 14.87 kB, so
-        // the limit is measured + ~0.3 kB, per the PR #353 tightening note.
-        limit: '15.2 KB',
+        // 2026-10-17, raised 12.7 -> 13.6 kB: the per-tab handoffs
+        // (tab-handoff.js and its message route), which hold the pending
+        // submit, the discount-link win and the run where the store's page
+        // cannot write them. Measured 13.24 kB.
+        // 2026-10-17 (review of PR #369), raised 13.6 -> 13.9 kB: the handoff
+        // route answers only the tab's top, live document, forgets a tab the
+        // browser replaces, writes down a refused record, and gains the
+        // compare-and-set replace that makes a cancel one step. Measured
+        // 13.60 kB.
+        // On this branch, before it merged main through #348:
+        // 2026-10-16, raised 11.3 -> 12.7 kB: the pick mode beside the flag,
+        // the couponBoxLearned flag, and behind it the learned-answer opt-in
+        // and the learned coupon box report (install id read, the POST, what
+        // the server recorded). Measured 10.68 -> 11.77 kB.
+        // 2026-10-17, raised 12.7 -> 15 kB: the learned-box memory moved here
+        // from the page (a page can write its own storage): the background
+        // reads and writes it for the sender tab's own host through
+        // coupon-box-learned.js (validation and the selector grammar), holds
+        // the box a run used across a reload per tab, and serialises writes
+        // across tabs. Measured 13.57 kB.
+        // 2026-10-17, unchanged at 15 kB: the per-tab handoff store
+        // (tab-handoff.js) joined, and the box a run holds across a reload
+        // moved onto it in place of its own copy. Measured 13.97 kB.
+        // 2026-10-17, raised 15 -> 16.6 kB: main through #348 brings the
+        // code-sharing funnel diagnostics (dated 2026-10-15 above) and the
+        // handoff store's review fixes. Measured 16.2 kB.
+        // 2026-10-20 (PR #384), raised 12.7 -> 13.4 kB: the toolbar badge
+        // counts only the tab in front (re-badging on tab switch), shares one
+        // request per domain and backs off after a 429, so it no longer spends
+        // the per-IP burst budget the shopper's coupon list needs. Measured
+        // 13.09 kB, so the limit is measured + ~0.3 kB.
+        // 2026-10-20, merging main into #348: both raises above land together
+        // (the per-tab handoffs and the toolbar badge). Measured 14.19 kB, so
+        // the limit is measured + ~0.3 kB.
+        // 2026-10-20, merging main (through #348) again: the learned-box
+        // memory and pick mode above plus the toolbar badge from #384.
+        // Measured 16.91 kB, so the limit is measured + ~0.3 kB.
+        limit: '17.2 KB',
         brotli: false,
     },
     {
@@ -189,6 +278,31 @@ module.exports = [
         brotli: false,
     },
     {
+        name: 'coupon-box-finder.js (loaded on demand, minified)',
+        path: '.size-cache/coupon-box-finder.min.js',
+        // 2026-10-17 — measured 29.74 kB, built exactly as it ships
+        // (scripts/finder-bundle.mjs). Not injected on every page: the
+        // content script imports it only when the finder flag is on and the
+        // page has no box a config describes. The nine-language vocabularies
+        // and the field, button, toggle and total-row readers are most of it
+        // (28.06 kB before it learned never to click a control that is not a
+        // code, 28.64 kB before an apply button with no apply word was
+        // limited to the box's own panel, 29.18 kB before it refused store
+        // credit, gift cards and balances and bounded what each rule reads,
+        // 29.65 kB before it refused the server's whole never-click list).
+        // The limit is measured + ~0.75 kB.
+        // 2026-10-17, raised 30.5 -> 32 kB: the per-tab pick memory (a cart
+        // that reloads to show each answer keeps the server's box, found again
+        // by name) ships in the finder. Measured 30.98 kB.
+        // 2026-10-19, raised 32 -> 37.5 kB: the server pick mode, the
+        // remembered coupon box and the checks on a learned apply ship in the
+        // finder now that it loads on demand. Measured 36.73 kB.
+        // It is written only here: tests/finder-module-build.test.mjs reads
+        // it.
+        limit: '37.5 KB',
+        brotli: false,
+    },
+    {
         name: 'porkbun-alert-shim.js (porkbun.com checkout only, minified)',
         path: '.size-cache/porkbun-alert.min.js',
         // 2026-10-15 (T-2480) — own MAIN-world content script for porkbun.com's
@@ -197,6 +311,31 @@ module.exports = [
         // to 1.86 kB minified; the same module adds ~0.8 kB to the per-page
         // content-scripts group above (116.69 -> 117.49 kB, inside its limit).
         limit: '2 KB',
+        brotli: false,
+    },
+    {
+        name: 'coupon-box-selectors.js (loaded on demand, minified)',
+        path: '.size-cache/coupon-box-selectors.min.js',
+        // 2026-10-16 — measured 3.55 kB minified. Not injected on every page:
+        // the finder imports it only on a store with no config, to name a box
+        // it may remember (stable selectors) and to save and report what a
+        // run on that box showed (the per-install memory, LRU 200 domains).
+        // Same date, raised 3.8 -> 4.5 kB: the selector grammar every learned
+        // selector is built in and read through (a served or stored selector
+        // outside it is never queried), and the one-element lookup the finder
+        // reads a learned box with. Measured 3.55 -> 4.19 kB.
+        // 2026-10-17, raised 4.5 -> 4.8 kB: the server's two refusals,
+        // mirrored so a box it would refuse is never remembered nor sent (no
+        // personal-data shapes in any selector; no apply or toggle that names
+        // checkout, ordering, paying or removing). Measured 4.43 kB.
+        // 2026-10-17, raised 4.8 -> 5.1 kB: the server's final rules for
+        // both (long numbers only in attribute values other than id, even
+        // split by spaces, dashes or dots; risky words only in the clicked
+        // element, as whole words or pairs). Measured 4.88 kB.
+        // 2026-10-17, raised 5.1 -> 5.4 kB: `checkout` is not risky when the
+        // clicked element also names a coupon word (the cart's own coupon
+        // apply). Measured 5.11 kB.
+        limit: '5.4 KB',
         brotli: false,
     },
 ]

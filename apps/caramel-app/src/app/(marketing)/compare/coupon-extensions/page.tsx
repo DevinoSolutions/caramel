@@ -14,6 +14,7 @@ import {
     formatComparisonDate,
     type ComparisonSourceId,
 } from '@/lib/seo/extensionComparison'
+import { COMPARISON_BODY, GUIDE_BODY } from '@/lib/seo/guidePageCopy'
 import { HONEY_GUIDE_PATH } from '@/lib/seo/honeyExtensionGuide'
 import type { Metadata } from 'next'
 import Link from 'next/link'
@@ -85,21 +86,17 @@ export default function CompareCouponExtensionsPage() {
             <article className="mx-auto max-w-5xl">
                 <header className="pb-10">
                     <h1 className="mb-4 text-4xl font-extrabold tracking-tight text-gray-900 dark:text-white md:text-3xl">
-                        The best coupon extensions, compared
+                        {COMPARISON_BODY.heading}
                     </h1>
                     <p className={`${bodyText} text-lg`}>
                         {COMPARISON_SUMMARY}
                     </p>
                     <p className="mt-4 text-sm text-gray-600 dark:text-gray-400">
-                        Checked on{' '}
+                        {GUIDE_BODY.checkedOn}{' '}
                         <time dateTime={COMPARISON_CHECKED_ON.toISOString()}>
                             {checkedOn}
                         </time>
-                        . Every statement about another extension comes from its
-                        maker&apos;s own site, its browser store listing, a
-                        court filing or a named news outlet, numbered in the
-                        sources below. Caramel is our extension, so check those
-                        sources rather than taking our word for it.
+                        {COMPARISON_BODY.sourceNote}
                     </p>
                 </header>
 
@@ -108,7 +105,7 @@ export default function CompareCouponExtensionsPage() {
                     className="pb-12"
                 >
                     <h2 id="compare-table-heading" className={sectionHeading}>
-                        Side by side
+                        {COMPARISON_BODY.tableHeading}
                     </h2>
                     <div className="overflow-x-auto rounded-2xl border border-gray-200 dark:border-white/10">
                         <table className="w-full min-w-[56rem] border-collapse text-left text-sm">
@@ -120,28 +117,28 @@ export default function CompareCouponExtensionsPage() {
                             <thead className="bg-gray-50 text-gray-900 dark:bg-darkSurface dark:text-white">
                                 <tr>
                                     <th scope="col" className="px-4 py-3">
-                                        Extension
+                                        {COMPARISON_BODY.tableLabels.name}
                                     </th>
                                     <th scope="col" className="px-4 py-3">
-                                        Price
+                                        {COMPARISON_BODY.tableLabels.price}
                                     </th>
                                     <th scope="col" className="px-4 py-3">
-                                        How it makes money
+                                        {COMPARISON_BODY.tableLabels.revenue}
                                     </th>
                                     <th scope="col" className="px-4 py-3">
-                                        Rewards
+                                        {COMPARISON_BODY.tableLabels.rewards}
                                     </th>
                                     <th scope="col" className="px-4 py-3">
-                                        Account, per its own guide
+                                        {COMPARISON_BODY.tableLabels.account}
                                     </th>
                                     <th scope="col" className="px-4 py-3">
-                                        Browsers
+                                        {COMPARISON_BODY.tableLabels.browsers}
                                     </th>
                                     <th scope="col" className="px-4 py-3">
-                                        Source code
+                                        {COMPARISON_BODY.tableLabels.sourceCode}
                                     </th>
                                     <th scope="col" className="px-4 py-3">
-                                        Sources
+                                        {GUIDE_BODY.sourcesHeading}
                                     </th>
                                 </tr>
                             </thead>
@@ -190,7 +187,7 @@ export default function CompareCouponExtensionsPage() {
                     className="pb-12"
                 >
                     <h2 id="compare-picks-heading" className={sectionHeading}>
-                        Which one should you use?
+                        {COMPARISON_BODY.picksHeading}
                     </h2>
                     <dl className="space-y-4">
                         {COMPARISON_PICKS.map(pick => (
@@ -204,8 +201,8 @@ export default function CompareCouponExtensionsPage() {
                     </dl>
                     <InstallCallout
                         placement="compare_extensions"
-                        lead="Want the one with no affiliate code?"
-                        body="Caramel finds and applies coupon codes at checkout. Free, no account, open source."
+                        lead={COMPARISON_BODY.installLead}
+                        body={GUIDE_BODY.installBody}
                     />
                 </section>
 
@@ -214,7 +211,7 @@ export default function CompareCouponExtensionsPage() {
                     className="pb-12"
                 >
                     <h2 id="compare-honey-heading" className={sectionHeading}>
-                        What happened with Honey
+                        {GUIDE_BODY.timelineHeading}
                     </h2>
                     <ol className="space-y-4 border-l-2 border-caramel/30 pl-6">
                         {HONEY_TIMELINE.map(event => (
@@ -235,13 +232,12 @@ export default function CompareCouponExtensionsPage() {
                         ))}
                     </ol>
                     <p className={`${bodyText} mt-6`}>
-                        What Honey does, how it makes money, and the controversy
-                        and lawsuit are explained in{' '}
+                        {COMPARISON_BODY.honeyBefore}
                         <Link
                             href={HONEY_GUIDE_PATH}
                             className="font-semibold text-caramel hover:underline"
                         >
-                            the Honey extension, explained
+                            {COMPARISON_BODY.honeyLink}
                         </Link>
                         .
                     </p>
@@ -252,7 +248,7 @@ export default function CompareCouponExtensionsPage() {
                     className="pb-12"
                 >
                     <h2 id="compare-faq-heading" className={sectionHeading}>
-                        Questions people ask
+                        {COMPARISON_BODY.faqHeading}
                     </h2>
                     <div className="space-y-6">
                         {COMPARISON_FAQ.map(item => (
@@ -265,19 +261,19 @@ export default function CompareCouponExtensionsPage() {
                         ))}
                     </div>
                     <p className={`${bodyText} mt-6`}>
-                        More about Caramel itself is in the{' '}
+                        {COMPARISON_BODY.onwardBefore}
                         <Link
                             href="/faq"
                             className="font-semibold text-caramel hover:underline"
                         >
-                            Caramel FAQ
+                            {COMPARISON_BODY.faqLink}
                         </Link>
-                        , and the stores it has codes for are in the{' '}
+                        {COMPARISON_BODY.onwardBetween}
                         <Link
                             href="/coupons/stores"
                             className="font-semibold text-caramel hover:underline"
                         >
-                            store directory
+                            {COMPARISON_BODY.directoryLink}
                         </Link>
                         .
                     </p>
@@ -285,7 +281,7 @@ export default function CompareCouponExtensionsPage() {
 
                 <section aria-labelledby="compare-sources-heading">
                     <h2 id="compare-sources-heading" className={sectionHeading}>
-                        Sources
+                        {GUIDE_BODY.sourcesHeading}
                     </h2>
                     <SourceList order={sourceOrder} />
                 </section>

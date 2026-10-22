@@ -15,6 +15,11 @@
         // Loaded by URL (import of runtime.getURL) in coupon-box-discovery.js,
         // so no import statement names it.
         "coupon-box-outline.js",
+        "coupon-box-selectors.js",
+        // Bundled on its own as assets/coupon-box-finder.js
+        // (scripts/finder-bundle.mjs) and loaded by URL in
+        // coupon-box-finder-loader.js, so no import statement names it.
+        "coupon-box-discovery.js",
         "background.js",
         "popup-core.js",
         "entrypoints/*.ts",

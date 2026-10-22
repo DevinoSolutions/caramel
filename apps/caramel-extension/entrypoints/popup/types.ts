@@ -20,6 +20,9 @@ export interface Coupon {
     cartCategory?: string
     cartCategorySecondary?: string
     lastWorkedAt?: string
+    /** "New customers only" label: the code works only for a new account.
+     *  An older server omits it — absent means no label. */
+    newCustomersOnly?: boolean
     /** Server-computed (>= 3 recent failures, none worked since). An older
      *  server omits it — absent means "not failing", never "unknown". */
     keepsFailing?: boolean

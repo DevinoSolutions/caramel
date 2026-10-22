@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { initCaramelBase } from '../caramel-base.js'
 import { showFinalModal } from '../UI-helpers.js'
+import { trustedClick, trustedKey } from './_trusted-events.mjs'
 
 // The result card covers the whole viewport, and for a long time it had exactly
 // one way out: the Esc key.
@@ -34,8 +35,7 @@ const modal = () => root()?.querySelector('.caramel-final-modal') ?? null
 const scrim = () => root()?.querySelector('.cm-scrim') ?? null
 const mounted = () => !!document.getElementById('caramel-final-overlay')
 
-const click = el =>
-    el.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }))
+const click = el => trustedClick(el)
 
 beforeAll(() => {
     // The bootstrap resolves `currentBrowser` off the chrome global; an
@@ -105,7 +105,7 @@ describe('the shopper can always leave', () => {
     it('still closes on Esc', async () => {
         await showFinalModal(0, null, 'Your cart is empty.')
 
-        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+        trustedKey(document, 'Escape')
 
         expect(mounted()).toBe(false)
     })

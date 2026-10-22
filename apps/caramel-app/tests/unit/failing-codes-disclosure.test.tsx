@@ -3,11 +3,11 @@ import CouponsSection from '@/components/coupons/coupons-section'
 import FailingCodesDisclosure from '@/components/coupons/FailingCodesDisclosure'
 import type { Coupon } from '@/types/coupon'
 import {
+    act,
     cleanup,
     fireEvent,
     render,
     screen,
-    waitFor,
     within,
 } from '@testing-library/react'
 import { renderToString } from 'react-dom/server'
@@ -49,12 +49,40 @@ const failingOne = (id: string) =>
     coupon(id, {
         keepsFailing: true,
         failCount: 4,
+        failWeight: 6,
         lastFailedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
     })
 
 const filtersResponse = {
     ok: true,
     json: async () => ({ sites: [], discountTypes: [] }),
+}
+
+// Reach loadMore through the component's IntersectionObserver fallback.
+class FiringObserver {
+    constructor(private cb: (entries: { isIntersecting: boolean }[]) => void) {}
+    observe() {
+        this.cb([{ isIntersecting: true }])
+    }
+    disconnect() {}
+    unobserve() {}
+}
+
+// load-more's finally block parks setIsLoadingMore(false) behind a
+// MIN_LOADING_DELAY_MS setTimeout. Under real timers it can outlive the test and
+// fire after jsdom is torn down (T-6309), so every load-more test arms fake
+// timers here and drains them with drainLoadMore() before it ends.
+function armLoadMore() {
+    vi.stubGlobal('IntersectionObserver', FiringObserver)
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+}
+
+// Flush the fetch promises, run the min-loading-delay timer, assert none is left.
+async function drainLoadMore() {
+    await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000)
+    })
+    expect(vi.getTimerCount()).toBe(0)
 }
 
 beforeEach(() => {
@@ -72,6 +100,7 @@ beforeEach(() => {
 
 afterEach(() => {
     cleanup()
+    vi.useRealTimers()
     vi.unstubAllGlobals()
 })
 
@@ -274,17 +303,7 @@ describe('CouponsSection groups keeps-failing codes at the end of a store list',
                 })
             },
         )
-        class FiringObserver {
-            constructor(
-                private cb: (entries: { isIntersecting: boolean }[]) => void,
-            ) {}
-            observe() {
-                this.cb([{ isIntersecting: true }])
-            }
-            disconnect() {}
-            unobserve() {}
-        }
-        vi.stubGlobal('IntersectionObserver', FiringObserver)
+        armLoadMore()
 
         render(
             <CouponsSection
@@ -299,9 +318,8 @@ describe('CouponsSection groups keeps-failing codes at the end of a store list',
         // Coupon 1 is first seen healthy (page 1) then flagged (page 2): the
         // first occurrence wins, so it stays in the main list and is not
         // duplicated into the disclosure.
-        await screen.findByRole('button', {
-            name: '1 code reported not working',
-        })
+        await drainLoadMore()
+        screen.getByRole('button', { name: '1 code reported not working' })
         expect(screen.getAllByText('Title 1')).toHaveLength(1)
         expect(screen.getAllByText('Title 2')).toHaveLength(1)
         expect(
@@ -374,18 +392,7 @@ describe('CouponsSection groups keeps-failing codes at the end of a store list',
                 })
             },
         )
-        // Reach loadMore through the component's IntersectionObserver fallback.
-        class FiringObserver {
-            constructor(
-                private cb: (entries: { isIntersecting: boolean }[]) => void,
-            ) {}
-            observe() {
-                this.cb([{ isIntersecting: true }])
-            }
-            disconnect() {}
-            unobserve() {}
-        }
-        vi.stubGlobal('IntersectionObserver', FiringObserver)
+        armLoadMore()
 
         render(
             <CouponsSection
@@ -397,16 +404,16 @@ describe('CouponsSection groups keeps-failing codes at the end of a store list',
             />,
         )
 
-        const button = await screen.findByRole('button', {
+        await drainLoadMore()
+
+        const button = screen.getByRole('button', {
             name: '2 codes reported not working',
         })
         expect(button.getAttribute('aria-expanded')).toBe('false')
-        await waitFor(() => {
-            const urls = (fetch as ReturnType<typeof vi.fn>).mock.calls.map(
-                ([u]) => String(u),
-            )
-            expect(urls.some(u => u.includes('page=2'))).toBe(true)
-        })
+        const urls = (fetch as ReturnType<typeof vi.fn>).mock.calls.map(([u]) =>
+            String(u),
+        )
+        expect(urls.some(u => u.includes('page=2'))).toBe(true)
     })
 
     it('a site-less browse list leaves flagged codes in place (no grouping, no disclosure)', () => {

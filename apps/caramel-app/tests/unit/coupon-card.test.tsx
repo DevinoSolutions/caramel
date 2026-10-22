@@ -151,6 +151,7 @@ describe('CouponCard: keeps-failing codes lose the green Verified badge', () => 
                     ...verified,
                     keepsFailing: true,
                     failCount: 4,
+                    failWeight: 6,
                     lastFailedAt: hoursAgo(2),
                 }}
                 index={0}
@@ -167,11 +168,39 @@ describe('CouponCard: keeps-failing codes lose the green Verified badge', () => 
                     ...verified,
                     keepsFailing: false,
                     failCount: 2,
+                    failWeight: 4,
                     lastFailedAt: hoursAgo(2),
                 }}
                 index={0}
             />,
         )
         expect(screen.getByText(/Verified/)).toBeTruthy()
+    })
+})
+
+// Owner decision 2026-10-19 (T-2956): a code that only works for a new account
+// (the kept referral codes) says so on the card, instead of being hidden.
+describe('CouponCard — "New customers only" label', () => {
+    it('shows the label when the coupon is flagged newCustomersOnly', () => {
+        render(
+            <CouponCard
+                coupon={{ ...baseCoupon, newCustomersOnly: true }}
+                index={0}
+            />,
+        )
+
+        expect(screen.getByText('New customers only')).toBeTruthy()
+    })
+
+    it('shows no label when the flag is false or absent', () => {
+        render(
+            <CouponCard
+                coupon={{ ...baseCoupon, newCustomersOnly: false }}
+                index={0}
+            />,
+        )
+        render(<CouponCard coupon={baseCoupon} index={1} />)
+
+        expect(screen.queryByText('New customers only')).toBeNull()
     })
 })

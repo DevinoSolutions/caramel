@@ -3,6 +3,7 @@ import {
     mintExtensionSession,
     mintExtensionSessionForUser,
 } from '@/lib/auth/extensionOAuthSession'
+import { decryptOAuthToken } from '@/lib/auth/oauthTokenCrypto'
 import prisma from '@/lib/prisma'
 import { afterAll, describe, expect, it } from 'vitest'
 
@@ -70,7 +71,11 @@ describe('extension OAuth session mint (F-007) — real DB constraints', () => {
             },
         })
         expect(accountsAfterFirst).toHaveLength(1)
-        expect(accountsAfterFirst[0].accessToken).toBe('access-token-1')
+        expect(
+            await decryptOAuthToken(
+                accountsAfterFirst[0].accessToken as string,
+            ),
+        ).toBe('access-token-1')
         expect(accountsAfterFirst[0].idToken).toBe('id-token-1')
 
         const sessionsAfterFirst = await prisma.session.findMany({
@@ -114,7 +119,11 @@ describe('extension OAuth session mint (F-007) — real DB constraints', () => {
         })
         expect(accountsAfterSecond).toHaveLength(1)
         expect(accountsAfterSecond[0].id).toBe(accountsAfterFirst[0].id)
-        expect(accountsAfterSecond[0].accessToken).toBe('access-token-2')
+        expect(
+            await decryptOAuthToken(
+                accountsAfterSecond[0].accessToken as string,
+            ),
+        ).toBe('access-token-2')
         expect(accountsAfterSecond[0].idToken).toBe('id-token-2')
 
         // Two sessions now — each mint issues a distinct 7-day session.

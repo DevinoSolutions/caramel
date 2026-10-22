@@ -1,4 +1,5 @@
 import { handleRouteError } from '@/lib/api/handleRouteError'
+import { readBodyCapped } from '@/lib/api/readBodyCapped'
 import { withRoute } from '@/lib/api/withRoute'
 import { classifyCart, type CartSignals } from '@/lib/cartClassifier'
 import {
@@ -77,15 +78,25 @@ export const POST = withRoute(
         body: null,
     },
     async ({ req }) => {
-        const contentLength = Number(req.headers.get('content-length') || 0)
-        if (contentLength > MAX_BODY_BYTES) {
+        // Read no further than the cap, chunked bodies included: a body
+        // with no Content-Length used to be read whole before anything
+        // measured it.
+        const body = await readBodyCapped(req, MAX_BODY_BYTES).catch(() => null)
+        if (body && !body.ok) {
             return NextResponse.json(
                 { error: 'payload too large' },
                 { status: 413 },
             )
         }
 
-        const raw = await req.json().catch(() => null)
+        let raw: unknown = null
+        if (body?.ok) {
+            try {
+                raw = JSON.parse(body.text)
+            } catch {
+                raw = null
+            }
+        }
         const signals = sanitize(raw)
         if (!signals) {
             return NextResponse.json(

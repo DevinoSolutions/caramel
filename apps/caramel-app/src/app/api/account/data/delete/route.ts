@@ -14,10 +14,9 @@ import { z } from 'zod'
 // It also SCRUBS the caller's identity off their site suggestions — see below.
 //
 // WHAT IT DELIBERATELY DOES NOT DO:
-//  - It does NOT delete the account or the login. That is a larger job (Better
-//    Auth session teardown, extension session revocation, an email
-//    confirmation step) and is out of scope here. See the TODO in
-//    DataPrivacySection.tsx.
+//  - It does NOT delete the account or the login. That is POST
+//    /api/account/delete (added for the iOS app, T-4906), which no web page
+//    calls yet. See the TODO in DataPrivacySection.tsx.
 //  - It does NOT delete site_suggestions rows, it SCRUBS them. The row's
 //    identifying half (user_id, requester_email, user_agent) is nulled; the
 //    domain and the status stay. A "please support this store" request is not

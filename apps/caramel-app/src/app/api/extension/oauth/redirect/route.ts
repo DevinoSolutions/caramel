@@ -1,8 +1,11 @@
 import { withRoute } from '@/lib/api/withRoute'
+import { bindCodeToState } from '@/lib/auth/extensionOAuthCodeBinding'
 import {
     isAllowedExtensionRedirectUri,
+    isNativeAppRedirectUri,
     reportRejectedExtensionRedirect,
 } from '@/lib/auth/extensionOAuthRedirect'
+import { verifiedExtensionOAuthState } from '@/lib/auth/extensionOAuthState'
 import { forwardClientIpHeaders } from '@/lib/clientIp'
 import { env } from '@/lib/env'
 import { BASE_URL } from '@/lib/env.client'
@@ -157,11 +160,14 @@ async function completeSafariOauth(args: {
         return { ok: false, error: 'Missing token in exchange response' }
     }
 
-    setNonceResult(args.nonce, {
+    const stored = setNonceResult(args.nonce, {
         token: data.token,
         username: data.username ?? null,
         image: data.image ?? null,
     })
+    if (!stored) {
+        return { ok: false, error: 'Sign-in result store is full' }
+    }
 
     return { ok: true }
 }
@@ -185,6 +191,15 @@ async function handleSafariCallback(
         args.signedState,
     )
     if (!nonce) return null
+
+    // Nothing below (a stored result, an internal exchange) may run for a
+    // state we did not sign: this route is unauthenticated, so an unverified
+    // nonce would let anyone fill the nonce store or drive exchanges
+    // (security audit 2026-10-21, M2). No sentinel is stored for it either:
+    // a forged or expired state has no legitimate poller.
+    if (!verifiedExtensionOAuthState(args.signedState)) {
+        return signInFailedPage('This sign-in link is invalid or has expired.')
+    }
 
     if (!isValidNonce(nonce)) {
         // Can only happen if someone hand-crafted a state; authorize refuses
@@ -213,7 +228,7 @@ async function handleSafariCallback(
     const result = await completeSafariOauth({
         baseURL,
         provider,
-        code: args.code,
+        code: bindCodeToState(args.code, args.signedState),
         state: args.signedState,
         redirectUri,
         nonce,
@@ -232,6 +247,16 @@ async function handleSafariCallback(
         'Sign-in successful',
         `<span class="tag">Caramel</span><h1>You're signed in</h1><p>Return to the Caramel extension to continue. You can close this tab.</p>`,
     )
+}
+
+/** Sends the browser on to `target`. The extensions keep the default 307, as
+ * before. The native app gets a 303: Apple's callback is a form POST, and a 307
+ * would make the browser re-POST to a custom-scheme URL, whereas the sheet
+ * (ASWebAuthenticationSession) intercepts a plain GET navigation to its scheme. */
+function redirectTo(destination: string, target: URL): NextResponse {
+    return isNativeAppRedirectUri(destination)
+        ? NextResponse.redirect(target.toString(), 303)
+        : NextResponse.redirect(target.toString())
 }
 
 /**
@@ -283,6 +308,19 @@ async function handleRedirect(req: NextRequest) {
         }
     }
 
+    // The native app's Google leg: Google redirects (GET) straight here with
+    // OUR signed state and no envelope or query param, so the destination can
+    // only come from the state's own payload. Taken ONLY when it is exactly the
+    // app's redirect URI; an unsigned-read destination of any other shape is
+    // still ignored, so a hand-made state cannot steer the code anywhere new
+    // (and the allowlist check below runs on the result regardless).
+    if (!extensionRedirectUri && originalState) {
+        const stateRedirect = readSignedStatePayload(originalState).redirectUri
+        if (stateRedirect && isNativeAppRedirectUri(stateRedirect)) {
+            extensionRedirectUri = stateRedirect
+        }
+    }
+
     // COMPATIBILITY SHIM — TODO(safari-shim-removal). A nonce inside the signed
     // state means the caller is the shipped Safari build, which has no redirect
     // URI to be sent back to and is polling instead. Returns null for every
@@ -307,7 +345,7 @@ async function handleRedirect(req: NextRequest) {
             const errorUrl = new URL(extensionRedirectUri)
             errorUrl.searchParams.set('error', error)
             if (originalState) errorUrl.searchParams.set('state', originalState)
-            return NextResponse.redirect(errorUrl.toString())
+            return redirectTo(extensionRedirectUri, errorUrl)
         }
         if (extensionRedirectUri) {
             reportRejectedExtensionRedirect({
@@ -352,27 +390,45 @@ async function handleRedirect(req: NextRequest) {
         )
     }
 
-    // Use originalState (which may be the decoded state from Apple's response)
+    // Use originalState (which may be the decoded state from Apple's response).
+    // The code is bound to that state (extensionOAuthCodeBinding.ts): the
+    // exchange redeems it under no other state, so a code lifted from one
+    // flow's callback cannot be traded under a state minted for another. With
+    // no state there is nothing to bind to, and the exchange refuses a
+    // state-less request anyway.
     const redirectUrl = new URL(extensionRedirectUri)
-    redirectUrl.searchParams.set('code', code)
+    redirectUrl.searchParams.set(
+        'code',
+        originalState ? bindCodeToState(code, originalState) : code,
+    )
     if (originalState) redirectUrl.searchParams.set('state', originalState)
 
-    return NextResponse.redirect(redirectUrl.toString())
+    return redirectTo(extensionRedirectUri, redirectUrl)
 }
 
-// No cors/rateLimit/origin/apiKey/body concerns — this is a server-to-
-// server OAuth-provider callback (Google/Apple POST or redirect here, not
-// a browser CORS context), and throttling Google/Apple is wrong (see
-// PLAN-F-007.md's route table). Wrapped ONLY for the F-002 error boundary
-// withRoute provides for free: previously `handleRedirect` had no
-// try/catch at all, so e.g. a malformed POST body threw an unhandled
-// rejection instead of a clean {error} response.
+// No cors/origin/apiKey/body concerns: this is an OAuth-provider callback
+// (Google redirects here, Apple form-posts here), not a browser CORS context.
+// Both arrive FROM THE SHOPPER'S BROWSER (a redirect, an auto-submitted form),
+// never from Google's or Apple's servers, so the per-IP 'mutation' bucket
+// meters the shopper: one sign-in spends one point of its 30/min. It was
+// unthrottled, which let anyone loop it (security audit 2026-10-21, M2).
+// Wrapped also for the F-002 error boundary withRoute provides: previously
+// `handleRedirect` had no try/catch at all, so e.g. a malformed POST body
+// threw an unhandled rejection instead of a clean {error} response.
 export const GET = withRoute(
-    { method: 'GET', routeName: 'extension/oauth/redirect' },
+    {
+        method: 'GET',
+        routeName: 'extension/oauth/redirect',
+        rateLimit: 'mutation',
+    },
     async ({ req }) => handleRedirect(req),
 )
 
 export const POST = withRoute(
-    { method: 'POST', routeName: 'extension/oauth/redirect' },
+    {
+        method: 'POST',
+        routeName: 'extension/oauth/redirect',
+        rateLimit: 'mutation',
+    },
     async ({ req }) => handleRedirect(req),
 )

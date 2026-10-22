@@ -209,6 +209,25 @@ describe('coupon_box_pick_outcome: one event per handler exit', () => {
         expect(props.model_ms).toEqual(expect.any(Number))
     })
 
+    it('no_pick:refused_button carries model_ms, and the answer is cached', async () => {
+        chatMock.mockImplementation(async () =>
+            answer({ input: 7, button: 9, toggle: null }),
+        )
+        const domain = freshDomain()
+        const outline = `${OUTLINE}
+    - [9] button "Checkout"`
+        await post({ domain, outline })
+        const props = expectOutcome('no_pick:refused_button')
+        expect(props).toMatchObject({ cached: false })
+        expect(props.model_ms).toEqual(expect.any(Number))
+        captureMock.mockClear()
+        await post({ domain, outline })
+        expect(onlyEvent().properties).toMatchObject({
+            outcome: 'no_pick:refused_button',
+            cached: true,
+        })
+    })
+
     it('no_pick:unparsable', async () => {
         chatMock.mockImplementation(async () => 'sorry, no idea')
         await post({ domain: freshDomain(), outline: OUTLINE })
@@ -267,6 +286,38 @@ describe('coupon_box_pick_outcome: one event per handler exit', () => {
         })
         expect(res.status).toBe(413)
         expect(expectOutcome('too_large')).not.toHaveProperty('store')
+    })
+
+    it('too_large: a chunked body with no Content-Length is read only up to the cap', async () => {
+        // 1 MiB offered in 1 KiB chunks, pulled only as the route reads.
+        let pulled = 0
+        const body = new ReadableStream<Uint8Array>({
+            pull(controller) {
+                pulled += 1
+                if (pulled > 1024) controller.close()
+                else controller.enqueue(new Uint8Array(1024).fill(0x20))
+            },
+        })
+        const req = new NextRequest(
+            'http://localhost/api/extension/coupon-box-pick',
+            {
+                method: 'POST',
+                headers: {
+                    'content-type': 'application/json',
+                    origin: EXT_ORIGIN,
+                    'cf-connecting-ip': '203.0.113.9',
+                },
+                body,
+                duplex: 'half',
+            } as ConstructorParameters<typeof NextRequest>[1],
+        )
+        const res = await POST(req)
+        expect(res.status).toBe(413)
+        expectOutcome('too_large')
+        // The 46 KiB cap is passed on the 47th chunk; a few more may be
+        // buffered ahead, never the whole body.
+        expect(pulled).toBeLessThan(70)
+        expect(chatMock).not.toHaveBeenCalled()
     })
 
     it('too_large: an outline over the outline cap carries the (valid) store', async () => {

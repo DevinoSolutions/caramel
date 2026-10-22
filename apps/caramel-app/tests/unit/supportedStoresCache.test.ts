@@ -152,3 +152,26 @@ describe('GET /api/extension/supported-stores — served from the cache', () => 
         expect(res.status).toBe(200)
     })
 })
+
+// A box the extension found and saved (store_configs.origin = 'auto_detect')
+// names no place where the store answers. The feed says so, and the extension
+// then reads that store's answer the way it reads a found box's (T-6310).
+describe('a saved box in the feed', () => {
+    it('marks a row the extension saved, and only that row', async () => {
+        queryRawMock.mockResolvedValue([
+            { ...ROW, store_name: 'saved.com', origin: 'auto_detect' },
+            { ...ROW, store_name: 'pipeline.com', origin: null },
+            ROW,
+        ])
+        const { body } = await getSupportedStoresPayload(1_000)
+        const byDomain = Object.fromEntries(
+            JSON.parse(body).supported.map((e: { domain: string }) => [
+                e.domain,
+                e,
+            ]),
+        )
+        expect(byDomain['saved.com'].savedBox).toBe(true)
+        expect('savedBox' in byDomain['pipeline.com']).toBe(false)
+        expect('savedBox' in byDomain['example.com']).toBe(false)
+    })
+})

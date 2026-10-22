@@ -13,6 +13,7 @@
             "undici": "7.30.0",
             "effect": "3.20.0",
             "vitest>picomatch": "4.0.4",
+            "vite": "8.1.6",
             "postcss": "8.5.23",
             "sharp": "0.35.5",
             "fast-uri": "3.1.8",

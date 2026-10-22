@@ -233,7 +233,7 @@ describe('ack — `supported` with SITE_SUGGESTIONS_AUTO_NOTIFY off (the default
 
     it('an ops-notice failure NEVER fails the ack — the transitions are the system of record', async () => {
         seedRow('r1', { requesterEmail: 'shopper@example.com' })
-        sendEmailMock.mockRejectedValueOnce(new Error('usesend down'))
+        sendEmailMock.mockRejectedValueOnce(new Error('sendly down'))
         const res = await ack({ ids: ['r1'], status: 'supported' })
         expect(res.status).toBe(200)
         const payload = await res.json()
@@ -284,7 +284,7 @@ describe('ack — `supported` with SITE_SUGGESTIONS_AUTO_NOTIFY on', () => {
             requesterEmail: 'shopper@example.com',
         })
         // First call is the requester notice; the ops notice that follows works.
-        sendEmailMock.mockRejectedValueOnce(new Error('usesend down'))
+        sendEmailMock.mockRejectedValueOnce(new Error('sendly down'))
         const payload = await (
             await ack({ ids: ['r1'], status: 'supported' })
         ).json()
@@ -459,7 +459,7 @@ describe('POST /notify — the owner’s explicit send', () => {
             status: 'supported',
             requesterEmail: 'shopper@example.com',
         })
-        sendEmailMock.mockRejectedValueOnce(new Error('usesend down'))
+        sendEmailMock.mockRejectedValueOnce(new Error('sendly down'))
         const failed = await (await notify({ ids: ['r1'] })).json()
         expect(failed).toMatchObject({
             sent: 0,

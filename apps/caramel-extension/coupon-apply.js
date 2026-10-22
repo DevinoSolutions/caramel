@@ -8,10 +8,7 @@
 // window/globalThis and has no effectful top-level statement, so it exports no
 // init() — there is nothing for the composition entrypoint to call.
 import { log, logError, recordTiming, sleep } from './caramel-base.js'
-import {
-    caramelFinderTotalNow,
-    caramelRemarkFoundBox,
-} from './coupon-box-discovery.js'
+import { caramelLoadedFinder } from './coupon-box-finder-loader.js'
 import {
     _caramelLastPrices,
     _isVisible,
@@ -21,9 +18,18 @@ import {
     pickBestMatch,
     qAll,
     qOne,
-    waitForTextChange,
+    waitForTotalChange,
     waitForVisible,
 } from './dom-utils.js'
+
+// A record the finder built (rec.caramelFound) exists only once the finder is
+// loaded (coupon-box-finder-loader.js), so these always reach it. Should it
+// ever be missing, the total reads as unknown and nothing is re-marked: no
+// saving can be measured from that.
+const caramelFinderTotalNow = (...args) =>
+    caramelLoadedFinder()?.caramelFinderTotalNow(...args) ?? NaN
+const caramelRemarkFoundBox = (...args) =>
+    caramelLoadedFinder()?.caramelRemarkFoundBox(...args) ?? false
 
 // Generic selectors used when the per-store config doesn't specify them.
 // These cover the most common Honey-style cart UIs.
@@ -132,6 +138,44 @@ function _caramelRemoveRowText(btn) {
     return ''
 }
 
+/* A product line in the cart, by the markup the common platforms give it:
+ * Shopify's <cart-remove-button> and data-line-item keys, BigCommerce's
+ * data-cart-itemid, WooCommerce's tr.cart_item, and the usual class names. */
+const CARAMEL_CART_LINE_SEL =
+    'cart-remove-button, [data-cart-item], [data-cart-itemid], [data-cart-item-key], [data-line-item], [data-line-item-key], .cart-item, .cart__item, .cart-line-item, tr.cart__row, tr.cart_item, .woocommerce-cart-form__cart-item'
+/* A field that changes how many of a product are in the cart. Only a product
+ * line carries one; a discount row never does. */
+const CARAMEL_LINE_QTY_SEL =
+    'input[name*="quantity" i], input[name^="updates"], select[name*="quantity" i], [data-quantity-input]'
+
+/* Does this remove button belong to a product line rather than to a discount?
+ * Its label cannot say: Shopify labels a line's button "Remove <product name>",
+ * which the forbidden-control guard does not read as a cart change, and a line
+ * that carries a line-level discount even shows our code in its text. So look
+ * at where it sits: inside a known line container, or a few levels under an
+ * ancestor holding exactly ONE quantity field. The climb stops as soon as the
+ * ancestor holds another candidate, the coupon box, or several quantity
+ * fields: past that point we are in the container shared by every line and the
+ * discount row, and a quantity field there says nothing about this button. */
+function _caramelInCartLine(btn, candidates, couponInput) {
+    try {
+        if (btn.closest?.(CARAMEL_CART_LINE_SEL)) return true
+        let node = btn.parentElement
+        for (let up = 0; up < 4 && node; up++) {
+            if (candidates.some(c => c !== btn && node.contains(c))) break
+            if (couponInput && node.contains(couponInput)) break
+            const qty = node.querySelectorAll(CARAMEL_LINE_QTY_SEL).length
+            if (qty > 1) break
+            if (qty === 1) return true
+            node = node.parentElement
+        }
+    } catch {
+        // An unreadable ancestor chain is not evidence the button is safe.
+        return true
+    }
+    return false
+}
+
 /* Try to remove the coupon WE just applied. Returns true if a remove button was
  * clicked. Caller should wait for the cart to update.
  *
@@ -160,7 +204,22 @@ export async function removeAppliedCoupon(rec, options) {
         _isVisible(b) && !b.disabled && !caramelIsForbiddenControl(b)
     // qAll (not raw querySelectorAll) so an XPath couponRemove selector is
     // evaluated correctly instead of throwing a SyntaxError that aborts removal.
-    const candidates = qAll(sel).filter(usable)
+    const visible = qAll(sel).filter(usable)
+    // A broad couponRemove ([aria-label*="Remove"] is on 865 served Shopify
+    // configs) also matches every product line's own button. Clicking one
+    // takes the product out of the shopper's cart, so those never count.
+    const couponInput = qOne(rec.couponInput)
+    const candidates = visible.filter(
+        b => !_caramelInCartLine(b, visible, couponInput),
+    )
+    if (visible.length && !candidates.length) {
+        log('REMOVE_REFUSED_CART_LINE', {
+            code: ourCode,
+            candidates: visible.length,
+            reason: 'every remove button the selector found sits in a product line — clicking one would take a product out of the cart',
+        })
+        return false
+    }
     if (candidates.length) {
         let btn = ourCode
             ? candidates.find(b =>
@@ -393,6 +452,42 @@ export function _caramelSentencesOf(text) {
 }
 // How long the total gets to move after a refusal-shaped sentence appears.
 const CARAMEL_ANSWER_GRACE_MS = 1500
+// How a finder-picked box's total settles before the verdict: read every
+// CARAMEL_FINDER_READ_MS; an unmoved total is settled on two equal reads, a
+// moved one must hold for CARAMEL_FINDER_HOLD_MS of equal reads; never more
+// than CARAMEL_FINDER_SETTLE_READS reads in all.
+const CARAMEL_FINDER_READ_MS = 250
+const CARAMEL_FINDER_HOLD_MS = 1500
+const CARAMEL_FINDER_HOLD_READS =
+    CARAMEL_FINDER_HOLD_MS / CARAMEL_FINDER_READ_MS
+const CARAMEL_FINDER_SETTLE_READS = 12
+// How long a disabled Apply button gets to be enabled after the code is typed.
+const CARAMEL_APPLY_ENABLE_WAIT_MS = 1500
+
+// A store's fresh sentence that refuses THIS code: it names the code, or says
+// the code is invalid, expired, unknown. A caveat printed as a code applies
+// ("Limit one offer per order", "Promo code applied. Cannot be combined with
+// other offers.") is not one — the total decides those.
+const _CARAMEL_REFUSES_CODE_RE =
+    /\b(invalid|not valid|isn.t valid|is not an? valid|no longer valid|expired|not recogni[sz]ed|does not exist|doesn.t exist|not found|incorrect (code|coupon|promo|voucher)|unknown (code|coupon|promo|voucher)|ung[üu]ltig|abgelaufen|no es v[aá]lido|n.est pas valide|non valid[oa]|ongeldig)\b/i
+// Judged sentence by sentence: "SAVE20 applied! Cannot be combined with other
+// offers." names the code in a sentence that accepts it, and refuses nothing.
+export function _caramelRefusesTheCode(text, code) {
+    const c = String(code || '')
+        .trim()
+        .toLowerCase()
+    return _caramelSentencesOf(String(text || '')).some(s => {
+        if (_CARAMEL_ACCEPTED_RE.test(s) && !_CARAMEL_NEGATION_RE.test(s))
+            return false
+        if (_CARAMEL_REFUSES_CODE_RE.test(s)) return true
+        return (
+            c.length >= 3 &&
+            s.toLowerCase().includes(c) &&
+            _CARAMEL_NEGATION_RE.test(s) &&
+            !/\bcombin|\bstack/i.test(s)
+        )
+    })
+}
 
 function _caramelRejectionSentences(scope) {
     const tidy = t => (t || '').trim().replace(/\s+/g, ' ')
@@ -439,7 +534,23 @@ function _caramelSmallestSaying(scope, priorText) {
     return best && best.length <= 200 ? best : null
 }
 
-function detectCouponError(rec, baseline, code, priorText) {
+// A box the extension found on an earlier visit and saved as the store's
+// config (the feed marks it `savedBox`, supportedStoresCache.ts) names no
+// place where the store answers, exactly like a box the finder picks now. Its
+// answer is read the same way: a refusal sentence beside the box or in a page
+// alert ends the wait and is quoted on its own. Measured on bumbleandbumble.com
+// (2026-10-22): read as a plain config, every refused code waited the full 10s
+// and was quoted with the Apply button's label ("apply. The offer code … is
+// not valid."). Only the READING is shared: the total and the success rules
+// of a saved box stay a config's (rec.caramelFound is the finder's alone).
+function _caramelReadsLikeFound(rec) {
+    return (
+        rec?.caramelFound === true ||
+        (rec?.savedBox === true && !rec.errorIndicator)
+    )
+}
+
+function detectCouponError(rec, baseline, code, priorText, alertsBefore) {
     // baseline is what snapshotErrorState() returned BEFORE the apply.
     // code is the coupon string we just tried.
     //
@@ -479,9 +590,13 @@ function detectCouponError(rec, baseline, code, priorText) {
     const input = pickBestMatch(rec.couponInput)
     if (!input) return null
     let scope = input.parentElement
-    const saysNo = rec.caramelFound
+    const readsLikeFound = _caramelReadsLikeFound(rec)
+    const saysNo = readsLikeFound
         ? _caramelFinderSaysNo
         : t => GENERIC_ERROR_TEXT_RE.test(t)
+    // A sentence that was on the page before we submitted, kept in case
+    // nothing newer turns up (it is then quoted as before, errorIsNew false).
+    let standing = null
     for (let d = 0; d < 5 && scope; d++) {
         const text = (scope.innerText || '').trim()
         if (text && saysNo(text)) {
@@ -492,10 +607,17 @@ function detectCouponError(rec, baseline, code, priorText) {
             // No such element is no quote: the window would hand over
             // whatever sits near the words, a form field's own error included.
             // A level whose saying element is the field's own error goes on
-            // climbing: the store's refusal may sit one level up.
-            if (rec.caramelFound) {
+            // climbing: the store's refusal may sit one level up. So does a
+            // level whose only such sentence was already there: on
+            // bumbleandbumble.com the fieldset always reads "Discount codes
+            // cannot be combined with other discount codes." and the refusal
+            // ("The offer code … is not valid.") is drawn two levels higher
+            // (measured live 2026-10-22).
+            if (readsLikeFound) {
                 const said = _caramelSmallestSaying(scope, priorText)
-                if (said) return said
+                if (said && caramelQuoteIsAttributable(said, priorText))
+                    return said
+                standing ??= said
                 scope = scope.parentElement
                 continue
             }
@@ -506,6 +628,49 @@ function detectCouponError(rec, baseline, code, priorText) {
                 .trim()
         }
         scope = scope.parentElement
+    }
+    return readsLikeFound
+        ? (_caramelPageAlertSaying(alertsBefore) ?? standing)
+        : null
+}
+
+// A page's alert regions: where a cart that answers far from the box puts its
+// answer.
+const _CARAMEL_PAGE_ALERTS =
+    '[role="alert"], [aria-live="assertive"], [aria-live="polite"]'
+
+// The store refusing a code in an alert region of the page rather than beside
+// the box. pureformulas.com, measured live 2026-10-22: a refused code is
+// answered only by one banner at the top of the cart ("Oops! This code can't
+// be applied. …"), outside the five levels read around the box, so the run saw
+// no answer and stopped after two codes. Only for a box the finder picked (a
+// config names its own errorIndicator), and only a sentence that is about a
+// code and was not there before we submitted: a stock or shipping notice in
+// the same region is not the store's answer to us.
+//
+// "Not there before" is judged per alert element, not by the page's text: the
+// same cart removes the banner on every submit and draws a NEW one with the
+// very same sentence for the next refused code, which a text comparison would
+// read as the old answer. An alert that was already showing keeps counting
+// only for words it did not hold before.
+function _caramelPageAlertsNow() {
+    const now = new Map()
+    for (const el of document.querySelectorAll(_CARAMEL_PAGE_ALERTS))
+        now.set(el, _isVisible(el) ? el.innerText || '' : '')
+    return now
+}
+function _caramelPageAlertSaying(alertsBefore) {
+    if (!alertsBefore) return null
+    for (const el of document.querySelectorAll(_CARAMEL_PAGE_ALERTS)) {
+        if (!_isVisible(el)) continue
+        const before = alertsBefore.get(el) ?? ''
+        const said = _caramelSmallestSaying(el, before)
+        if (
+            said &&
+            _caramelNamesCoupon(said) &&
+            caramelQuoteIsAttributable(said, before)
+        )
+            return said
     }
     return null
 }
@@ -580,6 +745,9 @@ export function caramelSnapshotCart(rec, code = '') {
     const beforeAppliedNodes = caramelAcceptedRowCount(appliedSel)
     const errorBaseline = snapshotErrorState(rec)
     const priorAreaText = _caramelCouponAreaText(rec)
+    const alertsBefore = _caramelReadsLikeFound(rec)
+        ? _caramelPageAlertsNow()
+        : null
     return {
         hasPriceCfg,
         original,
@@ -588,6 +756,7 @@ export function caramelSnapshotCart(rec, code = '') {
         beforeAppliedNodes,
         errorBaseline,
         priorAreaText,
+        alertsBefore,
     }
 }
 
@@ -614,6 +783,7 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
         beforeAppliedNodes,
         errorBaseline,
         priorAreaText,
+        alertsBefore,
     } = snapshot
 
     /* 4] wait for result — smart waiter: poll DOM up to APPLY_WAIT_MS for the
@@ -641,14 +811,14 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
         }
         return 'timeout-' + maxMs + 'ms'
     }
-    let priceEl = null
-    if (hasPriceCfg) {
-        priceEl =
-            qOne(rec.priceContainer) ||
-            document.getElementById(
-                rec.priceContainer.match(/\[id=['"]([^'"]+)['"]\]/)?.[1] || '',
-            )
-    }
+    // Looked up again on every read (waitForTotalChange): a store may answer
+    // by drawing a new total element.
+    const findPriceEl = () =>
+        qOne(rec.priceContainer) ||
+        document.getElementById(
+            rec.priceContainer.match(/\[id=['"]([^'"]+)['"]\]/)?.[1] || '',
+        )
+    const priceEl = hasPriceCfg ? findPriceEl() : null
     const waiters = [waitForCartSignal(APPLY_WAIT_MS)]
     // A box the finder picked has no error or success selector of its own.
     // Two waiters stand in for them:
@@ -709,6 +879,45 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
             })(),
         )
     }
+    // A saved box (_caramelReadsLikeFound) has no rec.caramelAnswer: the
+    // refusal is looked for around its input on each read, by the very reader
+    // the verdict uses below, so the wait and the verdict agree on what the
+    // store said. Only a sentence that was not there before we submitted ends
+    // the wait.
+    if (_caramelReadsLikeFound(rec) && !rec.caramelFound) {
+        waiters.push(
+            (async () => {
+                const startedAt = performance.now()
+                while (performance.now() - startedAt < APPLY_WAIT_MS) {
+                    await sleep(200)
+                    const said = detectCouponError(
+                        rec,
+                        errorBaseline,
+                        code,
+                        priorAreaText,
+                        null,
+                    )
+                    if (said && caramelQuoteIsAttributable(said, priorAreaText))
+                        return 'answered'
+                }
+                return 'answer-timeout'
+            })(),
+        )
+    }
+    // A found or saved box whose store answers in a page alert instead
+    // (_caramelPageAlertSaying): that answer ends the wait too.
+    if (_caramelReadsLikeFound(rec)) {
+        waiters.push(
+            (async () => {
+                const startedAt = performance.now()
+                while (performance.now() - startedAt < APPLY_WAIT_MS) {
+                    await sleep(200)
+                    if (_caramelPageAlertSaying(alertsBefore)) return 'answered'
+                }
+                return 'alert-timeout'
+            })(),
+        )
+    }
     if (rec.caramelFound && hasPriceCfg) {
         waiters.push(
             (async () => {
@@ -724,18 +933,15 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
         )
     }
     // A price-watch timeout means "the total didn't change" — that's a
-    // no-signal outcome, NOT a coupon error. Let it RESOLVE (swallow the
-    // reject) so a failed apply falls through to the real committed / error-
-    // text detection below, instead of aborting into the catch with a
-    // synthetic "waitForTextChange timeout" errorMsg. That synthetic error
-    // was being misread by the loop as a cart "signal" (sawSignal=true),
-    // defeating the no-signal early-exit and making dead checkouts churn all
-    // 8 codes (~80-100s) instead of bailing after ~2 (~20s).
+    // no-signal outcome, NOT a coupon error, so the waiter RESOLVES
+    // 'price-nochange' and a failed apply falls through to the real
+    // committed / error-text detection below. A synthetic timeout error was
+    // once misread by the loop as a cart "signal" (sawSignal=true), defeating
+    // the no-signal early-exit and making dead checkouts churn all 8 codes
+    // (~80-100s) instead of bailing after ~2 (~20s).
     if (priceEl)
         waiters.push(
-            waitForTextChange(priceEl, APPLY_WAIT_MS).catch(
-                () => 'price-nochange',
-            ),
+            waitForTotalChange(findPriceEl, priceEl.textContent, APPLY_WAIT_MS),
         )
 
     const via = await Promise.race(waiters)
@@ -743,24 +949,40 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
     // A refusal-shaped sentence can come a moment before the total it
     // belongs with ("Limit one offer per order" printed as the code applies).
     // Give the total a short grace to move before the verdict is read.
-    if (via === 'answered' && rec.caramelFound && hasPriceCfg) {
+    if (via === 'answered' && _caramelReadsLikeFound(rec) && hasPriceCfg) {
         const startedAt = performance.now()
         while (performance.now() - startedAt < CARAMEL_ANSWER_GRACE_MS) {
             await sleep(250)
-            const now = caramelFinderTotalNow(rec)
+            const now = rec.caramelFound
+                ? caramelFinderTotalNow(rec)
+                : getPrice(rec.priceContainer, { returnLargest: true })
             if (Number.isFinite(now) && now !== original) break
         }
     }
     // For a finder-picked box the total is the whole verdict: let it settle
     // (two equal reads in a row) so a number caught mid-render is not read as
     // the store's answer, and make sure the marker points at a live row.
+    //
+    // A total that MOVED is held longer (CARAMEL_FINDER_HOLD_MS of equal
+    // reads): a cart that re-prices line by line shows a lower number for a
+    // moment — the total without its shipping line — before the store's real
+    // answer lands and it is back where it was. Two reads a quarter second
+    // apart took that moment for a saving, told the shopper so, and saved the
+    // box as a proven one for every later shopper on the store. An unmoved
+    // total settles as before, so a refused code costs nothing more.
     if (rec.caramelFound && hasPriceCfg) {
         let last = caramelFinderTotalNow(rec)
-        for (let t = 0; t < 8; t++) {
-            await sleep(250)
+        let held = 0
+        for (let t = 0; t < CARAMEL_FINDER_SETTLE_READS; t++) {
+            await sleep(CARAMEL_FINDER_READ_MS)
             const now = caramelFinderTotalNow(rec)
-            if (Number.isFinite(now) && now === last) break
-            last = now
+            if (!Number.isFinite(now) || now !== last) {
+                held = 0
+                last = now
+                continue
+            }
+            if (now === original) break
+            if (++held >= CARAMEL_FINDER_HOLD_READS) break
         }
     }
 
@@ -783,7 +1005,13 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
     }
     // The store's answer is read around the box: the one it drew, if it did.
     if (rec.caramelFound) caramelRemarkFoundBox(false, rec)
-    const errorMsg = detectCouponError(rec, errorBaseline, code, priorAreaText)
+    const errorMsg = detectCouponError(
+        rec,
+        errorBaseline,
+        code,
+        priorAreaText,
+        alertsBefore,
+    )
     // Quotable only if the store said it BECAUSE of us (see
     // _caramelCouponAreaText). Detection above is deliberately untouched.
     const errorIsNew = caramelQuoteIsAttributable(errorMsg, priorAreaText)
@@ -846,6 +1074,25 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
         // A drop read off a new deduction line, beside the store's own fresh
         // rejection of the code, is not a saving (see finderTotal).
         if (rec.caramelNetted && errorIsNew) priceDropped = false
+        // Nor is a drop beside the store's fresh refusal of THIS code, on a
+        // box the finder picked: the store said the code is not valid and
+        // something else (its own promotion landing) moved the total. Money
+        // still wins over a caveat ("Limit one offer per order"), which
+        // _caramelRefusesTheCode leaves alone.
+        if (
+            rec.caramelFound &&
+            errorIsNew &&
+            _caramelRefusesTheCode(errorMsg, code)
+        ) {
+            log('AUTO_INSERT_DROP_BESIDE_REFUSAL', {
+                code,
+                text: opts?.redact
+                    ? '[redacted]'
+                    : String(errorMsg).slice(0, 140),
+                reason: 'the total moved while the store refused this code — not this code’s saving',
+            })
+            priceDropped = false
+        }
     }
     // Success rules (in priority order):
     //  1. price dropped                       → real win
@@ -998,6 +1245,18 @@ export async function applyCoupon(code, rec) {
            by the agent's HARD VALIDATION 2 step. */
         setInputValue(input, code)
         if (applyBtn !== input) {
+            // A store that enables Apply only once the field has text does
+            // so on the framework's next tick, after the input event we just
+            // dispatched. A click in the same tick lands on a still-disabled
+            // button and nothing is submitted; the shopper's own click comes
+            // much later and never meets this.
+            if (applyBtn.disabled) {
+                const until = performance.now() + CARAMEL_APPLY_ENABLE_WAIT_MS
+                while (applyBtn.disabled && performance.now() < until)
+                    await sleep(50)
+                if (applyBtn.disabled)
+                    log('AUTO_INSERT_APPLY_STILL_DISABLED', { code })
+            }
             try {
                 const r = applyBtn.getBoundingClientRect()
                 const cx = r.x + r.width / 2

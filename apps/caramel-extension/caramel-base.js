@@ -166,6 +166,29 @@ export const logError = (where, err) => {
     if (CARAMEL_ENV.verbose) console.error('Caramel:', where, err)
 }
 
+/* --------------------------------------------------  our own UI hosts */
+// The prompt, the apply overlay and the result card are found by their id,
+// and the store's page can create an element with the same id. Before
+// 2026-10-20 that alone was taken as our apply loop running: the result card
+// after a discount-link reload was skipped, the prompt never came back and
+// code capture paused. A host now counts only if createCaramelShadowHost
+// marked it. The mark is set from the content script, so it lives in the
+// extension's own JS world and a page script cannot put it on its element.
+// Every element with the id is checked: getElementById returns the first one
+// in the document, and a page element placed earlier would hide ours.
+const CARAMEL_OWN_HOST_MARK = '__caramelOwnHost'
+
+export function caramelMarkOwnHost(host) {
+    host[CARAMEL_OWN_HOST_MARK] = true
+    return host
+}
+
+export function caramelOwnHost(id) {
+    for (const el of document.querySelectorAll(`[id="${id}"]`))
+        if (el[CARAMEL_OWN_HOST_MARK] === true) return el
+    return null
+}
+
 /* --------------------------------------------------  worker messaging */
 // Every content-script call into the background worker used to be written as
 // `await new Promise(res => runtime.sendMessage(msg, res))`, which has two
@@ -241,6 +264,38 @@ export function caramelSendMessage(message, timeoutMs) {
             finish(() => reject(err))
         }
     })
+}
+
+// How long a per-tab handoff may wait for the background. A worker that does
+// not answer costs only the handoff, never the attempt.
+const CARAMEL_HANDOFF_WAIT_MS = 3000
+
+/* One operation on what this tab leaves for its next document (tab-handoff.js,
+ * held by the background where the store's page cannot write it): 'set',
+ * 'get', 'take' (read once), 'clear', or 'replace' (write over a record that
+ * exists, and still holds `expected` when given, in one step) on one kind of
+ * record. Answers the background's reply ({ saved }, { value }, { cleared }),
+ * or null when it could not be reached or refused; both are logged. */
+// Called from content scripts; tab-handoff.js lists the kinds.
+export async function caramelTabHandoff(op, key, value, expected) {
+    try {
+        const r = await caramelSendMessage(
+            { action: 'tabHandoff', op, key, value, expected },
+            CARAMEL_HANDOFF_WAIT_MS,
+        )
+        if (r?.error) {
+            log('TAB_HANDOFF_FAILED', { op, key, error: r.error })
+            return null
+        }
+        return r ?? null
+    } catch (err) {
+        log('TAB_HANDOFF_FAILED', {
+            op,
+            key,
+            error: String(err?.message || err),
+        })
+        return null
+    }
 }
 
 // Origins trusted to inject a login token via window.postMessage — decided by

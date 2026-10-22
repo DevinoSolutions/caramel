@@ -32,6 +32,7 @@ import {
     NO_EXTENSION_ATTRIBUTION,
     type ExtensionSignupAttribution,
 } from '@/lib/auth/extensionSignupAttribution'
+import { encryptOAuthToken } from '@/lib/auth/oauthTokenCrypto'
 import { recordSignup } from '@/lib/auth/signupCapture'
 import prisma from '@/lib/prisma'
 import { randomBytes } from 'crypto'
@@ -52,6 +53,9 @@ export interface ExtensionOAuthProviderUser {
 
 export interface ExtensionOAuthTokens {
     accessToken?: string | null
+    /** Apple's code exchange returns one; its account-deletion revoke
+     * (appleTokenRevocation.ts) needs it. Google's branch does not pass one. */
+    refreshToken?: string | null
     idToken?: string | null
 }
 
@@ -98,33 +102,42 @@ export async function mintExtensionSession({
         ? providerUser.email.toLowerCase().trim()
         : null
 
-    let user = await prisma.user.findFirst({
+    // The provider account decides first; the email only when nothing is
+    // linked to it yet. One findFirst over (email OR provider account) was
+    // ambiguous: with the email on one user and the provider link on another
+    // it returned whichever the database found first (audit 2026-10-21, M1).
+    const linkedUser = await prisma.user.findFirst({
         where: {
-            OR: email
-                ? [
-                      { email },
-                      {
-                          accounts: {
-                              some: {
-                                  providerId: provider,
-                                  accountId: providerUser.id,
-                              },
-                          },
-                      },
-                  ]
-                : [
-                      {
-                          accounts: {
-                              some: {
-                                  providerId: provider,
-                                  accountId: providerUser.id,
-                              },
-                          },
-                      },
-                  ],
+            accounts: {
+                some: { providerId: provider, accountId: providerUser.id },
+            },
         },
         include: { accounts: true },
     })
+    let user =
+        linkedUser ??
+        (email
+            ? await prisma.user.findFirst({
+                  where: { email },
+                  include: { accounts: true },
+              })
+            : null)
+
+    // Account pre-hijack (audit 2026-10-21, H3): anyone can register a
+    // password account under an email they do not own; it just stays
+    // unverified. Linking the real owner's provider to it, and marking it
+    // verified below, would hand that stranger a working password into the
+    // owner's account. So when a provider sign-in claims an UNVERIFIED account
+    // by email, whatever was set up before the email was proven goes first:
+    // its password login and its sessions. The provider has just proven the
+    // email, so the person signing in now is the owner; they can set a
+    // password again through the reset flow.
+    if (user && !linkedUser && !user.emailVerified) {
+        await prisma.account.deleteMany({
+            where: { userId: user.id, providerId: 'credential' },
+        })
+        await prisma.session.deleteMany({ where: { userId: user.id } })
+    }
 
     if (!user) {
         if (!email) {
@@ -188,13 +201,20 @@ export async function mintExtensionSession({
         },
     })
 
+    // Access and refresh tokens are encrypted at rest exactly as better-auth's
+    // own callback stores them (`account.encryptOAuthTokens`, see
+    // oauthTokenCrypto.ts); the id token stays plain text, as it does there.
+    const accessToken = await encryptOAuthToken(tokens.accessToken)
+    const refreshToken = await encryptOAuthToken(tokens.refreshToken)
+
     if (!account) {
         await prisma.account.create({
             data: {
                 providerId: provider,
                 accountId: providerUser.id,
                 userId: user.id,
-                accessToken: tokens.accessToken || null,
+                accessToken,
+                refreshToken,
                 idToken: tokens.idToken || null,
             },
         })
@@ -202,7 +222,8 @@ export async function mintExtensionSession({
         await prisma.account.update({
             where: { id: account.id },
             data: {
-                accessToken: tokens.accessToken || account.accessToken,
+                accessToken: accessToken ?? account.accessToken,
+                refreshToken: refreshToken ?? account.refreshToken,
                 idToken: tokens.idToken || account.idToken,
             },
         })

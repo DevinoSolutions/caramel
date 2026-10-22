@@ -5,6 +5,9 @@ import {
     caramelQuoteIsAttributable,
 } from '../coupon-apply.js'
 import { startApplyingCoupons } from '../coupon-runner.js'
+import { tabHandoffBackground } from './_tab-handoff-background.mjs'
+// The background's side of the per-tab handoffs (see the helper).
+const handoffs = tabHandoffBackground()
 
 // "The store said: …" has to be something the store actually said to US.
 //
@@ -94,7 +97,8 @@ beforeAll(() => {
     // and "teaches the trust loop nothing" is pinned as "nothing was sent".
     globalThis.chrome = {
         runtime: {
-            sendMessage: msg => {
+            sendMessage: (msg, cb) => {
+                if (handoffs.answers(msg, cb)) return
                 if (msg?.action !== 'reportOutcome') return
                 outcomeCalls.push(
                     msg.storeReason === undefined
@@ -112,6 +116,7 @@ beforeAll(() => {
 })
 
 beforeEach(() => {
+    handoffs.reset()
     document.body.innerHTML =
         '<input id="promo" /><button id="apply">Apply</button><div id="total"></div>'
     setTotalText('Total $80.00')

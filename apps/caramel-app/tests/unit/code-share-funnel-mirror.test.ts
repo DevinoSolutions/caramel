@@ -100,6 +100,19 @@ describe('code-share-funnel.js mirrors the server vocabulary (app <-> extension 
         )
     })
 
+    it('store_not_accepted keeps the retired not-committed (old builds send it) beside the split reasons', () => {
+        expect(CODE_SHARE_FUNNEL_STEP_REASONS.store_not_accepted).toEqual(
+            expect.arrayContaining([
+                'not-committed',
+                'store-error',
+                'not-tied-to-code',
+                'price-dropped-no-row',
+                'committed-no-effect',
+                'no-signal',
+            ]),
+        )
+    })
+
     it('declares the same browsers as the install-attribution store channels', () => {
         const ext = exportedLiteral(
             funnelSource(),

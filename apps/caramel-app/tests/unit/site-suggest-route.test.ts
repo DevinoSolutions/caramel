@@ -235,7 +235,7 @@ describe('POST /api/sites/suggest — persistence + requester identity', () => {
         const consoleError = vi
             .spyOn(console, 'error')
             .mockImplementation(() => {})
-        sendEmailMock.mockRejectedValueOnce(new Error('usesend down'))
+        sendEmailMock.mockRejectedValueOnce(new Error('sendly down'))
         const res = await POST(
             suggestRequest({
                 url: 'example-store.com',
@@ -251,7 +251,7 @@ describe('POST /api/sites/suggest — persistence + requester identity', () => {
         expect(suggestionRows).toHaveLength(1)
         expect(captureExceptionMock).toHaveBeenCalledTimes(1)
         const [error, context] = captureExceptionMock.mock.calls[0]!
-        expect((error as Error).message).toBe('usesend down')
+        expect((error as Error).message).toBe('sendly down')
         expect(context).toMatchObject({
             tags: { operation: 'site_suggestion_email' },
             extra: { suggestionId: 'suggestion-1' },

@@ -85,9 +85,35 @@ describe('parseServerEnv', () => {
         expect(parsed.BCRYPT_SALT_ROUNDS).toBe(10)
         expect(parsed.OPENROUTER_MODEL).toBe('anthropic/claude-haiku-4.5')
         expect(parsed.ALLOWED_ORIGINS).toBe('')
-        expect(parsed.USESEND_FROM_EMAIL).toBe('no_reply@grabcaramel.com')
-        expect(parsed.USESEND_FROM_NAME).toBe('Caramel')
+        expect(parsed.SENDLY_FROM_EMAIL).toBe('no_reply@grabcaramel.com')
+        expect(parsed.SENDLY_FROM_NAME).toBe('Caramel')
         expect(parsed.GOOGLE_CLIENT_ID).toBeUndefined()
+    })
+
+    it('(j) SENDLY_FROM_EMAIL must be a bare email address - the delivery-health check is pinned to its domain in the shared Sendly project', () => {
+        expect(
+            parseServerEnv({
+                ...validServerFixture,
+                SENDLY_FROM_EMAIL: 'support@grabcaramel.com',
+            }).SENDLY_FROM_EMAIL,
+        ).toBe('support@grabcaramel.com')
+        for (const bad of [
+            '',
+            'grabcaramel.com',
+            'not-an-address',
+            'Caramel <no_reply@grabcaramel.com>',
+            '@grabcaramel.com',
+            'no_reply@',
+        ]) {
+            expect(
+                () =>
+                    parseServerEnv({
+                        ...validServerFixture,
+                        SENDLY_FROM_EMAIL: bad,
+                    }),
+                `SENDLY_FROM_EMAIL=${JSON.stringify(bad)}`,
+            ).toThrow(/SENDLY_FROM_EMAIL/)
+        }
     })
 
     it('(i) Apple stays disabled when APPLE_CLIENT_ID is unset or empty — the signing vars are not required', () => {
@@ -231,6 +257,24 @@ describe('parseServerEnv', () => {
                 COUPON_BOX_DISCOVERY_ENABLED: 'on',
             }),
         ).toThrow(/COUPON_BOX_DISCOVERY_ENABLED/)
+    })
+
+    it('COUPON_BOX_SAVE_ENABLED is a strict boolean (default off) and a typo fails boot', () => {
+        expect(parseServerEnv(validServerFixture).COUPON_BOX_SAVE_ENABLED).toBe(
+            false,
+        )
+        expect(
+            parseServerEnv({
+                ...validServerFixture,
+                COUPON_BOX_SAVE_ENABLED: 'true',
+            }).COUPON_BOX_SAVE_ENABLED,
+        ).toBe(true)
+        expect(() =>
+            parseServerEnv({
+                ...validServerFixture,
+                COUPON_BOX_SAVE_ENABLED: 'on',
+            }),
+        ).toThrow(/COUPON_BOX_SAVE_ENABLED/)
     })
 
     it('COUPON_BOX_LLM_ENABLED is a strict boolean (default off) and a typo fails boot', () => {

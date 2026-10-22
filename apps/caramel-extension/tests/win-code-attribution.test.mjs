@@ -2,6 +2,9 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { initCaramelBase } from '../caramel-base.js'
 import { startApplyingCoupons } from '../coupon-runner.js'
 import { _caramelResetCachedCodes } from '../store-detect.js'
+import { tabHandoffBackground } from './_tab-handoff-background.mjs'
+// The background's side of the per-tab handoffs (see the helper).
+const handoffs = tabHandoffBackground()
 
 // The card names a code. That name has to be the one doing the work.
 //
@@ -104,7 +107,8 @@ beforeAll(() => {
     // DOES is send one runtime message — so the message is what gets recorded.
     globalThis.chrome = {
         runtime: {
-            sendMessage: msg => {
+            sendMessage: (msg, cb) => {
+                if (handoffs.answers(msg, cb)) return
                 if (msg?.action !== 'reportOutcome') return
                 reported.push([msg.id, msg.outcome])
             },
@@ -114,6 +118,7 @@ beforeAll(() => {
 })
 
 beforeEach(() => {
+    handoffs.reset()
     sessionStorage.clear()
     document.body.innerHTML = ''
     stubs.finalModals = []
@@ -128,7 +133,8 @@ beforeEach(() => {
     }
 })
 
-const handoff = () => JSON.parse(sessionStorage.getItem('caramel_applied'))
+// The discount-link win the background holds for the reloaded page.
+const handoff = () => handoffs.peek('applied')
 
 describe('when the store rewrites our code into its own', () => {
     beforeEach(() => {
@@ -153,15 +159,15 @@ describe('when the store rewrites our code into its own', () => {
 
     it('still names the code the shopper can actually type', () => {
         // The generated string is accurate and useless to them.
-        return startApplyingCoupons(REC).then(() => {
-            expect(handoff().code).toBe('ALPHA')
+        return startApplyingCoupons(REC).then(async () => {
+            expect((await handoff()).code).toBe('ALPHA')
         })
     })
 
     it('reports the saving the cart actually shows', async () => {
         await startApplyingCoupons(REC)
 
-        expect(handoff().saved).toBeCloseTo(30, 2)
+        expect((await handoff()).saved).toBeCloseTo(30, 2)
     })
 })
 
@@ -189,7 +195,7 @@ describe('when the cart is honouring a different code we probed', () => {
     it('credits the code doing the work, not the one we sent last', async () => {
         await startApplyingCoupons(REC)
 
-        expect(handoff().code).toBe('BETA')
+        expect((await handoff()).code).toBe('BETA')
     })
 
     it('reports the outcome against that code, so the trust loop learns the truth', async () => {
@@ -202,6 +208,6 @@ describe('when the cart is honouring a different code we probed', () => {
     it('does not change the amount while correcting the name', async () => {
         await startApplyingCoupons(REC)
 
-        expect(handoff().saved).toBeCloseTo(10, 2)
+        expect((await handoff()).saved).toBeCloseTo(10, 2)
     })
 })

@@ -8,6 +8,21 @@ export async function register() {
         return
     }
 
+    // Before anything opens an outbound connection (see outboundNetwork.ts:
+    // the default 250 ms per-address cut-off was failing real sign-ins).
+    const { configureOutboundNetwork } = await import('@/lib/outboundNetwork')
+    const network = configureOutboundNetwork()
+    console.log(
+        `[boot] outbound network: resultOrder=${network.resultOrder} autoSelectFamily=${network.autoSelectFamily}`,
+    )
+
+    // Analytics requests are proxied to PostHog; see the module for why each
+    // proxied response needs more than Node's default 10 listeners.
+    const { raiseListenerCeilingForProxiedResponses } = await import(
+        '@/lib/proxiedResponseListenerCeiling'
+    )
+    raiseListenerCeilingForProxiedResponses()
+
     await import('../sentry.server.config')
 
     // Loud, once-at-boot report of the coupons bridge-sync posture (W4-D3).
@@ -62,11 +77,11 @@ export async function register() {
     }
 
     // Async email-delivery health. sendEmail() throwing is already loud (see
-    // src/lib/auth/auth.ts); what was invisible until now is useSend accepting
-    // a send with a 2xx and the message later going BOUNCED/FAILED or never
-    // leaving QUEUED — 57 such rows on grabcaramel.com reached nobody. This
-    // starts the only schedule the app has: an unref'd interval on the one
-    // long-running process it owns. Dynamically imported for the same reason
+    // src/lib/auth/auth.ts); what was invisible (on the old useSend provider,
+    // 57 such rows on grabcaramel.com reached nobody) is Sendly accepting a
+    // send with a 202 and the message later going BOUNCED/FAILED or never
+    // leaving PENDING/SENDING. This starts the only schedule the app has: an
+    // unref'd interval on the one long-running process it owns. Dynamically imported for the same reason
     // as the PostHog helper above (never load it into the edge runtime), and
     // the decision is LOGGED either way so "is the check running?" is never a
     // guess.
@@ -76,6 +91,17 @@ export async function register() {
     const decision = startEmailDeliveryHealthMonitor()
     console.log(
         `[boot] email delivery health ${decision.enabled ? 'ENABLED' : 'DISABLED'} — ${decision.reason}`,
+    )
+
+    // Retention of the hashed coupon-report reporter rows (30 days, promised by
+    // the privacy policy): the route sweeps on writes, this hourly timer covers
+    // quiet periods. Same pattern and same reasons as the monitor above.
+    const { startCouponReporterRetentionSweep } = await import(
+        '@/lib/couponReporterRetention'
+    )
+    const retention = startCouponReporterRetentionSweep()
+    console.log(
+        `[boot] coupon reporter retention sweep ${retention.enabled ? 'ENABLED' : 'DISABLED'} — ${retention.reason}`,
     )
 }
 

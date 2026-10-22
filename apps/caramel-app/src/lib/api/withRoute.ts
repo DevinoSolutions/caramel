@@ -110,8 +110,10 @@ function unauthorized(cors: Headers): NextResponse {
 
 // better-auth's session type, resolved purely at the type level (no
 // runtime import of '@/lib/auth/auth' unless a route actually opts into
-// `auth` — see the dynamic import below). Used today by extension/me and
-// extension/session (both `'session'`); `'optional'` has no route yet.
+// `auth` — see the dynamic import below). `'session'` gates the account/*
+// routes, extension/me, extension/session and coupons/submit; `'optional'`
+// resolves a session without gating on coupons/[id]/report, coupons/increment
+// and sites/suggest.
 type Session = Awaited<
     ReturnType<typeof import('@/lib/auth/auth').auth.api.getSession>
 >

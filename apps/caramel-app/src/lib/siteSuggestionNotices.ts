@@ -19,7 +19,7 @@ import { render } from '@react-email/render'
  * aladdin@devino.ca, NOT support@unotes.net: the old recipient was a
  * copy-paste from another project whose mailbox bounces, so every visitor
  * suggestion was silently lost (a real one bounced 2026-08-08 06:33 UTC and had
- * to be recovered from the UseSend event log). Deliberately NOT
+ * to be recovered from the Sendly email log). Deliberately NOT
  * env.SUPPORT_EMAIL_TO either — the manual import flow mines THIS inbox for the
  * suggestion subject line, so the two must not drift apart on a deploy-env edit.
  *

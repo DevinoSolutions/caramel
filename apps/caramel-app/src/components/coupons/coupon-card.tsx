@@ -134,6 +134,15 @@ export default function CouponCard({ coupon, index }: CouponCardProps) {
                             {failedAgo}
                         </p>
                     )}
+                    {coupon.newCustomersOnly && (
+                        <span
+                            data-testid="coupon-new-customers-only"
+                            className="mr-2 mt-2 inline-flex items-center rounded-full bg-orange-100 px-2 py-0.5 text-[11px] font-semibold text-orange-700 ring-1 ring-orange-200 dark:bg-orange-900/30 dark:text-orange-300 dark:ring-orange-900/50"
+                            title="This code works only for a new account at this store."
+                        >
+                            New customers only
+                        </span>
+                    )}
                     {badge && (
                         <CouponStatusBadge
                             badge={badge}

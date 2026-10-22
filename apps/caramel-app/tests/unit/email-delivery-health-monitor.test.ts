@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 // so the check rides an unref'd interval on the Next server process. That
 // buys three obligations, each pinned below:
 //
-//   1. the enable decision is a pure table (prod default ON when useSend is
+//   1. the enable decision is a pure table (prod default ON when Sendly is
 //      configured, env var overrides BOTH ways) — a deploy must never have to
 //      guess whether the check is running;
 //   2. at most ONE Sentry event per clock hour, so a degraded provider cannot
@@ -33,9 +33,9 @@ vi.mock('@sentry/nextjs', () => ({
 
 const { envMock } = vi.hoisted(() => ({
     envMock: {
-        USESEND_BASE_URL: 'https://usesend.example.com' as string | undefined,
-        USESEND_API_KEY: 'us_test_key' as string | undefined,
-        USESEND_FROM_EMAIL: 'no_reply@grabcaramel.com',
+        SENDLY_BASE_URL: undefined as string | undefined,
+        SENDLY_API_KEY: 'sk_test_key' as string | undefined,
+        SENDLY_FROM_EMAIL: 'no_reply@grabcaramel.com',
         EMAIL_DELIVERY_HEALTH_ENABLED: undefined as
             | 'true'
             | 'false'
@@ -66,7 +66,7 @@ function report(
         delayed: 0,
         stuckPending: 0,
         byStatus: { DELIVERED: 3 },
-        domainId: 14,
+        senderDomain: 'grabcaramel.com',
         pagesFetched: 1,
         truncated: false,
         ...overrides,
@@ -85,7 +85,7 @@ beforeEach(() => {
     flushMock.mockClear()
     checkMock.mockReset()
     checkMock.mockResolvedValue(report())
-    envMock.USESEND_API_KEY = 'us_test_key'
+    envMock.SENDLY_API_KEY = 'sk_test_key'
     envMock.EMAIL_DELIVERY_HEALTH_ENABLED = undefined
     envMock.EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES = 60
     vi.spyOn(console, 'log').mockImplementation(() => {})
@@ -99,12 +99,12 @@ afterEach(() => {
 })
 
 describe('decideEmailDeliveryHealthMonitor', () => {
-    it('is on by default in production once useSend is configured', async () => {
+    it('is on by default in production once Sendly is configured', async () => {
         const { decideEmailDeliveryHealthMonitor } = await freshMonitor()
         expect(
             decideEmailDeliveryHealthMonitor({
                 NODE_ENV: 'production',
-                USESEND_API_KEY: 'us_key',
+                SENDLY_API_KEY: 'sk_key',
             }),
         ).toEqual({ enabled: true, reason: 'production default' })
     })
@@ -114,13 +114,13 @@ describe('decideEmailDeliveryHealthMonitor', () => {
         expect(
             decideEmailDeliveryHealthMonitor({
                 NODE_ENV: 'development',
-                USESEND_API_KEY: 'us_key',
+                SENDLY_API_KEY: 'sk_key',
             }).enabled,
         ).toBe(false)
         expect(
             decideEmailDeliveryHealthMonitor({
                 NODE_ENV: 'development',
-                USESEND_API_KEY: 'us_key',
+                SENDLY_API_KEY: 'sk_key',
                 EMAIL_DELIVERY_HEALTH_ENABLED: 'true',
             }).enabled,
         ).toBe(true)
@@ -130,21 +130,21 @@ describe('decideEmailDeliveryHealthMonitor', () => {
         const { decideEmailDeliveryHealthMonitor } = await freshMonitor()
         const decision = decideEmailDeliveryHealthMonitor({
             NODE_ENV: 'production',
-            USESEND_API_KEY: 'us_key',
+            SENDLY_API_KEY: 'sk_key',
             EMAIL_DELIVERY_HEALTH_ENABLED: 'false',
         })
         expect(decision.enabled).toBe(false)
         expect(decision.reason).toContain('EMAIL_DELIVERY_HEALTH_ENABLED=false')
     })
 
-    it('stays off — with a named reason — when useSend is not configured at all', async () => {
+    it('stays off — with a named reason — when Sendly is not configured at all', async () => {
         const { decideEmailDeliveryHealthMonitor } = await freshMonitor()
         const decision = decideEmailDeliveryHealthMonitor({
             NODE_ENV: 'production',
             EMAIL_DELIVERY_HEALTH_ENABLED: 'true',
         })
         expect(decision.enabled).toBe(false)
-        expect(decision.reason).toContain('USESEND_API_KEY')
+        expect(decision.reason).toContain('SENDLY_API_KEY')
     })
 })
 
@@ -186,10 +186,28 @@ describe('reportEmailDeliveryHealth', () => {
         expect(captureMessageMock.mock.calls[0][1].level).toBe('warning')
     })
 
+    it('reports a coverage gap (incomplete) to Sentry as a warning, never silently', async () => {
+        const { reportEmailDeliveryHealth } = await freshMonitor()
+        const sent = await reportEmailDeliveryHealth(
+            report({
+                status: 'incomplete',
+                truncated: true,
+                reason: 'page budget exhausted',
+            }),
+        )
+        expect(sent).toBe(true)
+        const [message, options] = captureMessageMock.mock.calls[0]
+        expect(message).toBe(
+            'Transactional email delivery health check incomplete',
+        )
+        expect(options.level).toBe('warning')
+        expect(options.extra.truncated).toBe(true)
+    })
+
     it('reports an unreachable provider as an error-level event', async () => {
         const { reportEmailDeliveryHealth } = await freshMonitor()
         await reportEmailDeliveryHealth(
-            report({ status: 'error', reason: 'useSend GET /emails failed' }),
+            report({ status: 'error', reason: 'Sendly list emails failed' }),
         )
         const [message, options] = captureMessageMock.mock.calls[0]
         expect(message).toBe('Transactional email delivery health check failed')

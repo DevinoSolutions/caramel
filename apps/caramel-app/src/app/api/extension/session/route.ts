@@ -74,7 +74,22 @@ export const DELETE = withRoute(
                 { status: 401 },
             )
         }
-        const { count } = await prisma.session.deleteMany({ where: { token } })
+        const { count } = await prisma.session.deleteMany({
+            where: { token: sessionRowToken(token) },
+        })
         return NextResponse.json({ revoked: count > 0 })
     },
 )
+
+// The Session row stores the RAW token. A bearer minted by the OAuth paths is
+// that raw token, but /api/extension/login hands out better-auth's SIGNED form,
+// `<raw>.<signature>`, and a delete keyed by the signed string matched no row:
+// email/password users got {revoked:false} and their bearer kept working for
+// its full 7 days. Neither raw format contains a dot (better-auth ids are
+// alphanumeric, ours are base64url), so the part before the first dot is the
+// row's token. The signature is not checked, and does not need to be: whoever
+// holds the signed form already holds the raw token, which revokes the same row.
+function sessionRowToken(bearer: string): string {
+    const dot = bearer.indexOf('.')
+    return dot > 0 ? bearer.slice(0, dot) : bearer
+}

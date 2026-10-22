@@ -117,15 +117,14 @@ The app serves its own coupon catalog from `DATABASE_URL`, so this is **unset in
 
 **Local defaults — already correct in `.env.example`, no action needed:**
 
-| Variable                                   | Shipped value                          |
-| ------------------------------------------ | -------------------------------------- |
-| `BETTER_AUTH_URL`                          | `http://localhost:58000`               |
-| `NEXT_PUBLIC_BASE_URL`                     | `http://localhost:58000`               |
-| `BCRYPT_SALT_ROUNDS`                       | `10`                                   |
-| `ALLOWED_ORIGINS`                          | blank (same-origin + extensions only)  |
-| `USESEND_BASE_URL`                         | `https://usesend.devino.ca`            |
-| `USESEND_FROM_EMAIL` / `USESEND_FROM_NAME` | `no_reply@grabcaramel.com` / `Caramel` |
-| `OPENROUTER_MODEL`                         | `anthropic/claude-haiku-4.5`           |
+| Variable                                 | Shipped value                          |
+| ---------------------------------------- | -------------------------------------- |
+| `BETTER_AUTH_URL`                        | `http://localhost:58000`               |
+| `NEXT_PUBLIC_BASE_URL`                   | `http://localhost:58000`               |
+| `BCRYPT_SALT_ROUNDS`                     | `10`                                   |
+| `ALLOWED_ORIGINS`                        | blank (same-origin + extensions only)  |
+| `SENDLY_FROM_EMAIL` / `SENDLY_FROM_NAME` | `no_reply@grabcaramel.com` / `Caramel` |
+| `OPENROUTER_MODEL`                       | `anthropic/claude-haiku-4.5`           |
 
 (`NODE_ENV` is deliberately absent from `.env.example`: it is framework-managed — Next.js sets it per command and env files cannot override it.)
 
@@ -145,7 +144,7 @@ The app serves its own coupon catalog from `DATABASE_URL`, so this is **unset in
 | ------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`                                                       | Google sign-in                                                                                                   |
 | `APPLE_CLIENT_ID` / `APPLE_TEAM_ID` / `APPLE_KEY_ID` / `APPLE_PRIVATE_KEY` / `APPLE_REDIRECT_URI` | Apple sign-in (the app signs its own client secret from the `.p8` key) — see `docs/APPLE_OAUTH_LOCAL_TESTING.md` |
-| `USESEND_API_KEY`                                                                                 | Outgoing email (signup verification, etc.)                                                                       |
+| `SENDLY_API_KEY`                                                                                  | Outgoing email via Sendly (signup verification, etc.); key scopes `emails:send` + `emails:read`                  |
 | `OPENROUTER_API_KEY`                                                                              | The cart classifier (`/api/classify-cart`) and `pnpm eval`                                                       |
 | `NEXT_PUBLIC_SENTRY_DSN`                                                                          | Error/APM reporting (no-op locally without it)                                                                   |
 | `NEXT_PUBLIC_GOOGLE_ANALYTICS_ID`                                                                 | Analytics                                                                                                        |

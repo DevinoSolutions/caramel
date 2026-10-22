@@ -15,6 +15,16 @@ import {
     codeSharingAccepted,
     parseCodeSharingConsent,
 } from '../code-sharing-consent.js'
+import { trustedClick, trustedKey } from './_trusted-events.mjs'
+
+// The runner's apply overlay as the runner makes it: marked as ours
+// (UI-helpers.js createCaramelShadowHost), which the page cannot do.
+async function ourOverlay() {
+    const { caramelMarkOwnHost } = await import('../caramel-base.js')
+    const overlay = caramelMarkOwnHost(document.createElement('div'))
+    overlay.id = 'caramel-testing-overlay'
+    return overlay
+}
 
 /**
  * code-capture.js — a code the SHOPPER types is shared with Caramel only when
@@ -439,12 +449,39 @@ describe('what must never leave the page', () => {
     it('nothing while the runner is applying (its overlay is up)', async () => {
         await armed()
         storeAnswers(true)
-        const overlay = document.createElement('div')
-        overlay.id = 'caramel-testing-overlay'
-        document.body.appendChild(overlay)
+        document.body.appendChild(await ourOverlay())
         shopperTypes('SAVE10')
         shopperClicksApply()
         await settle(600)
+
+        expect(sent).toEqual([])
+    })
+
+    // The store's page can create an element with our overlay's id. Before
+    // 2026-10-20 that alone paused capture: a code the shopper applied by hand
+    // was never shared.
+    it("a page element with the overlay's id is not our runner applying", async () => {
+        await armed()
+        storeAnswers(true)
+        const fake = document.createElement('div')
+        fake.id = 'caramel-testing-overlay'
+        document.body.appendChild(fake)
+        shopperTypes('SAVE10')
+        shopperClicksApply()
+
+        await vi.waitFor(() => expect(sent).toHaveLength(1), LONG)
+    })
+
+    it('our overlay placed after a page element with its id is still found', async () => {
+        await armed()
+        storeAnswers(true)
+        const fake = document.createElement('div')
+        fake.id = 'caramel-testing-overlay'
+        document.body.appendChild(fake)
+        document.body.appendChild(await ourOverlay())
+        shopperTypes('SAVE10')
+        shopperClicksApply()
+        await settle(2200)
 
         expect(sent).toEqual([])
     })
@@ -455,9 +492,7 @@ describe('what must never leave the page', () => {
         shopperTypes('SAVE10')
         shopperClicksApply()
         await settle(30)
-        const overlay = document.createElement('div')
-        overlay.id = 'caramel-testing-overlay'
-        document.body.appendChild(overlay)
+        document.body.appendChild(await ourOverlay())
         await settle(2200)
 
         expect(sent).toEqual([])
@@ -822,7 +857,7 @@ describe('consent: nothing is sent before the shopper says yes', () => {
         await waitForCard()
         expect(sent).toEqual([])
 
-        cardButton('caramel-share-yes').click()
+        trustedClick(cardButton('caramel-share-yes'))
 
         await vi.waitFor(() => expect(sent).toHaveLength(1), LONG)
         expect(sent[0]).toEqual({
@@ -840,11 +875,36 @@ describe('consent: nothing is sent before the shopper says yes', () => {
         expect(shareCard()).toBeNull()
     })
 
+    it('the page cannot say yes for the shopper', async () => {
+        // The card sits in the store's page. A script there can reach the
+        // button (the shadow root is open) and click it, or press Enter.
+        delete syncData[CODE_SHARING_CONSENT_KEY]
+        await shopperAppliesAcceptedCode('SAVE10')
+        await waitForCard()
+
+        cardButton('caramel-share-yes').click()
+        cardButton('caramel-share-yes').dispatchEvent(
+            new MouseEvent('click', { bubbles: true, composed: true }),
+        )
+        document.dispatchEvent(
+            new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+        )
+        await new Promise(r => setTimeout(r, 50))
+
+        expect(sent).toEqual([])
+        expect(CODE_SHARING_CONSENT_KEY in syncData).toBe(false)
+        expect(shareCard()).not.toBeNull()
+
+        // The shopper's own click still answers it.
+        trustedClick(cardButton('caramel-share-yes'))
+        await vi.waitFor(() => expect(sent).toHaveLength(1), LONG)
+    })
+
     it('after acceptance the next code is sent with no second prompt', async () => {
         delete syncData[CODE_SHARING_CONSENT_KEY]
         await shopperAppliesAcceptedCode('SAVE10')
         await waitForCard()
-        cardButton('caramel-share-yes').click()
+        trustedClick(cardButton('caramel-share-yes'))
         await vi.waitFor(() => expect(sent).toHaveLength(1), LONG)
 
         // A different code, in a fresh answer round.
@@ -861,7 +921,7 @@ describe('consent: nothing is sent before the shopper says yes', () => {
         await shopperAppliesAcceptedCode('SAVE10')
         await waitForCard()
 
-        cardButton('caramel-share-no').click()
+        trustedClick(cardButton('caramel-share-no'))
 
         await vi.waitFor(
             () =>
@@ -889,7 +949,7 @@ describe('consent: nothing is sent before the shopper says yes', () => {
         await shopperAppliesAcceptedCode('SAVE10')
         await waitForCard()
 
-        cardButton('caramel-share-close').click()
+        trustedClick(cardButton('caramel-share-close'))
 
         await vi.waitFor(() => expect(shareCard()).toBeNull(), LONG)
         expect(CODE_SHARING_CONSENT_KEY in syncData).toBe(false)
@@ -911,7 +971,7 @@ describe('consent: nothing is sent before the shopper says yes', () => {
         await shopperAppliesAcceptedCode('SAVE10')
         await waitForCard()
 
-        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+        trustedKey(document, 'Escape')
 
         await vi.waitFor(() => expect(shareCard()).toBeNull(), LONG)
         expect(CODE_SHARING_CONSENT_KEY in syncData).toBe(false)
@@ -984,7 +1044,7 @@ describe('consent: nothing is sent before the shopper says yes', () => {
             globalThis.chrome.runtime.lastError = undefined
         }
 
-        cardButton('caramel-share-yes').click()
+        trustedClick(cardButton('caramel-share-yes'))
         await settle(600)
 
         expect(sent).toEqual([])
@@ -1233,7 +1293,7 @@ describe('funnel diagnostics: which steps the page reports', () => {
             expect.objectContaining({ step: 'apply_observed' }),
             expect.objectContaining({
                 step: 'store_not_accepted',
-                reason: 'not-committed',
+                reason: 'store-error',
             }),
         ])
     })
@@ -1246,7 +1306,7 @@ describe('funnel diagnostics: which steps the page reports', () => {
         shopperClicksApply()
         await vi.waitFor(() => expect(shareCard()).not.toBeNull(), LONG)
 
-        cardButton('caramel-share-yes').click()
+        trustedClick(cardButton('caramel-share-yes'))
         await waitForStep('submit_sent')
         expect(steps()).toEqual([
             'capture_armed',
@@ -1266,7 +1326,7 @@ describe('funnel diagnostics: which steps the page reports', () => {
         shopperClicksApply()
         await vi.waitFor(() => expect(shareCard()).not.toBeNull(), LONG)
 
-        cardButton('caramel-share-no').click()
+        trustedClick(cardButton('caramel-share-no'))
         await waitForStep('prompt_declined')
         await settle(300)
         expect(steps()).not.toContain('submit_skipped')
@@ -1281,7 +1341,7 @@ describe('funnel diagnostics: which steps the page reports', () => {
         shopperClicksApply()
         await vi.waitFor(() => expect(shareCard()).not.toBeNull(), LONG)
 
-        cardButton('caramel-share-close').click()
+        trustedClick(cardButton('caramel-share-close'))
         await waitForStep('prompt_dismissed')
         await settle(300)
         expect(steps()).not.toContain('submit_skipped')
@@ -1444,5 +1504,117 @@ describe('funnel diagnostics: which steps the page reports', () => {
         shopperClicksApply()
 
         await vi.waitFor(() => expect(sent).toHaveLength(1), LONG)
+    })
+})
+
+// Why the capture refused a code is telemetry only: every refusal below must
+// share nothing, exactly as before; only the reported reason differs.
+describe('funnel diagnostics: why the store did not count as accepting', () => {
+    const refusalReasons = () =>
+        funnel.filter(m => m.step === 'store_not_accepted').map(m => m.reason)
+    const waitForRefusal = () =>
+        vi.waitFor(() => expect(refusalReasons()).toHaveLength(1), {
+            timeout: 13000,
+        })
+
+    it('a visible rejection with no applied row: store-error', async () => {
+        await armed()
+        storeAnswers(false)
+        shopperTypes('NOPE123')
+        shopperClicksApply()
+
+        await waitForRefusal()
+        expect(refusalReasons()).toEqual(['store-error'])
+        expect(sent).toEqual([])
+    })
+
+    it('an applied row beside a new error: store-error', async () => {
+        await armed()
+        storeAnswers(true, {
+            after: () =>
+                setText(document.getElementById('err'), 'This code is invalid'),
+        })
+        shopperTypes('SAVE10')
+        shopperClicksApply()
+
+        await waitForRefusal()
+        expect(refusalReasons()).toEqual(['store-error'])
+        expect(sent).toEqual([])
+    })
+
+    it('a price drop with no applied row: price-dropped-no-row', async () => {
+        await armed()
+        cartTotalDropsOnApply()
+        shopperTypes('SAVE10')
+        shopperClicksApply()
+
+        await waitForRefusal()
+        expect(refusalReasons()).toEqual(['price-dropped-no-row'])
+        expect(sent).toEqual([])
+    })
+
+    it('nothing changes within the window: no-signal', async () => {
+        await armed()
+        shopperTypes('SAVE10')
+        shopperClicksApply()
+
+        await waitForRefusal()
+        expect(refusalReasons()).toEqual(['no-signal'])
+        expect(sent).toEqual([])
+        // Waits out the whole 10s verdict window.
+    }, 20000)
+
+    it('an applied row that does not name the code, with no drop: not-tied-to-code', async () => {
+        await armed()
+        document.getElementById('apply').addEventListener('click', () => {
+            setTimeout(() => {
+                const row = document.createElement('div')
+                row.id = 'applied-row'
+                setText(row, 'Reward points redeemed')
+                document.body.appendChild(row)
+            }, 100)
+        })
+        shopperTypes('SAVE10')
+        shopperClicksApply()
+
+        await waitForRefusal()
+        expect(refusalReasons()).toEqual(['not-tied-to-code'])
+        expect(sent).toEqual([])
+    }, 20000)
+
+    it('a row that committed and then reverted, beside stale error text: committed-no-effect', async () => {
+        await armed()
+        // The error text was already on the page before the code was applied
+        // (furniture, not the store's verdict), so it is not attributable.
+        setText(document.getElementById('err'), 'Invalid promo code')
+        document.getElementById('apply').addEventListener('click', () => {
+            setTimeout(() => {
+                const row = document.createElement('div')
+                row.id = 'applied-row'
+                setText(row, `${promo().value} applied`)
+                document.body.appendChild(row)
+                // The store takes the code, then undoes it before the row has
+                // held for 1.2s. The runner polls every 200ms, so the row must
+                // outlive a few polls (600ms = about three) to be seen as
+                // committed at all.
+                setTimeout(() => row.remove(), 600)
+            }, 100)
+        })
+        shopperTypes('SAVE10')
+        shopperClicksApply()
+
+        await waitForRefusal()
+        expect(refusalReasons()).toEqual(['committed-no-effect'])
+        expect(sent).toEqual([])
+    }, 20000)
+
+    it('an accepted code reports no refusal and is still shared', async () => {
+        await armed()
+        storeAnswers(true)
+        shopperTypes('SAVE10')
+        shopperClicksApply()
+
+        await vi.waitFor(() => expect(sent).toHaveLength(1), LONG)
+        expect(refusalReasons()).toEqual([])
     })
 })

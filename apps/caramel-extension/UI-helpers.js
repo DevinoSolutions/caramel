@@ -19,6 +19,8 @@
 
 import {
     caramelGetSession,
+    caramelMarkOwnHost,
+    caramelOwnHost,
     caramelPromptAllowed,
     currentBrowser,
     log,
@@ -296,7 +298,7 @@ export function caramelTopBarBottom() {
  * root carrying the shared stylesheet. NOT appended — callers build into
  * `root`, wire listeners, then append the host, fully styled. */
 async function createCaramelShadowHost(id) {
-    const host = document.createElement('div')
+    const host = caramelMarkOwnHost(document.createElement('div'))
     host.id = id
     host.style.cssText = CARAMEL_HOST_CSS[id] || ''
     const root = host.attachShadow({ mode: 'open' })
@@ -304,6 +306,22 @@ async function createCaramelShadowHost(id) {
     style.textContent = await _caramelGetShadowCss()
     root.appendChild(style)
     return { host, root }
+}
+
+/* Every control in our UI acts only on the shopper's own input. Our UI sits
+ * in the store's page, which can reach it (and click it, or press its keys)
+ * from a script; an event a script makes is never trusted, so it does
+ * nothing here: it cannot start a run, stop one, share a code, open the
+ * popup or close a card. Logged, so a page that tries is visible. */
+// Exported for tests/injected-ui-trusted-input.test.mjs.
+export function caramelShopperOnly(handler) {
+    return event => {
+        if (!event?.isTrusted) {
+            log('UI_EVENT_NOT_TRUSTED', { type: event?.type || null })
+            return
+        }
+        return handler(event)
+    }
 }
 
 /* Focus trap: Tab/Shift+Tab cycle within the shadow root's focusables,
@@ -388,21 +406,13 @@ export function caramelMarkPromptDismissed() {
 
 // Called from store-detect.js.
 export async function insertCaramelPrompt(domainRecord) {
-    if (
-        document.getElementById('caramel-small-prompt') ||
-        _caramelPromptInFlight
-    )
-        return
+    if (caramelOwnHost('caramel-small-prompt') || _caramelPromptInFlight) return
     // The user already said "not now" on this tab. Honour it.
     if (caramelPromptDismissedHere()) return
     // User preference gate (popup settings): auto-apply off, or this site
     // paused → no passive prompt. Popup-initiated applies bypass this.
     if (!(await caramelPromptAllowed(location.hostname))) return
-    if (
-        document.getElementById('caramel-small-prompt') ||
-        _caramelPromptInFlight
-    )
-        return
+    if (caramelOwnHost('caramel-small-prompt') || _caramelPromptInFlight) return
     _caramelPromptInFlight = true
     let made
     try {
@@ -471,22 +481,27 @@ export async function insertCaramelPrompt(domainRecord) {
     root.querySelector('#caramel-close-btn').addEventListener(
         'click',
         event => {
+            // Stopped whoever made it: an untrusted click on the × must not
+            // reach the host as an activation either.
             event.stopPropagation()
-            _dismiss(true)
+            caramelShopperOnly(() => _dismiss(true))(event)
         },
     )
-    host.addEventListener('click', _activate)
+    host.addEventListener('click', caramelShopperOnly(_activate))
     // Keyboard parity (host is role="button"): composedPath()[0] is the
     // pre-retarget target — Enter on the focused × must only close.
-    host.addEventListener('keydown', event => {
-        if (
-            event.composedPath()[0] === host &&
-            (event.key === 'Enter' || event.key === ' ')
-        ) {
-            event.preventDefault()
-            _activate()
-        }
-    })
+    host.addEventListener(
+        'keydown',
+        caramelShopperOnly(event => {
+            if (
+                event.composedPath()[0] === host &&
+                (event.key === 'Enter' || event.key === ' ')
+            ) {
+                event.preventDefault()
+                _activate()
+            }
+        }),
+    )
 
     document.body.appendChild(host)
 }
@@ -543,15 +558,17 @@ ${noLoading ? '' : loadingHTML}`
         // both ends; a setter export was considered and rejected — no invented
         // API when the existing seam is behavior-identical to what ships.
         globalThis._caramelCancelled = true
-        caramelCancelRun()
+        caramelCancelRun().catch(err =>
+            log('RUN_CANCEL_FAILED', { error: String(err?.message || err) }),
+        )
         hideTestingModal()
     }
     const _close = root.querySelector('#caramel-testing-close')
-    if (_close) _close.addEventListener('click', _cancel)
+    if (_close) _close.addEventListener('click', caramelShopperOnly(_cancel))
     // Esc cancels — on `document` so it works with focus on the page too.
-    const onKey = e => {
+    const onKey = caramelShopperOnly(e => {
         if (e.key === 'Escape') _cancel()
-    }
+    })
     host.__caramelOnKey = onKey
     document.addEventListener('keydown', onKey)
     _caramelInstallFocusTrap(root, modal)
@@ -567,7 +584,7 @@ ${noLoading ? '' : loadingHTML}`
 /* Updates the testing modal's status text + progress bar width. */
 // Called from coupon-runner.js.
 export async function updateTestingModal(currentIndex, total, code) {
-    const host = document.getElementById('caramel-testing-overlay')
+    const host = caramelOwnHost('caramel-testing-overlay')
     const root = host && host.shadowRoot
     if (!root) return
 
@@ -584,7 +601,7 @@ export async function updateTestingModal(currentIndex, total, code) {
 }
 // Called from coupon-runner.js + store-detect.js.
 export function hideTestingModal() {
-    const host = document.getElementById('caramel-testing-overlay')
+    const host = caramelOwnHost('caramel-testing-overlay')
     if (host) {
         if (host.__caramelOnKey)
             document.removeEventListener('keydown', host.__caramelOnKey)
@@ -754,9 +771,9 @@ export async function showFinalModal(
 
     // Build the secondary message based on which state we landed in.
     // PLAIN TEXT ONLY — this string is escaped once at render, so nothing
-    // here may pre-escape or embed markup (it would double-encode). Callers
-    // reach `message` through the sessionStorage handoff, which the host page
-    // can write, so it is untrusted by definition.
+    // here may pre-escape or embed markup (it would double-encode). A
+    // caller's `message` can quote the store's own words, which the host page
+    // writes, so it is untrusted by definition.
     let finalMessage
     if (savedMoney) {
         // The amount is the modal's headline now — repeating it here read as
@@ -898,8 +915,7 @@ ${showPrimary ? `<button id="caramel-final-ok-btn">${primaryLabel}</button>` : '
     // Manual-copy buttons: copies the EXACT code shown (data-code); copied
     // feedback = class toggle (tokened green pair, dark-safe).
     modal.querySelectorAll('.caramel-manual-copy').forEach(btn => {
-        btn.addEventListener('click', async ev => {
-            ev.stopPropagation()
+        const copy = caramelShopperOnly(async () => {
             const cc = btn.getAttribute('data-code')
             const ok = await caramelCopyText(cc)
             const prev = btn.textContent
@@ -909,6 +925,10 @@ ${showPrimary ? `<button id="caramel-final-ok-btn">${primaryLabel}</button>` : '
                 btn.textContent = prev
                 btn.classList.remove('is-copied')
             }, 1600)
+        })
+        btn.addEventListener('click', ev => {
+            ev.stopPropagation()
+            return copy(ev)
         })
     })
 
@@ -924,33 +944,42 @@ ${showPrimary ? `<button id="caramel-final-ok-btn">${primaryLabel}</button>` : '
      * Only the scrim itself closes: a click that lands on the card (copying a
      * code, hitting the button) has the card as its target and must not. */
     const closeX = modal.querySelector('#caramel-final-close')
-    if (closeX) closeX.addEventListener('click', closeFinal)
-    scrim.addEventListener('click', ev => {
-        if (ev.target === scrim) closeFinal()
-    })
+    if (closeX) closeX.addEventListener('click', caramelShopperOnly(closeFinal))
+    scrim.addEventListener(
+        'click',
+        caramelShopperOnly(ev => {
+            if (ev.target === scrim) closeFinal()
+        }),
+    )
 
     // Guest teaser gate: same destination as the isSignIn button — open the
     // popup so the shopper signs in, then the full list is theirs.
     const manualLoginBtn = modal.querySelector('#caramel-manual-login')
     if (manualLoginBtn)
-        manualLoginBtn.addEventListener('click', () => {
-            closeFinal()
-            currentBrowser.runtime.sendMessage({ action: 'openPopup' })
-        })
+        manualLoginBtn.addEventListener(
+            'click',
+            caramelShopperOnly(() => {
+                closeFinal()
+                currentBrowser.runtime.sendMessage({ action: 'openPopup' })
+            }),
+        )
 
     // Close on the primary button; Esc closes too (keyboard).
     const okBtn = modal.querySelector('#caramel-final-ok-btn')
     if (okBtn)
-        okBtn.addEventListener('click', () => {
-            closeFinal()
-            if (isSignIn) {
-                //show popup.html
-                currentBrowser.runtime.sendMessage({ action: 'openPopup' })
-            }
-        })
-    const onKey = e => {
+        okBtn.addEventListener(
+            'click',
+            caramelShopperOnly(() => {
+                closeFinal()
+                if (isSignIn) {
+                    //show popup.html
+                    currentBrowser.runtime.sendMessage({ action: 'openPopup' })
+                }
+            }),
+        )
+    const onKey = caramelShopperOnly(e => {
         if (e.key === 'Escape') closeFinal()
-    }
+    })
     host.__caramelOnKey = onKey
     document.addEventListener('keydown', onKey)
     _caramelInstallFocusTrap(root, modal)
@@ -1015,9 +1044,9 @@ export async function showCodeSharingPrompt({ site, code }) {
 
     return new Promise(resolve => {
         let settled = false
-        const onKey = e => {
+        const onKey = caramelShopperOnly(e => {
             if (e.key === 'Escape') settle('dismissed')
-        }
+        })
         const settle = choice => {
             if (settled) return
             settled = true
@@ -1026,15 +1055,17 @@ export async function showCodeSharingPrompt({ site, code }) {
             resolve(choice)
         }
         host.__caramelSettle = settle
-        card.querySelector('#caramel-share-yes').addEventListener('click', () =>
-            settle('accepted'),
+        card.querySelector('#caramel-share-yes').addEventListener(
+            'click',
+            caramelShopperOnly(() => settle('accepted')),
         )
-        card.querySelector('#caramel-share-no').addEventListener('click', () =>
-            settle('declined'),
+        card.querySelector('#caramel-share-no').addEventListener(
+            'click',
+            caramelShopperOnly(() => settle('declined')),
         )
         card.querySelector('#caramel-share-close').addEventListener(
             'click',
-            () => settle('dismissed'),
+            caramelShopperOnly(() => settle('dismissed')),
         )
         // Capture phase and never stopped: Esc must still reach the store's own
         // handlers, we only listen.

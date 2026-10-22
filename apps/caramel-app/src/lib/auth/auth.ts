@@ -217,6 +217,12 @@ export const auth = betterAuth({
             sameSite: useSecure ? 'none' : 'lax',
         },
     },
+    // Provider access/refresh tokens are stored encrypted (XChaCha20-Poly1305,
+    // keyed by `secret`). Apple's refresh token is kept for the revoke call at
+    // account deletion (T-5065); oauthTokenCrypto.ts reads and writes the same
+    // format for the extension/app mint. Rows written before this was enabled
+    // stay readable (plain text is passed through).
+    account: { encryptOAuthTokens: true },
     // Every account created THROUGH better-auth (email sign-up, Google, Apple)
     // is recorded once: `users.acquisition` + the `signup_completed` event.
     // The extension's own OAuth mint creates users with raw Prisma (this hook

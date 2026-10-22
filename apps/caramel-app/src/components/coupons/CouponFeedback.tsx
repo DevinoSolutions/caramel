@@ -18,6 +18,11 @@ import { useId, useRef, useState } from 'react'
 // is anonymous and rate-limited, so a determined caller bypasses it by posting
 // directly, which is why the signal is never allowed to do more than reorder.
 // A failed request is NOT remembered, so the shopper can retry.
+//
+// A 404 is not a failure: the page was rendered before the code left the
+// catalog (a tombstone or an id remap), so there is nothing left to vote on. It
+// gets a quiet "no longer listed" note and nothing is reported (a stale page is
+// not a bug, and each one would otherwise be a Sentry event).
 
 const VOTE_KEY_PREFIX = 'caramel:coupon-vote:'
 
@@ -31,6 +36,7 @@ const BUTTONS: ReadonlyArray<{ vote: Vote; label: string }> = [
 const THANKS_MESSAGE = 'Thanks! Your answer helps other shoppers.'
 const RATE_LIMITED_MESSAGE = 'Too many answers just now. Try again in a minute.'
 const GENERIC_FAILURE_MESSAGE = "Couldn't send that. Try again."
+const NO_LONGER_LISTED_MESSAGE = 'That code is no longer listed.'
 
 /** The vote this browser already cast for a coupon, or null. */
 function readStoredVote(couponId: string): Vote | null {
@@ -59,6 +65,7 @@ export default function CouponFeedback({ couponId }: { couponId: string }) {
     )
     const [busy, setBusy] = useState(false)
     const [errorText, setErrorText] = useState<string | null>(null)
+    const [noLongerListed, setNoLongerListed] = useState(false)
     // Synchronous double-click guard: `busy` only updates on the next render.
     const inFlight = useRef(false)
     const questionId = useId()
@@ -77,6 +84,10 @@ export default function CouponFeedback({ couponId }: { couponId: string }) {
                     body: JSON.stringify({ outcome: chosen }),
                 },
             )
+            if (res.status === 404) {
+                setNoLongerListed(true)
+                return
+            }
             if (!res.ok) {
                 reportUserVisibleFailure({
                     error: new Error(`coupons/report ${res.status}`),
@@ -109,7 +120,7 @@ export default function CouponFeedback({ couponId }: { couponId: string }) {
 
     return (
         <div className="mt-4 border-t border-orange-100 pt-3 dark:border-orange-900/50">
-            {vote === null && (
+            {vote === null && !noLongerListed && (
                 <div
                     role="group"
                     aria-labelledby={questionId}
@@ -142,10 +153,16 @@ export default function CouponFeedback({ couponId }: { couponId: string }) {
                 className={
                     errorText
                         ? 'mt-2 text-sm font-medium text-red-700 dark:text-red-300'
-                        : 'text-sm font-medium text-green-700 dark:text-green-400'
+                        : noLongerListed
+                          ? 'text-sm font-medium text-gray-600 dark:text-gray-400'
+                          : 'text-sm font-medium text-green-700 dark:text-green-400'
                 }
             >
-                {vote !== null ? THANKS_MESSAGE : errorText}
+                {vote !== null
+                    ? THANKS_MESSAGE
+                    : noLongerListed
+                      ? NO_LONGER_LISTED_MESSAGE
+                      : errorText}
             </p>
         </div>
     )

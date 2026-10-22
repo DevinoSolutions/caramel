@@ -21,6 +21,7 @@ import { resolve } from 'node:path'
 import { defineConfig } from 'wxt'
 
 import { ENVIRONMENTS, stampFor } from './scripts/environments.mjs'
+import { buildFinderModule, FINDER_ASSET } from './scripts/finder-bundle.mjs'
 import { FIREFOX_NAME, NAME, SUMMARY } from './scripts/store-listing.mjs'
 
 // React is POPUP-ONLY by doctrine (content scripts stay React-free — the
@@ -28,13 +29,13 @@ import { FIREFOX_NAME, NAME, SUMMARY } from './scripts/store-listing.mjs'
 
 type EnvironmentName = keyof typeof ENVIRONMENTS
 
-// The site's favicon mark, the white italic C on the orange rounded square
-// (apps/caramel-app/public/icons/caramel-icon-192.png, same as favicon.ico),
-// unaltered and filling the canvas. Rendered from its 600 px master
-// (public/square_caramel_logo.png) with the favicon's corner radius scaled;
-// 192 is the favicon file itself. Owner direction 2026-10-06: the 1.4.5 header
-// wordmark was unreadable at icon size; never redesign the mark. 48 and 128
-// are the sizes the extensions page and the store tile ask for.
+// Every toolbar and store icon is the Caramel icon in the Discord-server-logo
+// look (owner direction 2026-10-20, T-4981; supersedes the 2026-10-06 flat
+// favicon C): the wordmark's script C in glossy cream on the orange squircle.
+// All of them are rasterised straight from the vector master by
+// brand/generate-icons.py (brand/icon-master.svg), never resized from another
+// PNG, so regenerate with that script rather than editing /icons/*.png. 48 and
+// 128 are the sizes the extensions page and the store tile ask for.
 const ICONS = {
     16: '/icons/16.png',
     19: '/icons/19.png',
@@ -57,31 +58,44 @@ function resolveEnvironment(mode: string): EnvironmentName {
     return mode
 }
 
+// Content-script modules loaded by URL on demand (see build:publicAssets).
+const ON_DEMAND_MODULES = ['coupon-box-outline.js', 'coupon-box-selectors.js']
+
 export default defineConfig({
     modules: ['@wxt-dev/module-react'],
     hooks: {
-        // The coupon-box outline builder ships as its own file rather than in
-        // the content-script bundle: coupon-box-discovery.js imports it only
-        // when it is about to ask the server for a box, so pages that never
-        // ask never load it. It has no imports of its own, so it is minified
-        // on its own with the same esbuild settings scripts/measure-size.mjs
-        // budgets it with, and the file that ships is the file that is
-        // measured; assets/* is already web-accessible, which a content
-        // script's import() of an extension URL needs.
+        // The coupon-box outline builder and the coupon-box selector builder
+        // ship as their own files rather than in the content-script bundle:
+        // coupon-box-discovery.js imports the outline only when it is about to
+        // ask the server for a box, and the selector builder only on a store
+        // with no config once it has a box to save, so pages that never need
+        // them never load them. Neither has
+        // imports of its own, so each is minified on its own with the same
+        // esbuild settings scripts/measure-size.mjs budgets it with, and the
+        // file that ships is the file that is measured; assets/* is already
+        // web-accessible, which a content script's import() of an extension
+        // URL needs.
         'build:publicAssets': async (wxt, files) => {
-            const source = await readFile(
-                resolve(wxt.config.root, 'coupon-box-outline.js'),
-                'utf8',
-            )
-            const { code } = await transform(source, {
-                loader: 'js',
-                format: 'esm',
-                minify: true,
-                target: 'es2022',
-            })
+            for (const name of ON_DEMAND_MODULES) {
+                const source = await readFile(
+                    resolve(wxt.config.root, name),
+                    'utf8',
+                )
+                const { code } = await transform(source, {
+                    loader: 'js',
+                    format: 'esm',
+                    minify: true,
+                    target: 'es2022',
+                })
+                files.push({ contents: code, relativeDest: `assets/${name}` })
+            }
+            // The promo-box finder ships the same way, and is loaded only by a
+            // page about to run it (coupon-box-finder-loader.js). Its imports
+            // of the content script's own modules are not bundled: see
+            // scripts/finder-bundle.mjs.
             files.push({
-                contents: code,
-                relativeDest: 'assets/coupon-box-outline.js',
+                contents: await buildFinderModule(wxt.config.root),
+                relativeDest: FINDER_ASSET,
             })
         },
     },

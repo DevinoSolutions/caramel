@@ -1,6 +1,7 @@
 import { DISCORD_INVITE_URL } from '@/lib/brandLinks'
 import { faqItems } from '@/lib/faqItems'
 import { faqPageJsonLd, jsonLdString } from '@/lib/jsonLd'
+import { FAQ_COPY } from '@/lib/marketing/faqContent'
 import { COMPARISON_PATH } from '@/lib/seo/extensionComparison'
 import { HONEY_GUIDE_PATH } from '@/lib/seo/honeyExtensionGuide'
 import Link from 'next/link'
@@ -29,11 +30,10 @@ export default function FaqSection(): React.JSX.Element {
             <div className="relative z-10 mx-auto max-w-7xl px-6 lg:px-8">
                 <div className="mb-16 text-center">
                     <h2 className="mb-8 text-5xl font-extrabold leading-tight tracking-tight text-caramel lg:text-4xl">
-                        Frequently Asked Questions
+                        {FAQ_COPY.heading}
                     </h2>
                     <p className="mx-auto max-w-3xl text-xl leading-relaxed text-gray-600 dark:text-gray-300 lg:text-lg">
-                        Straight answers about affiliate links, pricing, data,
-                        and where Caramel runs
+                        {FAQ_COPY.summary}
                     </p>
                 </div>
 
@@ -48,16 +48,16 @@ export default function FaqSection(): React.JSX.Element {
                            already beats z-[1]; only opacity stops show-through. */
                         <details
                             key={item.question}
-                            className="group overflow-hidden rounded-2xl border border-caramel/20 bg-gray-50 bg-gradient-to-br from-caramel/5 via-orange-50/30 to-caramel/5 shadow-md transition-all duration-300 open:border-caramel/60 hover:border-caramel/60 dark:border-caramel/30 dark:bg-darkBg dark:from-caramel/10 dark:via-orange-900/20 dark:to-caramel/10"
+                            className="group overflow-hidden rounded-2xl border border-caramel/20 bg-gray-50 bg-gradient-to-br from-caramel/5 via-orange-50/30 to-caramel/5 shadow-md transition-colors duration-150 open:border-caramel/60 hover:border-caramel/60 dark:border-caramel/30 dark:bg-darkBg dark:from-caramel/10 dark:via-orange-900/20 dark:to-caramel/10"
                         >
                             <summary className="flex cursor-pointer list-none items-center justify-between gap-4 p-6 text-left text-lg font-bold tracking-tight text-gray-800 marker:hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/70 dark:text-white sm:p-4 sm:text-base [&::-webkit-details-marker]:hidden">
                                 {item.question}
                                 <FaChevronDown
                                     aria-hidden="true"
-                                    className="flex-shrink-0 text-caramel transition-transform duration-300 group-open:rotate-180"
+                                    className="flex-shrink-0 text-caramel transition-transform duration-fast group-open:rotate-180"
                                 />
                             </summary>
-                            <p className="px-6 pb-6 text-base leading-relaxed text-gray-600 dark:text-gray-400 sm:px-4 sm:pb-4 sm:text-sm">
+                            <p className="motion-faq-answer px-6 pb-6 text-base leading-relaxed text-gray-600 dark:text-gray-400 sm:px-4 sm:pb-4 sm:text-sm">
                                 {item.answer}
                             </p>
                         </details>

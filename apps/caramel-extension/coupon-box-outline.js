@@ -75,6 +75,11 @@ const INTERACTIVE =
 const FIELD = /^(textbox|searchbox|combobox|spinbutton|checkbox|radio|switch)$/
 const CONTAINER =
     /^(navigation|main|banner|contentinfo|complementary|dialog|alertdialog|form|table|row|list|group|region|tabpanel|tablist|menu|listbox)$/
+// A plain element the store made clickable (harryrosen.com's "Promo code"
+// toggle is a <div> with a click handler and a pointer cursor) prints as a
+// button when its text is this short, and at most this many times a page.
+const CLICKABLE_TEXT_MAX = 40
+const CLICKABLE_MAX = 30
 
 const norm = s =>
     String(s || '')
@@ -84,9 +89,14 @@ const clip = (s, n) => (s.length > n ? s.slice(0, n - 1) + '…' : s)
 // Every digit and anything email-shaped, in everything but the [n] index.
 // "Digit" is any Unicode number (\p{N}), not just 0-9: a phone number written
 // in Arabic-Indic, Persian, fullwidth or circled digits has no letters, so the
-// word allowlist below would otherwise keep it verbatim.
+// word allowlist below would otherwise keep it verbatim. Every part of an
+// address is bounded at the lengths an address may have (the server reads the
+// outline with the same pattern): an open-ended one is read again from every
+// character of a long word, and a 40 KiB one took seconds.
 const scrub = s =>
-    s.replace(/[\w.+-]+@[\w-]+\.[\w.]+/g, '[email]').replace(/\p{N}/gu, '#')
+    s
+        .replace(/[\w.+-]{1,64}@[\w-]{1,253}\.[\w.]{1,253}/g, '[email]')
+        .replace(/\p{N}/gu, '#')
 const bytes = s => new TextEncoder().encode(s).length
 
 // The words a name may carry. Every other word is dropped before the outline
@@ -98,6 +108,9 @@ const bytes = s => new TextEncoder().encode(s).length
 // The list is the one the server's pick was measured with: interface and
 // coupon vocabulary in the store languages the finder reads. It changes only
 // together with the server's eval.
+// 2026-10-17: point(s), member(s), military, student(s), teacher(s), verify
+// and verification. Shopping words, never the shopper's, so the pick can tell
+// a points, member or student discount from a promo code box.
 // Exported for the tests.
 export const ALLOWED_WORDS = new Set(
     `
@@ -131,13 +144,13 @@ export const ALLOWED_WORDS = new Set(
     join kampanjkod keep kids kitchen klarna know kod korting kortingscode
     label language last later learn leather left legal less light lighting
     like links list live living log login logo low loyalty made main manage
-    map mattresses me media membership men menu message method mini mirrors
+    map mattresses me media member members membership men menu message method military mini mirrors
     mobile modal modern more move my name navigate navigation necessary need
     new news next night no not notice notifications now number nursery of
     off offer offers office ok on one onetrust online only open opens
     optional options or order orders original our out outdoor outlet over
     pack page pants password pay payment paypal performance personal phone
-    photo pillows pinterest place play plus policies policy postal power
+    photo pillows pinterest place play plus point points policies policy postal power
     powered pre preference preferences presentkort press previous price
     privacy pro problem proceed product products program promo promos
     promotion promotional promotions protection province purchase qty
@@ -150,12 +163,12 @@ export const ALLOWED_WORDS = new Set(
     settings share ship shipping shoes shop shopping shorts show side
     sideboards sign site sitemap size skip sleep slide small social sofas
     space special start state statement status stools storage store stores
-    story street strictly style submenu submit subscribe subtotal suite
+    story street strictly student students style submenu submit subscribe subtotal suite
     summary summarytotal supplies support sustainability tab table tables
-    targeting tax team terms text that the there this tienes tiktok time
+    targeting tax teacher teachers team terms text that the there this tienes tiktok time
     tips to toepassen toggle tools top tops total track tracking trade
     traditional training travel trending tu twitter type un una under une
-    unionpay up update updates use used value view votre voucher vouchers
+    unionpay up update updates use used value verification verify view votre voucher vouchers
     vous wall warranty was water we website what window wishlist with women
     world wrap you your youtube zip zniżka
 `
@@ -197,6 +210,7 @@ export function caramelPageOutline(root = document.body) {
     const lines = [] // { text, el, n } — el and n only on an indexed line
     let size = 0
     let counter = 0
+    let clickables = 0
 
     const hidden = el => {
         if (el.hidden || el.getAttribute('aria-hidden') === 'true') return true
@@ -282,18 +296,55 @@ export function caramelPageOutline(root = document.body) {
             (img && img.getAttribute('alt')) || el.getAttribute('title'),
         )
     }
+    // Clickable by the store's own hand: an inline handler, a tab stop, or a
+    // pointer cursor it set itself (a cursor inherited from a clickable parent
+    // says nothing about this element). Only outside every interactive element,
+    // and only with no field or control inside it, so a wrapper stays a
+    // wrapper and the controls in it keep their own lines.
+    const clickable = el => {
+        if (clickables >= CLICKABLE_MAX) return false
+        if (
+            !el.hasAttribute('onclick') &&
+            !(el.hasAttribute('tabindex') && el.tabIndex >= 0) &&
+            !(
+                win?.getComputedStyle &&
+                win.getComputedStyle(el).cursor === 'pointer' &&
+                win.getComputedStyle(el.parentElement || el).cursor !==
+                    'pointer'
+            )
+        )
+            return false
+        const t = textOf(el)
+        // An icon inside it (<svg role="img">, role="presentation") is not a
+        // control of its own; only an interactive role is.
+        return (
+            !!t &&
+            t.length <= CLICKABLE_TEXT_MAX &&
+            !el.querySelector('input, textarea, select, button, a[href]') &&
+            ![...el.querySelectorAll('[role]')].some(c =>
+                INTERACTIVE.test(roleOf(c)),
+            )
+        )
+    }
     // Past the cap nothing more is read: those lines would be dropped anyway.
     const push = (depth, text, el = null, n = -1) => {
         const line = '  '.repeat(depth) + '- ' + text
         lines.push({ text: line, el, n })
         size += bytes(line) + 1
     }
-    const walk = (el, depth) => {
+    const walk = (el, depth, inside = false) => {
         for (const n of el.childNodes) {
             if (size > CARAMEL_OUTLINE_MAX_BYTES) return
             if (n.nodeType !== 1 || SKIP.test(n.tagName.toUpperCase())) continue
             if (hidden(n)) continue
-            const role = roleOf(n)
+            let role = roleOf(n)
+            if (!role && !inside && clickable(n)) {
+                const name = safeName(textOf(n))
+                if (name) {
+                    clickables++
+                    role = 'button'
+                }
+            }
             if (INTERACTIVE.test(role)) {
                 const name = safeName(clip(nameOf(n, role), 80))
                 const state = []
@@ -312,7 +363,7 @@ export function caramelPageOutline(root = document.body) {
                         'input, textarea, select, button, a[href], [role]',
                     )
                 )
-                    walk(n, depth + 1)
+                    walk(n, depth + 1, true)
                 continue
             }
             if (role === 'heading') {
@@ -330,10 +381,10 @@ export function caramelPageOutline(root = document.body) {
                     ),
                 )
                 push(depth, role + (name ? ' "' + name + '"' : '') + ':')
-                walk(n, depth + 1)
+                walk(n, depth + 1, inside)
                 continue
             }
-            walk(n, depth)
+            walk(n, depth, inside)
         }
     }
     walk(root, 0)

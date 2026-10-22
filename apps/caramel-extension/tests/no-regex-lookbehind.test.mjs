@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { FINDER_SOURCE } from '../scripts/finder-files.mjs'
 import { entryModuleClosure, EXT_ROOT } from './_entry-modules.mjs'
 
 // Safari before 16.4 has no regex lookbehind. macOS 13.0 is inside the release
@@ -29,6 +30,10 @@ const SHIPPED_SCRIPTS = [
         'entrypoints/content.ts',
         'entrypoints/background.ts',
         'entrypoints/porkbun-alert.content.ts',
+        // Loaded on demand into the same store page (wxt.config.ts): the
+        // finder by the content script, the outline by the finder.
+        FINDER_SOURCE,
+        'coupon-box-outline.js',
     ]),
 ].toSorted()
 
@@ -46,6 +51,7 @@ describe('no regex lookbehind in any shipped script', () => {
         for (const file of [
             'coupon-apply.js',
             'coupon-box-discovery.js',
+            'coupon-box-finder-loader.js',
             'coupon-runner.js',
             'store-detect.js',
             'caramel-base.js',

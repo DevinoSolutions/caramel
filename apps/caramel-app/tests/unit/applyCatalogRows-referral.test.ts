@@ -46,7 +46,7 @@ type IngestCoupon = IngestCatalogPayload['coupons'][number]
 // Bound parameters per coupon tuple in the INSERT, and the positions of the
 // columns read back (id, code, site, title, description, rating,
 // discount_type, discount_amount, expiry, expired, ...).
-const TUPLE_WIDTH = 16
+const TUPLE_WIDTH = 17
 const ID_AT = 0
 const EXPIRED_AT = 9
 const STATUS_AT = 12

@@ -6,13 +6,14 @@
 // output — this is the ops handle for "did our mail actually get delivered?"
 // without waiting for the next interval or reading a Sentry issue.
 //
-// Run it from INSIDE the prod container, where USESEND_* already exist:
+// Run it from INSIDE the prod container, where SENDLY_* already exist:
 //
 //   docker exec <web-container> sh -lc 'cd apps/caramel-app && \
 //     pnpm exec tsx scripts/email-delivery-health.ts --minutes 1440'
 //
 // or locally with the vars exported. Exit code is the verdict: 0 healthy or
-// skipped, 1 degraded (failures / stuck sends) or unreachable — so a human, a
+// skipped, 1 degraded (failures / stuck sends), incomplete (page budget ran out
+// before the window was fully read) or unreachable / unusable sender — so a human, a
 // Dokploy schedule or an Uptime-Kuma push monitor can all consume it.
 //
 // It deliberately reads process.env directly instead of importing @/lib/env:
@@ -43,13 +44,13 @@ export function parseWindowMinutes(argv: readonly string[]): number {
 async function main() {
     const windowMinutes = parseWindowMinutes(process.argv.slice(2))
     const report = await checkEmailDeliveryHealth({
-        baseUrl: process.env.USESEND_BASE_URL ?? '',
-        apiKey: process.env.USESEND_API_KEY ?? '',
-        fromEmail: process.env.USESEND_FROM_EMAIL,
+        apiKey: process.env.SENDLY_API_KEY ?? '',
+        baseUrl: process.env.SENDLY_BASE_URL || undefined,
+        fromEmail: process.env.SENDLY_FROM_EMAIL ?? 'no_reply@grabcaramel.com',
         windowMinutes,
     })
     console.log(formatEmailDeliveryHealthLine(report))
-    if (report.status === 'degraded' || report.status === 'error') {
+    if (report.status !== 'ok' && report.status !== 'skipped') {
         process.exit(1)
     }
 }

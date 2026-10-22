@@ -2,6 +2,29 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Motion tokens for the subtle motion pass (docs/motion-audit.md). Tailwind
+   exposes them as duration-fast/base/slow, ease-motion-out and the
+   animate-motion-* utilities (tailwind.config.ts). */
+:root {
+    --motion-dur-fast: 120ms;
+    --motion-dur-base: 180ms;
+    --motion-dur-slow: 240ms;
+    --motion-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Global reduced-motion net: zero every animation/transition except spinners
+   (a rotation is allowed to stay). Per-component rules and framer's
+   MotionConfig reducedMotion="user" handle the rest. */
+@media (prefers-reduced-motion: reduce) {
+    *:not(.animate-spin),
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}
+
 html {
     scroll-behavior: smooth;
     /* Reserve gutter so the layout doesn't jump when scrollbars appear/disappear */
@@ -301,5 +324,111 @@ html.dark select:-webkit-autofill:focus {
     .hero-enter,
     .hero-enter-scale {
         animation: none;
+    }
+}
+
+/* Subtle motion pass 3/3 (docs/motion-audit.md rows 1, 4, 5): FAQ answer,
+   native dialogs and the growth prompt card enter softly. All three are only
+   ever shown after an interaction or client-side state (details[open],
+   showModal(), the growth host's effect), so a backwards-fill keyframe starting at
+   opacity 0 never hides server-rendered content. Exits stay instant. The
+   opacity-only keyframes run for everyone; the translate/scale ones sit under
+   no-preference. The global reduced-motion net above also collapses every
+   duration, and ::backdrop is outside its selector, so the backdrop fade is
+   no-preference-only. */
+@keyframes motion-faq-answer-fade {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes motion-faq-answer-rise {
+    from {
+        opacity: 0;
+        transform: translateY(-4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes motion-dialog-fade {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes motion-dialog-scale {
+    from {
+        opacity: 0;
+        transform: scale(0.96);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+@keyframes motion-growth-fade {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes motion-growth-rise {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.motion-faq-answer {
+    animation: motion-faq-answer-fade var(--motion-dur-base)
+        var(--motion-ease-out) backwards;
+}
+
+.motion-dialog[open] {
+    animation: motion-dialog-fade 160ms var(--motion-ease-out) backwards;
+}
+
+.motion-growth-card {
+    animation: motion-growth-fade 200ms var(--motion-ease-out) backwards;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    details[open] > .motion-faq-answer {
+        animation-name: motion-faq-answer-rise;
+    }
+
+    .motion-dialog[open] {
+        animation-name: motion-dialog-scale;
+    }
+
+    .motion-dialog[open]::backdrop {
+        /* Literal easing (= --motion-ease-out): custom-property inheritance
+           into ::backdrop is not guaranteed in every browser. */
+        animation: motion-dialog-fade 150ms cubic-bezier(0.16, 1, 0.3, 1)
+            backwards;
+    }
+
+    /* One 8px rise for every layout: the card is bottom-anchored in all of
+       them (note the tailwind screens here are max-width, so md: is the
+       corner card at <=767px and the default is the full-width bar). */
+    .motion-growth-card {
+        animation-name: motion-growth-rise;
     }
 }

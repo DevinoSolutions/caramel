@@ -132,4 +132,102 @@ describe('SupportForm — feedback_id lifecycle', () => {
         expect(postedBody(0).feedback_id).toBe('id-1')
         expect(postedBody(1).feedback_id).toBe('id-2')
     })
+
+    it('shows the success card, reserves the form height and moves focus onto it', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue({
+                ok: true,
+                status: 200,
+                json: async () => ({ ok: true, analytics: 'ok', email: 'ok' }),
+            }),
+        )
+        const form = render(<SupportForm accountEmail={null} />)
+        // jsdom has no layout; give the form a measurable height.
+        const formEl = form.container.querySelector('form') as HTMLFormElement
+        Object.defineProperty(formEl, 'offsetHeight', {
+            configurable: true,
+            value: 640,
+        })
+
+        typeMessage('a message')
+        fireEvent.submit(formEl)
+
+        const card = await waitFor(() => {
+            const el = form.container.querySelector(
+                '[data-support-success]',
+            ) as HTMLElement
+            expect(el.textContent).toContain('Thanks for reaching out')
+            return el
+        })
+        expect(card.style.minHeight).toBe('640px')
+        // Not a live region (the toast announces); focus lands on the card
+        // because the submit button that had focus just unmounted.
+        expect(card.getAttribute('role')).toBeNull()
+        expect(card.getAttribute('tabindex')).toBe('-1')
+        expect(document.activeElement).toBe(card)
+    })
+
+    it('returns focus to the first form field when "Send another" restores the form', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue({
+                ok: true,
+                status: 200,
+                json: async () => ({ ok: true, analytics: 'ok', email: 'ok' }),
+            }),
+        )
+        const { container } = render(<SupportForm accountEmail={null} />)
+        // Nothing is stolen on first mount.
+        expect(document.activeElement).toBe(document.body)
+
+        typeMessage('a message')
+        fireEvent.submit(container.querySelector('form') as HTMLFormElement)
+        await waitFor(() =>
+            expect(screen.getByText('Send another')).toBeTruthy(),
+        )
+
+        fireEvent.click(screen.getByText('Send another'))
+        const firstField = (
+            container.querySelector('form') as HTMLFormElement
+        ).querySelector('button, input, textarea')
+        await waitFor(() => expect(document.activeElement).toBe(firstField))
+    })
+
+    it('keeps one fixed-width submit button while swapping Send feedback / Sending… by opacity', async () => {
+        let release: (value: unknown) => void = () => undefined
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockReturnValue(
+                new Promise(resolve => {
+                    release = resolve
+                }),
+            ),
+        )
+        const { container } = render(<SupportForm accountEmail={null} />)
+        const submitBtn = container.querySelector(
+            'button[type="submit"]',
+        ) as HTMLButtonElement
+        // Both labels are always in the DOM (same grid cell), so the button
+        // never changes width; only the visible one is exposed to AT.
+        expect(submitBtn.textContent).toBe('Send feedbackSending…')
+        expect(
+            screen.getByRole('button', { name: 'Send feedback' }),
+        ).toBeTruthy()
+
+        typeMessage('slow message')
+        fireEvent.submit(container.querySelector('form') as HTMLFormElement)
+        await waitFor(() => expect(submitBtn.disabled).toBe(true))
+        expect(screen.getByRole('button', { name: 'Sending…' })).toBeTruthy()
+        release({
+            ok: true,
+            status: 200,
+            json: async () => ({ ok: true, analytics: 'ok', email: 'ok' }),
+        })
+        await waitFor(() =>
+            expect(
+                container.querySelector('[data-support-success]'),
+            ).toBeTruthy(),
+        )
+    })
 })

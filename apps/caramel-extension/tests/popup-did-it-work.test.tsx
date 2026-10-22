@@ -426,6 +426,34 @@ describe('the "Did it work?" prompt', () => {
         },
     )
 
+    it('a 404 (the code left the catalog) says it is no longer listed: not logged as an error, not retryable, and not asked again', async () => {
+        storage[PENDING_VOTE_KEY] = pendingRecord()
+        reportStatus = 404
+        renderView()
+
+        await userEvent.click(
+            await screen.findByRole('button', { name: 'Yes, it worked' }),
+        )
+
+        await screen.findByText('That code is no longer listed.')
+        expect(
+            screen.queryByRole('button', { name: 'Yes, it worked' }),
+        ).toBeNull()
+        expect(screen.queryByText("Couldn't send that. Try again.")).toBeNull()
+        expect(reportCalls()).toHaveLength(1)
+        expect(storage[VOTED_COUPONS_KEY]).toBeUndefined()
+        await waitFor(() => expect(storage[PENDING_VOTE_KEY]).toBeNull())
+        const timings = (storage.caramel_timings ?? []) as {
+            event: string
+            meta: { where: string }
+        }[]
+        expect(
+            timings.some(
+                t => t.event === 'ERROR' && t.meta.where === 'couponVote',
+            ),
+        ).toBe(false)
+    })
+
     it('"Not now" dismisses the prompt, clears the pending record, and hands focus to the list', async () => {
         storage[PENDING_VOTE_KEY] = pendingRecord()
         renderView()

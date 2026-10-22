@@ -26,6 +26,8 @@ on:
       - 'apps/caramel-app/src/lib/env.ts'
       - 'apps/caramel-app/src/app/api/classify-cart/**'
       - 'apps/caramel-app/src/app/api/extension/coupon-box-pick/**'
+      # The extension's outline code decides which words the pick ever sees.
+      - 'apps/caramel-extension/coupon-box-outline.js'
       - 'apps/caramel-app/evals/**'
       - 'apps/caramel-app/vitest.eval.config.ts'
       - 'apps/caramel-app/package.json'
@@ -145,7 +147,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    # 51 sequential live calls (~4 min measured) inside one vitest run.
+    # 65 sequential live calls inside one vitest run (63 took ~2 min).
     timeout-minutes: 20
     if: |
       github.event_name != 'pull_request' ||

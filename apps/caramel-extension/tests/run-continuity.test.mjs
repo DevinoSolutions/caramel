@@ -1,11 +1,12 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { initCaramelBase } from '../caramel-base.js'
+import { caramelMarkOwnHost, initCaramelBase } from '../caramel-base.js'
 import { _markTriedCode } from '../coupon-apply.js'
 import {
     caramelBeginRun,
     caramelCancelRun,
     caramelClaimRunHop,
     caramelEndRun,
+    caramelHoldAppliedWin,
     caramelMarkPendingSubmit,
 } from '../dom-utils.js'
 import {
@@ -13,6 +14,9 @@ import {
     getDomainRecord,
     startCheckoutDetection,
 } from '../store-detect.js'
+import { tabHandoffBackground } from './_tab-handoff-background.mjs'
+// The background's side of the per-tab handoffs (see the helper).
+const handoffs = tabHandoffBackground()
 
 // One click should test more than one code.
 //
@@ -50,8 +54,8 @@ const REC = {
     priceContainer: '#total',
 }
 
-const runRecord = () =>
-    JSON.parse(sessionStorage.getItem('caramel_run') ?? 'null')
+// The run record the background holds for this tab.
+const runRecord = () => handoffs.peek('run')
 
 /* Collaborators the old harness replaced on globalThis are module imports now,
  * replaced in the module the resumed run reads them from. The code list is the
@@ -111,6 +115,7 @@ function installChromeStub() {
     }
     stub.runtime.lastError = undefined
     stub.runtime.sendMessage = (message, cb) => {
+        if (handoffs.answers(message, cb)) return
         if (typeof cb !== 'function') return
         cb(message?.action === 'fetchCoupons' ? { coupons: couponList } : {})
     }
@@ -127,6 +132,7 @@ beforeAll(() => {
 
 beforeEach(() => {
     sessionStorage.clear()
+    handoffs.reset()
     document.body.innerHTML = '<input id="promo" />'
     applyCalls = []
     finalModalCalls = []
@@ -145,124 +151,124 @@ beforeEach(() => {
 })
 
 describe('the run record', () => {
-    it('is opened once, so a second page cannot restart the clock', () => {
-        caramelBeginRun()
-        const first = runRecord()
-        caramelBeginRun()
+    it('is opened once, so a second page cannot restart the clock', async () => {
+        await caramelBeginRun()
+        const first = await runRecord()
+        await caramelBeginRun()
 
-        expect(runRecord()).toEqual(first)
+        expect(await runRecord()).toEqual(first)
     })
 
-    it('does not exist until somebody starts a run', () => {
-        expect(caramelClaimRunHop()).toBeNull()
+    it('does not exist until somebody starts a run', async () => {
+        expect(await caramelClaimRunHop()).toBeNull()
     })
 
-    it('counts every hop it hands out', () => {
-        caramelBeginRun()
+    it('counts every hop it hands out', async () => {
+        await caramelBeginRun()
 
-        expect(caramelClaimRunHop().hops).toBe(1)
-        expect(caramelClaimRunHop().hops).toBe(2)
+        expect((await caramelClaimRunHop()).hops).toBe(1)
+        expect((await caramelClaimRunHop()).hops).toBe(2)
     })
 
-    it('stops handing out hops at the cap', () => {
-        caramelBeginRun()
+    it('stops handing out hops at the cap', async () => {
+        await caramelBeginRun()
         const claimed = []
-        for (let i = 0; i < 10; i++) claimed.push(caramelClaimRunHop())
+        for (let i = 0; i < 10; i++) claimed.push(await caramelClaimRunHop())
 
         expect(claimed.filter(Boolean).length).toBe(6)
         expect(claimed[6]).toBeNull()
     })
 
-    it('counts the hop even if the caller gives up afterwards', () => {
+    it('counts the hop even if the caller gives up afterwards', async () => {
         // The increment is written inside the claim for exactly this reason —
         // a caller that returns early must not get a free retry.
-        caramelBeginRun()
-        caramelClaimRunHop()
+        await caramelBeginRun()
+        await caramelClaimRunHop()
 
-        expect(runRecord().hops).toBe(1)
+        expect((await runRecord()).hops).toBe(1)
     })
 
-    it('expires a chain that has been running too long', () => {
-        sessionStorage.setItem(
-            'caramel_run',
-            JSON.stringify({ hops: 0, t: Date.now() - 181000 }),
-        )
+    it('expires a chain that has been running too long', async () => {
+        await caramelBeginRun()
+        await handoffs.put('run', { hops: 0, t: Date.now() - 181000 })
 
-        expect(caramelClaimRunHop()).toBeNull()
-        expect(runRecord()).toBeNull()
+        expect(await caramelClaimRunHop()).toBeNull()
+        expect(await runRecord()).toBeNull()
     })
 
-    it('ends for good once cancelled', () => {
-        caramelBeginRun()
-        caramelCancelRun()
+    it('ends for good once cancelled', async () => {
+        await caramelBeginRun()
+        await caramelCancelRun()
 
-        expect(caramelClaimRunHop()).toBeNull()
+        expect(await caramelClaimRunHop()).toBeNull()
     })
 
-    it('lets the shopper start again after they cancelled', () => {
+    it('lets the shopper start again after they cancelled', async () => {
         // The cancelled record is a tombstone — hops pinned at the cap. Reading
         // it as "a run is already in flight" would mean one × silenced
         // continuation for the rest of the tab: press the pill again,
         // deliberately, and you are back to one code per reload with no way out
         // short of closing the tab. Pressing the pill IS the consent this runs
         // on, so it starts a fresh run.
-        caramelBeginRun()
-        caramelCancelRun()
+        await caramelBeginRun()
+        await caramelCancelRun()
 
-        caramelBeginRun()
+        await caramelBeginRun()
 
-        expect(runRecord().hops).toBe(0)
-        expect(caramelClaimRunHop().hops).toBe(1)
+        expect((await runRecord()).hops).toBe(0)
+        expect((await caramelClaimRunHop()).hops).toBe(1)
     })
 
-    it('does not restart the clock on a run that is merely mid-flight', () => {
+    it('does not restart the clock on a run that is merely mid-flight', async () => {
         // The guard above must not become "every page reopens the run", which
         // would make the hop cap meaningless.
-        caramelBeginRun()
-        caramelClaimRunHop()
-        caramelClaimRunHop()
+        await caramelBeginRun()
+        await caramelClaimRunHop()
+        await caramelClaimRunHop()
 
-        caramelBeginRun()
+        await caramelBeginRun()
 
-        expect(runRecord().hops).toBe(2)
+        expect((await runRecord()).hops).toBe(2)
     })
 
-    it('starts clean over an unreadable record rather than building on it', () => {
-        sessionStorage.setItem('caramel_run', 'not json')
+    it('starts clean over an unreadable record rather than building on it', async () => {
+        await caramelBeginRun()
+        await handoffs.put('run', 'not json')
 
-        caramelBeginRun()
+        await caramelBeginRun()
 
-        expect(runRecord().hops).toBe(0)
+        expect((await runRecord()).hops).toBe(0)
     })
 
-    it('does not resurrect a run that was never open', () => {
+    it('does not resurrect a run that was never open', async () => {
         // Cancelling with nothing in flight must not write a record that a
         // later page would then have to reason about.
-        caramelCancelRun()
+        await caramelCancelRun()
 
-        expect(runRecord()).toBeNull()
+        expect(await runRecord()).toBeNull()
     })
 
-    it('forgets a corrupted record instead of trusting it', () => {
-        sessionStorage.setItem('caramel_run', 'not json')
+    it('forgets a corrupted record instead of trusting it', async () => {
+        await caramelBeginRun()
+        await handoffs.put('run', 'not json')
 
-        expect(caramelClaimRunHop()).toBeNull()
-        expect(runRecord()).toBeNull()
+        expect(await caramelClaimRunHop()).toBeNull()
+        expect(await runRecord()).toBeNull()
     })
 
-    it('is gone after it ends', () => {
-        caramelBeginRun()
-        caramelEndRun()
+    it('is gone after it ends', async () => {
+        await caramelBeginRun()
+        await caramelEndRun()
 
-        expect(runRecord()).toBeNull()
-        expect(caramelClaimRunHop()).toBeNull()
+        expect(await runRecord()).toBeNull()
+        expect(await caramelClaimRunHop()).toBeNull()
     })
 })
 
 describe('picking the loop back up after the store navigated', () => {
     it('carries on with the next code instead of asking for another click', async () => {
-        caramelBeginRun()
-        caramelMarkPendingSubmit('SALE20', 'c1', [])
+        await caramelBeginRun()
+        await caramelMarkPendingSubmit('SALE20', 'c1', [])
 
         await startCheckoutDetection()
 
@@ -270,9 +276,38 @@ describe('picking the loop back up after the store navigated', () => {
         expect(applyCalls[0][1]).toEqual({ resumed: true })
     })
 
+    it('leaves an attempt to the loop that is still running it', async () => {
+        // The address bar moved (a SPA cart) while our own loop is applying on
+        // this same document: re-detection runs, and the attempt the loop is in
+        // the middle of is not a reload's leftover.
+        await caramelBeginRun()
+        await caramelMarkPendingSubmit('SALE20', 'c1', [])
+        await caramelHoldAppliedWin({ code: 'SALE20', id: 'c1', saved: 5 })
+        // Marked as ours, the way the runner's overlay is (a page element
+        // with this id is not our runner).
+        const overlay = caramelMarkOwnHost(document.createElement('div'))
+        overlay.id = 'caramel-testing-overlay'
+        document.body.appendChild(overlay)
+
+        await startCheckoutDetection()
+
+        expect(applyCalls).toEqual([])
+        expect(finalModalCalls).toEqual([])
+        expect(await handoffs.peek('pending_submit')).toMatchObject({
+            code: 'SALE20',
+        })
+        expect(await handoffs.peek('applied')).toMatchObject({ saved: 5 })
+        expect((await runRecord()).hops).toBe(0)
+
+        // Once the loop is done, the next page picks it up as before.
+        overlay.remove()
+        await startCheckoutDetection()
+        expect(finalModalCalls).toHaveLength(1)
+    })
+
     it('says nothing terminal while it is still working', async () => {
-        caramelBeginRun()
-        caramelMarkPendingSubmit('SALE20', 'c1', [])
+        await caramelBeginRun()
+        await caramelMarkPendingSubmit('SALE20', 'c1', [])
 
         await startCheckoutDetection()
 
@@ -280,17 +315,17 @@ describe('picking the loop back up after the store navigated', () => {
     })
 
     it('spends a hop each time it continues', async () => {
-        caramelBeginRun()
-        caramelMarkPendingSubmit('SALE20', 'c1', [])
+        await caramelBeginRun()
+        await caramelMarkPendingSubmit('SALE20', 'c1', [])
 
         await startCheckoutDetection()
 
-        expect(runRecord().hops).toBe(1)
+        expect((await runRecord()).hops).toBe(1)
     })
 
     it('reports the outcome instead when no run is open', async () => {
         // A single-shot apply the user never asked to chain.
-        caramelMarkPendingSubmit('SALE20', 'c1', [])
+        await caramelMarkPendingSubmit('SALE20', 'c1', [])
 
         await startCheckoutDetection()
 
@@ -302,8 +337,8 @@ describe('picking the loop back up after the store navigated', () => {
         // The shopper navigated themselves. Submitting codes into a product
         // page would spend the chain on nothing.
         document.body.innerHTML = '<div>Product page</div>'
-        caramelBeginRun()
-        caramelMarkPendingSubmit('SALE20', 'c1', [])
+        await caramelBeginRun()
+        await caramelMarkPendingSubmit('SALE20', 'c1', [])
 
         await startCheckoutDetection()
 
@@ -312,10 +347,10 @@ describe('picking the loop back up after the store navigated', () => {
     })
 
     it('will not spend a reload on codes it has already tried', async () => {
-        caramelBeginRun()
+        await caramelBeginRun()
         _markTriedCode('SALE20')
         _markTriedCode('SPRING10')
-        caramelMarkPendingSubmit('SALE20', 'c1', [])
+        await caramelMarkPendingSubmit('SALE20', 'c1', [])
 
         await startCheckoutDetection()
 
@@ -326,9 +361,9 @@ describe('picking the loop back up after the store navigated', () => {
     it('stops when the shopper pressed × on the previous page', async () => {
         // The whole reason cancellation is written down: the × they clicked was
         // on a document the navigation then destroyed.
-        caramelBeginRun()
-        caramelCancelRun()
-        caramelMarkPendingSubmit('SALE20', 'c1', [])
+        await caramelBeginRun()
+        await caramelCancelRun()
+        await caramelMarkPendingSubmit('SALE20', 'c1', [])
 
         await startCheckoutDetection()
 
@@ -336,11 +371,8 @@ describe('picking the loop back up after the store navigated', () => {
     })
 
     it('stops once the hops are spent', async () => {
-        sessionStorage.setItem(
-            'caramel_run',
-            JSON.stringify({ hops: 6, t: Date.now() }),
-        )
-        caramelMarkPendingSubmit('SALE20', 'c1', [])
+        await handoffs.put('run', { hops: 6, t: Date.now() })
+        await caramelMarkPendingSubmit('SALE20', 'c1', [])
 
         await startCheckoutDetection()
 
@@ -358,8 +390,8 @@ describe('picking the loop back up after the store navigated', () => {
         startApplyingCouponsImpl = async () => {
             throw new Error('boom')
         }
-        caramelBeginRun()
-        caramelMarkPendingSubmit('SALE20', 'c1', [])
+        await caramelBeginRun()
+        await caramelMarkPendingSubmit('SALE20', 'c1', [])
 
         await startCheckoutDetection()
 
@@ -376,13 +408,13 @@ describe('picking the loop back up after the store navigated', () => {
             configurable: true,
         })
         document.body.appendChild(el)
-        caramelBeginRun()
-        caramelMarkPendingSubmit('SALE20', 'c1', [80])
+        await caramelBeginRun()
+        await caramelMarkPendingSubmit('SALE20', 'c1', [80])
 
         await startCheckoutDetection()
 
         expect(applyCalls).toEqual([])
-        expect(runRecord()).toBeNull()
+        expect(await runRecord()).toBeNull()
         expect(finalModalCalls[0][0]).toBeCloseTo(20, 2)
     })
 })

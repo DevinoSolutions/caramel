@@ -65,8 +65,42 @@ function extensionIdOf(uri: URL): string | null {
     return id.includes('.') ? null : id
 }
 
-/** True only for a redirect URI that belongs to one of OUR extensions. */
+/** The ONE redirect URI of the native iOS app (apps/caramel-apple). It is the
+ * `callbackURLScheme` its ASWebAuthenticationSession listens on, which needs no
+ * Info.plist registration and no apple-app-site-association: iOS hands the
+ * callback to the session that started the flow, not to whichever app claims
+ * the scheme. Reverse-DNS, so it cannot collide with a web scheme. Exact
+ * string match only (no path/query/port variants): AppConfig.swift holds the
+ * same literal. */
+export const NATIVE_APP_REDIRECT_URI = 'com.devino.caramel://auth/callback'
+
+/** True only for the native app's one redirect URI. */
+export function isNativeAppRedirectUri(uri: string): boolean {
+    return uri === NATIVE_APP_REDIRECT_URI
+}
+
+/** The redirect_uri Google is told for `redirectUri`.
+ *
+ * Google only accepts redirect URIs registered on its web client, and a custom
+ * scheme cannot be: the native app's flow therefore goes Google -> our own
+ * /api/extension/oauth/redirect (already registered, the Safari leg uses it)
+ * -> a bounce to the app scheme. The authorize URL and the code exchange must
+ * quote the SAME value, so both call this. Every other redirect URI (the
+ * extensions', the Safari shim's) is passed through untouched. (Apple always
+ * uses the /redirect hop and builds that URI inline.) */
+export function googleRedirectUriFor(
+    redirectUri: string,
+    baseURL: string,
+): string {
+    return isNativeAppRedirectUri(redirectUri)
+        ? `${baseURL}/api/extension/oauth/redirect`
+        : redirectUri
+}
+
+/** True only for a redirect URI that belongs to one of OUR extensions, or to
+ * our native app. */
 export function isAllowedExtensionRedirectUri(uri: string): boolean {
+    if (isNativeAppRedirectUri(uri)) return true
     let parsed: URL
     try {
         parsed = new URL(uri)

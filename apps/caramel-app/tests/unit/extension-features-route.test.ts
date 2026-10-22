@@ -5,14 +5,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 // GET /api/extension/features — the public, keyless feature-flag read the
 // extension background caches. It reports whether the server accepts
 // shopper-typed codes captured at checkout, and whether the coupon-box pick
-// (POST /api/extension/coupon-box-pick) is on, and whether the extension may
-// find a store's promo box itself when no config describes it.
+// (POST /api/extension/coupon-box-pick) is on, whether the extension may find
+// a store's promo box itself when no config describes it, and whether it may
+// save such a box as the store's config (POST /api/extension/coupon-box-save).
 const { envMock, checkRateLimitMock } = vi.hoisted(() => ({
     envMock: {
         SHOPPER_CODE_CAPTURE_ENABLED: false,
         COUPON_BOX_DISCOVERY_ENABLED: false,
         COUPON_BOX_LLM_ENABLED: false,
         COUPON_BOX_PICK_MODEL: undefined,
+        COUPON_BOX_SAVE_ENABLED: false,
     } as Record<string, unknown>,
     checkRateLimitMock: vi.fn(async () => null as unknown),
 }))
@@ -24,6 +26,7 @@ vi.mock('@/lib/env', async importOriginal => {
         COUPON_BOX_DISCOVERY_ENABLED: false,
         COUPON_BOX_LLM_ENABLED: false,
         COUPON_BOX_PICK_MODEL: undefined,
+        COUPON_BOX_SAVE_ENABLED: false,
     })
     return { ...actual, env: envMock }
 })
@@ -44,6 +47,7 @@ beforeEach(() => {
     envMock.COUPON_BOX_DISCOVERY_ENABLED = false
     envMock.COUPON_BOX_LLM_ENABLED = false
     envMock.COUPON_BOX_PICK_MODEL = undefined
+    envMock.COUPON_BOX_SAVE_ENABLED = false
     checkRateLimitMock.mockReset()
     checkRateLimitMock.mockImplementation(async () => null)
 })
@@ -57,6 +61,7 @@ describe('GET /api/extension/features', () => {
             shopperCodeCapture: false,
             couponBoxDiscovery: false,
             couponBoxLlm: false,
+            couponBoxSave: false,
         })
     })
 
@@ -70,6 +75,7 @@ describe('GET /api/extension/features', () => {
             shopperCodeCapture: true,
             couponBoxDiscovery: false,
             couponBoxLlm: false,
+            couponBoxSave: false,
         })
     })
 
@@ -83,6 +89,7 @@ describe('GET /api/extension/features', () => {
             shopperCodeCapture: false,
             couponBoxDiscovery: true,
             couponBoxLlm: false,
+            couponBoxSave: false,
         })
     })
 
@@ -97,10 +104,25 @@ describe('GET /api/extension/features', () => {
             shopperCodeCapture: false,
             couponBoxDiscovery: false,
             couponBoxLlm: true,
+            couponBoxSave: false,
         })
 
         envMock.COUPON_BOX_LLM_ENABLED = false
         expect((await read()).couponBoxLlm).toBe(false)
+    })
+
+    it('save flag on → { couponBoxSave: true }, every other key untouched', async () => {
+        envMock.COUPON_BOX_SAVE_ENABLED = true
+
+        const res = await GET(featuresRequest())
+
+        expect(res.status).toBe(200)
+        expect(await res.json()).toEqual({
+            shopperCodeCapture: false,
+            couponBoxDiscovery: false,
+            couponBoxLlm: false,
+            couponBoxSave: true,
+        })
     })
 
     it('needs no credentials (public read)', async () => {

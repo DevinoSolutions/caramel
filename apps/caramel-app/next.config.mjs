@@ -4,6 +4,10 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { resolveBuildSha } from './scripts/build-sha.mjs'
 import { buildTelemetryRewrites } from './src/lib/analytics/telemetryProxy.mjs'
+import {
+    buildMarkdownHeaders,
+    buildMarkdownRewrites,
+} from './src/lib/seo/markdownTwins/registry.mjs'
 
 const packageRoot = fileURLToPath(new URL('.', import.meta.url))
 const workspaceRoot = path.resolve(packageRoot, '..', '..')
@@ -81,6 +85,15 @@ const nextConfig = {
     // e2e/inline-css.spec.ts assert it on a real production build.
     experimental: {
         inlineCss: true,
+        // src/middleware.ts matches every path, so Next copies each request
+        // body for it and holds up to this many bytes in memory before any
+        // route runs (default 10 MB). Past it Next TRUNCATES the body the
+        // route sees, so it must stay above the largest real one. Measured
+        // 2026-10-20: a 1000-row store-config chunk from the coupon pipeline
+        // is ~0.45 MB (1 MB worst case), session-replay batches go out
+        // gzipped from a 0.9 MB JSON flush point, and the extension routes
+        // cap themselves at 46 KB. 4 MB keeps ~4x headroom over those.
+        proxyClientMaxBodySize: '4mb',
     },
     outputFileTracingRoot: workspaceRoot,
     // posthog-js POSTs to trailing-slash endpoints (/i/v0/e/, /flags/, /s/) on
@@ -152,10 +165,14 @@ const nextConfig = {
     // browser sends events to <our origin>/_t/k3v and Next forwards them. Empty
     // when the dataset is not `production` or no host is baked into the build.
     async rewrites() {
-        return buildTelemetryRewrites({
-            dataset: process.env.NEXT_PUBLIC_POSTHOG_DATASET,
-            host: process.env.NEXT_PUBLIC_POSTHOG_HOST,
-        })
+        return {
+            beforeFiles: buildMarkdownRewrites(),
+            afterFiles: buildTelemetryRewrites({
+                dataset: process.env.NEXT_PUBLIC_POSTHOG_DATASET,
+                host: process.env.NEXT_PUBLIC_POSTHOG_HOST,
+            }),
+            fallback: [],
+        }
     },
     async headers() {
         const headers = [{ source: '/:path*', headers: SECURITY_HEADERS }]
@@ -170,7 +187,7 @@ const nextConfig = {
                 headers: [{ key: 'X-Robots-Tag', value: 'noindex, nofollow' }],
             })
         }
-        return headers
+        return [...headers, ...buildMarkdownHeaders()]
     },
 }
 

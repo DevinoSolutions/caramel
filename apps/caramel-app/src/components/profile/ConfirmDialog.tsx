@@ -82,7 +82,7 @@ export default function ConfirmDialog({
                 if (e.target === dialogRef.current) onClose()
             }}
             aria-labelledby={headingId}
-            className="w-[92vw] max-w-md bg-transparent p-0 backdrop:bg-black/60 backdrop:backdrop-blur-sm"
+            className="motion-dialog w-[92vw] max-w-md bg-transparent p-0 backdrop:bg-black/60 backdrop:backdrop-blur-sm"
         >
             {open ? (
                 <div className={cardClasses}>
