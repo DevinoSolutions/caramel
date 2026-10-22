@@ -301,22 +301,39 @@ async function recordFailedIn(
 /** A global retention sweep runs at most this often per process. */
 const REPORTER_SWEEP_INTERVAL_MS = 60 * 60 * 1000
 let nextReporterSweepAt = 0
+let reporterSweepInFlight: Promise<void> | null = null
 
 /**
  * Retention: reporter rows are pseudonymous IP/user-derived data and are kept
- * only for FAILING_WINDOW_MS (30 days). recordFailed prunes the coupon it
- * writes, but a coupon nobody reports again would keep its rows forever, so the
- * report route calls this AFTER its write has committed: one DELETE, at most
- * hourly per process. It is deliberately outside the report's transaction (a
- * retention failure must not roll back a report that was valid) and it never
- * throws into the response: a failure is captured to Sentry and logged loudly,
- * and the schedule only advances after a sweep SUCCEEDS, so the next report
- * retries it.
+ * only for FAILING_WINDOW_MS (30 days), which the privacy policy promises.
+ * recordFailed prunes the coupon it writes, but a coupon nobody reports again
+ * would keep its rows, so two callers run this global sweep: the report route
+ * after its write has committed (not awaited: the response never waits for
+ * retention), and the hourly timer in couponReporterRetention.ts, which keeps
+ * the promise true in quiet periods. One DELETE, at most hourly per process,
+ * and at most ONE in flight: while a sweep is slow or failing, every other
+ * caller gets the running sweep's promise instead of starting its own DELETE.
+ * It is deliberately outside the report's transaction (a retention failure
+ * must not roll back a report that was valid) and it never rejects: a failure
+ * is captured to Sentry and logged loudly, and the schedule only advances
+ * after a sweep SUCCEEDS, so the next caller retries it. `force` skips the
+ * hourly throttle (the timer's own cadence is the throttle there).
  */
-export async function sweepExpiredReporters(
-    now: Date = new Date(),
+export function sweepExpiredReporters(
+    options: { force?: boolean } = {},
 ): Promise<void> {
-    if (now.getTime() < nextReporterSweepAt) return
+    if (reporterSweepInFlight) return reporterSweepInFlight
+    const now = new Date()
+    if (!options.force && now.getTime() < nextReporterSweepAt) {
+        return Promise.resolve()
+    }
+    reporterSweepInFlight = runReporterSweep(now).finally(() => {
+        reporterSweepInFlight = null
+    })
+    return reporterSweepInFlight
+}
+
+async function runReporterSweep(now: Date): Promise<void> {
     try {
         await prisma.couponSignalReporter.deleteMany({
             where: {
@@ -329,7 +346,7 @@ export async function sweepExpiredReporters(
             tags: { area: 'couponSignals.sweepExpiredReporters' },
         })
         console.error(
-            '[couponSignals] reporter retention sweep failed (will retry on the next report):',
+            '[couponSignals] reporter retention sweep failed (will retry on the next call):',
             error,
         )
     }
@@ -338,6 +355,7 @@ export async function sweepExpiredReporters(
 /** Test-only: make the next sweepExpiredReporters call run. */
 export function resetReporterSweepForTests(): void {
     nextReporterSweepAt = 0
+    reporterSweepInFlight = null
 }
 
 /** The trust overlay attachSignals merges onto each coupon (ISO strings; null/0 when we hold no signal). */

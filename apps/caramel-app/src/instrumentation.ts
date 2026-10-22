@@ -92,6 +92,17 @@ export async function register() {
     console.log(
         `[boot] email delivery health ${decision.enabled ? 'ENABLED' : 'DISABLED'} — ${decision.reason}`,
     )
+
+    // Retention of the hashed coupon-report reporter rows (30 days, promised by
+    // the privacy policy): the route sweeps on writes, this hourly timer covers
+    // quiet periods. Same pattern and same reasons as the monitor above.
+    const { startCouponReporterRetentionSweep } = await import(
+        '@/lib/couponReporterRetention'
+    )
+    const retention = startCouponReporterRetentionSweep()
+    console.log(
+        `[boot] coupon reporter retention sweep ${retention.enabled ? 'ENABLED' : 'DISABLED'} — ${retention.reason}`,
+    )
 }
 
 export const onRequestError = Sentry.captureRequestError

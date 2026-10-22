@@ -76,6 +76,8 @@ export function readEdgeClientIp(headers: Headers): string | null {
     return value && isIpAddress(value) ? value : null
 }
 
+const IP_CHARACTERS = /^[0-9a-fA-F:.]+$/
+
 const IPV4 =
     /^(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/
 
@@ -87,7 +89,9 @@ const IPV4 =
  */
 function isIpAddress(value: string): boolean {
     if (IPV4.test(value)) return true
-    if (!value.includes(':') || value.includes('%')) return false
+    // Only address characters may reach the URL parser: it is lenient and would
+    // accept `::1]/x@evil` or `1::2]:80/#` as a host with trailing junk.
+    if (!IP_CHARACTERS.test(value) || !value.includes(':')) return false
     try {
         // The parser throws on anything that is not an IPv6 literal.
         return new URL(`http://[${value}]/`).hostname.startsWith('[')

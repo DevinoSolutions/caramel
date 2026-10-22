@@ -140,9 +140,10 @@ export const POST = withRoute(
                 // because the schema was written before this call; a reader may
                 // assume user_id IS NOT NULL for every row this route creates.)
                 await writeSignal(prisma)
-                // Retention of reporter rows, AFTER the write committed (it never
-                // throws: a failure is captured to Sentry and retried later).
-                await sweepExpiredReporters()
+                // Retention of reporter rows, AFTER the write committed. Not
+                // awaited: the response never waits for retention, and the sweep
+                // never rejects (a failure is captured to Sentry and retried).
+                void sweepExpiredReporters()
                 return NextResponse.json({ ok: true })
             }
 
@@ -180,7 +181,7 @@ export const POST = withRoute(
                     data: { couponId: id, userId, outcome: body.outcome },
                 })
             })
-            await sweepExpiredReporters()
+            void sweepExpiredReporters()
 
             return NextResponse.json({ ok: true })
         } catch (error) {

@@ -443,6 +443,35 @@ describe('failure quorum: forged anonymous reports cannot sink a code', () => {
         errorSpy.mockRestore()
     })
 
+    it('concurrent triggers share ONE sweep: a slow or failing DELETE is never stampeded', async () => {
+        let release: (value: { count: number }) => void = () => {}
+        sweepClient.deleteMany.mockClear()
+        sweepClient.deleteMany.mockImplementationOnce(
+            () =>
+                new Promise<{ count: number }>(resolve => {
+                    release = resolve
+                }),
+        )
+
+        const first = sweepExpiredReporters()
+        const second = sweepExpiredReporters()
+        const forced = sweepExpiredReporters({ force: true })
+        expect(sweepClient.deleteMany).toHaveBeenCalledTimes(1)
+
+        release({ count: 0 })
+        await Promise.all([first, second, forced])
+        expect(sweepClient.deleteMany).toHaveBeenCalledTimes(1)
+    })
+
+    it('force skips the hourly throttle (the retention timer uses it)', async () => {
+        sweepClient.deleteMany.mockClear()
+        await sweepExpiredReporters()
+        await sweepExpiredReporters()
+        expect(sweepClient.deleteMany).toHaveBeenCalledTimes(1)
+        await sweepExpiredReporters({ force: true })
+        expect(sweepClient.deleteMany).toHaveBeenCalledTimes(2)
+    })
+
     it('runs in one transaction when handed a plain client', async () => {
         const transaction = vi.fn(
             async (fn: (tx: typeof db.tx) => Promise<unknown>) => fn(db.tx),
@@ -562,6 +591,11 @@ describe('reporter identity ignores forgeable headers', () => {
         ['[2001:db8::1]'],
         ['fe80::1%eth0'],
         ['<script>'],
+        ['::1]/x@evil'],
+        ['1::2]:80/#'],
+        ['[::1'],
+        ['::1/128'],
+        ['1.2.3.4/24'],
         ['a'.repeat(300)],
     ])(
         'readEdgeClientIp treats the non-IP %s as missing, so it mints no identity',
