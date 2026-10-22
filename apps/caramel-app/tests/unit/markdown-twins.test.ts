@@ -363,7 +363,8 @@ describe('Markdown document responses', () => {
                 ...publicCoupon,
                 lastWorkedAt: '2026-10-22T10:00:00Z',
                 lastFailedAt: '2026-10-22T11:00:00Z',
-                failCount: 2,
+                // A failure QUORUM (weight 4), not a raw count, hides "Worked".
+                failWeight: 4,
             }),
         ).not.toContain('Worked')
         expect(couponMarkdown(publicCoupon)).toContain(

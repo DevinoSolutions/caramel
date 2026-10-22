@@ -49,7 +49,7 @@ export function couponMarkdown(
         | 'discount_amount'
         | 'lastWorkedAt'
         | 'lastFailedAt'
-        | 'failCount'
+        | 'failWeight'
     >,
 ): string {
     const discount = discountBadgeText(
