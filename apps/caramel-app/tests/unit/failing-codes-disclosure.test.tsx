@@ -412,8 +412,8 @@ describe('CouponsSection groups keeps-failing codes at the end of a store list',
             name: '2 codes reported not working',
         })
         expect(button.getAttribute('aria-expanded')).toBe('false')
-        const urls = (fetch as ReturnType<typeof vi.fn>).mock.calls.map(
-            ([u]) => String(u),
+        const urls = (fetch as ReturnType<typeof vi.fn>).mock.calls.map(([u]) =>
+            String(u),
         )
         expect(urls.some(u => u.includes('page=2'))).toBe(true)
         // Guard: no timer may outlive the test.
