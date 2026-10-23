@@ -39,7 +39,7 @@ export type SuggestionIntake =
  * URL and email go into a plain-text mail one-per-line; WHATWG URL parsing
  * silently drops tab/CR/LF, so a value carrying one still validates as a store
  * URL while forging extra lines in that mail. Such input is refused outright. */
-export const CONTROL_CHARACTER = /[\p{Cc}  ]/u
+export const CONTROL_CHARACTER = /[\p{Cc}\p{Zl}\p{Zp}]/u
 
 export async function assessSuggestionIntake(input: {
     domain: string
