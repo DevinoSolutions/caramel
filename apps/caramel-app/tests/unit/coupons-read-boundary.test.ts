@@ -6,6 +6,7 @@ import { GET as supportedStoresGET } from '@/app/api/extension/supported-stores/
 import { POST as searchSupportedPOST } from '@/app/api/sites/search-supported/route'
 import { GET as topSitesGET } from '@/app/api/sites/top-sites/route'
 import { GET as sourcesGET } from '@/app/api/sources/route'
+import { resetAnonymousReadCaches } from '@/lib/anonymousReadCaches'
 import { NextRequest } from 'next/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -71,6 +72,7 @@ vi.mock('@sentry/nextjs', () => ({
 }))
 
 beforeEach(() => {
+    resetAnonymousReadCaches()
     rules = []
     capturedQueries = []
     capturedValues = []

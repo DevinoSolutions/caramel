@@ -1,4 +1,8 @@
 import { POST } from '@/app/api/sites/suggest/route'
+import {
+    SUGGESTION_OPS_MAILS_PER_DAY_BUDGET,
+    SUGGESTION_ROWS_PER_DAY_CAP,
+} from '@/lib/siteSuggestionIntake'
 import { NextRequest } from 'next/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -11,7 +15,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 // ANNOUNCED FAKE: `siteSuggestion.create` appends to an in-memory table so
 // every pin reads back exactly what the route wrote — the requester fields, the
 // normalized domain, the source — rather than asserting a call happened.
-const { prismaMock, suggestionRows } = vi.hoisted(() => {
+const { prismaMock, suggestionRows, intakeState } = vi.hoisted(() => {
     interface SuggestionRow {
         id: string
         domain: string
@@ -22,10 +26,36 @@ const { prismaMock, suggestionRows } = vi.hoisted(() => {
         userAgent: string | null
     }
     const rows: SuggestionRow[] = []
+    // Rows "created in the last 24h" by OTHER callers, on top of `rows` (the
+    // route's global budgets count the table, not just this test's inserts).
+    const state = { otherRecentRows: 0 }
     return {
         suggestionRows: rows,
+        intakeState: state,
         prismaMock: {
             siteSuggestion: {
+                findFirst: vi.fn(
+                    async (args: {
+                        where: {
+                            domain: string
+                            requesterEmail: string | null
+                            userId?: string | null
+                        }
+                    }) => {
+                        const hit = rows.find(
+                            row =>
+                                row.domain === args.where.domain &&
+                                row.requesterEmail ===
+                                    args.where.requesterEmail &&
+                                (!('userId' in args.where) ||
+                                    row.userId === args.where.userId),
+                        )
+                        return hit ? { id: hit.id } : null
+                    },
+                ),
+                count: vi.fn(
+                    async () => rows.length + state.otherRecentRows,
+                ),
                 create: vi.fn(
                     async (args: {
                         data: Omit<SuggestionRow, 'id'>
@@ -62,9 +92,13 @@ vi.mock('@/lib/email', async importOriginal => ({
     sendEmail: sendEmailMock,
 }))
 
-const { captureExceptionMock, setUserMock } = vi.hoisted(() => ({
+const { captureExceptionMock, captureMessageMock, setUserMock } = vi.hoisted(() => ({
     captureExceptionMock: vi.fn(
         (_error: unknown, _context?: Record<string, unknown>) => 'evt_test',
+    ),
+    // The ops-mail budget crossing is reported once with captureMessage.
+    captureMessageMock: vi.fn(
+        (_message: string, _context?: Record<string, unknown>) => 'evt_msg',
     ),
     // `withRoute` calls Sentry.setUser on every request since the stable-user-id
     // work; a mock without it throws "No setUser export is defined".
@@ -72,6 +106,7 @@ const { captureExceptionMock, setUserMock } = vi.hoisted(() => ({
 }))
 vi.mock('@sentry/nextjs', () => ({
     captureException: captureExceptionMock,
+    captureMessage: captureMessageMock,
     setUser: setUserMock,
 }))
 
@@ -108,6 +143,8 @@ function sentEmailText(): string {
 
 beforeEach(() => {
     suggestionRows.length = 0
+    intakeState.otherRecentRows = 0
+    captureMessageMock.mockClear()
     prismaMock.siteSuggestion.create.mockClear()
     getSessionMock.mockReset()
     getSessionMock.mockResolvedValue(null)
@@ -262,5 +299,144 @@ describe('POST /api/sites/suggest — persistence + requester identity', () => {
             error,
         )
         consoleError.mockRestore()
+    })
+})
+
+describe('POST /api/sites/suggest — anonymous-intake hardening (T-6224)', () => {
+    it.each([
+        ['a line feed', 'https://store.com/a\nDomain: evil.com'],
+        ['a carriage return', 'https://store.com/a\rRequested by: x'],
+        ['a tab', 'https://store.com/a\tb'],
+        ['a NUL', 'https://store.com/a\u0000b'],
+        ['a Unicode line separator', 'https://store.com/a\u2028b'],
+    ])(
+        'a url containing %s → 422, nothing written, no mail (the forged-line injection)',
+        async (_label, url) => {
+            const res = await POST(suggestRequest({ url }))
+            expect(res.status).toBe(422)
+            expect(suggestionRows).toEqual([])
+            expect(sendEmailMock).not.toHaveBeenCalled()
+        },
+    )
+
+    it('an email containing a line feed → 422, nothing written, no mail', async () => {
+        const res = await POST(
+            suggestRequest({
+                url: 'example-store.com',
+                email: 'a@example.com\nBcc: victim@example.com',
+            }),
+        )
+        expect(res.status).toBe(422)
+        expect(suggestionRows).toEqual([])
+        expect(sendEmailMock).not.toHaveBeenCalled()
+    })
+
+    it('a trailing newline the form can paste is trimmed, not refused, and cannot add a mail line', async () => {
+        const res = await POST(
+            suggestRequest({ url: 'https://example-store.com/sale\n' }),
+        )
+        expect(res.status).toBe(200)
+        expect(suggestionRows[0]!.rawUrl).toBe('https://example-store.com/sale')
+        expect(sentEmailText().split('\n')).toHaveLength(5)
+    })
+
+    it('the same anonymous visitor asking for the same store twice → ONE row and ONE mail; the repeat is answered ok with duplicate:true', async () => {
+        const first = await POST(suggestRequest({ url: 'example-store.com' }))
+        const again = await POST(
+            suggestRequest({ url: 'https://www.example-store.com/other' }),
+        )
+        expect(await first.json()).toEqual({
+            ok: true,
+            id: 'suggestion-1',
+            notified: true,
+        })
+        expect(again.status).toBe(200)
+        expect(await again.json()).toEqual({
+            ok: true,
+            id: 'suggestion-1',
+            notified: false,
+            duplicate: true,
+        })
+        expect(suggestionRows).toHaveLength(1)
+        expect(sendEmailMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('the same email asking again is a duplicate regardless of case; a DIFFERENT email for the same store is a new suggestion (it wants its own notice)', async () => {
+        await POST(
+            suggestRequest({
+                url: 'example-store.com',
+                email: 'Shopper@Example.com',
+            }),
+        )
+        const repeat = await POST(
+            suggestRequest({
+                url: 'example-store.com',
+                email: 'shopper@example.com',
+            }),
+        )
+        expect((await repeat.json()).duplicate).toBe(true)
+        const other = await POST(
+            suggestRequest({
+                url: 'example-store.com',
+                email: 'someone-else@example.com',
+            }),
+        )
+        expect((await other.json()).duplicate).toBeUndefined()
+        expect(suggestionRows).toHaveLength(2)
+    })
+
+    it('a different store is never a duplicate', async () => {
+        await POST(suggestRequest({ url: 'example-store.com' }))
+        await POST(suggestRequest({ url: 'other-store.com' }))
+        expect(suggestionRows.map(r => r.domain)).toEqual([
+            'example-store.com',
+            'other-store.com',
+        ])
+    })
+
+    it('the dedupe lookup only looks 24 hours back', async () => {
+        await POST(suggestRequest({ url: 'example-store.com' }))
+        const where = prismaMock.siteSuggestion.findFirst.mock.calls[0]![0]
+            .where as unknown as { createdAt: { gte: Date } }
+        const ageMs = Date.now() - where.createdAt.gte.getTime()
+        expect(ageMs).toBeGreaterThanOrEqual(24 * 60 * 60 * 1000 - 5000)
+        expect(ageMs).toBeLessThanOrEqual(24 * 60 * 60 * 1000 + 5000)
+    })
+
+    it('at the global daily ops-mail budget the row is STILL saved but no mail is sent, and Sentry hears about the crossing once', async () => {
+        intakeState.otherRecentRows = SUGGESTION_OPS_MAILS_PER_DAY_BUDGET
+        const res = await POST(suggestRequest({ url: 'example-store.com' }))
+        expect(res.status).toBe(200)
+        expect(await res.json()).toEqual({
+            ok: true,
+            id: 'suggestion-1',
+            notified: false,
+        })
+        expect(suggestionRows).toHaveLength(1)
+        expect(sendEmailMock).not.toHaveBeenCalled()
+        expect(captureMessageMock).toHaveBeenCalledTimes(1)
+
+        // The next request is past the line, not on it: still no mail, no
+        // second event.
+        await POST(suggestRequest({ url: 'other-store.com' }))
+        expect(sendEmailMock).not.toHaveBeenCalled()
+        expect(captureMessageMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('one below the mail budget still mails', async () => {
+        intakeState.otherRecentRows = SUGGESTION_OPS_MAILS_PER_DAY_BUDGET - 1
+        await POST(suggestRequest({ url: 'example-store.com' }))
+        expect(sendEmailMock).toHaveBeenCalledTimes(1)
+        expect(captureMessageMock).not.toHaveBeenCalled()
+    })
+
+    it('at the global daily row cap → 429 with Retry-After, nothing written, no mail', async () => {
+        intakeState.otherRecentRows = SUGGESTION_ROWS_PER_DAY_CAP
+        const res = await POST(suggestRequest({ url: 'example-store.com' }))
+        expect(res.status).toBe(429)
+        expect(res.headers.get('retry-after')).toBe('3600')
+        expect(typeof (await res.json()).error).toBe('string')
+        expect(suggestionRows).toEqual([])
+        expect(sendEmailMock).not.toHaveBeenCalled()
     })
 })

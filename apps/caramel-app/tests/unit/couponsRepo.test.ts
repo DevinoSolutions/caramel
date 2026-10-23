@@ -12,6 +12,7 @@ import {
     listStoreCoupons,
     listStoreSitemapEntries,
     requestSource,
+    MAX_REQUESTED_SOURCES,
     submitShopperCoupon,
     writeFailedSignal,
     writeUsageSignal,
@@ -49,6 +50,12 @@ let capturedValues: unknown[][] = []
 let executeRawResult = 0
 // Args every prisma.source.create() was called with (requestSource).
 let capturedSourceCreates: unknown[] = []
+// What the mocked prisma.source.findFirst / count answer (requestSource's
+// duplicate and queue-depth checks), plus the args they were asked with.
+let existingSourceRow: { id: string } | null = null
+let requestedSourceCount = 0
+let capturedSourceFinds: unknown[] = []
+let capturedSourceCounts: unknown[] = []
 // How many prisma.$transaction() calls were opened (submitShopperCoupon).
 let transactionCount = 0
 function mockRows(match: (sql: string) => boolean, rows: unknown[]) {
@@ -92,6 +99,14 @@ vi.mock('@/lib/prisma', () => {
                 capturedSourceCreates.push(arg)
                 return Promise.resolve({})
             },
+            findFirst: (arg: unknown) => {
+                capturedSourceFinds.push(arg)
+                return Promise.resolve(existingSourceRow)
+            },
+            count: (arg: unknown) => {
+                capturedSourceCounts.push(arg)
+                return Promise.resolve(requestedSourceCount)
+            },
         },
     }
     return { default: client }
@@ -103,6 +118,10 @@ beforeEach(() => {
     capturedValues = []
     executeRawResult = 0
     capturedSourceCreates = []
+    existingSourceRow = null
+    requestedSourceCount = 0
+    capturedSourceFinds = []
+    capturedSourceCounts = []
     transactionCount = 0
 })
 
@@ -338,8 +357,8 @@ describe('expireCoupons (write, app catalog via prisma.$executeRaw)', () => {
 })
 
 describe('requestSource (write, app sources INSERT via prisma.source.create)', () => {
-    it('creates a REQUESTED source row (empty websites[], minted id) and resolves void', async () => {
-        await expect(requestSource('example.com')).resolves.toBeUndefined()
+    it('creates a REQUESTED source row (empty websites[], minted id) and reports created', async () => {
+        await expect(requestSource('example.com')).resolves.toBe('created')
 
         expect(capturedSourceCreates).toHaveLength(1)
         const arg = capturedSourceCreates[0] as {
@@ -356,6 +375,42 @@ describe('requestSource (write, app sources INSERT via prisma.source.create)', (
         // id is minted app-side (Source.id has no DB default) — a non-empty string.
         expect(typeof arg.data.id).toBe('string')
         expect(arg.data.id.length).toBeGreaterThan(0)
+    })
+
+    it('T-6225: a host that already has a row (any case, any status) is a duplicate and writes nothing', async () => {
+        existingSourceRow = { id: 'src-1' }
+
+        await expect(requestSource('example.com')).resolves.toBe('duplicate')
+
+        expect(capturedSourceCreates).toHaveLength(0)
+        // The lookup is case-insensitive and NOT status-filtered.
+        expect(capturedSourceFinds).toEqual([
+            {
+                where: {
+                    source: { equals: 'example.com', mode: 'insensitive' },
+                },
+                select: { id: true },
+            },
+        ])
+    })
+
+    it('T-6225: at the REQUESTED cap the request is refused as queue_full and writes nothing', async () => {
+        requestedSourceCount = MAX_REQUESTED_SOURCES
+
+        await expect(requestSource('example.com')).resolves.toBe('queue_full')
+
+        expect(capturedSourceCreates).toHaveLength(0)
+        expect(capturedSourceCounts).toEqual([
+            { where: { status: 'REQUESTED' } },
+        ])
+    })
+
+    it('T-6225: one below the cap still creates', async () => {
+        requestedSourceCount = MAX_REQUESTED_SOURCES - 1
+
+        await expect(requestSource('example.com')).resolves.toBe('created')
+
+        expect(capturedSourceCreates).toHaveLength(1)
     })
 })
 

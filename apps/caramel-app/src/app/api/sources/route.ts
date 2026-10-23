@@ -1,7 +1,8 @@
+import { cachedActiveSources } from '@/lib/anonymousReadCaches'
 import { handleRouteError } from '@/lib/api/handleRouteError'
 import { withRoute } from '@/lib/api/withRoute'
 import { nextApiResponse } from '@/lib/apiResponseNext'
-import { listActiveSources, requestSource } from '@/lib/couponsRepo'
+import { requestSource } from '@/lib/couponsRepo'
 import { toSourceMetrics } from '@/lib/sourceMetrics'
 import { z } from 'zod'
 
@@ -12,18 +13,28 @@ import { z } from 'zod'
 // returning its pre-existing custom 400 "Invalid website." — same split
 // as extension/oauth's signed-state check: presence is a body-shape
 // concern (the wrapper's job), plausibility is not.
+//
+// T-6225: `.max(2048)` bounds what an anonymous caller can make the route
+// parse (a URL with megabytes of path/userinfo is not a store request); it
+// answers 422 like any other shape violation.
 const SourceCreateBodySchema = z.object({
-    website: z.string().trim().min(1),
+    website: z.string().trim().min(1).max(2048),
 })
+
+const QUEUE_FULL_MESSAGE =
+    'Too many store requests are waiting. Please try again later.'
 
 export const GET = withRoute(
     { method: 'GET', routeName: 'sources', rateLimit: 'read' },
     async ({ req }) => {
         try {
             // Same mapper the /sources server component uses — see
-            // lib/sourceMetrics.ts for why the two must never drift.
+            // lib/sourceMetrics.ts for why the two must never drift. The rows
+            // come through the 5-minute in-process cache (T-6226): the
+            // aggregate LEFT JOINs the whole coupons table and Cloudflare
+            // reports this path DYNAMIC, so it was a Postgres scan per call.
             const sourcesWithMetrics = toSourceMetrics(
-                await listActiveSources(),
+                await cachedActiveSources(),
             )
 
             return nextApiResponse(req, 200, 'sources', sourcesWithMetrics)
@@ -50,10 +61,12 @@ export const POST = withRoute(
             const website = body.website
             // Validate it's a plausible domain/URL and bound the length, so this
             // public "request a store" endpoint can't be used to bulk-insert junk.
-            let host = website
+            let host: string
             try {
                 host = new URL(
-                    website.startsWith('http') ? website : `https://${website}`,
+                    /^https?:\/\//i.test(website)
+                        ? website
+                        : `https://${website}`,
                 ).hostname
             } catch {
                 return nextApiResponse(req, 400, 'Invalid website.', null)
@@ -62,7 +75,25 @@ export const POST = withRoute(
                 return nextApiResponse(req, 400, 'Invalid website.', null)
             }
 
-            await requestSource(website)
+            // T-6225: what is stored is the validated, lowercased HOSTNAME,
+            // never the typed string (path/query/userinfo are attacker bytes
+            // that ops would later read as a store name).
+            const outcome = await requestSource(
+                host.toLowerCase().replace(/^www\./, ''),
+            )
+            if (outcome === 'queue_full') {
+                return nextApiResponse(
+                    req,
+                    429,
+                    QUEUE_FULL_MESSAGE,
+                    null,
+                    // The page's toast reads `error`, not `message`.
+                    QUEUE_FULL_MESSAGE,
+                )
+            }
+            // 'duplicate' answers exactly like 'created': the shopper's intent
+            // (the store is on the list) holds either way, and a different
+            // answer would let a caller probe which hosts were requested.
             return nextApiResponse(
                 req,
                 200,

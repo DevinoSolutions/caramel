@@ -1021,21 +1021,51 @@ export async function writeUsageSignal(
 }
 
 /**
- * api/sources/route.ts POST — "request a store"; caller has already validated
- * `website` is a plausible domain. Inserts an app `sources` row in the same
- * REQUESTED shape the pipeline uses (empty websites[]). `Source.id` has no DB
- * default, so mint a uuid app-side (mirrors the pre-W4 gen_random_uuid()::text);
- * created_at/updated_at fill via their @default(now()).
+ * Most REQUESTED `sources` rows the anonymous "request a store" endpoint will
+ * ever leave waiting (T-6225). The table is read by ops/the pipeline, so an
+ * unauthenticated caller must not be able to grow it without bound; a real
+ * backlog this deep means the queue needs a human, not more rows.
  */
-export async function requestSource(website: string): Promise<void> {
+export const MAX_REQUESTED_SOURCES = 500
+
+export type RequestSourceOutcome = 'created' | 'duplicate' | 'queue_full'
+
+/**
+ * api/sources/route.ts POST — "request a store"; caller has already reduced
+ * the input to a validated lowercase HOSTNAME (never the raw typed string).
+ * Inserts an app `sources` row in the same REQUESTED shape the pipeline uses
+ * (empty websites[]). `Source.id` has no DB default, so mint a uuid app-side
+ * (mirrors the pre-W4 gen_random_uuid()::text); created_at/updated_at fill via
+ * their @default(now()).
+ *
+ * Bounded (T-6225): a host that already has a row (any status, any case) is a
+ * `duplicate` and writes nothing; once MAX_REQUESTED_SOURCES requests are
+ * waiting the answer is `queue_full`. The check-then-insert is not atomic
+ * (there is no unique index on `source` and this PR ships no migration), so
+ * concurrent identical requests can both insert; the per-IP rate limit bounds
+ * that race. TODO(T-6225): a unique index on lower(source) would close it.
+ */
+export async function requestSource(
+    host: string,
+): Promise<RequestSourceOutcome> {
+    const existing = await prisma.source.findFirst({
+        where: { source: { equals: host, mode: 'insensitive' } },
+        select: { id: true },
+    })
+    if (existing) return 'duplicate'
+    const waiting = await prisma.source.count({
+        where: { status: 'REQUESTED' },
+    })
+    if (waiting >= MAX_REQUESTED_SOURCES) return 'queue_full'
     await prisma.source.create({
         data: {
             id: randomUUID(),
-            source: website,
+            source: host,
             websites: [],
             status: 'REQUESTED',
         },
     })
+    return 'created'
 }
 
 // Advisory-lock classes: the first int of pg_advisory_xact_lock(int, int).
