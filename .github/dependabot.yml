@@ -25,6 +25,11 @@ updates:
     open-pull-requests-limit: 10
     cooldown:
       default-days: 2 # security updates ignore the cooldown
+    ignore:
+      # 1.7 is a schema migration that fails the minor group's CI; it gets its own
+      # upgrade (T-6596), which drops this entry. Security updates are not affected.
+      - dependency-name: 'better-auth'
+        versions: ['>=1.7.0']
     groups:
       npm-security:
         applies-to: security-updates
@@ -41,6 +46,10 @@ updates:
       interval: 'weekly'
       day: 'monday'
     open-pull-requests-limit: 10
+    ignore:
+      # v7+ needs the Chrome Web Store API v2 publisher id (no CHROME_PUBLISHER_ID secret yet).
+      - dependency-name: 'mnao305/chrome-extension-upload'
+        update-types: ['version-update:semver-major']
     groups:
       actions:
         patterns:

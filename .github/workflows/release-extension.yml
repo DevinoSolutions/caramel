@@ -443,7 +443,10 @@ jobs:
           path: .
 
       - name: Upload to Chrome Web Store (upload-only)
-        uses: mnao305/chrome-extension-upload@v7.0.0
+        # Held at v5: v7 moves to the Chrome Web Store API v2, which needs a
+        # `publisher-id` we hold no secret for (see the guard comment above).
+        # dependabot.yml ignores its majors until CHROME_PUBLISHER_ID exists.
+        uses: mnao305/chrome-extension-upload@v5.0.0
         with:
           file-path: caramel-extension-${{ needs.guard.outputs.version }}-chrome.zip
           extension-id: ${{ secrets.CHROME_EXTENSION_ID }}

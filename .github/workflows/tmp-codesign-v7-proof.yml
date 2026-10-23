@@ -1,0 +1,49 @@
+# TEMPORARY: proves apple-actions/import-codesign-certs v7 still imports both
+# release certificates the way release-extension.yml / release-apple-app.yml use
+# them (v5 dropped `security import -A`). Deleted before this PR merges.
+name: tmp codesign v7 proof
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/tmp-codesign-v7-proof.yml'
+permissions:
+  contents: read
+jobs:
+  proof:
+    runs-on: macos-latest
+    steps:
+      - name: Import distribution cert
+        uses: apple-actions/import-codesign-certs@v7
+        with:
+          p12-file-base64: ${{ secrets.APPLE_CERT_P12 }}
+          p12-password: ${{ secrets.APPLE_CERT_PASSWORD }}
+          keychain: signing_temp
+          keychain-password: ${{ secrets.KEYCHAIN_PASSWORD }}
+
+      - name: Import development cert
+        id: dev
+        uses: apple-actions/import-codesign-certs@v7
+        with:
+          create-keychain: false
+          keychain: signing_temp
+          p12-file-base64: ${{ secrets.APPLE_DEV_CERT_P12 }}
+          p12-password: ${{ secrets.APPLE_DEV_CERT_PASSWORD }}
+          keychain-password: ${{ secrets.KEYCHAIN_PASSWORD }}
+
+      - name: Sign a throwaway binary non-interactively with each identity
+        env:
+          IDENTITIES: ${{ steps.dev.outputs.identities }}
+        run: |
+          set -euo pipefail
+          count=$(echo "$IDENTITIES" | jq length)
+          echo "valid codesigning identities in signing_temp: $count"
+          test "$count" -ge 2
+          i=0
+          for hash in $(echo "$IDENTITIES" | jq -r '.[].hash'); do
+            i=$((i+1))
+            cp /bin/echo "$RUNNER_TEMP/probe-$i"
+            codesign --force --timestamp=none --keychain signing_temp.keychain \
+              --sign "$hash" "$RUNNER_TEMP/probe-$i"
+            codesign --verify "$RUNNER_TEMP/probe-$i"
+            echo "identity $i: signed and verified"
+          done
