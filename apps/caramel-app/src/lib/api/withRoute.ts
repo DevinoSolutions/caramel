@@ -27,15 +27,17 @@
 // 'extension' = isExtensionOrigin's strict extension-protocol-only check,
 // no missing-Origin bypass — D5) → apiKey 401 → auth 401 (never for
 // auth: 'optional', which resolves a session but gates nothing) →
-// rateLimit 429 → body safeParse 422 → handler
+// rateLimit 429 → body read (capped, 413) → body safeParse 422 → handler
 // (try/catch → F-002's handleRouteError). CORS headers are merged onto
 // EVERY exit point (incl. 4xx/429/500) — matches the pre-F-007
 // authorize/oauth-exchange behavior of attaching corsHeaders to their
 // error responses too, so a preflight-passing extension can always read
 // the error body.
 import { handleRouteError } from '@/lib/api/handleRouteError'
+import { readBodyCapped } from '@/lib/api/readBodyCapped'
 import { env } from '@/lib/env'
 import {
+    checkBearerFailureLimit,
     checkRateLimit,
     forbiddenOrigin,
     isExtensionOrigin,
@@ -50,6 +52,18 @@ import { NextResponse } from 'next/server'
 import type { z } from 'zod'
 
 export type CorsMode = 'none' | 'extension' | 'public'
+
+/**
+ * The request-body ceiling every `body:`-declaring route gets unless it sets
+ * `maxBodyBytes`. 64 KiB is the measured headroom over the largest legitimate
+ * body on a withRoute route: a support ticket (4000 + 2000 chars of free text,
+ * up to 4 bytes each in UTF-8, plus ids) is ~30 KB worst case, and the
+ * extension's 100-event savings batch is ~40 KB. Everything else is a few
+ * hundred bytes. Before this cap `req.json()` buffered and parsed whatever an
+ * anonymous caller sent (T-6223: a 30 MB body to sites/search-supported was
+ * fully parsed and answered 200).
+ */
+export const DEFAULT_MAX_BODY_BYTES = 64 * 1024
 
 // Exact env-allowlist — authorize/route.ts's pre-F-007 model (KNOWN_EXTENSION_ORIGINS),
 // now the ONE way any route reflects an extension Origin. This TIGHTENS
@@ -166,6 +180,13 @@ export interface RouteConfig<TBody> {
      * sanitize(), oauth/redirect's formData/query, and the GET routes
      * that have no body at all). */
     body?: z.ZodType<TBody> | null
+    /** Most bytes of request body the wrapper will read for a `body` route
+     * (default DEFAULT_MAX_BODY_BYTES). Enforced on the bytes actually read
+     * from the stream, so a chunked body with no or a lying Content-Length is
+     * cut off at the cap too; an over-cap body is 413 and never parsed. A
+     * route that legitimately takes more (ingest/catalog) must say so
+     * explicitly, with the number's provenance next to it. */
+    maxBodyBytes?: number
 }
 
 export interface RouteContext<TBody> {
@@ -208,11 +229,15 @@ export function withRoute<TBody = undefined>(
             return withCors(forbiddenOrigin(), cors)
         }
 
-        if (config.apiKey === 'trustedServer' && !isTrustedServer(req)) {
-            return unauthorized(cors)
-        }
-        if (config.apiKey === 'ingest' && !isIngestAuthorized(req)) {
-            return unauthorized(cors)
+        // A FAILED bearer check is counted per client IP (a valid bearer never
+        // reaches the counter) and answers 429 once an IP has failed too often:
+        // before this a wrong-key run was unthrottled and invisible (T-6230).
+        if (
+            (config.apiKey === 'trustedServer' && !isTrustedServer(req)) ||
+            (config.apiKey === 'ingest' && !isIngestAuthorized(req))
+        ) {
+            const throttled = await checkBearerFailureLimit(req)
+            return throttled ? withCors(throttled, cors) : unauthorized(cors)
         }
 
         let session: Session | null = null
@@ -250,7 +275,44 @@ export function withRoute<TBody = undefined>(
 
         let body = undefined as TBody
         if (config.body) {
-            const raw = await req.json().catch(() => undefined)
+            // Read no further than the cap: req.json() buffers the whole body
+            // before anything can measure it.
+            // A stream that errors mid-read (the client hung up) is the
+            // caller's failure, not ours: it gets a 400 instead of a Sentry
+            // 500, and the handler never runs.
+            const read = await readBodyCapped(
+                req,
+                config.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES,
+            ).catch(() => null)
+            if (!read) {
+                return withCors(
+                    NextResponse.json(
+                        { error: 'Unreadable request body' },
+                        { status: 400 },
+                    ),
+                    cors,
+                )
+            }
+            if (!read.ok) {
+                return withCors(
+                    NextResponse.json(
+                        { error: 'payload too large' },
+                        { status: 413 },
+                    ),
+                    cors,
+                )
+            }
+            // Unparseable JSON is not its own error: it falls through to the
+            // schema as `{}`, so a schema that needs a field answers 422 and a
+            // lenient one (every field optional) accepts it, exactly as when
+            // this was `req.json().catch(() => undefined)`.
+            let raw: unknown
+            try {
+                raw = JSON.parse(read.text)
+            } catch (error) {
+                if (!(error instanceof SyntaxError)) throw error
+                raw = undefined
+            }
             const parsed = config.body.safeParse(raw ?? {})
             if (!parsed.success) {
                 return withCors(

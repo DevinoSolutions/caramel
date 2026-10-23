@@ -123,6 +123,24 @@ const IngestSourceSchema = z.object({
     created_at: z.coerce.date().optional(),
 })
 
+// Request-body ceiling for POST /api/ingest/catalog (withRoute maxBodyBytes),
+// the one route that takes a bulk push. The design maximum is a 23k-coupon push
+// (applyCatalogRows.ts, docs/INGEST.md). A generously padded row is ~1 KB of
+// JSON (tests/unit/withRoute-body-cap.test.ts builds one and measures the 23k
+// push at well under half of this), so 64 MiB leaves more than 2x headroom.
+// TODO: the pushing pipeline is the external Python service (not in this repo),
+// so its real batch size is unverified here; if it ever pushes more than ~60k
+// rows in ONE request, split the push or raise this with the number measured.
+// The cap sits behind the INGEST_API_KEY bearer, so only the supplier (or a
+// leaked key) can reach it.
+export const INGEST_CATALOG_MAX_BODY_BYTES = 64 * 1024 * 1024
+
+// Array ceilings: ~4x the 23k design maximum for coupons, and far above any
+// real store/source count. They bound the work one push can ask for.
+const INGEST_COUPONS_MAX = 100_000
+const INGEST_STORE_CONFIGS_MAX = 50_000
+const INGEST_SOURCES_MAX = 50_000
+
 // The whole push. Each array defaults to [] so a producer can send only the
 // entity it changed (coupons-only, sources-only, …). `force` bypasses the
 // tombstone sanity gate (see applyCatalogRows). The `.refine` rejects a
@@ -131,9 +149,18 @@ const IngestSourceSchema = z.object({
 // point of the whole "no silent failures" rule.
 export const IngestCatalogPayloadSchema = z
     .object({
-        coupons: z.array(IngestCouponSchema).default([]),
-        storeConfigs: z.array(IngestStoreConfigSchema).default([]),
-        sources: z.array(IngestSourceSchema).default([]),
+        coupons: z
+            .array(IngestCouponSchema)
+            .max(INGEST_COUPONS_MAX)
+            .default([]),
+        storeConfigs: z
+            .array(IngestStoreConfigSchema)
+            .max(INGEST_STORE_CONFIGS_MAX)
+            .default([]),
+        sources: z
+            .array(IngestSourceSchema)
+            .max(INGEST_SOURCES_MAX)
+            .default([]),
         force: z.boolean().default(false),
     })
     .refine(
