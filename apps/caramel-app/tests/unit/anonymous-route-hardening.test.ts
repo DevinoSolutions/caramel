@@ -2,10 +2,7 @@ import { GET as filtersGET } from '@/app/api/coupons/filters/route'
 import { GET as statsGET } from '@/app/api/coupons/stats/route'
 import { POST as searchSupportedPOST } from '@/app/api/sites/search-supported/route'
 import { GET as topSitesGET } from '@/app/api/sites/top-sites/route'
-import {
-    GET as sourcesGET,
-    POST as sourcesPOST,
-} from '@/app/api/sources/route'
+import { GET as sourcesGET, POST as sourcesPOST } from '@/app/api/sources/route'
 import { resetAnonymousReadCaches } from '@/lib/anonymousReadCaches'
 import { createLoadingTtlLruCache } from '@/lib/ttlLruCache'
 import { NextRequest } from 'next/server'

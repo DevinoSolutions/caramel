@@ -53,9 +53,7 @@ const { prismaMock, suggestionRows, intakeState } = vi.hoisted(() => {
                         return hit ? { id: hit.id } : null
                     },
                 ),
-                count: vi.fn(
-                    async () => rows.length + state.otherRecentRows,
-                ),
+                count: vi.fn(async () => rows.length + state.otherRecentRows),
                 create: vi.fn(
                     async (args: {
                         data: Omit<SuggestionRow, 'id'>
@@ -92,18 +90,20 @@ vi.mock('@/lib/email', async importOriginal => ({
     sendEmail: sendEmailMock,
 }))
 
-const { captureExceptionMock, captureMessageMock, setUserMock } = vi.hoisted(() => ({
-    captureExceptionMock: vi.fn(
-        (_error: unknown, _context?: Record<string, unknown>) => 'evt_test',
-    ),
-    // The ops-mail budget crossing is reported once with captureMessage.
-    captureMessageMock: vi.fn(
-        (_message: string, _context?: Record<string, unknown>) => 'evt_msg',
-    ),
-    // `withRoute` calls Sentry.setUser on every request since the stable-user-id
-    // work; a mock without it throws "No setUser export is defined".
-    setUserMock: vi.fn((_user: unknown) => undefined),
-}))
+const { captureExceptionMock, captureMessageMock, setUserMock } = vi.hoisted(
+    () => ({
+        captureExceptionMock: vi.fn(
+            (_error: unknown, _context?: Record<string, unknown>) => 'evt_test',
+        ),
+        // The ops-mail budget crossing is reported once with captureMessage.
+        captureMessageMock: vi.fn(
+            (_message: string, _context?: Record<string, unknown>) => 'evt_msg',
+        ),
+        // `withRoute` calls Sentry.setUser on every request since the stable-user-id
+        // work; a mock without it throws "No setUser export is defined".
+        setUserMock: vi.fn((_user: unknown) => undefined),
+    }),
+)
 vi.mock('@sentry/nextjs', () => ({
     captureException: captureExceptionMock,
     captureMessage: captureMessageMock,

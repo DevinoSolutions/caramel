@@ -1038,8 +1038,8 @@ export type RequestSourceOutcome = 'created' | 'duplicate' | 'queue_full'
  * (mirrors the pre-W4 gen_random_uuid()::text); created_at/updated_at fill via
  * their @default(now()).
  *
- * Bounded (T-6225): a host that already has a row (any status; exact match, the route lowercases) is a
- * `duplicate` and writes nothing; once MAX_REQUESTED_SOURCES requests are
+ * Bounded (T-6225): a host that already has a row (any status; an exact
+ * match, since the route lowercases) is a `duplicate` and writes nothing; once MAX_REQUESTED_SOURCES requests are
  * waiting the answer is `queue_full`. The check-then-insert is not atomic
  * (there is no unique index on `source` and this PR ships no migration), so
  * concurrent identical requests can both insert; the per-IP rate limit bounds
