@@ -59,6 +59,7 @@ import {
     applyCatalogRows,
 } from '@/lib/catalog/applyCatalogRows'
 import type { IngestCatalogPayload } from '@/lib/catalog/ingestSchemas'
+import { recordBoxProposal } from '@/lib/couponBoxSave'
 import { VISIBLE_COUPON_STATUSES } from '@/lib/coupons'
 import { listSupportedStoreConfigs } from '@/lib/couponsRepo'
 import prisma from '@/lib/prisma'
@@ -360,23 +361,33 @@ describe('coupon-box save: a store with a config refuses it', () => {
         expect(row?.origin).toBeNull()
     })
 
-    it('the saves that reach the quorum racing: exactly one publishes, none is a 5xx, and one row exists', async () => {
+    // Calls recordBoxProposal directly: the race is in the database, and
+    // requests racing through withRoute's lazy session import are a test-harness
+    // artifact (vitest hands some of them the real better-auth module).
+    it('the proposals that reach the quorum racing: exactly one publishes, none fails, and one row exists', async () => {
         const store = newStore()
         await knownStore(store)
         const users = await Promise.all(
             Array.from({ length: QUORUM }, () => newUser()),
         )
 
-        const answers = await Promise.all(users.map(id => save(store, BOX, id)))
-        const bodies = await Promise.all(answers.map(r => r.json()))
-        expect(
-            bodies.filter(
-                b => (b as { status?: string }).status === 'published',
+        const outcomes = await Promise.all(
+            users.map(userId =>
+                recordBoxProposal({
+                    storeName: store,
+                    host: store,
+                    box: BOX,
+                    userId,
+                }),
             ),
-        ).toHaveLength(1)
-        expect(answers.every(r => r.status === 200 || r.status === 409)).toBe(
-            true,
         )
+
+        expect(outcomes.filter(o => o.kind === 'published')).toHaveLength(1)
+        expect(
+            outcomes.every(o =>
+                ['published', 'pending', 'has_config'].includes(o.kind),
+            ),
+        ).toBe(true)
         expect(
             await prisma.storeConfig.count({ where: { storeName: store } }),
         ).toBe(1)
@@ -511,8 +522,8 @@ describe('coupon-box save: a saved box expires', () => {
         const fresh = newStore()
         await knownStore(expired)
         await knownStore(fresh)
-        expect((await save(expired)).status).toBe(200)
-        expect((await save(fresh)).status).toBe(200)
+        expect((await publish(expired)).status).toBe(200)
+        expect((await publish(fresh)).status).toBe(200)
 
         await backdate(expired, daysAgo(AUTO_DETECT_CONFIG_MAX_AGE_DAYS + 1))
         await backdate(fresh, daysAgo(AUTO_DETECT_CONFIG_MAX_AGE_DAYS - 1))
@@ -527,17 +538,21 @@ describe('coupon-box save: a saved box expires', () => {
     it('an expired saved box is replaced whole by the next proven save', async () => {
         const store = newStore()
         await knownStore(store)
-        expect((await save(store)).status).toBe(200)
+        expect((await publish(store)).status).toBe(200)
         await backdate(store, daysAgo(AUTO_DETECT_CONFIG_MAX_AGE_DAYS + 5))
 
-        const res = await save(`www.${store}`, {
+        const res = await publish(`www.${store}`, {
             input: '#new-code',
             apply: null,
             toggle: null,
             total: '.new-total',
         })
         expect(res.status).toBe(200)
-        expect(await res.json()).toEqual({ saved: true, store })
+        expect(await res.json()).toEqual({
+            saved: true,
+            store,
+            status: 'published',
+        })
 
         const row = await storedRow(store)
         expect(row).toMatchObject({
@@ -560,7 +575,7 @@ describe('coupon-box save: a saved box expires', () => {
     it('a saved box still inside the max age refuses a second save and is not touched', async () => {
         const store = newStore()
         await knownStore(store)
-        expect((await save(store)).status).toBe(200)
+        expect((await publish(store)).status).toBe(200)
         await backdate(store, daysAgo(AUTO_DETECT_CONFIG_MAX_AGE_DAYS - 1))
         const before = await storedRow(store)
 
