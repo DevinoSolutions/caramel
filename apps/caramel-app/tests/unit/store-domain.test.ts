@@ -19,6 +19,13 @@ import {
 // indexable pages for a fictional store called "co.uk".
 
 describe('resolveStoreDomain', () => {
+    it('a host that merely starts with "http" is a host, not a URL', () => {
+        // The scheme sniff used to be startsWith('http'), which sent
+        // `httpbin.org` to new URL() as-is and refused it.
+        expect(resolveStoreDomain('httpbin.org')).toBe('httpbin.org')
+        expect(resolveStoreDomain('https://httpbin.org/x')).toBe('httpbin.org')
+    })
+
     it('keeps the registrable label in front of a multi-label suffix', () => {
         // The bug, directly: this used to return "co.uk".
         expect(resolveStoreDomain('mymemory.co.uk')).toBe('mymemory.co.uk')
