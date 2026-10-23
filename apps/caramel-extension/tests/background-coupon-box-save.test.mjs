@@ -14,6 +14,7 @@ let fetchCalls
 let responses // queue of fetch results, consumed in order
 let sessionData
 let localData
+let signedIn
 
 const area = data => ({
     get: (keys, cb) =>
@@ -45,7 +46,7 @@ function installWorkerRealm() {
         return proxy
     }
     const stub = wrap(function chromeStubRoot() {})
-    localData = {}
+    localData = signedIn ? { token: 'session-token' } : {}
     const syncData = {}
     stub.storage.local = area(() => localData)
     stub.storage.sync = area(() => syncData)
@@ -96,6 +97,7 @@ beforeEach(async () => {
     fetchCalls = []
     responses = []
     sessionData = {}
+    signedIn = true
     globalThis.fetch = async (url, opts) => {
         fetchCalls.push({ url: String(url), opts })
         const next = responses.shift()
@@ -124,6 +126,37 @@ describe('couponBoxSave', () => {
 
         expect(await save()).toEqual({ skipped: 'already sent' })
         expect(saveCalls()).toHaveLength(1)
+    })
+
+    it('is sent with the session bearer', async () => {
+        responses.push(features(true), ok({ saved: true }))
+
+        await save()
+
+        expect(saveCalls()[0].opts.headers.Authorization).toBe(
+            'Bearer session-token',
+        )
+    })
+
+    it('signed out: nothing is posted and the host stays free', async () => {
+        signedIn = false
+        vi.resetModules()
+        const listeners = installWorkerRealm()
+        const { initBackground } = await import('../background.js')
+        initBackground()
+        ;[handler] = listeners
+        responses.push(features(true))
+
+        expect(await save()).toEqual({ skipped: 'signed-out' })
+        expect(saveCalls()).toHaveLength(0)
+    })
+
+    it('a 401 (expired token) is an error and leaves the host free', async () => {
+        responses.push(features(true), status(401))
+
+        expect(await save()).toEqual({ error: 'HTTP 401' })
+        responses.push(ok({ saved: true, status: 'pending' }))
+        expect(await save()).toEqual({ saved: true, reason: null })
     })
 
     it('sends only the four selectors, nothing else the message carried', async () => {

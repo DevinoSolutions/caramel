@@ -180,7 +180,7 @@ describe('apply and toggle selectors that name a risky control', () => {
         // Only the element that is clicked is read, never its ancestors:
         // WooCommerce's own apply button, inside its checkout_coupon form.
         'form.checkout_coupon button[name=apply_coupon]',
-        '.coupon .purchase-summary button',
+        '.coupon .purchase-summary button.apply',
         '#checkout > div > button.apply',
         // Whole words only: PayPal is not `pay`.
         '#PayPal-apply',
@@ -206,4 +206,74 @@ describe('apply and toggle selectors that name a risky control', () => {
             expect(isRiskyControlSelector(selector)).toBe(true)
         },
     )
+})
+
+// T-6221: a selector that is not worded like a checkout can still click a
+// button that submits the form (Place Order on a one-page checkout).
+describe('apply and toggle selectors that can submit a form', () => {
+    it.each([
+        // The submit controls themselves.
+        'button[type=submit]',
+        'button[type="submit"]',
+        'button[type=SUBMIT]',
+        'input[type=submit]',
+        'input[type="submit"]',
+        'input[type=image]',
+        '.cart__footer button[type=submit]',
+        'form.coupon button.apply[type=submit]',
+        // Any type test that is not exactly `button` or `reset`.
+        'button[type]',
+        'button[type^=sub]',
+        'button[type*=ubm]',
+        'button[type$=mit]',
+        'button.go[type=reset-all]',
+        // Form-submission attributes (outside the grammar, refused anyway).
+        'button[form]',
+        'button[form="checkout"]',
+        'button[formaction]',
+        'button[formaction="/pay"]',
+        'input[formmethod=post]',
+        // A bare submit-capable tag, whatever its ancestors say.
+        '.cart__footer button',
+        '#checkout-form input',
+        '.promo > button',
+        'button:first-of-type',
+        'form.coupon button:nth-of-type(2)',
+        '.promo *',
+        // Spelled in pieces, or joined, so no whole word is risky.
+        '[aria-label*=heckout]',
+        '[id^=check][id$=out]',
+        'button[id^=check][id$=out]',
+        'button[name*=laceord]',
+        'button[data-action*=ubmit]',
+        '#checkoutButton',
+        'button.btn_placeOrder',
+        'button[data-testid="submitOrder"]',
+        'button[data-complete-order]',
+        // An attribute NAME that says what the control does.
+        'button[data-place-order]',
+        'button[data-checkout-button]',
+    ])('refuses %s', selector => {
+        expect(isRiskyControlSelector(selector)).toBe(true)
+    })
+
+    it.each([
+        'button[type=button].apply',
+        'button.apply[type="button"]',
+        'button[type=reset].clear-promo',
+        'button[name="apply_coupon"]',
+        'input[name="apply_coupon"]',
+        '.cart__footer button.apply-code',
+        'form.coupon button:not(.go).apply',
+        // A partial test whose value is no piece of a risky term.
+        'button[id^=promo]',
+        'button[id$=-apply]',
+        'button[name*=coupon]',
+        'button[aria-label*=Apply]',
+        // Names that merely contain a short risky word inside another word.
+        'button.display-code',
+        'a#buyer-code-toggle',
+    ])('accepts %s', selector => {
+        expect(isRiskyControlSelector(selector)).toBe(false)
+    })
 })

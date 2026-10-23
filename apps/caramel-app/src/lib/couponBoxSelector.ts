@@ -206,36 +206,126 @@ const COUPON_WORDS: ReadonlySet<string> = new Set([
     'codes',
 ])
 
+// Terms long enough that finding them INSIDE a joined word is a real signal
+// (`checkoutButton`, `btn_placeOrder`), unlike `pay` or `buy`, which hide in
+// `display` and `buyer`. Tested against the clicked compound's values and
+// attribute names with every non-alphanumeric dropped, so `place-order`,
+// `place_order` and `placeOrder` are all `placeorder`.
+const RISKY_JOINED_TERMS: readonly string[] = [
+    'checkout',
+    'placeorder',
+    'submitorder',
+    'completeorder',
+    'confirmorder',
+    'purchase',
+    'paynow',
+    'buynow',
+]
+// A substring operator (`[id*=heckout]`, `[id^=check][id$=out]`) can spell a
+// risky term in pieces no word check sees, so a partial value that is a piece
+// of one of these is refused. `submit` is here (not in the joined terms) so
+// `[data-action*=ubmit]` cannot stand in for `[type=submit]`.
+const RISKY_FRAGMENT_TERMS: readonly string[] = [
+    ...RISKY_JOINED_TERMS,
+    'submit',
+    'pay',
+    'buy',
+    'delete',
+    'remove',
+]
+// `type` values that cannot submit a form. A `<button>` with no type, or any
+// other type, submits (`submit`, `image`), so it is not on the list.
+const NON_SUBMITTING_TYPES: ReadonlySet<string> = new Set(['button', 'reset'])
+// An attribute test in a grammar-valid compound.
+const ATTR_TEST_RE =
+    /\[([A-Za-z][A-Za-z0-9-]*)(?:(=|\^=|\$=|\*=)("[^"]*"|[A-Za-z0-9_-]+))?\]/g
+// Tags that submit a form or match anything; a compound naming one with no
+// id, class or attribute of its own says nothing about WHICH control it is.
+const SUBMIT_CAPABLE_TAGS: ReadonlySet<string> = new Set([
+    'button',
+    'input',
+    '*',
+    '',
+])
+
+const alnum = (text: string): string =>
+    text.toLowerCase().replace(/[^a-z0-9]/g, '')
+const splitWords = (text: string): string[] =>
+    text
+        .toLowerCase()
+        .split(/[^a-z0-9]+/)
+        .filter(Boolean)
+
 /**
- * Whether an APPLY or TOGGLE selector names a control that could place an
- * order, pay, or delete something (RISKY_CONTROL_WORDS). The extension clicks
- * these selectors, so the server refuses them outright.
+ * Whether an APPLY or TOGGLE selector could click a control that places an
+ * order, pays, submits a form, or deletes something. The extension clicks
+ * these selectors on other shoppers' browsers, so the server refuses them
+ * outright (T-6221: `button[type=submit]` passed the old word-only check and
+ * reaches Place Order on a one-page checkout).
  *
  * Only the LAST compound is read, the element that is clicked: its type, id,
- * classes and attribute VALUES. Ancestors are not (WooCommerce's own apply
- * button is `form.checkout_coupon button[name=apply_coupon]`), nor attribute
- * names (`button[data-buy-box]` says what data the element carries), nor what
- * `:not(...)` excludes. `checkout` alone does not make it risky when that
- * compound also names a coupon word (COUPON_WORDS). This is defence in depth and can be bypassed: a
- * substring or position selector (`[aria-label*=heckout]`,
- * `[id^=check][id$=out]`, `.cart__footer button[type=submit]`) names no risky
- * word, and neither does a joined camelCase word like `checkoutButton`. The
- * extension's own apply-control check on the page is what actually stops a
- * wrong click. The coupon field itself is not checked (typing into it clicks
- * nothing).
+ * classes and attribute names and VALUES. Ancestors are not (WooCommerce's own
+ * apply button is `form.checkout_coupon button[name=apply_coupon]`), nor what
+ * `:not(...)` excludes. Refused:
+ *   - a form-submission attribute (`[form]`, `[formaction]`, any `[form...]`);
+ *   - a `type` test that is not exactly `button` or `reset`
+ *     (`[type=submit]`, `[type=image]`, `[type^=sub]`, a bare `[type]`);
+ *   - a tag that can submit (`button`, `input`) or matches anything (`*`)
+ *     with no id, class or attribute of its own (`.cart__footer button`);
+ *   - a substring operator (`^= $= *=`) whose value is a piece of a risky
+ *     term (`[id*=heckout]`, `[id^=check][id$=out]`);
+ *   - a risky term inside the joined values or attribute names
+ *     (`#checkoutButton`, `[data-place-order]`), or a risky whole word
+ *     (RISKY_CONTROL_WORDS). `checkout` alone does not count when the same
+ *     compound also names a coupon word (COUPON_WORDS): the coupon apply in
+ *     the checkout's own namespace. Every other risky word stays absolute.
+ * This is still defence in depth: a harmless name can belong to a Place Order
+ * button, and the extension's own apply-control check on the page is what
+ * actually stops a wrong click. The coupon field itself is not checked
+ * (typing into it clicks nothing).
  */
 export function isRiskyControlSelector(selector: string): boolean {
     const compounds = compoundsOf(selector)
     const clicked = compounds
         ? (compounds[compounds.length - 1] ?? '')
         : selector
-    const words = clicked
-        .replace(/:not\([^)]*\)/g, ' ')
-        .replace(/\[[a-z0-9-]+/gi, ' ')
-        .toLowerCase()
-        .split(/[^a-z0-9]+/)
-        .filter(Boolean)
-    const namesCoupon = words.some(word => COUPON_WORDS.has(word))
+    const own = clicked.replace(/:not\([^)]*\)/g, ' ')
+
+    const attributes = Array.from(own.matchAll(ATTR_TEST_RE)).map(m => ({
+        name: (m[1] ?? '').toLowerCase(),
+        op: m[2] ?? null,
+        value: (m[3] ?? '').replace(/^"|"$/g, '').toLowerCase(),
+    }))
+    for (const { name, op, value } of attributes) {
+        if (name.startsWith('form')) return true
+        if (name === 'type' && !(op === '=' && NON_SUBMITTING_TYPES.has(value)))
+            return true
+        if (op && op !== '=') {
+            const piece = alnum(value)
+            if (
+                piece &&
+                RISKY_FRAGMENT_TERMS.some(term => term.includes(piece))
+            ) {
+                return true
+            }
+        }
+    }
+
+    const tag = (TYPE_RE.exec(own.trim())?.[0] ?? '').toLowerCase()
+    if (SUBMIT_CAPABLE_TAGS.has(tag) && !/[#.[]/.test(own)) return true
+
+    const nameWords = splitWords(attributes.map(a => a.name).join(' '))
+    const words = splitWords(own.replace(/\[[a-z0-9-]+/gi, ' '))
+    const namesCoupon = [...words, ...nameWords].some(word =>
+        COUPON_WORDS.has(word),
+    )
+    for (const joined of [words.join(''), nameWords.join('')]) {
+        for (const term of RISKY_JOINED_TERMS) {
+            if (!joined.includes(term)) continue
+            if (term === 'checkout' && namesCoupon) continue
+            return true
+        }
+    }
     return words.some((word, i) => {
         const pair = `${word} ${words[i + 1] ?? ''}`
         const risky = RISKY_CONTROL_WORDS.has(word)

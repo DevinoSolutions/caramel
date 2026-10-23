@@ -10,9 +10,18 @@
 // The rules (the route applies them in this order):
 //   - Off unless COUPON_BOX_SAVE_ENABLED (the extension reads it as
 //     `couponBoxSave` on GET /api/extension/features).
+//   - A signed-in extension only (T-6221): the route's withRoute `auth:
+//     'session'` takes the extension's bearer, so a forged Origin alone is 401.
+//   - A save is a PROPOSAL, not a config (recordBoxProposal): the box becomes
+//     the store's store_configs row, and so is served, only once
+//     COUPON_BOX_SAVE_MIN_AGREEING_INSTALLS distinct users proposed the same
+//     box for the same store. Until then nothing is served and nothing blocks
+//     a different box from being corroborated later.
+//   - A write budget (recordBoxProposal): per user, per store and across all
+//     callers per 24 hours; over a cap the route answers 429.
 //   - Selectors only, each inside the grammar in couponBoxSelector.ts, and an
 //     apply or toggle selector never names a checkout, payment, order or
-//     delete control. No codes, amounts, page text or anything about the
+//     delete control or could submit a form (isRiskyControlSelector). No codes, amounts, page text or anything about the
 //     shopper is accepted: the body is refused whole if it carries more.
 //   - The host must belong to a store the catalog knows (resolveSaveStoreName),
 //     matched the way the extension matches a host to a config row.
@@ -20,7 +29,11 @@
 //     and never over any existing row (insert-only).
 //   - A pipeline config pushed later replaces the saved row whole
 //     (applyCatalogRows).
-import type { AutoDetectedStoreConfig } from '@/lib/catalog/applyCatalogRows'
+import {
+    AUTO_DETECT_CONFIG_MAX_AGE_DAYS,
+    insertAutoDetectedStoreConfig,
+    type AutoDetectedStoreConfig,
+} from '@/lib/catalog/applyCatalogRows'
 import { couponBoxDomainSchema } from '@/lib/couponBoxPick'
 import {
     isCouponBoxSelector,
@@ -28,7 +41,10 @@ import {
 } from '@/lib/couponBoxSelector'
 import { findCatalogStoreNames } from '@/lib/couponsRepo'
 import { env } from '@/lib/env'
+import prisma from '@/lib/prisma'
 import { resolveStoreDomain } from '@/lib/storeDomain'
+import * as Sentry from '@sentry/nextjs'
+import { createHash } from 'node:crypto'
 import { z } from 'zod'
 
 export function couponBoxSaveEnabled(): boolean {
@@ -43,7 +59,9 @@ const selectorSchema = z.string().refine(isCouponBoxSelector, {
 // order, pays or deletes something.
 const clickedSelectorSchema = selectorSchema.refine(
     s => !isRiskyControlSelector(s),
-    { error: 'names a checkout, payment, order or delete control' },
+    {
+        error: 'names a checkout, payment, order, delete or form-submit control',
+    },
 )
 
 export const couponBoxSaveRequestSchema = z
@@ -187,4 +205,137 @@ export async function resolveSaveStoreName(
     if (names.length === 0) return null
     const known = await findCatalogStoreNames(names, shopLabel)
     return pickSaveStoreName(names, known)
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000
+const PROPOSAL_WINDOW_MS = AUTO_DETECT_CONFIG_MAX_AGE_DAYS * DAY_MS
+
+/** Which 24-hour write budget a refused proposal ran into. */
+export type BoxBudgetScope = 'user' | 'store' | 'global'
+
+export type BoxProposalOutcome =
+    | { kind: 'over_budget'; scope: BoxBudgetScope }
+    /** Recorded, not served: fewer than the required distinct users agree. */
+    | { kind: 'pending'; agreeing: number; needed: number }
+    /** Corroborated and written as the store's served config. */
+    | { kind: 'published' }
+    /** Corroborated, but the store already has a row (a racing or earlier save). */
+    | { kind: 'has_config' }
+
+/** The identity of a box for corroboration: a SHA-256 over the four stored
+ * selectors (the Enter-only convention already applied, whitespace trimmed),
+ * so two installs that found the same box agree whatever else they sent. */
+export function boxHash(config: AutoDetectedStoreConfig): string {
+    return createHash('sha256')
+        .update(
+            JSON.stringify([
+                config.couponInputXpath.trim(),
+                config.applyButtonXpath.trim(),
+                config.showInputXpath?.trim() ?? null,
+                config.priceContainerXpath?.trim() ?? null,
+            ]),
+        )
+        .digest('hex')
+}
+
+// A sustained global-cap hit is ONE Sentry event per hour, not one per request.
+const GLOBAL_CAP_REPORT_INTERVAL_MS = 60 * 60 * 1000
+let nextGlobalCapReportAt = 0
+
+function reportGlobalCapHit(cap: number, storeName: string): void {
+    Sentry.addBreadcrumb({
+        category: 'coupon-box-save',
+        level: 'warning',
+        message: 'global daily write cap reached',
+        data: { cap, storeName },
+    })
+    const now = Date.now()
+    if (now < nextGlobalCapReportAt) return
+    nextGlobalCapReportAt = now + GLOBAL_CAP_REPORT_INTERVAL_MS
+    Sentry.captureMessage('coupon-box-save global daily write cap reached', {
+        level: 'warning',
+        tags: { route: 'extension/coupon-box-save' },
+        extra: { cap },
+    })
+}
+
+/**
+ * Record one signed-in install's save of `box` for `storeName` and, once
+ * COUPON_BOX_SAVE_MIN_AGREEING_INSTALLS distinct users proposed the same box
+ * within AUTO_DETECT_CONFIG_MAX_AGE_DAYS, write it as the store's served
+ * config (insertAutoDetectedStoreConfig). Until then NOTHING reaches
+ * store_configs, so a forged or mistaken box is never served and a squatter
+ * cannot hold a store against the box real installs agree on.
+ *
+ * The write budget counts NEW proposals in the last 24 hours (a user repeating
+ * a save they already made is no new write and spends nothing): per user,
+ * then per store, then in total. Over a cap nothing is written. The caps are
+ * read-then-write, so a burst of simultaneous requests can overshoot a cap by
+ * the burst size; the caps bound growth, they are not a strict invariant.
+ */
+export async function recordBoxProposal(args: {
+    storeName: string
+    host: string
+    box: CouponBoxSaveRequest['box']
+    userId: string
+}): Promise<BoxProposalOutcome> {
+    const { storeName, host, box, userId } = args
+    const config = storeConfigFromBox(storeName, box)
+    const hash = boxHash(config)
+    const key = { storeName, boxHash: hash, userId }
+
+    const already = await prisma.couponBoxProposal.findUnique({
+        where: { storeName_boxHash_userId: key },
+        select: { userId: true },
+    })
+    if (!already) {
+        const since = new Date(Date.now() - DAY_MS)
+        const [byUser, byStore, total] = await Promise.all([
+            prisma.couponBoxProposal.count({
+                where: { userId, createdAt: { gt: since } },
+            }),
+            prisma.couponBoxProposal.count({
+                where: { storeName, createdAt: { gt: since } },
+            }),
+            prisma.couponBoxProposal.count({
+                where: { createdAt: { gt: since } },
+            }),
+        ])
+        if (byUser >= env.COUPON_BOX_SAVE_USER_DAILY_CAP) {
+            return { kind: 'over_budget', scope: 'user' }
+        }
+        if (byStore >= env.COUPON_BOX_SAVE_STORE_DAILY_CAP) {
+            return { kind: 'over_budget', scope: 'store' }
+        }
+        if (total >= env.COUPON_BOX_SAVE_GLOBAL_DAILY_CAP) {
+            reportGlobalCapHit(env.COUPON_BOX_SAVE_GLOBAL_DAILY_CAP, storeName)
+            return { kind: 'over_budget', scope: 'global' }
+        }
+        await prisma.couponBoxProposal.createMany({
+            data: [
+                {
+                    ...key,
+                    host,
+                    input: box.input,
+                    apply: box.apply,
+                    toggle: box.toggle,
+                    total: box.total,
+                },
+            ],
+            skipDuplicates: true,
+        })
+    }
+
+    const needed = env.COUPON_BOX_SAVE_MIN_AGREEING_INSTALLS
+    const agreeing = await prisma.couponBoxProposal.count({
+        where: {
+            storeName,
+            boxHash: hash,
+            createdAt: { gt: new Date(Date.now() - PROPOSAL_WINDOW_MS) },
+        },
+    })
+    if (agreeing < needed) return { kind: 'pending', agreeing, needed }
+
+    const { inserted } = await insertAutoDetectedStoreConfig(config)
+    return inserted ? { kind: 'published' } : { kind: 'has_config' }
 }
