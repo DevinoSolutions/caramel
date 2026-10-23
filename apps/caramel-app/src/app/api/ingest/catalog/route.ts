@@ -37,6 +37,9 @@ export const POST = withRoute(
         routeName: 'ingest/catalog',
         apiKey: 'ingest',
         body: IngestCatalogPayloadSchema,
+        // Equals Next's own 4mb body ceiling (see ingestSchemas.ts): a chunked
+        // body longer than that is truncated by Next before this route runs, so
+        // it arrives at exactly the cap and answers 422 (invalid JSON), not 413.
         maxBodyBytes: INGEST_CATALOG_MAX_BODY_BYTES,
     },
     async ({ body }) => {
