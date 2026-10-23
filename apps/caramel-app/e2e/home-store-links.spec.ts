@@ -109,14 +109,37 @@ test.describe('home page "Codes that just worked" (server-rendered)', () => {
         baseURL,
     }) => {
         if (!baseURL) throw new Error('playwright baseURL is not set')
-        const report = await request.post(
-            `/api/coupons/${SEED_COUPON_ID}/report`,
-            {
+        // T-6222: an anonymous "worked" report no longer stamps the code on its
+        // own; it takes COUPON_WORKED_QUORUM_LOW_TRUST_REPORTERS (3) DISTINCT
+        // reporters. Reporters are told apart by the Cloudflare edge address, so
+        // each report carries its own.
+        const reportFrom = (edgeIp: string) =>
+            request.post(`/api/coupons/${SEED_COUPON_ID}/report`, {
                 data: { outcome: 'worked' },
-                headers: { Origin: new URL(baseURL).origin },
-            },
-        )
-        expect(report.status(), await report.text()).toBe(200)
+                headers: {
+                    Origin: new URL(baseURL).origin,
+                    'cf-connecting-ip': edgeIp,
+                },
+            })
+        for (const edgeIp of ['203.0.113.11', '203.0.113.12']) {
+            const report = await reportFrom(edgeIp)
+            expect(report.status(), await report.text()).toBe(200)
+        }
+        // Two anonymous reporters are not enough: the stamp has not moved.
+        const { PrismaClient } = await import('@prisma/client')
+        const prisma = new PrismaClient()
+        try {
+            const row = await prisma.couponSignal.findUnique({
+                where: { couponId: SEED_COUPON_ID },
+            })
+            expect(row?.lastWorkedAt ?? null).toEqual(
+                signalBefore?.lastWorkedAt ?? null,
+            )
+        } finally {
+            await prisma.$disconnect()
+        }
+        const third = await reportFrom('203.0.113.13')
+        expect(third.status(), await third.text()).toBe(200)
 
         const html = await (await request.get('/')).text()
         expect(html).toContain('id="just-worked"')
