@@ -260,13 +260,25 @@ describe('POST /api/sources — bounded, normalized request (T-6225)', () => {
         expect(repo.requestSource).toHaveBeenCalledWith('httpbin.org')
     })
 
-    it('a megabyte-long website is refused with a 422 before anything is parsed or stored', async () => {
+    it('a website over the 2048-character field limit is refused with a 422 and nothing is stored', async () => {
+        const res = await sourcesPOST(
+            post('/api/sources', {
+                website: `https://valid.com/${'a'.repeat(3_000)}`,
+            }),
+        )
+        expect(res.status).toBe(422)
+        expect(repo.requestSource).not.toHaveBeenCalled()
+    })
+
+    // #430 (T-6223) caps every withRoute body at 64 KiB by default, so a
+    // megabyte payload is now refused by the body cap (413) before zod runs.
+    it('a megabyte-long website body is refused with a 413 before anything is parsed or stored', async () => {
         const res = await sourcesPOST(
             post('/api/sources', {
                 website: `https://valid.com/${'a'.repeat(1_000_000)}`,
             }),
         )
-        expect(res.status).toBe(422)
+        expect(res.status).toBe(413)
         expect(repo.requestSource).not.toHaveBeenCalled()
     })
 
