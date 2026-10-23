@@ -221,6 +221,19 @@ const RISKY_JOINED_TERMS: readonly string[] = [
     'paynow',
     'buynow',
 ]
+// Broader terms, found inside a joined name too, that no coupon control is
+// named for even next to a coupon word: `#apply-payment`,
+// `[data-complete-promo]`, `[data-apply-order]`, `[data-coupon-order]`,
+// `[aria-label="Gift card payment"]`. They also match harmless names
+// (`.promo-border`, `reorder`); refusing those only costs a save. Unlike the
+// terms above they are not exempted by a coupon word, and not part of
+// RISKY_FRAGMENT_TERMS (their pieces are too short to mean anything).
+// `submit` is deliberately NOT here: `#promo-code-submit` is a real apply.
+const RISKY_ABSOLUTE_JOINED_TERMS: readonly string[] = [
+    'payment',
+    'order',
+    'complete',
+]
 // A substring operator (`[id*=heckout]`, `[id^=check][id$=out]`) can spell a
 // risky term in pieces no word check sees, so a partial value that is a piece
 // of one of these is refused. `submit` is here (not in the joined terms) so
@@ -323,6 +336,9 @@ export function isRiskyControlSelector(selector: string): boolean {
         for (const term of RISKY_JOINED_TERMS) {
             if (!joined.includes(term)) continue
             if (term === 'checkout' && namesCoupon) continue
+            return true
+        }
+        if (RISKY_ABSOLUTE_JOINED_TERMS.some(term => joined.includes(term))) {
             return true
         }
     }

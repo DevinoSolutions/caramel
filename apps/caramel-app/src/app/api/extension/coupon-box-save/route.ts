@@ -1,6 +1,7 @@
 import { handleRouteError } from '@/lib/api/handleRouteError'
 import { readBodyCapped } from '@/lib/api/readBodyCapped'
 import { preflight, withRoute } from '@/lib/api/withRoute'
+import { couponBoxDomainSchema } from '@/lib/couponBoxPick'
 import {
     couponBoxSaveEnabled,
     couponBoxSaveRequestSchema,
@@ -9,6 +10,7 @@ import {
     type BoxBudgetScope,
 } from '@/lib/couponBoxSave'
 import { hasServedStoreConfig } from '@/lib/couponsRepo'
+import * as Sentry from '@sentry/nextjs'
 import { NextResponse, type NextRequest } from 'next/server'
 
 // POST /api/extension/coupon-box-save — the extension background proposes a
@@ -54,6 +56,31 @@ type SaveAnswer =
       }
 
 type BudgetReason = `${BoxBudgetScope}_budget`
+
+// How often real boxes are refused is worth seeing (the selector gates are
+// strict on purpose, T-6221), without a message per request: ONE Sentry
+// message per hour per process, with the host only, never a selector value.
+const REFUSAL_REPORT_INTERVAL_MS = 60 * 60 * 1000
+let nextRefusalReportAt = 0
+
+function reportInvalidSelector(raw: unknown): void {
+    const now = Date.now()
+    if (now < nextRefusalReportAt) return
+    nextRefusalReportAt = now + REFUSAL_REPORT_INTERVAL_MS
+    const rawHost =
+        typeof raw === 'object' && raw !== null && 'host' in raw
+            ? raw.host
+            : undefined
+    const host = couponBoxDomainSchema.safeParse(rawHost)
+    Sentry.captureMessage('coupon-box-save refused a save: invalid_selector', {
+        level: 'info',
+        tags: {
+            route: 'extension/coupon-box-save',
+            reason: 'invalid_selector',
+        },
+        extra: { host: host.success ? host.data : null },
+    })
+}
 
 function json(body: SaveAnswer, status: number) {
     return NextResponse.json(body, { status, headers: NO_STORE })
@@ -107,10 +134,12 @@ async function handleSave(
     try {
         raw = JSON.parse(body.text)
     } catch {
+        reportInvalidSelector(null)
         return json({ saved: false, reason: 'invalid_selector' }, 400)
     }
     const parsed = couponBoxSaveRequestSchema.safeParse(raw)
     if (!parsed.success) {
+        reportInvalidSelector(raw)
         return json({ saved: false, reason: 'invalid_selector' }, 400)
     }
     const { host, box } = parsed.data

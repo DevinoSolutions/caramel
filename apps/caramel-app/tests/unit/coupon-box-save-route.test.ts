@@ -410,6 +410,35 @@ describe('POST /api/extension/coupon-box-save', () => {
         expect(proposals).toHaveLength(0)
     })
 
+    it('2. a refused save reports to Sentry once an hour per process, with the host and no selector value', async () => {
+        vi.useFakeTimers({ toFake: ['Date'] })
+        try {
+            vi.setSystemTime(Date.now() + 10 * 24 * 60 * 60 * 1000)
+            sentry.captureMessage.mockClear()
+            await post(goodBody({ apply: 'button.btn', input: '#secret-id' }))
+            await post(goodBody({ apply: 'button.btn' }))
+            expect(sentry.captureMessage).toHaveBeenCalledTimes(1)
+            const [, options] = sentry.captureMessage.mock.calls[0]!
+            expect(options).toMatchObject({
+                level: 'info',
+                tags: { reason: 'invalid_selector' },
+                extra: { host: 'www.shop-example.com' },
+            })
+            expect(
+                JSON.stringify(sentry.captureMessage.mock.calls),
+            ).not.toContain('secret-id')
+
+            vi.setSystemTime(Date.now() + 61 * 60 * 1000)
+            await post('{nope')
+            expect(sentry.captureMessage).toHaveBeenCalledTimes(2)
+            expect(sentry.captureMessage.mock.calls[1]![1]).toMatchObject({
+                extra: { host: null },
+            })
+        } finally {
+            vi.useRealTimers()
+        }
+    })
+
     it('a body over 4 KiB: 413 too_large', async () => {
         const res = await post(goodBody({ input: `#${'a'.repeat(5000)}` }))
 

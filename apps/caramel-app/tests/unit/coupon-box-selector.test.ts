@@ -351,6 +351,30 @@ describe('apply and toggle selectors must name a coupon (allowlist) as well as p
         expect(acceptedForClick(selector)).toBe(true)
     })
 
+    it.each([
+        '#apply-payment',
+        '[data-complete-promo]',
+        '[data-apply-order]',
+        '[data-coupon-order]',
+        '[aria-label="Gift card payment"]',
+        'button.applyPayment',
+        'button.coupon-complete',
+        // A coupon word does not exempt these (only `checkout` has that).
+        '#checkout-coupon-order',
+    ])('refuses payment / order / complete in a name: %s', selector => {
+        expect(isRiskyControlSelector(selector)).toBe(true)
+        expect(acceptedForClick(selector)).toBe(false)
+    })
+
+    it.each([
+        // `submit` alone stays allowed: a real apply button.
+        '#promo-code-submit',
+        'button.coupon-submit',
+        'button[data-testid="apply-promo-submit"]',
+    ])('still accepts a submit-named coupon control: %s', selector => {
+        expect(acceptedForClick(selector)).toBe(true)
+    })
+
     it('a coupon word does not rescue a control the denylist refuses', () => {
         for (const selector of [
             'button.apply[type=submit]',
