@@ -28,3 +28,4 @@
   - per-coupon hourly velocity buckets (10 established, 5 low-trust);
   - an additive index migration.
   review-trust APPROVED on its third pass (0432d53). 794f7b6 is a clean merge of main. Product effect: the prod Verified rate will drop. Prod is NOT deployed: it waits on the B25 go (migrations).
+- `pr461-checks-green.png`: https://github.com/DevinoSolutions/caramel/pull/461 at head b3c3632, in a fresh unnamed headed clone at 19:5xZ. The merge box says "All checks have passed, 1 skipped, 11 successful" and "No conflicts with base branch". Merged as 1221ce5. This is T-5446 option D: 98 characterization tests for coupon-runner.js and UI-helpers.js, tests only. The file split is blocked on the size-gate decision (A or B, escalated to MASTER). review-5446 APPROVED.
