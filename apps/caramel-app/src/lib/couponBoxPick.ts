@@ -23,6 +23,7 @@ import { createCouponBoxAnswerCache } from '@/lib/couponBoxPickAnswerCache'
 import { env } from '@/lib/env'
 import { firstJsonObject } from '@/lib/llmJson'
 import { chat } from '@/lib/openrouter'
+import { proxyFallbackHeaders } from '@/lib/proxy-fallback-env'
 import * as Sentry from '@sentry/nextjs'
 import { z } from 'zod'
 
@@ -776,11 +777,22 @@ export async function pickCouponBox(
                 // field: a provider that rejects it turns every pick into
                 // no_pick, which the eval reports as red.
                 reasoningEffort: 'low',
-                // Pins the exact model on a relay that would otherwise fall
-                // back to another one; ignored by a provider that does not
-                // know it.
-                headers: { 'X-ORF-Strict': '1' },
-                // No paid-fallback headers: the route is guest-reachable (extension Origin gate only).
+                // X-ORF-Strict pins the exact model on a relay that would
+                // otherwise fall back to another free one; ignored by a
+                // provider that does not know it. The paid-fallback headers
+                // (Aladdin approved 2026-10-23, reversing the #346 rule that
+                // kept the paid key off this guest-reachable route) let the
+                // proxy answer on Caramel's own OpenRouter key when the free
+                // host is slow or down. The spend is bounded three ways: the
+                // daily model-call cap above (COUPON_BOX_PICK_DAILY_CAP), the
+                // per-call budget, and the key's own $5/week limit at
+                // OpenRouter. No key set = no headers, behaviour unchanged.
+                // TIMEOUT_MS must stay at or above
+                // MIN_PAID_PATH_DEADLINE_SECONDS, pinned by a test.
+                headers: {
+                    ...proxyFallbackHeaders(env.OPENROUTER_API_URL),
+                    'X-ORF-Strict': '1',
+                },
             },
         )
     } catch (error) {

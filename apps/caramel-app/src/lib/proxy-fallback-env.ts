@@ -11,15 +11,15 @@ import {
     isDevinoProxyUrl,
 } from './proxy-fallback-headers'
 
-// Caramel: no production caller sends these headers today. Both LLM routes
-// (classify-cart, coupon-box-pick) are guest-reachable, and guests never get
-// the paid path. Kept because every Devino app carries this reader; a future
-// signed-in caller with a deadline of at least MIN_PAID_PATH_DEADLINE_SECONDS
-// wires in here, with fetchWithoutRedirects on its request.
+// Caramel: the coupon-box pick (src/lib/couponBoxPick.ts) is the one caller,
+// approved by Aladdin 2026-10-23 for that guest-reachable route behind its
+// daily model-call cap and the key's own weekly limit. classify-cart sends
+// none. A caller needs a deadline of at least MIN_PAID_PATH_DEADLINE_SECONDS
+// and a request that follows no redirect (chat() does both for the box pick).
 
 let warnedOffProxy = false
 
-/** The fallback headers for a signed-in user's request to `baseUrl`. */
+/** The fallback headers for a request to `baseUrl` (no key or off the proxy: none). */
 export function proxyFallbackHeaders(
     baseUrl: string | undefined,
 ): Record<string, string> {

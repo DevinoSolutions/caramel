@@ -226,8 +226,8 @@ const serverObjectSchema = z.object({
     ),
     // Paid fallback through the Devino proxy (src/lib/proxy-fallback-headers.ts):
     // the app's OWN OpenRouter org key, sent as X-ORF-Fallback-Key only to
-    // https://proxyai.devino.ca and only for a signed-in caller; no request
-    // sends it today (src/lib/proxy-fallback-env.ts). The wait before it goes
+    // https://proxyai.devino.ca and only by the coupon-box pick, the one
+    // caller (src/lib/proxy-fallback-env.ts). The wait before it goes
     // paid is at most 12 s. Unset = no header, behaviour
     // unchanged. Blank is fine; a malformed value refuses boot here (the
     // message names the variable, never the value) because a key with a
