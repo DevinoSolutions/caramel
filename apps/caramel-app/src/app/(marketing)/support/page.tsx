@@ -59,8 +59,8 @@ export default async function SupportPage() {
                     </h1>
                     <p className="mx-auto max-w-md text-gray-600 dark:text-gray-300">
                         Tell us what is blocking you, or send an idea or a
-                        question. Tick &ldquo;I&apos;d like a reply&rdquo; and
-                        a human replies within 1 business day.
+                        question. Tick &ldquo;I&apos;d like a reply&rdquo; and a
+                        human replies within 1 business day.
                     </p>
                 </div>
                 <SupportForm accountEmail={accountEmail} />
