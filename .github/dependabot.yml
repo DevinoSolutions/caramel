@@ -26,10 +26,13 @@ updates:
     cooldown:
       default-days: 2 # security updates ignore the cooldown
     ignore:
-      # 1.7 is a schema migration that fails the minor group's CI; it gets its own
-      # upgrade (T-6596), which drops this entry. Security updates are not affected.
+      # Each needs its own upgrade, which drops its entry; security updates are not affected.
+      # better-auth 1.7 is a schema migration that fails the minor group's CI (T-6596).
       - dependency-name: 'better-auth'
         versions: ['>=1.7.0']
+      # prettier-plugin-tailwindcss 0.7+ mis-sorts Tailwind 3 variants; it goes with Tailwind 4 (T-6598).
+      - dependency-name: 'prettier-plugin-tailwindcss'
+        versions: ['>=0.7.0']
     groups:
       npm-security:
         applies-to: security-updates
@@ -60,6 +63,11 @@ updates:
       interval: 'weekly'
       day: 'monday'
     open-pull-requests-limit: 10
+    ignore:
+      # Odd Node majors are never LTS (25 is already end-of-life). The image moves
+      # to the next even LTS together with CI's setup-node `node-version`.
+      - dependency-name: 'node'
+        versions: ['25.x', '27.x']
   - package-ecosystem: 'pip' # apps/caramel-extension/brand/requirements-icons.txt
     directory: '/apps/caramel-extension/brand'
     schedule:
