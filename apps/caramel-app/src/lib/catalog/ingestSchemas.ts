@@ -124,16 +124,19 @@ const IngestSourceSchema = z.object({
 })
 
 // Request-body ceiling for POST /api/ingest/catalog (withRoute maxBodyBytes),
-// the one route that takes a bulk push. The design maximum is a 23k-coupon push
-// (applyCatalogRows.ts, docs/INGEST.md). A generously padded row is ~1 KB of
-// JSON (tests/unit/withRoute-body-cap.test.ts builds one and measures the 23k
-// push at well under half of this), so 64 MiB leaves more than 2x headroom.
-// TODO: the pushing pipeline is the external Python service (not in this repo),
-// so its real batch size is unverified here; if it ever pushes more than ~60k
-// rows in ONE request, split the push or raise this with the number measured.
-// The cap sits behind the INGEST_API_KEY bearer, so only the supplier (or a
-// leaked key) can reach it.
-export const INGEST_CATALOG_MAX_BODY_BYTES = 64 * 1024 * 1024
+// the one route that takes a bulk push. It equals the ceiling Next itself
+// enforces on EVERY request body (next.config `experimental.proxyClientMaxBodySize`,
+// 4mb): past that, Next truncates the body before any route sees it, so a
+// larger number here would be a claim nothing honours. tests/unit/
+// withRoute-body-cap.test.ts reads next.config and fails if the two drift.
+// Sized from the real producer, measured 2026-10-20 (next.config comment): the
+// coupon pipeline pushes in chunks, a 1000-row store-config chunk is ~0.45 MB
+// (1 MB worst case), so 4 MiB keeps ~4x headroom. A push of more rows than that
+// in ONE request must be split by the producer (applyCatalogRows itself has no
+// row limit; its design maximum is 23k coupons, docs/INGEST.md). The cap sits
+// behind the INGEST_API_KEY bearer, so only the supplier (or a leaked key) can
+// reach it.
+export const INGEST_CATALOG_MAX_BODY_BYTES = 4 * 1024 * 1024
 
 // Array ceilings: ~4x the 23k design maximum for coupons, and far above any
 // real store/source count. They bound the work one push can ask for.

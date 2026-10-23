@@ -119,7 +119,13 @@ const bearerFailureLimiter = new RateLimiterMemory(BEARER_FAILURE)
  * Sentry + PostHog once), so a key-guessing run is visible, not just slow.
  * The throttle is on the response: it cannot stop a correct guess from
  * passing, which is why the secrets must be long and random (not verified
- * here; see T-6230).
+ * here; see T-6230). It also keys on the exact IP string, so a caller with a
+ * whole IPv6 /64 gets a fresh budget per address: it slows guessing, key
+ * strength is what protects the endpoint.
+ *
+ * Unlike checkRateLimit this does NOT fail open: an unexpected limiter fault
+ * throws (a 500 to a caller who was already failing auth, reported to Sentry),
+ * rather than silently waving failed attempts through uncounted.
  */
 export async function checkBearerFailureLimit(
     req: NextRequest,

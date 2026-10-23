@@ -283,7 +283,14 @@ export function withRoute<TBody = undefined>(
             const read = await readBodyCapped(
                 req,
                 config.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES,
-            ).catch(() => null)
+            ).catch((error: unknown) => {
+                console.warn(
+                    `[withRoute] ${config.routeName}: request body stream failed: ${
+                        error instanceof Error ? error.message : String(error)
+                    }`,
+                )
+                return null
+            })
             if (!read) {
                 return withCors(
                     NextResponse.json(
@@ -309,8 +316,8 @@ export function withRoute<TBody = undefined>(
             let raw: unknown
             try {
                 raw = JSON.parse(read.text)
-            } catch (error) {
-                if (!(error instanceof SyntaxError)) throw error
+            } catch {
+                // JSON.parse only ever throws SyntaxError; see above.
                 raw = undefined
             }
             const parsed = config.body.safeParse(raw ?? {})

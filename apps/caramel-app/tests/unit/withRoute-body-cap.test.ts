@@ -4,6 +4,8 @@ import {
     IngestCatalogPayloadSchema,
 } from '@/lib/catalog/ingestSchemas'
 import { NextRequest, NextResponse } from 'next/server'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 
@@ -177,10 +179,11 @@ describe('withRoute — request body cap (T-6223)', () => {
         )
     })
 
-    it('answers 400 (not a 500) when the body stream errors mid-read', async () => {
+    it('answers 400 (not a 500) when the body stream errors mid-read, and logs why', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
         const handler = vi.fn(async () => NextResponse.json({ ok: true }))
         const route = withRoute(
-            { method: 'POST', routeName: 'test', body: Schema },
+            { method: 'POST', routeName: 'test/stream', body: Schema },
             handler,
         )
         const stream = new ReadableStream<Uint8Array>({
@@ -191,6 +194,10 @@ describe('withRoute — request body cap (T-6223)', () => {
         const res = await route(jsonRequest(stream))
         expect(res.status).toBe(400)
         expect(handler).not.toHaveBeenCalled()
+        expect(warn).toHaveBeenCalledWith(
+            expect.stringContaining('test/stream'),
+        )
+        warn.mockRestore()
     })
 
     it('unparseable JSON still falls through to the schema as {} (lenient schema -> 200)', async () => {
@@ -201,6 +208,22 @@ describe('withRoute — request body cap (T-6223)', () => {
         const res = await route(jsonRequest('not json {{{'))
         expect(res.status).toBe(200)
         expect(await res.json()).toEqual({ body: {} })
+    })
+
+    it('parses a body that starts with a UTF-8 BOM, as req.json() did', async () => {
+        const route = withRoute(
+            { method: 'POST', routeName: 'test', body: Schema },
+            async ({ body }) => NextResponse.json({ body }),
+        )
+        const bytes = new Uint8Array(
+            Buffer.concat([
+                Buffer.from([0xef, 0xbb, 0xbf]),
+                Buffer.from('{"name":"x"}'),
+            ]),
+        )
+        const res = await route(jsonRequest(bytes))
+        expect(res.status).toBe(200)
+        expect(await res.json()).toEqual({ body: { name: 'x' } })
     })
 
     it('a route that declares no body never reads the stream', async () => {
@@ -216,37 +239,23 @@ describe('withRoute — request body cap (T-6223)', () => {
 })
 
 describe('ingest/catalog cap (T-6223)', () => {
-    it('is larger than the default and fits the 23k-row design maximum with fully padded rows', () => {
+    it('is larger than the default, and never above the ceiling Next itself enforces on every body', () => {
         expect(INGEST_CATALOG_MAX_BODY_BYTES).toBeGreaterThan(
             DEFAULT_MAX_BODY_BYTES,
         )
-        const fatRow = (i: number) => ({
-            id: String(800_000_000 + i),
-            code: 'SAVE'.padEnd(24, 'X'),
-            site: 'a-fairly-long-store-name.example.com',
-            title: 't'.repeat(120),
-            description: 'd'.repeat(400),
-            rating: 4.5,
-            discount_type: 'PERCENTAGE',
-            discount_amount: 15,
-            expiry: '2026-12-31T23:59:59.000Z',
-            expired: false,
-            times_used: 12345,
-            last_time_used: '2026-10-21T12:00:00.000Z',
-            status: 'valid',
-            verification_message: 'v'.repeat(200),
-            created_at: '2026-01-01T00:00:00.000Z',
-            updated_at: '2026-10-21T12:00:00.000Z',
-            new_customers_only: false,
-        })
-        const bytes = Buffer.byteLength(
-            JSON.stringify({
-                coupons: Array.from({ length: 23_000 }, (_, i) => fatRow(i)),
-            }),
+        // next.config.mjs `experimental.proxyClientMaxBodySize: '4mb'`: past it
+        // Next truncates the body before any route runs, so a larger route cap
+        // would be unreachable. Read as text: next.config is not importable.
+        const config = readFileSync(
+            resolve(__dirname, '../../next.config.mjs'),
+            'utf8',
         )
-        // The comment on INGEST_CATALOG_MAX_BODY_BYTES claims ~1 KB a row and
-        // >2x headroom at the design maximum; this is the number behind it.
-        expect(bytes).toBeLessThan(INGEST_CATALOG_MAX_BODY_BYTES / 2)
+        const match = /proxyClientMaxBodySize:\s*'(\d+)mb'/.exec(config)
+        expect(match, 'next.config.mjs proxyClientMaxBodySize').not.toBeNull()
+        const nextCeilingBytes = Number(match?.[1]) * 1024 * 1024
+        expect(INGEST_CATALOG_MAX_BODY_BYTES).toBeLessThanOrEqual(
+            nextCeilingBytes,
+        )
     })
 
     it('the payload schema refuses an array past its ceiling', () => {
