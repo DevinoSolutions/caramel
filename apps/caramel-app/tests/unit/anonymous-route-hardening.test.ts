@@ -283,14 +283,11 @@ describe('POST /api/sources — bounded, normalized request (T-6225)', () => {
         ['https://a..b'],
         ['zzz1.xx'],
         ['co.uk'],
-    ])(
-        'an implausible host (%s) keeps the pre-existing 400',
-        async website => {
-            const res = await sourcesPOST(post('/api/sources', { website }))
-            expect(res.status).toBe(400)
-            expect(repo.requestSource).not.toHaveBeenCalled()
-        },
-    )
+    ])('an implausible host (%s) keeps the pre-existing 400', async website => {
+        const res = await sourcesPOST(post('/api/sources', { website }))
+        expect(res.status).toBe(400)
+        expect(repo.requestSource).not.toHaveBeenCalled()
+    })
 
     it('a duplicate request is answered exactly like a fresh one (nothing to probe)', async () => {
         const fresh = await sourcesPOST(

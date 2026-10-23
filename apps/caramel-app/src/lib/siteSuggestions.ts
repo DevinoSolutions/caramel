@@ -119,7 +119,7 @@ export function normalizeSuggestedDomain(rawUrl: string): string | null {
             .toLowerCase()
             // `store.com.` is the same host as `store.com`; kept, it would
             // dodge the per-(domain, requester) dedupe (T-6224).
-            .replace(/.$/, '')
+            .replace(/\.$/, '')
     } catch {
         return null
     }

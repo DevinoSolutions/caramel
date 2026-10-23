@@ -36,8 +36,7 @@ let quotas = createQuotas()
 export type AnonymousWriteRoute = keyof ReturnType<typeof createQuotas>
 
 export type AnonymousWriteQuota =
-    | { allowed: true }
-    | { allowed: false; retryAfterSec: number }
+    { allowed: true } | { allowed: false; retryAfterSec: number }
 
 /** Spend one write from this caller's hourly quota for `route`. */
 export async function consumeAnonymousWriteQuota(
