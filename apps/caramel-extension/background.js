@@ -406,8 +406,11 @@ async function couponBoxPick({ domain, outline }) {
  * document, never the message's: a page cannot save a box for another site.
  * Sent only while the server's couponBoxSave flag is on, and once per host per
  * browser session. The body is the box's selectors and the host: no code, no
- * price, nothing about the shopper. Answers { saved, reason } or { skipped } /
- * { error }; nothing here reaches the shopper. */
+ * price, nothing about the shopper. Signed-in shoppers only (T-6221): the
+ * server answers 401 to a request with no session, and a saved box is served
+ * to other installs only once several signed-in shoppers sent the same one.
+ * Answers { saved, reason } or { skipped } / { error }; nothing here reaches
+ * the shopper. */
 const COUPON_BOX_SAVED_KEY = 'caramel_box_saved'
 const _boxSaveHosts = new Set()
 const BOX_PARTS = ['input', 'apply', 'toggle', 'total']
@@ -463,27 +466,27 @@ async function couponBoxSave({ box }, sender) {
         logError('features', err)
     }
     if (!on) return { skipped: 'disabled' }
+    if (!(await getStoredToken())) return { skipped: 'signed-out' }
     const saved = await _boxSavedHosts()
     if (_boxSaveHosts.has(host) || saved.includes(host))
         return { skipped: 'already sent' }
     _boxSaveHosts.add(host)
     let r
     try {
-        r = await fetchWithTimeout(
-            caramelUrl('api/extension/coupon-box-save'),
-            {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ host, box: body }),
-            },
-        )
+        r = await fetchCaramelApi(caramelUrl('api/extension/coupon-box-save'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ host, box: body }),
+        })
     } catch (err) {
         // Never reached the server: the next confirmed run may try again.
         _boxSaveHosts.delete(host)
         return { error: String(err) }
     }
     const j = await r.json().catch(() => ({}))
-    if (r.status === 429 || r.status >= 500) {
+    // 401: the token expired or was revoked; sign-in, not this host, is the
+    // problem, so the host stays free for the next confirmed run.
+    if (r.status === 401 || r.status === 429 || r.status >= 500) {
         _boxSaveHosts.delete(host)
         return { error: `HTTP ${r.status}` }
     }

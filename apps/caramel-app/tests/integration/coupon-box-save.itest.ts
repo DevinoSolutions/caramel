@@ -1,6 +1,15 @@
 import { NextRequest } from 'next/server'
 import { randomUUID } from 'node:crypto'
-import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
+import {
+    afterAll,
+    afterEach,
+    beforeAll,
+    beforeEach,
+    describe,
+    expect,
+    it,
+    vi,
+} from 'vitest'
 
 // POST /api/extension/coupon-box-save against the REAL prisma client and a
 // live Postgres (the harness runs `prisma migrate deploy` first). Proves the
@@ -10,17 +19,34 @@ import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 // saved row whole (whatever its updated_at), and pipeline-on-pipeline upserts
 // behave as before. Test stores are `cbsave-<uuid>.com`, test coupons use the
 // private 8100xxxxx id range; both are deleted after each test.
+//
+// T-6221: a save is a PROPOSAL by a signed-in user, served only once
+// COUPON_BOX_SAVE_MIN_AGREEING_INSTALLS distinct users proposed the same box.
+// `save` is one user's POST; `publish` is enough distinct users' POSTs to
+// reach that quorum. Test users are `cbsave-<uuid>@example.com`.
 
-// MOCK (announced): env (the save switch on; the env singleton is parsed
-// once at import) and the rate limiter (the concurrency case posts twice from
-// one client).
+// MOCK (announced): env (the save switch on, the caps adjustable per test; the
+// env singleton is parsed once at import), the rate limiter (the concurrency
+// case posts several times from one client), and better-auth's session lookup
+// (a real one needs a sign-in round trip; the test names the user in the
+// `x-test-user` header, and prisma, the FK and every count below are real).
+const { envMock, getSessionMock } = vi.hoisted(() => ({
+    envMock: {} as Record<string, unknown>,
+    getSessionMock: vi.fn(
+        async (opts: { headers: Headers }): Promise<unknown> => {
+            const id = opts.headers.get('x-test-user')
+            return id ? { user: { id }, session: { id: 'itest' } } : null
+        },
+    ),
+}))
 vi.mock('@/lib/env', async importOriginal => {
     const actual = await importOriginal<typeof import('@/lib/env')>()
-    return {
-        ...actual,
-        env: { ...actual.env, COUPON_BOX_SAVE_ENABLED: true },
-    }
+    Object.assign(envMock, actual.env, { COUPON_BOX_SAVE_ENABLED: true })
+    return { ...actual, env: envMock }
 })
+vi.mock('@/lib/auth/auth', () => ({
+    auth: { api: { getSession: getSessionMock } },
+}))
 vi.mock('@/lib/rateLimit', async importOriginal => {
     const actual = await importOriginal<typeof import('@/lib/rateLimit')>()
     return { ...actual, checkRateLimit: vi.fn(async () => null) }
@@ -33,6 +59,7 @@ import {
     applyCatalogRows,
 } from '@/lib/catalog/applyCatalogRows'
 import type { IngestCatalogPayload } from '@/lib/catalog/ingestSchemas'
+import { recordBoxProposal } from '@/lib/couponBoxSave'
 import { VISIBLE_COUPON_STATUSES } from '@/lib/coupons'
 import { listSupportedStoreConfigs } from '@/lib/couponsRepo'
 import prisma from '@/lib/prisma'
@@ -90,6 +117,8 @@ function pushConfigs(storeConfigs: IngestStoreConfig[]) {
     })
 }
 
+const QUORUM = 3
+
 const BOX = {
     input: 'input#promo-code',
     apply: 'button[name="apply_coupon"]',
@@ -97,14 +126,45 @@ const BOX = {
     total: '.order-total',
 }
 
-function save(host: string, box: Record<string, unknown> = BOX) {
+const userIds: string[] = []
+
+async function newUser(): Promise<string> {
+    const user = await prisma.user.create({
+        data: { email: `cbsave-${randomUUID()}@example.com` },
+    })
+    userIds.push(user.id)
+    return user.id
+}
+
+/** One signed-in user's POST (`userId` null = no credential at all). */
+function save(
+    host: string,
+    box: Record<string, unknown> = BOX,
+    userId: string | null = defaultUserId,
+) {
+    const headers: Record<string, string> = {
+        'content-type': 'application/json',
+        origin: EXT_ORIGIN,
+    }
+    if (userId) headers['x-test-user'] = userId
     return POST(
         new NextRequest('http://localhost/api/extension/coupon-box-save', {
             method: 'POST',
-            headers: { 'content-type': 'application/json', origin: EXT_ORIGIN },
+            headers,
             body: JSON.stringify({ host, box }),
         }),
     )
+}
+
+/** QUORUM distinct users save the same box; the last answer is returned (the
+ * one that publishes it). */
+async function publish(host: string, box: Record<string, unknown> = BOX) {
+    let last: Response | null = null
+    for (let i = 0; i < QUORUM; i++) {
+        last = await save(host, box, await newUser())
+    }
+    if (!last) throw new Error('QUORUM is 0')
+    return last
 }
 
 async function storedRow(storeName: string) {
@@ -119,7 +179,12 @@ async function supportedEntry(storeName: string) {
     return parsed.supported.find(entry => entry.domain === storeName)
 }
 
+let defaultUserId = ''
+
 async function cleanup() {
+    await prisma.couponBoxProposal.deleteMany({
+        where: { storeName: { contains: 'cbsave-' } },
+    })
     await prisma.coupon.deleteMany({ where: { id: { startsWith: '8100' } } })
     await prisma.storeConfig.deleteMany({
         where: { storeName: { contains: 'cbsave-' } },
@@ -127,9 +192,19 @@ async function cleanup() {
     resetSupportedStoresCache()
 }
 
+beforeAll(async () => {
+    defaultUserId = await newUser()
+})
+beforeEach(() => {
+    envMock.COUPON_BOX_SAVE_MIN_AGREEING_INSTALLS = QUORUM
+    envMock.COUPON_BOX_SAVE_USER_DAILY_CAP = 10
+    envMock.COUPON_BOX_SAVE_STORE_DAILY_CAP = 20
+    envMock.COUPON_BOX_SAVE_GLOBAL_DAILY_CAP = 500
+})
 afterEach(cleanup)
 afterAll(async () => {
     await cleanup()
+    await prisma.user.deleteMany({ where: { id: { in: userIds } } })
     await prisma.$disconnect()
 })
 
@@ -139,9 +214,13 @@ describe('coupon-box save: the saved row is served like a pipeline row, marked s
         const pipeline = newStore()
         await knownStore(saved)
 
-        const res = await save(`www.${saved}`)
+        const res = await publish(`www.${saved}`)
         expect(res.status).toBe(200)
-        expect(await res.json()).toEqual({ saved: true, store: saved })
+        expect(await res.json()).toEqual({
+            saved: true,
+            store: saved,
+            status: 'published',
+        })
 
         const pushed = await pushConfigs([
             {
@@ -191,7 +270,7 @@ describe('coupon-box save: the saved row is served like a pipeline row, marked s
         const store = newStore()
         await knownStore(store)
 
-        const res = await save(`checkout.${store}`, {
+        const res = await publish(`checkout.${store}`, {
             input: '#discount',
             apply: null,
             toggle: null,
@@ -260,6 +339,11 @@ describe('coupon-box save: a store with a config refuses it', () => {
         const res = await save(store)
         expect(res.status).toBe(409)
         expect(await storedRow(store)).toBeNull()
+        expect(
+            await prisma.couponBoxProposal.count({
+                where: { storeName: store },
+            }),
+        ).toBe(0)
     })
 
     it('an unserved pipeline row (no apply selector) is never overwritten: 409 has_config', async () => {
@@ -269,7 +353,7 @@ describe('coupon-box save: a store with a config refuses it', () => {
             { store_name: store, coupon_input_xpath: '#only-input' },
         ])
 
-        const res = await save(store)
+        const res = await publish(store)
         expect(res.status).toBe(409)
         const row = await storedRow(store)
         expect(row?.couponInputXpath).toBe('#only-input')
@@ -277,15 +361,33 @@ describe('coupon-box save: a store with a config refuses it', () => {
         expect(row?.origin).toBeNull()
     })
 
-    it('two saves racing for one store: exactly one wins, the other is has_config', async () => {
+    // Calls recordBoxProposal directly: the race is in the database, and
+    // requests racing through withRoute's lazy session import are a test-harness
+    // artifact (vitest hands some of them the real better-auth module).
+    it('the proposals that reach the quorum racing: exactly one publishes, none fails, and one row exists', async () => {
         const store = newStore()
         await knownStore(store)
+        const users = await Promise.all(
+            Array.from({ length: QUORUM }, () => newUser()),
+        )
 
-        const answers = await Promise.all([
-            save(store),
-            save(`www.${store}`, { ...BOX, input: '#other-input' }),
-        ])
-        expect(answers.map(r => r.status).sort()).toEqual([200, 409])
+        const outcomes = await Promise.all(
+            users.map(userId =>
+                recordBoxProposal({
+                    storeName: store,
+                    host: store,
+                    box: BOX,
+                    userId,
+                }),
+            ),
+        )
+
+        expect(outcomes.filter(o => o.kind === 'published')).toHaveLength(1)
+        expect(
+            outcomes.every(o =>
+                ['published', 'pending', 'has_config'].includes(o.kind),
+            ),
+        ).toBe(true)
         expect(
             await prisma.storeConfig.count({ where: { storeName: store } }),
         ).toBe(1)
@@ -309,8 +411,12 @@ describe('coupon-box save: a store with a config refuses it', () => {
         await knownStore(parent)
         await knownStore(child)
 
-        const res = await save(`www.${child}`)
-        expect(await res.json()).toEqual({ saved: true, store: child })
+        const res = await publish(`www.${child}`)
+        expect(await res.json()).toEqual({
+            saved: true,
+            store: child,
+            status: 'published',
+        })
         expect(await storedRow(parent)).toBeNull()
     })
 })
@@ -320,7 +426,7 @@ describe('applyCatalogRows: a pipeline push replaces a saved row whole', () => {
         const saved = newStore()
         const pipeline = newStore()
         await knownStore(saved)
-        expect((await save(saved)).status).toBe(200)
+        expect((await publish(saved)).status).toBe(200)
         await pushConfigs([
             {
                 store_name: pipeline,
@@ -372,7 +478,7 @@ describe('applyCatalogRows: a pipeline push replaces a saved row whole', () => {
     it('once replaced, the store is a pipeline store: the only-if-newer rule applies again and no save is accepted', async () => {
         const store = newStore()
         await knownStore(store)
-        expect((await save(store)).status).toBe(200)
+        expect((await publish(store)).status).toBe(200)
         await pushConfigs([
             {
                 store_name: store,
@@ -416,8 +522,8 @@ describe('coupon-box save: a saved box expires', () => {
         const fresh = newStore()
         await knownStore(expired)
         await knownStore(fresh)
-        expect((await save(expired)).status).toBe(200)
-        expect((await save(fresh)).status).toBe(200)
+        expect((await publish(expired)).status).toBe(200)
+        expect((await publish(fresh)).status).toBe(200)
 
         await backdate(expired, daysAgo(AUTO_DETECT_CONFIG_MAX_AGE_DAYS + 1))
         await backdate(fresh, daysAgo(AUTO_DETECT_CONFIG_MAX_AGE_DAYS - 1))
@@ -432,17 +538,21 @@ describe('coupon-box save: a saved box expires', () => {
     it('an expired saved box is replaced whole by the next proven save', async () => {
         const store = newStore()
         await knownStore(store)
-        expect((await save(store)).status).toBe(200)
+        expect((await publish(store)).status).toBe(200)
         await backdate(store, daysAgo(AUTO_DETECT_CONFIG_MAX_AGE_DAYS + 5))
 
-        const res = await save(`www.${store}`, {
+        const res = await publish(`www.${store}`, {
             input: '#new-code',
             apply: null,
             toggle: null,
             total: '.new-total',
         })
         expect(res.status).toBe(200)
-        expect(await res.json()).toEqual({ saved: true, store })
+        expect(await res.json()).toEqual({
+            saved: true,
+            store,
+            status: 'published',
+        })
 
         const row = await storedRow(store)
         expect(row).toMatchObject({
@@ -465,13 +575,59 @@ describe('coupon-box save: a saved box expires', () => {
     it('a saved box still inside the max age refuses a second save and is not touched', async () => {
         const store = newStore()
         await knownStore(store)
-        expect((await save(store)).status).toBe(200)
+        expect((await publish(store)).status).toBe(200)
         await backdate(store, daysAgo(AUTO_DETECT_CONFIG_MAX_AGE_DAYS - 1))
         const before = await storedRow(store)
 
         const res = await save(store, { ...BOX, input: '#other' })
         expect(res.status).toBe(409)
         expect(await storedRow(store)).toEqual(before)
+    })
+
+    it('RENEWAL: after the box and its proposals age out, the same users saving the same box again re-publish it', async () => {
+        const store = newStore()
+        await knownStore(store)
+        const users = await Promise.all(
+            Array.from({ length: QUORUM }, () => newUser()),
+        )
+        const saveAll = async () => {
+            const answers: Response[] = []
+            for (const id of users) answers.push(await save(store, BOX, id))
+            return answers
+        }
+        const first = await saveAll()
+        expect(await first[QUORUM - 1]!.json()).toMatchObject({
+            status: 'published',
+        })
+
+        // Everything ages past the max age: the served config and every
+        // user's proposal.
+        const aged = daysAgo(AUTO_DETECT_CONFIG_MAX_AGE_DAYS + 1)
+        await backdate(store, aged)
+        await prisma.couponBoxProposal.updateMany({
+            where: { storeName: store },
+            data: { createdAt: aged },
+        })
+        expect(await supportedEntry(store)).toBeUndefined()
+
+        // The same users, the same box (the same hash): each save renews its
+        // row, and the last one is the quorum again.
+        const again = await saveAll()
+        expect(await Promise.all(again.map(r => r.json()))).toMatchObject([
+            { status: 'pending' },
+            { status: 'pending' },
+            { status: 'published' },
+        ])
+        resetSupportedStoresCache()
+        expect(await supportedEntry(store)).toMatchObject({
+            domain: store,
+            savedBox: true,
+        })
+        expect(
+            await prisma.couponBoxProposal.count({
+                where: { storeName: store },
+            }),
+        ).toBe(QUORUM)
     })
 
     it('the max age never applies to a pipeline row: a two-year-old pipeline config is served and refuses a save', async () => {
@@ -536,6 +692,108 @@ describe('applyCatalogRows: pipeline-on-pipeline upserts are unchanged', () => {
             couponInputXpath: '#in-2',
             applyButtonXpath: '#ap-1',
             updatedAt: new Date('2026-03-02T00:00:00.000Z'),
+        })
+    })
+})
+
+describe('coupon-box save: a proposal is quarantined until distinct users agree (T-6221)', () => {
+    it('PAIR: one fewer than the quorum is recorded and NOT served; the quorum-th save serves it', async () => {
+        const store = newStore()
+        await knownStore(store)
+
+        for (let i = 0; i < QUORUM - 1; i++) {
+            const res = await save(store, BOX, await newUser())
+            expect(res.status).toBe(200)
+            expect(await res.json()).toMatchObject({ status: 'pending' })
+        }
+        resetSupportedStoresCache()
+        expect(await storedRow(store)).toBeNull()
+        expect(await supportedEntry(store)).toBeUndefined()
+
+        const last = await save(store, BOX, await newUser())
+        expect(await last.json()).toMatchObject({ status: 'published' })
+        resetSupportedStoresCache()
+        expect(await supportedEntry(store)).toMatchObject({
+            domain: store,
+            savedBox: true,
+        })
+    })
+
+    it('one user repeating the same save never reaches the quorum', async () => {
+        const store = newStore()
+        await knownStore(store)
+
+        for (let i = 0; i < QUORUM + 2; i++) await save(store)
+
+        expect(await storedRow(store)).toBeNull()
+        expect(
+            await prisma.couponBoxProposal.count({
+                where: { storeName: store },
+            }),
+        ).toBe(1)
+    })
+
+    it('a pending box from one squatter does not block the box real installs agree on', async () => {
+        const store = newStore()
+        await knownStore(store)
+        const squat = await save(store, { ...BOX, input: '#squat' })
+        expect(squat.status).toBe(200)
+
+        const real = await publish(store)
+
+        expect(await real.json()).toMatchObject({ status: 'published' })
+        expect((await storedRow(store))?.couponInputXpath).toBe(BOX.input)
+    })
+
+    it('a request with no credential is 401 and writes nothing', async () => {
+        const store = newStore()
+        await knownStore(store)
+
+        const res = await save(store, BOX, null)
+
+        expect(res.status).toBe(401)
+        expect(
+            await prisma.couponBoxProposal.count({
+                where: { storeName: store },
+            }),
+        ).toBe(0)
+    })
+})
+
+describe('coupon-box save: the daily write budget (T-6221)', () => {
+    it('the per-user cap: the user at the cap is 429 user_budget and writes nothing more', async () => {
+        envMock.COUPON_BOX_SAVE_USER_DAILY_CAP = 1
+        const first = newStore()
+        const second = newStore()
+        await knownStore(first)
+        await knownStore(second)
+        const user = await newUser()
+
+        expect((await save(first, BOX, user)).status).toBe(200)
+        const over = await save(second, BOX, user)
+
+        expect(over.status).toBe(429)
+        expect(await over.json()).toEqual({
+            saved: false,
+            reason: 'user_budget',
+        })
+        expect(
+            await prisma.couponBoxProposal.count({ where: { userId: user } }),
+        ).toBe(1)
+    })
+
+    it('the per-store cap: another user is 429 store_budget on that store', async () => {
+        envMock.COUPON_BOX_SAVE_STORE_DAILY_CAP = 1
+        const store = newStore()
+        await knownStore(store)
+
+        expect((await save(store, BOX, await newUser())).status).toBe(200)
+        const over = await save(store, BOX, await newUser())
+
+        expect(over.status).toBe(429)
+        expect(await over.json()).toEqual({
+            saved: false,
+            reason: 'store_budget',
         })
     })
 })

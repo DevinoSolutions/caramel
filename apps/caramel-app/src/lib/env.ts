@@ -181,6 +181,35 @@ const serverObjectSchema = z.object({
         .enum(['true', 'false'])
         .default('false')
         .transform(value => value === 'true'),
+    // Quarantine + write budget of the same route (T-6221). A saved box is a
+    // PROPOSAL until MIN_AGREEING_INSTALLS distinct signed-in users proposed
+    // the same box for the same store (couponBoxSave.recordBoxProposal); only
+    // then does it become a served store_configs row. Minimum 2 on purpose:
+    // 1 would put a single account back in control of what other installs
+    // click. Default 5, not 3: this counts ACCOUNTS, and an attacker needs only
+    // that many email signups, so every extra account is cost. The residual
+    // risk stays until accounts are weighted by age (TODO(T-6221) in
+    // couponBoxSave.ts recordBoxProposal). The three caps count NEW proposals in the last 24 hours: per
+    // user, per store, and across all callers; over a cap the route answers
+    // 429 and nothing is written. Non-negative integers; 0 = refuse every
+    // save on that axis. A blank value reads as unset (z.coerce would turn ''
+    // into 0 and silently switch saving off); garbage fails boot.
+    COUPON_BOX_SAVE_MIN_AGREEING_INSTALLS: z.preprocess(
+        v => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+        z.coerce.number().int().min(2).default(5),
+    ),
+    COUPON_BOX_SAVE_USER_DAILY_CAP: z.preprocess(
+        v => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+        z.coerce.number().int().min(0).default(10),
+    ),
+    COUPON_BOX_SAVE_STORE_DAILY_CAP: z.preprocess(
+        v => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+        z.coerce.number().int().min(0).default(20),
+    ),
+    COUPON_BOX_SAVE_GLOBAL_DAILY_CAP: z.preprocess(
+        v => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+        z.coerce.number().int().min(0).default(500),
+    ),
     OPENROUTER_API_KEY: z.string().optional(),
     // Base URL of the OpenAI-compatible chat API that openrouter.ts POSTs
     // `${OPENROUTER_API_URL}/chat/completions` to. Unset (or blank) =

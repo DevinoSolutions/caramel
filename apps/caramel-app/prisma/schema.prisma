@@ -103,6 +103,7 @@ model User {
   accounts          Account[]
   sessions          Session[]
   couponReports     CouponReport[]
+  couponBoxProposals CouponBoxProposal[]
   favoriteStores    FavoriteStore[]
   savingsEvents     SavingsEvent[]
   siteSuggestions   SiteSuggestion[]
@@ -502,4 +503,35 @@ enum Role {
   MODERATOR
   ADMIN
   SUPER_ADMIN
+}
+
+/// A coupon box one signed-in install proposed for a store with no config
+/// (POST /api/extension/coupon-box-save, T-6221). A proposal is NOT served: it
+/// becomes the store's store_configs row (couponBoxSave.recordBoxProposal) only
+/// once COUPON_BOX_SAVE_MIN_AGREEING_INSTALLS distinct users proposed the same
+/// (store, box). The composite PK is the dedup: one row per user per box, so
+/// one user repeating a save never counts twice. box_hash is a SHA-256 of the
+/// four selectors; the selectors are kept so a promotion needs no second source
+/// and an operator can see what was proposed. Also the write-budget ledger:
+/// the per-user, per-store and global daily caps count rows by created_at.
+/// TODO(T-6221): no retention sweep yet; rows older than
+/// AUTO_DETECT_CONFIG_MAX_AGE_DAYS no longer count toward a promotion and
+/// should be deleted by a scheduled job.
+model CouponBoxProposal {
+  storeName String   @map("store_name")
+  boxHash   String   @map("box_hash")
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  host      String
+  input     String
+  apply     String?
+  toggle    String?
+  total     String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@id([storeName, boxHash, userId])
+  @@index([userId, createdAt])
+  @@index([storeName, createdAt])
+  @@index([createdAt])
+  @@map("coupon_box_proposals")
 }
