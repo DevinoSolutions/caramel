@@ -9,3 +9,6 @@
 - t6744-pr431-merge-box.png: headed merge box of PR #431 (next 16.4.2, sharp>=0.35.5, dompurify 3.4.17 into dev), 13 checks green, before squash merge (07531fe)
 - `t6823-pr433-merge-box.png`: https://github.com/DevinoSolutions/caramel/pull/433 at head 52d13b4, fresh unnamed headed clone, ~04:05Z. The merge box says "All checks have passed, 1 skipped, 11 successful", no conflicts. Test-only fix for main's red unit job (#428's megabyte-website test vs #430's 64 KiB body cap: a 3000-char website is 422, a 1 MB body is 413). review-433 APPROVED. Merged as c5502c0 (T-6823).
 - t6744-pr432-merge-box.png: headed merge box of PR #432 (full dependabot.yml into main), 11 checks green incl. unit after #433, before squash merge
+- t6744-dev-07531fe-version.png: headed clone, https://dev.grabcaramel.com/api/version showing {"sha":"07531fe93455c3fda8f83ed8c05018fb47efa62d"} (PR #431 merge, next 16.4.2)
+- t6744-dev-07531fe-home.png: https://dev.grabcaramel.com/ rendering fully; its logo is served via /_next/image (in-page check: 1/1 next/image loaded, fetch /_next/image?url=%2Ffull-logo.png&w=640&q=75 -> 200 image/png, so the patched sharp path works)
+- t6744-dev-07531fe-support.png: https://dev.grabcaramel.com/support rendering the Contact Support form (curl 200)
