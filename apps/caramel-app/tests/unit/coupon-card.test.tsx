@@ -238,7 +238,9 @@ describe('CouponCard: "Get Coupon Code" when the clipboard is refused', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Get Coupon Code' }))
 
         await waitFor(() => expect(screen.getByText('SAVE10')).toBeTruthy())
-        expect(screen.getByText('Select the code above to copy it')).toBeTruthy()
+        expect(
+            screen.getByText('Select the code above to copy it'),
+        ).toBeTruthy()
         expect(screen.queryByText('Code copied to clipboard!')).toBeNull()
         expect(screen.getByText('Did it work?')).toBeTruthy()
         expect(toastMock.info).toHaveBeenCalledWith(
