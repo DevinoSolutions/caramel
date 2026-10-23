@@ -5,6 +5,7 @@ import {
     GITHUB_REPO_URL,
     INSTAGRAM_URL,
 } from '@/lib/brandLinks'
+import { AFFILIATE_POLICY_PATH } from '@/lib/marketing/affiliatePolicyContent'
 import { COMPARISON_PATH } from '@/lib/seo/extensionComparison'
 import { HONEY_GUIDE_PATH } from '@/lib/seo/honeyExtensionGuide'
 import { canAdvertiseInstall } from '@/lib/surface/detectSurface'
@@ -52,7 +53,10 @@ const communityLinks = [
     },
 ]
 
-const legalLinks = [{ name: 'Privacy Policy', url: '/privacy' }]
+const legalLinks = [
+    { name: 'Privacy Policy', url: '/privacy' },
+    { name: 'Affiliate policy', url: AFFILIATE_POLICY_PATH },
+]
 
 const headingClasses =
     'text-sm font-semibold uppercase tracking-wider text-white dark:text-caramel'
