@@ -1,4 +1,4 @@
-import { withSentryConfig } from '@sentry/nextjs'
+import { withSentryConfig } from '@sentry/nextjs/config'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -201,7 +201,9 @@ const sentryConfig =
               silent: !process.env.CI,
               widenClientFileUpload: true,
               tunnelRoute: '/monitoring',
-              disableLogger: true,
+              // Strips the SDK's own debug logger from the bundle (v11 name of
+              // the old `disableLogger`; works on Turbopack and webpack).
+              bundleSizeOptimizations: { excludeDebugStatements: true },
           })
         : nextConfig
 

@@ -261,8 +261,9 @@ export function withRoute<TBody = undefined>(
             // handler, handleRouteError, onRequestError) is now attributed to
             // `users.id`, the same id PostHog identifies on and the same id
             // every query in these handlers is scoped by. ID only: no email,
-            // no name, `sendDefaultPii` stays off. A 401'd or anonymous request
-            // reaches this line with `session === null` and clears the field,
+            // no name, `dataCollection.userInfo` stays off. A 401'd or
+            // anonymous request reaches this line with `session === null` and
+            // clears the field,
             // so a pooled/reused server context cannot leak the previous
             // caller's identity onto an anonymous error.
             Sentry.setUser(session?.user?.id ? { id: session.user.id } : null)
