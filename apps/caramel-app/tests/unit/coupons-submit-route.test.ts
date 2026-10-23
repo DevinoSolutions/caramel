@@ -1,4 +1,9 @@
 import { POST } from '@/app/api/coupons/submit/route'
+import { resetReportDedupeForTests } from '@/lib/couponReportDedupe'
+import {
+    admitCouponReportVelocity,
+    resetReportVelocityForTests,
+} from '@/lib/couponReportVelocity'
 import {
     MIN_CHECKOUT_CONSENT_PROMPT_VERSION,
     ShopperSubmissionLimitError,
@@ -14,7 +19,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 // shopper-coupons.test.ts / couponsRepo.test.ts / the integration suite. What
 // this file pins is the ROUTE's contract: the gates, the status codes, and the
 // one rule that separates the two sources (only a checkout capture, where the
-// store itself accepted the code, stamps "worked").
+// store itself accepted the code, stamps "worked"). The stamp POLICY
+// (checkoutWorkedStamp.ts: reputation gate, dedupe, daily cap, velocity cap) runs
+// for REAL here over a fake coupon_reports table (ANNOUNCED FAKE: `reportRows`
+// below), so the route-to-policy wiring is exercised, not assumed.
 interface CapturedEvent {
     event: string
     distinctId: string
@@ -28,7 +36,17 @@ const {
     recordWorkedMock,
     checkRateLimitMock,
     captureMock,
+    reportRows,
+    sentryMessageMock,
 } = vi.hoisted(() => ({
+    // The coupon_reports rows the stamp policy counts and writes (fake table).
+    reportRows: [] as {
+        couponId: string
+        userId: string
+        outcome: string
+        createdAt: Date
+    }[],
+    sentryMessageMock: vi.fn(),
     envMock: { SHOPPER_CODE_CAPTURE_ENABLED: false } as Record<string, unknown>,
     getSessionMock: vi.fn(
         async (_opts: { headers: Headers }) => null as unknown,
@@ -39,10 +57,15 @@ const {
             code: string
             source: 'checkout' | 'manual'
             userId: string
-        }) => ({ couponId: '900000000000000001', created: true }),
+        }) => ({
+            couponId: '900000000000000001',
+            created: true,
+            submittedByUser: true,
+        }),
     ),
     recordWorkedMock: vi.fn(
-        async (_couponId: string, _reporter: unknown) => true,
+        async (_couponId: string, _reporter: unknown, _client?: unknown) =>
+            true,
     ),
     checkRateLimitMock: vi.fn(async () => null as unknown),
     captureMock: vi.fn(async (_args: CapturedEvent) => true),
@@ -78,6 +101,64 @@ vi.mock('@/lib/couponsRepo', async importOriginal => ({
     ...(await importOriginal<Record<string, unknown>>()),
     submitShopperCoupon: submitShopperCouponMock,
 }))
+// ANNOUNCED FAKE: the policy's reads and writes of coupon_reports go to the
+// in-memory `reportRows`; the transaction hands the callback this same client.
+vi.mock('@/lib/prisma', () => {
+    const couponReport = {
+        count: vi.fn(
+            async (args: {
+                where: {
+                    userId: string
+                    outcome: string
+                    createdAt: { gt: Date }
+                }
+            }) =>
+                reportRows.filter(
+                    row =>
+                        row.userId === args.where.userId &&
+                        row.outcome === args.where.outcome &&
+                        row.createdAt > args.where.createdAt.gt,
+                ).length,
+        ),
+        findFirst: vi.fn(
+            async (args: {
+                where: {
+                    couponId: string
+                    userId: string
+                    outcome: string
+                    createdAt: { gte: Date }
+                }
+            }) =>
+                reportRows.find(
+                    row =>
+                        row.couponId === args.where.couponId &&
+                        row.userId === args.where.userId &&
+                        row.outcome === args.where.outcome &&
+                        row.createdAt >= args.where.createdAt.gte,
+                ) ?? null,
+        ),
+        create: vi.fn(
+            async (args: {
+                data: { couponId: string; userId: string; outcome: string }
+            }) => {
+                const row = { ...args.data, createdAt: new Date() }
+                reportRows.push(row)
+                return row
+            },
+        ),
+    }
+    const client = {
+        couponReport,
+        $transaction: async (fn: (tx: unknown) => Promise<unknown>) =>
+            fn(client),
+    }
+    return { default: client }
+})
+vi.mock('@sentry/nextjs', () => ({
+    captureException: vi.fn(),
+    captureMessage: sentryMessageMock,
+    setUser: vi.fn(),
+}))
 vi.mock('@/lib/couponSignals', async importOriginal => ({
     ...(await importOriginal<Record<string, unknown>>()),
     recordWorked: recordWorkedMock,
@@ -107,10 +188,13 @@ function submitRequest(
     })
 }
 
-function signedInAs(userId: string) {
+// An account old enough to be established (accountReputation.ts, default 7 days).
+const OLD_ACCOUNT = new Date('2026-01-01T00:00:00.000Z')
+
+function signedInAs(userId: string, createdAt: Date = OLD_ACCOUNT) {
     getSessionMock.mockImplementation(async () => ({
         session: { id: `session-${userId}` },
-        user: { id: userId },
+        user: { id: userId, createdAt },
     }))
 }
 
@@ -122,7 +206,12 @@ beforeEach(() => {
     submitShopperCouponMock.mockImplementation(async () => ({
         couponId: '900000000000000001',
         created: true,
+        submittedByUser: true,
     }))
+    reportRows.length = 0
+    sentryMessageMock.mockReset()
+    resetReportDedupeForTests()
+    resetReportVelocityForTests()
     recordWorkedMock.mockReset()
     recordWorkedMock.mockImplementation(async () => true)
     checkRateLimitMock.mockReset()
@@ -352,6 +441,7 @@ describe('POST /api/coupons/submit — manual source', () => {
         submitShopperCouponMock.mockImplementation(async () => ({
             couponId: '42',
             created: false,
+            submittedByUser: false,
         }))
 
         const res = await POST(
@@ -417,10 +507,11 @@ describe('POST /api/coupons/submit — checkout source', () => {
             userId: 'user-1',
         })
         expect(recordWorkedMock).toHaveBeenCalledTimes(1)
-        expect(recordWorkedMock).toHaveBeenCalledWith('900000000000000001', {
-            kind: 'user',
-            userId: 'user-1',
-        })
+        expect(recordWorkedMock).toHaveBeenCalledWith(
+            '900000000000000001',
+            { kind: 'user', userId: 'user-1', established: true },
+            expect.anything(),
+        )
         // The write order matters: the row must exist before it is stamped.
         expect(
             submitShopperCouponMock.mock.invocationCallOrder[0]!,
@@ -535,6 +626,7 @@ describe('POST /api/coupons/submit — checkout source', () => {
         submitShopperCouponMock.mockImplementation(async () => ({
             couponId: '42',
             created: false,
+            submittedByUser: false,
         }))
 
         const res = await POST(
@@ -552,10 +644,11 @@ describe('POST /api/coupons/submit — checkout source', () => {
             created: false,
             status: 'worked',
         })
-        expect(recordWorkedMock).toHaveBeenCalledWith('42', {
-            kind: 'user',
-            userId: 'user-1',
-        })
+        expect(recordWorkedMock).toHaveBeenCalledWith(
+            '42',
+            { kind: 'user', userId: 'user-1', established: true },
+            expect.anything(),
+        )
     })
 
     it('a recordWorked failure is NOT swallowed: the route fails (500) rather than reporting a stamp that never landed', async () => {
@@ -895,6 +988,7 @@ describe('POST /api/coupons/submit — outcome telemetry', () => {
         submitShopperCouponMock.mockImplementation(async () => ({
             couponId: '900000000000000001',
             created: false,
+            submittedByUser: false,
         }))
 
         envMock.SHOPPER_CODE_CAPTURE_ENABLED = true
@@ -1136,5 +1230,264 @@ describe('POST /api/coupons/submit — outcome telemetry', () => {
             { outcome: 'created', source: 'manual' },
         )
         warnSpy.mockRestore()
+    })
+})
+
+// T-6222: a checkout "worked" stamp is client-asserted (Origin and the consent
+// proof are forgeable), so it is policy-gated (checkoutWorkedStamp.ts). The
+// policy runs for real here; recordWorked and the repo are the test doubles.
+describe('POST /api/coupons/submit — checkout worked-stamp policy (T-6222)', () => {
+    const YOUNG_ACCOUNT = new Date(Date.now() - 60 * 60 * 1000)
+    const checkout = {
+        site: 'ebay.com',
+        code: 'SAVE10',
+        source: 'checkout' as const,
+        consent: VALID_CONSENT,
+    }
+    const SUPPLIER_ROW = {
+        couponId: '42',
+        created: false,
+        submittedByUser: false,
+    }
+
+    beforeEach(() => {
+        envMock.SHOPPER_CODE_CAPTURE_ENABLED = true
+    })
+
+    function eventOutcome(): unknown {
+        return captureMock.mock.calls[0]![0].properties?.outcome
+    }
+
+    it('a NEW row may be stamped by a young account (the shopper listed it themselves)', async () => {
+        signedInAs('user-1', YOUNG_ACCOUNT)
+
+        const res = await POST(submitRequest(checkout))
+
+        expect(await res.json()).toMatchObject({
+            created: true,
+            status: 'worked',
+        })
+        expect(recordWorkedMock).toHaveBeenCalledTimes(1)
+        expect(recordWorkedMock).toHaveBeenCalledWith(
+            '900000000000000001',
+            { kind: 'user', userId: 'user-1', established: false },
+            expect.anything(),
+        )
+        expect(eventOutcome()).toBe('created')
+    })
+
+    it('an already-listed SUPPLIER code is NOT stamped by a young account: 200, status unverified, nothing recorded', async () => {
+        signedInAs('user-1', YOUNG_ACCOUNT)
+        submitShopperCouponMock.mockImplementation(async () => SUPPLIER_ROW)
+
+        const res = await POST(submitRequest(checkout))
+
+        expect(res.status).toBe(200)
+        expect(await res.json()).toEqual({
+            couponId: '42',
+            created: false,
+            status: 'unverified',
+        })
+        expect(recordWorkedMock).not.toHaveBeenCalled()
+        expect(reportRows).toHaveLength(0)
+        expect(eventOutcome()).toBe('worked-stamp-gated')
+    })
+
+    it('an already-listed code with NO Origin and NO reputation cannot be stamped either (the forged-request case)', async () => {
+        // Exactly the T-6222 attack: any account POSTs an existing public code
+        // with source "checkout", a valid-shaped consent and no Origin.
+        signedInAs('attacker', YOUNG_ACCOUNT)
+        submitShopperCouponMock.mockImplementation(async () => SUPPLIER_ROW)
+
+        const res = await POST(submitRequest(checkout))
+
+        expect((await res.json()).status).toBe('unverified')
+        expect(recordWorkedMock).not.toHaveBeenCalled()
+    })
+
+    it('an ESTABLISHED account may stamp an already-listed code, and the stamp is attributed', async () => {
+        signedInAs('user-1')
+        submitShopperCouponMock.mockImplementation(async () => SUPPLIER_ROW)
+
+        const res = await POST(submitRequest(checkout))
+
+        expect(await res.json()).toMatchObject({ status: 'worked' })
+        expect(recordWorkedMock).toHaveBeenCalledTimes(1)
+        expect(reportRows).toHaveLength(1)
+        expect(reportRows[0]).toMatchObject({
+            couponId: '42',
+            userId: 'user-1',
+            outcome: 'worked',
+        })
+    })
+
+    it('a young account may re-stamp ITS OWN earlier submission (created:false, submittedByUser:true)', async () => {
+        signedInAs('user-1', YOUNG_ACCOUNT)
+        submitShopperCouponMock.mockImplementation(async () => ({
+            couponId: '900000000000000009',
+            created: false,
+            submittedByUser: true,
+        }))
+
+        const res = await POST(submitRequest(checkout))
+
+        expect((await res.json()).status).toBe('worked')
+        expect(recordWorkedMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('DEDUPE: the same account stamping the same coupon twice stamps once; the repeat still answers worked', async () => {
+        signedInAs('user-1')
+        submitShopperCouponMock.mockImplementation(async () => SUPPLIER_ROW)
+
+        const first = await POST(submitRequest(checkout))
+        const second = await POST(submitRequest(checkout))
+
+        expect((await first.json()).status).toBe('worked')
+        expect((await second.json()).status).toBe('worked')
+        expect(recordWorkedMock).toHaveBeenCalledTimes(1)
+        expect(reportRows).toHaveLength(1)
+    })
+
+    it('a different account stamping the same coupon is its own stamp', async () => {
+        submitShopperCouponMock.mockImplementation(async () => SUPPLIER_ROW)
+        signedInAs('user-1')
+        await POST(submitRequest(checkout))
+        signedInAs('user-2')
+        await POST(submitRequest(checkout))
+
+        expect(recordWorkedMock).toHaveBeenCalledTimes(2)
+    })
+
+    it('DAILY CAP: an account at COUPON_WORKED_STAMPS_PER_USER_PER_DAY stamps nothing more, existing codes included, and a Sentry warning says so', async () => {
+        signedInAs('user-1')
+        submitShopperCouponMock.mockImplementation(async () => SUPPLIER_ROW)
+        const cap = envMock.COUPON_WORKED_STAMPS_PER_USER_PER_DAY as number
+        for (let n = 0; n < cap; n++) {
+            reportRows.push({
+                couponId: `${1000 + n}`,
+                userId: 'user-1',
+                outcome: 'worked',
+                createdAt: new Date(Date.now() - 60_000),
+            })
+        }
+
+        const res = await POST(submitRequest(checkout))
+
+        expect(await res.json()).toMatchObject({ status: 'unverified' })
+        expect(recordWorkedMock).not.toHaveBeenCalled()
+        expect(reportRows).toHaveLength(cap)
+        expect(eventOutcome()).toBe('worked-stamp-capped')
+        expect(sentryMessageMock).toHaveBeenCalledTimes(1)
+        expect(sentryMessageMock.mock.calls[0]![1]).toMatchObject({
+            level: 'warning',
+            tags: { budget: 'worked-stamp-daily' },
+        })
+        // The dedupe slot went back: once the day's stamps age out, the same
+        // account can stamp this coupon.
+        reportRows.length = 0
+        const retry = await POST(submitRequest(checkout))
+        expect((await retry.json()).status).toBe('worked')
+    })
+
+    it('DAILY CAP: stamps older than 24h do not count', async () => {
+        signedInAs('user-1')
+        submitShopperCouponMock.mockImplementation(async () => SUPPLIER_ROW)
+        const cap = envMock.COUPON_WORKED_STAMPS_PER_USER_PER_DAY as number
+        for (let n = 0; n < cap; n++) {
+            reportRows.push({
+                couponId: `${1000 + n}`,
+                userId: 'user-1',
+                outcome: 'worked',
+                createdAt: new Date(Date.now() - 25 * 60 * 60 * 1000),
+            })
+        }
+
+        const res = await POST(submitRequest(checkout))
+
+        expect((await res.json()).status).toBe('worked')
+    })
+
+    it('DAILY CAP: the count is per account, and failed outcomes do not count', async () => {
+        signedInAs('user-1')
+        submitShopperCouponMock.mockImplementation(async () => SUPPLIER_ROW)
+        const cap = envMock.COUPON_WORKED_STAMPS_PER_USER_PER_DAY as number
+        for (let n = 0; n < cap; n++) {
+            reportRows.push({
+                couponId: `${1000 + n}`,
+                userId: 'someone-else',
+                outcome: 'worked',
+                createdAt: new Date(),
+            })
+            reportRows.push({
+                couponId: `${2000 + n}`,
+                userId: 'user-1',
+                outcome: 'failed',
+                createdAt: new Date(),
+            })
+        }
+
+        const res = await POST(submitRequest(checkout))
+
+        expect((await res.json()).status).toBe('worked')
+    })
+
+    it('VELOCITY: once the coupon has its hourly cap of counted worked reports, a further stamp is refused (capped)', async () => {
+        signedInAs('user-1')
+        submitShopperCouponMock.mockImplementation(async () => SUPPLIER_ROW)
+        const max = envMock.COUPON_REPORT_MAX_PER_COUPON_PER_HOUR as number
+        for (let n = 0; n < max; n++) admitCouponReportVelocity('worked', '42')
+
+        const res = await POST(submitRequest(checkout))
+
+        expect(await res.json()).toMatchObject({ status: 'unverified' })
+        expect(recordWorkedMock).not.toHaveBeenCalled()
+        expect(eventOutcome()).toBe('worked-stamp-capped')
+    })
+
+    it('a stamp that FAILS frees its dedupe and velocity slots: the retry stamps (500 first, no attribution row left)', async () => {
+        signedInAs('user-1')
+        submitShopperCouponMock.mockImplementation(async () => SUPPLIER_ROW)
+        recordWorkedMock.mockImplementationOnce(async () => {
+            throw new Error('signals table unavailable')
+        })
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+        const failed = await POST(submitRequest(checkout))
+        expect(failed.status).toBe(500)
+        expect(reportRows).toHaveLength(0)
+
+        const retry = await POST(submitRequest(checkout))
+        expect((await retry.json()).status).toBe('worked')
+        expect(recordWorkedMock).toHaveBeenCalledTimes(2)
+        errorSpy.mockRestore()
+    })
+
+    it('the attribution row is idempotent per account, coupon and UTC day: a repeat after a restart (dedupe memory empty) writes no second row', async () => {
+        signedInAs('user-1')
+        submitShopperCouponMock.mockImplementation(async () => SUPPLIER_ROW)
+
+        await POST(submitRequest(checkout))
+        resetReportDedupeForTests()
+        resetReportVelocityForTests()
+        const again = await POST(submitRequest(checkout))
+
+        expect((await again.json()).status).toBe('worked')
+        expect(recordWorkedMock).toHaveBeenCalledTimes(2)
+        expect(reportRows).toHaveLength(1)
+    })
+
+    it('a MANUAL add never reaches the stamp policy', async () => {
+        signedInAs('user-1')
+
+        await POST(
+            submitRequest({
+                site: 'ebay.com',
+                code: 'SAVE10',
+                source: 'manual',
+            }),
+        )
+
+        expect(recordWorkedMock).not.toHaveBeenCalled()
+        expect(reportRows).toHaveLength(0)
     })
 })

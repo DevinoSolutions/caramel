@@ -1,6 +1,7 @@
 import { POST } from '@/app/api/coupons/[id]/report/route'
 import { POST as incrementPOST } from '@/app/api/coupons/increment/route'
 import { resetReportDedupeForTests } from '@/lib/couponReportDedupe'
+import { resetReportVelocityForTests } from '@/lib/couponReportVelocity'
 import { attachSignals } from '@/lib/couponSignals'
 import { isRecentlyFailing } from '@/lib/coupons'
 import { listStoreCoupons } from '@/lib/couponsRepo'
@@ -114,12 +115,15 @@ async function cleanup() {
 
 beforeEach(async () => {
     resetReportDedupeForTests()
+    resetReportVelocityForTests()
     await cleanup()
     const user = await prisma.user.create({ data: { email: USER_EMAIL } })
     userId = user.id
+    // createdAt is passed explicitly: this account must count as ESTABLISHED
+    // (accountReputation.ts), and the row just inserted is brand new.
     getSessionMock.mockImplementation(async () => ({
         session: { id: 'itest-session' },
-        user: { id: userId },
+        user: { id: userId, createdAt: new Date('2026-01-01T00:00:00.000Z') },
     }))
     await insertCoupon(KNOWN_ID)
 })
@@ -184,7 +188,7 @@ describe('POST /api/coupons/[id]/report — attribution against real pg :58005',
         expect(signal?.failCount).toBe(2)
     })
 
-    it('QUORUM: three distinct anonymous failed reports do not sink a code, the fourth does; forged forwarded-for headers add no reporters', async () => {
+    it('QUORUM: anonymous failed reports alone never sink a code (the pool stops at 3), an established account on top does; forged forwarded-for headers add no reporters', async () => {
         getSessionMock.mockImplementation(async () => null)
         const failedFrom = (headers: Record<string, string>) =>
             POST(
@@ -213,18 +217,84 @@ describe('POST /api/coupons/[id]/report — attribution against real pg :58005',
         expect(await weight()).toBe(3)
 
         // A flood of forged client headers WITHOUT the edge header is one
-        // reporter, however many addresses it claims.
+        // reporter, however many addresses it claims, and a fourth anonymous
+        // reporter adds nothing: the low-trust pool is capped below the sink
+        // threshold (coupons.ts MAX_LOW_TRUST_FAIL_WEIGHT).
         for (const n of [1, 2, 3, 4, 5]) {
             await failedFrom({ 'x-forwarded-for': `198.51.100.${n}` })
         }
-        expect(await weight()).toBe(4)
+        expect(await weight()).toBe(3)
+        const [anonymousOnly] = await attachSignals([{ id: KNOWN_ID }])
+        expect(isRecentlyFailing(anonymousOnly!)).toBe(false)
+
+        // One established account (the session mock) on top sinks it.
+        getSessionMock.mockImplementation(async () => ({
+            session: { id: 'itest-session' },
+            user: {
+                id: userId,
+                createdAt: new Date('2026-01-01T00:00:00.000Z'),
+            },
+        }))
+        await POST(
+            reportRequest(KNOWN_ID, { outcome: 'failed' }, '203.0.113.99'),
+        )
+        expect(await weight()).toBe(5)
 
         const { coupons } = await listStoreCoupons(ITEST_SITE, 20)
         const row = coupons.find(c => c.id === KNOWN_ID)
         expect(row).toBeDefined()
         const [overlaid] = await attachSignals([{ id: KNOWN_ID }])
-        expect(overlaid?.failWeight).toBe(4)
+        expect(overlaid?.failWeight).toBe(5)
         expect(isRecentlyFailing(overlaid!)).toBe(true)
+    })
+
+    it('QUORUM: a YOUNG account weighs as an anonymous network, so it cannot complete a sink', async () => {
+        getSessionMock.mockImplementation(async () => ({
+            session: { id: 'itest-session' },
+            user: { id: userId, createdAt: new Date() },
+        }))
+        for (const n of [10, 11, 12]) {
+            getSessionMock.mockImplementationOnce(async () => null)
+            await POST(
+                reportRequest(
+                    KNOWN_ID,
+                    { outcome: 'failed' },
+                    `203.0.113.${n}`,
+                ),
+            )
+        }
+        await POST(
+            reportRequest(KNOWN_ID, { outcome: 'failed' }, '203.0.113.99'),
+        )
+
+        const signal = await prisma.couponSignal.findUniqueOrThrow({
+            where: { couponId: KNOWN_ID },
+        })
+        expect(signal.failWeight).toBe(3)
+        expect(isRecentlyFailing(signal)).toBe(false)
+    })
+
+    it('VELOCITY: past the hourly per-coupon cap further failed reports are accepted and not counted (real Postgres)', async () => {
+        getSessionMock.mockImplementation(async () => null)
+        for (let n = 1; n <= 10; n++) {
+            const res = await POST(
+                reportRequest(
+                    KNOWN_ID,
+                    { outcome: 'failed' },
+                    `203.0.113.${n}`,
+                ),
+            )
+            expect(await res.json()).toEqual({ ok: true })
+        }
+        const over = await POST(
+            reportRequest(KNOWN_ID, { outcome: 'failed' }, '203.0.113.200'),
+        )
+        expect(await over.json()).toEqual({ ok: true, deduped: true })
+
+        const signal = await prisma.couponSignal.findUniqueOrThrow({
+            where: { couponId: KNOWN_ID },
+        })
+        expect(signal.failCount).toBe(10)
     })
 
     it('QUORUM: the honest single report still records, and does not sink', async () => {

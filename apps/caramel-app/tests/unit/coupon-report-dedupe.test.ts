@@ -20,7 +20,8 @@ const HOUR = 60 * 60 * 1000
 const DAY = 24 * HOUR
 const T0 = Date.parse('2026-10-11T12:00:00.000Z')
 const ip = (n: number) => ({ kind: 'ip', ip: `203.0.113.${n}` }) as const
-const user = (id: string) => ({ kind: 'user', userId: id }) as const
+const user = (id: string) =>
+    ({ kind: 'user', userId: id, established: false }) as const
 
 beforeEach(() => {
     resetReportDedupeForTests()
@@ -86,6 +87,12 @@ describe('report kinds', () => {
         expect(reporterFor('user-1', req)).toEqual({
             kind: 'user',
             userId: 'user-1',
+            established: false,
+        })
+        expect(reporterFor('user-1', req, true)).toEqual({
+            kind: 'user',
+            userId: 'user-1',
+            established: true,
         })
         expect(reporterFor(null, req)).toEqual({
             kind: 'ip',

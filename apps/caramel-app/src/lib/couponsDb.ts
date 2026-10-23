@@ -156,6 +156,12 @@ export const CouponIdRowSchema = z.object({
     id: couponIdSchema,
 })
 
+/** `SELECT id, submitted_by_user_id` — couponsRepo.submitShopperCoupon's dedupe
+ *  lookup: the listed row's id plus who submitted it (null = a supplier row). */
+export const ShopperDedupeRowSchema = CouponIdRowSchema.extend({
+    submittedByUserId: z.string().nullable(),
+})
+
 /** `... RETURNING fail_weight AS "failWeight"` — couponsRepo's coupon_signals
  *  writers (writeWorkedSignal / writeFailedSignal / writeUsageSignal). */
 export const CouponSignalWriteRowSchema = z.object({

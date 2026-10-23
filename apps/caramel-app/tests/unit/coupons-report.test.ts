@@ -1,5 +1,6 @@
 import { POST } from '@/app/api/coupons/[id]/report/route'
 import { resetReportDedupeForTests } from '@/lib/couponReportDedupe'
+import { resetReportVelocityForTests } from '@/lib/couponReportVelocity'
 import { NextRequest } from 'next/server'
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -174,6 +175,7 @@ function anonymous() {
 
 beforeEach(() => {
     resetReportDedupeForTests()
+    resetReportVelocityForTests()
     prismaMock.$transaction.mockClear()
     txMock.$queryRaw.mockClear()
     txMock.couponSignalReporter.upsert.mockClear()
@@ -855,5 +857,121 @@ describe('POST /api/coupons/[id]/report — signed-in attribution (coupon_report
         expect(res.status).toBe(400)
         expect(prismaMock.$transaction).not.toHaveBeenCalled()
         expect(reportRows).toEqual([])
+    })
+})
+
+// T-6227: a per-COUPON velocity cap across ALL reporters, and the reporter's
+// weight following the account's age. The cap's own arithmetic (window, bounded
+// table, Sentry) is pinned in coupon-report-velocity.test.ts; here only the
+// route's wiring of it.
+describe('POST /api/coupons/[id]/report — per-coupon velocity cap and account reputation (T-6227)', () => {
+    const MAX = 10 // COUPON_REPORT_MAX_PER_COUPON_PER_HOUR default
+    const ip = (n: number) => `203.0.113.${n}`
+    const anonReport = (id: string, outcome: 'failed' | 'worked', n: number) =>
+        reportRequest(id, { outcome }, undefined, ip(n))
+
+    it.each(['failed', 'worked'] as const)(
+        'the %s report past the hourly cap is accepted but NOT counted, and answers exactly what a deduped repeat answers',
+        async outcome => {
+            for (let n = 1; n <= MAX; n++) {
+                const res = await POST(anonReport(KNOWN_COUPON, outcome, n))
+                expect(await res.json()).toEqual({ ok: true })
+            }
+            expect(txMock.$queryRaw).toHaveBeenCalledTimes(MAX)
+
+            const over = await POST(anonReport(KNOWN_COUPON, outcome, 200))
+
+            expect(over.status).toBe(200)
+            expect(await over.json()).toEqual({ ok: true, deduped: true })
+            expect(txMock.$queryRaw).toHaveBeenCalledTimes(MAX)
+        },
+    )
+
+    it('the cap is per coupon and per kind: a spent failed cap blocks neither worked reports nor another coupon', async () => {
+        for (let n = 1; n <= MAX; n++) {
+            await POST(anonReport(KNOWN_COUPON, 'failed', n))
+        }
+        const worked = await POST(anonReport(KNOWN_COUPON, 'worked', 100))
+        const other = await POST(anonReport('43', 'failed', 101))
+
+        expect(await worked.json()).toEqual({ ok: true })
+        expect(await other.json()).toEqual({ ok: true })
+    })
+
+    it('an over-cap report gives the reporter its dedupe slot back: when the window rolls, the same IP counts', async () => {
+        for (let n = 1; n <= MAX; n++) {
+            await POST(anonReport(KNOWN_COUPON, 'failed', n))
+        }
+        await POST(anonReport(KNOWN_COUPON, 'failed', 150))
+        vi.setSystemTime(new Date('2026-08-09T13:30:00.000Z'))
+
+        const later = await POST(anonReport(KNOWN_COUPON, 'failed', 150))
+
+        expect(await later.json()).toEqual({ ok: true })
+    })
+
+    it('probing unknown ids spends no velocity: every probe is a 404, never a silent cap', async () => {
+        catalogIds.clear()
+        for (let n = 1; n <= MAX + 5; n++) {
+            const res = await POST(anonReport(KNOWN_COUPON, 'failed', n))
+            expect(res.status).toBe(404)
+        }
+    })
+
+    it('a failed write gives the velocity slot back as well', async () => {
+        txMock.$queryRaw.mockRejectedValueOnce(new Error('db down'))
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+        const failed = await POST(
+            reportRequest(KNOWN_COUPON, { outcome: 'failed' }),
+        )
+        expect(failed.status).toBe(500)
+        errorSpy.mockRestore()
+
+        for (let n = 1; n <= MAX; n++) {
+            const res = await POST(anonReport(KNOWN_COUPON, 'failed', n))
+            expect(await res.json()).toEqual({ ok: true })
+        }
+    })
+
+    function reporterWeightWritten(): number {
+        const calls = txMock.couponSignalReporter.upsert.mock
+            .calls as unknown as [{ create: { weight: number } }][]
+        return calls[calls.length - 1]![0].create.weight
+    }
+
+    function signedInWithAge(userId: string, createdAt: Date | undefined) {
+        getSessionMock.mockImplementation(async () => ({
+            session: { id: `session-${userId}` },
+            user: { id: userId, createdAt },
+        }))
+    }
+
+    it('an ESTABLISHED account (older than the age gate) reports a failure at the account weight', async () => {
+        signedInWithAge('old-user', new Date('2026-07-01T00:00:00.000Z'))
+        await POST(
+            reportRequest(KNOWN_COUPON, { outcome: 'failed' }, 'Bearer good'),
+        )
+        expect(reporterWeightWritten()).toBe(2)
+    })
+
+    it('a YOUNG account reports a failure at the anonymous-network weight', async () => {
+        signedInWithAge('new-user', new Date('2026-08-09T11:00:00.000Z'))
+        await POST(
+            reportRequest(KNOWN_COUPON, { outcome: 'failed' }, 'Bearer good'),
+        )
+        expect(reporterWeightWritten()).toBe(1)
+    })
+
+    it('an account whose age cannot be read gets no trust (weight of a network)', async () => {
+        signedInWithAge('unknown-age', undefined)
+        await POST(
+            reportRequest(KNOWN_COUPON, { outcome: 'failed' }, 'Bearer good'),
+        )
+        expect(reporterWeightWritten()).toBe(1)
+    })
+
+    it('an anonymous failure is the anonymous-network weight', async () => {
+        await POST(reportRequest(KNOWN_COUPON, { outcome: 'failed' }))
+        expect(reporterWeightWritten()).toBe(1)
     })
 })

@@ -280,7 +280,7 @@ describe('recordWorked (owns lastWorkedAt ONLY — W4-D2 split)', () => {
         const tx = txWith(4)
         await recordWorked(
             '42',
-            { kind: 'user', userId: 'user-1' },
+            { kind: 'user', userId: 'user-1', established: true },
             tx as never,
         )
 

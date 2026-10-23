@@ -872,16 +872,43 @@ describe('submitShopperCoupon (THIRD sanctioned write: shopper-submitted codes)'
     })
 
     it('(b) returns the existing row and inserts nothing when the code is already listed', async () => {
-        mockRows(isDedupe, [{ id: '812345' }])
+        // A supplier row: nobody submitted it.
+        mockRows(isDedupe, [{ id: '812345', submittedByUserId: null }])
 
         await expect(submitShopperCoupon(ARGS)).resolves.toEqual({
             couponId: '812345',
             created: false,
+            submittedByUser: false,
         })
         expect(capturedQueries.some(isInsert)).toBe(false)
         // A duplicate is a hit, not a new submission: it must not burn the
         // shopper's daily allowance, so the cap is never even counted.
         expect(capturedQueries.some(isCap)).toBe(false)
+    })
+
+    it("(b) reports whether the already-listed row is this shopper's own (T-6222: only their own code may be vouched for freely)", async () => {
+        mockRows(isDedupe, [
+            { id: '900000000000000003', submittedByUserId: 'user-uuid-1' },
+        ])
+        await expect(submitShopperCoupon(ARGS)).resolves.toEqual({
+            couponId: '900000000000000003',
+            created: false,
+            submittedByUser: true,
+        })
+
+        rules = []
+        capturedQueries = []
+        mockRows(isKnownStoreProbe, [{ known: true }])
+        mockRows(isDedupe, [
+            { id: '900000000000000004', submittedByUserId: 'someone-else' },
+        ])
+        await expect(submitShopperCoupon(ARGS)).resolves.toMatchObject({
+            created: false,
+            submittedByUser: false,
+        })
+        // The lookup selects the submitter alongside the id.
+        const sql = capturedQueries[queryIndex(isDedupe)] ?? ''
+        expect(sql).toContain('submitted_by_user_id AS "submittedByUserId"')
     })
 
     it("(c) counts the shopper's submissions in the last 24h and throws ShopperSubmissionLimitError at the cap", async () => {
@@ -907,6 +934,7 @@ describe('submitShopperCoupon (THIRD sanctioned write: shopper-submitted codes)'
         await expect(submitShopperCoupon(ARGS)).resolves.toEqual({
             couponId: INSERTED_ID,
             created: true,
+            submittedByUser: true,
         })
     })
 
@@ -916,7 +944,11 @@ describe('submitShopperCoupon (THIRD sanctioned write: shopper-submitted codes)'
 
         const result = await submitShopperCoupon(ARGS)
 
-        expect(result).toEqual({ couponId: INSERTED_ID, created: true })
+        expect(result).toEqual({
+            couponId: INSERTED_ID,
+            created: true,
+            submittedByUser: true,
+        })
         const i = queryIndex(isInsert)
         const sql = capturedQueries[i] ?? ''
         expect(sql).toContain("nextval('shopper_coupon_id_seq')::text")

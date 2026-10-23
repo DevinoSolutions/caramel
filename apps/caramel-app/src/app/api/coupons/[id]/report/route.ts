@@ -1,9 +1,14 @@
+import { isEstablishedAccount } from '@/lib/accountReputation'
 import { withRoute } from '@/lib/api/withRoute'
 import {
     admitReport,
     releaseReport,
     reporterFor,
 } from '@/lib/couponReportDedupe'
+import {
+    admitCouponReportVelocity,
+    releaseCouponReportVelocity,
+} from '@/lib/couponReportVelocity'
 import {
     recordFailed,
     recordWorked,
@@ -98,17 +103,40 @@ export const POST = withRoute(
         // anonymous callers. 'worked' and 'failed' have separate slots. A
         // duplicate is a 2xx no-op, never an error: the extension and the web
         // card must not show a failure for a harmless repeat.
-        const reporter = reporterFor(userId, req)
+        // An ESTABLISHED account weighs as an account toward a failure quorum, a
+        // young one as an anonymous network (accountReputation.ts).
+        const reporter = reporterFor(
+            userId,
+            req,
+            isEstablishedAccount(session?.user?.createdAt),
+        )
         if (!admitReport(body.outcome, reporter, id)) {
             return NextResponse.json({ ok: true, deduped: true })
         }
 
-        // An unknown id writes no signal and gives its dedupe slot back, so a
-        // forger probing random ids cannot fill the table with slots no report
-        // ever used. The slot is taken BEFORE the write so a tracked duplicate
-        // stays a database-free no-op.
-        const unknownCoupon = () => {
+        // The per-COUPON speed limit (couponReportVelocity.ts): however many
+        // distinct reporters there are, only COUPON_REPORT_MAX_PER_COUPON_PER_HOUR
+        // reports of one kind per coupon per hour are counted. Over it the report
+        // is accepted and dropped, answering exactly what a deduped repeat does,
+        // so the cap is not observable from outside. The reporter's dedupe slot
+        // goes back: nothing landed, so a later report of theirs may still count.
+        if (!admitCouponReportVelocity(body.outcome, id)) {
             releaseReport(body.outcome, reporter, id)
+            return NextResponse.json({ ok: true, deduped: true })
+        }
+
+        // Both slots are taken BEFORE the write so a tracked duplicate stays a
+        // database-free no-op; whatever does not land gives them back.
+        const giveSlotsBack = () => {
+            releaseReport(body.outcome, reporter, id)
+            releaseCouponReportVelocity(body.outcome, id)
+        }
+
+        // An unknown id writes no signal and gives its slots back, so a forger
+        // probing random ids cannot fill the tables with slots no report ever
+        // used.
+        const unknownCoupon = () => {
+            giveSlotsBack()
             return NextResponse.json(
                 { error: 'Unknown coupon' },
                 { status: 404 },
@@ -189,9 +217,9 @@ export const POST = withRoute(
 
             return NextResponse.json({ ok: true })
         } catch (error) {
-            // The report never landed: free its slot so a retry is not deduped.
+            // The report never landed: free its slots so a retry is not deduped.
             // withRoute still routes the rethrown error to Sentry.
-            releaseReport(body.outcome, reporter, id)
+            giveSlotsBack()
             throw error
         }
     },

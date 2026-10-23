@@ -224,6 +224,31 @@ const serverObjectSchema = z.object({
         v => (typeof v === 'string' && v.trim() === '' ? undefined : v),
         z.coerce.number().int().min(0).default(2000),
     ),
+    // Coupon trust signals (T-6222 / T-6227): who may move a code's "Verified" /
+    // "failing" state. All three read a blank value as unset (z.coerce would turn
+    // '' into 0 and silently switch a guard off); garbage fails boot.
+    //  - COUPON_TRUST_MIN_ACCOUNT_AGE_DAYS: an account younger than this counts
+    //    as an anonymous network toward a failure quorum, and may not stamp
+    //    "worked" on a code somebody else listed (accountReputation.ts).
+    //    0 = every account is established (the guard off).
+    //  - COUPON_REPORT_MAX_PER_COUPON_PER_HOUR: most worked reports, and most
+    //    failed reports, counted PER COUPON per hour whoever sends them
+    //    (couponReportVelocity.ts). Over it a report is accepted and not counted.
+    //  - COUPON_WORKED_STAMPS_PER_USER_PER_DAY: most "worked" attributions one
+    //    account may stamp in a rolling 24h through the checkout capture
+    //    (checkoutWorkedStamp.ts), new rows and already-listed codes alike.
+    COUPON_TRUST_MIN_ACCOUNT_AGE_DAYS: z.preprocess(
+        v => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+        z.coerce.number().int().min(0).default(7),
+    ),
+    COUPON_REPORT_MAX_PER_COUPON_PER_HOUR: z.preprocess(
+        v => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+        z.coerce.number().int().positive().default(10),
+    ),
+    COUPON_WORKED_STAMPS_PER_USER_PER_DAY: z.preprocess(
+        v => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+        z.coerce.number().int().positive().default(30),
+    ),
     // Paid fallback through the Devino proxy (src/lib/proxy-fallback-headers.ts):
     // the app's OWN OpenRouter org key, sent as X-ORF-Fallback-Key only to
     // https://proxyai.devino.ca and only by the coupon-box pick, the one

@@ -29,7 +29,11 @@
 // (or mutate) the externally-owned catalog. Signals are keyed by the catalog
 // coupon id as a string, matching the app's Coupon.id: string.
 import type { ReportReporter } from '@/lib/couponReportDedupe'
-import { FAILING_WINDOW_MS, keepsFailing } from '@/lib/coupons'
+import {
+    FAILING_WINDOW_MS,
+    MAX_LOW_TRUST_FAIL_WEIGHT,
+    keepsFailing,
+} from '@/lib/coupons'
 import {
     writeFailedSignal,
     writeUsageSignal,
@@ -59,10 +63,13 @@ export type CouponFailureWriter = Pick<
 >
 
 /**
- * How much one distinct reporter counts toward a failure quorum. A signed-in
- * account costs a verified email, an anonymous network costs a proxy address,
- * so an account counts double. coupons.ts FAILING_MIN_FAIL_WEIGHT /
- * KEEPS_FAILING_MIN_FAIL_WEIGHT are the thresholds these add up against.
+ * How much one distinct reporter counts toward a failure quorum. An ESTABLISHED
+ * signed-in account (accountReputation.ts: it has existed for a while) counts
+ * double an anonymous network. A signed-in account that is still young costs
+ * only a verified email, which is as cheap as a proxy address, so it counts as
+ * a network. coupons.ts FAILING_MIN_FAIL_WEIGHT / KEEPS_FAILING_MIN_FAIL_WEIGHT
+ * are the thresholds these add up against, and MAX_LOW_TRUST_FAIL_WEIGHT caps
+ * the weight-`network` reporters together (recomputeFailWeight).
  */
 export const REPORTER_WEIGHT = { account: 2, network: 1 } as const
 
@@ -96,7 +103,7 @@ export function reporterHash(reporter: ReportReporter): string {
 
 /** A reporter's weight toward a failure quorum. */
 export function reporterWeight(reporter: ReportReporter): number {
-    return reporter.kind === 'user'
+    return reporter.kind === 'user' && reporter.established
         ? REPORTER_WEIGHT.account
         : REPORTER_WEIGHT.network
 }
@@ -132,7 +139,13 @@ async function recomputeFailWeight(
         select: { outcome: true, weight: true, lastAt: true },
     })
     const worked = rows.filter(row => row.outcome === 'worked')
-    let total = 0
+    // Reporters at the account weight (or above: the 'legacy' seed rows weigh
+    // 2, 4 or 6) count in full. The weight-`network` reporters (anonymous
+    // networks, young accounts) are cheap to mint, so together they stop at
+    // MAX_LOW_TRUST_FAIL_WEIGHT: below the sink threshold, so a code can never
+    // be sunk without an established account behind it.
+    let trusted = 0
+    let lowTrust = 0
     for (const failure of rows) {
         if (failure.outcome !== 'failed') continue
         const clearing = worked.reduce(
@@ -140,11 +153,15 @@ async function recomputeFailWeight(
                 success.lastAt >= failure.lastAt ? sum + success.weight : sum,
             0,
         )
-        if (clearing < CLEARING_WORKED_WEIGHT) total += failure.weight
+        if (clearing >= CLEARING_WORKED_WEIGHT) continue
+        if (failure.weight >= REPORTER_WEIGHT.account) trusted += failure.weight
+        else lowTrust += failure.weight
     }
     await tx.couponSignal.update({
         where: { couponId },
-        data: { failWeight: total },
+        data: {
+            failWeight: trusted + Math.min(lowTrust, MAX_LOW_TRUST_FAIL_WEIGHT),
+        },
     })
 }
 

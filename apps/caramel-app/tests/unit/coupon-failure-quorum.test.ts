@@ -2,11 +2,13 @@ import { readEdgeClientIp } from '@/lib/clientIp'
 import {
     NO_EDGE_REPORTER_NETWORK,
     reporterFor,
+    resetReportDedupeForTests,
     type ReportReporter,
 } from '@/lib/couponReportDedupe'
 import {
     FAILING_MIN_FAIL_WEIGHT,
     FAILING_WINDOW_MS,
+    MAX_LOW_TRUST_FAIL_WEIGHT,
     isRecentlyFailing,
     keepsFailing,
 } from '@/lib/coupons'
@@ -213,7 +215,17 @@ const anon = (n: number): ReportReporter => ({
     kind: 'ip',
     ip: `203.0.113.${n}`,
 })
-const account = (id: string): ReportReporter => ({ kind: 'user', userId: id })
+// An ESTABLISHED account (accountReputation.ts) weighs 2; a young one weighs 1.
+const account = (id: string): ReportReporter => ({
+    kind: 'user',
+    userId: id,
+    established: true,
+})
+const youngAccount = (id: string): ReportReporter => ({
+    kind: 'user',
+    userId: id,
+    established: false,
+})
 const COUPON = '42'
 
 let db: ReturnType<typeof makeFakeDb>
@@ -240,35 +252,72 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers())
 
 describe('failure quorum: forged anonymous reports cannot sink a code', () => {
-    it('three distinct anonymous reporters do NOT sink it; the fourth does', async () => {
+    it('the cap on low-trust reporters sits one below the sink threshold', () => {
+        expect(MAX_LOW_TRUST_FAIL_WEIGHT).toBe(FAILING_MIN_FAIL_WEIGHT - 1)
+    })
+
+    it('anonymous networks alone can NEVER sink a code, however many distinct ones report (T-6227)', async () => {
         for (let n = 1; n <= 3; n++) await fail(anon(n))
         expect(stored().failWeight).toBe(3)
         expect(isRecentlyFailing(stored())).toBe(false)
 
-        await fail(anon(4))
-        expect(stored().failWeight).toBe(FAILING_MIN_FAIL_WEIGHT)
-        expect(isRecentlyFailing(stored())).toBe(true)
-        // Sinking is not collapsing: that needs a stronger quorum.
+        // The old rule sank it at the fourth distinct network.
+        for (let n = 4; n <= 60; n++) await fail(anon(n))
+        expect(stored().failWeight).toBe(MAX_LOW_TRUST_FAIL_WEIGHT)
+        expect(isRecentlyFailing(stored())).toBe(false)
         expect(keepsFailing(stored())).toBe(false)
+        // The raw count still records every report.
+        expect(db.signals.get(COUPON)?.failCount).toBe(60)
     })
 
-    it('six anonymous reporters collapse it', async () => {
-        for (let n = 1; n <= 6; n++) await fail(anon(n))
-        expect(keepsFailing(stored())).toBe(true)
+    it('throwaway (young) accounts weigh as networks and share the capped pool with them', async () => {
+        for (let n = 1; n <= 30; n++) await fail(youngAccount(`fresh-${n}`))
+        expect(stored().failWeight).toBe(MAX_LOW_TRUST_FAIL_WEIGHT)
+        expect(isRecentlyFailing(stored())).toBe(false)
+
+        for (let n = 1; n <= 30; n++) await fail(anon(n))
+        expect(stored().failWeight).toBe(MAX_LOW_TRUST_FAIL_WEIGHT)
+        expect(isRecentlyFailing(stored())).toBe(false)
     })
 
-    it('signed-in accounts count double: two accounts sink it, one account plus two networks sink it, one account alone does not', async () => {
+    it('established accounts count double: two sink it, one account plus two low-trust reporters sink it, one account alone or plus one network does not', async () => {
         await fail(account('user-1'))
         expect(isRecentlyFailing(stored())).toBe(false)
         await fail(account('user-2'))
         expect(isRecentlyFailing(stored())).toBe(true)
+        // Sinking is not collapsing: that needs a stronger quorum.
+        expect(keepsFailing(stored())).toBe(false)
 
         db = makeFakeDb()
         await fail(account('user-1'))
         await fail(anon(1))
         expect(isRecentlyFailing(stored())).toBe(false)
-        await fail(anon(2))
+        await fail(youngAccount('fresh-1'))
         expect(isRecentlyFailing(stored())).toBe(true)
+    })
+
+    it('collapsing needs more than the capped pool can add: three accounts do, one account plus any number of networks does not', async () => {
+        for (let n = 1; n <= 3; n++) await fail(account(`user-${n}`))
+        expect(keepsFailing(stored())).toBe(true)
+
+        db = makeFakeDb()
+        await fail(account('user-1'))
+        for (let n = 1; n <= 40; n++) await fail(anon(n))
+        // 2 (account) + 3 (the capped pool) = 5, under KEEPS_FAILING (6).
+        expect(stored().failWeight).toBe(2 + MAX_LOW_TRUST_FAIL_WEIGHT)
+        expect(isRecentlyFailing(stored())).toBe(true)
+        expect(keepsFailing(stored())).toBe(false)
+    })
+
+    it('a restart does not let a reporter count twice: the persisted reporter row is the identity, not the in-memory dedupe', async () => {
+        await fail(account('user-1'))
+        // A deploy empties couponReportDedupe's Map, so the same account's next
+        // report is admitted again; the quorum must still see ONE reporter.
+        resetReportDedupeForTests()
+        await fail(account('user-1'))
+        expect(db.signals.get(COUPON)?.failCount).toBe(2)
+        expect(stored().failWeight).toBe(2)
+        expect(isRecentlyFailing(stored())).toBe(false)
     })
 
     it('the raw count keeps rising but decides nothing: one reporter re-reporting is still one reporter', async () => {
@@ -288,8 +337,13 @@ describe('failure quorum: forged anonymous reports cannot sink a code', () => {
     const minutesLater = (n: number) =>
         vi.setSystemTime(Date.now() + n * 60_000)
 
+    const sinkIt = async () => {
+        await fail(account('sinker-1'))
+        await fail(account('sinker-2'))
+    }
+
     it('ONE anonymous "worked" does NOT un-sink a code (it would let one forged success undo any number of honest failures)', async () => {
-        for (let n = 1; n <= 4; n++) await fail(anon(n))
+        await sinkIt()
         expect(isRecentlyFailing(stored())).toBe(true)
 
         minutesLater(5)
@@ -302,7 +356,7 @@ describe('failure quorum: forged anonymous reports cannot sink a code', () => {
 
     it('two distinct anonymous "worked" reporters clear it; so does ONE signed-in "worked"', async () => {
         expect(CLEARING_WORKED_WEIGHT).toBe(2)
-        for (let n = 1; n <= 4; n++) await fail(anon(n))
+        await sinkIt()
 
         minutesLater(5)
         await succeed(anon(50))
@@ -312,14 +366,14 @@ describe('failure quorum: forged anonymous reports cannot sink a code', () => {
         expect(isRecentlyFailing(stored())).toBe(false)
 
         db = makeFakeDb()
-        for (let n = 1; n <= 4; n++) await fail(anon(n))
+        await sinkIt()
         minutesLater(5)
         await succeed(account('user-9'))
         expect(stored().failWeight).toBe(0)
     })
 
     it('one reporter re-reporting "worked" is still one reporter', async () => {
-        for (let n = 1; n <= 4; n++) await fail(anon(n))
+        await sinkIt()
         minutesLater(5)
         await succeed(anon(50))
         minutesLater(1)
@@ -328,7 +382,7 @@ describe('failure quorum: forged anonymous reports cannot sink a code', () => {
     })
 
     it('a success only clears the failures BEFORE it: failures after the cleared quorum count afresh', async () => {
-        for (let n = 1; n <= 4; n++) await fail(anon(n))
+        await sinkIt()
         minutesLater(5)
         await succeed(account('user-9'))
         expect(stored().failWeight).toBe(0)
@@ -651,9 +705,9 @@ describe('reporter identity as stored', () => {
         expect(reporterHash(anon(1))).toBe(a)
         expect(reporterHash(anon(2))).not.toBe(a)
         // A user id and an IP with the same text never collide.
-        expect(reporterHash({ kind: 'user', userId: '203.0.113.1' })).not.toBe(
-            a,
-        )
+        expect(reporterHash(account('203.0.113.1'))).not.toBe(a)
+        // Whether the account is established is NOT part of its identity.
+        expect(reporterHash(account('u'))).toBe(reporterHash(youngAccount('u')))
         expect(reporterHash(account('user-secret-1'))).not.toContain(
             'user-secret-1',
         )
@@ -676,8 +730,9 @@ describe('reporter identity as stored', () => {
         expect(reporterHash(anon(1))).not.toBe(rawKeyed)
     })
 
-    it('weights an account above an anonymous network', () => {
+    it('weights an established account above an anonymous network, and a young account as a network', () => {
         expect(reporterWeight(account('u'))).toBe(2)
+        expect(reporterWeight(youngAccount('u'))).toBe(1)
         expect(reporterWeight(anon(1))).toBe(1)
     })
 })
@@ -727,6 +782,12 @@ describe('reporter identity ignores forgeable headers', () => {
         expect(reporterFor('user-1', req({}))).toEqual({
             kind: 'user',
             userId: 'user-1',
+            established: false,
+        })
+        expect(reporterFor('user-1', req({}), true)).toEqual({
+            kind: 'user',
+            userId: 'user-1',
+            established: true,
         })
     })
 

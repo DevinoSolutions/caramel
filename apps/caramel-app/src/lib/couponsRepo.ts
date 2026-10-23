@@ -60,6 +60,7 @@ import {
     type RecentlyWorkedCouponRow,
     RecentlyWorkedCouponRowSchema,
     ServedStoreConfigRowSchema,
+    ShopperDedupeRowSchema,
     type SiteAggregateRow,
     SiteAggregateRowSchema,
     type SiteCountRow,
@@ -1280,6 +1281,14 @@ export type SubmitShopperCouponResult = {
     couponId: string
     /** false = the code was already listed for this store; nothing was written. */
     created: boolean
+    /**
+     * true when the returned row was submitted by this same user (a new row, or
+     * their own earlier submission); false when somebody else listed it, which
+     * includes every supplier row. The checkout worked-stamp policy
+     * (checkoutWorkedStamp.ts) reads it: a shopper may vouch for their own code
+     * freely, but vouching for a code another party listed needs reputation.
+     */
+    submittedByUser: boolean
 }
 
 /**
@@ -1355,9 +1364,9 @@ export async function submitShopperCoupon(
         if (!(await isKnownStore(base, tx))) throw new UnknownStoreError()
 
         const existing = parseCouponRows(
-            CouponIdRowSchema,
+            ShopperDedupeRowSchema,
             await tx.$queryRaw(Prisma.sql`
-                SELECT id FROM coupons
+                SELECT id, submitted_by_user_id AS "submittedByUserId" FROM coupons
                 WHERE lower(code) = lower(${code})
                   AND ${onStoreSql(base)}
                   AND ${visibleCouponsWhere()}
@@ -1366,7 +1375,13 @@ export async function submitShopperCoupon(
             `),
             'shopper-coupon.dedupe',
         )
-        if (existing[0]) return { couponId: existing[0].id, created: false }
+        if (existing[0]) {
+            return {
+                couponId: existing[0].id,
+                created: false,
+                submittedByUser: existing[0].submittedByUserId === userId,
+            }
+        }
 
         const [recent] = parseCouponRows(
             TotalCountRowSchema,
@@ -1409,6 +1424,6 @@ export async function submitShopperCoupon(
                 `submitShopperCoupon: INSERT returned no row for store "${base}"`,
             )
         }
-        return { couponId: row.id, created: true }
+        return { couponId: row.id, created: true, submittedByUser: true }
     })
 }
