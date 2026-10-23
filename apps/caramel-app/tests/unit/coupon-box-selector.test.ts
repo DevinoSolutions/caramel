@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
     isCouponBoxSelector,
     isRiskyControlSelector,
+    namesCouponControl,
 } from '@/lib/couponBoxSelector'
 
 // The coupon box selector grammar (src/lib/couponBoxSelector.ts), the
@@ -275,5 +276,91 @@ describe('apply and toggle selectors that can submit a form', () => {
         'a#buyer-code-toggle',
     ])('accepts %s', selector => {
         expect(isRiskyControlSelector(selector)).toBe(false)
+    })
+})
+
+// T-6221 (review): the denylist alone passes any generic selector
+// (`button.btn` clicks the first .btn on a checkout). An apply or toggle
+// selector must ALSO name a coupon, so the save accepts a selector only when
+// both gates agree.
+const acceptedForClick = (selector: string) =>
+    isCouponBoxSelector(selector) &&
+    namesCouponControl(selector) &&
+    !isRiskyControlSelector(selector)
+
+describe('apply and toggle selectors must name a coupon (allowlist) as well as pass the denylist', () => {
+    it.each([
+        // Generic selectors the denylist alone let through (T-6221 review).
+        '.btn',
+        'button.btn',
+        '.cart__footer .button',
+        '[name=commit]',
+        '[name=complete]',
+        '.btn[aria-label="Continue to payment"]',
+        'a.btn',
+        '[data-x*=ayment]',
+        '#p-a-y',
+        '.btn[data-submit]',
+        // More of the same shape.
+        'button[name=continue]',
+        '#submit-btn',
+        'input[type=button].go',
+        'button.primary',
+        '.checkout-footer .action',
+        // The coupon word is only an ANCESTOR, or only excluded by :not().
+        '.promo-box button.btn',
+        'button.btn:not(.promo)',
+        // A coupon word hiding inside another word is not a coupon word.
+        '#zipcode-go',
+        '.barcode-scan',
+        'button.reapply-later',
+        // A tag named like a coupon word does not count; only the name does.
+        'code.x',
+    ])('refuses %s', selector => {
+        expect(acceptedForClick(selector)).toBe(false)
+    })
+
+    it.each([
+        // Real-looking apply and toggle controls.
+        'button[name="apply_coupon"]',
+        'form.coupon button[name=apply_coupon]',
+        'button[name="checkout_reduction_code_apply"]',
+        '#checkout-coupon-apply',
+        '#checkout_discount_btn',
+        '#applyCouponBtn',
+        'button#ApplyPromoCode',
+        'button.js-apply-voucher',
+        'button[data-testid="apply-promo-code"]',
+        '[data-testid="coupon-apply-button"]',
+        'button[aria-label="Apply discount code"]',
+        'button[aria-label="Redeem gift card"]',
+        'button[aria-label="Apply"]',
+        'input[name="apply_coupon"]',
+        '.promo-code__submit',
+        '.cart-coupon .apply-code',
+        'button.reveal-promo',
+        'a[data-promo-toggle]',
+        'button.display-code',
+        'a#buyer-code-toggle',
+        'button[id^=promo]',
+        'button[id$=-apply]',
+        'button[name*=coupon]',
+        'button.apply[type="button"]',
+        '#PayPal-apply',
+    ])('accepts %s', selector => {
+        expect(acceptedForClick(selector)).toBe(true)
+    })
+
+    it('a coupon word does not rescue a control the denylist refuses', () => {
+        for (const selector of [
+            'button.apply[type=submit]',
+            '#apply-and-pay',
+            'button.promo-code.place-order',
+            'input.coupon[type=image]',
+            'button[data-promo][form]',
+        ]) {
+            expect(namesCouponControl(selector)).toBe(true)
+            expect(acceptedForClick(selector)).toBe(false)
+        }
     })
 })

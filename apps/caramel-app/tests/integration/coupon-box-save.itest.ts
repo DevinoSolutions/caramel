@@ -584,6 +584,52 @@ describe('coupon-box save: a saved box expires', () => {
         expect(await storedRow(store)).toEqual(before)
     })
 
+    it('RENEWAL: after the box and its proposals age out, the same users saving the same box again re-publish it', async () => {
+        const store = newStore()
+        await knownStore(store)
+        const users = await Promise.all(
+            Array.from({ length: QUORUM }, () => newUser()),
+        )
+        const saveAll = async () => {
+            const answers: Response[] = []
+            for (const id of users) answers.push(await save(store, BOX, id))
+            return answers
+        }
+        const first = await saveAll()
+        expect(await first[QUORUM - 1]!.json()).toMatchObject({
+            status: 'published',
+        })
+
+        // Everything ages past the max age: the served config and every
+        // user's proposal.
+        const aged = daysAgo(AUTO_DETECT_CONFIG_MAX_AGE_DAYS + 1)
+        await backdate(store, aged)
+        await prisma.couponBoxProposal.updateMany({
+            where: { storeName: store },
+            data: { createdAt: aged },
+        })
+        expect(await supportedEntry(store)).toBeUndefined()
+
+        // The same users, the same box (the same hash): each save renews its
+        // row, and the last one is the quorum again.
+        const again = await saveAll()
+        expect(await Promise.all(again.map(r => r.json()))).toMatchObject([
+            { status: 'pending' },
+            { status: 'pending' },
+            { status: 'published' },
+        ])
+        resetSupportedStoresCache()
+        expect(await supportedEntry(store)).toMatchObject({
+            domain: store,
+            savedBox: true,
+        })
+        expect(
+            await prisma.couponBoxProposal.count({
+                where: { storeName: store },
+            }),
+        ).toBe(QUORUM)
+    })
+
     it('the max age never applies to a pipeline row: a two-year-old pipeline config is served and refuses a save', async () => {
         const store = newStore()
         await knownStore(store)

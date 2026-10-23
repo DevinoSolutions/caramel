@@ -336,3 +336,57 @@ export function isRiskyControlSelector(selector: string): boolean {
         return risky !== null && !(namesCoupon && CHECKOUT_RISKY.has(risky))
     })
 }
+
+// Words that say a control is about a coupon, not a checkout. Terms long enough
+// to be found INSIDE a joined word (`applyCoupon`, `promocode`, `giftcard`) are
+// matched as substrings of the joined name; the short ones (`code`, `apply`,
+// `gift`) only as whole words, so `zipcode`, `barcode` and `reapply` are not
+// coupon words.
+const COUPON_NAME_SUBSTRINGS: readonly string[] = [
+    'coupon',
+    'discount',
+    'promo',
+    'voucher',
+    'redeem',
+    'reduction',
+    'giftcard',
+]
+const COUPON_NAME_WORDS: ReadonlySet<string> = new Set([
+    'code',
+    'codes',
+    'apply',
+    'gift',
+])
+
+/**
+ * Whether the element an APPLY or TOGGLE selector clicks is NAMED for a coupon:
+ * its last compound (ancestors and `:not(...)` do not count, and the tag does
+ * not either) holds a coupon word (COUPON_NAME_SUBSTRINGS, COUPON_NAME_WORDS)
+ * in an id, a class, an attribute NAME or an attribute VALUE (aria-label, name,
+ * placeholder, data-*). camelCase is split first (`applyCouponBtn`).
+ *
+ * This is the allowlist half of the T-6221 gate; isRiskyControlSelector is the
+ * denylist half and both must pass. A denylist alone cannot work: `.btn`,
+ * `button.btn`, `[name=commit]` and `[data-x*=ayment]` name no risky word and
+ * still click the first button on a checkout. An attacker can still WRITE a
+ * selector that mentions a coupon (`button.promo`), but it then only clicks an
+ * element the page itself calls a promo control, and it needs the corroboration
+ * quorum and the extension's on-page control guard to get any further.
+ */
+export function namesCouponControl(selector: string): boolean {
+    const compounds = compoundsOf(selector)
+    const clicked = compounds
+        ? (compounds[compounds.length - 1] ?? '')
+        : selector
+    const words = splitWords(
+        clicked
+            .replace(/:not\([^)]*\)/g, ' ')
+            .replace(TYPE_RE, ' ')
+            .replace(/([a-z0-9])([A-Z])/g, '$1 $2'),
+    )
+    const joined = words.join('')
+    return (
+        COUPON_NAME_SUBSTRINGS.some(term => joined.includes(term)) ||
+        words.some(word => COUPON_NAME_WORDS.has(word))
+    )
+}

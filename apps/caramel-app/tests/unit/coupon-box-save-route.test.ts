@@ -112,6 +112,22 @@ vi.mock('@/lib/prisma', () => {
                     proposals.find(r =>
                         matches(r, args.where.storeName_boxHash_userId),
                     ) ?? null,
+                update: async (args: {
+                    where: {
+                        storeName_boxHash_userId: Pick<
+                            ProposalRow,
+                            'storeName' | 'boxHash' | 'userId'
+                        >
+                    }
+                    data: { createdAt: Date }
+                }) => {
+                    const row = proposals.find(r =>
+                        matches(r, args.where.storeName_boxHash_userId),
+                    )
+                    if (!row) throw new Error('no proposal to renew')
+                    row.createdAt = args.data.createdAt
+                    return row
+                },
                 count: async (args: { where: ProposalWhere }) =>
                     proposals.filter(r => matches(r, args.where)).length,
                 createMany: async (args: {
@@ -365,6 +381,18 @@ describe('POST /api/extension/coupon-box-save', () => {
             'a place-order spelled in pieces',
             goodBody({ apply: 'button[id^=check][id$=out]' }),
         ],
+        // T-6221 review: generic selectors name no risky word but click
+        // the first such control on a checkout.
+        ['an apply that is just button.btn', goodBody({ apply: 'button.btn' })],
+        [
+            'an apply that is [name=commit]',
+            goodBody({ apply: '[name=commit]' }),
+        ],
+        [
+            'an apply with a payment aria-label',
+            goodBody({ apply: '.btn[aria-label="Continue to payment"]' }),
+        ],
+        ['a toggle that is a.btn', goodBody({ toggle: 'a.btn' })],
         ['a code in the body', { ...goodBody(), code: 'SAVE10' }],
         ['an amount in the box', goodBody({ amount: 5 })],
         ['a host with a path', goodBody({}, 'shop-example.com/cart')],
@@ -516,6 +544,18 @@ describe('coupon-box-save: the daily write budget (T-6221)', () => {
         })
         expect(proposals).toHaveLength(2)
         expect(insertMock).not.toHaveBeenCalled()
+        // Sentry: a breadcrumb every time, ONE message per hour per cap kind
+        // (this is the first user-cap hit in this file; the module keeps the
+        // throttle between tests).
+        await post(goodBody({ input: '#d' }))
+        expect(sentry.addBreadcrumb).toHaveBeenCalledTimes(2)
+        expect(sentry.captureMessage).toHaveBeenCalledTimes(1)
+        expect(sentry.captureMessage).toHaveBeenCalledWith(
+            'coupon-box-save user daily write cap reached',
+            expect.objectContaining({
+                tags: expect.objectContaining({ cap_scope: 'user' }),
+            }),
+        )
     })
 
     it('the cap is per user: another user is not affected', async () => {
@@ -537,6 +577,41 @@ describe('coupon-box-save: the daily write budget (T-6221)', () => {
         expect(proposals).toHaveLength(1)
     })
 
+    it('a repeat save renews the proposal (created_at = now) and spends no budget', async () => {
+        envMock.COUPON_BOX_SAVE_USER_DAILY_CAP = 1
+        await post(goodBody())
+        const old = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000)
+        proposals[0]!.createdAt = old
+
+        const again = await post(goodBody())
+
+        expect(again.status).toBe(200)
+        expect(proposals).toHaveLength(1)
+        expect(proposals[0]!.createdAt.getTime()).toBeGreaterThan(
+            old.getTime() + 39 * 24 * 60 * 60 * 1000,
+        )
+    })
+
+    it('RENEWAL: after the 30-day window the same users re-promote the same box by saving again', async () => {
+        await postFromQuorum(goodBody())
+        expect(insertMock).toHaveBeenCalledTimes(1)
+        const old = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000)
+        for (const row of proposals) row.createdAt = old
+        insertMock.mockClear()
+
+        // The rows are outside the corroboration window until each user
+        // saves again; only the last one reaches the quorum.
+        for (let i = 1; i < QUORUM; i++) {
+            const res = await post(goodBody(), { user: `quorum-user-${i}` })
+            expect(await res.json()).toMatchObject({ status: 'pending' })
+        }
+        expect(insertMock).not.toHaveBeenCalled()
+        const last = await post(goodBody(), { user: `quorum-user-${QUORUM}` })
+
+        expect(await last.json()).toMatchObject({ status: 'published' })
+        expect(insertMock).toHaveBeenCalledTimes(1)
+    })
+
     it('the per-store cap: 429 store_budget once the store has taken its share', async () => {
         envMock.COUPON_BOX_SAVE_STORE_DAILY_CAP = 2
         await post(goodBody({ input: '#a' }), { user: 'u1' })
@@ -550,6 +625,14 @@ describe('coupon-box-save: the daily write budget (T-6221)', () => {
             reason: 'store_budget',
         })
         expect(proposals).toHaveLength(2)
+        // First store-cap hit in this file: one throttled Sentry message.
+        expect(sentry.captureMessage).toHaveBeenCalledTimes(1)
+        expect(sentry.captureMessage).toHaveBeenCalledWith(
+            'coupon-box-save store daily write cap reached',
+            expect.objectContaining({
+                tags: expect.objectContaining({ cap_scope: 'store' }),
+            }),
+        )
     })
 
     it('the global cap: 429 global_budget, nothing written, and Sentry hears about it', async () => {

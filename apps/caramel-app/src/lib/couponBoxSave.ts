@@ -20,8 +20,12 @@
 //   - A write budget (recordBoxProposal): per user, per store and across all
 //     callers per 24 hours; over a cap the route answers 429.
 //   - Selectors only, each inside the grammar in couponBoxSelector.ts, and an
-//     apply or toggle selector never names a checkout, payment, order or
-//     delete control or could submit a form (isRiskyControlSelector). No codes, amounts, page text or anything about the
+//     apply or toggle selector must be NAMED for a coupon (namesCouponControl:
+//     coupon, discount, promo, voucher, code, apply, redeem, reduction, gift in
+//     its id, class or attributes) AND must not name a checkout, payment,
+//     order or delete control or be able to submit a form
+//     (isRiskyControlSelector): both gates, because a denylist alone passes
+//     `button.btn`. No codes, amounts, page text or anything about the
 //     shopper is accepted: the body is refused whole if it carries more.
 //   - The host must belong to a store the catalog knows (resolveSaveStoreName),
 //     matched the way the extension matches a host to a config row.
@@ -38,6 +42,7 @@ import { couponBoxDomainSchema } from '@/lib/couponBoxPick'
 import {
     isCouponBoxSelector,
     isRiskyControlSelector,
+    namesCouponControl,
 } from '@/lib/couponBoxSelector'
 import { findCatalogStoreNames } from '@/lib/couponsRepo'
 import { env } from '@/lib/env'
@@ -55,14 +60,17 @@ const selectorSchema = z.string().refine(isCouponBoxSelector, {
     error: 'not an accepted coupon box selector',
 })
 
-// The extension CLICKS these, so they may never name a control that places an
-// order, pays or deletes something.
-const clickedSelectorSchema = selectorSchema.refine(
-    s => !isRiskyControlSelector(s),
-    {
+// The extension CLICKS these on other shoppers' browsers (T-6221), so two gates
+// must both pass: the element must be named for a coupon (allowlist), and it
+// may never name a control that places an order, pays, deletes something or
+// can submit a form (denylist).
+const clickedSelectorSchema = selectorSchema
+    .refine(namesCouponControl, {
+        error: 'does not name a coupon, promo, discount or code control',
+    })
+    .refine(s => !isRiskyControlSelector(s), {
         error: 'names a checkout, payment, order, delete or form-submit control',
-    },
-)
+    })
 
 export const couponBoxSaveRequestSchema = z
     .object({
@@ -238,24 +246,34 @@ export function boxHash(config: AutoDetectedStoreConfig): string {
         .digest('hex')
 }
 
-// A sustained global-cap hit is ONE Sentry event per hour, not one per request.
-const GLOBAL_CAP_REPORT_INTERVAL_MS = 60 * 60 * 1000
-let nextGlobalCapReportAt = 0
+// A sustained cap hit is ONE Sentry event per hour per process per cap kind,
+// not one per request; the breadcrumb is every time.
+const CAP_REPORT_INTERVAL_MS = 60 * 60 * 1000
+const nextCapReportAt: Record<BoxBudgetScope, number> = {
+    user: 0,
+    store: 0,
+    global: 0,
+}
 
-function reportGlobalCapHit(cap: number, storeName: string): void {
+function reportCapHit(
+    scope: BoxBudgetScope,
+    cap: number,
+    storeName: string,
+): void {
+    const message = `coupon-box-save ${scope} daily write cap reached`
     Sentry.addBreadcrumb({
         category: 'coupon-box-save',
         level: 'warning',
-        message: 'global daily write cap reached',
-        data: { cap, storeName },
+        message,
+        data: { scope, cap, storeName },
     })
     const now = Date.now()
-    if (now < nextGlobalCapReportAt) return
-    nextGlobalCapReportAt = now + GLOBAL_CAP_REPORT_INTERVAL_MS
-    Sentry.captureMessage('coupon-box-save global daily write cap reached', {
+    if (now < nextCapReportAt[scope]) return
+    nextCapReportAt[scope] = now + CAP_REPORT_INTERVAL_MS
+    Sentry.captureMessage(message, {
         level: 'warning',
-        tags: { route: 'extension/coupon-box-save' },
-        extra: { cap },
+        tags: { route: 'extension/coupon-box-save', cap_scope: scope },
+        extra: { cap, storeName },
     })
 }
 
@@ -267,11 +285,24 @@ function reportGlobalCapHit(cap: number, storeName: string): void {
  * store_configs, so a forged or mistaken box is never served and a squatter
  * cannot hold a store against the box real installs agree on.
  *
- * The write budget counts NEW proposals in the last 24 hours (a user repeating
- * a save they already made is no new write and spends nothing): per user,
- * then per store, then in total. Over a cap nothing is written. The caps are
+ * The write budget counts proposals created in the last 24 hours: per user,
+ * then per store, then in total. A user repeating a save they already made is
+ * never refused by a cap and adds no row, but it RENEWS the row (created_at =
+ * now), which is what lets the same users re-promote a box after its served
+ * config has aged out (AUTO_DETECT_CONFIG_MAX_AGE_DAYS): without the renewal
+ * their rows would fall out of the corroboration window and never agree again.
+ * A renewed row counts in the 24-hour window like a new one. Over a cap nothing
+ * is written, and each cap kind raises a throttled Sentry message. The caps are
  * read-then-write, so a burst of simultaneous requests can overshoot a cap by
  * the burst size; the caps bound growth, they are not a strict invariant.
+ *
+ * RESIDUAL RISK (T-6221): corroboration counts distinct ACCOUNTS, so an
+ * attacker with COUPON_BOX_SAVE_MIN_AGREEING_INSTALLS accounts (any email
+ * signup) can still get a box served. The selector gates (couponBoxSelector.ts)
+ * and the extension's on-page control guard are what limit the damage then.
+ * TODO(T-6221): count only established accounts (accountReputation.ts
+ * isEstablishedAccount, from the T-6222/T-6227 PR) once it lands; do not
+ * re-implement that helper here.
  */
 export async function recordBoxProposal(args: {
     storeName: string
@@ -288,7 +319,13 @@ export async function recordBoxProposal(args: {
         where: { storeName_boxHash_userId: key },
         select: { userId: true },
     })
-    if (!already) {
+    if (already) {
+        // A repeat save renews the row (see above); it spends no budget.
+        await prisma.couponBoxProposal.update({
+            where: { storeName_boxHash_userId: key },
+            data: { createdAt: new Date() },
+        })
+    } else {
         const since = new Date(Date.now() - DAY_MS)
         const [byUser, byStore, total] = await Promise.all([
             prisma.couponBoxProposal.count({
@@ -301,15 +338,16 @@ export async function recordBoxProposal(args: {
                 where: { createdAt: { gt: since } },
             }),
         ])
-        if (byUser >= env.COUPON_BOX_SAVE_USER_DAILY_CAP) {
-            return { kind: 'over_budget', scope: 'user' }
-        }
-        if (byStore >= env.COUPON_BOX_SAVE_STORE_DAILY_CAP) {
-            return { kind: 'over_budget', scope: 'store' }
-        }
-        if (total >= env.COUPON_BOX_SAVE_GLOBAL_DAILY_CAP) {
-            reportGlobalCapHit(env.COUPON_BOX_SAVE_GLOBAL_DAILY_CAP, storeName)
-            return { kind: 'over_budget', scope: 'global' }
+        const caps = [
+            ['user', byUser, env.COUPON_BOX_SAVE_USER_DAILY_CAP],
+            ['store', byStore, env.COUPON_BOX_SAVE_STORE_DAILY_CAP],
+            ['global', total, env.COUPON_BOX_SAVE_GLOBAL_DAILY_CAP],
+        ] as const
+        for (const [scope, used, cap] of caps) {
+            if (used >= cap) {
+                reportCapHit(scope, cap, storeName)
+                return { kind: 'over_budget', scope }
+            }
         }
         await prisma.couponBoxProposal.createMany({
             data: [
