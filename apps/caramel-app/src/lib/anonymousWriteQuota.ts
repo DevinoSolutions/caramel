@@ -37,8 +37,9 @@ export function quotaKeyFor(address: string | null): string {
     if (family !== 6) return 'unknown'
 
     const lower = ip.toLowerCase()
-    const mapped =
-        /^(?:0{0,4}:){0,5}:?ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(lower)
+    const mapped = /^(?:0{0,4}:){0,5}:?ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(
+        lower,
+    )
     if (mapped && isIP(mapped[1]!) === 4) return mapped[1]!
 
     // Expand `::` and an embedded IPv4 tail into eight 16-bit groups.
