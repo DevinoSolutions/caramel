@@ -2,7 +2,7 @@ import { withRoute } from '@/lib/api/withRoute'
 import { sendEmail } from '@/lib/email'
 import {
     assessSuggestionIntake,
-    CONTROL_CHARACTER,
+    hasControlCharacter,
 } from '@/lib/siteSuggestionIntake'
 import { SITE_SUGGESTION_OPS_EMAIL } from '@/lib/siteSuggestionNotices'
 import {
@@ -44,7 +44,7 @@ const SuggestBodySchema = z.object({
         .trim()
         .min(1)
         .max(2048)
-        .refine(value => !CONTROL_CHARACTER.test(value), {
+        .refine(value => !hasControlCharacter(value), {
             message: 'must not contain control characters',
         }),
     // Optional contact for an anonymous requester. Ignored when a session
@@ -54,7 +54,7 @@ const SuggestBodySchema = z.object({
         .trim()
         .email()
         .max(320)
-        .refine(value => !CONTROL_CHARACTER.test(value), {
+        .refine(value => !hasControlCharacter(value), {
             message: 'must not contain control characters',
         })
         .optional(),

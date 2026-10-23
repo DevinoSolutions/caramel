@@ -377,20 +377,15 @@ describe('requestSource (write, app sources INSERT via prisma.source.create)', (
         expect(arg.data.id.length).toBeGreaterThan(0)
     })
 
-    it('T-6225: a host that already has a row (any case, any status) is a duplicate and writes nothing', async () => {
+    it('T-6225: a host that already has a row (any status) is a duplicate and writes nothing', async () => {
         existingSourceRow = { id: 'src-1' }
 
         await expect(requestSource('example.com')).resolves.toBe('duplicate')
 
         expect(capturedSourceCreates).toHaveLength(0)
-        // The lookup is case-insensitive and NOT status-filtered.
+        // An exact match (the route lowercases the host) and NOT status-filtered.
         expect(capturedSourceFinds).toEqual([
-            {
-                where: {
-                    source: { equals: 'example.com', mode: 'insensitive' },
-                },
-                select: { id: true },
-            },
+            { where: { source: 'example.com' }, select: { id: true } },
         ])
     })
 

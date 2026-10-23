@@ -35,11 +35,28 @@ export type SuggestionIntake =
     | { kind: 'over_daily_cap' }
     | { kind: 'accept'; sendOpsMail: boolean }
 
-/** Any control character (C0/C1) or line/paragraph separator. The
- * URL and email go into a plain-text mail one-per-line; WHATWG URL parsing
- * silently drops tab/CR/LF, so a value carrying one still validates as a store
- * URL while forging extra lines in that mail. Such input is refused outright. */
-export const CONTROL_CHARACTER = /[\p{Cc}\p{Zl}\p{Zp}]/u
+/**
+ * Does `value` hold a control character (C0/C1) or a line/paragraph separator?
+ * The URL and email go into a plain-text mail one value per line; WHATWG URL
+ * parsing silently drops tab/CR/LF, so a value carrying one still validates as
+ * a store URL while forging extra lines in that mail. Such input is refused
+ * outright. A loop, not a `\p{Cc}` regex: the tsconfig target predates the `u`
+ * flag.
+ */
+export function hasControlCharacter(value: string): boolean {
+    for (let i = 0; i < value.length; i += 1) {
+        const code = value.charCodeAt(i)
+        if (
+            code <= 0x1f ||
+            (code >= 0x7f && code <= 0x9f) ||
+            code === 0x2028 ||
+            code === 0x2029
+        ) {
+            return true
+        }
+    }
+    return false
+}
 
 export async function assessSuggestionIntake(input: {
     domain: string

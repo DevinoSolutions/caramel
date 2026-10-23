@@ -1038,7 +1038,7 @@ export type RequestSourceOutcome = 'created' | 'duplicate' | 'queue_full'
  * (mirrors the pre-W4 gen_random_uuid()::text); created_at/updated_at fill via
  * their @default(now()).
  *
- * Bounded (T-6225): a host that already has a row (any status, any case) is a
+ * Bounded (T-6225): a host that already has a row (any status; exact match, the route lowercases) is a
  * `duplicate` and writes nothing; once MAX_REQUESTED_SOURCES requests are
  * waiting the answer is `queue_full`. The check-then-insert is not atomic
  * (there is no unique index on `source` and this PR ships no migration), so
@@ -1049,7 +1049,7 @@ export async function requestSource(
     host: string,
 ): Promise<RequestSourceOutcome> {
     const existing = await prisma.source.findFirst({
-        where: { source: { equals: host, mode: 'insensitive' } },
+        where: { source: host },
         select: { id: true },
     })
     if (existing) return 'duplicate'
