@@ -47,6 +47,13 @@ describe('quotaKeyFor', () => {
 
     it('an IPv4-mapped IPv6 address is the IPv4 address', () => {
         expect(quotaKeyFor('::ffff:203.0.113.7')).toBe('203.0.113.7')
+        // The hex spellings of the same mapped address (a dotted-only regex
+        // sent these to the shared 0:0:0:0::/64 bucket).
+        expect(quotaKeyFor('::ffff:cb00:7107')).toBe('203.0.113.7')
+        expect(quotaKeyFor('0:0:0:0:0:ffff:cb00:7107')).toBe('203.0.113.7')
+        expect(quotaKeyFor('::FFFF:CB00:7107')).toBe('203.0.113.7')
+        expect(quotaKeyFor('::ffff:0102:0304')).toBe('1.2.3.4')
+        expect(quotaKeyFor('0:0:0:0:0:ffff:102:304')).toBe('1.2.3.4')
     })
 
     it('no address, or garbage, shares the unknown bucket', () => {

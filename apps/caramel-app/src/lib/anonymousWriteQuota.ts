@@ -37,11 +37,6 @@ export function quotaKeyFor(address: string | null): string {
     if (family !== 6) return 'unknown'
 
     const lower = ip.toLowerCase()
-    const mapped = /^(?:0{0,4}:){0,5}:?ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(
-        lower,
-    )
-    if (mapped && isIP(mapped[1]!) === 4) return mapped[1]!
-
     // Expand `::` and an embedded IPv4 tail into eight 16-bit groups.
     let text = lower
     const tail = /(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(text)
@@ -58,9 +53,17 @@ export function quotaKeyFor(address: string | null): string {
         rest === undefined ? 0 : Math.max(0, 8 - left.length - right.length)
     const groups = [...left, ...Array<string>(zeros).fill('0'), ...right]
     if (groups.length !== 8) return 'unknown'
-    return `${groups
+    const values = groups.map(group => parseInt(group, 16))
+    // IPv4-mapped (`::ffff:a.b.c.d` in ANY spelling, dotted or hex): the
+    // client is that IPv4 address and must share its bucket.
+    if (values.slice(0, 5).every(v => v === 0) && values[5] === 0xffff) {
+        const hi = values[6]!
+        const lo = values[7]!
+        return `${hi >> 8}.${hi & 0xff}.${lo >> 8}.${lo & 0xff}`
+    }
+    return `${values
         .slice(0, 4)
-        .map(group => parseInt(group, 16).toString(16))
+        .map(value => value.toString(16))
         .join(':')}::/64`
 }
 
