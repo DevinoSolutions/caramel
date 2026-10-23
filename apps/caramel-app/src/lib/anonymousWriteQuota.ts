@@ -28,20 +28,22 @@ const HOUR_SECONDS = 60 * 60
  */
 export function quotaKeyFor(address: string | null): string {
     if (!address) return 'unknown'
-    const ip = address.trim().replace(/^[|]$/g, '').split('%')[0]!
+    const ip = address
+        .trim()
+        .replace(/^\[|\]$/g, '')
+        .split('%')[0]!
     const family = isIP(ip)
     if (family === 4) return ip
     if (family !== 6) return 'unknown'
 
     const lower = ip.toLowerCase()
-    const mapped = /^(?:0{0,4}:){0,5}:?ffff:(d{1,3}(?:.d{1,3}){3})$/.exec(
-        lower,
-    )
+    const mapped =
+        /^(?:0{0,4}:){0,5}:?ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(lower)
     if (mapped && isIP(mapped[1]!) === 4) return mapped[1]!
 
     // Expand `::` and an embedded IPv4 tail into eight 16-bit groups.
     let text = lower
-    const tail = /(d{1,3}).(d{1,3}).(d{1,3}).(d{1,3})$/.exec(text)
+    const tail = /(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(text)
     if (tail) {
         const hi = ((Number(tail[1]) << 8) | Number(tail[2])).toString(16)
         const lo = ((Number(tail[3]) << 8) | Number(tail[4])).toString(16)
