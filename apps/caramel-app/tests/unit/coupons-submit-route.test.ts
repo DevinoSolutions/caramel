@@ -38,7 +38,9 @@ const {
     captureMock,
     reportRows,
     sentryMessageMock,
+    executeRawMock,
 } = vi.hoisted(() => ({
+    executeRawMock: vi.fn(async () => 0),
     // The coupon_reports rows the stamp policy counts and writes (fake table).
     reportRows: [] as {
         couponId: string
@@ -126,7 +128,7 @@ vi.mock('@/lib/prisma', () => {
                     couponId: string
                     userId: string
                     outcome: string
-                    createdAt: { gte: Date }
+                    createdAt: { gt: Date }
                 }
             }) =>
                 reportRows.find(
@@ -134,7 +136,7 @@ vi.mock('@/lib/prisma', () => {
                         row.couponId === args.where.couponId &&
                         row.userId === args.where.userId &&
                         row.outcome === args.where.outcome &&
-                        row.createdAt >= args.where.createdAt.gte,
+                        row.createdAt > args.where.createdAt.gt,
                 ) ?? null,
         ),
         create: vi.fn(
@@ -149,6 +151,8 @@ vi.mock('@/lib/prisma', () => {
     }
     const client = {
         couponReport,
+        // lockShopperUser's pg_advisory_xact_lock statement.
+        $executeRaw: executeRawMock,
         $transaction: async (fn: (tx: unknown) => Promise<unknown>) =>
             fn(client),
     }
@@ -210,6 +214,7 @@ beforeEach(() => {
     }))
     reportRows.length = 0
     sentryMessageMock.mockReset()
+    executeRawMock.mockClear()
     resetReportDedupeForTests()
     resetReportVelocityForTests()
     recordWorkedMock.mockReset()
@@ -511,6 +516,7 @@ describe('POST /api/coupons/submit — checkout source', () => {
             '900000000000000001',
             { kind: 'user', userId: 'user-1', established: true },
             expect.anything(),
+            { forceStamp: true },
         )
         // The write order matters: the row must exist before it is stamped.
         expect(
@@ -648,6 +654,7 @@ describe('POST /api/coupons/submit — checkout source', () => {
             '42',
             { kind: 'user', userId: 'user-1', established: true },
             expect.anything(),
+            { forceStamp: true },
         )
     })
 
@@ -1254,6 +1261,11 @@ describe('POST /api/coupons/submit — checkout worked-stamp policy (T-6222)', (
         envMock.SHOPPER_CODE_CAPTURE_ENABLED = true
     })
 
+    function lockCallCount(): number {
+        // The fake client's $executeRaw is the advisory-lock statement.
+        return executeRawMock.mock.calls.length
+    }
+
     function eventOutcome(): unknown {
         return captureMock.mock.calls[0]![0].properties?.outcome
     }
@@ -1272,6 +1284,7 @@ describe('POST /api/coupons/submit — checkout worked-stamp policy (T-6222)', (
             '900000000000000001',
             { kind: 'user', userId: 'user-1', established: false },
             expect.anything(),
+            { forceStamp: true },
         )
         expect(eventOutcome()).toBe('created')
     })
@@ -1435,7 +1448,9 @@ describe('POST /api/coupons/submit — checkout worked-stamp policy (T-6222)', (
         signedInAs('user-1')
         submitShopperCouponMock.mockImplementation(async () => SUPPLIER_ROW)
         const max = envMock.COUPON_REPORT_MAX_PER_COUPON_PER_HOUR as number
-        for (let n = 0; n < max; n++) admitCouponReportVelocity('worked', '42')
+        for (let n = 0; n < max; n++) {
+            admitCouponReportVelocity('worked', '42', 'established')
+        }
 
         const res = await POST(submitRequest(checkout))
 
@@ -1462,7 +1477,7 @@ describe('POST /api/coupons/submit — checkout worked-stamp policy (T-6222)', (
         errorSpy.mockRestore()
     })
 
-    it('the attribution row is idempotent per account, coupon and UTC day: a repeat after a restart (dedupe memory empty) writes no second row', async () => {
+    it('the PERSISTED coupon_reports row is the truth: after a restart (dedupe memory empty) a repeat inside 24h is not re-stamped and writes no second row', async () => {
         signedInAs('user-1')
         submitShopperCouponMock.mockImplementation(async () => SUPPLIER_ROW)
 
@@ -1472,8 +1487,26 @@ describe('POST /api/coupons/submit — checkout worked-stamp policy (T-6222)', (
         const again = await POST(submitRequest(checkout))
 
         expect((await again.json()).status).toBe('worked')
-        expect(recordWorkedMock).toHaveBeenCalledTimes(2)
+        expect(recordWorkedMock).toHaveBeenCalledTimes(1)
         expect(reportRows).toHaveLength(1)
+    })
+
+    it('the stamp transaction takes the per-shopper advisory lock first (the daily count cannot race)', async () => {
+        signedInAs('user-1')
+        submitShopperCouponMock.mockImplementation(async () => SUPPLIER_ROW)
+
+        await POST(submitRequest(checkout))
+
+        expect(lockCallCount()).toBe(1)
+    })
+
+    it('a stamp that is refused before the transaction (gated) takes no lock and opens none', async () => {
+        signedInAs('user-1', YOUNG_ACCOUNT)
+        submitShopperCouponMock.mockImplementation(async () => SUPPLIER_ROW)
+
+        await POST(submitRequest(checkout))
+
+        expect(lockCallCount()).toBe(0)
     })
 
     it('a MANUAL add never reaches the stamp policy', async () => {

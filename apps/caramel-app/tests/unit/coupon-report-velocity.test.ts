@@ -2,13 +2,18 @@ import {
     admitCouponReportVelocity,
     releaseCouponReportVelocity,
     resetReportVelocityForTests,
+    velocityEntryCountForTests,
+    velocityTierOf,
+    type VelocityKind,
+    type VelocityTier,
 } from '@/lib/couponReportVelocity'
 import * as Sentry from '@sentry/nextjs'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 // The per-COUPON speed limit on worked / failed reports (T-6227): at most
-// `maxPerHour` COUNTED reports of a kind per coupon per hour, whoever sends
-// them. State is a per-process Map; `now` and the cap are parameters.
+// `maxPerHour` COUNTED reports of a kind per coupon per hour per bucket
+// (established accounts vs low-trust reporters), whoever sends them. State is a
+// per-process Map; `now` and the cap are parameters.
 vi.mock('@sentry/nextjs', () => ({ captureMessage: vi.fn() }))
 
 const T0 = Date.parse('2026-10-23T12:00:00.000Z')
@@ -20,8 +25,12 @@ beforeEach(() => {
     vi.mocked(Sentry.captureMessage).mockClear()
 })
 
-const admit = (kind: 'worked' | 'failed', coupon: string, now: number) =>
-    admitCouponReportVelocity(kind, coupon, now, MAX)
+const admit = (
+    kind: VelocityKind,
+    coupon: string,
+    now: number,
+    tier: VelocityTier = 'low',
+) => admitCouponReportVelocity(kind, coupon, tier, now, MAX)
 
 describe('admitCouponReportVelocity', () => {
     it('counts up to the cap and refuses the next', () => {
@@ -39,6 +48,15 @@ describe('admitCouponReportVelocity', () => {
         expect(admit('failed', '8', T0)).toBe(true)
     })
 
+    it('low-trust and established reporters have SEPARATE buckets: a swarm cannot starve established reports', () => {
+        for (let n = 0; n < MAX; n++) admit('failed', '7', T0, 'low')
+        expect(admit('failed', '7', T0, 'low')).toBe(false)
+        for (let n = 0; n < MAX; n++) {
+            expect(admit('failed', '7', T0, 'established')).toBe(true)
+        }
+        expect(admit('failed', '7', T0, 'established')).toBe(false)
+    })
+
     it('the window rolls: an hour after the first counted report the coupon is open again, with a fresh count', () => {
         for (let n = 0; n < MAX; n++) admit('worked', '7', T0)
         expect(admit('worked', '7', T0 + HOUR - 1)).toBe(false)
@@ -50,15 +68,29 @@ describe('admitCouponReportVelocity', () => {
 
     it('release gives a counted slot back, and is a no-op on an unknown coupon or a rolled window', () => {
         for (let n = 0; n < MAX; n++) admit('failed', '7', T0)
-        releaseCouponReportVelocity('failed', '7', T0 + 1)
+        releaseCouponReportVelocity('failed', '7', 'low', T0 + 1)
         expect(admit('failed', '7', T0 + 2)).toBe(true)
         expect(admit('failed', '7', T0 + 3)).toBe(false)
 
-        releaseCouponReportVelocity('failed', '999', T0)
-        releaseCouponReportVelocity('failed', '7', T0 + 2 * HOUR)
+        releaseCouponReportVelocity('failed', '999', 'low', T0)
+        releaseCouponReportVelocity('failed', '7', 'low', T0 + 2 * HOUR)
         // The rolled window's release did not free anything in a NEW window.
         expect(admit('failed', '7', T0 + 2 * HOUR)).toBe(true)
         expect(admit('failed', '999', T0)).toBe(true)
+    })
+
+    it("release of a bucket's only slot DELETES the entry: probing unknown ids leaves nothing behind to fill the table", () => {
+        for (let n = 0; n < 500; n++) {
+            admit('failed', `probe-${n}`, T0)
+            releaseCouponReportVelocity('failed', `probe-${n}`, 'low', T0)
+        }
+        expect(velocityEntryCountForTests()).toBe(0)
+
+        // An entry that still has a counted report, or a refusal, stays.
+        admit('failed', '7', T0)
+        admit('failed', '7', T0)
+        releaseCouponReportVelocity('failed', '7', 'low', T0)
+        expect(velocityEntryCountForTests()).toBe(1)
     })
 
     it('a cap hit is reported to Sentry once per coupon and kind per window, not once per refused report', () => {
@@ -71,7 +103,11 @@ describe('admitCouponReportVelocity', () => {
         expect(message).toContain('velocity cap hit')
         expect(context).toMatchObject({
             level: 'warning',
-            tags: { budget: 'report-velocity', reportKind: 'failed' },
+            tags: {
+                budget: 'report-velocity',
+                reportKind: 'failed',
+                reporterTier: 'low',
+            },
             extra: { couponId: '7', maxPerHour: MAX },
         })
     })
@@ -101,9 +137,26 @@ describe('admitCouponReportVelocity', () => {
         expect(admit('failed', '7', T0)).toBe(true)
     })
 
-    it('reads the cap from COUPON_REPORT_MAX_PER_COUPON_PER_HOUR (default 10) when none is passed', () => {
-        let counted = 0
-        while (admitCouponReportVelocity('failed', '77', T0)) counted++
-        expect(counted).toBe(10)
+    it("reads each bucket's cap from the env when none is passed: established 10, low-trust 5", () => {
+        const count = (tier: VelocityTier) => {
+            let counted = 0
+            while (admitCouponReportVelocity('failed', `env-${tier}`, tier, T0))
+                counted++
+            return counted
+        }
+        expect(count('established')).toBe(10)
+        expect(count('low')).toBe(5)
+    })
+})
+
+describe('velocityTierOf', () => {
+    it('only an established account is in the established bucket', () => {
+        expect(
+            velocityTierOf({ kind: 'user', userId: 'u', established: true }),
+        ).toBe('established')
+        expect(
+            velocityTierOf({ kind: 'user', userId: 'u', established: false }),
+        ).toBe('low')
+        expect(velocityTierOf({ kind: 'ip', ip: '203.0.113.1' })).toBe('low')
     })
 })

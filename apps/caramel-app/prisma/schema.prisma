@@ -350,6 +350,9 @@ model CouponReport {
   createdAt DateTime @default(now()) @map("created_at")
 
   @@index([couponId, userId, createdAt])
+  // checkoutWorkedStamp.ts counts one user's recent rows of one outcome (the
+  // per-account daily stamp cap); the index above leads with coupon_id.
+  @@index([userId, outcome, createdAt])
   @@map("coupon_reports")
 }
 

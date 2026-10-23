@@ -958,11 +958,33 @@ async function writeCouponSignal(
  * couponSignals.recordWorked's aggregate write: stamp `last_worked_at` (this
  * writer owns that field only). Returns the row's `fail_weight` after the
  * write, or null when `couponId` is not a catalog row (nothing was written).
+ *
+ * `stamp: false` is the existence gate WITHOUT the stamp: a LOW-TRUST reporter's
+ * "worked" must not move `last_worked_at` (Verified, "Codes that just worked")
+ * until enough distinct reporters agree (couponSignals.ts recordWorked). The
+ * statement still returns the catalog check and the row's fail_weight; a new
+ * signal row is created with a NULL last_worked_at and an existing one is left
+ * exactly as it was.
  */
 export async function writeWorkedSignal(
     couponId: string,
     client: CouponSignalSqlClient = prisma,
+    options: { stamp: boolean } = { stamp: true },
 ): Promise<{ failWeight: number } | null> {
+    if (!options.stamp) {
+        return writeCouponSignal(
+            client,
+            couponId,
+            {
+                insertColumns: Prisma.sql`coupon_id, created_at, updated_at`,
+                selectList: Prisma.sql`${couponId}::text, ${SIGNAL_NOW_UTC}, ${SIGNAL_NOW_UTC}`,
+                // A no-op update, not DO NOTHING: only DO UPDATE RETURNS the
+                // existing row's fail_weight, which the caller reads.
+                onConflictSet: Prisma.sql`updated_at = coupon_signals.updated_at`,
+            },
+            'coupon-signal.write-worked-unstamped',
+        )
+    }
     return writeCouponSignal(
         client,
         couponId,
@@ -1072,6 +1094,21 @@ export async function requestSource(
 // Advisory-lock classes: the first int of pg_advisory_xact_lock(int, int).
 const SHOPPER_USER_LOCK_CLASS = 7101
 const SHOPPER_CODE_LOCK_CLASS = 7102
+
+/**
+ * Take the per-shopper advisory lock (the same one submitShopperCoupon holds)
+ * for the rest of the caller's transaction, so two concurrent requests of one
+ * account line up behind each other. checkoutWorkedStamp.ts takes it so its
+ * per-account daily count and its write cannot race.
+ */
+export async function lockShopperUser(
+    tx: Pick<Prisma.TransactionClient, '$executeRaw'>,
+    userId: string,
+): Promise<void> {
+    await tx.$executeRaw(
+        Prisma.sql`SELECT pg_advisory_xact_lock(${SHOPPER_USER_LOCK_CLASS}::int, hashtext(${userId}::text))`,
+    )
+}
 // A clean lowercase hostname: no LIKE wildcards (% _), no spaces, no slashes.
 const SHOPPER_STORE_BASE_PATTERN = /^[a-z0-9.-]+$/
 
@@ -1352,9 +1389,7 @@ export async function submitShopperCoupon(
         // Two-int advisory locks: the first int is a fixed class so these keys
         // cannot collide with any other advisory-lock user in this database.
         // Order matters (user, then code) and must never be reversed.
-        await tx.$executeRaw(
-            Prisma.sql`SELECT pg_advisory_xact_lock(${SHOPPER_USER_LOCK_CLASS}::int, hashtext(${userId}::text))`,
-        )
+        await lockShopperUser(tx, userId)
         await tx.$executeRaw(
             Prisma.sql`SELECT pg_advisory_xact_lock(${SHOPPER_CODE_LOCK_CLASS}::int, hashtext(${`${base}:${code.toLowerCase()}`}::text))`,
         )

@@ -32,6 +32,7 @@ import type { ReportReporter } from '@/lib/couponReportDedupe'
 import {
     FAILING_WINDOW_MS,
     MAX_LOW_TRUST_FAIL_WEIGHT,
+    WORKED_VERIFIED_WINDOW_MS,
     keepsFailing,
 } from '@/lib/coupons'
 import {
@@ -119,6 +120,15 @@ export function reporterWeight(reporter: ReportReporter): number {
 export const CLEARING_WORKED_WEIGHT = 2
 
 /**
+ * Most clearing weight the LOW-TRUST reporters (anonymous networks, young
+ * accounts) can add together, the mirror of coupons.ts MAX_LOW_TRUST_FAIL_WEIGHT:
+ * one below CLEARING_WORKED_WEIGHT, so no number of them clears a failure quorum
+ * and only an established account's success does. Without it two forged
+ * anonymous successes would undo a quorum of honest failures.
+ */
+export const MAX_LOW_TRUST_CLEARING_WEIGHT = CLEARING_WORKED_WEIGHT - 1
+
+/**
  * Recompute coupon_signals.fail_weight for a coupon from its reporter rows:
  * the sum of the weights of the DISTINCT reporters whose failure is inside
  * FAILING_WINDOW_MS and is not cleared by a worked quorum (CLEARING_WORKED_WEIGHT)
@@ -148,11 +158,19 @@ async function recomputeFailWeight(
     let lowTrust = 0
     for (const failure of rows) {
         if (failure.outcome !== 'failed') continue
-        const clearing = worked.reduce(
-            (sum, success) =>
-                success.lastAt >= failure.lastAt ? sum + success.weight : sum,
-            0,
-        )
+        let trustedClearing = 0
+        let lowTrustClearing = 0
+        for (const success of worked) {
+            if (success.lastAt < failure.lastAt) continue
+            if (success.weight >= REPORTER_WEIGHT.account) {
+                trustedClearing += success.weight
+            } else {
+                lowTrustClearing += success.weight
+            }
+        }
+        const clearing =
+            trustedClearing +
+            Math.min(lowTrustClearing, MAX_LOW_TRUST_CLEARING_WEIGHT)
         if (clearing >= CLEARING_WORKED_WEIGHT) continue
         if (failure.weight >= REPORTER_WEIGHT.account) trusted += failure.weight
         else lowTrust += failure.weight
@@ -166,62 +184,103 @@ async function recomputeFailWeight(
 }
 
 /**
- * A reporter said this coupon worked at checkout — stamp the last-worked time
- * (it drives "Verified"/"just worked", unchanged). Deliberately does NOT bump
- * workCount: a successful apply ALSO fires POST /api/coupons/increment
- * (→ recordUsage), which owns the counter. When the coupon carries a live
- * failure quorum (fail_weight > 0) the reporter's success is also recorded in
- * coupon_signal_reporters and the quorum recomputed, so a success clears
- * failures only once CLEARING_WORKED_WEIGHT of distinct reporters agree. A
- * coupon with no failures stores nothing about the reporter: a success older
- * than every failure never counts for anything. One transaction (a singleton
- * client is wrapped, a transaction client is joined).
+ * A reporter said this coupon worked at checkout. Whether that moves
+ * `lastWorkedAt` (the "Verified"/"just worked" stamp, which also lists the code
+ * in "Codes that just worked") depends on WHO says so, because the request is
+ * client-asserted and cheap to forge:
+ *   - an ESTABLISHED account (reporter.established), or a caller that already
+ *     vetted the shopper and passes `options.forceStamp` (the checkout capture,
+ *     checkoutWorkedStamp.ts), stamps on its own say-so;
+ *   - a LOW-TRUST reporter (anonymous network, young account) stamps only once
+ *     COUPON_WORKED_QUORUM_LOW_TRUST_REPORTERS DISTINCT low-trust reporters have
+ *     said so within WORKED_VERIFIED_WINDOW_MS. Their reports are kept in
+ *     coupon_signal_reporters (as 'worked' rows, hashed like every reporter) so
+ *     the quorum survives a restart; before the quorum a low-trust report
+ *     leaves `lastWorkedAt` exactly as it was.
+ * Deliberately does NOT bump workCount: a successful apply ALSO fires POST
+ * /api/coupons/increment (→ recordUsage), which owns the counter. When the
+ * coupon carries a live failure quorum (fail_weight > 0) the reporter's success
+ * is also recorded and the quorum recomputed, so a success clears failures only
+ * once enough weight of distinct reporters agree (low-trust ones count up to
+ * MAX_LOW_TRUST_CLEARING_WEIGHT together). One transaction (a singleton client
+ * is wrapped, a transaction client is joined).
  *
- * Resolves true when the signal was written, false when `couponId` is not a
- * catalog row (couponsRepo.writeWorkedSignal folds that existence check into
- * its single upsert statement): nothing was written, and the caller owns the
- * unknown-coupon response.
+ * Resolves true when the coupon exists, false when `couponId` is not a catalog
+ * row (couponsRepo.writeWorkedSignal folds that existence check into its single
+ * upsert statement): nothing was written, and the caller owns the
+ * unknown-coupon response. True does NOT say the stamp moved: a low-trust
+ * report short of the quorum is accepted and not stamped, and the caller
+ * answers it exactly like any other.
  */
 export async function recordWorked(
     couponId: string,
     reporter: ReportReporter,
     client: CouponFailureWriter | PrismaClient = prisma,
+    options: { forceStamp?: boolean } = {},
 ): Promise<boolean> {
+    const forceStamp = options.forceStamp === true
     if ('$transaction' in client) {
-        return client.$transaction(tx => recordWorkedIn(couponId, reporter, tx))
+        return client.$transaction(tx =>
+            recordWorkedIn(couponId, reporter, tx, forceStamp),
+        )
     }
-    return recordWorkedIn(couponId, reporter, client)
+    return recordWorkedIn(couponId, reporter, client, forceStamp)
 }
 
 async function recordWorkedIn(
     couponId: string,
     reporter: ReportReporter,
     tx: CouponFailureWriter,
+    forceStamp: boolean,
 ): Promise<boolean> {
     const now = new Date()
-    const signal = await writeWorkedSignal(couponId, tx)
+    const lowTrust =
+        !forceStamp && !(reporter.kind === 'user' && reporter.established)
+    const signal = await writeWorkedSignal(couponId, tx, { stamp: !lowTrust })
     if (!signal) return false
-    if (signal.failWeight <= 0) return true
     const hash = reporterHash(reporter)
     const weight = reporterWeight(reporter)
-    await tx.couponSignalReporter.upsert({
-        where: {
-            couponId_outcome_reporterHash: {
+    const upsertReporterRow = () =>
+        tx.couponSignalReporter.upsert({
+            where: {
+                couponId_outcome_reporterHash: {
+                    couponId,
+                    outcome: 'worked',
+                    reporterHash: hash,
+                },
+            },
+            create: {
                 couponId,
                 outcome: 'worked',
                 reporterHash: hash,
+                weight,
+                lastAt: now,
             },
-        },
-        create: {
-            couponId,
-            outcome: 'worked',
-            reporterHash: hash,
-            weight,
-            lastAt: now,
-        },
-        update: { weight, lastAt: now },
-    })
-    await recomputeFailWeight(tx, couponId, now)
+            update: { weight, lastAt: now },
+        })
+    if (lowTrust) {
+        await upsertReporterRow()
+        const distinct = await tx.couponSignalReporter.count({
+            where: {
+                couponId,
+                outcome: 'worked',
+                weight: { lt: REPORTER_WEIGHT.account },
+                lastAt: {
+                    gt: new Date(now.getTime() - WORKED_VERIFIED_WINDOW_MS),
+                },
+            },
+        })
+        if (distinct >= env.COUPON_WORKED_QUORUM_LOW_TRUST_REPORTERS) {
+            await writeWorkedSignal(couponId, tx, { stamp: true })
+        }
+    } else {
+        // An established reporter's success is only remembered while the coupon
+        // carries a failure quorum it can clear: a coupon with no failures
+        // stores nothing about the reporter.
+        if (signal.failWeight <= 0) return true
+        await upsertReporterRow()
+    }
+    if (signal.failWeight > 0) await recomputeFailWeight(tx, couponId, now)
     return true
 }
 

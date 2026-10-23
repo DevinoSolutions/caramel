@@ -8,6 +8,7 @@ import {
 import {
     admitCouponReportVelocity,
     releaseCouponReportVelocity,
+    velocityTierOf,
 } from '@/lib/couponReportVelocity'
 import {
     recordFailed,
@@ -115,12 +116,14 @@ export const POST = withRoute(
         }
 
         // The per-COUPON speed limit (couponReportVelocity.ts): however many
-        // distinct reporters there are, only COUPON_REPORT_MAX_PER_COUPON_PER_HOUR
-        // reports of one kind per coupon per hour are counted. Over it the report
+        // distinct reporters there are, only a fixed number of reports of one
+        // kind per coupon per hour are counted (established accounts and
+        // low-trust reporters have separate buckets). Over it the report
         // is accepted and dropped, answering exactly what a deduped repeat does,
         // so the cap is not observable from outside. The reporter's dedupe slot
         // goes back: nothing landed, so a later report of theirs may still count.
-        if (!admitCouponReportVelocity(body.outcome, id)) {
+        const tier = velocityTierOf(reporter)
+        if (!admitCouponReportVelocity(body.outcome, id, tier)) {
             releaseReport(body.outcome, reporter, id)
             return NextResponse.json({ ok: true, deduped: true })
         }
@@ -129,7 +132,7 @@ export const POST = withRoute(
         // database-free no-op; whatever does not land gives them back.
         const giveSlotsBack = () => {
             releaseReport(body.outcome, reporter, id)
-            releaseCouponReportVelocity(body.outcome, id)
+            releaseCouponReportVelocity(body.outcome, id, tier)
         }
 
         // An unknown id writes no signal and gives its slots back, so a forger

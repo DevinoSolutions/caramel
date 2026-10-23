@@ -14,6 +14,8 @@ import {
 } from '@/lib/coupons'
 import {
     CLEARING_WORKED_WEIGHT,
+    MAX_LOW_TRUST_CLEARING_WEIGHT,
+    REPORTER_WEIGHT,
     recordFailed,
     recordWorked,
     reporterHash,
@@ -111,6 +113,23 @@ function makeFakeDb() {
                             r.lastAt > args.where.lastAt.gt,
                     ),
             ),
+            count: vi.fn(
+                async (args: {
+                    where: {
+                        couponId: string
+                        outcome: string
+                        weight: { lt: number }
+                        lastAt: { gt: Date }
+                    }
+                }) =>
+                    Array.from(reporters.values()).filter(
+                        r =>
+                            r.couponId === args.where.couponId &&
+                            r.outcome === args.where.outcome &&
+                            r.weight < args.where.weight.lt &&
+                            r.lastAt > args.where.lastAt.gt,
+                    ).length,
+            ),
             aggregate: vi.fn(
                 async (args: {
                     where: {
@@ -184,6 +203,11 @@ function makeFakeDb() {
                 row.lastFailReason = query.values[1] as string | null
             } else if (query.sql.includes('last_worked_at')) {
                 row.lastWorkedAt = now
+            } else if (
+                query.sql.includes('updated_at = coupon_signals.updated_at')
+            ) {
+                // The existence gate WITHOUT the stamp (a low-trust "worked"):
+                // creates the row if absent, changes nothing otherwise.
             } else {
                 throw new Error(`unexpected signal statement: ${query.sql}`)
             }
@@ -252,13 +276,22 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers())
 
 describe('failure quorum: forged anonymous reports cannot sink a code', () => {
-    it('the cap on low-trust reporters sits one below the sink threshold', () => {
-        expect(MAX_LOW_TRUST_FAIL_WEIGHT).toBe(FAILING_MIN_FAIL_WEIGHT - 1)
+    it('one established account plus the whole low-trust pool stays BELOW the sink threshold (so sinking takes two accounts)', () => {
+        expect(
+            REPORTER_WEIGHT.account + MAX_LOW_TRUST_FAIL_WEIGHT,
+        ).toBeLessThan(FAILING_MIN_FAIL_WEIGHT)
+        expect(2 * REPORTER_WEIGHT.account).toBeGreaterThanOrEqual(
+            FAILING_MIN_FAIL_WEIGHT,
+        )
+        // The clearing pool mirrors it: low-trust successes alone cannot clear.
+        expect(MAX_LOW_TRUST_CLEARING_WEIGHT).toBeLessThan(
+            CLEARING_WORKED_WEIGHT,
+        )
     })
 
     it('anonymous networks alone can NEVER sink a code, however many distinct ones report (T-6227)', async () => {
         for (let n = 1; n <= 3; n++) await fail(anon(n))
-        expect(stored().failWeight).toBe(3)
+        expect(stored().failWeight).toBe(MAX_LOW_TRUST_FAIL_WEIGHT)
         expect(isRecentlyFailing(stored())).toBe(false)
 
         // The old rule sank it at the fourth distinct network.
@@ -280,31 +313,30 @@ describe('failure quorum: forged anonymous reports cannot sink a code', () => {
         expect(isRecentlyFailing(stored())).toBe(false)
     })
 
-    it('established accounts count double: two sink it, one account plus two low-trust reporters sink it, one account alone or plus one network does not', async () => {
+    it('sinking takes TWO established accounts: one account alone, or plus any number of networks and young accounts, does not', async () => {
         await fail(account('user-1'))
         expect(isRecentlyFailing(stored())).toBe(false)
+        for (let n = 1; n <= 40; n++) await fail(anon(n))
+        for (let n = 1; n <= 40; n++) await fail(youngAccount(`fresh-${n}`))
+        expect(stored().failWeight).toBe(2 + MAX_LOW_TRUST_FAIL_WEIGHT)
+        expect(isRecentlyFailing(stored())).toBe(false)
+
+        // The second established account completes the sink.
         await fail(account('user-2'))
         expect(isRecentlyFailing(stored())).toBe(true)
         // Sinking is not collapsing: that needs a stronger quorum.
         expect(keepsFailing(stored())).toBe(false)
-
-        db = makeFakeDb()
-        await fail(account('user-1'))
-        await fail(anon(1))
-        expect(isRecentlyFailing(stored())).toBe(false)
-        await fail(youngAccount('fresh-1'))
-        expect(isRecentlyFailing(stored())).toBe(true)
     })
 
-    it('collapsing needs more than the capped pool can add: three accounts do, one account plus any number of networks does not', async () => {
+    it('collapsing takes three established accounts; two plus any number of low-trust reporters sink it but do not collapse it', async () => {
         for (let n = 1; n <= 3; n++) await fail(account(`user-${n}`))
         expect(keepsFailing(stored())).toBe(true)
 
         db = makeFakeDb()
         await fail(account('user-1'))
+        await fail(account('user-2'))
         for (let n = 1; n <= 40; n++) await fail(anon(n))
-        // 2 (account) + 3 (the capped pool) = 5, under KEEPS_FAILING (6).
-        expect(stored().failWeight).toBe(2 + MAX_LOW_TRUST_FAIL_WEIGHT)
+        expect(stored().failWeight).toBe(4 + MAX_LOW_TRUST_FAIL_WEIGHT)
         expect(isRecentlyFailing(stored())).toBe(true)
         expect(keepsFailing(stored())).toBe(false)
     })
@@ -350,18 +382,21 @@ describe('failure quorum: forged anonymous reports cannot sink a code', () => {
         await succeed(anon(50))
         expect(stored().failWeight).toBe(4)
         expect(isRecentlyFailing(stored())).toBe(true)
-        // The success is still recorded as the last-worked stamp ("Verified").
-        expect(stored().lastWorkedAt).toBeInstanceOf(Date)
+        // And a lone anonymous success does not stamp "Verified" either.
+        expect(stored().lastWorkedAt).toBeNull()
     })
 
-    it('two distinct anonymous "worked" reporters clear it; so does ONE signed-in "worked"', async () => {
+    it('NO number of anonymous or young-account "worked" reporters clears a sink; ONE established "worked" does', async () => {
         expect(CLEARING_WORKED_WEIGHT).toBe(2)
         await sinkIt()
 
         minutesLater(5)
-        await succeed(anon(50))
+        for (let n = 50; n < 90; n++) await succeed(anon(n))
+        for (let n = 1; n <= 20; n++) await succeed(youngAccount(`fresh-${n}`))
+        expect(stored().failWeight).toBe(4)
         expect(isRecentlyFailing(stored())).toBe(true)
-        await succeed(anon(51))
+
+        await succeed(account('user-9'))
         expect(stored().failWeight).toBe(0)
         expect(isRecentlyFailing(stored())).toBe(false)
 
@@ -390,15 +425,80 @@ describe('failure quorum: forged anonymous reports cannot sink a code', () => {
         minutesLater(5)
         await fail(anon(10))
         await fail(anon(11))
-        // Two NEW reporters after the success: weight 2, not 2 + the old 4.
-        expect(stored().failWeight).toBe(2)
+        // Two NEW anonymous reporters after the success: the low-trust pool
+        // (1), not 2 and not the old 4 on top.
+        expect(stored().failWeight).toBe(MAX_LOW_TRUST_FAIL_WEIGHT)
         expect(isRecentlyFailing(stored())).toBe(false)
     })
 
-    it('a "worked" on a coupon with no failure quorum stores nothing about the reporter (no new personal data)', async () => {
-        await succeed(anon(50))
+    it('an ESTABLISHED "worked" on a coupon with no failure quorum stores nothing about the reporter (no new personal data) and stamps alone', async () => {
+        await succeed(account('user-9'))
         expect(db.reporters.size).toBe(0)
         expect(stored().lastWorkedAt).toBeInstanceOf(Date)
+    })
+
+    describe('a low-trust "worked" moves last_worked_at only with a quorum (T-6222 by another door)', () => {
+        const quorum = 3 // COUPON_WORKED_QUORUM_LOW_TRUST_REPORTERS default
+
+        it('one, or two, anonymous / young-account "worked" reports leave last_worked_at untouched', async () => {
+            await succeed(anon(1))
+            await succeed(youngAccount('fresh-1'))
+            expect(stored().lastWorkedAt).toBeNull()
+            // They are remembered as reporters (hashed), which is the quorum's state.
+            expect(db.reporters.size).toBe(2)
+        })
+
+        it('the third DISTINCT low-trust reporter inside 24h stamps it', async () => {
+            await succeed(anon(1))
+            await succeed(anon(2))
+            expect(stored().lastWorkedAt).toBeNull()
+            await succeed(youngAccount('fresh-1'))
+            expect(stored().lastWorkedAt).toBeInstanceOf(Date)
+        })
+
+        it('the same reporter repeating itself is still one reporter', async () => {
+            for (let n = 0; n < quorum + 2; n++) await succeed(anon(1))
+            expect(stored().lastWorkedAt).toBeNull()
+            expect(db.reporters.size).toBe(1)
+        })
+
+        it('reporters older than the Verified window no longer count toward the quorum', async () => {
+            await succeed(anon(1))
+            await succeed(anon(2))
+            vi.setSystemTime(Date.now() + 25 * 60 * 60 * 1000)
+            await succeed(anon(3))
+            expect(stored().lastWorkedAt).toBeNull()
+        })
+
+        it('the quorum is persisted, not in memory: it survives a restart (a fresh in-memory dedupe)', async () => {
+            await succeed(anon(1))
+            await succeed(anon(2))
+            resetReportDedupeForTests()
+            await succeed(anon(3))
+            expect(stored().lastWorkedAt).toBeInstanceOf(Date)
+        })
+
+        it('an established account stamps alone; so does a vouched caller (forceStamp, the checkout capture)', async () => {
+            await succeed(account('user-9'))
+            expect(stored().lastWorkedAt).toBeInstanceOf(Date)
+
+            db = makeFakeDb()
+            await recordWorked(
+                COUPON,
+                youngAccount('fresh-9'),
+                db.tx as never,
+                {
+                    forceStamp: true,
+                },
+            )
+            expect(stored().lastWorkedAt).toBeInstanceOf(Date)
+        })
+
+        it('an unknown coupon writes nothing, no reporter row included, and resolves false', async () => {
+            db.unknownCoupons.add(COUPON)
+            expect(await succeed(anon(1))).toBe(false)
+            expect(db.reporters.size).toBe(0)
+        })
     })
 
     it('a grandfathered legacy failure row resets exactly like any other', async () => {
@@ -420,8 +520,9 @@ describe('failure quorum: forged anonymous reports cannot sink a code', () => {
         })
         minutesLater(5)
         await succeed(anon(50))
-        expect(stored().failWeight).toBe(6)
         await succeed(anon(51))
+        expect(stored().failWeight).toBe(6)
+        await succeed(account('user-9'))
         expect(stored().failWeight).toBe(0)
     })
 

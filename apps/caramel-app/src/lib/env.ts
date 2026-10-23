@@ -234,6 +234,13 @@ const serverObjectSchema = z.object({
     //  - COUPON_REPORT_MAX_PER_COUPON_PER_HOUR: most worked reports, and most
     //    failed reports, counted PER COUPON per hour whoever sends them
     //    (couponReportVelocity.ts). Over it a report is accepted and not counted.
+    //  - COUPON_REPORT_MAX_LOW_TRUST_PER_COUPON_PER_HOUR: the same cap for the
+    //    LOW-TRUST reporters alone (anonymous networks, young accounts), a
+    //    separate smaller bucket so a swarm of them cannot use up the hourly
+    //    slots established accounts report into.
+    //  - COUPON_WORKED_QUORUM_LOW_TRUST_REPORTERS: how many DISTINCT low-trust
+    //    reporters must say a code worked (inside 24h) before their reports move
+    //    last_worked_at (Verified). An established account moves it alone.
     //  - COUPON_WORKED_STAMPS_PER_USER_PER_DAY: most "worked" attributions one
     //    account may stamp in a rolling 24h through the checkout capture
     //    (checkoutWorkedStamp.ts), new rows and already-listed codes alike.
@@ -244,6 +251,14 @@ const serverObjectSchema = z.object({
     COUPON_REPORT_MAX_PER_COUPON_PER_HOUR: z.preprocess(
         v => (typeof v === 'string' && v.trim() === '' ? undefined : v),
         z.coerce.number().int().positive().default(10),
+    ),
+    COUPON_REPORT_MAX_LOW_TRUST_PER_COUPON_PER_HOUR: z.preprocess(
+        v => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+        z.coerce.number().int().positive().default(5),
+    ),
+    COUPON_WORKED_QUORUM_LOW_TRUST_REPORTERS: z.preprocess(
+        v => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+        z.coerce.number().int().positive().default(3),
     ),
     COUPON_WORKED_STAMPS_PER_USER_PER_DAY: z.preprocess(
         v => (typeof v === 'string' && v.trim() === '' ? undefined : v),

@@ -37,6 +37,8 @@ const ABSENT_ID = '700071404' // deliberately never inserted — the FK case
 const ALL_COUPON_IDS = [KNOWN_ID, OTHER_ID, ABSENT_ID]
 const ITEST_SITE = 'reports-itest.example'
 const USER_EMAIL = 'reports-itest@example.com'
+const USER2_EMAIL = 'reports-itest-2@example.com'
+const ESTABLISHED_SINCE = new Date('2026-01-01T00:00:00.000Z')
 
 // Only better-auth is stood in for: a real session would need a full sign-in
 // round-trip, and WHICH user id the wrapper resolves is already pinned by
@@ -110,7 +112,9 @@ async function cleanup() {
         where: { couponId: { in: ALL_COUPON_IDS } },
     })
     await prisma.coupon.deleteMany({ where: { id: { in: ALL_COUPON_IDS } } })
-    await prisma.user.deleteMany({ where: { email: USER_EMAIL } })
+    await prisma.user.deleteMany({
+        where: { email: { in: [USER_EMAIL, USER2_EMAIL] } },
+    })
 }
 
 beforeEach(async () => {
@@ -123,7 +127,7 @@ beforeEach(async () => {
     // (accountReputation.ts), and the row just inserted is brand new.
     getSessionMock.mockImplementation(async () => ({
         session: { id: 'itest-session' },
-        user: { id: userId, createdAt: new Date('2026-01-01T00:00:00.000Z') },
+        user: { id: userId, createdAt: ESTABLISHED_SINCE },
     }))
     await insertCoupon(KNOWN_ID)
 })
@@ -188,7 +192,7 @@ describe('POST /api/coupons/[id]/report — attribution against real pg :58005',
         expect(signal?.failCount).toBe(2)
     })
 
-    it('QUORUM: anonymous failed reports alone never sink a code (the pool stops at 3), an established account on top does; forged forwarded-for headers add no reporters', async () => {
+    it('QUORUM: anonymous failed reports alone never sink a code (the pool stops at 1), and it takes TWO established accounts; forged forwarded-for headers add no reporters', async () => {
         getSessionMock.mockImplementation(async () => null)
         const failedFrom = (headers: Record<string, string>) =>
             POST(
@@ -214,29 +218,41 @@ describe('POST /api/coupons/[id]/report — attribution against real pg :58005',
         for (const n of [10, 11, 12]) {
             await failedFrom({ 'cf-connecting-ip': `203.0.113.${n}` })
         }
-        expect(await weight()).toBe(3)
+        // Three distinct networks: the low-trust pool stops at 1
+        // (coupons.ts MAX_LOW_TRUST_FAIL_WEIGHT).
+        expect(await weight()).toBe(1)
 
         // A flood of forged client headers WITHOUT the edge header is one
-        // reporter, however many addresses it claims, and a fourth anonymous
-        // reporter adds nothing: the low-trust pool is capped below the sink
-        // threshold (coupons.ts MAX_LOW_TRUST_FAIL_WEIGHT).
+        // reporter, however many addresses it claims.
         for (const n of [1, 2, 3, 4, 5]) {
             await failedFrom({ 'x-forwarded-for': `198.51.100.${n}` })
         }
-        expect(await weight()).toBe(3)
+        expect(await weight()).toBe(1)
         const [anonymousOnly] = await attachSignals([{ id: KNOWN_ID }])
         expect(isRecentlyFailing(anonymousOnly!)).toBe(false)
 
-        // One established account (the session mock) on top sinks it.
+        // One established account (the session mock) on top: 2 + 1, still no.
         getSessionMock.mockImplementation(async () => ({
             session: { id: 'itest-session' },
-            user: {
-                id: userId,
-                createdAt: new Date('2026-01-01T00:00:00.000Z'),
-            },
+            user: { id: userId, createdAt: ESTABLISHED_SINCE },
         }))
         await POST(
             reportRequest(KNOWN_ID, { outcome: 'failed' }, '203.0.113.99'),
+        )
+        expect(await weight()).toBe(3)
+        const [oneAccount] = await attachSignals([{ id: KNOWN_ID }])
+        expect(isRecentlyFailing(oneAccount!)).toBe(false)
+
+        // A SECOND established account sinks it: 2 + 2 + 1.
+        const second = await prisma.user.create({
+            data: { email: USER2_EMAIL },
+        })
+        getSessionMock.mockImplementation(async () => ({
+            session: { id: 'itest-session-2' },
+            user: { id: second.id, createdAt: ESTABLISHED_SINCE },
+        }))
+        await POST(
+            reportRequest(KNOWN_ID, { outcome: 'failed' }, '203.0.113.98'),
         )
         expect(await weight()).toBe(5)
 
@@ -270,13 +286,15 @@ describe('POST /api/coupons/[id]/report — attribution against real pg :58005',
         const signal = await prisma.couponSignal.findUniqueOrThrow({
             where: { couponId: KNOWN_ID },
         })
-        expect(signal.failWeight).toBe(3)
+        // 3 anonymous networks + the young account: one shared pool, capped at 1.
+        expect(signal.failWeight).toBe(1)
         expect(isRecentlyFailing(signal)).toBe(false)
     })
 
     it('VELOCITY: past the hourly per-coupon cap further failed reports are accepted and not counted (real Postgres)', async () => {
         getSessionMock.mockImplementation(async () => null)
-        for (let n = 1; n <= 10; n++) {
+        // Anonymous callers are low-trust: the smaller bucket (default 5).
+        for (let n = 1; n <= 5; n++) {
             const res = await POST(
                 reportRequest(
                     KNOWN_ID,
@@ -294,7 +312,7 @@ describe('POST /api/coupons/[id]/report — attribution against real pg :58005',
         const signal = await prisma.couponSignal.findUniqueOrThrow({
             where: { couponId: KNOWN_ID },
         })
-        expect(signal.failCount).toBe(10)
+        expect(signal.failCount).toBe(5)
     })
 
     it('QUORUM: the honest single report still records, and does not sink', async () => {
@@ -407,7 +425,7 @@ describe('POST /api/coupons/[id]/report — attribution against real pg :58005',
         ])
     })
 
-    it('a repeated success from one anonymous shopper moves lastWorkedAt and workCount once; another shopper still counts', async () => {
+    it('anonymous successes do NOT stamp lastWorkedAt until the third DISTINCT shopper (the quorum); repeats are deduped and workCount counts once per shopper (real pg)', async () => {
         getSessionMock.mockImplementation(async () => null)
 
         await POST(reportRequest(KNOWN_ID, { outcome: 'worked' }))
@@ -416,8 +434,8 @@ describe('POST /api/coupons/[id]/report — attribution against real pg :58005',
             where: { couponId: KNOWN_ID },
         })
         expect(first.workCount).toBe(1)
+        expect(first.lastWorkedAt).toBeNull()
 
-        await new Promise(resolve => setTimeout(resolve, 20))
         for (let i = 0; i < 3; i++) {
             const report = await POST(
                 reportRequest(KNOWN_ID, { outcome: 'worked' }),
@@ -426,23 +444,50 @@ describe('POST /api/coupons/[id]/report — attribution against real pg :58005',
             const use = await incrementPOST(incrementRequest(KNOWN_ID))
             expect(await use.json()).toEqual({ ok: true, deduped: true })
         }
-        const repeated = await prisma.couponSignal.findUniqueOrThrow({
-            where: { couponId: KNOWN_ID },
-        })
-        expect(repeated.lastWorkedAt).toEqual(first.lastWorkedAt)
-        expect(repeated.workCount).toBe(1)
 
         await POST(
             reportRequest(KNOWN_ID, { outcome: 'worked' }, '203.0.113.2'),
         )
         await incrementPOST(incrementRequest(KNOWN_ID, '203.0.113.2'))
-        const another = await prisma.couponSignal.findUniqueOrThrow({
+        const second = await prisma.couponSignal.findUniqueOrThrow({
             where: { couponId: KNOWN_ID },
         })
-        expect(another.lastWorkedAt!.getTime()).toBeGreaterThan(
-            first.lastWorkedAt!.getTime(),
+        expect(second.lastWorkedAt).toBeNull()
+        expect(second.workCount).toBe(2)
+
+        // The third distinct shopper completes the quorum.
+        await POST(
+            reportRequest(KNOWN_ID, { outcome: 'worked' }, '203.0.113.3'),
         )
-        expect(another.workCount).toBe(2)
+        const third = await prisma.couponSignal.findUniqueOrThrow({
+            where: { couponId: KNOWN_ID },
+        })
+        expect(third.lastWorkedAt).toBeInstanceOf(Date)
+    })
+
+    it('a worked report from an ESTABLISHED signed-in account stamps lastWorkedAt on its own (real pg)', async () => {
+        getSessionMock.mockImplementation(async () => ({
+            session: { id: 'itest-session' },
+            user: { id: userId, createdAt: ESTABLISHED_SINCE },
+        }))
+        await POST(reportRequest(KNOWN_ID, { outcome: 'worked' }))
+        const signal = await prisma.couponSignal.findUniqueOrThrow({
+            where: { couponId: KNOWN_ID },
+        })
+        expect(signal.lastWorkedAt).toBeInstanceOf(Date)
+    })
+
+    it('a worked report from a YOUNG signed-in account does not stamp (real pg)', async () => {
+        getSessionMock.mockImplementation(async () => ({
+            session: { id: 'itest-session' },
+            user: { id: userId, createdAt: new Date() },
+        }))
+        const res = await POST(reportRequest(KNOWN_ID, { outcome: 'worked' }))
+        expect(res.status).toBe(200)
+        const signal = await prisma.couponSignal.findUniqueOrThrow({
+            where: { couponId: KNOWN_ID },
+        })
+        expect(signal.lastWorkedAt).toBeNull()
     })
 
     it('an anonymous report writes the signal and NOTHING to coupon_reports', async () => {
@@ -454,9 +499,11 @@ describe('POST /api/coupons/[id]/report — attribution against real pg :58005',
         expect(
             await prisma.couponReport.count({ where: { couponId: KNOWN_ID } }),
         ).toBe(0)
+        // The signal row exists (the report was accepted) but carries no stamp.
         const signal = await prisma.couponSignal.findUnique({
             where: { couponId: KNOWN_ID },
         })
-        expect(signal?.lastWorkedAt).toBeInstanceOf(Date)
+        expect(signal).not.toBeNull()
+        expect(signal?.lastWorkedAt).toBeNull()
     })
 })
