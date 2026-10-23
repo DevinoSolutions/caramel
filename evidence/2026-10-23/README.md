@@ -12,3 +12,5 @@
 - t6744-dev-07531fe-version.png: headed clone, https://dev.grabcaramel.com/api/version showing {"sha":"07531fe93455c3fda8f83ed8c05018fb47efa62d"} (PR #431 merge, next 16.4.2)
 - t6744-dev-07531fe-home.png: https://dev.grabcaramel.com/ rendering fully; its logo is served via /_next/image (in-page check: 1/1 next/image loaded, fetch /_next/image?url=%2Ffull-logo.png&w=640&q=75 -> 200 image/png, so the patched sharp path works)
 - t6744-dev-07531fe-support.png: https://dev.grabcaramel.com/support rendering the Contact Support form (curl 200)
+- t6900-before-dev-320-{sentence,verify}.png: https://dev.grabcaramel.com/agent-setup at 320px, Playwright chromium on Linux (DejaVu Sans Mono, the CI font), current code: the host breaks mid-word ("grabcaramel.co|m/api/coupons?") in the verify curl box; the copy sentence breaks "aramel.com|/agent-set". Same specs pass on prod (shorter host). Windows Consolas does not reproduce it.
+- t6900-after-dev-320-{sentence,verify}.png: same page and font with the fix's <wbr> after "https://" injected into the live DOM (dev still runs old code): the host starts its own line, breaks only at "/" and "&"
