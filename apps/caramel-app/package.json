@@ -70,7 +70,7 @@
         "three": "0.185.1",
         "tldts": "7.4.10",
         "yup": "1.7.0",
-        "zod": "4.4.3"
+        "zod": "4.6.7"
     },
     "devDependencies": {
         "@argos-ci/cli": "6.9.6",
