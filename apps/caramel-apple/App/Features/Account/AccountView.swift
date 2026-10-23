@@ -25,7 +25,7 @@ struct AccountView: View {
                 } else {
                     signedOutSection
                 }
-                Section("About") {
+                Section {
                     Link(destination: AppConfig.supportURL) {
                         Label("Help & support", systemImage: "questionmark.circle")
                     }
@@ -40,6 +40,10 @@ struct AccountView: View {
                             Label("Your account on the web", systemImage: "safari")
                         }
                     }
+                } header: {
+                    Text("About")
+                } footer: {
+                    Text("Tell us what is blocking you. A human replies within 1 business day.")
                 }
             }
             .navigationTitle("Account")

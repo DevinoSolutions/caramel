@@ -2,6 +2,7 @@ import SupportForm from '@/components/support/support-form'
 import { auth } from '@/lib/auth/auth'
 import { DISCORD_INVITE_URL } from '@/lib/brandLinks'
 import { BASE_URL } from '@/lib/env.client'
+import { SUPPORT_REPLY_PROMISE } from '@/lib/supportCopy'
 import type { Metadata } from 'next'
 import { headers } from 'next/headers'
 import { FaDiscord } from 'react-icons/fa'
@@ -58,8 +59,8 @@ export default async function SupportPage() {
                         Contact Support
                     </h1>
                     <p className="mx-auto max-w-md text-gray-600 dark:text-gray-300">
-                        Hit a snag, have an idea, or just a question? Send it
-                        our way — we read every message.
+                        Tell us what is blocking you, or send an idea or a
+                        question. {SUPPORT_REPLY_PROMISE}
                     </p>
                 </div>
                 <SupportForm accountEmail={accountEmail} />
