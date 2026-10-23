@@ -23,15 +23,27 @@ export default function CouponCard({ coupon, index }: CouponCardProps) {
     // Unlike showCode (a 3-second overlay), this stays true once the shopper
     // has copied the code, so the "Did it work?" question outlives the overlay.
     const [copied, setCopied] = useState(false)
+    // False when the browser refused the clipboard write, so the overlay tells
+    // the shopper to copy the code by hand instead of claiming it was copied.
+    const [clipboardWorked, setClipboardWorked] = useState(true)
 
     const handleCopyCode = async () => {
-        if (coupon.code) {
+        if (!coupon.code) return
+        // The browser may refuse the write (document not focused, in-app
+        // browsers, Permissions-Policy, insecure context: Sentry CARAMEL-2F).
+        // The code is still shown, longer, so the shopper can copy it by hand.
+        let wrote = true
+        try {
             await navigator.clipboard.writeText(coupon.code)
-            toast.success('Coupon code copied!')
-            setShowCode(true)
-            setCopied(true)
-            setTimeout(() => setShowCode(false), 3000)
+        } catch {
+            wrote = false
         }
+        if (wrote) toast.success('Coupon code copied!')
+        else toast.info('Copy the code shown on the card')
+        setClipboardWorked(wrote)
+        setShowCode(true)
+        setCopied(true)
+        setTimeout(() => setShowCode(false), wrote ? 3000 : 15000)
     }
 
     // Honest badge only: when the catalog has no discount amount the badge
@@ -182,7 +194,9 @@ export default function CouponCard({ coupon, index }: CouponCardProps) {
                             {coupon.code}
                         </p>
                         <p className="text-xs text-gray-400">
-                            Code copied to clipboard!
+                            {clipboardWorked
+                                ? 'Code copied to clipboard!'
+                                : 'Select the code above to copy it'}
                         </p>
                     </div>
                 </motion.div>

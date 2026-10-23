@@ -1,8 +1,17 @@
 // @vitest-environment jsdom
 import CouponCard from '@/components/coupons/coupon-card'
 import type { Coupon } from '@/types/coupon'
-import { cleanup, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import {
+    cleanup,
+    fireEvent,
+    render,
+    screen,
+    waitFor,
+} from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+const toastMock = vi.hoisted(() => ({ success: vi.fn(), info: vi.fn() }))
+vi.mock('sonner', () => ({ toast: toastMock }))
 
 // W1 — the web card surfaces the app-owned "worked Xh ago" trust line only
 // when a recent lastWorkedAt is present. These pins prove it renders for a
@@ -202,5 +211,55 @@ describe('CouponCard — "New customers only" label', () => {
         render(<CouponCard coupon={baseCoupon} index={1} />)
 
         expect(screen.queryByText('New customers only')).toBeNull()
+    })
+})
+
+// T-6893: the browser can refuse the clipboard write (document not focused,
+// in-app browsers, Permissions-Policy: Sentry CARAMEL-2F). The click used to
+// reject unhandled and do nothing at all; the code must still be shown.
+describe('CouponCard: "Get Coupon Code" when the clipboard is refused', () => {
+    const setClipboard = (writeText: () => Promise<void>) =>
+        Object.defineProperty(window.navigator, 'clipboard', {
+            value: { writeText: vi.fn(writeText) },
+            configurable: true,
+        })
+
+    beforeEach(() => {
+        toastMock.success.mockReset()
+        toastMock.info.mockReset()
+    })
+
+    it('a refused write still shows the code, asks to copy it by hand, and keeps the "Did it work?" vote', async () => {
+        setClipboard(() =>
+            Promise.reject(
+                new DOMException('Document is not focused.', 'NotAllowedError'),
+            ),
+        )
+        render(<CouponCard coupon={baseCoupon} index={0} />)
+
+        fireEvent.click(screen.getByRole('button', { name: 'Get Coupon Code' }))
+
+        await waitFor(() => expect(screen.getByText('SAVE10')).toBeTruthy())
+        expect(screen.getByText('Select the code above to copy it')).toBeTruthy()
+        expect(screen.queryByText('Code copied to clipboard!')).toBeNull()
+        expect(screen.getByText('Did it work?')).toBeTruthy()
+        expect(toastMock.info).toHaveBeenCalledWith(
+            'Copy the code shown on the card',
+        )
+        expect(toastMock.success).not.toHaveBeenCalled()
+    })
+
+    it('a successful write still says the code was copied', async () => {
+        setClipboard(() => Promise.resolve())
+        render(<CouponCard coupon={baseCoupon} index={0} />)
+
+        fireEvent.click(screen.getByRole('button', { name: 'Get Coupon Code' }))
+
+        await waitFor(() =>
+            expect(screen.getByText('Code copied to clipboard!')).toBeTruthy(),
+        )
+        expect(toastMock.success).toHaveBeenCalledWith('Coupon code copied!')
+        expect(toastMock.info).not.toHaveBeenCalled()
+        expect(screen.getByText('Did it work?')).toBeTruthy()
     })
 })
