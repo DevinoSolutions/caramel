@@ -61,7 +61,7 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # project.yml is the one version authority for the Apple app. A tag must
       # say exactly that version, so a stale tag can never ship a different one.
@@ -107,7 +107,7 @@ jobs:
       - name: Upload the generated project (drift diagnostics)
         if: steps.drift.outputs.drift == 'true'
         continue-on-error: true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: generated-caramel-apple
           path: |
@@ -124,10 +124,10 @@ jobs:
           exit 1
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
@@ -175,7 +175,7 @@ jobs:
 
       - name: Import distribution cert
         if: github.event_name != 'pull_request'
-        uses: apple-actions/import-codesign-certs@v2
+        uses: apple-actions/import-codesign-certs@v7
         with:
           p12-file-base64: ${{ secrets.APPLE_CERT_P12 }}
           p12-password: ${{ secrets.APPLE_CERT_PASSWORD }}
@@ -184,7 +184,7 @@ jobs:
 
       - name: Import development cert
         if: github.event_name != 'pull_request'
-        uses: apple-actions/import-codesign-certs@v2
+        uses: apple-actions/import-codesign-certs@v7
         with:
           create-keychain: false
           keychain: signing_temp
