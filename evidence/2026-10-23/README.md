@@ -29,3 +29,12 @@
   - an additive index migration.
   review-trust APPROVED on its third pass (0432d53). 794f7b6 is a clean merge of main. Product effect: the prod Verified rate will drop. Prod is NOT deployed: it waits on the B25 go (migrations).
 - `pr461-checks-green.png`: https://github.com/DevinoSolutions/caramel/pull/461 at head b3c3632, in a fresh unnamed headed clone at 19:5xZ. The merge box says "All checks have passed, 1 skipped, 11 successful" and "No conflicts with base branch". Merged as 1221ce5. This is T-5446 option D: 98 characterization tests for coupon-runner.js and UI-helpers.js, tests only. The file split is blocked on the size-gate decision (A or B, escalated to MASTER). review-5446 APPROVED.
+- B25 prod deploy of main 1221ce5 (Amin's go, relayed by MASTER 19:4xZ; MASTER 21:0xZ confirmed all 4 additive migrations: coupon_failure_quorum, coupon_failure_quorum_legacy_seed, coupon_box_proposals, coupon_reports_user_outcome_idx).
+  - Backup first: caramel-prod-compose/2026-10-23T20-47-52-387Z.sql.gz, 13,644,822 bytes (earlier backups today were about 13.6 MB).
+  - Deploy job done at 20:57Z. /api/version returned 1221ce5 with health 200 at 21:01:23Z.
+  - Curl checks: features couponBoxSave:false; a box-save POST with no bearer returns 401; a report on an unknown id returns 404; /_next/image 200; /monitoring with a bogus DSN returns 401; /, /support, /login, /coupons and /agent-setup all 200.
+  - `b25-prod-1221ce5-store-page.png` (fresh unnamed headed clone, 21:03Z): the home page has "Codes that just worked". https://grabcaramel.com/coupons/inez.com renders codes with Verified badges and "Worked 16h ago"; no code values were revealed.
+  - `b25-prod-1221ce5-support-copy.png` (21:04Z): /support says "a human replies within 1 business day" (T-6724 live); the overlay shows Next 16.4.2. /login shows Google, Apple and email sign-in with no error.
+  - `b25-prod-support-sent.png` (21:34Z): a /support "Other" message "[deploy check] B25 1221ce5 Sendly transport test, ignore" shows "Thanks for reaching out". Through the Sendly MCP: both copies "[Caramel support] other — 975fb6f1-…" were DELIVERED at 21:34:18Z, sent with the new key …FvVK (lastUsedAt 21:34:18Z). The old key db6df06a (…0Bhl, last used 01:57Z) was then revoked at 21:34:53Z.
+  - Sentry (MCP, project caramel): 0 error or warning events from 20:57Z to 21:33Z; the latest event is CARAMEL-2G at 19:41Z, before the deploy.
+  - The main push E2E rerun (run 40010767587) is green against live prod.
