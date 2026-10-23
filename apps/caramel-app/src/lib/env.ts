@@ -164,13 +164,15 @@ const serverObjectSchema = z.object({
         .enum(['true', 'false'])
         .default('false')
         .transform(value => value === 'true'),
-    // Kill switch for the Google Chrome extension's daily-active-installation
-    // ping (POST /api/extension/activity → PostHog `extension_active`, see
-    // src/lib/extensionActivity.ts). OFF by default: the route answers
-    // { status: 'disabled' } and captures nothing (the extension's requests
-    // still reach this server — off stops CAPTURE, not the request). Turning it on in prod is a
-    // maintainer action that waits on the privacy policy AND the Chrome Web
-    // Store privacy-tab disclosure (RUNBOOK.md "Extension DAU telemetry").
+    // Switch for the Google Chrome extension's opted-in popup-open
+    // daily-active event (kind 'daily_active' on POST /api/extension/telemetry
+    // → PostHog `extension_active`, see src/lib/extensionActivity.ts). Served
+    // to the extension by GET /api/extension/features; OFF, the extension sends
+    // nothing for it, and the telemetry route also refuses to capture it
+    // (defence in depth). It never affects the code-share funnel events.
+    // Turning it on in prod is a maintainer action that waits on the privacy
+    // policy AND the Chrome Web Store privacy-practices/listing disclosure
+    // (RUNBOOK.md "Extension DAU telemetry").
     // Same strict two-value enum as above, for the same reason.
     EXTENSION_DAU_TELEMETRY_ENABLED: z
         .enum(['true', 'false'])

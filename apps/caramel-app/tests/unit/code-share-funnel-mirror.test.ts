@@ -1,10 +1,15 @@
 import {
     CODE_SHARE_FUNNEL_STEP_REASONS,
     CodeShareFunnelEventSchema,
+    ExtensionTelemetryBodySchema,
     FUNNEL_STORE_PATTERN,
     MIN_USAGE_DIAGNOSTICS_CONSENT_PROMPT_VERSION,
     UsageDiagnosticsConsentProofSchema,
 } from '@/lib/analytics/codeShareFunnel'
+import {
+    DailyActiveEventSchema,
+    MIN_DAILY_ACTIVE_CONSENT_PROMPT_VERSION,
+} from '@/lib/extensionActivity'
 import {
     EXTENSION_STORES,
     EXTENSION_VERSION_PATTERN,
@@ -199,6 +204,12 @@ describe('usage-diagnostics consent prompt version: extension vs server floor', 
         ).toBeLessThanOrEqual(extensionPromptVersion())
     })
 
+    it('the daily-active floor never exceeds the version the extension sends either', () => {
+        expect(MIN_DAILY_ACTIVE_CONSENT_PROMPT_VERSION).toBeLessThanOrEqual(
+            extensionPromptVersion(),
+        )
+    })
+
     it('the server floor is a positive integer', () => {
         expect(
             Number.isInteger(MIN_USAGE_DIAGNOSTICS_CONSENT_PROMPT_VERSION),
@@ -222,5 +233,65 @@ describe('usage-diagnostics consent prompt version: extension vs server floor', 
         expect(background).toMatch(
             /consent:\s*\{\s*choice:\s*latest\.choice,\s*promptVersion:\s*latest\.promptVersion,\s*\}/,
         )
+    })
+})
+
+describe('extension-activity.js daily-active payload vs the server schema', () => {
+    interface ExtensionActivity {
+        buildDailyActiveEvent: (
+            day: string,
+            extVersion: string,
+        ) => Record<string, unknown>
+    }
+    /** The extension module, import-free, rebuilt from its source text. */
+    function extensionActivity(): ExtensionActivity {
+        // Its one import (the storage wrapper) is not needed by the builder.
+        const source = read('extension-activity.js')
+            .replace(/^import .*$/gm, '')
+            .replace(/^export /gm, '')
+        return new Function(
+            `${source}\nreturn { buildDailyActiveEvent }`,
+        )() as ExtensionActivity
+    }
+
+    it('what the extension builds is exactly the strict daily_active variant', () => {
+        const built = extensionActivity().buildDailyActiveEvent(
+            '2026-10-22',
+            '1.4.18',
+        )
+
+        expect(built).toEqual({
+            kind: 'daily_active',
+            day: '2026-10-22',
+            extVersion: '1.4.18',
+            browser: 'chrome',
+        })
+        expect(DailyActiveEventSchema.safeParse(built).success).toBe(true)
+        expect(
+            ExtensionTelemetryBodySchema.safeParse({
+                id: '3f2b8c1e-7d4a-4c2e-9b6f-1a2b3c4d5e6f',
+                event: built,
+                consent: { choice: 'accepted', promptVersion: 1 },
+            }).success,
+        ).toBe(true)
+    })
+
+    it('a funnel payload from an already-installed build still validates unchanged (no `kind`)', () => {
+        const shipped = {
+            id: '3f2b8c1e-7d4a-4c2e-9b6f-1a2b3c4d5e6f',
+            event: {
+                step: 'submit_skipped',
+                reason: 'signed-out',
+                store: 'example.com',
+                extVersion: '1.4.14',
+                browser: 'firefox',
+                sharingPromptVersion: 1,
+            },
+            consent: { choice: 'accepted', promptVersion: 1 },
+        }
+
+        const parsed = ExtensionTelemetryBodySchema.safeParse(shipped)
+        expect(parsed.success).toBe(true)
+        expect(parsed.data).toEqual(shipped)
     })
 })

@@ -26,7 +26,9 @@ const root = document.getElementById('root')
 if (!root) throw new Error('popup index.html lost its #root mount point')
 createRoot(root).render(<App />)
 
-// The daily-active ping (Google Chrome only): one popup open = one qualifying
-// use, whatever view resolves. Deliberately after render and not awaited — the
-// worker does the delivery and recordPopupActivity logs its own failures.
+// The opted-in daily-active event: one popup open = one qualifying use,
+// whatever view resolves; the worker decides whether anything is sent (Google
+// Chrome, the server flag, usage-diagnostics consent, once per UTC day).
+// Deliberately after render and not awaited — recordPopupActivity logs its own
+// failures.
 void recordPopupActivity()

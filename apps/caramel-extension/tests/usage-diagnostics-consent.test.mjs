@@ -30,7 +30,7 @@ let browser
 const record = (choice, extra = {}) => ({
     choice,
     at: '2026-10-15T12:00:00.000Z',
-    promptVersion: 1,
+    promptVersion: 2,
     ...extra,
 })
 
@@ -80,13 +80,17 @@ describe('parseUsageDiagnosticsConsent', () => {
         ['null', null],
         ['a string', 'accepted'],
         ['an unknown choice', record('maybe')],
-        ['another prompt version', record('accepted', { promptVersion: 2 })],
+        ['another prompt version', record('accepted', { promptVersion: 3 })],
+        [
+            'a v1 yes (the card before it named daily activity)',
+            record('accepted', { promptVersion: 1 }),
+        ],
         [
             'a missing prompt version',
             { choice: 'accepted', at: record('accepted').at },
         ],
         ['an unparsable date', record('accepted', { at: 'yesterday' })],
-        ['a missing date', { choice: 'accepted', promptVersion: 1 }],
+        ['a missing date', { choice: 'accepted', promptVersion: 2 }],
     ])('%s parses to null (= no telemetry)', (_label, raw) => {
         expect(parseUsageDiagnosticsConsent(raw)).toBeNull()
     })

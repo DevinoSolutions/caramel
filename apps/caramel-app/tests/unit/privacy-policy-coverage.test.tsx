@@ -63,19 +63,38 @@ describe('privacy policy coverage', () => {
         )
     })
 
-    it('discloses the Google Chrome daily usage count (extension_active) and no longer claims the extension has no analytics', () => {
-        expect(text).not.toContain('no ads, no analytics')
-        expect(text).toContain('Daily usage count (Google Chrome only).')
-        expect(text).toContain('a random ID that changes every day')
-        // The request reaches our server even while counting is switched off.
-        expect(text).toContain(
-            'because counting is switched off on our server, or the message failed — the message still reaches our server, nothing is recorded',
+    it('discloses the opt-in Google Chrome daily activity event without absolute anonymity claims', () => {
+        const normalized = text.replace(/&quot;/g, '"').replace(/\s+/g, ' ')
+        // The extension does send (opt-in) diagnostics, so no "no analytics".
+        expect(normalized).not.toContain('no ads, no analytics')
+        expect(normalized).toContain('Usage diagnostics, only if you opt in.')
+        expect(normalized).toContain('Daily activity (Google Chrome only).')
+        expect(normalized).toContain(
+            'Nothing described in this paragraph is sent before you opt in.',
         )
-        expect(text).toContain('only records whether you were signed in')
-        expect(text).toContain(
-            'not sent by Caramel for Firefox, Safari or Microsoft Edge',
+        expect(normalized).toContain(
+            "When you open the extension's popup in Google Chrome, at most once per day: the date (in UTC), the extension version and the browser name",
         )
-        expect(text).toContain("the extension's only analytics is the")
+        expect(normalized).toContain(
+            'It is sent without your sign-in token and without saying whether you are signed in',
+        )
+        expect(normalized).toContain(
+            'under a pseudonymous ID: a random ID created on this device when you opt in',
+        )
+        expect(normalized).toContain(
+            'they also reach it with your IP address and browser type (user agent), which our server and proxy logs keep',
+        )
+        expect(normalized).toContain(
+            'It is not sent from Microsoft Edge, Firefox or Safari',
+        )
+        expect(normalized).toContain('switch on "Send usage diagnostics"')
+        expect(normalized).not.toMatch(/anonymous usage diagnostics/i)
+        // Not "the only analytics", and no unlinkability promise: IP and user
+        // agent reach our server logs.
+        expect(normalized).not.toMatch(/only analytics/i)
+        expect(normalized).not.toMatch(/can(no|')t be linked/i)
+        expect(normalized).not.toContain('anything that identifies you')
+        expect(normalized).toContain('Effective Date: October 22, 2026')
     })
 
     it('discloses what the coupon-box finder and server pick send (wording delegated 2026-10-13)', () => {
@@ -92,7 +111,6 @@ describe('privacy policy coverage', () => {
             "Devino's own AI model proxy",
             "which currently passes the request to NVIDIA's hosted model service (NIM)",
             'The only other page content the extension sends is the trimmed cart-page outline described under “Finding the promo-code box on a cart page”, and only as described there.',
-            'Effective Date: October 14, 2026',
             'for that store and page shape',
             'Your IP address is used to rate-limit these requests.',
         ]) {

@@ -262,11 +262,11 @@ export function SettingsView({
 
             <label className="settings-row">
                 <span className="settings-copy">
-                    <span>Send anonymous usage diagnostics</span>
+                    <span>Send usage diagnostics</span>
                     <small>
-                        Only at checkout on a supported store. Never your codes,
-                        your cart, the other pages you visit, or anything that
-                        identifies you.
+                        At checkout on a supported store, and once a day in
+                        Google Chrome when you open Caramel. Never your codes,
+                        your cart, the other pages you visit, or your account.
                     </small>
                 </span>
                 <input

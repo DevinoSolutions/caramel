@@ -24,7 +24,7 @@ const TEST_ID = '0b9e8f2a-4c1d-4e57-9a36-7d5f1c2b8e40'
 const consent = choice => ({
     choice,
     at: '2026-10-15T12:00:00.000Z',
-    promptVersion: 1,
+    promptVersion: 2,
 })
 
 function installWorkerRealm() {
@@ -214,7 +214,7 @@ describe('reportCodeShareFunnel: what is sent when the shopper opted in', () => 
         const body = JSON.parse(call.opts.body)
         expect(Object.keys(body).toSorted()).toEqual(['consent', 'event', 'id'])
         expect(body.id).toBe(TEST_ID)
-        expect(body.consent).toEqual({ choice: 'accepted', promptVersion: 1 })
+        expect(body.consent).toEqual({ choice: 'accepted', promptVersion: 2 })
         expect(body.event).toEqual({
             step: 'capture_armed',
             store: 'example.com',

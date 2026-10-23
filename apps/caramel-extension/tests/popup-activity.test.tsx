@@ -1,22 +1,21 @@
 import { screen, waitFor } from '@testing-library/react'
 import { act } from 'react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-// The popup half of the daily-active ping: opening the popup is the one
+// The popup half of the daily-active event: opening the popup is the one
 // qualifying use. Boots the REAL popup entrypoint (entrypoints/popup/main.tsx)
 // and watches what it sends the worker. Pins:
-//   - Google Chrome sends ONE `recordExtensionActivity`, guest or signed in;
-//   - Edge, Safari (the converted Chrome build), the Firefox build and any
-//     browser without the Chrome brand send nothing;
+//   - one `recordExtensionActivity` per open, the same bare message for a
+//     guest and a signed-in shopper (the popup decides nothing; Google Chrome,
+//     the server flag, consent and once-a-day are the worker's, pinned in
+//     tests/background-daily-active.test.mjs);
 //   - the popup paints without waiting for the worker's answer.
-// The worker half is tests/extension-activity.test.mjs.
 
 type Msg = { action: string }
 type Reply = (resp: unknown) => void
 
 let sent: Msg[]
 let session: Record<string, unknown>
-let extensionBase: string
 let answerActivity: boolean
 
 /* One permissive chrome stub for the whole file: caramel-base.js latches the
@@ -46,12 +45,13 @@ function installChromeStub() {
         stub.storage[area].remove = (_keys: unknown, cb: any) => cb?.()
     }
     stub.runtime.lastError = undefined
-    stub.runtime.getURL = (path: string) => extensionBase + path
+    stub.runtime.getURL = (path: string) =>
+        'chrome-extension://caramel-test-id/' + path
     stub.runtime.sendMessage = (msg: Msg, cb: Reply) => {
         sent.push(msg)
         if (msg.action === 'recordExtensionActivity') {
             // Never answering models a worker that is still delivering.
-            if (answerActivity) cb({ outcome: 'recorded' })
+            if (answerActivity) cb({ sent: true })
             return
         }
         // No active tab: the popup resolves its "unsupported" view.
@@ -63,15 +63,6 @@ function installChromeStub() {
     ;(window as any).browser = undefined
 }
 installChromeStub()
-
-function setBrands(names: string[] | null) {
-    Object.defineProperty(navigator, 'userAgentData', {
-        configurable: true,
-        value: names
-            ? { brands: names.map(brand => ({ brand, version: '130' })) }
-            : undefined,
-    })
-}
 
 async function openPopup() {
     document.body.innerHTML = '<div id="root"></div>'
@@ -87,32 +78,22 @@ const activityMessages = () =>
 beforeEach(() => {
     sent = []
     session = {}
-    extensionBase = 'chrome-extension://caramel-test-id/'
     answerActivity = true
-    vi.stubEnv('BROWSER', 'chrome')
-    setBrands(['Chromium', 'Google Chrome', 'Not?A_Brand'])
 })
 
-afterEach(() => {
-    vi.unstubAllEnvs()
-})
-
-describe('popup open → daily-active ping', () => {
-    it('Google Chrome, guest: one recordExtensionActivity message', async () => {
+describe('popup open → daily-active event', () => {
+    it('guest and signed in: the same single bare message', async () => {
         await openPopup()
-
         await waitFor(() => expect(activityMessages()).toHaveLength(1))
-    })
+        const guest = activityMessages()[0]
 
-    it('Google Chrome, signed in: the same single message (sign-in state is the server’s to derive)', async () => {
+        sent = []
         session = { token: 'tok-123', user: { username: 'sam' } }
-
         await openPopup()
-
         await waitFor(() => expect(activityMessages()).toHaveLength(1))
-        expect(activityMessages()[0]).toEqual({
-            action: 'recordExtensionActivity',
-        })
+
+        expect(activityMessages()[0]).toEqual(guest)
+        expect(guest).toEqual({ action: 'recordExtensionActivity' })
     })
 
     it('the popup paints without waiting on the worker’s answer', async () => {
@@ -126,38 +107,5 @@ describe('popup open → daily-active ping', () => {
             ).toBeInTheDocument(),
         )
         expect(activityMessages()).toHaveLength(1)
-    })
-
-    it.each([
-        ['Microsoft Edge', ['Chromium', 'Microsoft Edge', 'Not?A_Brand']],
-        ['Opera', ['Chromium', 'Opera', 'Not?A_Brand']],
-        ['Brave', ['Chromium', 'Brave', 'Not?A_Brand']],
-        ['a browser without userAgentData', null],
-    ])('%s: nothing is sent', async (_label, brands) => {
-        setBrands(brands)
-
-        await openPopup()
-
-        // The boot's own messages prove the popup ran.
-        await waitFor(() => expect(sent.length).toBeGreaterThan(0))
-        expect(activityMessages()).toEqual([])
-    })
-
-    it('Safari (the converted Chrome build): nothing is sent', async () => {
-        extensionBase = 'safari-web-extension://caramel-test-id/'
-
-        await openPopup()
-
-        await waitFor(() => expect(sent.length).toBeGreaterThan(0))
-        expect(activityMessages()).toEqual([])
-    })
-
-    it('the Firefox build: nothing is sent', async () => {
-        vi.stubEnv('BROWSER', 'firefox')
-
-        await openPopup()
-
-        await waitFor(() => expect(sent.length).toBeGreaterThan(0))
-        expect(activityMessages()).toEqual([])
     })
 })

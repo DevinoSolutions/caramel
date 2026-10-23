@@ -264,6 +264,14 @@ module.exports = [
         // 2026-10-20, merging main (through #348) again: the learned-box
         // memory and pick mode above plus the toolbar badge from #384.
         // Measured 16.91 kB, so the limit is measured + ~0.3 kB.
+        // 2026-10-22, unchanged at 17.2 kB: the opted-in popup-open
+        // daily-active event (its message route, the Chrome/consent/flag gate
+        // and the per-UTC-day state in extension-activity.js), riding the
+        // funnel's existing diagnostics POST, storage wrapper and features
+        // cache instead of a copy of each (the three fail-closed flag reads
+        // became one helper, the manifest-version read another). main measured
+        // 15.69 kB; this measured 17.10 kB, so the next background change
+        // needs a dated raise.
         limit: '17.2 KB',
         brotli: false,
     },

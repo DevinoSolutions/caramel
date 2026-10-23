@@ -25,7 +25,6 @@ import {
 import { CARAMEL_ENV } from './caramel-env.js'
 import { CaramelCoupons } from './coupon-constants.generated.js'
 import { fetchCouponsPage } from './coupon-fetch.js'
-import { isGoogleChromeRuntime } from './extension-activity.js'
 import { installAttributionFields } from './install-attribution.js'
 import { resolvePermissionState } from './permission-state.js'
 
@@ -152,21 +151,16 @@ export function afterLoginSuccess() {
 }
 
 /* ------------------------------------------------------------ */
-/*  Daily-active ping                                           */
+/*  Daily-active event                                          */
 /* ------------------------------------------------------------ */
-// Opening the popup is the ONE qualifying use (guests included, whatever view
-// resolves). This only decides "is this Google Chrome?" — with the Safari
-// check that needs this realm's currentBrowser — and hands the rest to the
-// worker (extension-activity.js), which outlives this page. main.tsx calls it
-// after the first render and never awaits it, so the popup paints the same
-// with or without it. Resolves to the worker's answer, or null when skipped.
+// Opening the popup is the ONE qualifying use (guests and signed-in alike,
+// whatever view resolves). This only tells the worker; every decision (Google
+// Chrome, the server flag, the shopper's usage-diagnostics consent, once per
+// UTC day) is the worker's (background.js reportDailyActive), which also
+// outlives this page. main.tsx calls it after the first render and never
+// awaits it, so the popup paints the same with or without it. Resolves to the
+// worker's answer, or null when the message failed.
 export async function recordPopupActivity() {
-    const isChrome = isGoogleChromeRuntime({
-        buildBrowser: import.meta.env.BROWSER,
-        isSafari: isSafariExtensionRuntime(),
-        brands: globalThis.navigator?.userAgentData?.brands,
-    })
-    if (!isChrome) return null
     try {
         const resp = await caramelSendMessage({
             action: 'recordExtensionActivity',

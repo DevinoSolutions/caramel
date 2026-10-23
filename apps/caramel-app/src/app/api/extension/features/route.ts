@@ -37,6 +37,15 @@ import { NextResponse } from 'next/server'
 // /api/extension/coupon-box-save)? Mirrors COUPON_BOX_SAVE_ENABLED, false by
 // default; the route answers 404 while it is off. Older builds ignore the key.
 //
+// extensionDauTelemetry: may the extension send the Google Chrome popup-open
+// daily-active event (kind 'daily_active' on POST /api/extension/telemetry,
+// src/lib/extensionActivity.ts)? Mirrors EXTENSION_DAU_TELEMETRY_ENABLED,
+// false by default. The extension fails closed: anything but a literal true,
+// or a failed read, sends nothing, and the event still needs the shopper's
+// usage-diagnostics consent. The telemetry route re-checks the same flag
+// (defence in depth) and never lets it touch the code-share funnel events.
+// Older builds ignore the key.
+//
 // withRoute: public read like extension/supported-stores (rate-limited, no
 // auth/origin gate); cors 'extension' + the OPTIONS preflight mirror
 // extension/me, so a preflighted extension-origin fetch can read it.
@@ -62,5 +71,6 @@ export const GET = withRoute(
             couponBoxDiscovery: env.COUPON_BOX_DISCOVERY_ENABLED,
             couponBoxLlm: couponBoxLlmEnabled(),
             couponBoxSave: env.COUPON_BOX_SAVE_ENABLED,
+            extensionDauTelemetry: env.EXTENSION_DAU_TELEMETRY_ENABLED,
         }),
 )

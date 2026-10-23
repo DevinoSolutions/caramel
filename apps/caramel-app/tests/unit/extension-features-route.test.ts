@@ -7,7 +7,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 // shopper-typed codes captured at checkout, and whether the coupon-box pick
 // (POST /api/extension/coupon-box-pick) is on, whether the extension may find
 // a store's promo box itself when no config describes it, and whether it may
-// save such a box as the store's config (POST /api/extension/coupon-box-save).
+// save such a box as the store's config (POST /api/extension/coupon-box-save),
+// and whether it may send the popup-open daily-active event
+// (extensionDauTelemetry).
 const { envMock, checkRateLimitMock } = vi.hoisted(() => ({
     envMock: {
         SHOPPER_CODE_CAPTURE_ENABLED: false,
@@ -15,6 +17,7 @@ const { envMock, checkRateLimitMock } = vi.hoisted(() => ({
         COUPON_BOX_LLM_ENABLED: false,
         COUPON_BOX_PICK_MODEL: undefined,
         COUPON_BOX_SAVE_ENABLED: false,
+        EXTENSION_DAU_TELEMETRY_ENABLED: false,
     } as Record<string, unknown>,
     checkRateLimitMock: vi.fn(async () => null as unknown),
 }))
@@ -27,6 +30,7 @@ vi.mock('@/lib/env', async importOriginal => {
         COUPON_BOX_LLM_ENABLED: false,
         COUPON_BOX_PICK_MODEL: undefined,
         COUPON_BOX_SAVE_ENABLED: false,
+        EXTENSION_DAU_TELEMETRY_ENABLED: false,
     })
     return { ...actual, env: envMock }
 })
@@ -48,6 +52,7 @@ beforeEach(() => {
     envMock.COUPON_BOX_LLM_ENABLED = false
     envMock.COUPON_BOX_PICK_MODEL = undefined
     envMock.COUPON_BOX_SAVE_ENABLED = false
+    envMock.EXTENSION_DAU_TELEMETRY_ENABLED = false
     checkRateLimitMock.mockReset()
     checkRateLimitMock.mockImplementation(async () => null)
 })
@@ -62,6 +67,7 @@ describe('GET /api/extension/features', () => {
             couponBoxDiscovery: false,
             couponBoxLlm: false,
             couponBoxSave: false,
+            extensionDauTelemetry: false,
         })
     })
 
@@ -76,6 +82,7 @@ describe('GET /api/extension/features', () => {
             couponBoxDiscovery: false,
             couponBoxLlm: false,
             couponBoxSave: false,
+            extensionDauTelemetry: false,
         })
     })
 
@@ -90,6 +97,7 @@ describe('GET /api/extension/features', () => {
             couponBoxDiscovery: true,
             couponBoxLlm: false,
             couponBoxSave: false,
+            extensionDauTelemetry: false,
         })
     })
 
@@ -105,6 +113,7 @@ describe('GET /api/extension/features', () => {
             couponBoxDiscovery: false,
             couponBoxLlm: true,
             couponBoxSave: false,
+            extensionDauTelemetry: false,
         })
 
         envMock.COUPON_BOX_LLM_ENABLED = false
@@ -122,6 +131,22 @@ describe('GET /api/extension/features', () => {
             couponBoxDiscovery: false,
             couponBoxLlm: false,
             couponBoxSave: true,
+            extensionDauTelemetry: false,
+        })
+    })
+
+    it('DAU flag on → { extensionDauTelemetry: true }, every other key untouched', async () => {
+        envMock.EXTENSION_DAU_TELEMETRY_ENABLED = true
+
+        const res = await GET(featuresRequest())
+
+        expect(res.status).toBe(200)
+        expect(await res.json()).toEqual({
+            shopperCodeCapture: false,
+            couponBoxDiscovery: false,
+            couponBoxLlm: false,
+            couponBoxSave: false,
+            extensionDauTelemetry: true,
         })
     })
 

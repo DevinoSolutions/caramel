@@ -84,11 +84,12 @@ export function UsageDiagnosticsCard() {
         >
             <h3 id="usageDiagnosticsTitle">Help improve Caramel?</h3>
             <p>
-                Send anonymous diagnostics when you&apos;re at checkout on a
-                supported store: which store, whether the code-sharing offer
-                appeared, and why a code wasn&apos;t shared. Never your codes,
-                your cart, the other pages you visit, or anything that
-                identifies you. You can change this anytime in Settings.
+                Send diagnostics when you&apos;re at checkout on a supported
+                store: which store, whether the code-sharing offer appeared, and
+                why a code wasn&apos;t shared. In Google Chrome, also a
+                once-a-day note that you opened Caramel. Never your codes, your
+                cart, the other pages you visit, or your account. You can change
+                this anytime in Settings.
             </p>
             <div className="diagnostics-card-actions">
                 <button

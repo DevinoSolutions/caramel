@@ -92,8 +92,8 @@ export const GROUPS = {
         ...(await tsSourcesUnder('entrypoints/popup')),
         ...(await tsSourcesUnder('../../packages/caramel-ui/src')),
     ],
-    // extension-activity.js is the worker's daily-active recorder (the popup
-    // imports only its pure Chrome check), so it is weighed with the worker.
+    // extension-activity.js is the worker's daily-active payload and per-day
+    // state (only background.js imports it), so it is weighed with the worker.
     background: ['background.js', 'extension-activity.js'],
     // Not injected: the build ships it as assets/coupon-box-outline.js and the
     // finder imports it only when it is about to ask the server for a box

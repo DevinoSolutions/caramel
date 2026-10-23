@@ -31,7 +31,7 @@ const ID_KEY = 'caramel_usage_diagnostics_id'
 const accepted = () => ({
     choice: 'accepted',
     at: '2026-10-15T12:00:00.000Z',
-    promptVersion: 1,
+    promptVersion: 2,
 })
 
 function installChromeStub() {
@@ -143,7 +143,7 @@ describe('the one-time "Help improve Caramel?" card', () => {
         ).toBeInTheDocument()
         expect(
             screen.getByText(
-                "Send anonymous diagnostics when you're at checkout on a supported store: which store, whether the code-sharing offer appeared, and why a code wasn't shared. Never your codes, your cart, the other pages you visit, or anything that identifies you. You can change this anytime in Settings.",
+                "Send diagnostics when you're at checkout on a supported store: which store, whether the code-sharing offer appeared, and why a code wasn't shared. In Google Chrome, also a once-a-day note that you opened Caramel. Never your codes, your cart, the other pages you visit, or your account. You can change this anytime in Settings.",
             ),
         ).toBeInTheDocument()
         const allow = screen.getByRole('button', { name: 'Allow' })
@@ -163,7 +163,7 @@ describe('the one-time "Help improve Caramel?" card', () => {
         await waitFor(() =>
             expect(localData[CONSENT_KEY]).toMatchObject({
                 choice: 'accepted',
-                promptVersion: 1,
+                promptVersion: 2,
             }),
         )
         expect(localData[ID_KEY]).toMatch(/^[0-9a-f-]{36}$/)
@@ -252,7 +252,7 @@ describe('the one-time "Help improve Caramel?" card', () => {
     })
 
     it('a record for an older prompt version asks again', async () => {
-        localData[CONSENT_KEY] = { ...accepted(), promptVersion: 0 }
+        localData[CONSENT_KEY] = { ...accepted(), promptVersion: 1 }
         renderCard()
 
         expect(
@@ -323,10 +323,10 @@ describe('the one-time "Help improve Caramel?" card', () => {
     })
 })
 
-describe('the Settings toggle "Send anonymous usage diagnostics"', () => {
+describe('the Settings toggle "Send usage diagnostics"', () => {
     const toggle = () =>
         screen.findByRole('checkbox', {
-            name: /Send anonymous usage diagnostics/,
+            name: /Send usage diagnostics/,
         })
 
     it('is OFF by default and writes nothing', async () => {

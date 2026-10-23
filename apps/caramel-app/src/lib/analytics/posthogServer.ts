@@ -52,16 +52,6 @@ function getActiveClient(): ActiveClient | null {
 }
 
 /**
- * True when this deploy's server dataset routes captures somewhere
- * (production or e2e with a complete pair). Lets a caller tell "analytics is
- * off here" apart from a capture that FAILED — `captureServerEvent` returns
- * `false` for both.
- */
-export function isServerCaptureConfigured(): boolean {
-    return resolveServerTarget() !== null
-}
-
-/**
  * Capture one server-side event. Contract:
  *  - no-ops returning `false` when the dataset is disabled/unconfigured;
  *  - stamps app_id / app_version / environment / platform on every event;
