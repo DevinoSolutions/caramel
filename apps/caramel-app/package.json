@@ -52,7 +52,7 @@
         "postgres": "3.4.9",
         "posthog-js": "1.438.17",
         "posthog-node": "5.57.0",
-        "prisma": "6.19.3",
+        "prisma": "7.10.1",
         "rate-limiter-flexible": "11.2.3",
         "react": "19.3.1",
         "react-dom": "19.3.1",
