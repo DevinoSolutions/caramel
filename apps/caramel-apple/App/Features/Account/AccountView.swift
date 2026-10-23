@@ -43,7 +43,7 @@ struct AccountView: View {
                 } header: {
                     Text("About")
                 } footer: {
-                    Text("Tell us what is blocking you. A human replies within 1 business day.")
+                    Text("Tell us what is blocking you and ask for a reply: a human replies within 1 business day.")
                 }
             }
             .navigationTitle("Account")
