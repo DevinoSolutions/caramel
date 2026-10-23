@@ -10,8 +10,7 @@
 # `target-branch` is deliberately absent: with it set, security updates stop following
 # the ecosystem options and always target the default branch anyway.
 #
-# The org reusable security-audit.yml (see .github/workflows/security-audit.yml) also
-# audits pnpm.overrides for entries that have become a ceiling over a newer advisory.
+# TODO: the org reusable security-audit.yml (stale pnpm.overrides check) cannot be called from here: caramel is a PUBLIC repo and DevinoSolutions/.github is PRIVATE, so GitHub reports "workflow was not found". Needs an owner decision (inline the override check or change visibility); checks-app.yml `audit` job remains the CI gate.
 version: 2
 updates:
   - package-ecosystem: 'npm' # covers the pnpm lockfile
