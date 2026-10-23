@@ -36,7 +36,7 @@
     },
     "dependencies": {
         "@heroicons/react": "2.2.0",
-        "@prisma/client": "6.19.3",
+        "@prisma/client": "7.10.1",
         "@react-email/render": "2.1.1",
         "@react-three/drei": "10.7.9",
         "@react-three/fiber": "9.8.2",
