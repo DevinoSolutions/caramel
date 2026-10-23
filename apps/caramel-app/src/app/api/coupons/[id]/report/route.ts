@@ -1,5 +1,6 @@
 import { isEstablishedAccount } from '@/lib/accountReputation'
 import { withRoute } from '@/lib/api/withRoute'
+import { workedStampCapSpent } from '@/lib/checkoutWorkedStamp'
 import {
     admitReport,
     releaseReport,
@@ -16,6 +17,7 @@ import {
     sweepExpiredReporters,
     type CouponFailureWriter,
 } from '@/lib/couponSignals'
+import { lockShopperUser } from '@/lib/couponsRepo'
 import prisma from '@/lib/prisma'
 import type { PrismaClient } from '@prisma/client'
 import { NextResponse } from 'next/server'
@@ -151,9 +153,12 @@ export const POST = withRoute(
             // signed-in path can never end up writing a DIFFERENT signal than the
             // anonymous one. Resolves false when the id is not a catalog row
             // (nothing written).
-            const writeSignal = (client: CouponFailureWriter | PrismaClient) =>
+            const writeSignal = (
+                client: CouponFailureWriter | PrismaClient,
+                demote = false,
+            ) =>
                 body.outcome === 'worked'
-                    ? recordWorked(id, reporter, client)
+                    ? recordWorked(id, reporter, client, { demote })
                     : recordFailed(
                           id,
                           body.storeReason ?? null,
@@ -188,13 +193,34 @@ export const POST = withRoute(
                 // above, exactly as for an anonymous report. The per-day dedup
                 // below applies to the ATTRIBUTION ONLY, and survives a restart
                 // that empties the in-memory window.
-                if (!(await writeSignal(tx))) return false
+                //
+                // An ESTABLISHED account's "worked" stamps Verified on its own,
+                // so it shares the checkout capture's per-account daily cap
+                // (checkoutWorkedStamp.workedStampCapSpent, counted from the
+                // persisted coupon_reports rows, under the per-shopper advisory
+                // lock so concurrent reports cannot both read the same count).
+                // Past the cap the report is not refused: it is recorded as a
+                // low-trust one, which is accepted and moves nothing.
+                let demote = false
+                if (
+                    body.outcome === 'worked' &&
+                    reporter.kind === 'user' &&
+                    reporter.established
+                ) {
+                    await lockShopperUser(tx, userId)
+                    demote = await workedStampCapSpent(tx, userId)
+                }
+                if (!(await writeSignal(tx, demote))) return false
 
                 // coupon_reports.coupon_id carries a real FK to `coupons`; the
                 // signal write above just proved the row exists, so the insert
                 // below cannot raise a foreign-key violation.
 
-                // One attributed report per (user, coupon, UTC day). Postgres
+                // One attributed report per (user, coupon, outcome, UTC day).
+                // The OUTCOME is part of the key: without it a "failed" report
+                // earlier in the day would suppress the "worked" row, and the
+                // daily stamp cap (counted from these rows) would never see the
+                // stamp. Postgres
                 // cannot express a UNIQUE on date_trunc('day', created_at), so this
                 // is app-side by necessity; it rides the
                 // (coupon_id, user_id, created_at) index the table ships with. A
@@ -204,6 +230,7 @@ export const POST = withRoute(
                     where: {
                         couponId: id,
                         userId,
+                        outcome: body.outcome,
                         createdAt: { gte: startOfUtcDay(new Date()) },
                     },
                     select: { id: true },

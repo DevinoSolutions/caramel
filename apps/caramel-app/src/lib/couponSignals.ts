@@ -32,7 +32,6 @@ import type { ReportReporter } from '@/lib/couponReportDedupe'
 import {
     FAILING_WINDOW_MS,
     MAX_LOW_TRUST_FAIL_WEIGHT,
-    WORKED_VERIFIED_WINDOW_MS,
     keepsFailing,
 } from '@/lib/coupons'
 import {
@@ -188,99 +187,88 @@ async function recomputeFailWeight(
  * `lastWorkedAt` (the "Verified"/"just worked" stamp, which also lists the code
  * in "Codes that just worked") depends on WHO says so, because the request is
  * client-asserted and cheap to forge:
- *   - an ESTABLISHED account (reporter.established), or a caller that already
- *     vetted the shopper and passes `options.forceStamp` (the checkout capture,
- *     checkoutWorkedStamp.ts), stamps on its own say-so;
- *   - a LOW-TRUST reporter (anonymous network, young account) stamps only once
- *     COUPON_WORKED_QUORUM_LOW_TRUST_REPORTERS DISTINCT low-trust reporters have
- *     said so within WORKED_VERIFIED_WINDOW_MS. Their reports are kept in
- *     coupon_signal_reporters (as 'worked' rows, hashed like every reporter) so
- *     the quorum survives a restart; before the quorum a low-trust report
- *     leaves `lastWorkedAt` exactly as it was.
+ *   - an ESTABLISHED account (reporter.established) stamps on its own say-so,
+ *     unless `options.demote` says its daily stamp cap is spent
+ *     (checkoutWorkedStamp.ts workedStampCapSpent), in which case it counts as
+ *     low-trust for this report;
+ *   - a caller that already vetted the shopper passes `options.forceStamp` (the
+ *     checkout capture, checkoutWorkedStamp.ts) and stamps even for a young
+ *     account;
+ *   - a LOW-TRUST reporter (anonymous network, young account, demoted account)
+ *     NEVER moves `lastWorkedAt`, however many of them agree: three throwaway
+ *     addresses could otherwise keep a dead code Verified forever. The report is
+ *     accepted, the coupon's existence is checked, and nothing else is stored
+ *     (no reporter row), because nothing would ever read it.
  * Deliberately does NOT bump workCount: a successful apply ALSO fires POST
  * /api/coupons/increment (→ recordUsage), which owns the counter. When the
- * coupon carries a live failure quorum (fail_weight > 0) the reporter's success
- * is also recorded and the quorum recomputed, so a success clears failures only
- * once enough weight of distinct reporters agree (low-trust ones count up to
- * MAX_LOW_TRUST_CLEARING_WEIGHT together). One transaction (a singleton client
- * is wrapped, a transaction client is joined).
+ * coupon carries a live failure quorum (fail_weight > 0) a stamping reporter's
+ * success is also recorded and the quorum recomputed, so a success clears
+ * failures only once enough weight of distinct reporters agree. One transaction
+ * (a singleton client is wrapped, a transaction client is joined).
  *
  * Resolves true when the coupon exists, false when `couponId` is not a catalog
  * row (couponsRepo.writeWorkedSignal folds that existence check into its single
  * upsert statement): nothing was written, and the caller owns the
- * unknown-coupon response. True does NOT say the stamp moved: a low-trust
- * report short of the quorum is accepted and not stamped, and the caller
- * answers it exactly like any other.
+ * unknown-coupon response. True does NOT say the stamp moved: a low-trust report
+ * is accepted and not stamped, and the caller answers it exactly like any other.
  */
 export async function recordWorked(
     couponId: string,
     reporter: ReportReporter,
     client: CouponFailureWriter | PrismaClient = prisma,
-    options: { forceStamp?: boolean } = {},
+    options: { forceStamp?: boolean; demote?: boolean } = {},
 ): Promise<boolean> {
-    const forceStamp = options.forceStamp === true
+    const lowTrust = isLowTrustWorked(reporter, options)
     if ('$transaction' in client) {
         return client.$transaction(tx =>
-            recordWorkedIn(couponId, reporter, tx, forceStamp),
+            recordWorkedIn(couponId, reporter, tx, lowTrust),
         )
     }
-    return recordWorkedIn(couponId, reporter, client, forceStamp)
+    return recordWorkedIn(couponId, reporter, client, lowTrust)
+}
+
+function isLowTrustWorked(
+    reporter: ReportReporter,
+    options: { forceStamp?: boolean; demote?: boolean },
+): boolean {
+    if (options.forceStamp === true) return false
+    if (options.demote === true) return true
+    return !(reporter.kind === 'user' && reporter.established)
 }
 
 async function recordWorkedIn(
     couponId: string,
     reporter: ReportReporter,
     tx: CouponFailureWriter,
-    forceStamp: boolean,
+    lowTrust: boolean,
 ): Promise<boolean> {
     const now = new Date()
-    const lowTrust =
-        !forceStamp && !(reporter.kind === 'user' && reporter.established)
     const signal = await writeWorkedSignal(couponId, tx, { stamp: !lowTrust })
     if (!signal) return false
+    // A low-trust success stores nothing; a stamping reporter's success is only
+    // remembered while the coupon carries a failure quorum it can clear: a
+    // coupon with no failures stores nothing about the reporter.
+    if (lowTrust || signal.failWeight <= 0) return true
     const hash = reporterHash(reporter)
     const weight = reporterWeight(reporter)
-    const upsertReporterRow = () =>
-        tx.couponSignalReporter.upsert({
-            where: {
-                couponId_outcome_reporterHash: {
-                    couponId,
-                    outcome: 'worked',
-                    reporterHash: hash,
-                },
-            },
-            create: {
+    await tx.couponSignalReporter.upsert({
+        where: {
+            couponId_outcome_reporterHash: {
                 couponId,
                 outcome: 'worked',
                 reporterHash: hash,
-                weight,
-                lastAt: now,
             },
-            update: { weight, lastAt: now },
-        })
-    if (lowTrust) {
-        await upsertReporterRow()
-        const distinct = await tx.couponSignalReporter.count({
-            where: {
-                couponId,
-                outcome: 'worked',
-                weight: { lt: REPORTER_WEIGHT.account },
-                lastAt: {
-                    gt: new Date(now.getTime() - WORKED_VERIFIED_WINDOW_MS),
-                },
-            },
-        })
-        if (distinct >= env.COUPON_WORKED_QUORUM_LOW_TRUST_REPORTERS) {
-            await writeWorkedSignal(couponId, tx, { stamp: true })
-        }
-    } else {
-        // An established reporter's success is only remembered while the coupon
-        // carries a failure quorum it can clear: a coupon with no failures
-        // stores nothing about the reporter.
-        if (signal.failWeight <= 0) return true
-        await upsertReporterRow()
-    }
-    if (signal.failWeight > 0) await recomputeFailWeight(tx, couponId, now)
+        },
+        create: {
+            couponId,
+            outcome: 'worked',
+            reporterHash: hash,
+            weight,
+            lastAt: now,
+        },
+        update: { weight, lastAt: now },
+    })
+    await recomputeFailWeight(tx, couponId, now)
     return true
 }
 

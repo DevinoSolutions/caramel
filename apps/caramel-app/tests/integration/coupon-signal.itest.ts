@@ -60,7 +60,7 @@ afterAll(async () => {
 })
 
 // An ESTABLISHED account stamps lastWorkedAt on its own say-so; an anonymous
-// network or a young account does not (the worked quorum, tested below).
+// network or a young account NEVER does (tested below).
 const ESTABLISHED = {
     kind: 'user',
     userId: 'itest-established-account',
@@ -68,34 +68,31 @@ const ESTABLISHED = {
 } as const
 
 describe('couponSignals (real prisma, live pg :58005)', () => {
-    it('a LOW-TRUST worked report leaves lastWorkedAt NULL; the third DISTINCT low-trust reporter stamps it (real pg)', async () => {
+    it('LOW-TRUST worked reports NEVER stamp lastWorkedAt, however many distinct reporters, and store nothing about them (real pg)', async () => {
         const anon = (n: number) =>
             ({ kind: 'ip', ip: `203.0.113.${n}` }) as const
-        expect(await recordWorked(WORKED_ID, anon(1))).toBe(true)
-        expect(await recordWorked(WORKED_ID, anon(1))).toBe(true)
-        expect(await recordWorked(WORKED_ID, anon(2))).toBe(true)
-        const before = await prisma.couponSignal.findUniqueOrThrow({
-            where: { couponId: WORKED_ID },
-        })
-        // The existence gate created the row, but no stamp.
-        expect(before.lastWorkedAt).toBeNull()
-        expect(before.workCount).toBe(0)
-        const rows = await prisma.couponSignalReporter.findMany({
-            where: { couponId: WORKED_ID, outcome: 'worked' },
-        })
-        expect(rows).toHaveLength(2)
-        expect(rows.every(r => r.weight === 1)).toBe(true)
-        expect(rows.map(r => r.reporterHash).join()).not.toContain('203.0.113')
-
+        for (let n = 1; n <= 10; n++) {
+            expect(await recordWorked(WORKED_ID, anon(n))).toBe(true)
+        }
         await recordWorked(WORKED_ID, {
             kind: 'user',
             userId: 'itest-young-account',
             established: false,
         })
-        const after = await prisma.couponSignal.findUniqueOrThrow({
+        // An established account over its daily cap is demoted to low-trust.
+        await recordWorked(WORKED_ID, ESTABLISHED, undefined, { demote: true })
+
+        const row = await prisma.couponSignal.findUniqueOrThrow({
             where: { couponId: WORKED_ID },
         })
-        expect(after.lastWorkedAt).toBeInstanceOf(Date)
+        // The existence gate created the row, but no stamp.
+        expect(row.lastWorkedAt).toBeNull()
+        expect(row.workCount).toBe(0)
+        expect(
+            await prisma.couponSignalReporter.count({
+                where: { couponId: WORKED_ID },
+            }),
+        ).toBe(0)
     })
 
     it('a low-trust worked report on an id that is not a catalog row writes no reporter row (real pg)', async () => {

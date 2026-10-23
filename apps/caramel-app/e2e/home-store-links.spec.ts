@@ -66,12 +66,14 @@ test.describe('home page "Codes that just worked" (server-rendered)', () => {
     test.describe.configure({ timeout: 60000 })
     test.skip(
         !process.env.DATABASE_URL,
-        'needs the hermetic DB: it records a worked signal and removes it',
+        'needs the hermetic DB: it seeds a worked signal and removes it',
     )
 
-    // TEST-ONLY DB access, announced: the report route below writes the
-    // signal the real way; this only snapshots the row first and puts it
-    // back afterwards (deleting the one the test created), so the
+    // TEST-ONLY DB access, announced: T-6222 means no anonymous caller can
+    // stamp a code "worked" through the API any more, so the test seeds the
+    // stamp the way a trusted reporter (an established account, or the vetted
+    // checkout capture) would have left it. This snapshots the row first and
+    // puts it back afterwards (deleting the one the test created), so the
     // visual-regression home screenshot (same run, same DB) never sees a
     // strip it did not expect. The type import is erased at runtime.
     let signalBefore: import('@prisma/client').CouponSignal | null = null
@@ -103,43 +105,56 @@ test.describe('home page "Codes that just worked" (server-rendered)', () => {
         }
     })
 
-    test('a code reported as worked appears in the home HTML with its store link', async ({
+    test('a code with a trusted worked stamp appears in the home HTML with its store link; anonymous reports cannot put one there', async ({
         request,
         page,
         baseURL,
     }) => {
         if (!baseURL) throw new Error('playwright baseURL is not set')
-        // T-6222: an anonymous "worked" report no longer stamps the code on its
-        // own; it takes COUPON_WORKED_QUORUM_LOW_TRUST_REPORTERS (3) DISTINCT
-        // reporters. Reporters are told apart by the Cloudflare edge address, so
-        // each report carries its own.
-        const reportFrom = (edgeIp: string) =>
-            request.post(`/api/coupons/${SEED_COUPON_ID}/report`, {
-                data: { outcome: 'worked' },
-                headers: {
-                    Origin: new URL(baseURL).origin,
-                    'cf-connecting-ip': edgeIp,
-                },
-            })
-        for (const edgeIp of ['203.0.113.11', '203.0.113.12']) {
-            const report = await reportFrom(edgeIp)
-            expect(report.status(), await report.text()).toBe(200)
-        }
-        // Two anonymous reporters are not enough: the stamp has not moved.
         const { PrismaClient } = await import('@prisma/client')
         const prisma = new PrismaClient()
         try {
-            const row = await prisma.couponSignal.findUnique({
+            // T-6222: anonymous "worked" reports are accepted (a 200, so a
+            // forger learns nothing) but NEVER stamp lastWorkedAt, however
+            // many distinct addresses send them.
+            for (const edgeIp of [
+                '203.0.113.11',
+                '203.0.113.12',
+                '203.0.113.13',
+            ]) {
+                const report = await request.post(
+                    `/api/coupons/${SEED_COUPON_ID}/report`,
+                    {
+                        data: { outcome: 'worked' },
+                        headers: {
+                            Origin: new URL(baseURL).origin,
+                            'cf-connecting-ip': edgeIp,
+                        },
+                    },
+                )
+                expect(report.status(), await report.text()).toBe(200)
+            }
+            const afterAnonymous = await prisma.couponSignal.findUnique({
                 where: { couponId: SEED_COUPON_ID },
             })
-            expect(row?.lastWorkedAt ?? null).toEqual(
+            expect(afterAnonymous?.lastWorkedAt ?? null).toEqual(
                 signalBefore?.lastWorkedAt ?? null,
             )
+
+            // The stamp a trusted reporter leaves behind.
+            const stampedAt = new Date()
+            await prisma.couponSignal.upsert({
+                where: { couponId: SEED_COUPON_ID },
+                create: {
+                    couponId: SEED_COUPON_ID,
+                    lastWorkedAt: stampedAt,
+                    workCount: 1,
+                },
+                update: { lastWorkedAt: stampedAt },
+            })
         } finally {
             await prisma.$disconnect()
         }
-        const third = await reportFrom('203.0.113.13')
-        expect(third.status(), await third.text()).toBe(200)
 
         const html = await (await request.get('/')).text()
         expect(html).toContain('id="just-worked"')

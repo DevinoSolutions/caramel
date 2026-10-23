@@ -34,7 +34,13 @@ import {
 const KNOWN_ID = '700071001'
 const OTHER_ID = '700071002'
 const ABSENT_ID = '700071404' // deliberately never inserted — the FK case
-const ALL_COUPON_IDS = [KNOWN_ID, OTHER_ID, ABSENT_ID]
+// Filler coupons the daily-stamp-cap test attributes worked reports to (the
+// coupon_reports FK needs real catalog rows).
+const WORKED_CAP = 30 // COUPON_WORKED_STAMPS_PER_USER_PER_DAY default
+const FILLER_IDS = Array.from({ length: WORKED_CAP }, (_, n) =>
+    String(700071100 + n),
+)
+const ALL_COUPON_IDS = [KNOWN_ID, OTHER_ID, ABSENT_ID, ...FILLER_IDS]
 const ITEST_SITE = 'reports-itest.example'
 const USER_EMAIL = 'reports-itest@example.com'
 const USER2_EMAIL = 'reports-itest-2@example.com'
@@ -425,7 +431,7 @@ describe('POST /api/coupons/[id]/report — attribution against real pg :58005',
         ])
     })
 
-    it('anonymous successes do NOT stamp lastWorkedAt until the third DISTINCT shopper (the quorum); repeats are deduped and workCount counts once per shopper (real pg)', async () => {
+    it('anonymous successes NEVER stamp lastWorkedAt, however many distinct shoppers; repeats are deduped and workCount counts once per shopper (real pg)', async () => {
         getSessionMock.mockImplementation(async () => null)
 
         await POST(reportRequest(KNOWN_ID, { outcome: 'worked' }))
@@ -445,24 +451,84 @@ describe('POST /api/coupons/[id]/report — attribution against real pg :58005',
             expect(await use.json()).toEqual({ ok: true, deduped: true })
         }
 
-        await POST(
-            reportRequest(KNOWN_ID, { outcome: 'worked' }, '203.0.113.2'),
-        )
-        await incrementPOST(incrementRequest(KNOWN_ID, '203.0.113.2'))
-        const second = await prisma.couponSignal.findUniqueOrThrow({
+        for (const n of [2, 3, 4]) {
+            await POST(
+                reportRequest(
+                    KNOWN_ID,
+                    { outcome: 'worked' },
+                    `203.0.113.${n}`,
+                ),
+            )
+            await incrementPOST(incrementRequest(KNOWN_ID, `203.0.113.${n}`))
+        }
+        const after = await prisma.couponSignal.findUniqueOrThrow({
             where: { couponId: KNOWN_ID },
         })
-        expect(second.lastWorkedAt).toBeNull()
-        expect(second.workCount).toBe(2)
+        expect(after.lastWorkedAt).toBeNull()
+        expect(after.workCount).toBe(4)
+        // Nothing is remembered about the anonymous reporters.
+        expect(
+            await prisma.couponSignalReporter.count({
+                where: { couponId: KNOWN_ID },
+            }),
+        ).toBe(0)
+    })
 
-        // The third distinct shopper completes the quorum.
-        await POST(
-            reportRequest(KNOWN_ID, { outcome: 'worked' }, '203.0.113.3'),
-        )
-        const third = await prisma.couponSignal.findUniqueOrThrow({
-            where: { couponId: KNOWN_ID },
+    it('DAILY CAP on {worked}: an established account at its cap is accepted but no longer stamps; a failed report earlier the same day does not hide a stamp from the cap (real pg)', async () => {
+        await prisma.coupon.createMany({
+            data: FILLER_IDS.map(id => ({
+                id,
+                code: `REPORT-ITEST-${id}`,
+                site: ITEST_SITE,
+                title: 'reports itest filler',
+                description: 'synthetic row for the stamp-cap itest',
+                status: 'pending',
+            })),
         })
-        expect(third.lastWorkedAt).toBeInstanceOf(Date)
+        await prisma.couponReport.createMany({
+            data: FILLER_IDS.slice(0, WORKED_CAP - 1).map(couponId => ({
+                couponId,
+                userId,
+                outcome: 'worked',
+                createdAt: new Date(Date.now() - 60_000),
+            })),
+        })
+
+        // One slot left: a failed report first, then the worked one stamps AND
+        // is attributed (the failed row must not suppress the worked row).
+        await POST(reportRequest(KNOWN_ID, { outcome: 'failed' }))
+        const last = await POST(reportRequest(KNOWN_ID, { outcome: 'worked' }))
+        expect(await last.json()).toEqual({ ok: true })
+        expect(
+            (
+                await prisma.couponSignal.findUniqueOrThrow({
+                    where: { couponId: KNOWN_ID },
+                })
+            ).lastWorkedAt,
+        ).toBeInstanceOf(Date)
+        expect(
+            (
+                await prisma.couponReport.findMany({
+                    where: { couponId: KNOWN_ID, userId },
+                    orderBy: { outcome: 'asc' },
+                })
+            ).map(row => row.outcome),
+        ).toEqual(['failed', 'worked'])
+
+        // At the cap now: the next coupon's report is accepted, stamps nothing.
+        const over = await POST(
+            reportRequest(OTHER_ID, { outcome: 'worked' }, '203.0.113.7'),
+        )
+        expect(over.status).toBe(404) // OTHER_ID is not inserted in this test
+        await insertCoupon(OTHER_ID)
+        const accepted = await POST(
+            reportRequest(OTHER_ID, { outcome: 'worked' }, '203.0.113.8'),
+        )
+        expect(await accepted.json()).toEqual({ ok: true })
+        const signal = await prisma.couponSignal.findUnique({
+            where: { couponId: OTHER_ID },
+        })
+        expect(signal?.lastWorkedAt ?? null).toBeNull()
     })
 
     it('a worked report from an ESTABLISHED signed-in account stamps lastWorkedAt on its own (real pg)', async () => {

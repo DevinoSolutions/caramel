@@ -960,8 +960,8 @@ async function writeCouponSignal(
  * write, or null when `couponId` is not a catalog row (nothing was written).
  *
  * `stamp: false` is the existence gate WITHOUT the stamp: a LOW-TRUST reporter's
- * "worked" must not move `last_worked_at` (Verified, "Codes that just worked")
- * until enough distinct reporters agree (couponSignals.ts recordWorked). The
+ * "worked" must never move `last_worked_at` (Verified, "Codes that just
+ * worked"; couponSignals.ts recordWorked decides who is low-trust). The
  * statement still returns the catalog check and the row's fail_weight; a new
  * signal row is created with a NULL last_worked_at and an existing one is left
  * exactly as it was.

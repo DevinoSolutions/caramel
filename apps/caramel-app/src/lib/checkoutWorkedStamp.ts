@@ -16,17 +16,26 @@
 //      or their own earlier submission: SubmitShopperCouponResult
 //      .submittedByUser) or has an ESTABLISHED account (accountReputation.ts).
 //      Otherwise nothing is stamped ('gated'): the code is still listed.
-//   2. DEDUPE. One stamp per account per coupon per 24h: the in-memory slot
-//      (couponReportDedupe.ts, the same 'worked' slot the report route uses) is
-//      the fast path, and the PERSISTED coupon_reports row is the truth, so a
-//      restart or a second instance cannot re-stamp. A repeat is 'deduped': the
-//      earlier stamp still stands, so the response is the same success.
+//   2. DEDUPE. One stamp per account per coupon per 24h, from the PERSISTED
+//      coupon_reports row, so a restart or a second instance cannot re-stamp. A
+//      row only counts if the stamp really happened: POST /api/coupons/<id>/report
+//      also writes a 'worked' attribution row for a LOW-TRUST account whose
+//      report moved nothing, so a row counts only when the coupon's
+//      last_worked_at is at or after it (within STAMP_CLOCK_TOLERANCE_MS, because
+//      the row's created_at is stamped by the app and last_worked_at by the
+//      database). A repeat of a real stamp is 'deduped': the earlier stamp
+//      still stands, so the response is the same success. An UNSTAMPED row is
+//      stamped now and reused as the attribution row. The in-memory 'worked'
+//      slot is NOT consulted here, because the report route takes it for
+//      unstamped reports too.
 //   3. A PER-ACCOUNT DAILY CAP, COUPON_WORKED_STAMPS_PER_USER_PER_DAY, counted
 //      from the account's persisted coupon_reports 'worked' rows in the last
 //      24h (index coupon_reports_user_id_outcome_created_at_idx), so it
 //      survives a restart and counts stamps on already-listed codes as well as
 //      new ones (the submission cap only counts new rows). Over it: 'capped',
-//      and a Sentry warning (at most hourly per process).
+//      and a Sentry warning (at most hourly per process). The report route
+//      applies the same count (workedStampCapSpent) to an established
+//      account's {worked} report, which past the cap counts as low-trust.
 //   4. THE PER-COUPON VELOCITY CAP (couponReportVelocity.ts), shared with the
 //      report route's 'worked' reports.
 //
@@ -34,13 +43,9 @@
 // per-shopper advisory lock (couponsRepo.lockShopperUser, the one
 // submitShopperCoupon holds), so two concurrent requests of one account cannot
 // both read the same count and both pass. The stamp and its coupon_reports
-// attribution row commit together or not at all. NOTE the count includes the
+// attribution row commit together or not at all. The count includes the
 // 'worked' attribution rows the report route writes for signed-in users too: the
-// cap is on how many codes an account vouched for in total, by either path. It
-// does not LIMIT the report route (TODO: if the report route's worked reports
-// from one account ever need a daily cap, apply the same count there; today they
-// are bounded by the mutation rate limit, the per-coupon dedupe, the account's
-// reputation and the per-coupon velocity cap).
+// cap is on how many codes an account vouched for in total, by either path.
 //
 // TODO: KNOWN LIMITATION, accepted by design (T-6222 review): a YOUNG account
 // may still stamp "worked" on a code it listed ITSELF, so one new account can
@@ -50,11 +55,7 @@
 // needs a second shopper to confirm (a worked quorum for shopper-listed codes)
 // or an age gate on stamping one's own codes.
 import { isEstablishedAccount } from '@/lib/accountReputation'
-import {
-    admitReport,
-    releaseReport,
-    type ReportReporter,
-} from '@/lib/couponReportDedupe'
+import type { ReportReporter } from '@/lib/couponReportDedupe'
 import {
     admitCouponReportVelocity,
     releaseCouponReportVelocity,
@@ -64,10 +65,20 @@ import { recordWorked } from '@/lib/couponSignals'
 import { lockShopperUser } from '@/lib/couponsRepo'
 import { env } from '@/lib/env'
 import prisma from '@/lib/prisma'
+import type { Prisma } from '@prisma/client'
 import * as Sentry from '@sentry/nextjs'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const CAP_REPORT_INTERVAL_MS = 60 * 60 * 1000
+/**
+ * How far BEFORE an attribution row's created_at a coupon's last_worked_at may
+ * be and still count as that row's stamp. The row's created_at comes from the
+ * app clock, last_worked_at from the database's (and NOW() is the transaction's
+ * start), so a genuine stamp can read slightly earlier than its own row. An
+ * unstamped row followed within this window by somebody else's stamp is read as
+ * stamped, which is harmless: the code is Verified either way.
+ */
+const STAMP_CLOCK_TOLERANCE_MS = 60 * 1000
 let nextCapReportAt = 0
 
 /**
@@ -105,6 +116,31 @@ function reportDailyCapHit(cap: number, now: number): void {
     )
 }
 
+/**
+ * True when this account has already made COUPON_WORKED_STAMPS_PER_USER_PER_DAY
+ * 'worked' attributions in the last 24h (persisted coupon_reports rows, so a
+ * restart does not reset it), by the checkout capture or the report route. Call
+ * it inside a transaction that holds couponsRepo.lockShopperUser, or two
+ * concurrent requests can both read the same count. Raises the throttled Sentry
+ * warning when the cap is spent.
+ */
+export async function workedStampCapSpent(
+    tx: Pick<Prisma.TransactionClient, 'couponReport'>,
+    userId: string,
+): Promise<boolean> {
+    const cap = env.COUPON_WORKED_STAMPS_PER_USER_PER_DAY
+    const stampedToday = await tx.couponReport.count({
+        where: {
+            userId,
+            outcome: 'worked',
+            createdAt: { gt: new Date(Date.now() - DAY_MS) },
+        },
+    })
+    if (stampedToday < cap) return false
+    reportDailyCapHit(cap, Date.now())
+    return true
+}
+
 export async function stampCheckoutWorked(
     args: CheckoutStampArgs,
 ): Promise<CheckoutStampOutcome> {
@@ -113,36 +149,39 @@ export async function stampCheckoutWorked(
     if (!args.submittedByUser && !established) return 'gated'
 
     const reporter: ReportReporter = { kind: 'user', userId, established }
-    if (!admitReport('worked', reporter, couponId)) return 'deduped'
-
     const tier = velocityTierOf(reporter)
-    const cap = env.COUPON_WORKED_STAMPS_PER_USER_PER_DAY
     let velocityTaken = false
-    let dailyCapHit = false
     try {
-        const outcome = await prisma.$transaction(async tx => {
+        return await prisma.$transaction(async tx => {
             await lockShopperUser(tx, userId)
-            const since = new Date(Date.now() - DAY_MS)
 
-            // The persisted truth behind the in-memory slot.
-            const alreadyStamped = await tx.couponReport.findFirst({
+            // The persisted truth: this account's latest 'worked' attribution
+            // for this coupon in the last 24h, and whether it really stamped.
+            const prior = await tx.couponReport.findFirst({
                 where: {
                     couponId,
                     userId,
                     outcome: 'worked',
-                    createdAt: { gt: since },
+                    createdAt: { gt: new Date(Date.now() - DAY_MS) },
                 },
-                select: { id: true },
+                orderBy: { createdAt: 'desc' },
+                select: { createdAt: true },
             })
-            if (alreadyStamped) return 'deduped' as const
-
-            const stampedToday = await tx.couponReport.count({
-                where: { userId, outcome: 'worked', createdAt: { gt: since } },
-            })
-            if (stampedToday >= cap) {
-                dailyCapHit = true
-                return 'capped' as const
+            if (prior) {
+                const signal = await tx.couponSignal.findUnique({
+                    where: { couponId },
+                    select: { lastWorkedAt: true },
+                })
+                if (
+                    signal?.lastWorkedAt &&
+                    signal.lastWorkedAt.getTime() >=
+                        prior.createdAt.getTime() - STAMP_CLOCK_TOLERANCE_MS
+                ) {
+                    return 'deduped' as const
+                }
             }
+
+            if (await workedStampCapSpent(tx, userId)) return 'capped' as const
 
             if (!admitCouponReportVelocity('worked', couponId, tier)) {
                 return 'capped' as const
@@ -166,24 +205,19 @@ export async function stampCheckoutWorked(
                     `checkoutWorkedStamp: recordWorked found no catalog row for coupon ${couponId}`,
                 )
             }
-            await tx.couponReport.create({
-                data: { couponId, userId, outcome: 'worked' },
-            })
+            // An unstamped row of the same day (a low-trust /report) is reused
+            // as the attribution row rather than doubling the daily count.
+            if (!prior) {
+                await tx.couponReport.create({
+                    data: { couponId, userId, outcome: 'worked' },
+                })
+            }
             return 'stamped' as const
         })
-
-        if (outcome === 'capped') {
-            // Nothing landed: give the dedupe slot back so the stamp can count
-            // once the cap clears.
-            releaseReport('worked', reporter, couponId)
-            if (dailyCapHit) reportDailyCapHit(cap, Date.now())
-        }
-        return outcome
     } catch (error) {
-        // Nothing landed (the transaction rolled back): free both slots so the
-        // extension's retry counts.
+        // Nothing landed (the transaction rolled back): free the velocity slot
+        // so the extension's retry counts.
         if (velocityTaken) releaseCouponReportVelocity('worked', couponId, tier)
-        releaseReport('worked', reporter, couponId)
         throw error
     }
 }

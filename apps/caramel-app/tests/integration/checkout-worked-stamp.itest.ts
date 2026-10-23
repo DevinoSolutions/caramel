@@ -168,7 +168,48 @@ describe('stampCheckoutWorked (real pg)', () => {
         expect(await reportRows(TARGET)).toHaveLength(2)
     })
 
-    it('DAILY CAP: an account at the cap stamps nothing more; the refusal writes nothing and gives its dedupe slot back', async () => {
+    // N3: POST /api/coupons/<id>/report keeps a 'worked' attribution row even
+    // when the report moved nothing (a low-trust or over-cap account). Only a
+    // row whose stamp really happened may dedupe the capture.
+    it('an attribution row with NO stamp behind it does not dedupe: the capture stamps and reuses the row', async () => {
+        await prisma.couponReport.create({
+            data: {
+                couponId: TARGET,
+                userId,
+                outcome: 'worked',
+                createdAt: new Date(Date.now() - 60 * 60 * 1000),
+            },
+        })
+
+        expect(await stamp(TARGET)).toBe('stamped')
+
+        expect(await lastWorkedAt(TARGET)).toBeInstanceOf(Date)
+        expect(await reportRows(TARGET)).toHaveLength(1)
+    })
+
+    it("an attribution row whose coupon carries only SOMEBODY ELSE's older stamp does not dedupe either", async () => {
+        const hoursAgo = (hours: number) =>
+            new Date(Date.now() - hours * 60 * 60 * 1000)
+        await prisma.couponReport.create({
+            data: {
+                couponId: TARGET,
+                userId,
+                outcome: 'worked',
+                createdAt: hoursAgo(1),
+            },
+        })
+        await prisma.couponSignal.create({
+            data: { couponId: TARGET, lastWorkedAt: hoursAgo(5), workCount: 1 },
+        })
+
+        expect(await stamp(TARGET)).toBe('stamped')
+
+        const stamped = await lastWorkedAt(TARGET)
+        expect(stamped?.getTime()).toBeGreaterThan(hoursAgo(1).getTime())
+        expect(await reportRows(TARGET)).toHaveLength(1)
+    })
+
+    it('DAILY CAP: an account at the cap stamps nothing more; the refusal writes nothing and moves nothing', async () => {
         await seedStamps(userId, DAILY_CAP)
 
         expect(await stamp(TARGET)).toBe('capped')
@@ -177,7 +218,7 @@ describe('stampCheckoutWorked (real pg)', () => {
         expect(await reportRows(TARGET)).toHaveLength(0)
 
         // Once the day's stamps age out, the same account can stamp this code
-        // (the in-memory slot was released, not left behind).
+        // (the refusal left no dedupe state behind).
         await prisma.couponReport.updateMany({
             where: { userId },
             data: { createdAt: new Date(Date.now() - 2 * DAY) },
@@ -202,7 +243,6 @@ describe('stampCheckoutWorked (real pg)', () => {
                 createdAt: new Date(Date.now() - 2 * DAY),
             })),
         })
-        resetReportDedupeForTests()
         expect(await stamp(OTHER)).toBe('stamped')
     })
 

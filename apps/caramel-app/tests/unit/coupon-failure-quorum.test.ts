@@ -113,23 +113,6 @@ function makeFakeDb() {
                             r.lastAt > args.where.lastAt.gt,
                     ),
             ),
-            count: vi.fn(
-                async (args: {
-                    where: {
-                        couponId: string
-                        outcome: string
-                        weight: { lt: number }
-                        lastAt: { gt: Date }
-                    }
-                }) =>
-                    Array.from(reporters.values()).filter(
-                        r =>
-                            r.couponId === args.where.couponId &&
-                            r.outcome === args.where.outcome &&
-                            r.weight < args.where.weight.lt &&
-                            r.lastAt > args.where.lastAt.gt,
-                    ).length,
-            ),
             aggregate: vi.fn(
                 async (args: {
                     where: {
@@ -437,45 +420,13 @@ describe('failure quorum: forged anonymous reports cannot sink a code', () => {
         expect(stored().lastWorkedAt).toBeInstanceOf(Date)
     })
 
-    describe('a low-trust "worked" moves last_worked_at only with a quorum (T-6222 by another door)', () => {
-        const quorum = 3 // COUPON_WORKED_QUORUM_LOW_TRUST_REPORTERS default
-
-        it('one, or two, anonymous / young-account "worked" reports leave last_worked_at untouched', async () => {
-            await succeed(anon(1))
-            await succeed(youngAccount('fresh-1'))
+    describe('a low-trust "worked" NEVER moves last_worked_at (T-6222 by another door)', () => {
+        it('no number of anonymous / young-account "worked" reports stamps, and none is stored', async () => {
+            for (let n = 1; n <= 30; n++) await succeed(anon(n))
+            for (let n = 1; n <= 30; n++)
+                await succeed(youngAccount(`fresh-${n}`))
             expect(stored().lastWorkedAt).toBeNull()
-            // They are remembered as reporters (hashed), which is the quorum's state.
-            expect(db.reporters.size).toBe(2)
-        })
-
-        it('the third DISTINCT low-trust reporter inside 24h stamps it', async () => {
-            await succeed(anon(1))
-            await succeed(anon(2))
-            expect(stored().lastWorkedAt).toBeNull()
-            await succeed(youngAccount('fresh-1'))
-            expect(stored().lastWorkedAt).toBeInstanceOf(Date)
-        })
-
-        it('the same reporter repeating itself is still one reporter', async () => {
-            for (let n = 0; n < quorum + 2; n++) await succeed(anon(1))
-            expect(stored().lastWorkedAt).toBeNull()
-            expect(db.reporters.size).toBe(1)
-        })
-
-        it('reporters older than the Verified window no longer count toward the quorum', async () => {
-            await succeed(anon(1))
-            await succeed(anon(2))
-            vi.setSystemTime(Date.now() + 25 * 60 * 60 * 1000)
-            await succeed(anon(3))
-            expect(stored().lastWorkedAt).toBeNull()
-        })
-
-        it('the quorum is persisted, not in memory: it survives a restart (a fresh in-memory dedupe)', async () => {
-            await succeed(anon(1))
-            await succeed(anon(2))
-            resetReportDedupeForTests()
-            await succeed(anon(3))
-            expect(stored().lastWorkedAt).toBeInstanceOf(Date)
+            expect(db.reporters.size).toBe(0)
         })
 
         it('an established account stamps alone; so does a vouched caller (forceStamp, the checkout capture)', async () => {
@@ -487,11 +438,16 @@ describe('failure quorum: forged anonymous reports cannot sink a code', () => {
                 COUPON,
                 youngAccount('fresh-9'),
                 db.tx as never,
-                {
-                    forceStamp: true,
-                },
+                { forceStamp: true },
             )
             expect(stored().lastWorkedAt).toBeInstanceOf(Date)
+        })
+
+        it('an established account over its daily cap (demote) counts as low-trust: no stamp', async () => {
+            await recordWorked(COUPON, account('user-9'), db.tx as never, {
+                demote: true,
+            })
+            expect(stored().lastWorkedAt).toBeNull()
         })
 
         it('an unknown coupon writes nothing, no reporter row included, and resolves false', async () => {

@@ -1,5 +1,8 @@
 import { POST } from '@/app/api/coupons/submit/route'
-import { resetReportDedupeForTests } from '@/lib/couponReportDedupe'
+import {
+    admitReport,
+    resetReportDedupeForTests,
+} from '@/lib/couponReportDedupe'
 import {
     admitCouponReportVelocity,
     resetReportVelocityForTests,
@@ -39,8 +42,12 @@ const {
     reportRows,
     sentryMessageMock,
     executeRawMock,
+    stampedAt,
 } = vi.hoisted(() => ({
     executeRawMock: vi.fn(async () => 0),
+    // ANNOUNCED FAKE of coupon_signals.last_worked_at, per coupon id: set by the
+    // recordWorked double (a real stamp), read by the dedupe (N3).
+    stampedAt: new Map<string, Date>(),
     // The coupon_reports rows the stamp policy counts and writes (fake table).
     reportRows: [] as {
         couponId: string
@@ -131,13 +138,17 @@ vi.mock('@/lib/prisma', () => {
                     createdAt: { gt: Date }
                 }
             }) =>
-                reportRows.find(
-                    row =>
-                        row.couponId === args.where.couponId &&
-                        row.userId === args.where.userId &&
-                        row.outcome === args.where.outcome &&
-                        row.createdAt > args.where.createdAt.gt,
-                ) ?? null,
+                reportRows
+                    .filter(
+                        row =>
+                            row.couponId === args.where.couponId &&
+                            row.userId === args.where.userId &&
+                            row.outcome === args.where.outcome &&
+                            row.createdAt > args.where.createdAt.gt,
+                    )
+                    .sort(
+                        (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
+                    )[0] ?? null,
         ),
         create: vi.fn(
             async (args: {
@@ -149,8 +160,15 @@ vi.mock('@/lib/prisma', () => {
             },
         ),
     }
+    const couponSignal = {
+        findUnique: vi.fn(async (args: { where: { couponId: string } }) => {
+            const at = stampedAt.get(args.where.couponId)
+            return at ? { lastWorkedAt: at } : null
+        }),
+    }
     const client = {
         couponReport,
+        couponSignal,
         // lockShopperUser's pg_advisory_xact_lock statement.
         $executeRaw: executeRawMock,
         $transaction: async (fn: (tx: unknown) => Promise<unknown>) =>
@@ -217,8 +235,13 @@ beforeEach(() => {
     executeRawMock.mockClear()
     resetReportDedupeForTests()
     resetReportVelocityForTests()
+    stampedAt.clear()
     recordWorkedMock.mockReset()
-    recordWorkedMock.mockImplementation(async () => true)
+    // A real stamp: last_worked_at moves to now.
+    recordWorkedMock.mockImplementation(async (couponId: string) => {
+        stampedAt.set(couponId, new Date())
+        return true
+    })
     checkRateLimitMock.mockReset()
     checkRateLimitMock.mockImplementation(async () => null)
     captureMock.mockReset()
@@ -1507,6 +1530,85 @@ describe('POST /api/coupons/submit — checkout worked-stamp policy (T-6222)', (
         await POST(submitRequest(checkout))
 
         expect(lockCallCount()).toBe(0)
+    })
+
+    // N3: POST /api/coupons/<id>/report also writes a 'worked' attribution row
+    // for a LOW-TRUST account whose report moved nothing. That row must not make a
+    // later checkout capture look already stamped.
+    describe('the persisted dedupe only counts a stamp that really happened (N3)', () => {
+        const priorRow = (ageMs: number) =>
+            reportRows.push({
+                couponId: '42',
+                userId: 'user-1',
+                outcome: 'worked',
+                createdAt: new Date(Date.now() - ageMs),
+            })
+
+        it('an UNSTAMPED attribution row (no last_worked_at) does not dedupe: the capture stamps, reuses that row, and answers worked', async () => {
+            signedInAs('user-1')
+            submitShopperCouponMock.mockImplementation(async () => SUPPLIER_ROW)
+            priorRow(60 * 60 * 1000)
+
+            const res = await POST(submitRequest(checkout))
+
+            expect(await res.json()).toMatchObject({ status: 'worked' })
+            expect(recordWorkedMock).toHaveBeenCalledTimes(1)
+            expect(stampedAt.has('42')).toBe(true)
+            // Reused, not doubled: the daily count sees one row for this coupon.
+            expect(reportRows).toHaveLength(1)
+        })
+
+        it("a stamp that PREDATES the row by more than the clock tolerance is somebody else's: still not a dedupe", async () => {
+            signedInAs('user-1')
+            submitShopperCouponMock.mockImplementation(async () => SUPPLIER_ROW)
+            priorRow(60 * 60 * 1000)
+            stampedAt.set('42', new Date(Date.now() - 3 * 60 * 60 * 1000))
+
+            await POST(submitRequest(checkout))
+
+            expect(recordWorkedMock).toHaveBeenCalledTimes(1)
+        })
+
+        it('a row whose stamp is at or after it (or inside the clock tolerance before it) IS a dedupe: no second stamp, status worked', async () => {
+            signedInAs('user-1')
+            submitShopperCouponMock.mockImplementation(async () => SUPPLIER_ROW)
+            priorRow(60 * 60 * 1000)
+            // The app writes the row a moment after the database stamps.
+            stampedAt.set('42', new Date(Date.now() - 60 * 60 * 1000 - 20_000))
+
+            const res = await POST(submitRequest(checkout))
+
+            expect(await res.json()).toMatchObject({ status: 'worked' })
+            expect(recordWorkedMock).not.toHaveBeenCalled()
+            expect(reportRows).toHaveLength(1)
+        })
+
+        it('a row older than 24h never dedupes, stamped or not', async () => {
+            signedInAs('user-1')
+            submitShopperCouponMock.mockImplementation(async () => SUPPLIER_ROW)
+            priorRow(25 * 60 * 60 * 1000)
+            stampedAt.set('42', new Date(Date.now() - 25 * 60 * 60 * 1000))
+
+            await POST(submitRequest(checkout))
+
+            expect(recordWorkedMock).toHaveBeenCalledTimes(1)
+            expect(reportRows).toHaveLength(2)
+        })
+
+        it('the in-memory "worked" slot the report route takes for an unstamped report does NOT dedupe the capture', async () => {
+            signedInAs('user-1')
+            submitShopperCouponMock.mockImplementation(async () => SUPPLIER_ROW)
+            admitReport(
+                'worked',
+                { kind: 'user', userId: 'user-1', established: false },
+                '42',
+            )
+
+            const res = await POST(submitRequest(checkout))
+
+            expect(await res.json()).toMatchObject({ status: 'worked' })
+            expect(recordWorkedMock).toHaveBeenCalledTimes(1)
+        })
     })
 
     it('a MANUAL add never reaches the stamp policy', async () => {
