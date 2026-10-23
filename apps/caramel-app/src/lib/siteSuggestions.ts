@@ -115,7 +115,11 @@ export function normalizeSuggestedDomain(rawUrl: string): string | null {
     try {
         hostname = new URL(
             /^https?:\/\//i.test(input) ? input : `https://${input}`,
-        ).hostname.toLowerCase()
+        ).hostname
+            .toLowerCase()
+            // `store.com.` is the same host as `store.com`; kept, it would
+            // dodge the per-(domain, requester) dedupe (T-6224).
+            .replace(/.$/, '')
     } catch {
         return null
     }

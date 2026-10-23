@@ -1,4 +1,5 @@
 import { POST } from '@/app/api/sites/suggest/route'
+import { resetAnonymousWriteQuotas } from '@/lib/anonymousWriteQuota'
 import {
     SUGGESTION_OPS_MAILS_PER_DAY_BUDGET,
     SUGGESTION_ROWS_PER_DAY_CAP,
@@ -143,6 +144,7 @@ function sentEmailText(): string {
 
 beforeEach(() => {
     suggestionRows.length = 0
+    resetAnonymousWriteQuotas()
     intakeState.otherRecentRows = 0
     captureMessageMock.mockClear()
     prismaMock.siteSuggestion.create.mockClear()
@@ -340,7 +342,7 @@ describe('POST /api/sites/suggest — anonymous-intake hardening (T-6224)', () =
         expect(sentEmailText().split('\n')).toHaveLength(5)
     })
 
-    it('the same anonymous visitor asking for the same store twice → ONE row and ONE mail; the repeat is answered ok with duplicate:true', async () => {
+    it('the same anonymous visitor asking for the same store twice → ONE row and ONE mail; the repeat is answered ok without an id or flag', async () => {
         const first = await POST(suggestRequest({ url: 'example-store.com' }))
         const again = await POST(
             suggestRequest({ url: 'https://www.example-store.com/other' }),
@@ -351,14 +353,51 @@ describe('POST /api/sites/suggest — anonymous-intake hardening (T-6224)', () =
             notified: true,
         })
         expect(again.status).toBe(200)
-        expect(await again.json()).toEqual({
-            ok: true,
-            id: 'suggestion-1',
-            notified: false,
-            duplicate: true,
-        })
+        // No row id and no duplicate flag: the body must not confirm to a
+        // stranger that a given email already asked for a given store.
+        expect(await again.json()).toEqual({ ok: true, notified: false })
         expect(suggestionRows).toHaveLength(1)
         expect(sendEmailMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('a trailing-dot host is the same store: `store.com.` dedupes against `store.com` and is recorded without the dot', async () => {
+        await POST(suggestRequest({ url: 'https://example-store.com' }))
+        const again = await POST(
+            suggestRequest({ url: 'https://example-store.com./x' }),
+        )
+        expect(await again.json()).toEqual({ ok: true, notified: false })
+        expect(suggestionRows).toHaveLength(1)
+        expect(suggestionRows[0]!.domain).toBe('example-store.com')
+    })
+
+    it('per-address hourly quota: the 11th suggestion from one address is a 429 with Retry-After and writes nothing, while a different address is unaffected', async () => {
+        for (let i = 1; i <= 10; i += 1) {
+            const res = await POST(
+                suggestRequest(
+                    { url: `store-${i}.com` },
+                    { 'cf-connecting-ip': '203.0.113.7' },
+                ),
+            )
+            expect(res.status).toBe(200)
+        }
+        const blocked = await POST(
+            suggestRequest(
+                { url: 'store-11.com' },
+                { 'cf-connecting-ip': '203.0.113.7' },
+            ),
+        )
+        expect(blocked.status).toBe(429)
+        expect(Number(blocked.headers.get('retry-after'))).toBeGreaterThan(0)
+        expect(suggestionRows).toHaveLength(10)
+
+        const other = await POST(
+            suggestRequest(
+                { url: 'store-11.com' },
+                { 'cf-connecting-ip': '203.0.113.8' },
+            ),
+        )
+        expect(other.status).toBe(200)
+        expect(suggestionRows).toHaveLength(11)
     })
 
     it('the same email asking again is a duplicate regardless of case; a DIFFERENT email for the same store is a new suggestion (it wants its own notice)', async () => {
@@ -374,14 +413,14 @@ describe('POST /api/sites/suggest — anonymous-intake hardening (T-6224)', () =
                 email: 'shopper@example.com',
             }),
         )
-        expect((await repeat.json()).duplicate).toBe(true)
+        expect(await repeat.json()).toEqual({ ok: true, notified: false })
         const other = await POST(
             suggestRequest({
                 url: 'example-store.com',
                 email: 'someone-else@example.com',
             }),
         )
-        expect((await other.json()).duplicate).toBeUndefined()
+        expect((await other.json()).id).toBe('suggestion-2')
         expect(suggestionRows).toHaveLength(2)
     })
 

@@ -1,4 +1,5 @@
 import { withRoute } from '@/lib/api/withRoute'
+import { consumeAnonymousWriteQuota } from '@/lib/anonymousWriteQuota'
 import { sendEmail } from '@/lib/email'
 import {
     assessSuggestionIntake,
@@ -83,24 +84,35 @@ export const POST = withRoute(
             )
         }
 
+        // T-6224: one address cannot spend the shared daily budgets below.
+        const quota = await consumeAnonymousWriteQuota(req, 'sites/suggest')
+        if (!quota.allowed) {
+            return NextResponse.json(
+                {
+                    error: 'You have sent a lot of store requests. Please try again later.',
+                },
+                {
+                    status: 429,
+                    headers: { 'Retry-After': String(quota.retryAfterSec) },
+                },
+            )
+        }
+
         const userId = session?.user?.id ?? null
         const requesterEmail = session?.user?.email ?? body.email ?? null
 
         // T-6224: anonymous-intake bounds (siteSuggestionIntake.ts). The same
         // requester asking for the same store inside a day is ONE suggestion:
-        // answered like a fresh one, but no new row and no new mail.
+        // answered ok, but no new row and no new mail. The body carries no id
+        // and no flag, so it does not confirm to a stranger that a given email
+        // asked for a given store.
         const intake = await assessSuggestionIntake({
             domain,
             userId,
             requesterEmail,
         })
         if (intake.kind === 'duplicate') {
-            return NextResponse.json({
-                ok: true,
-                id: intake.id,
-                notified: false,
-                duplicate: true,
-            })
+            return NextResponse.json({ ok: true, notified: false })
         }
         if (intake.kind === 'over_daily_cap') {
             return NextResponse.json(

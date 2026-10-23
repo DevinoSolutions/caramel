@@ -1,9 +1,12 @@
 import { cachedActiveSources } from '@/lib/anonymousReadCaches'
+import { consumeAnonymousWriteQuota } from '@/lib/anonymousWriteQuota'
 import { handleRouteError } from '@/lib/api/handleRouteError'
 import { withRoute } from '@/lib/api/withRoute'
 import { nextApiResponse } from '@/lib/apiResponseNext'
 import { requestSource } from '@/lib/couponsRepo'
+import { normalizeSuggestedDomain } from '@/lib/siteSuggestions'
 import { toSourceMetrics } from '@/lib/sourceMetrics'
+import * as Sentry from '@sentry/nextjs'
 import { z } from 'zod'
 
 // Strict on presence only (missing/empty `website` -> 422 — the flagged
@@ -21,6 +24,9 @@ const SourceCreateBodySchema = z.object({
     website: z.string().trim().min(1).max(2048),
 })
 
+// The page's toast reads `error`, so both go in the body.
+const QUOTA_MESSAGE =
+    'You have requested a lot of stores. Please try again later.'
 const QUEUE_FULL_MESSAGE =
     'Too many store requests are waiting. Please try again later.'
 
@@ -58,36 +64,47 @@ export const POST = withRoute(
     },
     async ({ req, body }) => {
         try {
-            const website = body.website
-            // Validate it's a plausible domain/URL and bound the length, so this
-            // public "request a store" endpoint can't be used to bulk-insert junk.
-            let host: string
-            try {
-                host = new URL(
-                    /^https?:\/\//i.test(website)
-                        ? website
-                        : `https://${website}`,
-                ).hostname
-            } catch {
-                return nextApiResponse(req, 400, 'Invalid website.', null)
-            }
-            if (host.length > 253 || !/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(host)) {
+            // T-6225: the same normalizer /api/sites/suggest uses, so a host
+            // that is not a store (no registrable domain under a real public
+            // suffix, e.g. `zzz1.xx`) cannot be minted in bulk. What is stored
+            // is the lowercased, www-less HOSTNAME, never the typed string
+            // (path/query/userinfo are attacker bytes that ops would later
+            // read as a store name).
+            const host = normalizeSuggestedDomain(body.website)
+            if (!host || host.length > 253) {
                 return nextApiResponse(req, 400, 'Invalid website.', null)
             }
 
-            // T-6225: what is stored is the validated, lowercased HOSTNAME,
-            // never the typed string (path/query/userinfo are attacker bytes
-            // that ops would later read as a store name).
-            const outcome = await requestSource(
-                host.toLowerCase().replace(/^www\./, ''),
-            )
+            // One address cannot fill the REQUESTED queue by itself.
+            const quota = await consumeAnonymousWriteQuota(req, 'sources')
+            if (!quota.allowed) {
+                const res = nextApiResponse(
+                    req,
+                    429,
+                    QUOTA_MESSAGE,
+                    null,
+                    QUOTA_MESSAGE,
+                )
+                res.headers.set('Retry-After', String(quota.retryAfterSec))
+                return res
+            }
+
+            const outcome = await requestSource(host)
             if (outcome === 'queue_full') {
+                // Said out loud: a full queue means ops must drain it (or it
+                // is being abused), and every honest request now gets a 429.
+                Sentry.captureMessage(
+                    'sources REQUESTED queue is full; new store requests are refused',
+                    {
+                        level: 'warning',
+                        tags: { operation: 'source_request_queue_full' },
+                    },
+                )
                 return nextApiResponse(
                     req,
                     429,
                     QUEUE_FULL_MESSAGE,
                     null,
-                    // The page's toast reads `error`, not `message`.
                     QUEUE_FULL_MESSAGE,
                 )
             }

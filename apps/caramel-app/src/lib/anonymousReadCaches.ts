@@ -12,9 +12,12 @@
 // are the couponsRepo reads untouched: no SQL here.
 //
 // Single instance by design, like supportedStoresCache.ts and rateLimit.ts.
+// Search terms are free-form, so the LRU absorbs REPEATED terms (autocomplete
+// prefixes, popular stores) but a caller sending unique terms still misses
+// every time; the 'read' rate limit per IP is the only bound on those.
 // TODO(T-6226): a prefix/trigram index for searchSupportedSites needs a
 // migration (pg_trgm was dropped in 20260414231559) and was left out of this
-// hardening PR; until then the LRU below is what bounds the ILIKE scans.
+// hardening PR, as was a concurrency budget for cache misses on that route.
 import type {
     DiscountTypeRow,
     SiteCountRow,

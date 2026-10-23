@@ -4,6 +4,7 @@ import { POST as searchSupportedPOST } from '@/app/api/sites/search-supported/ro
 import { GET as topSitesGET } from '@/app/api/sites/top-sites/route'
 import { GET as sourcesGET, POST as sourcesPOST } from '@/app/api/sources/route'
 import { resetAnonymousReadCaches } from '@/lib/anonymousReadCaches'
+import { resetAnonymousWriteQuotas } from '@/lib/anonymousWriteQuota'
 import { createLoadingTtlLruCache } from '@/lib/ttlLruCache'
 import { NextRequest } from 'next/server'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -31,6 +32,10 @@ const repo = vi.hoisted(() => ({
 }))
 vi.mock('@/lib/couponsRepo', () => repo)
 
+// siteSuggestions.ts (the hostname normalizer the sources route reuses) imports
+// the prisma client; nothing here touches it, so an empty stand-in is enough.
+vi.mock('@/lib/prisma', () => ({ default: {} }))
+
 vi.mock('@/lib/rateLimit', () => ({
     checkRateLimit: async () => null,
     isTrustedServer: () => false,
@@ -41,13 +46,19 @@ vi.mock('@/lib/rateLimit', () => ({
         }),
 }))
 
+const { captureMessageMock } = vi.hoisted(() => ({
+    captureMessageMock: vi.fn(),
+}))
 vi.mock('@sentry/nextjs', () => ({
     captureException: vi.fn(),
+    captureMessage: captureMessageMock,
     setUser: vi.fn(),
 }))
 
 beforeEach(() => {
     resetAnonymousReadCaches()
+    resetAnonymousWriteQuotas()
+    captureMessageMock.mockClear()
     for (const fn of Object.values(repo)) fn.mockClear()
     repo.requestSource.mockResolvedValue('created')
 })
@@ -259,7 +270,20 @@ describe('POST /api/sources — bounded, normalized request (T-6225)', () => {
         expect(repo.requestSource).not.toHaveBeenCalled()
     })
 
-    it.each([['not a domain'], ['https://localhost'], ['https://a..b']])(
+    it('a trailing-dot host is stored without the dot (it is the same store)', async () => {
+        await sourcesPOST(
+            post('/api/sources', { website: 'https://example.com./path' }),
+        )
+        expect(repo.requestSource).toHaveBeenCalledWith('example.com')
+    })
+
+    it.each([
+        ['not a domain'],
+        ['https://localhost'],
+        ['https://a..b'],
+        ['zzz1.xx'],
+        ['co.uk'],
+    ])(
         'an implausible host (%s) keeps the pre-existing 400',
         async website => {
             const res = await sourcesPOST(post('/api/sources', { website }))
@@ -280,7 +304,7 @@ describe('POST /api/sources — bounded, normalized request (T-6225)', () => {
         expect(await again.json()).toEqual(await fresh.json())
     })
 
-    it('a full queue answers 429 with a message the page toast can show', async () => {
+    it('a full queue answers 429 with a message the page toast can show, and tells Sentry', async () => {
         repo.requestSource.mockResolvedValueOnce('queue_full')
         const res = await sourcesPOST(
             post('/api/sources', { website: 'example.com' }),
@@ -289,6 +313,34 @@ describe('POST /api/sources — bounded, normalized request (T-6225)', () => {
         const body = await res.json()
         expect(typeof body.error).toBe('string')
         expect(body.error.length).toBeGreaterThan(0)
+        expect(captureMessageMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('per-address hourly quota: the 6th request from one address is a 429 with Retry-After and never reaches the repo; another address is unaffected', async () => {
+        const from = (ip: string, website: string) =>
+            sourcesPOST(
+                new NextRequest('http://localhost/api/sources', {
+                    method: 'POST',
+                    headers: {
+                        'content-type': 'application/json',
+                        'cf-connecting-ip': ip,
+                    },
+                    body: JSON.stringify({ website }),
+                }),
+            )
+        for (let i = 1; i <= 5; i += 1) {
+            expect((await from('203.0.113.7', `store-${i}.com`)).status).toBe(
+                200,
+            )
+        }
+        const blocked = await from('203.0.113.7', 'store-6.com')
+        expect(blocked.status).toBe(429)
+        expect(Number(blocked.headers.get('retry-after'))).toBeGreaterThan(0)
+        expect(typeof (await blocked.json()).error).toBe('string')
+        expect(repo.requestSource).toHaveBeenCalledTimes(5)
+
+        expect((await from('203.0.113.8', 'store-6.com')).status).toBe(200)
+        expect(repo.requestSource).toHaveBeenCalledTimes(6)
     })
 
     it('a repo failure is a 500, not a swallowed success', async () => {
