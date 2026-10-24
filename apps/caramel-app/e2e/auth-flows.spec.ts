@@ -455,6 +455,11 @@ test.describe('Auth Flows — Protected Routes', () => {
             }),
         )
 
+        // The stubbed 500 is reported by the page and must not reach prod Sentry.
+        await page.route('**/monitoring**', route =>
+            route.fulfill({ status: 200, body: '' }),
+        )
+
         await page.goto('/profile')
 
         // The user's own name is the page's <h1> — the standalone "Profile"
