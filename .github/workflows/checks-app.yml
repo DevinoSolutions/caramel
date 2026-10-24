@@ -87,6 +87,13 @@ jobs:
         if: ${{ !cancelled() }}
         run: pnpm prettier-check:root
 
+      # knip resolves every import, and since Prisma 7 the client is generated
+      # into src/generated/prisma (gitignored), so it must exist first. No
+      # database needed: prisma.config.ts leaves the URL unset here.
+      - name: Generate Prisma Client
+        if: ${{ !cancelled() }}
+        run: pnpm --filter caramel-app exec prisma generate
+
       - name: Run knip
         if: ${{ !cancelled() }}
         working-directory: ./apps/caramel-app
