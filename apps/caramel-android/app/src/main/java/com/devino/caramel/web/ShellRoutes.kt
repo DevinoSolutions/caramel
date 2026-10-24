@@ -30,6 +30,10 @@ object ShellRoutes {
 
     fun homeUrl(): String = urlFor(ShellTab.DEALS)
 
+    /** The privacy policy, loaded in the WebView through the same guard as every other URL. */
+    fun privacyUrl(): String =
+        checkNotNull(AppLinkGuard.targetForStartPath("/privacy")) { "the privacy path is not on the app origin" }
+
     /** The tab a URL belongs to, or null when it belongs to none (the selection then stays). */
     fun tabFor(url: String?): ShellTab? {
         val allowed = AppLinkGuard.allowedTarget(url) ?: return null

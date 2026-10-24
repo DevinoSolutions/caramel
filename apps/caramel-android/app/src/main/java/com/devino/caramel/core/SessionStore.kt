@@ -172,10 +172,9 @@ class SessionStore(
      * this one included) and clears the local session. Returns false, with the error set, when the
      * server refused: nothing was deleted and the shopper stays signed in.
      *
-     * TODO(T-7505): NOT reachable from the UI since the native Account screen went away (T-7842), and
-     * the web /profile has no account deletion yet, so the 1.6 shell has no in-app deletion path.
-     * Wire a native entry to this, or drop it once the web deletion page exists and the WebView shows
-     * it. The Play account-deletion policy blocks a store submission until one of the two is true.
+     * TODO(T-7505): reached from the native "Account & privacy" dialog (ui/CaramelApp.kt) because the web
+     * /profile has no account deletion yet (Google Play / Apple 5.1.1(v) need it in-app). Once T-7505 ships
+     * and the WebView shows that page, this can move to the web.
      */
     suspend fun deleteAccount(): Boolean {
         val bearer = token ?: return false

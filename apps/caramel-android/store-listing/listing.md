@@ -54,7 +54,7 @@ wanted, `Caramel: Coupon Finder & Promo Codes` is the existing Safari name, EXT 
 > - No data selling: Caramel doesn't sell your data. You can browse Deals and Search without an account.
 > - Open source: the full code is public under the AGPL-3.0 license at github.com/DevinoSolutions/caramel.
 >
-> Sign in with Apple or Google (optional) to sync your saved stores and see what Caramel has saved you.
+> Sign in with Apple or Google (optional) to sync your saved stores and see what Caramel has saved you. You can sign out or delete your account from inside the app.
 >
 > Questions or something not working? See the Support page at grabcaramel.com/support: a human replies within 1 business day.
 
@@ -70,8 +70,8 @@ Claim trace:
   once the web session handoff exists (**TODO T-7852: not built yet, so a signed-in app does not yet show a signed-in `/profile`; do
   not submit before it does**).
 - Support sentence: SUP, "a human replies within 1 business day".
-- REMOVED vs the 1.5.0 draft: "download your data, delete your synced data, or delete your account from inside the app". The native
-  Account screen that did this is gone and the web `/profile` has no account deletion (`privacy.md`, T-7505).
+- REMOVED vs the 1.5.0 draft: "download your data" and "delete your synced data" (the native Account screen is gone). KEPT: "delete
+  your account from inside the app", via the native "Account & privacy" dialog (top-bar icon; `ui/CaramelApp.kt`, T-7505 note).
 
 Deliberately NOT claimed (the Android app does not do it): auto-applying codes at checkout, comparing totals, savings read from
 the cart, a toolbar badge, affiliate-link handling, cashback or rewards (EXT says Caramel has none), push notifications,

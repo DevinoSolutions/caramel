@@ -4,10 +4,12 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
@@ -15,6 +17,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -33,6 +36,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -41,6 +45,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.devino.caramel.AppContainer
 import com.devino.caramel.core.OAuthProvider
+import com.devino.caramel.web.AccountAction
+import com.devino.caramel.web.AccountPanel
 import com.devino.caramel.web.AuthAction
 import com.devino.caramel.web.ExternalLink
 import com.devino.caramel.web.ExternalLinkPolicy
@@ -86,6 +92,8 @@ fun CaramelApp(
     var selectedTab by remember { mutableStateOf(ShellTab.DEALS) }
     var canGoBack by remember { mutableStateOf(false) }
     var showSignIn by remember { mutableStateOf(false) }
+    var showAccount by remember { mutableStateOf(false) }
+    var confirmingDelete by remember { mutableStateOf(false) }
     var loadError by remember { mutableStateOf<String?>(null) }
     // Bumped to rebuild the WebView after its renderer process died.
     var webViewGeneration by remember { mutableIntStateOf(0) }
@@ -181,6 +189,16 @@ fun CaramelApp(
         },
     ) { padding ->
         Column(modifier = Modifier.padding(padding).fillMaxSize()) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text("Caramel", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+                IconButton(onClick = { showAccount = true }) {
+                    Icon(Icons.Filled.AccountCircle, contentDescription = "Account and privacy")
+                }
+            }
             session.errorMessage?.let { ErrorBanner(it, retryTitle = "Dismiss") { container.session.dismissError() } }
             notice?.let { ErrorBanner(it, retryTitle = "Dismiss") { onNotice(null) } }
             if (session.isSigningIn) {
@@ -234,6 +252,73 @@ fun CaramelApp(
                 }
             },
             confirmButton = { TextButton(onClick = { showSignIn = false }) { Text("Cancel") } },
+        )
+    }
+
+    // Native on purpose: Google Play's account-deletion policy (and Apple 5.1.1(v) on the iOS twin)
+    // needs in-app deletion while the app offers sign-in, and the web /profile has none yet.
+    // TODO(T-7505): once the web deletion page ships and the WebView shows it, this dialog can move to the web.
+    if (showAccount) {
+        AlertDialog(
+            onDismissRequest = { showAccount = false },
+            title = { Text("Account & privacy") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(AccountPanel.signedInLine(session.isSignedIn, session.username))
+                    AccountPanel.actions(session.isSignedIn).forEach { action ->
+                        when (action) {
+                            AccountAction.SIGN_IN -> Button(
+                                modifier = Modifier.fillMaxWidth(),
+                                onClick = {
+                                    showAccount = false
+                                    showSignIn = true
+                                },
+                            ) { Text("Sign in") }
+                            AccountAction.SIGN_OUT -> OutlinedButton(
+                                modifier = Modifier.fillMaxWidth(),
+                                onClick = {
+                                    showAccount = false
+                                    // TODO(T-7852): also end the WebView's web session here once the handoff exists.
+                                    scope.launch { container.session.signOut() }
+                                },
+                            ) { Text("Sign out") }
+                            AccountAction.DELETE_ACCOUNT -> OutlinedButton(
+                                modifier = Modifier.fillMaxWidth(),
+                                onClick = {
+                                    showAccount = false
+                                    confirmingDelete = true
+                                },
+                            ) { Text("Delete my account", color = MaterialTheme.colorScheme.error) }
+                            AccountAction.PRIVACY_POLICY -> TextButton(
+                                modifier = Modifier.fillMaxWidth(),
+                                onClick = {
+                                    showAccount = false
+                                    webView.loadUrl(ShellRoutes.privacyUrl())
+                                },
+                            ) { Text("Privacy policy") }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showAccount = false }) { Text("Close") } },
+        )
+    }
+
+    if (confirmingDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmingDelete = false },
+            title = { Text("Delete your account?") },
+            text = {
+                Text("This permanently deletes your Caramel account, your sign-ins and all your synced data, and signs you out everywhere. This cannot be undone.")
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmingDelete = false
+                    // On success the session clears (signed out); on failure SessionStore.errorMessage shows in the banner.
+                    scope.launch { container.session.deleteAccount() }
+                }) { Text("Delete account", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { confirmingDelete = false }) { Text("Cancel") } },
         )
     }
 }

@@ -18,9 +18,9 @@ shows grabcaramel.com in a WebView, so these answers are **no longer all true an
   `DELETE /api/extension/session` (and `POST /api/account/delete`, currently unreachable, see below).
 - **Stored on device:** the saved-store list (SharedPreferences) is gone. What stays: the Keystore-encrypted session token, plus
   whatever cookies and storage the WebView keeps for grabcaramel.com (app-private, excluded from backup).
-- **Account and data deletion / export:** the native Account screen (export, delete synced data, delete account) was removed. The
-  web `/profile` has no account deletion (T-7505), so **1.6.0 has no in-app deletion path**: a Play blocker until T-7505 lands or a
-  native entry is wired to `SessionStore.deleteAccount` (kept, unreachable, `TODO(T-7505)`).
+- **Account and data deletion / export:** the native Account screen (export, delete synced data) was removed; a small native "Account & privacy" dialog (top-bar icon) keeps sign out, **Delete my account** (POST /api/account/delete, confirmation step) and the privacy policy. The
+  Deletion is therefore in-app only (Play account-deletion policy): the dialog's "Delete my account" calls `SessionStore.deleteAccount`
+  (`TODO(T-7505)`: it can move to the web once the web deletion page exists). Data export and "delete synced data" are gone from the app.
 - **Signed-in web pages:** the WebView has no web session after the native sign-in until `POST /api/app/web-session/handoff`
   (T-7852) exists, so signed-in features (favorites, savings) are not usable in the app yet.
 - Source paths in the tables below that name `ui/AccountScreen.kt`, `core/FavoritesStore.kt` or `OnboardingScreen.kt` point at code
