@@ -451,9 +451,12 @@ test.describe('Auth Flows — Protected Routes', () => {
         // alone, which is the point: this test stubs only get-session, so
         // /api/account/overview genuinely fails here and the page must still
         // show real account content rather than collapsing to an error.
+        // 15s headroom: in deployed mode the first client render right after a
+        // deploy pays for cold chunks plus the stubbed get-session hydration
+        // (T-7525); the same 15000 used by the other deployed-mode specs.
         await expect(
             page.getByRole('heading', { name: 'carameluser', level: 1 }),
-        ).toBeVisible({ timeout: 5000 })
+        ).toBeVisible({ timeout: 15000 })
         await expect(
             page.getByRole('heading', { name: 'Account details' }),
         ).toBeVisible()
