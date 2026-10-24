@@ -1,5 +1,7 @@
 package com.devino.caramel.web
 
+import java.io.ByteArrayOutputStream
+
 /** The bottom tabs; each one is a grabcaramel.com route shown in the WebView. */
 enum class ShellTab(val label: String, val startPath: String) {
     DEALS("Deals", "/coupons"),
@@ -37,23 +39,19 @@ object ShellRoutes {
     /** The tab a URL belongs to, or null when it belongs to none (the selection then stays). */
     fun tabFor(url: String?): ShellTab? {
         val allowed = AppLinkGuard.allowedTarget(url) ?: return null
-        val path = pathOf(allowed)
+        val path = normalizedPath(allowed) ?: return null
         val fragment = allowed.substringAfter('#', "")
         return when {
-            path == "/profile" || path.startsWith("/profile/") ->
-                if (fragment == "favorites") ShellTab.SAVED else ShellTab.ACCOUNT
-            path == "/coupons/stores" || path.startsWith("/coupons/stores/") -> ShellTab.SEARCH
-            path == "/coupons" || path.startsWith("/coupons/") -> ShellTab.DEALS
+            isUnder(path, "/profile") -> if (fragment == "favorites") ShellTab.SAVED else ShellTab.ACCOUNT
+            isUnder(path, "/coupons/stores") -> ShellTab.SEARCH
+            isUnder(path, "/coupons") -> ShellTab.DEALS
             else -> null
         }
     }
 
     fun isSignInRoute(url: String?): Boolean {
-        val allowed = AppLinkGuard.allowedTarget(url) ?: return false
-        return when (pathOf(allowed).trimEnd('/')) {
-            "/login", "/signup" -> true
-            else -> false
-        }
+        val path = normalizedPath(AppLinkGuard.allowedTarget(url)) ?: return false
+        return path == "/login" || path == "/signup"
     }
 
     /**
@@ -68,10 +66,56 @@ object ShellRoutes {
         else -> AuthAction.WEB_SESSION_UNAVAILABLE
     }
 
-    /** The path of an [AppLinkGuard]-approved URL, "/" when there is none. */
-    private fun pathOf(allowed: String): String {
-        val rest = allowed.removePrefix(AppLinkGuard.APP_ORIGIN).substringBefore('#').substringBefore('?')
-        return rest.ifEmpty { "/" }
+    /**
+     * Whether an intent (VIEW data or the start-path extra) may land on [url]: only the home page,
+     * the coupon pages, the profile, the privacy policy and support. Anything else on the origin
+     * (the login and signup pages, auth callbacks, API routes) is not a place another app may send
+     * the shopper, so the shell falls back to home.
+     */
+    fun isIntentPathAllowed(url: String?): Boolean {
+        val path = normalizedPath(AppLinkGuard.allowedTarget(url)) ?: return false
+        return path == "/" || isUnder(path, "/coupons") || isUnder(path, "/profile") ||
+            isUnder(path, "/privacy") || isUnder(path, "/support")
+    }
+
+    /**
+     * The path of an [AppLinkGuard]-approved URL the way a browser and the server will read it:
+     * percent-escapes decoded once, empty and "." segments dropped, ".." resolved, one leading
+     * slash, lowercased. So "/%6cogin", "//login", "/./login" and "/a/../LOGIN" all become
+     * "/login". Null when [allowed] is null.
+     */
+    fun normalizedPath(allowed: String?): String? {
+        if (allowed == null) return null
+        val rawPath = allowed.removePrefix(AppLinkGuard.APP_ORIGIN).substringBefore('#').substringBefore('?')
+        val segments = ArrayList<String>()
+        for (segment in percentDecodeOnce(rawPath).split('/')) {
+            when (segment) {
+                "", "." -> Unit
+                ".." -> if (segments.isNotEmpty()) segments.removeAt(segments.size - 1)
+                else -> segments.add(segment)
+            }
+        }
+        return "/" + segments.joinToString("/").lowercase()
+    }
+
+    private fun isUnder(path: String, prefix: String): Boolean = path == prefix || path.startsWith("$prefix/")
+
+    /** Decodes %XX escapes once (UTF-8); a malformed escape stays literal. No "+" handling: this is a path. */
+    internal fun percentDecodeOnce(text: String): String {
+        val out = ByteArrayOutputStream()
+        var i = 0
+        while (i < text.length) {
+            val c = text[i]
+            if (c == '%' && i + 2 < text.length && Character.digit(text[i + 1], 16) >= 0 && Character.digit(text[i + 2], 16) >= 0) {
+                out.write(Character.digit(text[i + 1], 16) * 16 + Character.digit(text[i + 2], 16))
+                i += 3
+            } else {
+                val codePoint = text.codePointAt(i)
+                out.write(String(Character.toChars(codePoint)).toByteArray(Charsets.UTF_8))
+                i += Character.charCount(codePoint)
+            }
+        }
+        return String(out.toByteArray(), Charsets.UTF_8)
     }
 }
 
@@ -90,17 +134,20 @@ object ShellIntents {
     /**
      * [action], [dataString] and [startPath] come straight off the Intent. The sign-in callback
      * (the app's own scheme, [callbackScheme]) is handled by MainActivity.handleCallback, not here.
+     * A URL the guard approves but whose path is not on the allowlist loads the home page instead.
      */
     fun resolve(action: String?, dataString: String?, startPath: String?, callbackScheme: String): IntentTarget {
         if (action == "android.intent.action.VIEW" && dataString != null) {
             if (dataString.startsWith("$callbackScheme:")) return IntentTarget.None
-            val allowed = AppLinkGuard.allowedTarget(dataString)
-            return if (allowed != null) IntentTarget.Load(allowed) else IntentTarget.Refused("a link")
+            return landing(AppLinkGuard.allowedTarget(dataString), "a link")
         }
-        if (startPath != null) {
-            val allowed = AppLinkGuard.targetForStartPath(startPath)
-            return if (allowed != null) IntentTarget.Load(allowed) else IntentTarget.Refused("a start path")
-        }
+        if (startPath != null) return landing(AppLinkGuard.targetForStartPath(startPath), "a start path")
         return IntentTarget.None
+    }
+
+    private fun landing(allowed: String?, what: String): IntentTarget = when {
+        allowed == null -> IntentTarget.Refused(what)
+        ShellRoutes.isIntentPathAllowed(allowed) -> IntentTarget.Load(allowed)
+        else -> IntentTarget.Load(ShellRoutes.homeUrl())
     }
 }

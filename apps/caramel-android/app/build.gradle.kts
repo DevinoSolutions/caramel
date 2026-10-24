@@ -23,6 +23,8 @@ android {
         // Gradle dependency locking / verification-metadata.xml yet (supply-chain pinning of the
         // resolved artifacts); add it once the dependency set settles.
         versionCode = (project.findProperty("caramelVersionCode") as String?)?.toInt() ?: 1
+        // DO NOT TAG android-v1.6.0 before T-7852 ships: until the web-session handoff exists the Saved and Account tabs
+        // (/profile) redirect to /login, which the shell turns into the sign-in dialog and a bounce to Deals.
         versionName = "1.6.0"
     }
 

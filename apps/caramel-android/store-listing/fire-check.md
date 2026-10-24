@@ -6,8 +6,8 @@
 > `<uses-library>`. The manifest gains one `<meta-data android:name="android.webkit.WebView.EnableSafeBrowsing">` and
 > `android:configChanges` on `MainActivity`. Re-run sections 1 to 5 on the 1.6.0 release artifact before relying on this.
 > New, **untested** Fire risk: the app now depends on the device's system WebView. Fire OS ships an Amazon WebView (Chromium);
-> Safe Browsing there has no Google Play Services to talk to and is expected to be a no-op, not a failure, but no Fire device or
-> emulator has run this build.
+> WebView Safe Browsing needs Google Play services, so it is **not** a protection on Fire: it is requested but does nothing there, and
+> the app must not claim it for Fire devices. No Fire device or emulator has run this build.
 
 Date: 2026-10-24. Tools: Android SDK build-tools 36.1.0 (`aapt2`, `apksigner`), JDK 21 (`jarsigner`, `keytool`), Python 3 stdlib.
 `$SDK` below = `~/AppData/Local/Android/Sdk/build-tools/36.1.0`.

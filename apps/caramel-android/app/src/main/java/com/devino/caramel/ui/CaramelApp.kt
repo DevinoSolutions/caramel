@@ -53,7 +53,9 @@ import com.devino.caramel.web.ExternalLinkPolicy
 import com.devino.caramel.web.ShellHost
 import com.devino.caramel.web.ShellRoutes
 import com.devino.caramel.web.ShellTab
+import com.devino.caramel.web.clearWebSessionState
 import com.devino.caramel.web.createShellWebView
+import com.devino.caramel.web.loadGuarded
 import kotlinx.coroutines.launch
 
 private fun ShellTab.icon(): ImageVector = when (this) {
@@ -124,6 +126,7 @@ fun CaramelApp(
                     AuthAction.SIGN_OUT_NATIVE_THEN_SIGN_IN -> {
                         scope.launch {
                             container.session.signOut()
+                            clearWebSessionState()
                             showSignIn = true
                         }
                         true
@@ -134,6 +137,10 @@ fun CaramelApp(
                         true
                     }
                 }
+
+            override fun onBlockedNavigation() {
+                currentOnNotice("Caramel blocked a page that tried to leave grabcaramel.com.")
+            }
 
             override fun onLoadStarted() {
                 loadError = null
@@ -156,16 +163,20 @@ fun CaramelApp(
         }
     }
     val webView = remember(webViewGeneration) { createShellWebView(context, host) }
+    // Every load goes through the sink guard (WebView.loadGuarded); a refusal is reported, not dropped.
+    val load: (String) -> Unit = { url ->
+        if (!webView.loadGuarded(url)) currentOnNotice("Caramel did not open a page because it is not on grabcaramel.com.")
+    }
 
     var started by remember(webView) { mutableStateOf(false) }
     LaunchedEffect(webView, requestedUrl) {
         if (requestedUrl != null) {
             started = true
-            webView.loadUrl(requestedUrl)
+            load(requestedUrl)
             onRequestedUrlConsumed()
         } else if (!started) {
             started = true
-            webView.loadUrl(ShellRoutes.homeUrl())
+            load(ShellRoutes.homeUrl())
         }
     }
 
@@ -179,7 +190,7 @@ fun CaramelApp(
                         selected = selectedTab == tab,
                         onClick = {
                             selectedTab = tab
-                            webView.loadUrl(ShellRoutes.urlFor(tab))
+                            load(ShellRoutes.urlFor(tab))
                         },
                         icon = { Icon(tab.icon(), contentDescription = null) },
                         label = { Text(tab.label) },
@@ -278,8 +289,11 @@ fun CaramelApp(
                                 modifier = Modifier.fillMaxWidth(),
                                 onClick = {
                                     showAccount = false
-                                    // TODO(T-7852): also end the WebView's web session here once the handoff exists.
-                                    scope.launch { container.session.signOut() }
+                                    scope.launch {
+                                        container.session.signOut()
+                                        clearWebSessionState()
+                                        load(ShellRoutes.homeUrl())
+                                    }
                                 },
                             ) { Text("Sign out") }
                             AccountAction.DELETE_ACCOUNT -> OutlinedButton(
@@ -293,7 +307,7 @@ fun CaramelApp(
                                 modifier = Modifier.fillMaxWidth(),
                                 onClick = {
                                     showAccount = false
-                                    webView.loadUrl(ShellRoutes.privacyUrl())
+                                    load(ShellRoutes.privacyUrl())
                                 },
                             ) { Text("Privacy policy") }
                         }
@@ -315,7 +329,13 @@ fun CaramelApp(
                 TextButton(onClick = {
                     confirmingDelete = false
                     // On success the session clears (signed out); on failure SessionStore.errorMessage shows in the banner.
-                    scope.launch { container.session.deleteAccount() }
+                    scope.launch {
+                        if (container.session.deleteAccount()) {
+                            // TODO(T-7852): also end the server-side web session once the handoff exists.
+                            clearWebSessionState()
+                            load(ShellRoutes.homeUrl())
+                        }
+                    }
                 }) { Text("Delete account", color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = { TextButton(onClick = { confirmingDelete = false }) { Text("Cancel") } },

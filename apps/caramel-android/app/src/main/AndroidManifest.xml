@@ -16,7 +16,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Caramel">
 
-        <!-- WebView Safe Browsing (also switched on in code, ShellWebView.kt). -->
+        <!-- Requests WebView Safe Browsing (also set in code, ShellWebView.kt). It needs Google Play services, so it is a no-op on Fire; it is not a protection the app can claim there. -->
         <meta-data
             android:name="android.webkit.WebView.EnableSafeBrowsing"
             android:value="true" />

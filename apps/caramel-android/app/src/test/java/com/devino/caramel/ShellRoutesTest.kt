@@ -135,4 +135,70 @@ class ShellRoutesTest {
         // A VIEW intent's data wins over the extra: a bad link is refused even beside a good start path.
         assertTrue(ShellIntents.resolve(view, "https://evil.com/", "/coupons", cb) is IntentTarget.Refused)
     }
+
+    @Test
+    fun theSignInRoutesAreCaughtWhateverTheirSpelling() {
+        val spellings = listOf(
+            "/login", "/login/", "//login", "///login", "/%6cogin", "/%6Cogin", "/lo%67in", "/LOGIN", "/Login/",
+            "/./login", "/x/../login", "/x/%2e%2e/login", "/%2e/login", "/coupons/..%2flogin", "/signup", "//SIGNUP/", "/sign%75p",
+            "/login?next=%2Fprofile", "/login#x",
+        )
+        for (path in spellings) assertTrue(path, ShellRoutes.isSignInRoute("$origin$path"))
+        for (path in spellings) {
+            assertEquals(path, AuthAction.START_NATIVE_SIGN_IN, ShellRoutes.authAction("$origin$path", false, false))
+        }
+    }
+
+    @Test
+    fun lookAlikePathsAreNotSignInRoutes() {
+        val others = listOf(
+            "/", "/loginx", "/login/reset", "/log%69n%2fx", "/%256cogin", "/coupons/login", "/signup-now", "/forgot-password", "/coupons?next=/login",
+        )
+        for (path in others) assertFalse(path, ShellRoutes.isSignInRoute("$origin$path"))
+    }
+
+    @Test
+    fun pathsAreNormalizedTheWayABrowserReadsThem() {
+        assertEquals("/", ShellRoutes.normalizedPath(origin))
+        assertEquals("/", ShellRoutes.normalizedPath("$origin/?x=1"))
+        assertEquals("/coupons/stores", ShellRoutes.normalizedPath("$origin//coupons///stores/"))
+        assertEquals("/login", ShellRoutes.normalizedPath("$origin/a/b/../../%4cogin"))
+        assertEquals("/", ShellRoutes.normalizedPath("$origin/../../.."))
+        assertEquals("/%6cogin", ShellRoutes.normalizedPath("$origin/%256cogin")) // decoded once, not twice
+        assertEquals("/a%zzb", ShellRoutes.normalizedPath("$origin/A%zzB")) // a malformed escape stays literal
+        assertEquals("/café", ShellRoutes.normalizedPath("$origin/caf%C3%A9"))
+        assertNull(ShellRoutes.normalizedPath(null))
+    }
+
+    @Test
+    fun anIntentMayOnlyLandOnTheAllowedPaths() {
+        val allowed = listOf(
+            "", "/", "/coupons", "/coupons/stores", "/coupons/nike.com", "/profile", "/profile#favorites", "/profile/x",
+            "/privacy", "/support", "/support?x=1", "//coupons", "/%63oupons", "/COUPONS",
+        )
+        for (path in allowed) assertTrue(path, ShellRoutes.isIntentPathAllowed("$origin$path"))
+        val denied = listOf(
+            "/login", "/signup", "//login", "/%6cogin", "/api/extension/oauth", "/api/account/delete", "/verify", "/reset-password",
+            "/welcome", "/couponsx", "/profiles", "/privacy-x", "/coupons/../login", "/coupons%2f..%2flogin", "/support/../api",
+        )
+        for (path in denied) assertFalse(path, ShellRoutes.isIntentPathAllowed("$origin$path"))
+        assertFalse(ShellRoutes.isIntentPathAllowed("https://evil.com/coupons"))
+        assertFalse(ShellRoutes.isIntentPathAllowed(null))
+    }
+
+    @Test
+    fun anIntentOnAnUnlistedPathFallsBackToHome() {
+        val cb = "com.devino.caramel"
+        val view = "android.intent.action.VIEW"
+        val home = ShellRoutes.homeUrl()
+        assertEquals(IntentTarget.Load(home), ShellIntents.resolve(view, "$origin/login", null, cb))
+        assertEquals(IntentTarget.Load(home), ShellIntents.resolve(view, "$origin/%6cogin", null, cb))
+        assertEquals(IntentTarget.Load(home), ShellIntents.resolve(view, "$origin/api/account/delete", null, cb))
+        assertEquals(IntentTarget.Load(home), ShellIntents.resolve(null, null, "/signup", cb))
+        assertEquals(IntentTarget.Load(home), ShellIntents.resolve(null, null, "/welcome?x=1", cb))
+        assertEquals(IntentTarget.Load("$origin/privacy"), ShellIntents.resolve(null, null, "/privacy", cb))
+        assertEquals(IntentTarget.Load("$origin/support"), ShellIntents.resolve(view, "$origin/support", null, cb))
+        // A URL the guard refuses is still refused, not turned into a home load.
+        assertTrue(ShellIntents.resolve(view, "https://evil.com/coupons", null, cb) is IntentTarget.Refused)
+    }
 }
