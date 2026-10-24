@@ -444,13 +444,24 @@ test.describe('Auth Flows — Protected Routes', () => {
             }),
         )
 
+        // The overview call must fail with a 500, not a 401: a 401 correctly
+        // means "signed out" and useProfileOverview ends the session and
+        // redirects to /login, which raced this test's assertions.
+        await page.route('**/api/account/overview', route =>
+            route.fulfill({
+                status: 500,
+                contentType: 'application/json',
+                body: JSON.stringify({ error: 'overview unavailable' }),
+            }),
+        )
+
         await page.goto('/profile')
 
         // The user's own name is the page's <h1> — the standalone "Profile"
         // heading is gone. Both assertions below render from the session
-        // alone, which is the point: this test stubs only get-session, so
-        // /api/account/overview genuinely fails here and the page must still
-        // show real account content rather than collapsing to an error.
+        // alone, which is the point: /api/account/overview fails (stubbed
+        // 500 above) and the page must still show real account content
+        // rather than collapsing to an error or redirecting.
         // 15s headroom: in deployed mode the first client render right after a
         // deploy pays for cold chunks plus the stubbed get-session hydration
         // (T-7525); the same 15000 used by the other deployed-mode specs.
@@ -461,5 +472,6 @@ test.describe('Auth Flows — Protected Routes', () => {
             page.getByRole('heading', { name: 'Account details' }),
         ).toBeVisible()
         await expect(page.getByText('test@example.com').first()).toBeVisible()
+        await expect(page).toHaveURL(/\/profile/)
     })
 })
