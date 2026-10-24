@@ -11,7 +11,7 @@ Provenance (checked 2026-10-24): the folder layout (`apk/release`, `bundle/relea
 build), but the artifact digest was not compared, so it is not proven. Signing key: the APK/AAB signer SHA-256
 (`32:81:07:E2:...:6A:0D:CE`) was compared with the certificate in the upload keystore `~/.secrets/caramel-android/caramel-upload.jks`
 (opened inside a script with the password read from the local secrets file; nothing printed): **match**. So the staged files are signed
-with the Caramel upload key.:
+with the Caramel upload key.
 
 | File                                                      | Size   | sha256                                                             |
 | --------------------------------------------------------- | ------ | ------------------------------------------------------------------ |
@@ -106,7 +106,7 @@ SHA256: 32:81:07:E2:76:B2:8D:52:E4:B0:BE:64:23:97:21:22:28:8F:C1:3E:69:52:D4:62:
 
 The AAB and the APK are signed by the same certificate (the colon-separated SHA256 equals the apksigner digest). The v2
 scheme verifies, which is what Fire OS 7+ (Android 9+ based) needs; v1 is not required at minSdk 26. Only the public
-certificate fingerprint is shown here; no key material or passwords were read.
+certificate fingerprint is shown here; no key material or passwords are printed in this document.
 
 ### 6. Fire OS compatibility notes
 
