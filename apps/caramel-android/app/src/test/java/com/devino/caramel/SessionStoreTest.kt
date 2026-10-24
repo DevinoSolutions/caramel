@@ -63,6 +63,16 @@ class SessionStoreTest {
     }
 
     @Test
+    fun completeSignInReportsWhetherTheCallbackWasAccepted() = runBlocking {
+        val (api, _) = routed()
+        val store = SessionStore(api, MemoryTokenStore()) { pkce }
+        store.beginSignIn(OAuthProvider.GOOGLE)
+        assertFalse(store.completeSignIn("com.devino.caramel://auth/callback?code=x&state=forged"))
+        assertTrue(store.completeSignIn(callback))
+        assertFalse(store.completeSignIn(callback)) // nothing pending any more
+    }
+
+    @Test
     fun aCallbackWithNoPendingSignInIsRefused() = runBlocking {
         val (api, transport) = routed()
         val store = SessionStore(api, MemoryTokenStore()) { pkce }

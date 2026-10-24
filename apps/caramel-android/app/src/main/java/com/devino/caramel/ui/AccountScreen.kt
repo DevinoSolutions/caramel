@@ -1,5 +1,6 @@
 package com.devino.caramel.ui
 
+import android.content.ActivityNotFoundException
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -49,6 +50,16 @@ fun AccountScreen(container: AppContainer, session: SessionState, onStartSignIn:
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val uriHandler = LocalUriHandler.current
+
+    var linkMessage by remember { mutableStateOf<String?>(null) }
+    val openLink: (String) -> Unit = { url ->
+        try {
+            uriHandler.openUri(url)
+        } catch (e: IllegalArgumentException) {
+            // LocalUriHandler throws when no app can open the link (no browser installed).
+            linkMessage = "No web browser is installed to open this link: ${e.message}"
+        }
+    }
 
     var overview by remember { mutableStateOf<LoadState<OverviewResponse>>(LoadState.Idle) }
     var isExporting by remember { mutableStateOf(false) }
@@ -113,6 +124,10 @@ fun AccountScreen(container: AppContainer, session: SessionState, onStartSignIn:
                                 saveExport.launch(EXPORT_FILE_NAME)
                             } catch (e: ApiError) {
                                 exportMessage = "Could not prepare the export: ${e.message}"
+                            } catch (e: ActivityNotFoundException) {
+                                // No app on this device can create a document (some Fire builds): drop the bytes.
+                                container.pendingExport.take()
+                                exportMessage = "This device has no app to save the export with: ${e.message}"
                             } finally {
                                 isExporting = false
                             }
@@ -150,12 +165,13 @@ fun AccountScreen(container: AppContainer, session: SessionState, onStartSignIn:
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             SectionTitle("About")
-            TextButton(onClick = { uriHandler.openUri(AppConfig.SUPPORT_URL) }) { Text("Help & support") }
-            TextButton(onClick = { uriHandler.openUri(AppConfig.PRIVACY_POLICY_URL) }) { Text("Privacy policy") }
-            TextButton(onClick = { uriHandler.openUri(AppConfig.WEBSITE_URL) }) { Text("Website") }
+            TextButton(onClick = { openLink(AppConfig.SUPPORT_URL) }) { Text("Help & support") }
+            TextButton(onClick = { openLink(AppConfig.PRIVACY_POLICY_URL) }) { Text("Privacy policy") }
+            TextButton(onClick = { openLink(AppConfig.WEBSITE_URL) }) { Text("Website") }
             if (session.isSignedIn) {
-                TextButton(onClick = { uriHandler.openUri(AppConfig.WEB_ACCOUNT_URL) }) { Text("Your account on the web") }
+                TextButton(onClick = { openLink(AppConfig.WEB_ACCOUNT_URL) }) { Text("Your account on the web") }
             }
+            linkMessage?.let { Footnote(it) }
             Footnote("Tell us what is blocking you and ask for a reply: a human replies within 1 business day.")
         }
     }

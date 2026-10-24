@@ -11,6 +11,7 @@ import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 import java.security.GeneralSecurityException
 import java.security.KeyStore
+import java.security.ProviderException
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -60,6 +61,9 @@ class KeystoreTokenStore(context: Context) : TokenStore {
             // The key was lost (a restored device, a changed lock screen): the stored token is
             // unusable. Drop it so the next sign-in starts clean, and say so.
             throw unusable("Your saved sign-in could not be read on this device. Please sign in again.", e)
+        } catch (e: ProviderException) {
+            // The Keystore provider itself failed (a RuntimeException, not a GeneralSecurityException).
+            throw unusable("The secure storage on this device failed. Please sign in again.", e)
         } catch (e: IllegalArgumentException) {
             throw unusable("Your saved sign-in was damaged. Please sign in again.", e)
         }
@@ -84,6 +88,8 @@ class KeystoreTokenStore(context: Context) : TokenStore {
             if (!prefs.edit().putString(TOKEN_KEY, Base64.encodeToString(encrypted, Base64.NO_WRAP)).commit()) {
                 throw TokenStoreException("Could not save the sign-in on this device.")
             }
+        } catch (e: ProviderException) {
+            throw TokenStoreException("This device could not store your sign-in securely: ${e.message}", e)
         } catch (e: GeneralSecurityException) {
             throw TokenStoreException("This device could not store your sign-in securely: ${e.message}", e)
         }

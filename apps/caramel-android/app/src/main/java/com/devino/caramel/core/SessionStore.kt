@@ -115,16 +115,19 @@ class SessionStore(
      * The pending sign-in is consumed ONLY by a callback that echoes its signed state. Any other
      * VIEW intent on our scheme (another app, a stray link) is refused and leaves the real
      * sign-in waiting for its answer.
+     *
+     * Returns true when the callback answered the pending sign-in (whatever its outcome), false
+     * when it was refused as not ours.
      */
-    suspend fun completeSignIn(callbackUrl: String) {
+    suspend fun completeSignIn(callbackUrl: String): Boolean {
         val current = pending
         if (current == null) {
             mutableState.update { it.copy(isSigningIn = false, errorMessage = SignInFailure.SIGN_IN_NOT_STARTED.userMessage) }
-            return
+            return false
         }
         if (SignInCallback.stateParam(callbackUrl) != current.state) {
             mutableState.update { it.copy(errorMessage = SignInFailure.STATE_MISMATCH.userMessage) }
-            return
+            return false
         }
         pending = null
         try {
@@ -141,6 +144,7 @@ class SessionStore(
         } catch (e: TokenStoreException) {
             mutableState.update { it.copy(isSigningIn = false, errorMessage = e.message) }
         }
+        return true
     }
 
     /**

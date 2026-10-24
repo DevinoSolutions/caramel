@@ -62,9 +62,14 @@ class MainActivity : ComponentActivity() {
     private fun handleCallback(intent: Intent?) {
         val data = intent?.data ?: return
         if (data.scheme != AppConfig.SIGN_IN_SCHEME) return
-        awaitingBrowser = false
-        leftForBrowser = false
-        lifecycleScope.launch { container.session.completeSignIn(data.toString()) }
+        lifecycleScope.launch {
+            // Only a callback that answers the pending sign-in ends the wait; a stray VIEW intent must
+            // leave the real sign-in (and its disabled buttons) exactly as they were.
+            if (container.session.completeSignIn(data.toString())) {
+                awaitingBrowser = false
+                leftForBrowser = false
+            }
+        }
     }
 
     private fun openSignInTab(url: String) {
