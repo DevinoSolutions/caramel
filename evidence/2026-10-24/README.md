@@ -34,3 +34,7 @@
   - anthropologie title "Anthropologie Promo Codes & Coupon Codes: 26 Codes | Caramel".
   - amazon.com (not in the pilot) unchanged: "Best Amazon coupon codes today".
   Main push E2E rerun 40121629608 attempt 2: success. Sentry: nothing new since the deploy. Recrawl submitted for the 4 pilot URLs plus /docs (Indexing API, 5/5 submitted).
+- `pr492-checks-green.png`: #492 (T-7842/T-7817, iOS WKWebView shell) at head fa93e47, fresh unnamed headed clone, 19:2xZ: "All checks have passed, 1 skipped, 13 successful" (unsigned build + archive, CaramelTests with 23 tests, screenshots). review-465 adversarial review:
+  - round 1: fix-needed (no gesture gate, client-side /login not intercepted, web data not cleared on sign-out/delete, onOpenURL allowlist, alerts seen-state; plus a Postify body that overwrote the PR body via the shared /tmp/pr-body.md);
+  - delta at fa93e47: merge.
+  Caveats are recorded in a PR comment. Merged as fcebf84. No simulator or device check is possible: no macOS host. The runtime check moves to the first 1.6 TestFlight build, which is not tagged before T-7852.
