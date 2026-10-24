@@ -85,6 +85,11 @@ jobs:
       # (POST /api/app/web-session/handoff, T-7852) is wired: the Saved and Account tabs open signed
       # out. Every TODO(T-7852) marker in the app source is part of that unfinished work, so a
       # tag/dispatch build stops while any is left. Never runs on pull requests.
+      - name: Show the unfinished web-session handoff (T-7852) markers (warning only on pull requests)
+        if: github.event_name == 'pull_request'
+        run: |
+          grep -rn 'TODO(T-7852)' "$APPLE_DIR/App" | while IFS= read -r line; do echo "::warning::$line"; done
+
       - name: Block the release while the web-session handoff (T-7852) is unfinished
         if: github.event_name != 'pull_request'
         run: |

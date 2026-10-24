@@ -118,15 +118,21 @@ final class WebShellModel: NSObject, ObservableObject {
     func resetToHome() {
         let old = webView
         old.stopLoading()
+        // Take the old view off screen BEFORE dropping its delegates: a web view with no
+        // navigation delegate lets WebKit allow every navigation, so it must never stay visible.
+        old.scrollView.refreshControl = nil
+        old.removeFromSuperview()
         old.navigationDelegate = nil
         old.uiDelegate = nil
         urlObservation = nil
         lastObservedURL = nil
         lastRequestedURL = nil
         pageState = .idle
+        // Not started: the visible tab's onAppear (loadHomeIfNeeded) loads home. Loading all four
+        // shells eagerly would let a signed-out /profile redirect to /login and pop the native sign-in.
+        didStartLoading = false
         webView = Self.makeWebView()
         attach(webView)
-        open(home)
     }
 
     func retry() {
@@ -314,7 +320,9 @@ struct WebShellView: View {
     @ObservedObject var model: WebShellModel
 
     var body: some View {
+        // .id forces SwiftUI to build a new host (makeUIView) when resetToHome replaces the web view.
         WebViewHost(webView: model.webView)
+            .id(ObjectIdentifier(model.webView))
             .overlay(alignment: .top) {
                 if model.pageState == .loading {
                     ProgressView().padding(8)
