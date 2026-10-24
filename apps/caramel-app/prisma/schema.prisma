@@ -1,10 +1,17 @@
+// Prisma 7: the Rust-free `prisma-client` generator emits TypeScript into
+// src/generated/prisma (gitignored; import it as '@/generated/prisma/client').
+// moduleFormat "cjs": the ESM flavour sets __dirname from `import.meta.url`,
+// which Playwright's CommonJS transform of the e2e specs cannot load.
+// The connection URL lives in prisma.config.ts (CLI) and src/lib/prisma.ts
+// (runtime driver adapter), no longer here.
 generator client {
-  provider = "prisma-client-js"
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
 }
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 model Account {

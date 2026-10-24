@@ -28,6 +28,7 @@
 // point of the trust loop is to own this signal ourselves rather than mirror
 // (or mutate) the externally-owned catalog. Signals are keyed by the catalog
 // coupon id as a string, matching the app's Coupon.id: string.
+import type { Prisma, PrismaClient } from '@/generated/prisma/client'
 import type { ReportReporter } from '@/lib/couponReportDedupe'
 import {
     FAILING_WINDOW_MS,
@@ -41,7 +42,6 @@ import {
 } from '@/lib/couponsRepo'
 import { env } from '@/lib/env'
 import prisma from '@/lib/prisma'
-import type { Prisma, PrismaClient } from '@prisma/client'
 import * as Sentry from '@sentry/nextjs'
 import { createHmac } from 'node:crypto'
 

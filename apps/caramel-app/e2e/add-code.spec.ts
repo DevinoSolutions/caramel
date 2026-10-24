@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test'
 import { normalizeShopperCode } from '../src/lib/shopperCoupons'
 import { seedVerifiedUser } from './support/seed-user'
 import { firstLinkedStoreDomain } from './support/stores'
+import { openTestPrisma } from './support/test-prisma'
 
 // The "Add a code" form on /coupons/[store] (shopper-submitted codes, owner
 // directed 2026-10-02). Two contexts, per CLAUDE.md's e2e rules (docs/agent/conventions-and-checks.md):
@@ -47,12 +48,11 @@ test.describe('Add a code — signed out', () => {
     })
 })
 
-/** Delete the shopper row the test created. @prisma/client is imported LAZILY: the
+/** Delete the shopper row the test created. The Prisma client is opened LAZILY: the
  * e2e-push lane has no generated client, and a top-level import would crash this
  * whole file at collection time, before the DATABASE_URL skip gate can run. */
 async function deleteCouponById(couponId: string): Promise<void> {
-    const { PrismaClient } = await import('@prisma/client')
-    const prisma = new PrismaClient()
+    const prisma = await openTestPrisma()
     try {
         await prisma.coupon.deleteMany({ where: { id: couponId } })
     } finally {

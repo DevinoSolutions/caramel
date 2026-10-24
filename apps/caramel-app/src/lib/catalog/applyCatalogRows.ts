@@ -62,10 +62,10 @@
 // currently-visible catalog is REFUSED (409, `gated`) unless `force: true`.
 // This guards against a broken producer wiping the catalog with one bad push;
 // a genuinely large expiry is still possible by resending with force.
+import { Prisma } from '@/generated/prisma/client'
 import type { IngestCatalogPayload } from '@/lib/catalog/ingestSchemas'
 import { VISIBLE_COUPON_STATUSES, isReferralCoupon } from '@/lib/coupons'
 import prisma from '@/lib/prisma'
-import { Prisma } from '@prisma/client'
 
 /** The tombstone-gate detail returned (409) when a push is refused. */
 export interface CatalogGate {
