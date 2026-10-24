@@ -78,7 +78,7 @@ jobs:
       version: ${{ steps.version.outputs.version }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Announce run mode
         env:
@@ -305,7 +305,7 @@ jobs:
         working-directory: ${{ env.WORKING_DIRECTORY }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
@@ -683,7 +683,7 @@ jobs:
       # here — the checkout exists so the web-ext version comes from the repo's
       # own pin instead of a second copy of the number living in this file.
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         if: steps.credentials.outputs.configured == 'true'
 
       - name: Resolve the pinned web-ext version
@@ -919,7 +919,7 @@ jobs:
       run:
         working-directory: ${{ env.WORKING_DIRECTORY }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
       - name: Select Xcode 16
         uses: maxim-lobanov/setup-xcode@v1
         with:
