@@ -111,6 +111,9 @@ jobs:
           CFG=$(find "$HOME" -path '*/smoke.avd/config.ini' -print -quit)
           [ -n "$CFG" ] || { echo "::error::avdmanager created no smoke.avd/config.ini under $HOME"; exit 1; }
           echo "AVD config: $CFG"
+          # avdmanager honours XDG (~/.config/.android/avd here) but the emulator only looks in
+          # $ANDROID_AVD_HOME, $ANDROID_SDK_HOME/avd and ~/.android/avd, so point it at the real dir.
+          echo "ANDROID_AVD_HOME=$(dirname "$(dirname "$CFG")")" >> "$GITHUB_ENV"
           # A default AVD boots at a tiny skin; pin a phone-shaped screen so the
           # screenshot is real evidence. printf rather than a heredoc: YAML
           # forbids tabs, so <<- cannot strip this block's indentation.
