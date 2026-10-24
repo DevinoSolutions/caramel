@@ -14,7 +14,9 @@ name: Release – Apple App (iOS container + Safari extension)
 #     apps/caramel-apple/project.yml; `v*` tags belong to release-extension.yml)
 #   - workflow_dispatch (the workflow file must exist on the default branch). `internal_preview`
 #     (default false) lets a dispatch FROM main past the T-7852 gate for an INTERNAL-only
-#     TestFlight build; see the gate note below. Tag pushes ignore it and stay blocked.
+#     TestFlight build; see the gate note below. Tag pushes ignore it and stay blocked. A preview
+#     is also refused when the App Store version it would upload into (MARKETING_VERSION) is open
+#     (asc-testflight.mjs version-state), so it can never join a train being shipped.
 #   - pull_request touching apps/caramel-apple: builds and archives UNSIGNED and
 #     verifies the committed Xcode project matches project.yml. It never signs
 #     or uploads, so CI proves the build before anything can ship.
@@ -226,6 +228,21 @@ jobs:
           set -euo pipefail
           echo "${ASC_API_KEY_BASE64}" | base64 --decode > "/tmp/AuthKey_${ASC_KEY_ID}.p8"
           ls -l "/tmp/AuthKey_${ASC_KEY_ID}.p8"
+
+      # internal_preview only: a main-branch preview build must never land in a TestFlight train
+      # that is being prepared or reviewed for the App Store (someone could pick it for submission).
+      # Read-only ASC call; fails closed (API error, unknown state, missing state = refuse).
+      - name: Refuse an internal preview into an open App Store train
+        if: github.event_name == 'workflow_dispatch' && inputs.internal_preview
+        env:
+          ASC_KEY_PATH: /tmp/AuthKey_${{ secrets.ASC_KEY_ID }}.p8
+          ASC_BUNDLE_ID: ${{ env.BUNDLE_ID }}
+        run: |
+          set -euo pipefail
+          if ! node .github/workflows/scripts/asc-testflight.mjs version-state "${{ steps.version.outputs.version }}"; then
+            echo "::error::Internal preview refused: App Store version ${{ steps.version.outputs.version }} is open (being prepared or reviewed) or its state could not be read. Bump MARKETING_VERSION in project.yml to the next train, or wait for that version to close. See the log above."
+            exit 1
+          fi
 
       - name: Resolve the next TestFlight build number
         id: build_number

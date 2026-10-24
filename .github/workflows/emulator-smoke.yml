@@ -1,7 +1,10 @@
 # Emulator smoke for the native Android shell (apps/caramel-android, com.devino.caramel).
 #
 # What it proves: the debug APK builds, installs on a real headless Android emulator (KVM, API 35),
-# launches, the process is still alive after the settle window, and the captured screenshot
+# and the emulator resolves grabcaramel.com BEFORE the app launches. After the settle window the
+# assertions are, in order: the process is still alive; logcat holds no FATAL EXCEPTION for the app;
+# a uiautomator dump shows the real Deals page ("Coupon Codes" heading) and neither "Something went
+# wrong" nor "net::ERR_" (so a WebView error page can no longer pass); and the captured screenshot
 # (smoke.png) is a non-trivial rendered screen rather than a blank frame. Nothing more.
 #
 # What it does NOT prove: any physical-device behaviour (real GPU, OEM skins, Play Services, push,
@@ -198,6 +201,35 @@ jobs:
             exit 1
           fi
 
+      # The emulator reports sys.boot_completed well before its user-mode network resolves names (run
+      # 40140700725 launched the app into net::ERR_NAME_NOT_RESOLVED and still passed). Wait until the
+      # guest itself resolves the host the app loads. Android has no nslookup; toybox ping resolves
+      # first and prints "PING <host> (<addr>)" or "ping: unknown host", so a resolved address is the
+      # signal, whether or not the echo reply comes back (ICMP through the emulator's NAT is not
+      # reliable; name resolution is what the WebView needs).
+      - name: Wait for the emulator to resolve grabcaramel.com
+        env:
+          DNS_HOST: grabcaramel.com
+          DNS_WAIT_SECONDS: '120'
+        run: |
+          set -uo pipefail
+          deadline=$((SECONDS + DNS_WAIT_SECONDS))
+          while :; do
+            OUT=$(adb shell "ping -c1 -W2 $DNS_HOST" 2>&1 | tr -d '\r' || true)
+            echo "ping $DNS_HOST -> $(printf '%s' "$OUT" | head -n 2 | tr '\n' ' ')"
+            if printf '%s\n' "$OUT" | grep -Eq "^PING $DNS_HOST \([0-9a-fA-F.:]+\)"; then
+              echo "emulator resolves $DNS_HOST."
+              break
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error::emulator could not resolve $DNS_HOST within ${DNS_WAIT_SECONDS}s; last ping output: $OUT"
+              echo "net.dns1=$(adb shell getprop net.dns1 | tr -d '\r')  net.dns2=$(adb shell getprop net.dns2 | tr -d '\r')"
+              tail -n 40 "$RUNNER_TEMP/emulator.log" || true
+              exit 1
+            fi
+            sleep 5
+          done
+
       - name: Launch the app and let it settle
         run: |
           set -euo pipefail
@@ -206,10 +238,6 @@ jobs:
           sleep "$LAUNCH_SETTLE_SECONDS"
           adb shell pidof "$APP_ID" | tr -d '\r' > "$RUNNER_TEMP/pid.txt" || true
           echo "pidof output: $(cat "$RUNNER_TEMP/pid.txt")"
-
-      - name: Capture screenshot
-        if: always()
-        run: adb exec-out screencap -p > smoke.png && ls -l smoke.png
 
       - name: Assert the app process is alive (THE smoke assertion)
         run: |
@@ -235,6 +263,48 @@ jobs:
             exit 1
           fi
           echo "no FATAL EXCEPTION for $APP_ID in logcat."
+
+      # The alive check cannot see a WebView stuck on an error page (a dead network leaves the
+      # process running). uiautomator dumps the accessibility tree: the shell's own "Something went
+      # wrong" banner is native text, and the page's text comes through the WebView's accessibility
+      # nodes. PASS needs the Deals page heading ("Today's Coupon Codes" on grabcaramel.com/coupons);
+      # either error marker FAILS at once. The loop only covers a slow first paint after the DNS wait.
+      # If a run shows the heading is on screen but missing from the dump, the WebView content is not
+      # exposed to uiautomator on this image: replace this signal, do not weaken it.
+      - name: Assert the Deals page rendered (uiautomator dump, no error page)
+        env:
+          PAGE_MARKER: Coupon Codes
+          PAGE_WAIT_SECONDS: '90'
+        run: |
+          set -uo pipefail
+          deadline=$((SECONDS + PAGE_WAIT_SECONDS))
+          attempt=0
+          while :; do
+            attempt=$((attempt + 1))
+            adb shell uiautomator dump /sdcard/ui.xml 2>&1 | tr -d '\r' || true
+            adb exec-out cat /sdcard/ui.xml 2>/dev/null | tr -d '\r' > ui.xml || true
+            echo "attempt $attempt: ui.xml $(stat -c%s ui.xml 2>/dev/null || echo 0) bytes"
+            ERR=$(grep -oE 'Something went wrong|net::ERR_[A-Z_]+' ui.xml | sort -u | tr '\n' ' ' || true)
+            if [ -n "$ERR" ]; then
+              echo "::error::the app shows an error page, not the Deals page: $ERR"
+              grep -oE '(text|content-desc)="[^"]+"' ui.xml | head -n 40 || true
+              exit 1
+            fi
+            if grep -qF "$PAGE_MARKER" ui.xml; then
+              echo "uiautomator evidence: found '$PAGE_MARKER' in the dump: $(grep -oE "(text|content-desc)=\"[^\"]*$PAGE_MARKER[^\"]*\"" ui.xml | head -n 3 | tr '\n' ' ')"
+              break
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error::no '$PAGE_MARKER' in the uiautomator dump after ${PAGE_WAIT_SECONDS}s: the Deals page did not render, or the WebView content is not exposed to uiautomator on this image. Visible text nodes:"
+              grep -oE '(text|content-desc)="[^"]+"' ui.xml | head -n 60 || true
+              exit 1
+            fi
+            sleep 5
+          done
+
+      - name: Capture screenshot
+        if: always()
+        run: adb exec-out screencap -p > smoke.png && ls -l smoke.png
 
       - name: Assert the screenshot is non-trivial evidence (not a blank/failed capture)
         run: |

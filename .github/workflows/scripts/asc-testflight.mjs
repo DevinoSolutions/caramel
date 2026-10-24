@@ -13,6 +13,11 @@
 //   node asc-testflight.mjs attach-build <marketing-version> <build-number> <group-name>
 //       Waits for the uploaded build to finish processing, adds it to the named
 //       INTERNAL TestFlight group, and verifies membership + IN_BETA_TESTING.
+//   node asc-testflight.mjs version-state <marketing-version>
+//       Read-only train guard for internal_preview builds: exits non-zero when an iOS
+//       App Store version with that versionString exists in any state other than a closed
+//       one (being prepared, in review, awaiting release...), so a preview build can never
+//       land in a train someone is shipping. Fails CLOSED on any API error or unknown state.
 // Env: ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_PATH (path to AuthKey_<id>.p8),
 //      ASC_BUNDLE_ID (com.devino.Caramel).
 import { createPrivateKey, sign } from 'node:crypto'
@@ -127,6 +132,59 @@ async function nextBuildNumber() {
         `${builds.length} existing iOS build(s); highest CFBundleVersion ${highest}.`,
     )
     process.stdout.write(String(highest + 1))
+}
+
+// App Store version states in which the train is over: the version is live or was live and has
+// since been replaced or pulled. Source: Apple's AppVersionState (READY_FOR_DISTRIBUTION is the
+// current name of READY_FOR_SALE) and the deprecated AppStoreVersionState. Anything else
+// (PREPARE_FOR_SUBMISSION, WAITING_FOR_REVIEW, IN_REVIEW, REJECTED, PENDING_DEVELOPER_RELEASE,
+// ... or a state this list has never heard of) means the train is still being prepared or reviewed.
+const CLOSED_TRAIN_STATES = new Set([
+    'READY_FOR_SALE',
+    'READY_FOR_DISTRIBUTION',
+    'REPLACED_WITH_NEW_VERSION',
+    'REMOVED_FROM_SALE',
+    'DEVELOPER_REMOVED_FROM_SALE',
+])
+
+// Pure: given the appStoreVersions rows for one versionString, returns the rows that keep the
+// train open as "<id>: <state>" strings (empty = the preview build may proceed). A row with no
+// readable state counts as open (fail closed). Both state attributes are checked because Apple
+// is moving appStoreState -> appVersionState; if either is non-closed the train is open.
+function openTrainVersions(rows) {
+    return rows.flatMap(row => {
+        const states = [
+            row.attributes?.appVersionState,
+            row.attributes?.appStoreState,
+        ].filter(state => typeof state === 'string' && state !== '')
+        if (states.length === 0) return [`${row.id}: <no state attribute>`]
+        return states.every(state => CLOSED_TRAIN_STATES.has(state))
+            ? []
+            : [`${row.id}: ${states.join('/')}`]
+    })
+}
+
+async function assertTrainClosed(marketingVersion) {
+    const appId = await resolveAppId()
+    const rows = await listAll(
+        `/apps/${appId}/appStoreVersions?filter[platform]=IOS&filter[versionString]=${encodeURIComponent(marketingVersion)}&fields[appStoreVersions]=versionString,platform,appStoreState,appVersionState&limit=200`,
+    )
+    // The server-side filter is trusted but not relied on: a row for another version or
+    // platform must not satisfy or fail the guard.
+    const sameTrain = rows.filter(
+        row =>
+            row.attributes?.versionString === marketingVersion &&
+            row.attributes?.platform === 'IOS',
+    )
+    const open = openTrainVersions(sameTrain)
+    if (open.length > 0) {
+        throw new Error(
+            `App Store version ${marketingVersion} (iOS) is still open on app ${appId} [${open.join(', ')}]: refusing an internal preview build into that TestFlight train.`,
+        )
+    }
+    summary(
+        `### Train guard\n\niOS version \`${marketingVersion}\`: ${sameTrain.length} App Store version row(s), none open. The internal preview build may use this train.`,
+    )
 }
 
 async function findBuild(appId, marketingVersion, buildNumber) {
@@ -259,8 +317,10 @@ if (command === 'next-build-number') {
     await nextBuildNumber()
 } else if (command === 'attach-build' && args.length === 3) {
     await attachBuild(...args)
+} else if (command === 'version-state' && args.length === 1) {
+    await assertTrainClosed(args[0])
 } else {
     throw new Error(
-        'Usage: asc-testflight.mjs next-build-number | attach-build <marketing-version> <build-number> <group-name>',
+        'Usage: asc-testflight.mjs next-build-number | attach-build <marketing-version> <build-number> <group-name> | version-state <marketing-version>',
     )
 }

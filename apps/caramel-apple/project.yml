@@ -28,7 +28,7 @@ options:
     iOS: '16.4' # MV3 floor, same as IOS_DEPLOYMENT_FLOOR in release-extension.yml
 settings:
   base:
-    MARKETING_VERSION: '1.5.0' # the tag apple-v1.5.0 must match this (asserted in release-apple-app.yml)
+    MARKETING_VERSION: '1.6.0' # the tag apple-v1.6.0 must match this (asserted in release-apple-app.yml)
     CURRENT_PROJECT_VERSION: '1' # overridden at archive time by the CI build-number scheme
     SWIFT_VERSION: '5.0'
     CODE_SIGN_STYLE: Automatic # DEVELOPMENT_TEAM is passed on the xcodebuild command line from the APPLE_TEAM_ID secret
