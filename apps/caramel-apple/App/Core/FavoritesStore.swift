@@ -1,12 +1,18 @@
 import SwiftUI
 
-/// Saved stores. Signed out they are a local list in the App Group defaults;
-/// signed in the account's /api/account/favorites list is the truth plus any
-/// store still waiting to be pushed up, and the local list mirrors that union
-/// (so the background alerts check can read it without a network round trip).
+/// The on-device mirror of the saved stores that AlertsEngine watches. Signed in,
+/// the account's /api/account/favorites list is the truth plus any store still
+/// waiting to be pushed up, and the local list mirrors that union (so the
+/// background alerts check can read it without a network round trip).
 ///
-/// A store saved on this device is never dropped by a sync: it stays in the
-/// persisted "pending push" set until the server has confirmed it.
+/// Saving a store is the web page's job now (the Saved tab frames grabcaramel.com),
+/// so nothing in the app adds to the list any more. What remains is the sync, and
+/// it still carries stores that earlier versions saved on this device: those are
+/// never dropped, they stay in the persisted "pending push" set until the server
+/// has confirmed them.
+///
+/// TODO(T-7852): signed-out shell pages cannot save stores until the web-session
+/// handoff exists, so alerts only see stores from a signed-in account.
 @MainActor
 final class FavoritesStore: ObservableObject {
     @Published private(set) var stores: [String]
@@ -28,26 +34,11 @@ final class FavoritesStore: ObservableObject {
 
     var isSyncedToAccount: Bool { session.isSignedIn }
 
-    func contains(_ domain: String) -> Bool {
-        stores.contains(Self.key(domain))
-    }
-
     /// Signed in: retries any pending pushes, then adopts the account list plus
     /// whatever could not be pushed (a failure is shown, the cached list stays).
     func refresh() async {
         guard let token = session.token else { return }
         await sync(token: token)
-    }
-
-    func toggle(_ domain: String) async {
-        await set(domain, favorited: !contains(domain))
-    }
-
-    func remove(at offsets: IndexSet) async {
-        let doomed = offsets.map { stores[$0] }
-        for domain in doomed {
-            await set(domain, favorited: false)
-        }
     }
 
     /// Called when the session changes: a new sign-in queues the device list for
@@ -115,23 +106,6 @@ final class FavoritesStore: ObservableObject {
         }
     }
 
-    private func set(_ domain: String, favorited: Bool) async {
-        let key = Self.key(domain)
-        guard let token = session.token else {
-            replace(with: favorited ? [key] + stores.filter { $0 != key } : stores.filter { $0 != key })
-            return
-        }
-        do {
-            let stored = try await api.setFavorite(key, favorited: favorited, bearer: token)
-            setPending(pending().filter { $0 != key && $0 != stored })
-            replace(with: favorited ? [stored] + stores.filter { $0 != stored && $0 != key } : stores.filter { $0 != stored && $0 != key })
-        } catch is CancellationError {
-            return
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-    }
-
     // MARK: Persistence
 
     private func pending() -> [String] {
@@ -150,9 +124,5 @@ final class FavoritesStore: ObservableObject {
     private static func unique(_ domains: [String]) -> [String] {
         var seen = Set<String>()
         return domains.filter { seen.insert($0).inserted }
-    }
-
-    private static func key(_ domain: String) -> String {
-        domain.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 }

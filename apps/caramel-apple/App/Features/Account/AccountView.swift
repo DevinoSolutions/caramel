@@ -1,12 +1,17 @@
 import SwiftUI
 
-/// Sign in (Apple / Google through the web OAuth flow), savings, data export,
-/// data deletion, sign out.
+/// The native account screen: sign in (Apple / Google through the web OAuth flow),
+/// sign out, data export and deletion (App Review 5.1.1(v) account deletion stays
+/// in-app), deal alerts, the privacy policy, and a door to the framed web account.
+///
+/// TODO(T-7852): the web account page opens signed out until the session handoff
+/// exists, which is why export and "Delete my synced data" are still native here.
+/// Drop them once /profile in the shell is signed in.
 struct AccountView: View {
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var favorites: FavoritesStore
+    @EnvironmentObject private var router: ShellRouter
 
-    @State private var overview: LoadState<OverviewResponse> = .idle
     @State private var exportedFile: URL?
     @State private var exportError: String?
     @State private var isExporting = false
@@ -26,6 +31,18 @@ struct AccountView: View {
                     signedOutSection
                 }
                 Section {
+                    NavigationLink {
+                        WebShellView(model: router.profile)
+                            .navigationTitle("Your Caramel account")
+                            .navigationBarTitleDisplayMode(.inline)
+                    } label: {
+                        Label("Your Caramel account", systemImage: "person.text.rectangle")
+                    }
+                } footer: {
+                    Text("Savings, saved stores and preferences, on grabcaramel.com.")
+                }
+                AlertsSettingsSection()
+                Section {
                     Link(destination: AppConfig.supportURL) {
                         Label("Help & support", systemImage: "questionmark.circle")
                     }
@@ -35,11 +52,6 @@ struct AccountView: View {
                     Link(destination: AppConfig.websiteURL) {
                         Label("Website", systemImage: "globe")
                     }
-                    if session.isSignedIn {
-                        Link(destination: AppConfig.webAccountURL) {
-                            Label("Your account on the web", systemImage: "safari")
-                        }
-                    }
                 } header: {
                     Text("About")
                 } footer: {
@@ -47,10 +59,6 @@ struct AccountView: View {
                 }
             }
             .navigationTitle("Account")
-            .task(id: session.token) {
-                guard session.isSignedIn else { return }
-                await loadOverview()
-            }
             .alert("Delete your account?", isPresented: $confirmingAccountDelete) {
                 Button("Delete account", role: .destructive) { Task { await deleteAccount() } }
                 Button("Cancel", role: .cancel) {}
@@ -108,16 +116,6 @@ struct AccountView: View {
         Section {
             Label(session.username ?? "Signed in", systemImage: "person.crop.circle.fill")
         }
-        Section("Your savings") {
-            switch overview {
-            case .idle, .loading:
-                ProgressView()
-            case .failed(let message):
-                ErrorBanner(message: message) { Task { await loadOverview() } }
-            case .loaded(let data):
-                savingsRows(data.savings)
-            }
-        }
         Section {
             if let exportedFile = exportedFile {
                 ShareLink(item: exportedFile) {
@@ -156,42 +154,7 @@ struct AccountView: View {
         }
     }
 
-    @ViewBuilder
-    private func savingsRows(_ savings: OverviewResponse.Savings) -> some View {
-        if savings.totals.isEmpty {
-            Text(savings.syncEnabled
-                ? "No savings recorded yet."
-                : "Savings are not synced. Turn on savings sync in the Caramel extension to see totals here.")
-                .foregroundStyle(.secondary)
-        } else {
-            ForEach(savings.totals, id: \.currency) { total in
-                HStack {
-                    Text("Saved (\(total.currency))")
-                    Spacer()
-                    Text(DiscountFormat.money(minorUnits: total.minorUnits, currency: total.currency)).bold()
-                }
-            }
-            Text("\(savings.eventCount) \(savings.eventCount == 1 ? "saving" : "savings") across \(savings.storeCount) \(savings.storeCount == 1 ? "store" : "stores").")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-        }
-    }
-
     // MARK: Actions
-
-    private func loadOverview() async {
-        guard let token = session.token else { return }
-        overview = .loading
-        do {
-            overview = .loaded(try await CaramelAPI.shared.overview(bearer: token))
-        } catch let error as APIError where error.isUnauthorized {
-            overview = .failed("Your session expired. Sign out and sign in again.")
-        } catch is CancellationError {
-            overview = .idle
-        } catch {
-            overview = .failed(error.localizedDescription)
-        }
-    }
 
     private func exportData() async {
         guard let token = session.token else { return }
@@ -225,7 +188,6 @@ struct AccountView: View {
             exportedFile = nil
             deleteMessage = "Your synced data was deleted."
             await favorites.refresh()
-            await loadOverview()
         } catch {
             deleteMessage = "Could not delete: \(error.localizedDescription)"
         }

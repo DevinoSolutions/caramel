@@ -18,6 +18,8 @@ enum AlertsEngine {
     struct Hit: Equatable {
         let store: String
         let newCodes: Int
+        /// The store's coupon total at check time: what `markSeen` records once the shopper has been shown the hit.
+        let total: Int
     }
 
     struct CheckResult {
@@ -43,17 +45,10 @@ enum AlertsEngine {
         AppGroup.defaults.set(current, forKey: key)
     }
 
-    /// The shopper looked at a store's codes: that total is now "seen".
+    /// The shopper was shown a store's codes (the Alerts section's manual check): that total is now "seen".
     static func markSeen(store: String, total: Int) {
         setTotal(total, for: store, key: AppGroup.Key.alertsLastSeenTotals)
         setTotal(total, for: store, key: AppGroup.Key.alertsLastNotifiedTotals)
-    }
-
-    /// A store just got saved: its current total is the baseline, not "new".
-    static func baselineIfUnknown(store: String, total: Int) {
-        if totals(AppGroup.Key.alertsLastSeenTotals)[store] == nil {
-            markSeen(store: store, total: total)
-        }
     }
 
     // MARK: Check
@@ -71,7 +66,7 @@ enum AlertsEngine {
                     continue
                 }
                 if page.total > seen {
-                    result.hits.append(Hit(store: store, newCodes: page.total - seen))
+                    result.hits.append(Hit(store: store, newCodes: page.total - seen, total: page.total))
                 } else if page.total < seen {
                     // Codes expired: lower the baseline so the next new one is counted.
                     markSeen(store: store, total: page.total)

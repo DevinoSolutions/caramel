@@ -2,8 +2,8 @@ import Foundation
 
 enum AppConfig {
     /// The production Caramel API. Every network call in the app goes here:
-    /// the public JSON routes under /api (coupons, sites) and the bearer-gated
-    /// account routes.
+    /// the public coupons route (alerts) and the bearer-gated account routes. The
+    /// web shell's origin is AppLinkGuard.origin, the same host.
     static let apiBaseURL = URL(string: "https://grabcaramel.com")!
 
     /// BGTaskScheduler identifier for the local new-codes check (must also be
@@ -22,12 +22,11 @@ enum AppConfig {
     static let signInRedirectURI = "\(signInCallbackScheme)://auth/callback"
 
     /// Public pages linked from the Account tab's About section (App Review
-    /// wants a support URL and a privacy policy reachable inside the app).
-    /// There is no terms page on the site, so none is linked.
+    /// wants a support URL and a privacy policy reachable inside the app). They
+    /// open in Safari, outside the shell. There is no terms page on the site, so none is linked.
     static let websiteURL = URL(string: "https://grabcaramel.com")!
     static let supportURL = URL(string: "https://grabcaramel.com/support")!
     static let privacyPolicyURL = URL(string: "https://grabcaramel.com/privacy")!
-    static let webAccountURL = URL(string: "https://grabcaramel.com/profile")!
 }
 
 /// App Store screenshot capture ONLY. The "App Store screenshots" workflow
@@ -56,9 +55,6 @@ enum ScreenshotLaunch {
     /// never pass the argument and always show it.
     static var isActive: Bool { value(after: "-screenshotTab") != nil }
 
-    /// Text typed into the Search tab, so the shot shows results instead of the A-Z browse list.
-    static var searchQuery: String? { value(after: "-screenshotSearchQuery") }
-
     /// The tab to open on; `store:DOMAIN` opens the Deals tab.
     static var initialTab: RootTab? {
         guard let raw = value(after: "-screenshotTab") else { return nil }
@@ -66,7 +62,7 @@ enum ScreenshotLaunch {
         return RootTab(rawValue: raw)
     }
 
-    /// The store page to push on top of the Deals tab, if requested.
+    /// The store whose /coupons/DOMAIN page the Deals shell loads, if requested (ShellRouter).
     static var storeDomain: String? {
         guard let raw = value(after: "-screenshotTab"), raw.hasPrefix(storePrefix) else { return nil }
         let domain = String(raw.dropFirst(storePrefix.count))

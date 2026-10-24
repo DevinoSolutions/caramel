@@ -125,6 +125,27 @@ jobs:
           echo "::error::${APPLE_DIR} does not match what project.yml generates. Run ${APPLE_DIR}/scripts/generate-project.sh on a Mac (or take the 'generated-caramel-apple' artifact of this run) and commit the result."
           exit 1
 
+      # PR mode only: the web shell's link-guard unit tests (CaramelTests scheme;
+      # host-less, so no WXT build or signing is needed). The signed tag runs skip
+      # it: the PR that changed the code already ran it.
+      - name: Test the web shell link guard (unit tests)
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          command -v jq >/dev/null 2>&1 || brew install jq
+          udid=$(xcrun simctl list devices available -j | jq -r '
+            [.devices | to_entries[] | select(.key | test("iOS")) | . as $rt
+              | $rt.value[] | select(.name | test("^iPhone")) | {rt: $rt.key, name: .name, udid: .udid}]
+            | sort_by(.rt, .name) | last | .udid // empty')
+          [ -n "$udid" ] || { echo "::error::No available iPhone simulator on this runner image."; exit 1; }
+          xcodebuild test \
+            -project "${APPLE_DIR}/Caramel.xcodeproj" \
+            -scheme CaramelTests \
+            -destination "platform=iOS Simulator,id=${udid}" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
 

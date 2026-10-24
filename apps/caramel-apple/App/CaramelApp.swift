@@ -6,6 +6,7 @@ struct CaramelApp: App {
     @StateObject private var session: SessionStore
     @StateObject private var favorites: FavoritesStore
     @StateObject private var extensionStatus = ExtensionStatus()
+    @StateObject private var router = ShellRouter()
 
     init() {
         ScreenshotLaunch.seedSavedStoresIfRequested() // App Store screenshot capture only; inert without its launch argument
@@ -20,6 +21,8 @@ struct CaramelApp: App {
                 .environmentObject(session)
                 .environmentObject(favorites)
                 .environmentObject(extensionStatus)
+                .environmentObject(router)
+                .onOpenURL { router.handleIncoming($0) }
                 .task {
                     // Launch: confirm the stored sign-in is alive, then adopt the account's saved stores.
                     await session.validate()
