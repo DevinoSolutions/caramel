@@ -43,3 +43,7 @@
   - delta at 973f4fc: merge;
   - final push 73ce567 (lead-checked diff): WebView rebuilt with clearCache on sign-out/delete so the back stack can't reach cached signed-in pages, and a release-job step that fails while any TODO(T-7852) marker remains (a do-not-tag check).
   Merged as ce8414c. No emulator or device check possible (devino-fifth agent user lacks kvm and the SDK); reported to MASTER.
+- `pr493-checks-green.png`: #493 (T-7842, iOS parity follow-up) at head 852c865, fresh unnamed headed clone, 20:5xZ: "All checks have passed, 1 skipped, 13 successful", including App Store screenshots (run 40129012390, 34 min, slow runner). review-465:
+  - first pass fix-needed: the representable never swapped in the new WKWebView, and nilled delegates left the visible view unguarded;
+  - delta at 852c865: merge. The host is keyed on the view; the old view is removed before its delegates drop; lazy reload; PR-mode ::warning:: marker step; ::error:: tag gate while TODO(T-7852) markers remain.
+  Merged as 1c0b170. Nits carried to T-7842: .task(id:) instead of onAppear (blank tab after a launch-time 401), and `|| true` on the warning grep.
