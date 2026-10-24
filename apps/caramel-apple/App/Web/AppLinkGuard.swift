@@ -28,6 +28,8 @@ enum AppLinkGuard {
         case openInSystem(URL)
         /// A frame embedded in a page (not a navigation of the shell): https content, or the about: placeholders, may load.
         case allowEmbedded
+        /// An external open (Safari, mail, phone) that no tap asked for, e.g. `location.href = ...`. Cancelled, with a notice.
+        case blockedExternal
         /// Refused. `reason` goes to the log, never into a user-visible URL.
         case cancel(reason: String)
     }
@@ -66,7 +68,37 @@ enum AppLinkGuard {
 
     // MARK: Navigation decision
 
-    private static let signInPaths: Set<String> = ["/login", "/login/", "/signup", "/signup/"]
+    /// What started a navigation, reduced to what the gesture gate needs.
+    enum NavigationKind: Equatable {
+        /// A tapped link (WKNavigationType.linkActivated).
+        case linkActivated
+        /// A submitted form (WKNavigationType.formSubmitted).
+        case formSubmitted
+        /// Script (`location.href`, `window.open`), redirects, reloads, back/forward.
+        case other
+    }
+
+    /// Leaving the app for Safari, Mail or the dialer needs a tap or a form
+    /// submit. Without one the page could launch them on its own, so the open is
+    /// replaced by `.blockedExternal`. Decisions that stay in the shell, or that
+    /// are already refusals, are unchanged.
+    static func gate(_ decision: Decision, kind: NavigationKind) -> Decision {
+        switch decision {
+        case .openInBrowser, .openInSystem:
+            return kind == .other ? .blockedExternal : decision
+        default:
+            return decision
+        }
+    }
+
+    /// The path's non-empty segments, so `//login` and `/login/` read as `login`.
+    /// `URLComponents.path` is already percent-decoded.
+    static func pathSegments(of url: URL) -> [String] {
+        let path = URLComponents(url: url, resolvingAgainstBaseURL: false)?.path ?? ""
+        return path.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
+    }
+
+    private static let signInSegments: Set<String> = ["login", "signup"]
 
     /// `isMainFrame` is false for iframes. Their loads are not navigations of the
     /// shell (an iframe that navigates the TOP frame is a main-frame decision), so
@@ -87,8 +119,9 @@ enum AppLinkGuard {
         }
 
         if isAllowed(string) {
-            let path = URLComponents(string: string)?.path ?? ""
-            return signInPaths.contains(path) ? .signIn : .loadInShell(url)
+            let segments = pathSegments(of: url)
+            let isSignInPage = segments.count == 1 && signInSegments.contains(segments[0])
+            return isSignInPage ? .signIn : .loadInShell(url)
         }
 
         if containsForbiddenCharacter(string) {
@@ -104,6 +137,23 @@ enum AppLinkGuard {
             return .openInSystem(url)
         default:
             return .cancel(reason: "scheme \(scheme ?? "none") is not allowed")
+        }
+    }
+
+    // MARK: Incoming links
+
+    /// Where an incoming link (onOpenURL, universal link) may land: `/`, `/coupons*`,
+    /// `/profile*`, `/privacy`, `/support`. Anything else on the origin goes home
+    /// (Deals), and a URL the string gate refuses is nil (ignored, logged).
+    static func incomingTarget(for url: URL, home: URL) -> URL? {
+        guard isAllowed(url.absoluteString) else { return nil }
+        let segments = pathSegments(of: url)
+        guard let first = segments.first else { return url }
+        switch (first, segments.count) {
+        case ("coupons", _), ("profile", _), ("privacy", 1), ("support", 1):
+            return url
+        default:
+            return home
         }
     }
 }

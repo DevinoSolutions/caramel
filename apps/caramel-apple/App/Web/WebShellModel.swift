@@ -1,3 +1,4 @@
+import Combine
 import OSLog
 import SwiftUI
 import UIKit
@@ -11,7 +12,9 @@ import WebKit
 ///  - no WKScriptMessageHandler / user script: there is no JS-to-native bridge;
 ///  - no file-URL access: the guard refuses file: URLs, nothing calls loadFileURL
 ///    and the private allowFileAccessFromFileURLs preference is left at its default (off);
-///  - no new web views: window.open and target=_blank go through the same decision.
+///  - no new web views: window.open and target=_blank go through the same decision;
+///  - no script-launched windows (javaScriptCanOpenWindowsAutomatically is off) and no
+///    script-launched Safari/Mail/dialer: an external open needs a tap or a form submit.
 ///
 /// TODO(T-7842): `WKWebViewConfiguration.limitsNavigationsToAppBoundDomains` is not
 /// turned on. It needs WKAppBoundDomains (grabcaramel.com, plus the www host if the
@@ -27,6 +30,8 @@ final class WebShellModel: NSObject, ObservableObject {
         case idle
         case loading
         case loaded
+        /// The page wants a signed-in web session, which the shell does not have yet (TODO(T-7852)).
+        case needsSignIn
         case failed(String)
     }
 
@@ -42,6 +47,8 @@ final class WebShellModel: NSObject, ObservableObject {
     private static let log = Logger(subsystem: "com.devino.Caramel", category: "web-shell")
 
     private let home: URL
+    private var urlObservation: AnyCancellable?
+    private var lastObservedURL: URL?
     private var lastRequestedURL: URL?
     private var didStartLoading = false
 
@@ -50,6 +57,7 @@ final class WebShellModel: NSObject, ObservableObject {
         let configuration = WKWebViewConfiguration()
         configuration.applicationNameForUserAgent = ShellUserAgent.applicationName(version: Self.marketingVersion())
         configuration.websiteDataStore = .default()
+        configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
         webView = WKWebView(frame: .zero, configuration: configuration)
         super.init()
         webView.navigationDelegate = self
@@ -61,6 +69,13 @@ final class WebShellModel: NSObject, ObservableObject {
 #if DEBUG
         webView.isInspectable = true
 #endif
+        // Client-side routing (history.pushState / router.push) never reaches
+        // decidePolicyFor, so the shell also reacts to the URL itself changing.
+        urlObservation = webView.publisher(for: \.url)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] url in
+                Task { @MainActor in self?.urlChanged(url) }
+            }
     }
 
     private static func marketingVersion() -> String {
@@ -86,6 +101,12 @@ final class WebShellModel: NSObject, ObservableObject {
         webView.load(URLRequest(url: url))
     }
 
+    /// Back to the guarded home page (after sign-out or account deletion, once the web data is cleared).
+    func resetToHome() {
+        lastRequestedURL = nil
+        open(home)
+    }
+
     func retry() {
         open(lastRequestedURL ?? home)
     }
@@ -100,6 +121,44 @@ final class WebShellModel: NSObject, ObservableObject {
 
     // MARK: Decisions
 
+    private func urlChanged(_ url: URL?) {
+        guard let url = url, url != lastObservedURL else { return }
+        lastObservedURL = url
+        switch AppLinkGuard.decision(for: url, isMainFrame: true) {
+        case .signIn:
+            // The web app routed itself to /login (or a signed-out page bounced there):
+            // run the native sign-in, and step the page back to where it was.
+            pageAskedForSignIn(stepBack: true)
+        case .loadInShell:
+            if let store = StorePath.store(fromSegments: AppLinkGuard.pathSegments(of: url)) {
+                AlertsEngine.noteVisited(store: store)
+            }
+        case .allowEmbedded, .openInBrowser, .openInSystem, .blockedExternal, .cancel:
+            break
+        }
+    }
+
+    /// A page asked for /login or /signup. The native sign-in is offered; the web login
+    /// page itself is never left on screen. Reloading home would loop for a page that
+    /// bounces signed-out visitors to /login, so with nothing to step back to the shell
+    /// shows a "sign in" state instead.
+    private func pageAskedForSignIn(stepBack: Bool) {
+        onSignInRequested()
+        if stepBack, webView.canGoBack {
+            webView.goBack()
+        } else if stepBack || webView.url == nil {
+            pageState = .needsSignIn
+        }
+    }
+
+    private static func kind(of type: WKNavigationType) -> AppLinkGuard.NavigationKind {
+        switch type {
+        case .linkActivated: return .linkActivated
+        case .formSubmitted: return .formSubmitted
+        default: return .other
+        }
+    }
+
     private func perform(_ decision: AppLinkGuard.Decision) {
         switch decision {
         case .loadInShell(let url):
@@ -108,12 +167,19 @@ final class WebShellModel: NSObject, ObservableObject {
             // Unreachable for a main-frame decision; refuse rather than guess.
             Self.log.error("An embedded-frame decision reached the main-frame path.")
         case .signIn:
-            onSignInRequested()
+            pageAskedForSignIn(stepBack: false)
         case .openInBrowser(let url), .openInSystem(let url):
             openExternally(url)
+        case .blockedExternal:
+            blockExternalOpen()
         case .cancel(let reason):
             Self.log.error("Refused a navigation: \(reason, privacy: .public)")
         }
+    }
+
+    private func blockExternalOpen() {
+        Self.log.error("Blocked an external open that no tap asked for.")
+        notice = "A page tried to open another app or website without a tap, so Caramel blocked it."
     }
 
     private func openExternally(_ url: URL) {
@@ -148,7 +214,8 @@ extension WebShellModel: WKNavigationDelegate {
         }
         // A navigation with no target frame is treated as main-frame (the stricter policy).
         let isMainFrame = navigationAction.targetFrame?.isMainFrame ?? true
-        switch AppLinkGuard.decision(for: url, isMainFrame: isMainFrame) {
+        let kind = Self.kind(of: navigationAction.navigationType)
+        switch AppLinkGuard.gate(AppLinkGuard.decision(for: url, isMainFrame: isMainFrame), kind: kind) {
         case .loadInShell(let allowed):
             lastRequestedURL = allowed
             decisionHandler(.allow)
@@ -156,10 +223,13 @@ extension WebShellModel: WKNavigationDelegate {
             decisionHandler(.allow)
         case .signIn:
             decisionHandler(.cancel)
-            onSignInRequested()
+            pageAskedForSignIn(stepBack: false)
         case .openInBrowser(let external), .openInSystem(let external):
             decisionHandler(.cancel)
             openExternally(external)
+        case .blockedExternal:
+            decisionHandler(.cancel)
+            blockExternalOpen()
         case .cancel(let reason):
             Self.log.error("Refused a navigation: \(reason, privacy: .public)")
             decisionHandler(.cancel)
@@ -202,7 +272,8 @@ extension WebShellModel: WKUIDelegate {
             Self.log.error("Refused a new-window request without a URL.")
             return nil
         }
-        perform(AppLinkGuard.decision(for: url, isMainFrame: true))
+        let kind = Self.kind(of: navigationAction.navigationType)
+        perform(AppLinkGuard.gate(AppLinkGuard.decision(for: url, isMainFrame: true), kind: kind))
         return nil
     }
 }
@@ -225,6 +296,18 @@ struct WebShellView: View {
             .overlay(alignment: .top) {
                 if model.pageState == .loading {
                     ProgressView().padding(8)
+                }
+            }
+            .overlay {
+                if model.pageState == .needsSignIn {
+                    VStack(spacing: 12) {
+                        Text("Sign in to see this page").font(.headline)
+                        Button("Sign in") { model.onSignInRequested() }
+                            .buttonStyle(.borderedProminent)
+                        Button("Try again") { model.retry() }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(.background)
                 }
             }
             .overlay {

@@ -150,7 +150,12 @@ struct AccountView: View {
             Text("Your data")
         }
         Section {
-            Button("Sign out", role: .destructive) { Task { await session.signOut() } }
+            Button("Sign out", role: .destructive) {
+                Task {
+                    await session.signOut()
+                    await router.resetWebState()
+                }
+            }
         }
     }
 
@@ -176,6 +181,7 @@ struct AccountView: View {
         // state; on failure SessionStore.errorMessage shows the banner.
         if await session.deleteAccount() {
             exportedFile = nil
+            await router.resetWebState()
             await favorites.refresh()
         }
     }

@@ -88,7 +88,7 @@ final class AppLinkGuardTests: XCTestCase {
     }
 
     func testLoginAndSignupRunTheNativeSignIn() {
-        for path in ["/login", "/login/", "/signup", "/signup?next=%2Fprofile", "/login#x"] {
+        for path in ["/login", "/login/", "//login", "///login/", "/signup", "/signup?next=%2Fprofile", "/login#x", "/%6Cogin"] {
             XCTAssertEqual(decision("https://grabcaramel.com" + path), .signIn, path)
         }
         // Only the exact pages: a lookalike path is a normal page.
@@ -136,6 +136,82 @@ final class AppLinkGuardTests: XCTestCase {
         }
         guard case .cancel = decision("http://example.com/", mainFrame: false) else {
             return XCTFail("an http frame should be cancelled")
+        }
+    }
+
+    // MARK: Gesture gate (navigationType x target class)
+
+    func testExternalOpensNeedATapOrAFormSubmit() {
+        let targets: [(String, AppLinkGuard.Decision)] = [
+            ("browser", .openInBrowser(URL(string: "https://example.com/")!)),
+            ("system", .openInSystem(URL(string: "tel:+15555550100")!)),
+        ]
+        for (name, decision) in targets {
+            XCTAssertEqual(AppLinkGuard.gate(decision, kind: .linkActivated), decision, "\(name) via a tap")
+            XCTAssertEqual(AppLinkGuard.gate(decision, kind: .formSubmitted), decision, "\(name) via a form")
+            XCTAssertEqual(AppLinkGuard.gate(decision, kind: .other), .blockedExternal, "\(name) via script/redirect must be blocked")
+        }
+    }
+
+    func testTheGestureGateLeavesEveryOtherDecisionAlone() {
+        let page = URL(string: "https://grabcaramel.com/coupons")!
+        let others: [AppLinkGuard.Decision] = [.loadInShell(page), .signIn, .allowEmbedded, .blockedExternal, .cancel(reason: "x")]
+        for decision in others {
+            for kind in [AppLinkGuard.NavigationKind.linkActivated, .formSubmitted, .other] {
+                XCTAssertEqual(AppLinkGuard.gate(decision, kind: kind), decision)
+            }
+        }
+    }
+
+    // MARK: Incoming links
+
+    func testIncomingLinksLandOnlyOnAllowlistedPaths() {
+        let home = URL(string: "https://grabcaramel.com/coupons")!
+        let kept = [
+            "https://grabcaramel.com", "https://grabcaramel.com/", "https://grabcaramel.com/coupons", "https://grabcaramel.com/coupons/humehealth.com",
+            "https://grabcaramel.com/coupons/stores/a", "https://grabcaramel.com/profile", "https://grabcaramel.com/profile#favorites",
+            "https://grabcaramel.com/privacy", "https://grabcaramel.com/support", "https://grabcaramel.com/support?x=1",
+        ]
+        for string in kept {
+            XCTAssertEqual(AppLinkGuard.incomingTarget(for: URL(string: string)!, home: home), URL(string: string)!, string)
+        }
+        let sentHome = [
+            "https://grabcaramel.com/login", "https://grabcaramel.com/signup", "https://grabcaramel.com/faq", "https://grabcaramel.com/couponsfoo",
+            "https://grabcaramel.com/privacy/extra", "https://grabcaramel.com/api/account/export", "https://grabcaramel.com/welcome",
+        ]
+        for string in sentHome {
+            XCTAssertEqual(AppLinkGuard.incomingTarget(for: URL(string: string)!, home: home), home, string)
+        }
+    }
+
+    func testIncomingLinksOffTheOriginAreIgnored() {
+        let home = URL(string: "https://grabcaramel.com/coupons")!
+        for string in ["https://example.com/coupons", "http://grabcaramel.com/coupons", "https://grabcaramel.com.evil.com/", "javascript:alert(1)", "com.devino.caramel://auth/callback"] {
+            XCTAssertNil(AppLinkGuard.incomingTarget(for: URL(string: string)!, home: home), string)
+        }
+    }
+
+    // MARK: Alerts
+
+    func testAStoreWithoutABaselineIsRecordedNotReported() {
+        XCTAssertEqual(AlertsLogic.outcome(seen: nil, total: 7, visited: false), .markSeen(total: 7))
+    }
+
+    func testNewCodesAreReportedUntilTheShopperLooks() {
+        XCTAssertEqual(AlertsLogic.outcome(seen: 5, total: 8, visited: false), .hit(newCodes: 3))
+        XCTAssertEqual(AlertsLogic.outcome(seen: 5, total: 5, visited: false), .nothingNew)
+        XCTAssertEqual(AlertsLogic.outcome(seen: 5, total: 2, visited: false), .lowerBaseline(total: 2))
+    }
+
+    func testOpeningTheStorePageCountsAsSeen() {
+        XCTAssertEqual(AlertsLogic.outcome(seen: 5, total: 8, visited: true), .markSeen(total: 8))
+        XCTAssertEqual(AlertsLogic.outcome(seen: 5, total: 2, visited: true), .markSeen(total: 2))
+    }
+
+    func testStorePathReadsOnlyAStorePage() {
+        XCTAssertEqual(StorePath.store(fromSegments: ["coupons", "HumeHealth.com"]), "humehealth.com")
+        for segments in [[], ["coupons"], ["coupons", "stores"], ["coupons", "stores", "a"], ["profile"], ["coupons", "a/b"], ["coupons", "x.com", "y"]] {
+            XCTAssertNil(StorePath.store(fromSegments: segments), "\(segments)")
         }
     }
 

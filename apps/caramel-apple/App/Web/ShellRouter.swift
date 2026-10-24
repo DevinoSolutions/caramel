@@ -1,5 +1,6 @@
 import OSLog
 import SwiftUI
+import WebKit
 
 /// Owns the tab selection and the web shells, and is the single place an incoming
 /// URL (onOpenURL, a universal link) and a web-initiated sign-in are routed.
@@ -39,7 +40,8 @@ final class ShellRouter: ObservableObject {
 
     /// Any URL handed to the app from outside (custom scheme, universal link).
     /// Same gate as in-page navigation: only an AppLinkGuard-approved Caramel URL
-    /// is ever loaded, and it loads in the Deals shell.
+    /// is ever loaded, only on an allowlisted path (AppLinkGuard.incomingTarget;
+    /// any other path lands on the Deals home), and it loads in the Deals shell.
     ///
     /// TODO(T-7842): universal links need the Associated Domains entitlement
     /// (applinks:grabcaramel.com) and an apple-app-site-association file on the web
@@ -47,14 +49,21 @@ final class ShellRouter: ObservableObject {
     func handleIncoming(_ url: URL) {
         // The sign-in callback is consumed by ASWebAuthenticationSession (SessionStore); not a page to show.
         if url.scheme?.lowercased() == AppConfig.signInCallbackScheme { return }
-        switch AppLinkGuard.decision(for: url, isMainFrame: true) {
-        case .loadInShell(let allowed):
-            selection = .deals
-            deals.open(allowed)
-        case .signIn:
-            isChoosingSignInProvider = true
-        case .allowEmbedded, .openInBrowser, .openInSystem, .cancel:
+        guard let target = AppLinkGuard.incomingTarget(for: url, home: ShellDestination.deals.url) else {
             Self.log.error("Ignored an incoming URL that is not on the Caramel origin.")
+            return
+        }
+        selection = .deals
+        deals.open(target)
+    }
+
+    /// Sign-out and account deletion: the web side holds its own cookies and storage,
+    /// so wipe all of it and send every shell back to its guarded home page. Without
+    /// this the next person on the device would open the previous account's web session.
+    func resetWebState() async {
+        await WKWebsiteDataStore.default().removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast)
+        for model in [deals, stores, saved, profile] {
+            model.resetToHome()
         }
     }
 

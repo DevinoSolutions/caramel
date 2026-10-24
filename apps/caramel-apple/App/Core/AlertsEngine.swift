@@ -53,23 +53,45 @@ enum AlertsEngine {
 
     // MARK: Check
 
-    /// New codes per saved store since the shopper last looked. A store never
-    /// seen before gets its baseline recorded and reports nothing.
+    /// A saved store's web page was opened in the shell: its codes were looked at,
+    /// so the next check takes its total as the new baseline instead of reporting
+    /// the difference. No network here; the total is read by the check itself.
+    static func noteVisited(store: String) {
+        let saved = AppGroup.defaults.stringArray(forKey: AppGroup.Key.savedStores) ?? []
+        guard saved.contains(store) else { return }
+        var visited = Set(AppGroup.defaults.stringArray(forKey: AppGroup.Key.alertsVisitedStores) ?? [])
+        if visited.insert(store).inserted {
+            AppGroup.defaults.set(visited.sorted(), forKey: AppGroup.Key.alertsVisitedStores)
+        }
+    }
+
+    private static func clearVisited(_ store: String) {
+        var visited = Set(AppGroup.defaults.stringArray(forKey: AppGroup.Key.alertsVisitedStores) ?? [])
+        if visited.remove(store) != nil {
+            AppGroup.defaults.set(visited.sorted(), forKey: AppGroup.Key.alertsVisitedStores)
+        }
+    }
+
+    /// New codes per saved store since the shopper last looked (opened the store's
+    /// web page, or was shown the hit). A store never seen before gets its baseline
+    /// recorded and reports nothing.
     static func check(stores: [String], api: CaramelAPI = .shared) async -> CheckResult {
         var result = CheckResult()
         let lastSeen = totals(AppGroup.Key.alertsLastSeenTotals)
+        let visited = Set(AppGroup.defaults.stringArray(forKey: AppGroup.Key.alertsVisitedStores) ?? [])
         for store in stores {
             do {
                 let page = try await api.coupons(site: store, page: 1, limit: 1)
-                guard let seen = lastSeen[store] else {
-                    markSeen(store: store, total: page.total)
-                    continue
-                }
-                if page.total > seen {
-                    result.hits.append(Hit(store: store, newCodes: page.total - seen, total: page.total))
-                } else if page.total < seen {
-                    // Codes expired: lower the baseline so the next new one is counted.
-                    markSeen(store: store, total: page.total)
+                switch AlertsLogic.outcome(seen: lastSeen[store], total: page.total, visited: visited.contains(store)) {
+                case .markSeen(let total):
+                    markSeen(store: store, total: total)
+                    clearVisited(store)
+                case .hit(let newCodes):
+                    result.hits.append(Hit(store: store, newCodes: newCodes, total: page.total))
+                case .lowerBaseline(let total):
+                    markSeen(store: store, total: total)
+                case .nothingNew:
+                    break
                 }
             } catch is CancellationError {
                 // The caller went away (view change, new run): the rest of the
