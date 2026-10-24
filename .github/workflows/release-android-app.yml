@@ -105,6 +105,8 @@ jobs:
             ${{ env.ANDROID_DIR }}/app/build/reports
             ${{ env.ANDROID_DIR }}/app/build/test-results
           if-no-files-found: ignore
+          # T-7021: org artifact quota; reports are only read on the run that produced them.
+          retention-days: 3
 
   release:
     name: Sign release AAB + APK, upload to Play internal unless dry run
@@ -206,6 +208,10 @@ jobs:
             ${{ env.ANDROID_DIR }}/app/build/outputs/apk/release/app-release.apk
             ${{ env.ANDROID_DIR }}/app/build/outputs/mapping/release/mapping.txt
           if-no-files-found: error
+          # T-7021: org artifact quota. This copy is a convenience: the AAB of record is
+          # the one uploaded to the Play internal track below. A bundle that must outlive
+          # 3 days goes to MinIO via the shared keep-artifacts path (DevinoSolutions/.github).
+          retention-days: 3
 
       - name: Upload to Play internal track
         if: env.UPLOAD_TO_PLAY == 'true'

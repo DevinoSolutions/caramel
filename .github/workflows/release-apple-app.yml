@@ -116,6 +116,8 @@ jobs:
             ${{ env.APPLE_DIR }}/App/Caramel.entitlements
             ${{ env.APPLE_DIR }}/Extension/Info.plist
             ${{ env.APPLE_DIR }}/Extension/CaramelExtension.entitlements
+          # T-7021: org artifact quota; a drift diff is only read on the run that failed.
+          retention-days: 3
 
       - name: Fail on project drift
         if: steps.drift.outputs.drift == 'true'
