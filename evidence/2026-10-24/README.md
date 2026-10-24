@@ -38,3 +38,8 @@
   - round 1: fix-needed (no gesture gate, client-side /login not intercepted, web data not cleared on sign-out/delete, onOpenURL allowlist, alerts seen-state; plus a Postify body that overwrote the PR body via the shared /tmp/pr-body.md);
   - delta at fa93e47: merge.
   Caveats are recorded in a PR comment. Merged as fcebf84. No simulator or device check is possible: no macOS host. The runtime check moves to the first 1.6 TestFlight build, which is not tagged before T-7852.
+- `pr490-checks-green.png`: #490 (T-7842/T-7817, Android/Fire WebView shell) at head 73ce567, fresh unnamed headed clone, 19:5xZ: "All checks have passed, 2 skipped, 12 successful" (assembleDebug, testDebugUnitTest, lintDebug). review-465 adversarial review:
+  - round 1 fix-needed: POST main-frame bypass, no gesture gate, source-only guard, no path allowlist, /login normalisation, no web-state wipe, a Safe Browsing claim on Fire, stale PR body;
+  - delta at 973f4fc: merge;
+  - final push 73ce567 (lead-checked diff): WebView rebuilt with clearCache on sign-out/delete so the back stack can't reach cached signed-in pages, and a release-job step that fails while any TODO(T-7852) marker remains (a do-not-tag check).
+  Merged as ce8414c. No emulator or device check possible (devino-fifth agent user lacks kvm and the SDK); reported to MASTER.
