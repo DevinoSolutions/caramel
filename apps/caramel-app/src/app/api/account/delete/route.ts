@@ -1,3 +1,4 @@
+import type { Prisma } from '@/generated/prisma/client'
 import { withRoute } from '@/lib/api/withRoute'
 import {
     loadAppleRevocationTargets,
@@ -10,7 +11,6 @@ import {
     SITE_SUGGESTION_SCRUB_DATA,
     siteSuggestionIdentityWhere,
 } from '@/lib/siteSuggestionIdentity'
-import type { Prisma } from '@prisma/client'
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 

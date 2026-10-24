@@ -38,7 +38,8 @@ export function resolveStoreDomain(raw: string): string | null {
     let hostname = input
     try {
         hostname = new URL(
-            input.startsWith('http') ? input : `https://${input}`,
+            // A scheme, not just the letters "http": `httpbin.org` is a host.
+            /^https?:\/\//.test(input) ? input : `https://${input}`,
         ).hostname
     } catch {
         return null

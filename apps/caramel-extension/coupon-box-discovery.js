@@ -870,7 +870,7 @@ function sectionWords(el) {
         .map(wordsOf)
     let head = ''
     for (let n = el; !head && n !== box; n = n.parentElement)
-        for (let s = n; !head && (s = s.previousElementSibling); ) {
+        for (let s = n; !head && (s = s.previousElementSibling);) {
             const h = s.matches(HEADING) ? s : s.querySelector(HEADING)
             if (
                 h &&
@@ -1900,28 +1900,40 @@ const SELECTORS_MODULE = 'assets/coupon-box-selectors.js'
 async function savable(record, found, opened, totalEl) {
     if (isServed(record)) return record
     let box
+    // Which part kept the box from being saved, for the log: a refusal that
+    // does not say which element had no name cost a live store session to
+    // diagnose (pureformulas.com 2026-10-22: input and apply were named, the
+    // order total was a bare `div.col-4.text-end`).
+    const missing = []
+    const risky = []
     try {
         const m = await import(
             /* @vite-ignore */ currentBrowser.runtime.getURL(SELECTORS_MODULE)
         )
+        const name = el => (el ? m.caramelStableSelector(el) : null)
         const parts = m.caramelBoxSelectors(found.input, found.button, opened)
         // The total is part of the box: the next shopper's run reads the
         // saving there, and a box whose total cannot be found again cannot
         // prove a code works.
         const total = totalEl ? m.caramelTotalSelector(totalEl) : null
-        if (
-            parts &&
-            total &&
-            !(parts.apply && m.caramelRiskyControl(parts.apply)) &&
-            !(parts.toggle && m.caramelRiskyControl(parts.toggle))
-        )
-            box = { ...parts, total }
+        if (!parts) {
+            if (!name(found.input)) missing.push('input')
+            if (found.button && !name(found.button)) missing.push('apply')
+            if (opened && !name(opened)) missing.push('toggle')
+        }
+        if (!total) missing.push('total')
+        if (parts?.apply && m.caramelRiskyControl(parts.apply))
+            risky.push('apply')
+        if (parts?.toggle && m.caramelRiskyControl(parts.toggle))
+            risky.push('toggle')
+        if (parts && total && !risky.length) box = { ...parts, total }
     } catch (err) {
         log('FINDER_SAVE_UNAVAILABLE', { error: String(err?.message || err) })
         return record
     }
     if (!box) {
-        log('FINDER_SAVE_NO_NAME', {})
+        if (missing.length) log('FINDER_SAVE_NO_NAME', { missing, risky })
+        else log('FINDER_SAVE_RISKY_CONTROL', { risky })
         return record
     }
     caramelTabHandoff('set', 'box_save', box)

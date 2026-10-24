@@ -65,6 +65,7 @@ import {
     COUPON_BOX_PICK_BUDGET,
     resetCouponBoxPickBudgetForTests,
 } from '@/lib/couponBoxPickBudget'
+import { MIN_PAID_PATH_DEADLINE_SECONDS } from '@/lib/proxy-fallback-headers'
 import { couponBoxCases } from '../../evals/fixtures/coupon-box-cases'
 
 const EXT_ORIGIN = 'chrome-extension://abcdefghijklmnopabcdefghijklmnop'
@@ -225,6 +226,80 @@ describe('the pick', () => {
             temperature: 0,
             responseFormat: 'json_object',
             headers: { 'X-ORF-Strict': '1' },
+        })
+    })
+
+    describe('the paid fallback (Aladdin approved 2026-10-23)', () => {
+        const KEY = 'sk-or-v1-' + 'test000000000000000000000000'
+        const keep = {
+            url: envMock.OPENROUTER_API_URL,
+            key: envMock.OPENROUTER_FALLBACK_API_KEY,
+            model: envMock.OPENROUTER_FALLBACK_MODEL,
+            after: envMock.OPENROUTER_FALLBACK_AFTER_SECONDS,
+        }
+        const restore = () => {
+            envMock.OPENROUTER_API_URL = keep.url
+            envMock.OPENROUTER_FALLBACK_API_KEY = keep.key
+            envMock.OPENROUTER_FALLBACK_MODEL = keep.model
+            envMock.OPENROUTER_FALLBACK_AFTER_SECONDS = keep.after
+        }
+        const sentHeaders = () =>
+            (
+                chatMock.mock.calls[0] as unknown as [
+                    unknown,
+                    { headers: Record<string, string> },
+                ]
+            )[1].headers
+
+        it('with no key set, sends only the exact-model header', async () => {
+            envMock.OPENROUTER_API_URL = 'https://proxyai.devino.ca/v1'
+            envMock.OPENROUTER_FALLBACK_API_KEY = undefined
+            try {
+                await pickCouponBox({ domain: freshDomain(), outline: OUTLINE })
+                expect(sentHeaders()).toEqual({ 'X-ORF-Strict': '1' })
+            } finally {
+                restore()
+            }
+        })
+
+        it('with a key and the Devino proxy, sends the key, model and wait beside the exact-model header', async () => {
+            envMock.OPENROUTER_API_URL = 'https://proxyai.devino.ca/v1'
+            envMock.OPENROUTER_FALLBACK_API_KEY = KEY
+            envMock.OPENROUTER_FALLBACK_MODEL = 'deepseek/deepseek-v4.1-flash'
+            envMock.OPENROUTER_FALLBACK_AFTER_SECONDS = '6'
+            try {
+                await pickCouponBox({ domain: freshDomain(), outline: OUTLINE })
+                expect(sentHeaders()).toEqual({
+                    'X-ORF-Strict': '1',
+                    'X-ORF-Fallback-Key': KEY,
+                    'X-ORF-Fallback-Model': 'deepseek/deepseek-v4.1-flash',
+                    'X-ORF-Fallback-After': '6',
+                })
+            } finally {
+                restore()
+            }
+        })
+
+        it('with a key but a base URL that is not the Devino proxy, sends no key', async () => {
+            envMock.OPENROUTER_API_URL = 'https://openrouter.ai/api/v1'
+            envMock.OPENROUTER_FALLBACK_API_KEY = KEY
+            try {
+                await pickCouponBox({ domain: freshDomain(), outline: OUTLINE })
+                expect(sentHeaders()).toEqual({ 'X-ORF-Strict': '1' })
+            } finally {
+                restore()
+            }
+        })
+
+        it('gives the call at least the paid path minimum, so a paid answer can still arrive', async () => {
+            await pickCouponBox({ domain: freshDomain(), outline: OUTLINE })
+            const [, opts] = chatMock.mock.calls[0] as unknown as [
+                unknown,
+                { timeoutMs: number },
+            ]
+            expect(opts.timeoutMs).toBeGreaterThanOrEqual(
+                MIN_PAID_PATH_DEADLINE_SECONDS * 1000,
+            )
         })
     })
 

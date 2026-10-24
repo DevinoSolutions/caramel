@@ -58,8 +58,9 @@ export default async function SupportPage() {
                         Contact Support
                     </h1>
                     <p className="mx-auto max-w-md text-gray-600 dark:text-gray-300">
-                        Hit a snag, have an idea, or just a question? Send it
-                        our way — we read every message.
+                        Tell us what is blocking you, or send an idea or a
+                        question. Tick &ldquo;I&apos;d like a reply&rdquo; and a
+                        human replies within 1 business day.
                     </p>
                 </div>
                 <SupportForm accountEmail={accountEmail} />

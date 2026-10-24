@@ -3,7 +3,7 @@
 // The ONE definition of "which site_suggestions rows identify this account",
 // and of what a scrub removes from them.
 //
-// A LEAF on purpose: types from @prisma/client and nothing else. Two callers
+// A LEAF on purpose: types from the generated Prisma client and nothing else. Two callers
 // need this predicate and they must not each spell it out —
 //   - POST /api/account/data/delete   scrubs the rows it selects
 //   - GET  /api/account/overview      counts them, so the danger-zone button
@@ -11,7 +11,7 @@
 // If those two ever disagreed, the account page would say "Nothing to delete"
 // about rows the delete route would happily have scrubbed, or offer a delete
 // that removes nothing — and both readings look fine in isolation.
-import type { Prisma } from '@prisma/client'
+import type { Prisma } from '@/generated/prisma/client'
 
 /**
  * How a suggestion is tied to an account, matched TWO ways.

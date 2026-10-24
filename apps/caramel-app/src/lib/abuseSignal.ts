@@ -143,9 +143,8 @@ export async function reportRateLimitRejection(
         // Dynamic import: posthog-node must never be pulled into the edge
         // runtime, and `server-only` must not be evaluated by an edge build.
         // Mirrors instrumentation.ts's boot capture.
-        const { captureServerEvent } = await import(
-            '@/lib/analytics/posthogServer'
-        )
+        const { captureServerEvent } =
+            await import('@/lib/analytics/posthogServer')
         await captureServerEvent({
             event: 'api_abuse_detected',
             distinctId: `ip:${clientHash}`,

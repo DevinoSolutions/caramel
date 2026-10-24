@@ -1,15 +1,24 @@
+import type { PrismaClient } from '@/generated/prisma/client'
+import { isEstablishedAccount } from '@/lib/accountReputation'
 import { withRoute } from '@/lib/api/withRoute'
+import { workedStampCapSpent } from '@/lib/checkoutWorkedStamp'
 import {
     admitReport,
     releaseReport,
     reporterFor,
 } from '@/lib/couponReportDedupe'
 import {
+    admitCouponReportVelocity,
+    releaseCouponReportVelocity,
+    velocityTierOf,
+} from '@/lib/couponReportVelocity'
+import {
     recordFailed,
     recordWorked,
-    type CouponSignalWriter,
+    sweepExpiredReporters,
+    type CouponFailureWriter,
 } from '@/lib/couponSignals'
-import { couponExists } from '@/lib/couponsRepo'
+import { lockShopperUser } from '@/lib/couponsRepo'
 import prisma from '@/lib/prisma'
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
@@ -23,9 +32,12 @@ import { z } from 'zod'
 // extension fetches with host_permissions, so its request bypasses CORS
 // entirely (adding CORS/OPTIONS here would be dead ceremony).
 //
-// An id that is not a row of the catalog is a 404 and writes nothing
-// (couponsRepo.couponExists, status-agnostic: see its doc comment). coupon_signals
-// carries no FK, so without the gate any numeric id minted a signal row.
+// An id that is not a row of the catalog is a 404 and writes nothing. The check
+// is part of the aggregate write itself (couponsRepo.writeCouponSignal: an
+// INSERT ... SELECT ... WHERE EXISTS statement, status-agnostic, see its doc
+// comment), so a known id costs ONE statement, not an existence lookup plus a
+// write. coupon_signals carries no FK, so without the gate any numeric id
+// minted a signal row.
 //
 // Writes ONLY app-owned tables — the aggregate `coupon_signals` (through
 // couponSignals.ts) and, for a signed-in caller, the attributed
@@ -94,35 +106,69 @@ export const POST = withRoute(
         // anonymous callers. 'worked' and 'failed' have separate slots. A
         // duplicate is a 2xx no-op, never an error: the extension and the web
         // card must not show a failure for a harmless repeat.
-        const reporter = reporterFor(userId, req)
+        // An ESTABLISHED account weighs as an account toward a failure quorum, a
+        // young one as an anonymous network (accountReputation.ts).
+        const reporter = reporterFor(
+            userId,
+            req,
+            isEstablishedAccount(session?.user?.createdAt),
+        )
         if (!admitReport(body.outcome, reporter, id)) {
             return NextResponse.json({ ok: true, deduped: true })
         }
 
-        try {
-            // An unknown id writes no signal and gives its dedupe slot back, so
-            // a forger probing random ids cannot fill the table with slots no
-            // report ever used. The slot is taken BEFORE this lookup so a
-            // tracked duplicate stays a database-free no-op.
-            if (!(await couponExists(id))) {
-                releaseReport(body.outcome, reporter, id)
-                return NextResponse.json(
-                    { error: 'Unknown coupon' },
-                    { status: 404 },
-                )
-            }
+        // The per-COUPON speed limit (couponReportVelocity.ts): however many
+        // distinct reporters there are, only a fixed number of reports of one
+        // kind per coupon per hour are counted (established accounts and
+        // low-trust reporters have separate buckets). Over it the report
+        // is accepted and dropped, answering exactly what a deduped repeat does,
+        // so the cap is not observable from outside. The reporter's dedupe slot
+        // goes back: nothing landed, so a later report of theirs may still count.
+        const tier = velocityTierOf(reporter)
+        if (!admitCouponReportVelocity(body.outcome, id, tier)) {
+            releaseReport(body.outcome, reporter, id)
+            return NextResponse.json({ ok: true, deduped: true })
+        }
 
+        // Both slots are taken BEFORE the write so a tracked duplicate stays a
+        // database-free no-op; whatever does not land gives them back.
+        const giveSlotsBack = () => {
+            releaseReport(body.outcome, reporter, id)
+            releaseCouponReportVelocity(body.outcome, id, tier)
+        }
+
+        // An unknown id writes no signal and gives its slots back, so a forger
+        // probing random ids cannot fill the tables with slots no report ever
+        // used.
+        const unknownCoupon = () => {
+            giveSlotsBack()
+            return NextResponse.json(
+                { error: 'Unknown coupon' },
+                { status: 404 },
+            )
+        }
+
+        try {
             // The aggregate signal write — identical for every caller, so the
             // signed-in path can never end up writing a DIFFERENT signal than the
-            // anonymous one.
-            const writeSignal = (client: CouponSignalWriter) =>
+            // anonymous one. Resolves false when the id is not a catalog row
+            // (nothing written).
+            const writeSignal = (
+                client: CouponFailureWriter | PrismaClient,
+                demote = false,
+            ) =>
                 body.outcome === 'worked'
-                    ? recordWorked(id, client)
-                    : recordFailed(id, body.storeReason ?? null, client)
+                    ? recordWorked(id, reporter, client, { demote })
+                    : recordFailed(
+                          id,
+                          body.storeReason ?? null,
+                          reporter,
+                          client,
+                      )
 
             if (!userId) {
-                // Anonymous: ONE signal statement, no transaction (after the
-                // catalog check above, a PK lookup). Nothing is written to
+                // Anonymous: no transaction opened HERE (both writers wrap
+                // their own quorum bookkeeping in one). Nothing is written to
                 // coupon_reports for an anonymous report — DELIBERATE, not an
                 // oversight: coupon_reports is ATTRIBUTION, and every row in it
                 // names a user. Anonymous volume is already fully counted by the
@@ -131,25 +177,50 @@ export const POST = withRoute(
                 // the extension's highest-volume path. (The column is nullable
                 // because the schema was written before this call; a reader may
                 // assume user_id IS NOT NULL for every row this route creates.)
-                await writeSignal(prisma)
+                if (!(await writeSignal(prisma))) return unknownCoupon()
+                // Retention of reporter rows, AFTER the write committed. Not
+                // awaited: the response never waits for retention, and the sweep
+                // never rejects (a failure is captured to Sentry and retried).
+                void sweepExpiredReporters()
                 return NextResponse.json({ ok: true })
             }
 
             // Signed in: the signal and the attribution are ONE atomic unit, so a
             // failure can never leave a counted report with no attribution (or the
             // reverse) for a client that will retry.
-            await prisma.$transaction(async tx => {
+            const recorded = await prisma.$transaction(async tx => {
                 // Written on every report that got past the per-reporter dedupe
                 // above, exactly as for an anonymous report. The per-day dedup
                 // below applies to the ATTRIBUTION ONLY, and survives a restart
                 // that empties the in-memory window.
-                await writeSignal(tx)
+                //
+                // An ESTABLISHED account's "worked" stamps Verified on its own,
+                // so it shares the checkout capture's per-account daily cap
+                // (checkoutWorkedStamp.workedStampCapSpent, counted from the
+                // persisted coupon_reports rows, under the per-shopper advisory
+                // lock so concurrent reports cannot both read the same count).
+                // Past the cap the report is not refused: it is recorded as a
+                // low-trust one, which is accepted and moves nothing.
+                let demote = false
+                if (
+                    body.outcome === 'worked' &&
+                    reporter.kind === 'user' &&
+                    reporter.established
+                ) {
+                    await lockShopperUser(tx, userId)
+                    demote = await workedStampCapSpent(tx, userId)
+                }
+                if (!(await writeSignal(tx, demote))) return false
 
                 // coupon_reports.coupon_id carries a real FK to `coupons`; the
-                // couponExists gate above already proved the row exists, so the
-                // insert below cannot raise a foreign-key violation.
+                // signal write above just proved the row exists, so the insert
+                // below cannot raise a foreign-key violation.
 
-                // One attributed report per (user, coupon, UTC day). Postgres
+                // One attributed report per (user, coupon, outcome, UTC day).
+                // The OUTCOME is part of the key: without it a "failed" report
+                // earlier in the day would suppress the "worked" row, and the
+                // daily stamp cap (counted from these rows) would never see the
+                // stamp. Postgres
                 // cannot express a UNIQUE on date_trunc('day', created_at), so this
                 // is app-side by necessity; it rides the
                 // (coupon_id, user_id, created_at) index the table ships with. A
@@ -159,22 +230,26 @@ export const POST = withRoute(
                     where: {
                         couponId: id,
                         userId,
+                        outcome: body.outcome,
                         createdAt: { gte: startOfUtcDay(new Date()) },
                     },
                     select: { id: true },
                 })
-                if (alreadyReportedToday) return
+                if (alreadyReportedToday) return true
 
                 await tx.couponReport.create({
                     data: { couponId: id, userId, outcome: body.outcome },
                 })
+                return true
             })
+            if (!recorded) return unknownCoupon()
+            void sweepExpiredReporters()
 
             return NextResponse.json({ ok: true })
         } catch (error) {
-            // The report never landed: free its slot so a retry is not deduped.
+            // The report never landed: free its slots so a retry is not deduped.
             // withRoute still routes the rethrown error to Sentry.
-            releaseReport(body.outcome, reporter, id)
+            giveSlotsBack()
             throw error
         }
     },

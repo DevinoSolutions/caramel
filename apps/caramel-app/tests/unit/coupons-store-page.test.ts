@@ -142,6 +142,7 @@ describe('StoreCouponsPage — CouponListRow + TotalCountRow', () => {
                 lastWorkedAt: null,
                 lastFailedAt: null,
                 failCount: 0,
+                failWeight: 0,
                 keepsFailing: false,
             },
         ])
@@ -205,6 +206,7 @@ describe('StoreCouponsPage — CouponListRow + TotalCountRow', () => {
                 lastWorkedAt: null,
                 lastFailedAt: new Date(Date.now() - 60 * 60 * 1000),
                 failCount: 4,
+                failWeight: 6,
             },
         ] as never)
 

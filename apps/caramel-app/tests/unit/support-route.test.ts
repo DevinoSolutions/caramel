@@ -153,9 +153,8 @@ describe('POST /api/support — support/feedback flow', () => {
         )
         vi.resetModules()
         try {
-            const { POST: postWithLink } = await import(
-                '@/app/api/support/route'
-            )
+            const { POST: postWithLink } =
+                await import('@/app/api/support/route')
             const res = await postWithLink(supportRequest(validBody()))
             expect(res.status).toBe(200)
 

@@ -6,15 +6,13 @@
 // supported-site/suggestion-form.tsx (caramel palette, rounded-3xl card,
 // rounded-full inputs, framer-motion whileTap, sonner toasts, dark mode).
 import { getLoadedPosthog } from '@/lib/analytics/posthogBrowser'
+import { SUPPORT_REPLY_PROMISE } from '@/lib/supportCopy'
 import { m } from 'framer-motion'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
 export type SupportFeedbackType =
-    | 'problem'
-    | 'feature_request'
-    | 'question'
-    | 'other'
+    'problem' | 'feature_request' | 'question' | 'other'
 
 const TYPE_OPTIONS: { value: SupportFeedbackType; label: string }[] = [
     { value: 'problem', label: 'Problem' },
@@ -185,7 +183,7 @@ export default function SupportForm({
             } else {
                 toast.success(
                     wantsReply
-                        ? "Thanks — we've received it. We'll get back to you soon."
+                        ? `Thanks — we've received it. ${SUPPORT_REPLY_PROMISE}`
                         : "Thanks — we've received it.",
                 )
             }
@@ -222,7 +220,7 @@ export default function SupportForm({
                 </p>
                 <p className="text-sm text-gray-600 dark:text-gray-300">
                     We&apos;ve received your message
-                    {wantsReply ? ' and will reply soon.' : '.'}
+                    {wantsReply ? `. ${SUPPORT_REPLY_PROMISE}` : '.'}
                 </p>
                 <m.button
                     type="button"

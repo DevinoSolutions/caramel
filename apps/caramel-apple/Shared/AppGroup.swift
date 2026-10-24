@@ -37,7 +37,9 @@ enum AppGroup {
 
 /// The Caramel session bearer (the raw session token `POST /api/extension/oauth`
 /// mints, the same one the browser extension keeps in its storage), in the
-/// keychain so the Safari extension can read the app's sign-in.
+/// keychain. TODO(T-5059): the item is stored where the Safari extension could
+/// read it, but nothing in the extension reads it yet, so the app's sign-in is
+/// not shared with it today.
 ///
 /// Both targets list the same single `keychain-access-groups` entry
 /// (project.yml). The item names that group explicitly: its full value (team

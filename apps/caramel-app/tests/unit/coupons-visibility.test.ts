@@ -1,6 +1,7 @@
 import { GET as filtersGET } from '@/app/api/coupons/filters/route'
 import { GET as couponsGET } from '@/app/api/coupons/route'
 import { GET as statsGET } from '@/app/api/coupons/stats/route'
+import { resetAnonymousReadCaches } from '@/lib/anonymousReadCaches'
 import { NextRequest } from 'next/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -35,6 +36,7 @@ vi.mock('@/lib/rateLimit', () => ({
 }))
 
 beforeEach(() => {
+    resetAnonymousReadCaches()
     capturedQueries = []
 })
 

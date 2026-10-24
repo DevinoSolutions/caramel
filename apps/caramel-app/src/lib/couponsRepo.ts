@@ -29,25 +29,30 @@
 // (RULING C′). No write touches the external `caramel_coupons` DB anymore.
 // submitShopperCoupon (owner-directed 2026-10-02) is the THIRD app write: it
 // INSERTs shopper-submitted codes with ids from a reserved sequence.
+// writeWorkedSignal / writeFailedSignal / writeUsageSignal are the aggregate
+// `coupon_signals` upserts couponSignals.ts calls: each is ONE INSERT ... SELECT
+// ... WHERE EXISTS (catalog row) ON CONFLICT statement, so the catalog
+// existence gate and the write are a single round trip.
 //
 // HTTP-only concerns stay OUT of this file by design: param parsing/caps,
 // `getBaseDomain`/domain-validation 400s, response envelopes, cache
 // headers, `hasMore`/`active` computed fields, and auth/rate-limit/origin
 // gates all stay in the calling route (`withRoute` config + the route body).
+import { Prisma } from '@/generated/prisma/client'
 import { STORE_CONFIG_STILL_SERVED_SQL } from '@/lib/catalog/applyCatalogRows'
 import {
-    FAILING_MIN_FAIL_COUNT,
+    FAILING_MIN_FAIL_WEIGHT,
     FAILING_WINDOW_DAYS,
-    KEEPS_FAILING_MIN_FAIL_COUNT,
+    KEEPS_FAILING_MIN_FAIL_WEIGHT,
     RESTRICTED_COUPON_STATUSES,
     VISIBLE_COUPON_STATUSES,
 } from '@/lib/coupons'
 import {
     CatalogStoreNameRowSchema,
-    CouponExistsRowSchema,
     CouponIdRowSchema,
     type CouponListRow,
     CouponListRowSchema,
+    CouponSignalWriteRowSchema,
     type DiscountTypeRow,
     DiscountTypeRowSchema,
     KnownStoreRowSchema,
@@ -56,6 +61,7 @@ import {
     type RecentlyWorkedCouponRow,
     RecentlyWorkedCouponRowSchema,
     ServedStoreConfigRowSchema,
+    ShopperDedupeRowSchema,
     type SiteAggregateRow,
     SiteAggregateRowSchema,
     type SiteCountRow,
@@ -84,7 +90,6 @@ import {
     UnknownStoreError,
     normalizeShopperCode,
 } from '@/lib/shopperCoupons'
-import { Prisma } from '@prisma/client'
 import { randomUUID } from 'node:crypto'
 
 // ---------------------------------------------------------------------------
@@ -123,9 +128,9 @@ const rankingOrderSql = () => Prisma.sql`rating DESC, created_at DESC, id DESC`
 
 /**
  * SQL twin of coupons.ts's isRecentlyFailing(): true for a coupon whose
- * coupon_signals row holds at least FAILING_MIN_FAIL_COUNT failures, the latest
- * within FAILING_WINDOW_DAYS and newer than the last success (or no success
- * ever). The numbers come from coupons.ts, so the ordering and the card's hint
+ * coupon_signals row holds a failure quorum of at least FAILING_MIN_FAIL_WEIGHT, the latest
+ * within FAILING_WINDOW_DAYS. Successes are folded into fail_weight when they
+ * are reported (couponSignals.recomputeFailWeight). The numbers come from coupons.ts, so the ordering and the card's hint
  * cannot drift apart.
  *
  * A hashed uncorrelated `id IN (SELECT ...)`, not a JOIN: coupon_signals has
@@ -135,22 +140,21 @@ const rankingOrderSql = () => Prisma.sql`rating DESC, created_at DESC, id DESC`
  * ambiguous. The window compares against UTC because Prisma writes these
  * timestamp-WITHOUT-time-zone columns as UTC.
  */
-const failingSinkSql = () => failingSignalIdsSql(FAILING_MIN_FAIL_COUNT)
+const failingSinkSql = () => failingSignalIdsSql(FAILING_MIN_FAIL_WEIGHT)
 
 /**
  * SQL twin of coupons.ts's keepsFailing(): the same predicate at
- * KEEPS_FAILING_MIN_FAIL_COUNT. A subset of failingSinkSql(), used as the
+ * KEEPS_FAILING_MIN_FAIL_WEIGHT. A subset of failingSinkSql(), used as the
  * SECOND ORDER BY key so the codes the web page and the popup collapse are the
  * very last rows of the list, behind the merely-failing ones: the collapsed
  * group is then one contiguous tail, however the list is paginated.
  */
-const keepsFailingSql = () => failingSignalIdsSql(KEEPS_FAILING_MIN_FAIL_COUNT)
+const keepsFailingSql = () => failingSignalIdsSql(KEEPS_FAILING_MIN_FAIL_WEIGHT)
 
-const failingSignalIdsSql = (minFailCount: number) => Prisma.sql`(id IN (
+const failingSignalIdsSql = (minFailWeight: number) => Prisma.sql`(id IN (
     SELECT s.coupon_id FROM coupon_signals s
-    WHERE s.fail_count >= ${minFailCount}
+    WHERE s.fail_weight >= ${minFailWeight}
       AND s.last_failed_at > (NOW() AT TIME ZONE 'UTC') - (${FAILING_WINDOW_DAYS}::int * INTERVAL '1 day')
-      AND (s.last_worked_at IS NULL OR s.last_failed_at > s.last_worked_at)
 ))`
 
 /**
@@ -811,7 +815,8 @@ export async function listSupportedStoreConfigs(): Promise<StoreConfigRow[]> {
                price_container_xpath,
                success_indicator_xpath,
                error_indicator_xpath,
-               coupon_remove_xpath
+               coupon_remove_xpath,
+               origin
         FROM store_configs
         WHERE coupon_input_xpath IS NOT NULL
           AND apply_button_xpath IS NOT NULL
@@ -886,12 +891,31 @@ export async function expireCoupons(ids: string[]): Promise<number> {
 }
 
 /**
- * Is `id` a row of the app-owned catalog? The gate the two signal writers
- * (POST /api/coupons/[id]/report, POST /api/coupons/increment) run BEFORE
- * writing coupon_signals, which carries no FK to `coupons` on purpose (so an
- * aggregate can outlive a tombstoned coupon) and so would otherwise upsert a row
- * for ANY numeric id: unbounded table growth, and a failure count pre-seeded on
- * an id the catalog (or the shopper sequence) has not issued yet.
+ * The slice of the Prisma client the coupon_signals writers below need: the
+ * singleton and an interactive-transaction client both satisfy it, so
+ * couponSignals.ts runs the same statement inside a caller's transaction.
+ */
+type CouponSignalSqlClient = Pick<Prisma.TransactionClient, '$queryRaw'>
+
+/** The UTC wall-clock `now` the coupon_signals timestamps are stamped with. */
+const SIGNAL_NOW_UTC = Prisma.sql`(NOW() AT TIME ZONE 'UTC')`
+
+/**
+ * ONE statement: `INSERT INTO coupon_signals (...) SELECT ... WHERE EXISTS
+ * (SELECT 1 FROM coupons WHERE id = $id) ON CONFLICT (coupon_id) DO UPDATE ...
+ * RETURNING fail_weight`. The three public writers below supply the column
+ * list, the SELECT list and the DO UPDATE SET; this adds the existence gate.
+ *
+ * Why the gate rides in the write: coupon_signals carries no FK to `coupons` on
+ * purpose (an aggregate may outlive a tombstoned coupon), so an ungated upsert
+ * mints a row for ANY numeric id: unbounded table growth, and a failure count
+ * pre-seeded on an id the catalog (or the shopper sequence) has not issued yet.
+ * A separate existence SELECT before the write doubled the statements on the
+ * extension's highest-volume path (it fires "used" and "worked" together on
+ * every apply). With the check inside the INSERT, an id that is not a catalog
+ * row selects zero rows, inserts nothing, never reaches ON CONFLICT and
+ * RETURNS no row: that is how a caller tells "unknown coupon" (null) from a
+ * write (the row's fail_weight after it).
  *
  * Status-agnostic on purpose: any `coupons` row counts, hidden ('invalid'),
  * 'expired' and `expired = TRUE` rows included. A signal never changes
@@ -900,42 +924,191 @@ export async function expireCoupons(ids: string[]): Promise<number> {
  * while refusing it would 404 an honest shopper whose cached store page (or an
  * in-flight apply) predates a tombstone, and drop the evidence if ingest later
  * revives the row. Only an id that is not a catalog row at all is refused.
+ *
+ * Timestamps are UTC wall-clock (`NOW() AT TIME ZONE 'UTC'`) because the
+ * columns are `timestamp(3)` without a zone that Prisma always writes in UTC;
+ * bare NOW() would shift them on a non-UTC session. `updated_at` is bumped by
+ * hand: `@updatedAt` is Prisma-client behaviour and raw SQL bypasses it.
  */
-export async function couponExists(id: string): Promise<boolean> {
-    const [row] = parseCouponRows(
-        CouponExistsRowSchema,
-        await prisma.$queryRaw(
-            Prisma.sql`SELECT EXISTS (SELECT 1 FROM coupons WHERE id = ${id}) AS known`,
-        ),
-        'coupon-signal.coupon-exists',
+async function writeCouponSignal(
+    client: CouponSignalSqlClient,
+    couponId: string,
+    statement: {
+        insertColumns: Prisma.Sql
+        selectList: Prisma.Sql
+        onConflictSet: Prisma.Sql
+    },
+    queryLabel: string,
+): Promise<{ failWeight: number } | null> {
+    const rows = parseCouponRows(
+        CouponSignalWriteRowSchema,
+        await client.$queryRaw(Prisma.sql`
+            INSERT INTO coupon_signals (${statement.insertColumns})
+            SELECT ${statement.selectList}
+            WHERE EXISTS (SELECT 1 FROM coupons WHERE id = ${couponId}::text)
+            ON CONFLICT (coupon_id) DO UPDATE SET ${statement.onConflictSet}
+            RETURNING fail_weight AS "failWeight"
+        `),
+        queryLabel,
     )
-    if (!row) {
-        throw new Error('couponExists: existence query returned no row')
-    }
-    return row.known
+    return rows[0] ?? null
 }
 
 /**
- * api/sources/route.ts POST — "request a store"; caller has already validated
- * `website` is a plausible domain. Inserts an app `sources` row in the same
- * REQUESTED shape the pipeline uses (empty websites[]). `Source.id` has no DB
- * default, so mint a uuid app-side (mirrors the pre-W4 gen_random_uuid()::text);
- * created_at/updated_at fill via their @default(now()).
+ * couponSignals.recordWorked's aggregate write: stamp `last_worked_at` (this
+ * writer owns that field only). Returns the row's `fail_weight` after the
+ * write, or null when `couponId` is not a catalog row (nothing was written).
+ *
+ * `stamp: false` is the existence gate WITHOUT the stamp: a LOW-TRUST reporter's
+ * "worked" must never move `last_worked_at` (Verified, "Codes that just
+ * worked"; couponSignals.ts recordWorked decides who is low-trust). The
+ * statement still returns the catalog check and the row's fail_weight; a new
+ * signal row is created with a NULL last_worked_at and an existing one is left
+ * exactly as it was.
  */
-export async function requestSource(website: string): Promise<void> {
+export async function writeWorkedSignal(
+    couponId: string,
+    client: CouponSignalSqlClient = prisma,
+    options: { stamp: boolean } = { stamp: true },
+): Promise<{ failWeight: number } | null> {
+    if (!options.stamp) {
+        return writeCouponSignal(
+            client,
+            couponId,
+            {
+                insertColumns: Prisma.sql`coupon_id, created_at, updated_at`,
+                selectList: Prisma.sql`${couponId}::text, ${SIGNAL_NOW_UTC}, ${SIGNAL_NOW_UTC}`,
+                // A no-op update, not DO NOTHING: only DO UPDATE RETURNS the
+                // existing row's fail_weight, which the caller reads.
+                onConflictSet: Prisma.sql`updated_at = coupon_signals.updated_at`,
+            },
+            'coupon-signal.write-worked-unstamped',
+        )
+    }
+    return writeCouponSignal(
+        client,
+        couponId,
+        {
+            insertColumns: Prisma.sql`coupon_id, last_worked_at, created_at, updated_at`,
+            selectList: Prisma.sql`${couponId}::text, ${SIGNAL_NOW_UTC}, ${SIGNAL_NOW_UTC}, ${SIGNAL_NOW_UTC}`,
+            onConflictSet: Prisma.sql`last_worked_at = EXCLUDED.last_worked_at, updated_at = EXCLUDED.updated_at`,
+        },
+        'coupon-signal.write-worked',
+    )
+}
+
+/**
+ * couponSignals.recordFailed's aggregate write: raw `fail_count`,
+ * `last_failed_at` and the bounded `last_fail_reason` (the caller recomputes
+ * fail_weight from the reporter rows afterwards). Returns the row's
+ * `fail_weight` after the write, or null when `couponId` is not a catalog row
+ * (nothing was written).
+ */
+export async function writeFailedSignal(
+    couponId: string,
+    reason: string | null,
+    client: CouponSignalSqlClient = prisma,
+): Promise<{ failWeight: number } | null> {
+    return writeCouponSignal(
+        client,
+        couponId,
+        {
+            insertColumns: Prisma.sql`coupon_id, fail_count, last_failed_at, last_fail_reason, created_at, updated_at`,
+            selectList: Prisma.sql`${couponId}::text, 1, ${SIGNAL_NOW_UTC}, ${reason}::text, ${SIGNAL_NOW_UTC}, ${SIGNAL_NOW_UTC}`,
+            onConflictSet: Prisma.sql`fail_count = coupon_signals.fail_count + 1, last_failed_at = EXCLUDED.last_failed_at, last_fail_reason = EXCLUDED.last_fail_reason, updated_at = EXCLUDED.updated_at`,
+        },
+        'coupon-signal.write-failed',
+    )
+}
+
+/**
+ * couponSignals.recordUsage's write: bump `work_count` (this writer owns that
+ * counter only; no timestamp, a use is not a "worked at" stamp). Returns the
+ * row's `fail_weight` after the write, or null when `couponId` is not a
+ * catalog row (nothing was written).
+ */
+export async function writeUsageSignal(
+    couponId: string,
+    client: CouponSignalSqlClient = prisma,
+): Promise<{ failWeight: number } | null> {
+    return writeCouponSignal(
+        client,
+        couponId,
+        {
+            insertColumns: Prisma.sql`coupon_id, work_count, created_at, updated_at`,
+            selectList: Prisma.sql`${couponId}::text, 1, ${SIGNAL_NOW_UTC}, ${SIGNAL_NOW_UTC}`,
+            onConflictSet: Prisma.sql`work_count = coupon_signals.work_count + 1, updated_at = EXCLUDED.updated_at`,
+        },
+        'coupon-signal.write-usage',
+    )
+}
+
+/**
+ * Most REQUESTED `sources` rows the anonymous "request a store" endpoint will
+ * ever leave waiting (T-6225). The table is read by ops/the pipeline, so an
+ * unauthenticated caller must not be able to grow it without bound; a real
+ * backlog this deep means the queue needs a human, not more rows.
+ */
+export const MAX_REQUESTED_SOURCES = 500
+
+export type RequestSourceOutcome = 'created' | 'duplicate' | 'queue_full'
+
+/**
+ * api/sources/route.ts POST — "request a store"; caller has already reduced
+ * the input to a validated lowercase HOSTNAME (never the raw typed string).
+ * Inserts an app `sources` row in the same REQUESTED shape the pipeline uses
+ * (empty websites[]). `Source.id` has no DB default, so mint a uuid app-side
+ * (mirrors the pre-W4 gen_random_uuid()::text); created_at/updated_at fill via
+ * their @default(now()).
+ *
+ * Bounded (T-6225): a host that already has a row (any status; an exact
+ * match, since the route lowercases) is a `duplicate` and writes nothing; once MAX_REQUESTED_SOURCES requests are
+ * waiting the answer is `queue_full`. The check-then-insert is not atomic
+ * (there is no unique index on `source` and this PR ships no migration), so
+ * concurrent identical requests can both insert; the per-IP rate limit bounds
+ * that race. TODO(T-6225): a unique index on lower(source) would close it.
+ */
+export async function requestSource(
+    host: string,
+): Promise<RequestSourceOutcome> {
+    const existing = await prisma.source.findFirst({
+        where: { source: host },
+        select: { id: true },
+    })
+    if (existing) return 'duplicate'
+    const waiting = await prisma.source.count({
+        where: { status: 'REQUESTED' },
+    })
+    if (waiting >= MAX_REQUESTED_SOURCES) return 'queue_full'
     await prisma.source.create({
         data: {
             id: randomUUID(),
-            source: website,
+            source: host,
             websites: [],
             status: 'REQUESTED',
         },
     })
+    return 'created'
 }
 
 // Advisory-lock classes: the first int of pg_advisory_xact_lock(int, int).
 const SHOPPER_USER_LOCK_CLASS = 7101
 const SHOPPER_CODE_LOCK_CLASS = 7102
+
+/**
+ * Take the per-shopper advisory lock (the same one submitShopperCoupon holds)
+ * for the rest of the caller's transaction, so two concurrent requests of one
+ * account line up behind each other. checkoutWorkedStamp.ts takes it so its
+ * per-account daily count and its write cannot race.
+ */
+export async function lockShopperUser(
+    tx: Pick<Prisma.TransactionClient, '$executeRaw'>,
+    userId: string,
+): Promise<void> {
+    await tx.$executeRaw(
+        Prisma.sql`SELECT pg_advisory_xact_lock(${SHOPPER_USER_LOCK_CLASS}::int, hashtext(${userId}::text))`,
+    )
+}
 // A clean lowercase hostname: no LIKE wildcards (% _), no spaces, no slashes.
 const SHOPPER_STORE_BASE_PATTERN = /^[a-z0-9.-]+$/
 
@@ -1145,6 +1318,14 @@ export type SubmitShopperCouponResult = {
     couponId: string
     /** false = the code was already listed for this store; nothing was written. */
     created: boolean
+    /**
+     * true when the returned row was submitted by this same user (a new row, or
+     * their own earlier submission); false when somebody else listed it, which
+     * includes every supplier row. The checkout worked-stamp policy
+     * (checkoutWorkedStamp.ts) reads it: a shopper may vouch for their own code
+     * freely, but vouching for a code another party listed needs reputation.
+     */
+    submittedByUser: boolean
 }
 
 /**
@@ -1208,9 +1389,7 @@ export async function submitShopperCoupon(
         // Two-int advisory locks: the first int is a fixed class so these keys
         // cannot collide with any other advisory-lock user in this database.
         // Order matters (user, then code) and must never be reversed.
-        await tx.$executeRaw(
-            Prisma.sql`SELECT pg_advisory_xact_lock(${SHOPPER_USER_LOCK_CLASS}::int, hashtext(${userId}::text))`,
-        )
+        await lockShopperUser(tx, userId)
         await tx.$executeRaw(
             Prisma.sql`SELECT pg_advisory_xact_lock(${SHOPPER_CODE_LOCK_CLASS}::int, hashtext(${`${base}:${code.toLowerCase()}`}::text))`,
         )
@@ -1220,9 +1399,9 @@ export async function submitShopperCoupon(
         if (!(await isKnownStore(base, tx))) throw new UnknownStoreError()
 
         const existing = parseCouponRows(
-            CouponIdRowSchema,
+            ShopperDedupeRowSchema,
             await tx.$queryRaw(Prisma.sql`
-                SELECT id FROM coupons
+                SELECT id, submitted_by_user_id AS "submittedByUserId" FROM coupons
                 WHERE lower(code) = lower(${code})
                   AND ${onStoreSql(base)}
                   AND ${visibleCouponsWhere()}
@@ -1231,7 +1410,13 @@ export async function submitShopperCoupon(
             `),
             'shopper-coupon.dedupe',
         )
-        if (existing[0]) return { couponId: existing[0].id, created: false }
+        if (existing[0]) {
+            return {
+                couponId: existing[0].id,
+                created: false,
+                submittedByUser: existing[0].submittedByUserId === userId,
+            }
+        }
 
         const [recent] = parseCouponRows(
             TotalCountRowSchema,
@@ -1274,6 +1459,6 @@ export async function submitShopperCoupon(
                 `submitShopperCoupon: INSERT returned no row for store "${base}"`,
             )
         }
-        return { couponId: row.id, created: true }
+        return { couponId: row.id, created: true, submittedByUser: true }
     })
 }

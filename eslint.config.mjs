@@ -12,8 +12,20 @@ const caramelPlugin = {
     },
 }
 
+// Prisma 7 generates the client into src/generated/prisma; the old
+// '@prisma/client' entry point is no longer what the app runs, so importing
+// it would silently type against a different client.
+const PRISMA_CLIENT_IMPORT_BAN = {
+    name: '@prisma/client',
+    message:
+        "Import from '@/generated/prisma/client' (Prisma 7 generated client). E2E specs open it via openTestPrisma() in e2e/support/test-prisma.ts.",
+}
+
 /** @type {import('eslint').Linter.Config[]} */
 export default [
+    // Prisma 7's generated client (`prisma generate` -> src/generated/prisma,
+    // gitignored): machine output, never linted.
+    { ignores: ['**/src/generated/**'] },
     ...next,
     {
         rules: {
@@ -92,6 +104,13 @@ export default [
             // env.client.ts's schema + .env.example — only this call site's
             // read is dynamic (see the file's own header comment).
             '**/src/lib/securityHelpers/decryptJsonData.ts',
+            // Documented exception (2026-10-24, Prisma 7): Prisma 7 no longer
+            // reads DATABASE_URL itself; the driver adapter in prisma.ts needs
+            // it. env.ts is `server-only`, which throws under the plain-tsx
+            // scripts/bridge-sync.ts that imports this module, and the bridge
+            // must not boot the app's zod env (see bridge-sync.ts header).
+            // DATABASE_URL stays declared and validated in env.ts at app boot.
+            '**/src/lib/prisma.ts',
             // Documented exception (2026-08-06): buildInfo.ts holds the commit
             // next.config.mjs's `env` inlines at BUILD time, by rewriting that
             // exact `process.env.GIT_COMMIT_SHA` expression into a string
@@ -188,8 +207,27 @@ export default [
                             message:
                                 "Import useReducedMotion from '@/lib/reducedMotion' — framer's version is not hydration-safe (returns null server-side, the real value on the first client render) and its mismatch regenerates the server tree.",
                         },
+                        PRISMA_CLIENT_IMPORT_BAN,
                     ],
                 },
+            ],
+        },
+    },
+    {
+        // Prisma 7 (2026-10-24) — the same ban for the test/e2e/script trees,
+        // which the src-only block above does not cover.
+        files: [
+            '**/apps/caramel-app/tests/**/*.{ts,tsx}',
+            '**/apps/caramel-app/e2e/**/*.ts',
+            '**/apps/caramel-app/scripts/**/*.ts',
+            'tests/**/*.{ts,tsx}',
+            'e2e/**/*.ts',
+            'scripts/**/*.ts',
+        ],
+        rules: {
+            'no-restricted-imports': [
+                'error',
+                { paths: [PRISMA_CLIENT_IMPORT_BAN] },
             ],
         },
     },

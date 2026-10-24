@@ -156,9 +156,16 @@ export const CouponIdRowSchema = z.object({
     id: couponIdSchema,
 })
 
-/** `SELECT EXISTS(...) AS known` — couponsRepo.couponExists. */
-export const CouponExistsRowSchema = z.object({
-    known: z.boolean(),
+/** `SELECT id, submitted_by_user_id` — couponsRepo.submitShopperCoupon's dedupe
+ *  lookup: the listed row's id plus who submitted it (null = a supplier row). */
+export const ShopperDedupeRowSchema = CouponIdRowSchema.extend({
+    submittedByUserId: z.string().nullable(),
+})
+
+/** `... RETURNING fail_weight AS "failWeight"` — couponsRepo's coupon_signals
+ *  writers (writeWorkedSignal / writeFailedSignal / writeUsageSignal). */
+export const CouponSignalWriteRowSchema = z.object({
+    failWeight: z.number().int(),
 })
 
 /** `SELECT (EXISTS(...) OR EXISTS(...)) AS known` — couponsRepo.isKnownStore. */
@@ -289,6 +296,9 @@ export const StoreConfigRowSchema = z.object({
     success_indicator_xpath: z.string().nullable(),
     error_indicator_xpath: z.string().nullable(),
     coupon_remove_xpath: z.string().nullable(),
+    // Who wrote the row: NULL = the coupons pipeline, 'auto_detect' = a box the
+    // extension found and saved (schema.prisma `origin`).
+    origin: z.string().nullish(),
 })
 export type StoreConfigRow = z.infer<typeof StoreConfigRowSchema>
 

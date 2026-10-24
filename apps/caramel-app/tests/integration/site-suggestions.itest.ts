@@ -1,6 +1,7 @@
 import { POST as deleteMyData } from '@/app/api/account/data/delete/route'
 import { GET as accountOverview } from '@/app/api/account/overview/route'
 import { POST } from '@/app/api/sites/suggest/route'
+import { resetAnonymousWriteQuotas } from '@/lib/anonymousWriteQuota'
 import prisma from '@/lib/prisma'
 import { siteSuggestionIdentityWhere } from '@/lib/siteSuggestionIdentity'
 import {
@@ -88,6 +89,9 @@ async function cleanup() {
 }
 
 beforeEach(async () => {
+    // Every test posts from the same (absent) client address; the hourly
+    // per-address quota must not carry over between tests.
+    resetAnonymousWriteQuotas()
     await cleanup()
     const user = await prisma.user.create({
         data: { email: USER_EMAIL, name: 'Suggest Itest', emailVerified: true },

@@ -1,10 +1,17 @@
+// Prisma 7: the Rust-free `prisma-client` generator emits TypeScript into
+// src/generated/prisma (gitignored; import it as '@/generated/prisma/client').
+// moduleFormat "cjs": the ESM flavour sets __dirname from `import.meta.url`,
+// which Playwright's CommonJS transform of the e2e specs cannot load.
+// The connection URL lives in prisma.config.ts (CLI) and src/lib/prisma.ts
+// (runtime driver adapter), no longer here.
 generator client {
-  provider = "prisma-client-js"
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
 }
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 model Account {
@@ -103,6 +110,7 @@ model User {
   accounts          Account[]
   sessions          Session[]
   couponReports     CouponReport[]
+  couponBoxProposals CouponBoxProposal[]
   favoriteStores    FavoriteStore[]
   savingsEvents     SavingsEvent[]
   siteSuggestions   SiteSuggestion[]
@@ -127,6 +135,12 @@ model CouponSignal {
   lastFailedAt   DateTime? @map("last_failed_at")
   workCount      Int       @default(0) @map("work_count")
   failCount      Int       @default(0) @map("fail_count")
+  // Quorum weight of the failed reports since the last success: the sum of
+  // coupon_signal_reporters.weight over DISTINCT reporters (couponSignals.recordFailed
+  // recomputes it on every admitted failed report). fail_count is the raw count
+  // and no longer decides anything; the sink/collapse rules read this instead
+  // (coupons.ts FAILING_MIN_FAIL_WEIGHT / KEEPS_FAILING_MIN_FAIL_WEIGHT).
+  failWeight     Int       @default(0) @map("fail_weight")
   lastFailReason String?   @map("last_fail_reason")
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at")
@@ -295,6 +309,37 @@ model Source {
 /// createdAt) index exists to make the app-side per-day check a cheap lookup.
 /// Until that check ships, this table accepts repeat reports. TODO: enforce
 /// one-report-per-user-per-coupon-per-day in app logic (later PR).
+// One row per (coupon, outcome, distinct reporter): who reported a coupon, as a
+// salted hash of the reporter identity (couponReportDedupe.ts: signed-in user,
+// else the Cloudflare edge address cut to its /64), never the raw IP or user id.
+// coupon_signals is one aggregate row per coupon and cannot tell 3 reports from
+// one reporter from 3 reporters, which is what a failure quorum needs. NO FK to
+// coupons, like coupon_signals (an aggregate may outlive a tombstoned coupon).
+// Written by couponSignals.recordFailed ('failed') and, while a coupon carries a
+// live failure quorum, recordWorked ('worked': a success clears failures only
+// once a quorum of distinct reporters agree).
+// reporter_hash 'legacy' marks the one synthetic row per coupon seeded by migration
+// 20261021213000 to grandfather codes already sunk under the old raw-count rule;
+// it ages out and is cleared by a success like any other reporter row.
+// TODO(T-4372): the "Verified needs 2 distinct reporters" rule is not built yet;
+// it can reuse this table's 'worked' rows, but today those exist only while a
+// coupon has a failure quorum.
+model CouponSignalReporter {
+  couponId     String   @map("coupon_id")
+  outcome      String
+  reporterHash String   @map("reporter_hash")
+  // How much this reporter's report counts toward a quorum: 1 for an anonymous
+  // network, 2 for a signed-in account (couponSignals.ts REPORTER_WEIGHT).
+  weight       Int
+  lastAt       DateTime @default(now()) @map("last_at")
+
+  @@id([couponId, outcome, reporterHash])
+  @@index([couponId, outcome, lastAt])
+  // The retention sweep deletes by last_at alone.
+  @@index([lastAt])
+  @@map("coupon_signal_reporters")
+}
+
 model CouponReport {
   id        String   @id @default(cuid())
   // FK into the app-owned catalog with CASCADE: a report about a coupon row
@@ -313,6 +358,9 @@ model CouponReport {
   createdAt DateTime @default(now()) @map("created_at")
 
   @@index([couponId, userId, createdAt])
+  // checkoutWorkedStamp.ts counts one user's recent rows of one outcome (the
+  // per-account daily stamp cap); the index above leads with coupon_id.
+  @@index([userId, outcome, createdAt])
   @@map("coupon_reports")
 }
 
@@ -462,4 +510,35 @@ enum Role {
   MODERATOR
   ADMIN
   SUPER_ADMIN
+}
+
+/// A coupon box one signed-in install proposed for a store with no config
+/// (POST /api/extension/coupon-box-save, T-6221). A proposal is NOT served: it
+/// becomes the store's store_configs row (couponBoxSave.recordBoxProposal) only
+/// once COUPON_BOX_SAVE_MIN_AGREEING_INSTALLS distinct users proposed the same
+/// (store, box). The composite PK is the dedup: one row per user per box, so
+/// one user repeating a save never counts twice. box_hash is a SHA-256 of the
+/// four selectors; the selectors are kept so a promotion needs no second source
+/// and an operator can see what was proposed. Also the write-budget ledger:
+/// the per-user, per-store and global daily caps count rows by created_at.
+/// TODO(T-6221): no retention sweep yet; rows older than
+/// AUTO_DETECT_CONFIG_MAX_AGE_DAYS no longer count toward a promotion and
+/// should be deleted by a scheduled job.
+model CouponBoxProposal {
+  storeName String   @map("store_name")
+  boxHash   String   @map("box_hash")
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  host      String
+  input     String
+  apply     String?
+  toggle    String?
+  total     String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@id([storeName, boxHash, userId])
+  @@index([userId, createdAt])
+  @@index([storeName, createdAt])
+  @@index([createdAt])
+  @@map("coupon_box_proposals")
 }

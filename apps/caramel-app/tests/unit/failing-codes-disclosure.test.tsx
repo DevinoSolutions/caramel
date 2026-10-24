@@ -49,6 +49,7 @@ const failingOne = (id: string) =>
     coupon(id, {
         keepsFailing: true,
         failCount: 4,
+        failWeight: 6,
         lastFailedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
     })
 

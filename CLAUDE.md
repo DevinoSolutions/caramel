@@ -76,7 +76,7 @@ Every convention here has an enforcing check. The full convention → check map 
 
 - Generated extension constants are byte-synced and NEVER hand-edited: regenerate via `pnpm --filter caramel-app generate:coupon-constants`.
 - Coupons SQL lives only in `src/lib/couponsRepo.ts` (never inline in a route/page); raw coupon-status literals are banned outside `coupons.ts`/the generated file; the scraper's PIPELINE-INTERNAL tables stay out of `prisma/schema.prisma`.
-- The e2e suite runs hermetic (`DATABASE_URL` set) AND deployed (no `DATABASE_URL`, no generated prisma client): any spec asserting DB content or touching the DB MUST gate on `test.skip(!process.env.DATABASE_URL, …)` and MUST NOT import `@prisma/client` at module top level.
+- The e2e suite runs hermetic (`DATABASE_URL` set) AND deployed (no `DATABASE_URL`, no generated prisma client): any spec asserting DB content or touching the DB MUST gate on `test.skip(!process.env.DATABASE_URL, …)` and MUST NOT import the generated Prisma client at module top level (open it via `e2e/support/test-prisma.ts` `openTestPrisma()`, which imports lazily).
 - Model/prompt changes need `pnpm eval` green ×2 + a dated `evals/SCOREBOARD.md` row (eval gate ≥0.85 primary-match).
 - Unenforced (memory only): new routes must use `withRoute`; env reads only via the env modules; new `.eval.ts` stays out of the unit glob.
 
@@ -86,6 +86,7 @@ Every convention here has an enforcing check. The full convention → check map 
 - `.gitattributes` pins `eol=lf` (NF-04) so fresh clones are safe, but a clone predating it with `core.autocrlf=true` breaks the byte-exact generated-file test — `git config core.autocrlf false && git checkout-index -a -f` (`git reset --hard` won't rewrite round-trip-clean files; docs/LOCAL-DEV.md troubleshooting).
 - `openai/gpt-5-mini` is a REASONING model: completion budget must include hidden reasoning tokens (`maxTokens: 600`, see F-017 in `evals/SCOREBOARD.md`) — never trim it back to "just enough JSON".
 - Extension env stamp: `CARAMEL_ENV` comes from `import`ing `caramel-env.js`; never decide dev-vs-production at runtime from the manifest; keep new extension modules free of top-level side effects and wire any effect through an `init*` called from `entrypoints/content.ts` (details: `docs/agent/gotchas.md`).
+- Prisma 7: the client is GENERATED into `src/generated/prisma` (gitignored) — import `@/generated/prisma/client`, never `@prisma/client`; a fresh worktree needs `pnpm --filter caramel-app generate` before tsc. The CLI reads the URL from `prisma.config.ts` (not schema.prisma, and it no longer auto-loads .env except via that file); the runtime reads it in `src/lib/prisma.ts` (pg driver adapter, pool pinned to Prisma 6 timeouts — pg's default connect timeout is 0, i.e. hang forever).
 - `server-only` throws under vitest — shimmed once in `tests/setup.ts`. `.env*` is gitignored — a new shareable env-named file needs a `!` negation entry (`.env.example` burned us).
 - The Docker build step MUST stay `pnpm --filter caramel-app run build`, NEVER `turbo run build` (turbo's strict env mode strips the build-time env before `next build` sees it) (details: `docs/agent/gotchas.md`).
 
