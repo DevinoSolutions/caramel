@@ -77,10 +77,13 @@ enum AppLinkGuard {
         let scheme = url.scheme?.lowercased()
 
         if !isMainFrame {
-            if isAllowed(string) || string == "about:blank" || string == "about:srcdoc" {
-                return .loadInShell(url)
+            if containsForbiddenCharacter(string) {
+                return .cancel(reason: "frame URL contains whitespace, a control/separator/format character or a backslash")
             }
-            return .cancel(reason: "subframe load outside the Caramel origin (scheme \(scheme ?? "none"))")
+            if scheme == "https" || string == "about:blank" || string == "about:srcdoc" {
+                return .allowEmbedded
+            }
+            return .cancel(reason: "frame scheme \(scheme ?? "none") is not allowed")
         }
 
         if isAllowed(string) {
