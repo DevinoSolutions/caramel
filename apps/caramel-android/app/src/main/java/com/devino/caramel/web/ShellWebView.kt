@@ -138,8 +138,8 @@ fun WebView.loadGuarded(url: String): Boolean {
  */
 fun clearWebSessionState() {
     val cookies = CookieManager.getInstance()
-    cookies.removeAllCookies(null)
-    cookies.flush()
+    // Flush once the removal has finished; flushing right after the call could persist the old cookies.
+    cookies.removeAllCookies { cookies.flush() }
     WebStorage.getInstance().deleteAllData()
 }
 

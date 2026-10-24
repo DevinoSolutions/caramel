@@ -36,6 +36,9 @@ name: Release – Android App (Kotlin + Compose, com.devino.caramel)
 #     there so such a reset cannot fall below codes already uploaded; if it ever happens, raise the
 #     offset in the Build step past the highest versionCode in Play Console.
 #
+# The release job also refuses to run while any TODO(T-7852) marker is left in the app source (the WebView web-session
+# handoff is unfinished: see the "Block the release" step).
+#
 # Release gating (no GitHub Environment, which is a repo-settings change): a real upload needs a
 # commit on main (dispatch from main, or a tag whose commit is an ancestor of origin/main) and a tag
 # equal to android-v<versionName>. TODO(owner): add a protected Environment with required reviewers
@@ -140,6 +143,19 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           fetch-depth: 0 # the tag-is-on-main check needs history
+
+      # The 1.6 shell shows grabcaramel.com in a WebView with NO web session until the handoff
+      # (POST /api/app/web-session/handoff, T-7852) is wired: the Saved and Account tabs bounce to
+      # Deals. Every TODO(T-7852) marker in the app source is part of that unfinished work, so a
+      # release build stops while any is left. Runs only in this release job (never on PRs).
+      - name: Block the release while the web-session handoff (T-7852) is unfinished
+        run: |
+          markers="$(grep -rn 'TODO(T-7852)' "$ANDROID_DIR/app/src/main" || true)"
+          if [ -n "$markers" ]; then
+            echo "::error::Release stopped on purpose: the Android WebView shell has no web session yet, so the Saved and Account tabs do not work for signed-in users. T-7852 (POST /api/app/web-session/handoff, wired into MainActivity.handleCallback and AppContainer.webSessionActive) is unfinished. Remove the TODO(T-7852) markers once it ships, then re-tag with a new tag. Markers still present:"
+            echo "$markers"
+            exit 1
+          fi
 
       - name: Release gating (main only for real uploads; tag must match versionName)
         env:

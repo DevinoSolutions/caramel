@@ -41,6 +41,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.vector.ImageVector
+import android.webkit.WebView
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.devino.caramel.AppContainer
@@ -100,6 +101,18 @@ fun CaramelApp(
     // Bumped to rebuild the WebView after its renderer process died.
     var webViewGeneration by remember { mutableIntStateOf(0) }
 
+    // The current WebView, readable from the host object built before it.
+    val webViewHolder = remember { arrayOfNulls<WebView>(1) }
+
+    // After sign-out or account deletion the next person on the device must not reach a signed-in page: wipe
+    // cookies, DOM storage and the HTTP cache, then discard the WebView (and with it its back stack) for a
+    // fresh one, which loads Deals. Main thread only.
+    val resetWebSession: () -> Unit = {
+        clearWebSessionState()
+        webViewHolder[0]?.clearCache(true)
+        webViewGeneration += 1
+    }
+
     // Launch: read the stored bearer, then confirm it is still alive (a 401 clears it).
     LaunchedEffect(Unit) {
         container.session.load()
@@ -126,7 +139,7 @@ fun CaramelApp(
                     AuthAction.SIGN_OUT_NATIVE_THEN_SIGN_IN -> {
                         scope.launch {
                             container.session.signOut()
-                            clearWebSessionState()
+                            resetWebSession()
                             showSignIn = true
                         }
                         true
@@ -163,6 +176,7 @@ fun CaramelApp(
         }
     }
     val webView = remember(webViewGeneration) { createShellWebView(context, host) }
+    webViewHolder[0] = webView
     // Every load goes through the sink guard (WebView.loadGuarded); a refusal is reported, not dropped.
     val load: (String) -> Unit = { url ->
         if (!webView.loadGuarded(url)) currentOnNotice("Caramel did not open a page because it is not on grabcaramel.com.")
@@ -291,8 +305,7 @@ fun CaramelApp(
                                     showAccount = false
                                     scope.launch {
                                         container.session.signOut()
-                                        clearWebSessionState()
-                                        load(ShellRoutes.homeUrl())
+                                        resetWebSession()
                                     }
                                 },
                             ) { Text("Sign out") }
@@ -332,8 +345,7 @@ fun CaramelApp(
                     scope.launch {
                         if (container.session.deleteAccount()) {
                             // TODO(T-7852): also end the server-side web session once the handoff exists.
-                            clearWebSessionState()
-                            load(ShellRoutes.homeUrl())
+                            resetWebSession()
                         }
                     }
                 }) { Text("Delete account", color = MaterialTheme.colorScheme.error) }
