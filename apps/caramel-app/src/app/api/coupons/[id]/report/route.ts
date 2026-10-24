@@ -1,3 +1,4 @@
+import type { PrismaClient } from '@/generated/prisma/client'
 import { isEstablishedAccount } from '@/lib/accountReputation'
 import { withRoute } from '@/lib/api/withRoute'
 import { workedStampCapSpent } from '@/lib/checkoutWorkedStamp'
@@ -19,7 +20,6 @@ import {
 } from '@/lib/couponSignals'
 import { lockShopperUser } from '@/lib/couponsRepo'
 import prisma from '@/lib/prisma'
-import type { PrismaClient } from '@prisma/client'
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 

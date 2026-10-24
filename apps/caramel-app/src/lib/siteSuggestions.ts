@@ -8,6 +8,7 @@
 //
 // This is app-owned user/ops state, like coupon_reports and favorite_stores —
 // NOT the coupon catalog (couponsRepo.ts owns that, with its own write rules).
+import type { Prisma } from '@/generated/prisma/client'
 import { env } from '@/lib/env'
 import prisma from '@/lib/prisma'
 import { foldRequesterEmail } from '@/lib/siteSuggestionIdentity'
@@ -16,7 +17,6 @@ import {
     sendSupportedOpsNotice,
 } from '@/lib/siteSuggestionNotices'
 import { resolveStoreDomain } from '@/lib/storeDomain'
-import type { Prisma } from '@prisma/client'
 import * as Sentry from '@sentry/nextjs'
 import { z } from 'zod'
 

@@ -38,6 +38,7 @@
 // `getBaseDomain`/domain-validation 400s, response envelopes, cache
 // headers, `hasMore`/`active` computed fields, and auth/rate-limit/origin
 // gates all stay in the calling route (`withRoute` config + the route body).
+import { Prisma } from '@/generated/prisma/client'
 import { STORE_CONFIG_STILL_SERVED_SQL } from '@/lib/catalog/applyCatalogRows'
 import {
     FAILING_MIN_FAIL_WEIGHT,
@@ -89,7 +90,6 @@ import {
     UnknownStoreError,
     normalizeShopperCode,
 } from '@/lib/shopperCoupons'
-import { Prisma } from '@prisma/client'
 import { randomUUID } from 'node:crypto'
 
 // ---------------------------------------------------------------------------

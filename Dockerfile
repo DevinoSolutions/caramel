@@ -86,8 +86,8 @@ ENV DATABASE_URL=postgresql://build-placeholder:build-placeholder@db.build-place
 ENV COUPONS_DATABASE_URL=postgresql://build-placeholder:build-placeholder@db.build-placeholder.invalid:5432/build_placeholder
 ENV BETTER_AUTH_SECRET=build-placeholder-not-a-secret
 # caramel-app's `build` script is `npx prisma generate && next build`, so the
-# Prisma client is generated here explicitly (musl engine, same platform as the
-# runner) before the standalone trace.
+# Prisma client is generated here explicitly (into src/generated/prisma) before
+# the standalone trace.
 # pnpm-direct, NOT `turbo run build`: turbo 2's strict env mode passes child
 # tasks only turbo.json-declared vars (this repo declares none) plus
 # framework-inferred NEXT_PUBLIC_*, which strips the build-time placeholders
@@ -117,17 +117,19 @@ ENV HOSTNAME=0.0.0.0
 RUN addgroup --system --gid 1001 nodejs \
   && adduser --system --uid 1001 nextjs
 
-# Standalone server bundle (real, traced node_modules incl. @prisma/client +
-# query engine). outputFileTracingRoot = monorepo root, so the app lands under
+# Standalone server bundle (real, traced node_modules incl. the Prisma 7
+# runtime + @prisma/adapter-pg; the generated client is compiled into it). outputFileTracingRoot = monorepo root, so the app lands under
 # apps/caramel-app/ inside the standalone tree.
 COPY --from=builder --chown=nextjs:nodejs /app/apps/caramel-app/.next/standalone ./
 # Static assets + public are not part of the standalone bundle.
 COPY --from=builder --chown=nextjs:nodejs /app/apps/caramel-app/.next/static ./apps/caramel-app/.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/apps/caramel-app/public ./apps/caramel-app/public
-# Prisma schema + migrations for `migrate deploy`.
+# Prisma schema + migrations + CLI config for `migrate deploy` (Prisma 7 reads
+# the datasource URL from prisma.config.ts, no longer from schema.prisma).
 COPY --from=builder --chown=nextjs:nodejs /app/apps/caramel-app/prisma ./apps/caramel-app/prisma
+COPY --from=builder --chown=nextjs:nodejs /app/apps/caramel-app/prisma.config.ts ./apps/caramel-app/prisma.config.ts
 # Prisma CLI + engines in their OWN staged tree — the standalone bundle's
-# traced node_modules stays pristine (@prisma/client for the running app comes
+# traced node_modules stays pristine (the running app's Prisma runtime comes
 # from the trace, not from here).
 COPY --from=builder --chown=nextjs:nodejs /prisma-cli/node_modules ./prisma-cli/node_modules
 COPY --chown=nextjs:nodejs docker-entrypoint.sh ./docker-entrypoint.sh

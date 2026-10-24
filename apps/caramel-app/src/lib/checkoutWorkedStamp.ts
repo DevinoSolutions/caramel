@@ -54,6 +54,7 @@
 // "a shopper says this worked" hint on a code nobody else listed. Closing it
 // needs a second shopper to confirm (a worked quorum for shopper-listed codes)
 // or an age gate on stamping one's own codes.
+import type { Prisma } from '@/generated/prisma/client'
 import { isEstablishedAccount } from '@/lib/accountReputation'
 import type { ReportReporter } from '@/lib/couponReportDedupe'
 import {
@@ -65,7 +66,6 @@ import { recordWorked } from '@/lib/couponSignals'
 import { lockShopperUser } from '@/lib/couponsRepo'
 import { env } from '@/lib/env'
 import prisma from '@/lib/prisma'
-import type { Prisma } from '@prisma/client'
 import * as Sentry from '@sentry/nextjs'
 
 const DAY_MS = 24 * 60 * 60 * 1000

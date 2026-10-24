@@ -42,3 +42,6 @@ next-env.d.ts
 .react-email
 
 **/data/*.json
+
+# Prisma 7 generated client (prisma generate)
+**/src/generated/

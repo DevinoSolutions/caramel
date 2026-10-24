@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { openTestPrisma } from './support/test-prisma'
 
 // The home page's crawlable links into the store pages, checked in the SERVER
 // HTML (what a crawler sees before any script runs), not the hydrated DOM.
@@ -76,11 +77,11 @@ test.describe('home page "Codes that just worked" (server-rendered)', () => {
     // puts it back afterwards (deleting the one the test created), so the
     // visual-regression home screenshot (same run, same DB) never sees a
     // strip it did not expect. The type import is erased at runtime.
-    let signalBefore: import('@prisma/client').CouponSignal | null = null
+    let signalBefore:
+        import('../src/generated/prisma/client').CouponSignal | null = null
 
     test.beforeAll(async () => {
-        const { PrismaClient } = await import('@prisma/client')
-        const prisma = new PrismaClient()
+        const prisma = await openTestPrisma()
         try {
             signalBefore = await prisma.couponSignal.findUnique({
                 where: { couponId: SEED_COUPON_ID },
@@ -91,8 +92,7 @@ test.describe('home page "Codes that just worked" (server-rendered)', () => {
     })
 
     test.afterAll(async () => {
-        const { PrismaClient } = await import('@prisma/client')
-        const prisma = new PrismaClient()
+        const prisma = await openTestPrisma()
         try {
             await prisma.couponSignal.deleteMany({
                 where: { couponId: SEED_COUPON_ID },
@@ -111,8 +111,7 @@ test.describe('home page "Codes that just worked" (server-rendered)', () => {
         baseURL,
     }) => {
         if (!baseURL) throw new Error('playwright baseURL is not set')
-        const { PrismaClient } = await import('@prisma/client')
-        const prisma = new PrismaClient()
+        const prisma = await openTestPrisma()
         try {
             // T-6222: anonymous "worked" reports are accepted (a 200, so a
             // forger learns nothing) but NEVER stamp lastWorkedAt, however
