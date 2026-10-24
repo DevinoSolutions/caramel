@@ -1,0 +1,4 @@
+# Evidence 2026-10-24
+
+- `t7474-play-console-no-caramel-record-p2.png`: Play Console, Devino organization account (7759952709745299293), fresh unnamed headed clone of the master seed, 01:2xZ. The app list has 17 apps over 2 pages and none is Caramel, so there was no Caramel internal-track build to promote. The full package list was read from the page text; a search for "caramel" returned "No results found". StoreScope could not be read: its MCP is not loaded in this session.
+- `t7474-play-caramel-app-created.png`: the Caramel app record created in the same clone: name "Caramel", package com.devino.caramel ("already registered to your account"), App, Free, en-US; app id 4975652339663782353. It is a draft with no release and no store listing yet. Users and permissions shows 6 users: 3 service accounts (postify, bioflow and unotes projects) and 3 people. T-7474.
