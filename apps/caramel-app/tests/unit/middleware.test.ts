@@ -186,6 +186,13 @@ describe('middleware — docs host (docs.<apex> -> <apex>/docs, T-7855)', () => 
             'docs.',
             'docs..x',
             'docs.grabcaramel.com:99999999',
+            // A syntactically valid foreign apex must never become a 301 to it.
+            'docs.evil.com',
+            'docs.grabcaramel.com.evil.com',
+            // Numeric remainders used to reach new URL() and throw (a 500).
+            'docs.999.1',
+            'docs.x.9',
+            'docs.1.1',
         ]) {
             const res = middleware(
                 new NextRequest('https://grabcaramel.com/pricing', {

@@ -45,10 +45,20 @@ function cameThroughHttpsProxy(request: NextRequest): boolean {
     return forwardedProto.split(',')[0]?.trim().toLowerCase() === 'https'
 }
 
-// docs.<apex>, captured as the apex (with any :port). Applied only to a Host
-// that already passed HOST_HEADER, so the remainder is a plausible host.
-const DOCS_HOST = /^docs\.([a-z0-9][a-z0-9.-]*(?::\d{1,5})?)$/i
+// docs.<apex>, split into the apex hostname and an optional :port. Applied
+// only to a Host that already passed HOST_HEADER.
+const DOCS_HOST = /^docs\.([a-z0-9.-]+?)(:\d{1,5})?$/i
 const DOCS_PATH = '/docs'
+// The ONLY apexes the docs host redirects to. The Location is never built from
+// an arbitrary Host: `Host: docs.evil.com` must not answer a cacheable 301 to
+// evil.com, and a numeric remainder (`docs.999.1`) must not reach new URL()
+// and throw. Production is pinned to its literal origin; localhost keeps the
+// dev port.
+const DOCS_PRODUCTION_ORIGIN = 'https://grabcaramel.com'
+const DOCS_APEX_HOSTNAMES: ReadonlySet<string> = new Set([
+    'grabcaramel.com',
+    'localhost',
+])
 
 // A plausible Host value (hostname or host:port). Anything else is ignored
 // rather than trusted into a Location header.
@@ -79,29 +89,32 @@ function redirectOrigin(
 }
 
 /**
- * The docs host redirect target: the apex's /docs on the public origin. https
- * behind the proxy (or when the docs host itself was https); local dev
- * (docs.localhost:port, no proxy signal) keeps its own scheme.
+ * The docs host redirect target, or null when the Host is not docs.<one of
+ * DOCS_APEX_HOSTNAMES>. Production always lands on DOCS_PRODUCTION_ORIGIN;
+ * local dev (docs.localhost:port) keeps its own scheme and port.
  */
-function docsRedirectTarget(request: NextRequest, apexHost: string): URL {
+function docsRedirectTarget(
+    request: NextRequest,
+    hostHeader: string,
+): URL | null {
+    const match = DOCS_HOST.exec(hostHeader)
+    const apexHostname = match?.[1]?.toLowerCase()
+    if (!apexHostname || !DOCS_APEX_HOSTNAMES.has(apexHostname)) return null
+    if (apexHostname !== 'localhost') {
+        return new URL(DOCS_PATH, DOCS_PRODUCTION_ORIGIN)
+    }
     const incoming = new URL(request.url)
-    const scheme =
-        cameThroughHttpsProxy(request) || incoming.protocol === 'https:'
-            ? 'https:'
-            : incoming.protocol
-    return new URL(DOCS_PATH, `${scheme}//${apexHost}`)
+    return new URL(
+        DOCS_PATH,
+        `${incoming.protocol}//localhost${match?.[2] ?? ''}`,
+    )
 }
 
 export function middleware(request: NextRequest) {
     const rawHost = request.headers.get('host') ?? ''
     const hostHeader = HOST_HEADER.test(rawHost) ? rawHost : ''
-    const docsApexHost = DOCS_HOST.exec(hostHeader)?.[1]
-    if (docsApexHost) {
-        return NextResponse.redirect(
-            docsRedirectTarget(request, docsApexHost),
-            301,
-        )
-    }
+    const docsTarget = docsRedirectTarget(request, hostHeader)
+    if (docsTarget) return NextResponse.redirect(docsTarget, 301)
     const isWww = hostHeader.startsWith('www.')
     const isPlainHttp = CF_VISITOR_PLAIN_HTTP.test(
         request.headers.get('cf-visitor') ?? '',
