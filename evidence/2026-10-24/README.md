@@ -24,3 +24,13 @@
   - www still 308 to apex; / and /coupons/amazon.com 200;
   - /docs is in llms.txt and the sitemap.
   Sentry: no unresolved issue seen since the deploy.
+- `pr491-checks-green.png`: #491 (T-7856, store intent pilot) at head 38769b1, fresh unnamed headed clone, 18:3xZ: "All checks have passed, 1 skipped, 11 successful" (22 checks across runs). review-481 raised two points, both resolved:
+  - the `sm:pt-8` breakpoint: this repo's tailwind `sm` is max-width 639px, so the class applies to phones as intended;
+  - the 60-character title limit: covered by storeIntentPilot.test.tsx:115.
+  Merged as 1caee02.
+- `t7856-prod-1caee02-coursera-390.png`, `t7856-prod-1caee02-dominos-390.png`: prod deploy of 1caee02 after backup caramel-prod-compose/2026-10-24T18-38-54-386Z.sql.gz; live since 18:42:40Z. Fresh unnamed headed clone at 390x844:
+  - coursera: H1 "Coursera promo codes & discount codes" at y=80 (was ~200); freshness line "20 codes · list updated Aug 4, 2026" (no worked-recently clause, k=0); cross-link "Course Hero codes →" to /coupons/coursehero.com; no overflow.
+  - dominos: title "Domino's Coupons & Promo Codes: 81 Codes, Oct 2026 | Caramel"; H1 "Domino's coupons & promo codes" at y=80; line "81 codes · list updated today" (datetime 2026-10-24T12:47Z).
+  - anthropologie title "Anthropologie Promo Codes & Coupon Codes: 26 Codes | Caramel".
+  - amazon.com (not in the pilot) unchanged: "Best Amazon coupon codes today".
+  Main push E2E rerun 40121629608 attempt 2: success. Sentry: nothing new since the deploy. Recrawl submitted for the 4 pilot URLs plus /docs (Indexing API, 5/5 submitted).
