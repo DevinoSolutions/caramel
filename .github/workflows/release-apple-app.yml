@@ -81,6 +81,20 @@ jobs:
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "Apple app marketing version: ${version}" >> "$GITHUB_STEP_SUMMARY"
 
+      # The 1.6 shell shows grabcaramel.com in a WKWebView with NO web session until the handoff
+      # (POST /api/app/web-session/handoff, T-7852) is wired: the Saved and Account tabs open signed
+      # out. Every TODO(T-7852) marker in the app source is part of that unfinished work, so a
+      # tag/dispatch build stops while any is left. Never runs on pull requests.
+      - name: Block the release while the web-session handoff (T-7852) is unfinished
+        if: github.event_name != 'pull_request'
+        run: |
+          markers="$(grep -rn 'TODO(T-7852)' "$APPLE_DIR/App" || true)"
+          if [ -n "$markers" ]; then
+            echo "::error::Release stopped on purpose: the iOS web tabs have no web session yet, so Saved and Account do not work for signed-in users. T-7852 (POST /api/app/web-session/handoff, wired into ShellRouter.signInFromWeb) is unfinished. Remove the TODO(T-7852) markers once it ships, then the owner re-tags. Markers still present:"
+            echo "$markers"
+            exit 1
+          fi
+
       - name: Select Xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:

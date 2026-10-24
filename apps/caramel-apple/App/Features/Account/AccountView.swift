@@ -152,8 +152,8 @@ struct AccountView: View {
         Section {
             Button("Sign out", role: .destructive) {
                 Task {
+                    // CaramelApp resets the web shells when the token goes away.
                     await session.signOut()
-                    await router.resetWebState()
                 }
             }
         }
@@ -181,7 +181,6 @@ struct AccountView: View {
         // state; on failure SessionStore.errorMessage shows the banner.
         if await session.deleteAccount() {
             exportedFile = nil
-            await router.resetWebState()
             await favorites.refresh()
         }
     }
