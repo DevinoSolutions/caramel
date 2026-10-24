@@ -88,7 +88,7 @@ jobs:
           if-no-files-found: ignore
 
   release:
-    name: Sign release AAB + APK${{ (github.event_name == 'push' || inputs.dry_run == false) && ', upload to Play internal' || ' (dry run, no upload)' }}
+    name: Sign release AAB + APK, upload to Play internal unless dry run
     if: github.event_name != 'pull_request'
     needs: verify
     runs-on: ubuntu-latest
