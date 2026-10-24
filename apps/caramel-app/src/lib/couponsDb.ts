@@ -203,6 +203,11 @@ export const StoreCouponAggregateRowSchema = z.object({
     last_updated: z.date().nullable(),
 })
 
+/** `SELECT COUNT(*)::int AS worked` — couponsRepo.countStoreCodesWorkedWithinDays. */
+export const WorkedCountRowSchema = z.object({
+    worked: z.number(),
+})
+
 /** coupons/stats/route.ts's total+expired aggregate. */
 export const StatsRowSchema = z.object({
     total: z.number(),

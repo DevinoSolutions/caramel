@@ -77,6 +77,7 @@ import {
     StoreCouponAggregateRowSchema,
     StoreListRowSchema,
     TotalCountRowSchema,
+    WorkedCountRowSchema,
     parseCouponRows,
 } from '@/lib/couponsDb'
 import { shopperCouponTitle } from '@/lib/couponTitleText'
@@ -433,6 +434,38 @@ export async function listStoreCoupons(
         },
         hasSupplierRow,
     }
+}
+
+/**
+ * How many of one store's visible codes a shopper's checkout applied
+ * successfully (coupon_signals.last_worked_at) within the last `days` days.
+ * Read-only. The T-7856 pilot's freshness note ("3 worked in the last 7 days",
+ * storeIntentPilot.ts) is the only caller: it counts the whole store, not just
+ * the 20 rows the page lists. The window compares against UTC because Prisma
+ * writes the timestamp-WITHOUT-time-zone column as UTC (see failingSinkSql).
+ */
+export async function countStoreCodesWorkedWithinDays(
+    baseSite: string,
+    days: number,
+): Promise<number> {
+    if (!Number.isInteger(days) || days <= 0) {
+        throw new Error(
+            `countStoreCodesWorkedWithinDays: days must be a positive integer, got ${days}`,
+        )
+    }
+    const [row] = parseCouponRows(
+        WorkedCountRowSchema,
+        await prisma.$queryRaw(Prisma.sql`
+            SELECT COUNT(*)::int AS worked
+            FROM coupon_signals s
+            JOIN coupons c ON c.id = s.coupon_id
+            WHERE ${visibleCouponsWhere()}
+              AND ${onStoreSql(baseSite.toLowerCase())}
+              AND s.last_worked_at > (NOW() AT TIME ZONE 'UTC') - (${days}::int * INTERVAL '1 day')
+        `),
+        'store-page.worked-count',
+    )
+    return row?.worked ?? 0
 }
 
 /**

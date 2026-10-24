@@ -36,6 +36,9 @@ interface CouponsSectionProps {
      * baseline) passes no slot and its DOM is byte-identical to before. Only
      * /coupons/[store], which has no baseline, fills it. */
     heroAction?: React.ReactNode
+    /** Optional server-rendered note under the hero (T-7856 store-intent
+     *  pilot). Omitted -> renders nothing, like heroAction. */
+    heroNote?: React.ReactNode
     /** Codes per page: the server-rendered first page and every "load more"
      *  fetch. MUST equal the number of `initialCoupons` the server rendered,
      *  or page 2's offset re-lists or skips rows. /coupons keeps the default
@@ -54,6 +57,7 @@ export default function CouponsSection({
     heroTitle = 'All Coupons',
     heroSubtitle = 'Browse coupon codes, promo codes, and offers.',
     heroAction,
+    heroNote,
     pageSize = DEFAULT_PAGE_SIZE,
 }: CouponsSectionProps) {
     const ITEMS_PER_PAGE = pageSize
@@ -330,6 +334,7 @@ export default function CouponsSection({
                     </p>
                 ) : null}
                 {heroAction ?? null}
+                {heroNote ?? null}
             </div>
 
             <div className="flex gap-8 md:flex-col">
