@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
@@ -22,13 +23,19 @@ class PrefsListStore(context: Context) : ListStore {
 
     override fun read(key: String): List<String> {
         val raw = prefs.getString(key, null) ?: return emptyList()
-        return Json.decodeFromString(serializer, raw)
+        try {
+            return Json.decodeFromString(serializer, raw)
+        } catch (e: SerializationException) {
+            // A corrupt list must not crash-loop the app at launch: drop it and say so.
+            val cleared = prefs.edit().remove(key).commit()
+            val suffix = if (cleared) "" else " (and the damaged copy could not be removed)"
+            throw ListStoreException("Your saved stores on this device were damaged and have been reset$suffix.", e)
+        }
     }
 
     override fun write(key: String, values: List<String>) {
-        // commit(), not apply(): a failed write must not be silent.
-        check(prefs.edit().putString(key, Json.encodeToString(serializer, values)).commit()) {
-            "Could not save the list '$key' on this device."
+        if (!prefs.edit().putString(key, Json.encodeToString(serializer, values)).commit()) {
+            throw ListStoreException("Could not save your stores on this device.")
         }
     }
 }
@@ -52,12 +59,21 @@ class KeystoreTokenStore(context: Context) : TokenStore {
         } catch (e: GeneralSecurityException) {
             // The key was lost (a restored device, a changed lock screen): the stored token is
             // unusable. Drop it so the next sign-in starts clean, and say so.
-            delete()
-            throw TokenStoreException("Your saved sign-in could not be read on this device. Please sign in again.", e)
+            throw unusable("Your saved sign-in could not be read on this device. Please sign in again.", e)
         } catch (e: IllegalArgumentException) {
-            delete()
-            throw TokenStoreException("Your saved sign-in was damaged. Please sign in again.", e)
+            throw unusable("Your saved sign-in was damaged. Please sign in again.", e)
         }
+    }
+
+    /** Drops the unusable token; a failure of the drop is attached to, never replaces, the original error. */
+    private fun unusable(message: String, cause: Exception): TokenStoreException {
+        val error = TokenStoreException(message, cause)
+        try {
+            delete()
+        } catch (deleteFailure: TokenStoreException) {
+            error.addSuppressed(deleteFailure)
+        }
+        return error
     }
 
     override fun write(token: String) {
@@ -65,8 +81,8 @@ class KeystoreTokenStore(context: Context) : TokenStore {
             val cipher = Cipher.getInstance(TRANSFORMATION)
             cipher.init(Cipher.ENCRYPT_MODE, key())
             val encrypted = cipher.iv + cipher.doFinal(token.toByteArray(Charsets.UTF_8))
-            check(prefs.edit().putString(TOKEN_KEY, Base64.encodeToString(encrypted, Base64.NO_WRAP)).commit()) {
-                "Could not save the sign-in on this device."
+            if (!prefs.edit().putString(TOKEN_KEY, Base64.encodeToString(encrypted, Base64.NO_WRAP)).commit()) {
+                throw TokenStoreException("Could not save the sign-in on this device.")
             }
         } catch (e: GeneralSecurityException) {
             throw TokenStoreException("This device could not store your sign-in securely: ${e.message}", e)
@@ -74,7 +90,9 @@ class KeystoreTokenStore(context: Context) : TokenStore {
     }
 
     override fun delete() {
-        check(prefs.edit().remove(TOKEN_KEY).commit()) { "Could not clear the saved sign-in on this device." }
+        if (!prefs.edit().remove(TOKEN_KEY).commit()) {
+            throw TokenStoreException("Could not clear the saved sign-in on this device.")
+        }
     }
 
     private fun key(): SecretKey {

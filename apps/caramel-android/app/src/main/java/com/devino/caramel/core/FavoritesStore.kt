@@ -7,10 +7,14 @@ import kotlinx.coroutines.flow.update
 
 /** Persistent string lists (SharedPreferences in production). */
 interface ListStore {
+    /** Throws [ListStoreException] when the stored list is damaged (it is reset) or unreadable. */
     fun read(key: String): List<String>
 
+    /** Throws [ListStoreException] when the list could not be saved. */
     fun write(key: String, values: List<String>)
 }
+
+class ListStoreException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
 data class FavoritesState(val stores: List<String> = emptyList(), val errorMessage: String? = null)
 
@@ -27,7 +31,7 @@ class FavoritesStore(
     private val lists: ListStore,
     private val tokenProvider: () -> String?,
 ) {
-    private val mutableState = MutableStateFlow(FavoritesState(stores = lists.read(SAVED_KEY)))
+    private val mutableState = MutableStateFlow(initialState())
     val state: StateFlow<FavoritesState> = mutableState.asStateFlow()
 
     val isSyncedToAccount: Boolean get() = tokenProvider() != null
@@ -136,13 +140,33 @@ class FavoritesStore(
         }
     }
 
-    private fun pending(): List<String> = lists.read(PENDING_KEY)
+    private fun initialState(): FavoritesState = try {
+        FavoritesState(stores = lists.read(SAVED_KEY))
+    } catch (e: ListStoreException) {
+        // A damaged list was reset by the store: start empty and surface it, never crash at launch.
+        FavoritesState(errorMessage = e.message)
+    }
 
-    private fun setPending(domains: List<String>) = lists.write(PENDING_KEY, domains)
+    private fun pending(): List<String> = try {
+        lists.read(PENDING_KEY)
+    } catch (e: ListStoreException) {
+        mutableState.update { it.copy(errorMessage = e.message) }
+        emptyList()
+    }
+
+    private fun setPending(domains: List<String>) = persist(PENDING_KEY, domains)
 
     private fun replace(newStores: List<String>) {
         mutableState.update { it.copy(stores = newStores) }
-        lists.write(SAVED_KEY, newStores)
+        persist(SAVED_KEY, newStores)
+    }
+
+    private fun persist(key: String, values: List<String>) {
+        try {
+            lists.write(key, values)
+        } catch (e: ListStoreException) {
+            mutableState.update { it.copy(errorMessage = e.message) }
+        }
     }
 
     companion object {

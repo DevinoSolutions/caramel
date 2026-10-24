@@ -52,16 +52,18 @@ fun AccountScreen(container: AppContainer, session: SessionState, onStartSignIn:
 
     var overview by remember { mutableStateOf<LoadState<OverviewResponse>>(LoadState.Idle) }
     var isExporting by remember { mutableStateOf(false) }
-    var exportBytes by remember { mutableStateOf<ByteArray?>(null) }
     var exportMessage by remember { mutableStateOf<String?>(null) }
     var deleteMessage by remember { mutableStateOf<String?>(null) }
     var confirmingDataDelete by remember { mutableStateOf(false) }
     var confirmingAccountDelete by remember { mutableStateOf(false) }
 
     val saveExport = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
-        val bytes = exportBytes
-        exportBytes = null
-        if (uri != null && bytes != null) {
+        // Held by the app container, not by this composable, so a rotation while the file picker is
+        // open does not lose the export. (A reclaimed process does lose it: that is reported below.)
+        val bytes = container.pendingExport.take()
+        if (uri != null && bytes == null) {
+            exportMessage = "Could not save the export: it was lost while the file picker was open. Please download it again."
+        } else if (uri != null && bytes != null) {
             exportMessage = try {
                 val out = context.contentResolver.openOutputStream(uri) ?: throw IOException("The chosen location could not be opened.")
                 out.use { it.write(bytes) }
@@ -107,7 +109,7 @@ fun AccountScreen(container: AppContainer, session: SessionState, onStartSignIn:
                             isExporting = true
                             exportMessage = null
                             try {
-                                exportBytes = container.api.exportData(token)
+                                container.pendingExport.bytes = container.api.exportData(token)
                                 saveExport.launch(EXPORT_FILE_NAME)
                             } catch (e: ApiError) {
                                 exportMessage = "Could not prepare the export: ${e.message}"
@@ -171,10 +173,7 @@ fun AccountScreen(container: AppContainer, session: SessionState, onStartSignIn:
                     scope.launch {
                         // On success the session clears and the screen swaps to signed out; on
                         // failure SessionStore.errorMessage shows the banner.
-                        if (container.session.deleteAccount()) {
-                            overview = LoadState.Idle
-                            container.favorites.refresh()
-                        }
+                        if (container.session.deleteAccount()) overview = LoadState.Idle
                     }
                 }) { Text("Delete account", color = MaterialTheme.colorScheme.error) }
             },

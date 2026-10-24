@@ -25,9 +25,12 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         container = (application as CaramelApplication).container
-        // A fresh launch can itself be the sign-in callback (the process was reclaimed while the
-        // browser tab was open). A recreation (rotation) must not replay the same callback.
-        if (savedInstanceState == null) handleCallback(intent)
+        // A recreation (rotation) must not replay the same callback, and neither must a relaunch
+        // from recents, which hands back the old launch intent. A callback that cold-starts a
+        // reclaimed process cannot complete: the PKCE verifier lives in memory only (never
+        // persisted), so it is refused with "no longer waiting" and the shopper signs in again.
+        val fromHistory = intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0
+        if (savedInstanceState == null && !fromHistory) handleCallback(intent)
         setContent {
             CaramelTheme {
                 CaramelApp(container = container, onStartSignIn = ::openSignInTab)

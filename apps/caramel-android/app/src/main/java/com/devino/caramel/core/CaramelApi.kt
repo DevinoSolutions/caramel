@@ -41,6 +41,9 @@ data class HttpRequest(
 
 data class HttpResponse(val status: Int, val body: String)
 
+/** A 2xx [HttpResponse] plus the request id it answered (kept for decode failures). */
+class ApiResponse(val body: String, val requestId: String)
+
 /** The one seam between the client and the network, so the client is unit-testable. */
 fun interface HttpTransport {
     /** Returns every HTTP response (also non-2xx); throws IOException when there is none. */
@@ -52,6 +55,8 @@ class HttpUrlConnectionTransport : HttpTransport {
         val connection = URL(request.url).openConnection() as HttpURLConnection
         try {
             connection.requestMethod = request.method
+            // The API never redirects a JSON call; following one would resend the bearer elsewhere.
+            connection.instanceFollowRedirects = false
             connection.connectTimeout = TIMEOUT_MS
             connection.readTimeout = TIMEOUT_MS
             request.headers.forEach { (name, value) -> connection.setRequestProperty(name, value) }
@@ -89,14 +94,14 @@ class CaramelApi(
     @Serializable
     private class ErrorBody(val error: String? = null)
 
-    /** Sends one request and returns the response of a 2xx. */
+    /** Sends one request and returns the body of a 2xx with its request id. */
     suspend fun send(
         method: String,
         path: String,
         query: List<Pair<String, String>> = emptyList(),
         body: String? = null,
         bearer: String? = null,
-    ): HttpResponse {
+    ): ApiResponse {
         val requestId = newRequestId()
         val headers = linkedMapOf("Accept" to "application/json", "x-request-id" to requestId)
         if (bearer != null) headers["Authorization"] = "Bearer $bearer"
@@ -115,7 +120,7 @@ class CaramelApi(
             }
             throw ApiError(method, path, response.status, requestId, serverMessage ?: "unexpected status")
         }
-        return response
+        return ApiResponse(response.body, requestId)
     }
 
     private suspend inline fun <reified T> get(
@@ -124,10 +129,10 @@ class CaramelApi(
         bearer: String? = null,
     ): T = decode(send("GET", path, query, bearer = bearer), "GET", path)
 
-    private inline fun <reified T> decode(response: HttpResponse, method: String, path: String): T = try {
+    private inline fun <reified T> decode(response: ApiResponse, method: String, path: String): T = try {
         json.decodeFromString<T>(response.body)
     } catch (e: SerializationException) {
-        throw ApiError(method, path, null, "n/a", "Response did not match the expected shape: ${e.message}", e)
+        throw ApiError(method, path, null, response.requestId, "Response did not match the expected shape: ${e.message}", e)
     }
 
     // region Public catalog routes

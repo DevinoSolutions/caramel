@@ -19,7 +19,9 @@ android {
         minSdk = 26
         targetSdk = 36
         // Mirrors the iOS container (apps/caramel-apple project.yml MARKETING_VERSION).
-        // The release workflow passes -PcaramelVersionCode (monotonic, from the run number).
+        // The release workflow passes -PcaramelVersionCode = 100 + run number. TODO(T-7474): no
+        // Gradle dependency locking / verification-metadata.xml yet (supply-chain pinning of the
+        // resolved artifacts); add it once the dependency set settles.
         versionCode = (project.findProperty("caramelVersionCode") as String?)?.toInt() ?: 1
         versionName = "1.5.0"
     }

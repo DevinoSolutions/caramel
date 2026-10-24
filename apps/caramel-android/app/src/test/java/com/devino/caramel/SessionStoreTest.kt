@@ -46,7 +46,7 @@ class SessionStoreTest {
     }
 
     @Test
-    fun aCallbackWithTheWrongStateSignsNobodyIn() = runBlocking {
+    fun aCallbackWithTheWrongStateSignsNobodyInAndKeepsTheRealSignInWaiting() = runBlocking {
         val (api, transport) = routed()
         val tokens = MemoryTokenStore()
         val store = SessionStore(api, tokens) { pkce }
@@ -55,8 +55,11 @@ class SessionStoreTest {
 
         assertNull(tokens.token)
         assertEquals(SignInFailure.STATE_MISMATCH.userMessage, store.state.value.errorMessage)
-        assertFalse(store.state.value.isSigningIn)
+        assertTrue(store.state.value.isSigningIn)
         assertEquals(1, transport.requests.size) // only the authorize call: no exchange
+
+        store.completeSignIn(callback) // the genuine answer still works
+        assertEquals("bearer-1", tokens.token)
     }
 
     @Test
@@ -92,6 +95,7 @@ class SessionStoreTest {
         val (api, _) = routed { _, path -> if (path == "/api/extension/me") HttpResponse(401, """{"error":"expired"}""") else null }
         val tokens = MemoryTokenStore("old")
         val store = SessionStore(api, tokens) { pkce }
+        store.load()
         store.validate()
         assertNull(tokens.token)
         assertFalse(store.state.value.isSignedIn)
@@ -103,6 +107,7 @@ class SessionStoreTest {
         val (api, _) = routed { method, _ -> if (method == "DELETE") HttpResponse(500, "{}") else null }
         val tokens = MemoryTokenStore("tok")
         val store = SessionStore(api, tokens) { pkce }
+        store.load()
         store.signOut()
         assertNull(tokens.token)
         assertTrue(store.state.value.errorMessage!!.startsWith("Signed out on this device, but the server could not end the session"))
@@ -113,6 +118,7 @@ class SessionStoreTest {
         val (okApi, okTransport) = routed()
         val okTokens = MemoryTokenStore("tok")
         val okStore = SessionStore(okApi, okTokens) { pkce }
+        okStore.load()
         assertTrue(okStore.deleteAccount())
         assertNull(okTokens.token)
         assertEquals("/api/account/delete", okTransport.requests.single().url.removePrefix("https://example.test"))
@@ -120,6 +126,7 @@ class SessionStoreTest {
         val (badApi, _) = routed { _, path -> if (path == "/api/account/delete") HttpResponse(403, """{"error":"nope"}""") else null }
         val badTokens = MemoryTokenStore("tok")
         val badStore = SessionStore(badApi, badTokens) { pkce }
+        badStore.load()
         assertFalse(badStore.deleteAccount())
         assertEquals("tok", badTokens.token)
         assertTrue(badStore.state.value.errorMessage!!.startsWith("Could not delete your account"))

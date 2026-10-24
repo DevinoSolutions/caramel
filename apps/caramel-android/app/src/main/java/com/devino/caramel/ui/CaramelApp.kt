@@ -51,13 +51,15 @@ fun CaramelApp(container: AppContainer, onStartSignIn: (String) -> Unit) {
     val session by container.session.state.collectAsStateWithLifecycle()
     val favorites by container.favorites.state.collectAsStateWithLifecycle()
 
+    var lastToken by remember { mutableStateOf(session.token) }
     // Launch: confirm the stored sign-in is alive, then adopt the account's saved stores.
     LaunchedEffect(Unit) {
+        container.session.load()
+        lastToken = container.session.token // the token the app launched with is not a sign-in
         container.session.validate()
         container.favorites.refresh()
     }
     // A sign-in or sign-out queues / drops the account's saved stores. Not run for the token the app launched with.
-    var lastToken by remember { mutableStateOf(session.token) }
     LaunchedEffect(session.token) {
         if (session.token != lastToken) {
             lastToken = session.token

@@ -3,6 +3,8 @@ package com.devino.caramel
 import com.devino.caramel.core.FavoritesStore
 import com.devino.caramel.core.HttpRequest
 import com.devino.caramel.core.HttpResponse
+import com.devino.caramel.core.ListStore
+import com.devino.caramel.core.ListStoreException
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -104,5 +106,31 @@ class FavoritesStoreTest {
         store.refresh()
         assertEquals(listOf("a.com"), store.state.value.stores)
         assertNotNull(store.state.value.errorMessage)
+    }
+
+    @Test
+    fun aDamagedStoredListStartsEmptyAndIsReportedInsteadOfCrashing() {
+        val (api, _) = testApi { HttpResponse(404, "{}") }
+        val damaged = object : ListStore {
+            override fun read(key: String): List<String> = throw ListStoreException("damaged and reset")
+
+            override fun write(key: String, values: List<String>) = Unit
+        }
+        val store = FavoritesStore(api, damaged) { null }
+        assertEquals(emptyList<String>(), store.state.value.stores)
+        assertEquals("damaged and reset", store.state.value.errorMessage)
+    }
+
+    @Test
+    fun aFailedSaveIsReportedNotThrown() = runBlocking {
+        val (api, _) = testApi { HttpResponse(404, "{}") }
+        val full = object : ListStore {
+            override fun read(key: String): List<String> = emptyList()
+
+            override fun write(key: String, values: List<String>) = throw ListStoreException("disk full")
+        }
+        val store = FavoritesStore(api, full) { null }
+        store.toggle("a.com")
+        assertEquals("disk full", store.state.value.errorMessage)
     }
 }

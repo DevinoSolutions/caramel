@@ -26,7 +26,20 @@ name: Release – Android App (Kotlin + Compose, com.devino.caramel)
 #   PLAY_SERVICE_ACCOUNT_JSON   Google Play service-account JSON (plain text); only when uploading
 # A missing secret fails the release job loudly, naming the secret.
 #
-# versionCode: this workflow's run number (monotonic per workflow). versionName: apps/caramel-android/app/build.gradle.kts.
+# versionCode = 100 + this workflow's run number; versionName: apps/caramel-android/app/build.gradle.kts.
+# Pitfalls (Play rejects a versionCode it has already seen, and codes never go back down):
+#   - the run number is ONE counter shared by every trigger of this workflow (PR runs, dry runs,
+#     tags), so codes skip numbers; that is fine, they only have to increase;
+#   - a re-run of a run REUSES its run number, so a failed upload must be retried with a NEW run
+#     (push a new tag / dispatch again), never with "Re-run jobs";
+#   - renaming this workflow file or its `name:` resets the run counter. The fixed +100 offset is
+#     there so such a reset cannot fall below codes already uploaded; if it ever happens, raise the
+#     offset in the Build step past the highest versionCode in Play Console.
+#
+# Release gating (no GitHub Environment, which is a repo-settings change): a real upload needs a
+# commit on main (dispatch from main, or a tag whose commit is an ancestor of origin/main) and a tag
+# equal to android-v<versionName>. TODO(owner): add a protected Environment with required reviewers
+# for the Play upload and keystore secrets; until then anyone with write access can push a tag.
 
 on:
   push:
@@ -71,11 +84,17 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - uses: gradle/actions/setup-gradle@b9bee63ef481cc545e4517ec730544a4d8b1dfa0 # v6.4.0
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
 
       - name: assembleDebug + unit tests + lint
         working-directory: ${{ env.ANDROID_DIR }}
         run: ./gradlew --no-daemon assembleDebug testDebugUnitTest lintDebug
+
+      # The R8 / resource-shrinking / lintVital release path, unsigned (no keystore here), so a
+      # shrinker problem shows on the PR and not for the first time on a release tag.
+      - name: assembleRelease (unsigned) + lintVitalRelease
+        working-directory: ${{ env.ANDROID_DIR }}
+        run: ./gradlew --no-daemon assembleRelease lintVitalRelease
 
       - name: Upload reports
         if: always()
@@ -119,13 +138,38 @@ jobs:
           exit $missing
 
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0 # the tag-is-on-main check needs history
+
+      - name: Release gating (main only for real uploads; tag must match versionName)
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          version_name="$(sed -n 's/^ *versionName = "\(.*\)"$/\1/p' "$ANDROID_DIR/app/build.gradle.kts")"
+          test -n "$version_name" || { echo "::error::Could not read versionName from build.gradle.kts."; exit 1; }
+          if [ "$EVENT" = "push" ]; then
+            if [ "$REF_NAME" != "android-v$version_name" ]; then
+              echo "::error::Tag $REF_NAME does not match versionName $version_name (expected android-v$version_name)."
+              exit 1
+            fi
+            git fetch --no-tags origin main
+            if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+              echo "::error::Tagged commit $GITHUB_SHA is not on main. Release tags must point at main."
+              exit 1
+            fi
+          elif [ "$UPLOAD_TO_PLAY" = "true" ] && [ "$REF" != "refs/heads/main" ]; then
+            echo "::error::A real (non-dry-run) dispatch must run from main, not $REF. Use dry_run=true on a branch."
+            exit 1
+          fi
 
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
           distribution: temurin
           java-version: '21'
 
-      - uses: gradle/actions/setup-gradle@b9bee63ef481cc545e4517ec730544a4d8b1dfa0 # v6.4.0
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
 
       - name: Decode the upload keystore
         env:
@@ -142,12 +186,14 @@ jobs:
           CARAMEL_KEYSTORE_PASSWORD: ${{ secrets.CARAMEL_KEYSTORE_PASSWORD }}
           CARAMEL_KEY_ALIAS: ${{ secrets.CARAMEL_KEY_ALIAS }}
           CARAMEL_KEY_PASSWORD: ${{ secrets.CARAMEL_KEY_PASSWORD }}
-        run: ./gradlew --no-daemon -PcaramelVersionCode=${{ github.run_number }} bundleRelease assembleRelease
+        run: ./gradlew --no-daemon -PcaramelVersionCode=$((100 + ${{ github.run_number }})) bundleRelease assembleRelease
 
       - name: Verify the artifacts are signed
         working-directory: ${{ env.ANDROID_DIR }}/app/build/outputs
         run: |
-          jarsigner -verify bundle/release/app-release.aab
+          verify_output="$(jarsigner -verify bundle/release/app-release.aab 2>&1)" || true
+          echo "$verify_output"
+          grep -q '^jar verified' <<<"$verify_output" || { echo "::error::jarsigner did not report 'jar verified' for the AAB."; exit 1; }
           apksigner="$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)"
           "$apksigner" verify --print-certs apk/release/app-release.apk
 

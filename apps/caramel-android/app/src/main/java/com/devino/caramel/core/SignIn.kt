@@ -72,6 +72,14 @@ object SignInCallback {
         return code
     }
 
+    /** The `state` query parameter of [callback], or null when there is none or the URL is malformed. */
+    fun stateParam(callback: String): String? = try {
+        queryParameters(URI(callback).rawQuery)["state"]
+    } catch (_: URISyntaxException) {
+        // Not a URL at all: it cannot be the answer to our request, so it has no state to match.
+        null
+    }
+
     private fun parse(callback: String): URI = try {
         URI(callback)
     } catch (e: URISyntaxException) {

@@ -1,9 +1,12 @@
 package com.devino.caramel.core
 
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.withContext
+import kotlin.coroutines.CoroutineContext
 
 /** Where the session bearer lives (an Android Keystore-encrypted file in production). */
 interface TokenStore {
@@ -34,6 +37,8 @@ data class SessionState(
 class SessionStore(
     private val api: CaramelApi,
     private val tokens: TokenStore,
+    // Keystore work is blocking crypto: never on the main thread.
+    private val io: CoroutineContext = Dispatchers.IO,
     private val newPkce: () -> Pkce = { Pkce.generate() },
 ) {
     private class PendingSignIn(val provider: OAuthProvider, val state: String, val pkce: Pkce)
@@ -45,9 +50,11 @@ class SessionStore(
 
     val token: String? get() = mutableState.value.token
 
-    init {
+    /** Reads the stored bearer. Call once at launch, before [validate]. */
+    suspend fun load() {
         try {
-            mutableState.update { it.copy(token = tokens.read()) }
+            val stored = withContext(io) { tokens.read() }
+            mutableState.update { it.copy(token = stored) }
         } catch (e: TokenStoreException) {
             mutableState.update { it.copy(errorMessage = e.message) }
         }
@@ -102,19 +109,31 @@ class SessionStore(
         mutableState.update { it.copy(isSigningIn = false) }
     }
 
-    /** Step 2: the callback URL the browser tab redirected to (the app's intent filter). */
+    /**
+     * Step 2: the callback URL the browser tab redirected to (the app's intent filter).
+     *
+     * The pending sign-in is consumed ONLY by a callback that echoes its signed state. Any other
+     * VIEW intent on our scheme (another app, a stray link) is refused and leaves the real
+     * sign-in waiting for its answer.
+     */
     suspend fun completeSignIn(callbackUrl: String) {
         val current = pending
         if (current == null) {
             mutableState.update { it.copy(isSigningIn = false, errorMessage = SignInFailure.SIGN_IN_NOT_STARTED.userMessage) }
             return
         }
+        if (SignInCallback.stateParam(callbackUrl) != current.state) {
+            mutableState.update { it.copy(errorMessage = SignInFailure.STATE_MISMATCH.userMessage) }
+            return
+        }
         pending = null
         try {
             val code = SignInCallback.code(callbackUrl, current.state)
             val result = api.oauthExchange(current.provider, code, current.state, current.pkce.verifier)
-            tokens.write(result.token)
-            mutableState.update { it.copy(token = result.token, username = result.username, isSigningIn = false) }
+            withContext(io) { tokens.write(result.token) }
+            mutableState.update {
+                it.copy(token = result.token, username = result.username, isSigningIn = false, errorMessage = null)
+            }
         } catch (e: SignInException) {
             mutableState.update { it.copy(isSigningIn = false, errorMessage = e.message) }
         } catch (e: ApiError) {
@@ -167,10 +186,10 @@ class SessionStore(
         return true
     }
 
-    private fun clearLocalSession() {
+    private suspend fun clearLocalSession() {
         var failure: String? = null
         try {
-            tokens.delete()
+            withContext(io) { tokens.delete() }
         } catch (e: TokenStoreException) {
             failure = e.message
         }
