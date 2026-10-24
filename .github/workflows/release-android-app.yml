@@ -1,0 +1,177 @@
+name: Release – Android App (Kotlin + Compose, com.devino.caramel)
+
+# Builds apps/caramel-android (the native Android twin of the iOS container in apps/caramel-apple).
+#
+# Triggers (owner pushes the tags; agents never do):
+#   - pull_request touching apps/caramel-android or this file: assembleDebug + JVM unit tests + lint.
+#     It never signs and never uploads, so CI proves the build before anything can ship.
+#   - tag `android-v*`: the same verification, then a SIGNED release AAB + universal APK and an
+#     upload of the AAB to the Play INTERNAL track. `v*` tags belong to release-extension.yml and
+#     `apple-v*` to release-apple-app.yml.
+#   - workflow_dispatch (the workflow file must exist on the default branch): same as a tag, but
+#     `dry_run` (default true) builds + signs + verifies and SKIPS the Play upload, mirroring the
+#     other Devino Android callers (marka-pwa-android release.yml).
+#
+# INTERNAL track only: nothing here promotes a build to closed/open/production. The universal APK
+# (app-release.apk) is attached as a workflow artifact for the Amazon Appstore; it is the same
+# signed build, so it needs no GMS and no extra secret.
+#
+# Secrets (names only; this workflow never prints them). The first four mirror the shared
+# Devino Android convention (marka / superbooks / dodomain use ANDROID_KEYSTORE_B64 and
+# PLAY_SERVICE_ACCOUNT_JSON); the app-specific ones are prefixed CARAMEL_:
+#   ANDROID_KEYSTORE_B64        base64 of the upload keystore
+#   CARAMEL_KEYSTORE_PASSWORD   keystore store password
+#   CARAMEL_KEY_ALIAS           upload key alias
+#   CARAMEL_KEY_PASSWORD        upload key password
+#   PLAY_SERVICE_ACCOUNT_JSON   Google Play service-account JSON (plain text); only when uploading
+# A missing secret fails the release job loudly, naming the secret.
+#
+# versionCode: this workflow's run number (monotonic per workflow). versionName: apps/caramel-android/app/build.gradle.kts.
+
+on:
+  push:
+    tags: ['android-v*']
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'true = build + sign + verify only, SKIP the Play upload (tag pushes always upload)'
+        type: boolean
+        default: true
+      play_status:
+        description: 'Play release status (use "draft" while the Play app record has never been published)'
+        type: choice
+        options: [completed, draft]
+        default: completed
+  pull_request:
+    paths:
+      - 'apps/caramel-android/**'
+      - '.github/workflows/release-android-app.yml'
+
+concurrency:
+  group: release-android-app-${{ github.event_name == 'pull_request' && github.ref || 'release' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  ANDROID_DIR: apps/caramel-android
+  PACKAGE_NAME: com.devino.caramel
+
+jobs:
+  verify:
+    name: Build debug, unit tests, lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@b9bee63ef481cc545e4517ec730544a4d8b1dfa0 # v6.4.0
+
+      - name: assembleDebug + unit tests + lint
+        working-directory: ${{ env.ANDROID_DIR }}
+        run: ./gradlew --no-daemon assembleDebug testDebugUnitTest lintDebug
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: android-verify-reports
+          path: |
+            ${{ env.ANDROID_DIR }}/app/build/reports
+            ${{ env.ANDROID_DIR }}/app/build/test-results
+          if-no-files-found: ignore
+
+  release:
+    name: Sign release AAB + APK${{ (github.event_name == 'push' || inputs.dry_run == false) && ', upload to Play internal' || ' (dry run, no upload)' }}
+    if: github.event_name != 'pull_request'
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      UPLOAD_TO_PLAY: ${{ github.event_name == 'push' || inputs.dry_run == false }}
+      PLAY_STATUS: ${{ inputs.play_status || 'completed' }}
+    steps:
+      - name: Require the signing secrets
+        env:
+          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          CARAMEL_KEYSTORE_PASSWORD: ${{ secrets.CARAMEL_KEYSTORE_PASSWORD }}
+          CARAMEL_KEY_ALIAS: ${{ secrets.CARAMEL_KEY_ALIAS }}
+          CARAMEL_KEY_PASSWORD: ${{ secrets.CARAMEL_KEY_PASSWORD }}
+          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+        run: |
+          missing=0
+          for name in ANDROID_KEYSTORE_B64 CARAMEL_KEYSTORE_PASSWORD CARAMEL_KEY_ALIAS CARAMEL_KEY_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing repository secret $name: the release build cannot be signed."
+              missing=1
+            fi
+          done
+          if [ "$UPLOAD_TO_PLAY" = "true" ] && [ -z "$PLAY_SERVICE_ACCOUNT_JSON" ]; then
+            echo "::error::Missing repository secret PLAY_SERVICE_ACCOUNT_JSON: the AAB cannot be uploaded to Play."
+            missing=1
+          fi
+          exit $missing
+
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@b9bee63ef481cc545e4517ec730544a4d8b1dfa0 # v6.4.0
+
+      - name: Decode the upload keystore
+        env:
+          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          keystore="$RUNNER_TEMP/caramel-upload.keystore"
+          printf '%s' "$ANDROID_KEYSTORE_B64" | base64 -d > "$keystore"
+          test -s "$keystore" || { echo "::error::ANDROID_KEYSTORE_B64 did not decode to a keystore."; exit 1; }
+          echo "CARAMEL_KEYSTORE_PATH=$keystore" >> "$GITHUB_ENV"
+
+      - name: Build signed AAB + universal APK
+        working-directory: ${{ env.ANDROID_DIR }}
+        env:
+          CARAMEL_KEYSTORE_PASSWORD: ${{ secrets.CARAMEL_KEYSTORE_PASSWORD }}
+          CARAMEL_KEY_ALIAS: ${{ secrets.CARAMEL_KEY_ALIAS }}
+          CARAMEL_KEY_PASSWORD: ${{ secrets.CARAMEL_KEY_PASSWORD }}
+        run: ./gradlew --no-daemon -PcaramelVersionCode=${{ github.run_number }} bundleRelease assembleRelease
+
+      - name: Verify the artifacts are signed
+        working-directory: ${{ env.ANDROID_DIR }}/app/build/outputs
+        run: |
+          jarsigner -verify bundle/release/app-release.aab
+          apksigner="$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)"
+          "$apksigner" verify --print-certs apk/release/app-release.apk
+
+      - name: Upload AAB + universal APK
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: caramel-android-release
+          path: |
+            ${{ env.ANDROID_DIR }}/app/build/outputs/bundle/release/app-release.aab
+            ${{ env.ANDROID_DIR }}/app/build/outputs/apk/release/app-release.apk
+            ${{ env.ANDROID_DIR }}/app/build/outputs/mapping/release/mapping.txt
+          if-no-files-found: error
+
+      - name: Upload to Play internal track
+        if: env.UPLOAD_TO_PLAY == 'true'
+        uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5 # v1.1.5
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: ${{ env.PACKAGE_NAME }}
+          releaseFiles: ${{ env.ANDROID_DIR }}/app/build/outputs/bundle/release/app-release.aab
+          track: internal
+          status: ${{ env.PLAY_STATUS }}
+          mappingFile: ${{ env.ANDROID_DIR }}/app/build/outputs/mapping/release/mapping.txt
+
+      - name: Remove the keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/caramel-upload.keystore" serviceAccountJson.json
