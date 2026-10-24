@@ -133,7 +133,20 @@ jobs:
             -no-window -no-audio -no-boot-anim -no-snapshot -no-metrics \
             -gpu swiftshader_indirect -camera-back none -camera-front none \
             -accel on -netdelay none -netspeed full > "$RUNNER_TEMP/emulator.log" 2>&1 &
-          adb wait-for-device
+          EMU_PID=$!
+          # Unlike the reusable, bound the wait and notice a dead emulator: a bare
+          # `adb wait-for-device` blocks until the job timeout when the emulator exits at start.
+          sleep 10
+          if ! kill -0 "$EMU_PID" 2>/dev/null; then
+            echo "::error::emulator process exited right after start"
+            cat "$RUNNER_TEMP/emulator.log" || true
+            exit 1
+          fi
+          timeout 300 adb wait-for-device || {
+            echo "::error::no emulator device appeared within 5 minutes"
+            cat "$RUNNER_TEMP/emulator.log" || true
+            exit 1
+          }
           for i in $(seq 1 120); do
             BOOTED=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)
             if [ "$BOOTED" = "1" ]; then echo "Booted after ~$((i*5))s"; break; fi
@@ -248,3 +261,7 @@ jobs:
             echo ""
             echo "</details>"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Dump the emulator log (diagnostics, only on failure)
+        if: failure()
+        run: tail -n 120 "$RUNNER_TEMP/emulator.log" || true
