@@ -106,7 +106,11 @@ jobs:
           set -euo pipefail
           echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd \
             -n smoke -k "$SYSTEM_IMAGE" --force
-          CFG="$HOME/.android/avd/smoke.avd/config.ini"
+          # Where avdmanager writes depends on ANDROID_AVD_HOME / XDG on the runner image, so find the
+          # file it actually created instead of assuming ~/.android/avd.
+          CFG=$(find "$HOME" -path '*/smoke.avd/config.ini' -print -quit)
+          [ -n "$CFG" ] || { echo "::error::avdmanager created no smoke.avd/config.ini under $HOME"; exit 1; }
+          echo "AVD config: $CFG"
           # A default AVD boots at a tiny skin; pin a phone-shaped screen so the
           # screenshot is real evidence. printf rather than a heredoc: YAML
           # forbids tabs, so <<- cannot strip this block's indentation.
