@@ -14,7 +14,7 @@ class NavigationPolicyTest {
             "https://evil.com/collect",
             "http://grabcaramel.com/",
             "https://grabcaramel.com.evil.com/",
-            "https://grabcaramel.com@evil.com/",
+            "https://grabcaramel.com\@evil.com/",
             "https://grabcaramel.com\@evil.com/",
             "https://grabcaramel.com:8443/",
             "data:text/html,hi",
