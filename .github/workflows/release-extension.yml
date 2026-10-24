@@ -313,7 +313,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
           cache-dependency-path: ${{ github.workspace }}/pnpm-lock.yaml
 
@@ -717,7 +717,7 @@ jobs:
         if: steps.credentials.outputs.configured == 'true'
         uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
 
       # `--channel=listed` submits the version to the public AMO listing, which
       # is what the 829 daily users on that listing actually receive.
