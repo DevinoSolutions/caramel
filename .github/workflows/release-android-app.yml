@@ -10,7 +10,8 @@ name: Release – Android App (Kotlin + Compose, com.devino.caramel)
 #     `apple-v*` to release-apple-app.yml.
 #   - workflow_dispatch (the workflow file must exist on the default branch): same as a tag, but
 #     `dry_run` (default true) builds + signs + verifies and SKIPS the Play upload, mirroring the
-#     other Devino Android callers (marka-pwa-android release.yml).
+#     other Devino Android callers (marka-pwa-android release.yml). `internal_preview` (default
+#     false) lets a dispatch FROM main past the T-7852 gate for an INTERNAL-only build; see below.
 #
 # INTERNAL track only: nothing here promotes a build to closed/open/production. The universal APK
 # (app-release.apk) is attached as a workflow artifact for the Amazon Appstore; it is the same
@@ -37,7 +38,10 @@ name: Release – Android App (Kotlin + Compose, com.devino.caramel)
 #     offset in the Build step past the highest versionCode in Play Console.
 #
 # The release job also refuses to run while any TODO(T-7852) marker is left in the app source (the WebView web-session
-# handoff is unfinished: see the "Block the release" step).
+# handoff is unfinished: see the "Block the release" step). The only way past it is a workflow_dispatch from main with
+# `internal_preview` = true: the markers are then printed as warnings and the run is labelled INTERNAL PREVIEW. Such a
+# build (Play internal track) has signed-out web tabs and must never be submitted for review or promoted. Tag pushes
+# ignore the input and stay blocked.
 #
 # Release gating (no GitHub Environment, which is a repo-settings change): a real upload needs a
 # commit on main (dispatch from main, or a tag whose commit is an ancestor of origin/main) and a tag
@@ -58,6 +62,10 @@ on:
         type: choice
         options: [completed, draft]
         default: completed
+      internal_preview:
+        description: 'true = allow an INTERNAL-only build (TestFlight group Devino / Play internal track) while TODO(T-7852) markers remain; web tabs are signed out. Tag pushes ignore this and stay blocked. Never submit such a build for review.'
+        type: boolean
+        default: false
   pull_request:
     paths:
       - 'apps/caramel-android/**'
@@ -150,13 +158,33 @@ jobs:
       # (POST /api/app/web-session/handoff, T-7852) is wired: the Saved and Account tabs bounce to
       # Deals. Every TODO(T-7852) marker in the app source is part of that unfinished work, so a
       # release build stops while any is left. Runs only in this release job (never on PRs).
+      # Passes with warnings ONLY for a workflow_dispatch from main with internal_preview = true.
+      # Tag pushes, a plain dispatch and a dispatch from a branch all fail exactly as before.
       - name: Block the release while the web-session handoff (T-7852) is unfinished
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INTERNAL_PREVIEW: ${{ inputs.internal_preview }}
+          REF: ${{ github.ref }}
         run: |
           markers="$(grep -rn 'TODO(T-7852)' "$ANDROID_DIR/app/src/main" || true)"
           if [ -n "$markers" ]; then
-            echo "::error::Release stopped on purpose: the Android WebView shell has no web session yet, so the Saved and Account tabs do not work for signed-in users. T-7852 (POST /api/app/web-session/handoff, wired into MainActivity.handleCallback and AppContainer.webSessionActive) is unfinished. Remove the TODO(T-7852) markers once it ships, then re-tag with a new tag. Markers still present:"
-            echo "$markers"
-            exit 1
+            if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$INTERNAL_PREVIEW" = "true" ] && [ "$REF" = "refs/heads/main" ]; then
+              while IFS= read -r line; do echo "::warning::$line"; done <<<"$markers"
+              echo "::warning::INTERNAL PREVIEW build: the Android WebView shell has no web session yet (T-7852 unfinished), so the Saved and Account tabs are signed out. Play internal track only; never submit or promote this build."
+              {
+                echo "### INTERNAL PREVIEW — not for App Store / Play production submission; T-7852 markers present"
+                echo
+                echo "The web tabs of this build are signed out. Markers still present:"
+                echo
+                echo '```'
+                echo "$markers"
+                echo '```'
+              } >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::error::Release stopped on purpose: the Android WebView shell has no web session yet, so the Saved and Account tabs do not work for signed-in users. T-7852 (POST /api/app/web-session/handoff, wired into MainActivity.handleCallback and AppContainer.webSessionActive) is unfinished. Remove the TODO(T-7852) markers once it ships, then re-tag with a new tag. Markers still present:"
+              echo "$markers"
+              exit 1
+            fi
           fi
 
       - name: Release gating (main only for real uploads; tag must match versionName)

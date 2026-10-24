@@ -1,0 +1,105 @@
+# Emulator smoke for the native Android shell (apps/caramel-android, com.devino.caramel).
+#
+# What it proves: the debug APK installs on a real headless Android emulator (KVM, API 35),
+# launches, the process is still alive after the settle window, and the captured screenshot
+# (smoke.png) is a non-trivial rendered screen rather than a blank frame. Nothing more.
+#
+# Why it lives here: the old caramel-pwa-android repo that carried this lane is archived. The
+# shell now lives in this monorepo, so the caller does too. The emulator boot itself is the org's
+# shared reusable (DevinoSolutions/.github pwa-emulator-smoke.yml); this file only builds and
+# publishes the APK it needs and calls it.
+#
+# What it does NOT prove: any physical-device behaviour (real GPU, OEM skins, Play Services,
+# push, biometrics, WebView versions shipped on actual phones). There is no physical-device run.
+#
+# APK hand-off: the reusable DOWNLOADS the APK from the org MinIO store
+# (DevinoSolutions/artifact, keyed <owner>/<repo>/<run-id>/shell-build-<app-id>) instead of
+# rebuilding. Its rebuild fallback is a Capacitor path (pnpm install + cap sync) that cannot work
+# for this native app, so `shell-build` below publishes the APK itself and `smoke` passes
+# `require-artifact: true`: a missing APK is a hard failure, never a silent rebuild. GitHub's own
+# upload-artifact is deliberately not used (the org is over its GitHub artifact quota).
+#
+# Triggers:
+#   - pull_request touching ONLY this file. It deliberately does not watch apps/caramel-android/**:
+#     every dependabot bump would burn a 45-minute KVM pod.
+#   - workflow_dispatch. `shell-build-run-id` blank = build the APK in this run; set it to the id
+#     of an earlier run that published `shell-build-com.devino.caramel` to smoke that APK instead.
+name: Emulator smoke (Android shell)
+
+on:
+  workflow_dispatch:
+    inputs:
+      shell-build-run-id:
+        description: 'Run id of an earlier run that published the APK (blank = build the APK in this run)'
+        type: string
+        default: ''
+  pull_request:
+    paths:
+      - '.github/workflows/emulator-smoke.yml'
+
+concurrency:
+  group: emulator-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  # REQUIRED: DevinoSolutions/artifact (upload here, download and screenshot upload in the shared
+  # lane) authenticates to the org MinIO with this job's GitHub OIDC token.
+  id-token: write
+
+env:
+  ANDROID_DIR: apps/caramel-android
+  APP_ID: com.devino.caramel
+
+jobs:
+  shell-build:
+    name: shell-build
+    # A supplied run id means the APK already exists; the input is always blank on pull_request.
+    if: ${{ !inputs.shell-build-run-id }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: assembleDebug
+        working-directory: ${{ env.ANDROID_DIR }}
+        run: ./gradlew --no-daemon assembleDebug
+
+      - name: Assert the debug APK exists
+        run: |
+          apk="$ANDROID_DIR/app/build/outputs/apk/debug/app-debug.apk"
+          if [ ! -s "$apk" ]; then
+            echo "::error::assembleDebug produced no $apk"
+            exit 1
+          fi
+          echo "debug APK: $(stat -c%s "$apk") bytes"
+
+      # A single-file path uploads rooted at the file's directory, so the reusable's download into
+      # <ANDROID_DIR>/app/build/outputs/apk/debug yields app-debug.apk. Not continue-on-error: a
+      # broken hand-off must fail here, not surface as a confusing missing-APK error in `smoke`.
+      - name: Publish the debug APK to the org artifact store
+        uses: DevinoSolutions/artifact/upload@v1
+        with:
+          name: shell-build-${{ env.APP_ID }}
+          path: ${{ env.ANDROID_DIR }}/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 3
+
+  smoke:
+    name: smoke
+    needs: shell-build
+    if: ${{ !cancelled() && (needs.shell-build.result == 'success' || needs.shell-build.result == 'skipped') }}
+    uses: DevinoSolutions/.github/.github/workflows/pwa-emulator-smoke.yml@main
+    with:
+      app-id: com.devino.caramel
+      kit-path: apps/caramel-android
+      android-path: '.'
+      shell-build-run-id: ${{ inputs.shell-build-run-id || github.run_id }}
+      require-artifact: true
+      # google-services stays at its default (skip): the app has no google-services plugin, and
+      # the setting only applies to the Capacitor rebuild fallback this call never takes.

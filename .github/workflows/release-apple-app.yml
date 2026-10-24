@@ -12,7 +12,9 @@ name: Release – Apple App (iOS container + Safari extension)
 # Triggers (owner pushes the tags; agents never do):
 #   - tag `apple-v<MARKETING_VERSION>` (must equal MARKETING_VERSION in
 #     apps/caramel-apple/project.yml; `v*` tags belong to release-extension.yml)
-#   - workflow_dispatch (the workflow file must exist on the default branch)
+#   - workflow_dispatch (the workflow file must exist on the default branch). `internal_preview`
+#     (default false) lets a dispatch FROM main past the T-7852 gate for an INTERNAL-only
+#     TestFlight build; see the gate note below. Tag pushes ignore it and stay blocked.
 #   - pull_request touching apps/caramel-apple: builds and archives UNSIGNED and
 #     verifies the committed Xcode project matches project.yml. It never signs
 #     or uploads, so CI proves the build before anything can ship.
@@ -32,6 +34,11 @@ on:
   push:
     tags: ['apple-v*']
   workflow_dispatch:
+    inputs:
+      internal_preview:
+        description: 'true = allow an INTERNAL-only build (TestFlight group Devino / Play internal track) while TODO(T-7852) markers remain; web tabs are signed out. Tag pushes ignore this and stay blocked. Never submit such a build for review.'
+        type: boolean
+        default: false
   pull_request:
     paths:
       - 'apps/caramel-apple/**'
@@ -84,7 +91,9 @@ jobs:
       # The 1.6 shell shows grabcaramel.com in a WKWebView with NO web session until the handoff
       # (POST /api/app/web-session/handoff, T-7852) is wired: the Saved and Account tabs open signed
       # out. Every TODO(T-7852) marker in the app source is part of that unfinished work, so a
-      # tag/dispatch build stops while any is left. Never runs on pull requests.
+      # tag/dispatch build stops while any is left. Never runs on pull requests. The only way past
+      # it is a workflow_dispatch from main with internal_preview = true (INTERNAL TestFlight group
+      # only; the markers print as warnings and the run is labelled INTERNAL PREVIEW).
       - name: Show the unfinished web-session handoff (T-7852) markers (warning only on pull requests)
         if: github.event_name == 'pull_request'
         run: |
@@ -92,12 +101,30 @@ jobs:
 
       - name: Block the release while the web-session handoff (T-7852) is unfinished
         if: github.event_name != 'pull_request'
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INTERNAL_PREVIEW: ${{ inputs.internal_preview }}
+          REF: ${{ github.ref }}
         run: |
           markers="$(grep -rn 'TODO(T-7852)' "$APPLE_DIR/App" || true)"
           if [ -n "$markers" ]; then
-            echo "::error::Release stopped on purpose: the iOS web tabs have no web session yet, so Saved and Account do not work for signed-in users. T-7852 (POST /api/app/web-session/handoff, wired into ShellRouter.signInFromWeb) is unfinished. Remove the TODO(T-7852) markers once it ships, then the owner re-tags. Markers still present:"
-            echo "$markers"
-            exit 1
+            if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$INTERNAL_PREVIEW" = "true" ] && [ "$REF" = "refs/heads/main" ]; then
+              while IFS= read -r line; do echo "::warning::$line"; done <<<"$markers"
+              echo "::warning::INTERNAL PREVIEW build: the iOS web tabs have no web session yet (T-7852 unfinished), so Saved and Account open signed out. TestFlight group Devino only; never submit this build for review."
+              {
+                echo "### INTERNAL PREVIEW — not for App Store / Play production submission; T-7852 markers present"
+                echo
+                echo "The web tabs of this build are signed out. Markers still present:"
+                echo
+                echo '```'
+                echo "$markers"
+                echo '```'
+              } >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::error::Release stopped on purpose: the iOS web tabs have no web session yet, so Saved and Account do not work for signed-in users. T-7852 (POST /api/app/web-session/handoff, wired into ShellRouter.signInFromWeb) is unfinished. Remove the TODO(T-7852) markers once it ships, then the owner re-tags. Markers still present:"
+              echo "$markers"
+              exit 1
+            fi
           fi
 
       - name: Select Xcode
