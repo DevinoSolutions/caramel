@@ -11,11 +11,18 @@
 # pwa-emulator-smoke.yml): this repo is PUBLIC and that reusable lives in a PRIVATE repo, which a
 # public repo cannot call ("workflow was not found" at startup). The org's self-hosted KVM runner
 # group (ubuntu-devino-kvm) also excludes public repositories. So this is ONE self-contained job on
-# a GitHub-hosted runner; the AVD config, emulator flags, boot wait, install/launch/alive/screenshot
-# assertions below are copied from that reusable on purpose, so the two stay comparable. There is no
-# APK hand-off through the org MinIO store: the same job builds and boots.
+# a GitHub-hosted runner. The boot recipe (AVD config, emulator flags, boot wait, install, launch,
+# alive and screenshot assertions) is copied from that reusable on purpose, so the two stay
+# comparable, EXCEPT two deliberate differences: the wait for the device is bounded (a dead emulator
+# fails fast with its log instead of hanging until the job timeout) and the AVD directory is
+# discovered (avdmanager wrote to ~/.config/.android/avd on this runner image). On top of the
+# reusable's checks this job also asserts the installed versionName equals build.gradle.kts and that
+# logcat holds no FATAL EXCEPTION for the app. There is no APK hand-off through the org MinIO store:
+# the same job builds and boots.
 # TODO: replace this job with a call to DevinoSolutions/.github pwa-emulator-smoke.yml@main if that
 # reusable ever becomes callable from this repo (kit-path apps/caramel-android, android-path '.').
+# TODO: wire this as a nightly schedule or a required check once the KVM path has proven stable
+# (it runs only on edits to this file today, so an app regression is not caught by it).
 #
 # Triggers:
 #   - pull_request touching ONLY this file. It deliberately does not watch apps/caramel-android/**:
@@ -25,8 +32,9 @@
 # Evidence: smoke.png is uploaded through DevinoSolutions/artifact (the org is over its GitHub
 # artifact quota, so actions/upload-artifact is not used), and ALWAYS also written as base64 to the
 # job summary and the log. Recover it from the log with:
-#   gh run view <id> --log | sed -n '/BEGIN SMOKE PNG/,/END SMOKE PNG/p' \
-#     | sed 's/.*base64| //' | sed '1d;$d' | base64 -d > smoke.png
+# `gh run view --log` also echoes the step's own source, so match the TIMESTAMPED marker lines:
+#   gh run view <id> --log | sed -n '/Z BEGIN SMOKE PNG/,/Z END SMOKE PNG/p' \
+#     | sed -E 's/.*Z base64\| //' | grep -v 'SMOKE PNG' | tr -d '\r' | base64 -d > smoke.png
 name: Emulator smoke (Android shell)
 
 on:
@@ -179,9 +187,16 @@ jobs:
             *"package:$APP_ID"*) echo "$APP_ID present in pm list packages." ;;
             *) echo "::error::$APP_ID is not installed after adb install"; exit 1 ;;
           esac
-          # Name the installed build in the log so the proof says which version was smoked.
+          # The smoked build must be the one the source says it is (same read as release-android-app.yml).
+          EXPECTED=$(sed -n 's/^ *versionName = "\(.*\)"$/\1/p' "$ANDROID_DIR/app/build.gradle.kts")
+          [ -n "$EXPECTED" ] || { echo "::error::Could not read versionName from build.gradle.kts."; exit 1; }
           DUMP=$(adb shell dumpsys package "$APP_ID" | tr -d '\r')
-          echo "installed: $(printf '%s\n' "$DUMP" | grep versionName | head -n 1 | tr -d ' ')"
+          INSTALLED=$(printf '%s\n' "$DUMP" | sed -n 's/^ *versionName=//p' | head -n 1)
+          echo "installed: versionName=$INSTALLED (build.gradle.kts: $EXPECTED)"
+          if [ "$INSTALLED" != "$EXPECTED" ]; then
+            echo "::error::installed versionName '$INSTALLED' differs from build.gradle.kts '$EXPECTED'"
+            exit 1
+          fi
 
       - name: Launch the app and let it settle
         run: |
@@ -207,6 +222,19 @@ jobs:
             exit 1
           fi
           echo "$APP_ID alive with pid $PID."
+          # Late-crash / crash-dialog guard: the process can be alive while a crash was logged.
+          # Keep a FATAL EXCEPTION block (the marker plus 8 lines) only when it names this package.
+          CRASH=$(adb logcat -d 2>/dev/null | tr -d '\r' | awk -v app="$APP_ID" '
+            function flush() { if (blk != "" && index(blk, "Process: " app) > 0) printf "%s", blk }
+            /FATAL EXCEPTION/ { flush(); blk = $0 "\n"; n = 1; next }
+            n > 0 && n < 9 { blk = blk $0 "\n"; n++ }
+            END { flush() }')
+          if [ -n "$CRASH" ]; then
+            echo "::error::logcat holds a FATAL EXCEPTION for $APP_ID"
+            printf '%s\n' "$CRASH"
+            exit 1
+          fi
+          echo "no FATAL EXCEPTION for $APP_ID in logcat."
 
       - name: Assert the screenshot is non-trivial evidence (not a blank/failed capture)
         run: |
@@ -238,7 +266,7 @@ jobs:
         if: always()
         run: |
           set -euo pipefail
-          [ -f smoke.png ] || { echo "::warning::no smoke.png to emit"; exit 0; }
+          [ -s smoke.png ] || { echo "::warning::smoke.png is missing or empty; nothing to emit"; exit 0; }
           echo "::group::smoke.png base64"
           echo "BEGIN SMOKE PNG"
           base64 -w 120 smoke.png | sed 's/^/base64| /'

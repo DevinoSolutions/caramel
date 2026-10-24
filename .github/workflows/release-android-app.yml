@@ -63,7 +63,7 @@ on:
         options: [completed, draft]
         default: completed
       internal_preview:
-        description: 'true = allow an INTERNAL-only build (TestFlight group Devino / Play internal track) while TODO(T-7852) markers remain; web tabs are signed out. Tag pushes ignore this and stay blocked. Never submit such a build for review.'
+        description: 'true = allow an INTERNAL-only build (Play internal track) while TODO(T-7852) markers remain; web tabs are signed out. Tag pushes ignore this and stay blocked. Never submit such a build for review.'
         type: boolean
         default: false
   pull_request:
@@ -172,7 +172,7 @@ jobs:
               while IFS= read -r line; do echo "::warning::$line"; done <<<"$markers"
               echo "::warning::INTERNAL PREVIEW build: the Android WebView shell has no web session yet (T-7852 unfinished), so the Saved and Account tabs are signed out. Play internal track only; never submit or promote this build."
               {
-                echo "### INTERNAL PREVIEW — not for App Store / Play production submission; T-7852 markers present"
+                echo "### INTERNAL PREVIEW — not for Play production submission; T-7852 markers present"
                 echo
                 echo "The web tabs of this build are signed out. Markers still present:"
                 echo

@@ -36,7 +36,7 @@ on:
   workflow_dispatch:
     inputs:
       internal_preview:
-        description: 'true = allow an INTERNAL-only build (TestFlight group Devino / Play internal track) while TODO(T-7852) markers remain; web tabs are signed out. Tag pushes ignore this and stay blocked. Never submit such a build for review.'
+        description: 'true = allow an INTERNAL-only build (TestFlight group Devino) while TODO(T-7852) markers remain; web tabs are signed out. Tag pushes ignore this and stay blocked. Never submit such a build for review.'
         type: boolean
         default: false
   pull_request:
@@ -112,7 +112,7 @@ jobs:
               while IFS= read -r line; do echo "::warning::$line"; done <<<"$markers"
               echo "::warning::INTERNAL PREVIEW build: the iOS web tabs have no web session yet (T-7852 unfinished), so Saved and Account open signed out. TestFlight group Devino only; never submit this build for review."
               {
-                echo "### INTERNAL PREVIEW — not for App Store / Play production submission; T-7852 markers present"
+                echo "### INTERNAL PREVIEW — not for App Store submission; T-7852 markers present"
                 echo
                 echo "The web tabs of this build are signed out. Markers still present:"
                 echo
