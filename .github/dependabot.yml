@@ -79,3 +79,14 @@ updates:
         applies-to: security-updates
         patterns:
           - '*'
+  - package-ecosystem: 'gradle' # apps/caramel-android (gradle/libs.versions.toml + plugins)
+    directory: '/apps/caramel-android'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+    open-pull-requests-limit: 10
+    groups:
+      gradle-security:
+        applies-to: security-updates
+        patterns:
+          - '*'

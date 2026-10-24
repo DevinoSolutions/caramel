@@ -1,0 +1,93 @@
+plugins {
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlin.serialization)
+}
+
+// Release signing comes from the environment (the release workflow writes the
+// upload keystore to a temp file and exports these). Absent = the release build
+// is left UNSIGNED and the workflow's own secret check is what fails loudly.
+val releaseKeystorePath: String? = System.getenv("CARAMEL_KEYSTORE_PATH")
+
+android {
+    namespace = "com.devino.caramel"
+    compileSdk = 36
+
+    defaultConfig {
+        applicationId = "com.devino.caramel"
+        minSdk = 26
+        targetSdk = 36
+        // Mirrors the iOS container (apps/caramel-apple project.yml MARKETING_VERSION).
+        // The release workflow passes -PcaramelVersionCode = 100 + run number. TODO(T-7474): no
+        // Gradle dependency locking / verification-metadata.xml yet (supply-chain pinning of the
+        // resolved artifacts); add it once the dependency set settles.
+        versionCode = (project.findProperty("caramelVersionCode") as String?)?.toInt() ?: 1
+        versionName = "1.5.0"
+    }
+
+    signingConfigs {
+        if (releaseKeystorePath != null) {
+            create("release") {
+                storeFile = file(releaseKeystorePath)
+                storePassword = System.getenv("CARAMEL_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("CARAMEL_KEY_ALIAS")
+                keyPassword = System.getenv("CARAMEL_KEY_PASSWORD")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            if (releaseKeystorePath != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    buildFeatures {
+        compose = true
+        buildConfig = false
+    }
+
+    lint {
+        warningsAsErrors = false
+        abortOnError = true
+    }
+
+    testOptions {
+        unitTests.isReturnDefaultValues = false
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        allWarningsAsErrors.set(true)
+    }
+}
+
+dependencies {
+    implementation(platform(libs.androidx.compose.bom))
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.lifecycle.runtime.compose)
+    implementation(libs.androidx.navigation.compose)
+    implementation(libs.androidx.browser)
+    implementation(libs.androidx.compose.ui)
+    implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.compose.material.icons.core)
+    implementation(libs.kotlinx.serialization.json)
+    implementation(libs.kotlinx.coroutines.android)
+
+    testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
+}
