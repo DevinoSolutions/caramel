@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0EC67FDFEC941285B5CC458D /* ExtensionStatusPill.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5ABABE51F0CA9C4351196D4 /* ExtensionStatusPill.swift */; };
 		1C4799D2627902A5F4DC0F00 /* AppGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 153AB6675AB3D6CB897A19A6 /* AppGroup.swift */; };
 		1C69055E2D02E0D9890B3118 /* CaramelExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = D4C6080DC2774B12A877F80E /* CaramelExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		223B143989D737111224AB12 /* SafariWebExtensionHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 788B56A4598C221C0BD84FBF /* SafariWebExtensionHandler.swift */; };
@@ -14,20 +15,24 @@
 		2BCCE1E3C6409D238DC00405 /* AccountView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FC2A7E8669FBD64B0CA5C46 /* AccountView.swift */; };
 		2FE09F8AB12DB1FEE4380B8E /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 331F14D75DB1D0A2D163AB99 /* PrivacyInfo.xcprivacy */; };
 		3A504510A6E2DF038244FF1B /* CommonViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AAAF75B845F9436877CFE01 /* CommonViews.swift */; };
+		45D2705C90E57E0C30FBBDC5 /* WebShellModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5EF37E80CED51796B54048C /* WebShellModel.swift */; };
 		4D18E194A4E69E2CC85028D9 /* AppConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71AFE3F0DC45860AB6819739 /* AppConfig.swift */; };
 		4EAD3B4F6FB902CA0F2229C0 /* SessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C7BEE522C7796E42905C7FA /* SessionStore.swift */; };
+		6201B525F31466B1A33F4739 /* AppLinkGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AE6125DC376F346419C3427 /* AppLinkGuard.swift */; };
+		764F0FEBF101662A092DA0C6 /* AppLinkGuardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1256106FE4F18D2E4FA22FC /* AppLinkGuardTests.swift */; };
 		83C57960323D370868438989 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C832CD8A3FA16B7C3DC4E1A3 /* Assets.xcassets */; };
+		960F6D5226BBCC114C212CE4 /* AlertsSettingsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAFC5DB2BA386C71BB30B9BB /* AlertsSettingsSection.swift */; };
 		9D4D15374853E74859DD596B /* FavoritesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBF099D6646DCD28EA326974 /* FavoritesStore.swift */; };
 		A4617CF2EE8E49BCFF6F4997 /* CaramelApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02CFAE4BA11D3EF91F8953D0 /* CaramelApp.swift */; };
 		A51442248D1F57F4B22BC3E5 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45FB6CEC93CE78C3755C135A /* OnboardingView.swift */; };
 		B32F6041D544AB48E4AEEC24 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3084E5C8DAFCE980C38D7B17 /* Models.swift */; };
-		B7586D0652EB7B7C14ABC954 /* StoreDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4F49A68A304F4BD060C7CEC /* StoreDetailView.swift */; };
+		B6A33C3BD9711C6CD016A4F8 /* ShellConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87DD7891489461D08FBD49A3 /* ShellConfig.swift */; };
+		BAD6ACE0A2A0A955ACE7C02A /* AppLinkGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AE6125DC376F346419C3427 /* AppLinkGuard.swift */; };
 		C2D00FA1479A757BABC8803B /* RootTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADD85713C3AEE9C01B979904 /* RootTabView.swift */; };
+		C7C9145A83664FD64DA7688C /* ShellRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF1C69E4F1E2088F02B68DC2 /* ShellRouter.swift */; };
 		C842C053B321227A9B948B40 /* AppGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 153AB6675AB3D6CB897A19A6 /* AppGroup.swift */; };
-		CCCD8D987517485DD6A6088C /* SavedView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD6BC6BEF31641D016F07B5E /* SavedView.swift */; };
-		D39EA0F0ADA2871E45A2B1E5 /* DealsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF5E1D03CE96926CA4FCC5B1 /* DealsView.swift */; };
 		E04767DC1190BDF128FDDA17 /* AlertsEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2EE4F9EA552F0C76F92F168 /* AlertsEngine.swift */; };
-		E2A9BED9DB582951C3C4C8CA /* SearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 831B607FF32C11907A5092FA /* SearchView.swift */; };
+		E11BF9BB75271525988141EB /* ShellConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87DD7891489461D08FBD49A3 /* ShellConfig.swift */; };
 		EB8F1D4E2632DE1FBB3862F5 /* ExtensionStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = A60C9DAEA8B24EAC7F7EE81C /* ExtensionStatus.swift */; };
 		F78F0E8A837EB2D43F28103F /* CaramelAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C6AD30BCF06E1F970A3A585 /* CaramelAPI.swift */; };
 /* End PBXBuildFile section */
@@ -59,8 +64,10 @@
 /* Begin PBXFileReference section */
 		02CFAE4BA11D3EF91F8953D0 /* CaramelApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaramelApp.swift; sourceTree = "<group>"; };
 		153AB6675AB3D6CB897A19A6 /* AppGroup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppGroup.swift; sourceTree = "<group>"; };
+		1AE6125DC376F346419C3427 /* AppLinkGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLinkGuard.swift; sourceTree = "<group>"; };
 		1B8AC0E55EE09B3B11102E43 /* CaramelExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = CaramelExtension.entitlements; sourceTree = "<group>"; };
 		2408B1D019256A89A6BBCB76 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		2684E53962954D29AE86C2D9 /* CaramelTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = CaramelTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		2AAAF75B845F9436877CFE01 /* CommonViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommonViews.swift; sourceTree = "<group>"; };
 		3084E5C8DAFCE980C38D7B17 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		331F14D75DB1D0A2D163AB99 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
@@ -71,19 +78,21 @@
 		71AFE3F0DC45860AB6819739 /* AppConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfig.swift; sourceTree = "<group>"; };
 		788B56A4598C221C0BD84FBF /* SafariWebExtensionHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafariWebExtensionHandler.swift; sourceTree = "<group>"; };
 		8135EC36D9DE7BA427DD4349 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
-		831B607FF32C11907A5092FA /* SearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchView.swift; sourceTree = "<group>"; };
+		87DD7891489461D08FBD49A3 /* ShellConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellConfig.swift; sourceTree = "<group>"; };
 		A60C9DAEA8B24EAC7F7EE81C /* ExtensionStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtensionStatus.swift; sourceTree = "<group>"; };
 		A90F079566A3D1F6C98CBE67 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		ADD85713C3AEE9C01B979904 /* RootTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootTabView.swift; sourceTree = "<group>"; };
 		B1FEFF51E83F4DFE0E2E857C /* Caramel.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Caramel.entitlements; sourceTree = "<group>"; };
+		C5ABABE51F0CA9C4351196D4 /* ExtensionStatusPill.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtensionStatusPill.swift; sourceTree = "<group>"; };
 		C832CD8A3FA16B7C3DC4E1A3 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		C96F52B98AA80D4156953406 /* Caramel.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Caramel.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		CD6BC6BEF31641D016F07B5E /* SavedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedView.swift; sourceTree = "<group>"; };
-		CF5E1D03CE96926CA4FCC5B1 /* DealsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DealsView.swift; sourceTree = "<group>"; };
+		CAFC5DB2BA386C71BB30B9BB /* AlertsSettingsSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlertsSettingsSection.swift; sourceTree = "<group>"; };
 		D4C6080DC2774B12A877F80E /* CaramelExtension.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = CaramelExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		DBF099D6646DCD28EA326974 /* FavoritesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FavoritesStore.swift; sourceTree = "<group>"; };
+		E1256106FE4F18D2E4FA22FC /* AppLinkGuardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLinkGuardTests.swift; sourceTree = "<group>"; };
 		E2EE4F9EA552F0C76F92F168 /* AlertsEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlertsEngine.swift; sourceTree = "<group>"; };
-		F4F49A68A304F4BD060C7CEC /* StoreDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreDetailView.swift; sourceTree = "<group>"; };
+		E5EF37E80CED51796B54048C /* WebShellModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebShellModel.swift; sourceTree = "<group>"; };
+		FF1C69E4F1E2088F02B68DC2 /* ShellRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellRouter.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -92,6 +101,7 @@
 			children = (
 				C96F52B98AA80D4156953406 /* Caramel.app */,
 				D4C6080DC2774B12A877F80E /* CaramelExtension.appex */,
+				2684E53962954D29AE86C2D9 /* CaramelTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -104,14 +114,6 @@
 			path = Shared;
 			sourceTree = "<group>";
 		};
-		5296DDF67316BC8EF9CDBC89 /* Saved */ = {
-			isa = PBXGroup;
-			children = (
-				CD6BC6BEF31641D016F07B5E /* SavedView.swift */,
-			);
-			path = Saved;
-			sourceTree = "<group>";
-		};
 		61F89EE2BF1DA21BEEBF3320 /* Extension */ = {
 			isa = PBXGroup;
 			children = (
@@ -121,6 +123,14 @@
 				788B56A4598C221C0BD84FBF /* SafariWebExtensionHandler.swift */,
 			);
 			path = Extension;
+			sourceTree = "<group>";
+		};
+		704FED2AEF696B0354F92C1B /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				E1256106FE4F18D2E4FA22FC /* AppLinkGuardTests.swift */,
+			);
+			path = Tests;
 			sourceTree = "<group>";
 		};
 		7A985AD0D79E1C3E8E3C428F /* Onboarding */ = {
@@ -149,17 +159,9 @@
 			isa = PBXGroup;
 			children = (
 				5FC2A7E8669FBD64B0CA5C46 /* AccountView.swift */,
+				CAFC5DB2BA386C71BB30B9BB /* AlertsSettingsSection.swift */,
 			);
 			path = Account;
-			sourceTree = "<group>";
-		};
-		A154DC57E8AD86978724A261 /* Deals */ = {
-			isa = PBXGroup;
-			children = (
-				CF5E1D03CE96926CA4FCC5B1 /* DealsView.swift */,
-				F4F49A68A304F4BD060C7CEC /* StoreDetailView.swift */,
-			);
-			path = Deals;
 			sourceTree = "<group>";
 		};
 		A34112C8158E5253304D80C3 = {
@@ -168,16 +170,9 @@
 				D13D979766F8CB3306288908 /* App */,
 				61F89EE2BF1DA21BEEBF3320 /* Extension */,
 				5034A80D80D459B57269D163 /* Shared */,
+				704FED2AEF696B0354F92C1B /* Tests */,
 				001DD958604FE03ECE110609 /* Products */,
 			);
-			sourceTree = "<group>";
-		};
-		CE0CC2501AAB1152166BAE8B /* Search */ = {
-			isa = PBXGroup;
-			children = (
-				831B607FF32C11907A5092FA /* SearchView.swift */,
-			);
-			path = Search;
 			sourceTree = "<group>";
 		};
 		D13D979766F8CB3306288908 /* App */ = {
@@ -192,6 +187,7 @@
 				ADD85713C3AEE9C01B979904 /* RootTabView.swift */,
 				8E257B58FA07150364B5DABC /* Core */,
 				D461C7D1540BD063D9434852 /* Features */,
+				E423D99BDF3480330FFFC8F0 /* Web */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -200,12 +196,21 @@
 			isa = PBXGroup;
 			children = (
 				977B7B1693A1A28C6A2428E5 /* Account */,
-				A154DC57E8AD86978724A261 /* Deals */,
 				7A985AD0D79E1C3E8E3C428F /* Onboarding */,
-				5296DDF67316BC8EF9CDBC89 /* Saved */,
-				CE0CC2501AAB1152166BAE8B /* Search */,
 			);
 			path = Features;
+			sourceTree = "<group>";
+		};
+		E423D99BDF3480330FFFC8F0 /* Web */ = {
+			isa = PBXGroup;
+			children = (
+				1AE6125DC376F346419C3427 /* AppLinkGuard.swift */,
+				C5ABABE51F0CA9C4351196D4 /* ExtensionStatusPill.swift */,
+				87DD7891489461D08FBD49A3 /* ShellConfig.swift */,
+				FF1C69E4F1E2088F02B68DC2 /* ShellRouter.swift */,
+				E5EF37E80CED51796B54048C /* WebShellModel.swift */,
+			);
+			path = Web;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -250,6 +255,23 @@
 			productReference = C96F52B98AA80D4156953406 /* Caramel.app */;
 			productType = "com.apple.product-type.application";
 		};
+		C4CB55512A1DB94A62B7F439 /* CaramelTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C92AFA2ADB8C39C5DAA718EC /* Build configuration list for PBXNativeTarget "CaramelTests" */;
+			buildPhases = (
+				0A0007BA208BC4ADC09B5073 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = CaramelTests;
+			packageProductDependencies = (
+			);
+			productName = CaramelTests;
+			productReference = 2684E53962954D29AE86C2D9 /* CaramelTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -263,6 +285,9 @@
 						ProvisioningStyle = Automatic;
 					};
 					41348FEC973626C9253F97D4 = {
+						ProvisioningStyle = Automatic;
+					};
+					C4CB55512A1DB94A62B7F439 = {
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -283,6 +308,7 @@
 			targets = (
 				41348FEC973626C9253F97D4 /* Caramel */,
 				11A6284E5054D506030ADE3E /* CaramelExtension */,
+				C4CB55512A1DB94A62B7F439 /* CaramelTests */,
 			);
 		};
 /* End PBXProject section */
@@ -330,27 +356,39 @@
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		0A0007BA208BC4ADC09B5073 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BAD6ACE0A2A0A955ACE7C02A /* AppLinkGuard.swift in Sources */,
+				764F0FEBF101662A092DA0C6 /* AppLinkGuardTests.swift in Sources */,
+				B6A33C3BD9711C6CD016A4F8 /* ShellConfig.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		0F1F9AA12907A7491F1B60BA /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 				2BCCE1E3C6409D238DC00405 /* AccountView.swift in Sources */,
 				E04767DC1190BDF128FDDA17 /* AlertsEngine.swift in Sources */,
+				960F6D5226BBCC114C212CE4 /* AlertsSettingsSection.swift in Sources */,
 				4D18E194A4E69E2CC85028D9 /* AppConfig.swift in Sources */,
 				1C4799D2627902A5F4DC0F00 /* AppGroup.swift in Sources */,
+				6201B525F31466B1A33F4739 /* AppLinkGuard.swift in Sources */,
 				F78F0E8A837EB2D43F28103F /* CaramelAPI.swift in Sources */,
 				A4617CF2EE8E49BCFF6F4997 /* CaramelApp.swift in Sources */,
 				3A504510A6E2DF038244FF1B /* CommonViews.swift in Sources */,
-				D39EA0F0ADA2871E45A2B1E5 /* DealsView.swift in Sources */,
 				EB8F1D4E2632DE1FBB3862F5 /* ExtensionStatus.swift in Sources */,
+				0EC67FDFEC941285B5CC458D /* ExtensionStatusPill.swift in Sources */,
 				9D4D15374853E74859DD596B /* FavoritesStore.swift in Sources */,
 				B32F6041D544AB48E4AEEC24 /* Models.swift in Sources */,
 				A51442248D1F57F4B22BC3E5 /* OnboardingView.swift in Sources */,
 				C2D00FA1479A757BABC8803B /* RootTabView.swift in Sources */,
-				CCCD8D987517485DD6A6088C /* SavedView.swift in Sources */,
-				E2A9BED9DB582951C3C4C8CA /* SearchView.swift in Sources */,
 				4EAD3B4F6FB902CA0F2229C0 /* SessionStore.swift in Sources */,
-				B7586D0652EB7B7C14ABC954 /* StoreDetailView.swift in Sources */,
+				E11BF9BB75271525988141EB /* ShellConfig.swift in Sources */,
+				C7C9145A83664FD64DA7688C /* ShellRouter.swift in Sources */,
+				45D2705C90E57E0C30FBBDC5 /* WebShellModel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -442,6 +480,22 @@
 			};
 			name = Debug;
 		};
+		30F51B3AC660F4E0A8CCBA43 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.devino.CaramelTests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
 		3AB740D84E34E89E0F00D9E0 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -455,6 +509,22 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.devino.Caramel.Extension;
 				PRODUCT_NAME = "Caramel Extension";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		46DFC34F956BA6D6891604AA /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.devino.CaramelTests;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -592,6 +662,15 @@
 			buildConfigurations = (
 				ADCC539E193D96AF4BB02425 /* Debug */,
 				3AB740D84E34E89E0F00D9E0 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		C92AFA2ADB8C39C5DAA718EC /* Build configuration list for PBXNativeTarget "CaramelTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				30F51B3AC660F4E0A8CCBA43 /* Debug */,
+				46DFC34F956BA6D6891604AA /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
