@@ -11,6 +11,10 @@
 //              installable). The PWA is still just the website — it does NOT
 //              have the extension — so it is a distinct surface for analytics
 //              but it does not hide extension CTAs (see canAdvertiseInstall).
+//   app-shell  a page rendered inside the Caramel iOS/macOS/Android/Fire store
+//              app's WebView. The shell appends "CaramelApp/<version> (<platform>)"
+//              to the user agent. Marketing chrome (header, footer, install CTAs,
+//              growth prompts) is hidden; page content stays.
 //
 // The extension announces itself two ways, and this reads both because they
 // ship on different schedules:
@@ -24,7 +28,10 @@
 // PURE — the provider gathers the inputs, this decides. Every branch is
 // unit-tested (tests/unit/detectSurface.test.ts).
 
-export type Surface = 'web' | 'extension' | 'pwa'
+export type Surface = 'web' | 'extension' | 'pwa' | 'app-shell'
+
+/** Platforms the native shell identifies itself as in the UA suffix. */
+export type AppShellPlatform = 'ios' | 'macos' | 'android' | 'fire'
 
 export type SurfaceInput = {
     /** Value of `<html data-caramel-extension>` — null when absent. */
@@ -35,6 +42,8 @@ export type SurfaceInput = {
     displayModeStandalone: boolean
     /** iOS Safari's `navigator.standalone`. */
     navigatorStandalone: boolean
+    /** The user agent string, used to detect the native app shell. */
+    userAgent: string
 }
 
 /** The attribute the extension stamps on <html> on trusted Caramel origins. */
@@ -46,7 +55,32 @@ export const EXTENSION_MESSAGE_TYPES: ReadonlySet<string> = new Set([
     'caramel-ext-present',
 ])
 
+/**
+ * Matches the " CaramelApp/<semver> (<platform>)" suffix the native shells
+ * append to their WebView's user agent. Returns {version, platform} or null.
+ *
+ * Requirements (T-7853 acceptance check 4):
+ * - Rejects "CaramelApp/1.6 (ios)"      (missing patch)
+ * - Rejects "XCaramelApp/1.6.0 (ios)"   (no word boundary before)
+ * - Rejects "CaramelApp/1.6.0 (windows)" (unknown platform)
+ * - Accepts all four platforms: ios, macos, android, fire
+ */
+const APP_SHELL_RE =
+    /(?:^|\s)CaramelApp\/(\d+\.\d+\.\d+) \((ios|macos|android|fire)\)(?:\s|$)/
+
+export function detectAppShell(
+    ua: string,
+): { version: string; platform: AppShellPlatform } | null {
+    const m = APP_SHELL_RE.exec(ua)
+    if (!m) return null
+    return { version: m[1], platform: m[2] as AppShellPlatform }
+}
+
 export function detectSurface(input: SurfaceInput): Surface {
+    // app-shell beats extension and pwa (T-7853).
+    if (detectAppShell(input.userAgent)) {
+        return 'app-shell'
+    }
     if (input.extensionStamp !== null || input.extensionMessageSeen) {
         return 'extension'
     }
@@ -66,5 +100,5 @@ export function detectSurface(input: SurfaceInput): Surface {
  * CSS rule in globals.css hides even that when the stamp is present.
  */
 export function canAdvertiseInstall(surface: Surface | 'unknown'): boolean {
-    return surface !== 'extension'
+    return surface !== 'extension' && surface !== 'app-shell'
 }

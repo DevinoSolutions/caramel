@@ -267,6 +267,7 @@ export default function AppsPageClient() {
                 <section
                     aria-labelledby="apps-devino-heading"
                     className="border-t border-gray-200 pt-6 dark:border-white/10"
+                    data-shell-hide
                 >
                     <h2
                         id="apps-devino-heading"

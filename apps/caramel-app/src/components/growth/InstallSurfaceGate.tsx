@@ -28,7 +28,11 @@ export default function InstallSurfaceGate({
     const { surface } = useSurface()
     if (!canAdvertiseInstall(surface)) return null
     return (
-        <div data-growth={INSTALL_SURFACE_MARKER} className={className}>
+        <div
+            data-growth={INSTALL_SURFACE_MARKER}
+            data-shell-hide
+            className={className}
+        >
             {children}
         </div>
     )

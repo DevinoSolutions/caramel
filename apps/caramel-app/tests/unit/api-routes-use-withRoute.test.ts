@@ -25,6 +25,13 @@ const API_DIR = path.join(REPO_ROOT, 'apps/caramel-app/src/app/api')
 const ALLOWLISTED_ROUTES = new Set([
     'auth/[...all]/route.ts',
     'health/db/route.ts',
+    // T-7852: the handoff POST needs a CUSTOM bearer-only check that strips
+    // cookies (a cookie-only request from a web page must 401 — CSRF safety);
+    // withRoute's `auth: 'session'` accepts both bearer and cookie. The
+    // redeem GET is a document navigation that accepts no auth at all: it
+    // consumes a one-time code and sets a cookie via 303.
+    'app/web-session/handoff/route.ts',
+    'app/web-session/redeem/route.ts',
 ])
 
 function findRouteFiles(dir: string): string[] {
@@ -59,7 +66,7 @@ function routeDeclaresWithRoute(content: string): boolean {
 }
 
 describe('api-routes-use-withRoute (DESIGN §1 route pipeline)', () => {
-    it('every API route declares itself through withRoute (except the 2 documented standoffs)', () => {
+    it('every API route declares itself through withRoute (except the 4 documented standoffs)', () => {
         const files = findRouteFiles(API_DIR)
         expect(files.length).toBeGreaterThan(0) // sanity: the walk found routes
 
@@ -72,7 +79,7 @@ describe('api-routes-use-withRoute (DESIGN §1 route pipeline)', () => {
         expect(offenders).toEqual([])
     })
 
-    it('the 2 allowlisted standoffs exist and genuinely skip withRoute', () => {
+    it('the 4 allowlisted standoffs exist and genuinely skip withRoute', () => {
         // Guards the allowlist against rot: if a standoff is deleted or later
         // adopts withRoute, this fails so the entry is revisited deliberately
         // rather than silently exempting a route that no longer needs it.

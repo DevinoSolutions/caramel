@@ -34,9 +34,15 @@ export default function Layout({ children }: LayoutProps) {
                 isDarkMode ? 'dark' : 'light'
             } font-Roboto`}
         >
-            <Header scrollRef={ref} />
+            {/* T-7853: hidden in the native app shell via the CSS rule on
+                html[data-app-shell] [data-shell-hide]. */}
+            <div data-shell-hide>
+                <Header scrollRef={ref} />
+            </div>
             <div className="flex-1">{children}</div>
-            <Footer />
+            <div data-shell-hide>
+                <Footer />
+            </div>
         </div>
     )
 }

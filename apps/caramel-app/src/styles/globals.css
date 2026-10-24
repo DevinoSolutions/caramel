@@ -40,6 +40,19 @@ html[data-caramel-extension] [data-growth='install'] {
     display: none;
 }
 
+/* T-7853: the native app shell (CaramelApp/<version> in the UA) stamps
+   <html data-app-shell="<platform>"> before first paint (inline script in
+   app/layout.tsx). Every element carrying data-shell-hide — Header, Footer,
+   install CTAs, "More from Devino" — is hidden so the WebView shows only
+   page content. safe-area padding absorbs the iOS notch / home indicator. */
+html[data-app-shell] [data-shell-hide] {
+    display: none !important;
+}
+html[data-app-shell] body {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+}
+
 /* The `dark` class lives on an INNER wrapper div (Layout.tsx, (auth)/layout.tsx)
    AND, since SSR was restored, on <html> itself (stamped pre-hydration by the
    script in app/layout.tsx). Tailwind's `dark:` variant compiles to a

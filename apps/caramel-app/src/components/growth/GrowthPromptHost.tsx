@@ -77,6 +77,8 @@ export default function GrowthPromptHost({
     useEffect(() => {
         if (active || slotClosed) return
         if (surface.surface === 'unknown') return
+        // T-7853: the native app shell does not show growth prompts.
+        if (surface.surface === 'app-shell') return
 
         const local = storageOrUndefined(() => window.localStorage)
         const sessionStore = storageOrUndefined(() => window.sessionStorage)
