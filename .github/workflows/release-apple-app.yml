@@ -237,10 +237,11 @@ jobs:
         env:
           ASC_KEY_PATH: /tmp/AuthKey_${{ secrets.ASC_KEY_ID }}.p8
           ASC_BUNDLE_ID: ${{ env.BUNDLE_ID }}
+          MARKETING_VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          if ! node .github/workflows/scripts/asc-testflight.mjs version-state "${{ steps.version.outputs.version }}"; then
-            echo "::error::Internal preview refused: App Store version ${{ steps.version.outputs.version }} is open (being prepared or reviewed) or its state could not be read. Bump MARKETING_VERSION in project.yml to the next train, or wait for that version to close. See the log above."
+          if ! node .github/workflows/scripts/asc-testflight.mjs version-state "$MARKETING_VERSION"; then
+            echo "::error::Internal preview refused: App Store version $MARKETING_VERSION is open (being prepared or reviewed) or its state could not be read. Bump MARKETING_VERSION in project.yml to the next train, or wait for that version to close. See the log above."
             exit 1
           fi
 

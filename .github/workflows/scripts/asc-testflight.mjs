@@ -147,12 +147,21 @@ const CLOSED_TRAIN_STATES = new Set([
     'DEVELOPER_REMOVED_FROM_SALE',
 ])
 
-// Pure: given the appStoreVersions rows for one versionString, returns the rows that keep the
-// train open as "<id>: <state>" strings (empty = the preview build may proceed). A row with no
-// readable state counts as open (fail closed). Both state attributes are checked because Apple
-// is moving appStoreState -> appVersionState; if either is non-closed the train is open.
-function openTrainVersions(rows) {
+// Pure: given ALL of the app's iOS appStoreVersions rows, returns the rows of the train
+// `marketingVersion` that keep it open as "<id>: <state>" strings (empty = the preview build may
+// proceed). Nothing is silently skipped: a row with no versionString cannot be ruled out of the
+// train, so it counts as open; a row with no state attribute counts as open (fail closed). Both
+// state attributes are read because Apple is moving appStoreState -> appVersionState; if either is
+// non-closed the train is open. The platform is filtered server-side; a row that EXPLICITLY names
+// another platform is ignored, a row that names none is trusted to be iOS.
+function openTrainVersions(rows, marketingVersion) {
     return rows.flatMap(row => {
+        const { versionString, platform } = row.attributes ?? {}
+        if (typeof versionString !== 'string' || versionString === '') {
+            return [`${row.id}: <no versionString>`]
+        }
+        if (versionString !== marketingVersion) return []
+        if (typeof platform === 'string' && platform !== 'IOS') return []
         const states = [
             row.attributes?.appVersionState,
             row.attributes?.appStoreState,
@@ -166,24 +175,28 @@ function openTrainVersions(rows) {
 
 async function assertTrainClosed(marketingVersion) {
     const appId = await resolveAppId()
+    // No versionString filter and no fields[] filter: the whole iOS list with every attribute, so an
+    // empty answer can be told apart from "this version does not exist" and an unknown field name
+    // can never 400 the guard.
     const rows = await listAll(
-        `/apps/${appId}/appStoreVersions?filter[platform]=IOS&filter[versionString]=${encodeURIComponent(marketingVersion)}&fields[appStoreVersions]=versionString,platform,appStoreState,appVersionState&limit=200`,
+        `/apps/${appId}/appStoreVersions?filter[platform]=IOS&limit=200`,
     )
-    // The server-side filter is trusted but not relied on: a row for another version or
-    // platform must not satisfy or fail the guard.
-    const sameTrain = rows.filter(
-        row =>
-            row.attributes?.versionString === marketingVersion &&
-            row.attributes?.platform === 'IOS',
-    )
-    const open = openTrainVersions(sameTrain)
+    if (rows.length === 0) {
+        throw new Error(
+            `App ${appId} lists no iOS App Store versions, which cannot be right for a shipped app: refusing to guess that the ${marketingVersion} train is closed.`,
+        )
+    }
+    const open = openTrainVersions(rows, marketingVersion)
     if (open.length > 0) {
         throw new Error(
             `App Store version ${marketingVersion} (iOS) is still open on app ${appId} [${open.join(', ')}]: refusing an internal preview build into that TestFlight train.`,
         )
     }
+    const sameTrain = rows.filter(
+        row => row.attributes?.versionString === marketingVersion,
+    ).length
     summary(
-        `### Train guard\n\niOS version \`${marketingVersion}\`: ${sameTrain.length} App Store version row(s), none open. The internal preview build may use this train.`,
+        `### Train guard\n\niOS version \`${marketingVersion}\`: ${sameTrain} App Store version row(s) of ${rows.length} iOS rows, none open. The internal preview build may use this train.`,
     )
 }
 

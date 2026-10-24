@@ -267,13 +267,14 @@ jobs:
       # The alive check cannot see a WebView stuck on an error page (a dead network leaves the
       # process running). uiautomator dumps the accessibility tree: the shell's own "Something went
       # wrong" banner is native text, and the page's text comes through the WebView's accessibility
-      # nodes. PASS needs the Deals page heading ("Today's Coupon Codes" on grabcaramel.com/coupons);
+      # nodes. PASS needs the body heading "Today's Coupon Codes" of grabcaramel.com/coupons, not the
+      # document title ("Coupon Codes & Promo Codes ..."), which also sits in the dump;
       # either error marker FAILS at once. The loop only covers a slow first paint after the DNS wait.
       # If a run shows the heading is on screen but missing from the dump, the WebView content is not
       # exposed to uiautomator on this image: replace this signal, do not weaken it.
       - name: Assert the Deals page rendered (uiautomator dump, no error page)
         env:
-          PAGE_MARKER: Coupon Codes
+          PAGE_MARKER: Today's Coupon Codes
           PAGE_WAIT_SECONDS: '90'
         run: |
           set -uo pipefail
@@ -281,6 +282,7 @@ jobs:
           attempt=0
           while :; do
             attempt=$((attempt + 1))
+            adb shell rm -f /sdcard/ui.xml
             adb shell uiautomator dump /sdcard/ui.xml 2>&1 | tr -d '\r' || true
             adb exec-out cat /sdcard/ui.xml 2>/dev/null | tr -d '\r' > ui.xml || true
             echo "attempt $attempt: ui.xml $(stat -c%s ui.xml 2>/dev/null || echo 0) bytes"
