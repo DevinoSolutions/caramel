@@ -81,7 +81,7 @@ final class WebShellModel: NSObject, ObservableObject {
 #endif
         // Client-side routing (history.pushState / router.push) never reaches
         // decidePolicyFor, so the shell also reacts to the URL itself changing.
-        urlObservation = view.publisher(for: .url)
+        urlObservation = view.publisher(for: \.url)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] url in
                 Task { @MainActor in self?.urlChanged(url) }
