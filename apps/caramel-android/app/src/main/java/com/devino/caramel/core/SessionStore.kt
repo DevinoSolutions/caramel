@@ -171,6 +171,11 @@ class SessionStore(
      * Deletes the account on the server (POST /api/account/delete, which also ends every session,
      * this one included) and clears the local session. Returns false, with the error set, when the
      * server refused: nothing was deleted and the shopper stays signed in.
+     *
+     * TODO(T-7505): NOT reachable from the UI since the native Account screen went away (T-7842), and
+     * the web /profile has no account deletion yet, so the 1.6 shell has no in-app deletion path.
+     * Wire a native entry to this, or drop it once the web deletion page exists and the WebView shows
+     * it. The Play account-deletion policy blocks a store submission until one of the two is true.
      */
     suspend fun deleteAccount(): Boolean {
         val bearer = token ?: return false

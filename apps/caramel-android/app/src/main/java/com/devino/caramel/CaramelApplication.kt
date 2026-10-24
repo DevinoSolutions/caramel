@@ -2,26 +2,23 @@ package com.devino.caramel
 
 import android.app.Application
 import com.devino.caramel.core.CaramelApi
-import com.devino.caramel.core.FavoritesStore
 import com.devino.caramel.core.KeystoreTokenStore
-import com.devino.caramel.core.PrefsListStore
 import com.devino.caramel.core.SessionStore
 
-/** The bytes of an account export between "download" and the file picker's answer. */
-class PendingExport {
-    @Volatile
-    var bytes: ByteArray? = null
-
-    /** Returns the held bytes and forgets them. */
-    fun take(): ByteArray? = bytes.also { bytes = null }
-}
-
-/** The app-wide objects, created once (the iOS app creates the same three in CaramelApp.swift). */
+/** The app-wide objects, created once. */
 class AppContainer(application: Application) {
     val api = CaramelApi()
-    val pendingExport = PendingExport()
     val session = SessionStore(api, KeystoreTokenStore(application))
-    val favorites = FavoritesStore(api, PrefsListStore(application)) { session.token }
+
+    /**
+     * Whether the WebView holds a grabcaramel.com web session that mirrors the native sign-in.
+     * TODO(T-7852): always false until POST /api/app/web-session/handoff exists (Aladdin's task) and
+     * the shell calls it after native sign-in. While false, a web navigation to /login cannot mean
+     * "the shopper signed out on the web", so the shell never clears the native token on it
+     * (see ShellRoutes.authAction).
+     */
+    @Volatile
+    var webSessionActive: Boolean = false
 }
 
 // TODO(T-7474): no crash / error reporting and no trace propagation yet. The repo rule is that

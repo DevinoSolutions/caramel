@@ -1,6 +1,31 @@
-# DRAFT - privacy / data-safety answers for com.devino.caramel (Android 1.5.0)
+# DRAFT - privacy / data-safety answers for com.devino.caramel (Android 1.5.0 native app; 1.6.0 WebView shell changes it, see below)
 
 Status: DRAFT for the owner. Derived from the code at `origin/main` d7af267 (PR #465 merged later as 95b4535; the app code described is the #465 head 8d82c07, whose files are unchanged by the merge). Not submitted anywhere.
+
+## READ FIRST - 1.6.0 (WebView shell, T-7842) changed the facts below
+
+Everything under "What the app does with the network" and the two forms was derived from the **1.5.0 native app**. In 1.6.0 the app
+shows grabcaramel.com in a WebView, so these answers are **no longer all true and must be re-derived before any submission**:
+
+- **Third-party analytics / tracking SDKs, device IDs, cookies:** the native code still has no SDK, but the WebView loads the
+  website, which runs Google Analytics (`gtag`), PostHog-style first-party tracking and Sentry on its own pages
+  (`apps/caramel-app/src/app/providers.tsx`). The rows that say "No" for analytics, device or other IDs, and "Only grabcaramel.com
+  is contacted" are therefore **unverified for 1.6.0** and probably wrong for the web layer. Owner/web team to decide what the
+  WebView may load (consent, a no-analytics app mode) and re-answer the forms. The native request list below is still accurate for
+  sign-in only.
+- **Network calls:** the catalog, savings, favorites and export calls listed below are no longer made by the app; the web pages make
+  their own. The app itself only calls `GET /api/extension/oauth/authorize`, `POST /api/extension/oauth`, `GET /api/extension/me`,
+  `DELETE /api/extension/session` (and `POST /api/account/delete`, currently unreachable, see below).
+- **Stored on device:** the saved-store list (SharedPreferences) is gone. What stays: the Keystore-encrypted session token, plus
+  whatever cookies and storage the WebView keeps for grabcaramel.com (app-private, excluded from backup).
+- **Account and data deletion / export:** the native Account screen (export, delete synced data, delete account) was removed. The
+  web `/profile` has no account deletion (T-7505), so **1.6.0 has no in-app deletion path**: a Play blocker until T-7505 lands or a
+  native entry is wired to `SessionStore.deleteAccount` (kept, unreachable, `TODO(T-7505)`).
+- **Signed-in web pages:** the WebView has no web session after the native sign-in until `POST /api/app/web-session/handoff`
+  (T-7852) exists, so signed-in features (favorites, savings) are not usable in the app yet.
+- Source paths in the tables below that name `ui/AccountScreen.kt`, `core/FavoritesStore.kt` or `OnboardingScreen.kt` point at code
+  that no longer exists; see git history at `95b4535` for the 1.5.0 versions.
+
 Privacy policy URL: https://grabcaramel.com/privacy (HTTP 200, checked with curl 2026-10-24).
 Server-side facts (what grabcaramel.com stores) come from the existing, already-reviewed `docs/store-listing.md` (CWS privacy tab,
 2026-10-15) and `apps/caramel-app/src/components/PrivacyPolicy.tsx`; they must match this file. Paths below are under

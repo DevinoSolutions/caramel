@@ -135,58 +135,10 @@ class CaramelApi(
         throw ApiError(method, path, null, response.requestId, "Response did not match the expected shape: ${e.message}", e)
     }
 
-    // region Public catalog routes
-
-    /** GET /api/coupons/recently-worked */
-    suspend fun recentlyWorked(): List<RecentlyWorkedCoupon> =
-        get<RecentlyWorkedResponse>("/api/coupons/recently-worked").coupons
-
-    /** GET /api/sites/top-sites */
-    suspend fun topStores(): List<String> = get<SitesResponse>("/api/sites/top-sites").sites.filterNotNull()
-
-    /** GET /api/coupons/stores?q=&limit= (empty [query] browses). */
-    suspend fun storeOptions(query: String, limit: Int = 30): List<String> =
-        get<SitesResponse>("/api/coupons/stores", listOf("q" to query, "limit" to limit.toString())).sites.filterNotNull()
-
-    /** GET /api/coupons?site=&page=&limit= */
-    suspend fun coupons(site: String, page: Int = 1, limit: Int = 50): CouponsPage =
-        get("/api/coupons", listOf("site" to site, "page" to page.toString(), "limit" to limit.toString()))
-
-    // endregion
-
     // region Account routes (bearer)
 
     /** GET /api/extension/me */
     suspend fun me(bearer: String): MeResponse = get("/api/extension/me", bearer = bearer)
-
-    /** GET /api/account/overview */
-    suspend fun overview(bearer: String): OverviewResponse = get("/api/account/overview", bearer = bearer)
-
-    /** GET /api/account/favorites */
-    suspend fun favorites(bearer: String): List<String> =
-        get<FavoritesResponse>("/api/account/favorites", bearer = bearer).favorites.map { it.store }
-
-    /**
-     * PUT or DELETE /api/account/favorites/:store. Returns the store key the server actually
-     * wrote (it normalizes to the registrable domain).
-     */
-    suspend fun setFavorite(store: String, favorited: Boolean, bearer: String): String {
-        val method = if (favorited) "PUT" else "DELETE"
-        val path = "/api/account/favorites/$store"
-        return decode<FavoriteWriteResponse>(send(method, path, bearer = bearer), method, path).store
-    }
-
-    /** GET /api/account/export (the JSON download), returned as the bytes of the body. */
-    suspend fun exportData(bearer: String): ByteArray =
-        send("GET", "/api/account/export", bearer = bearer).body.toByteArray(Charsets.UTF_8)
-
-    /**
-     * POST /api/account/delete. Deletes the account itself (the user, every session including this
-     * bearer, linked sign-ins and synced data).
-     */
-    suspend fun deleteAccount(bearer: String) {
-        send("POST", "/api/account/delete", body = confirmDeleteBody(), bearer = bearer)
-    }
 
     /** DELETE /api/extension/session. Revokes THIS bearer on the server (idempotent). */
     suspend fun revokeSession(bearer: String) {
@@ -194,11 +146,11 @@ class CaramelApi(
     }
 
     /**
-     * POST /api/account/data/delete. Removes synced savings, followed stores and reports; it does
-     * NOT delete the account (see [deleteAccount]).
+     * POST /api/account/delete. Deletes the account itself (the user, every session including this
+     * bearer, linked sign-ins and synced data). TODO(T-7505): see SessionStore.deleteAccount.
      */
-    suspend fun deleteSyncedData(bearer: String) {
-        send("POST", "/api/account/data/delete", body = confirmDeleteBody(), bearer = bearer)
+    suspend fun deleteAccount(bearer: String) {
+        send("POST", "/api/account/delete", body = confirmDeleteBody(), bearer = bearer)
     }
 
     // endregion

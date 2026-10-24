@@ -4,7 +4,6 @@ import com.devino.caramel.core.CaramelApi
 import com.devino.caramel.core.HttpRequest
 import com.devino.caramel.core.HttpResponse
 import com.devino.caramel.core.HttpTransport
-import com.devino.caramel.core.ListStore
 import com.devino.caramel.core.TokenStore
 
 /** Scripted transport: [handler] answers each request; every request is recorded. */
@@ -34,15 +33,5 @@ class MemoryTokenStore(var token: String? = null) : TokenStore {
 
     override fun delete() {
         token = null
-    }
-}
-
-class MemoryListStore : ListStore {
-    val lists = mutableMapOf<String, List<String>>()
-
-    override fun read(key: String): List<String> = lists[key] ?: emptyList()
-
-    override fun write(key: String, values: List<String>) {
-        lists[key] = values
     }
 }

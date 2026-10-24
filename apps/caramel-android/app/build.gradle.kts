@@ -18,12 +18,12 @@ android {
         applicationId = "com.devino.caramel"
         minSdk = 26
         targetSdk = 36
-        // Mirrors the iOS container (apps/caramel-apple project.yml MARKETING_VERSION).
+        // 1.6.0 = the WebView shell (T-7842); Android has its own version line, the iOS container (project.yml MARKETING_VERSION) is still 1.5.0.
         // The release workflow passes -PcaramelVersionCode = 100 + run number. TODO(T-7474): no
         // Gradle dependency locking / verification-metadata.xml yet (supply-chain pinning of the
         // resolved artifacts); add it once the dependency set settles.
         versionCode = (project.findProperty("caramelVersionCode") as String?)?.toInt() ?: 1
-        versionName = "1.5.0"
+        versionName = "1.6.0"
     }
 
     signingConfigs {
@@ -55,7 +55,7 @@ android {
 
     buildFeatures {
         compose = true
-        buildConfig = false
+        buildConfig = true
     }
 
     lint {
@@ -80,7 +80,6 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
-    implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.browser)
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.material3)

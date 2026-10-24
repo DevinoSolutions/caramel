@@ -16,8 +16,6 @@ object AppConfig {
      */
     const val SIGN_IN_REDIRECT_URI = "$SIGN_IN_SCHEME://auth/callback"
 
+    /** The site the WebView shell shows; AppLinkGuard.APP_ORIGIN is the same string (AppLinkGuardTest pins it). */
     const val WEBSITE_URL = "https://grabcaramel.com"
-    const val SUPPORT_URL = "https://grabcaramel.com/support"
-    const val PRIVACY_POLICY_URL = "https://grabcaramel.com/privacy"
-    const val WEB_ACCOUNT_URL = "https://grabcaramel.com/profile"
 }

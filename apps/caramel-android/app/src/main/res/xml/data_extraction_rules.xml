@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The saved-stores list and the encrypted session stay on this device: neither
+<!-- The encrypted session stays on this device (the WebView keeps its own cookies and storage): neither
      cloud backup nor device-to-device transfer carries them. -->
 <data-extraction-rules>
     <cloud-backup>

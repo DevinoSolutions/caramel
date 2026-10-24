@@ -1,23 +1,27 @@
 # DRAFT - Amazon Appstore / Play listing for Caramel (com.devino.caramel)
 
 Status: DRAFT. Owner approval is needed before any of this is pasted into a console. Nothing here has been submitted.
-Prepared for T-7474. Version described: Android 1.5.0 (`versionName` in `apps/caramel-android/app/build.gradle.kts`).
+Prepared for T-7474, revised for T-7842. Version described: Android 1.6.0 (`versionName` in `apps/caramel-android/app/build.gradle.kts`), the WebView shell.
 
 ## The one rule for this copy
 
-The Android app is a **container** (the twin of the iOS 1.5.0 app): it lists codes and lets the shopper copy them. It does
-NOT apply codes at checkout, because there is no Android extension. So the extension's "auto-apply at checkout" claims are
-deliberately left out below. Every sentence is traceable to the app's own screens or to existing public copy (cited).
-Anything not already public is flagged **[NEW CLAIM - owner to approve]**.
+The Android app is a **container**: since 1.6.0 (T-7842) it shows grabcaramel.com's own coupon pages (Deals `/coupons`, Search
+`/coupons/stores`, Saved `/profile#favorites`, Account `/profile`) inside a WebView with native sign-in. It lists codes and
+lets the shopper copy them. It does NOT apply codes at checkout, because there is no Android extension. So the extension's
+"auto-apply at checkout" claims are deliberately left out below. Every sentence is traceable to the web pages the tabs show
+or to existing public copy (cited). Anything not already public is flagged **[NEW CLAIM - owner to approve]**.
+
+**Not verified in the 1.6.0 WebView:** the app has not been run on a device or emulator, so the web pages' behaviour inside the
+shell (copy buttons, saving a store, the Account page) is taken from the web app's code, not observed. Verify before submitting.
 
 Source key:
 
 - EXT = `apps/caramel-extension/scripts/store-listing.mjs` (public extension store text, claim-audited 2026-10-05)
-- ONB = `apps/caramel-android/app/src/main/java/com/devino/caramel/ui/OnboardingScreen.kt` (`OnboardingCopy`, from line 30)
-- UI = the Compose screens under `apps/caramel-android/app/src/main/java/com/devino/caramel/ui/`
+- WEB = the grabcaramel.com pages the tabs open (`apps/caramel-app/src/app/(marketing)/coupons/`, `apps/caramel-app/src/app/profile/`)
+- SHELL = `apps/caramel-android/app/src/main/java/com/devino/caramel/` (`ui/CaramelApp.kt`, `web/`)
 - SUP = `apps/caramel-app/src/app/(marketing)/support/page.tsx:60-63` and `apps/caramel-app/src/lib/supportCopy.ts:5`
-- The iOS 1.5.0 App Store listing text is not stored in this repo (App Store Connect only). The iOS in-app copy
-  (`apps/caramel-apple/App/...`) is what ONB mirrors.
+- The 1.5.0 native Kotlin screens (Deals, Search, Store, Saved, Account, Get started) were removed in 1.6.0; older drafts cited
+  them as ONB / UI.
 
 ## Amazon fields
 
@@ -32,9 +36,10 @@ wanted, `Caramel: Coupon Finder & Promo Codes` is the existing Safari name, EXT 
 
 > Find coupon codes for the stores you shop at, tap a code to copy it, and save your favorite stores.
 
-- "find coupon codes for the stores you shop at": ONB `INTRO` (`OnboardingScreen.kt:32`).
-- "copy them": UI `StoreDetailScreen.kt` (Copy button, `copyToClipboard`).
-- "save your favorite stores": UI `SavedScreen.kt` and the heart in `StoreDetailScreen.kt`.
+- "find coupon codes for the stores you shop at": WEB `/coupons` and `/coupons/stores` (coupon list, popular stores, store index).
+- "copy them": WEB `components/coupons/coupon-card.tsx` (copy action on each code). Not observed inside the WebView.
+- "save your favorite stores": WEB `components/coupons/store-favorite-star.tsx` and `/profile#favorites`. Saving needs an account on
+  the web, so the old "on this device" wording is gone.
 
 100 characters. Amazon's field limit is not verified (the console is off limits); it is under the 132 the Chrome Web Store allows.
 
@@ -42,28 +47,31 @@ wanted, `Caramel: Coupon Finder & Promo Codes` is the existing Safari name, EXT 
 
 > Caramel finds coupon codes for the stores you shop at.
 >
-> - Deals: see codes that recently worked for other shoppers, and the top stores.
+> - Deals: browse coupon codes and popular stores.
 > - Search: look up a store by name or domain and see its codes. Tap Copy to copy a code, then paste it at that store's checkout.
-> - Saved stores: keep the stores you care about on this device, or sign in to keep them across devices.
+> - Saved stores: sign in to keep the stores you care about across devices.
 > - Free: Caramel is free. There are no purchases in the app.
-> - No data selling: Caramel doesn't sell your data and only talks to grabcaramel.com. You can use Deals and Search without an account.
+> - No data selling: Caramel doesn't sell your data. You can browse Deals and Search without an account.
 > - Open source: the full code is public under the AGPL-3.0 license at github.com/DevinoSolutions/caramel.
 >
-> Sign in with Apple or Google (optional) to sync your saved stores and see what Caramel has saved you. You can download your data,
-> delete your synced data, or delete your account from inside the app.
+> Sign in with Apple or Google (optional) to sync your saved stores and see what Caramel has saved you.
 >
-> Questions or something not working? Use Help & support in the Account tab: a human replies within 1 business day.
+> Questions or something not working? See the Support page at grabcaramel.com/support: a human replies within 1 business day.
 
 Claim trace:
 
-- Deals / Search / Saved / copy: ONB `STEPS`, UI screens above.
+- Deals / Search / Saved / copy: WEB pages above, shown by SHELL `web/ShellRoutes.kt` (`ShellTab`).
 - "Free", "no purchases": EXT ("Caramel is free"); the app has no billing path (billing-gate grep in PR #465).
-- "doesn't sell your data", "only talks to grabcaramel.com", "without an account": EXT bullets. For the app: the only host is
-  `AppConfig.API_BASE_URL` (`core/AppConfig.kt:6`) and Deals/Search/Store need no session.
+- "doesn't sell your data", "without an account": EXT bullets; Deals and Search are public web pages (no session needed).
+  "Only talks to grabcaramel.com" was dropped: the WebView can follow a link out to a retailer, and `ExternalLinkPolicy` then opens
+  it in the browser, so the app itself does not browse other sites, but the claim is not worth the risk.
 - "Open source ... AGPL-3.0 ... github.com/DevinoSolutions/caramel": EXT bullet.
-- Sign in with Apple or Google, sync, savings: UI `AccountScreen.kt:111,152,157`.
-- "download your data / delete synced data / delete account": UI `AccountScreen.kt:136-142`.
-- Support sentence: SUP, "a human replies within 1 business day" (also in the app's Account tab footer).
+- Sign in with Apple or Google: SHELL `ui/CaramelApp.kt` (sign-in sheet) and `core/SessionStore.kt`. Sync and savings: WEB `/profile`
+  once the web session handoff exists (**TODO T-7852: not built yet, so a signed-in app does not yet show a signed-in `/profile`; do
+  not submit before it does**).
+- Support sentence: SUP, "a human replies within 1 business day".
+- REMOVED vs the 1.5.0 draft: "download your data, delete your synced data, or delete your account from inside the app". The native
+  Account screen that did this is gone and the web `/profile` has no account deletion (`privacy.md`, T-7505).
 
 Deliberately NOT claimed (the Android app does not do it): auto-applying codes at checkout, comparing totals, savings read from
 the cart, a toolbar badge, affiliate-link handling, cashback or rewards (EXT says Caramel has none), push notifications,
@@ -72,7 +80,7 @@ price tracking.
 ### Product feature bullets (Amazon "product features")
 
 1. Coupon codes for the stores you shop at, in one place
-2. Deals tab: codes that recently worked, plus top stores
+2. Deals tab: browse coupon codes and popular stores
 3. Search any store by name or domain, then tap to copy a code
 4. Save favorite stores; sign in (optional) to keep them across devices
 5. Free, open source (AGPL-3.0), and no data selling
@@ -99,13 +107,13 @@ Amazon Appstore: **Shopping**. (Play: Shopping, to be confirmed in Play Console;
 - Website: https://grabcaramel.com
 
 Owner note on "what Caramel has saved you": the Android app records no savings (only the browser extension does), so an
-Android-only user sees "Savings are not synced" in the Account tab. The long description keeps that sentence limited to
+Android-only user sees no savings on the web Account page (`/profile`, not checked inside the WebView). The long description keeps that sentence limited to
 "see what Caramel has saved you" for signed-in users who also use the extension; reword it if the listing should not
 imply Android records savings.
 
 ### Other form facts
 
-- Package `com.devino.caramel`, versionName 1.5.0. No ads, no in-app purchases (see `privacy.md`).
+- Package `com.devino.caramel`, versionName 1.6.0. No ads, no in-app purchases (see `privacy.md`).
 - Content rating: the owner answers the console questionnaire (a coupon-lookup utility, no user-generated content shown).
 - Devices: phones and tablets, Fire OS 7+ (minSdk 26 excludes Fire OS 5/6; see `fire-check.md`).
 - Icons: `icons/icon-512.png`, `icons/icon-114.png` (below). Screenshots: not produced, see `screenshots-TODO.md`.
