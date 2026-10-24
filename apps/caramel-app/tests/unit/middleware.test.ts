@@ -193,6 +193,9 @@ describe('middleware — docs host (docs.<apex> -> <apex>/docs, T-7855)', () => 
             'docs.999.1',
             'docs.x.9',
             'docs.1.1',
+            // A dev-host port past 65535 must not reach new URL() either.
+            'docs.localhost:99999',
+            'docs.localhost:65536',
         ]) {
             const res = middleware(
                 new NextRequest('https://grabcaramel.com/pricing', {

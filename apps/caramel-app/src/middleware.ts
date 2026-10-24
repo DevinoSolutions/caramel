@@ -103,11 +103,11 @@ function docsRedirectTarget(
     if (apexHostname !== 'localhost') {
         return new URL(DOCS_PATH, DOCS_PRODUCTION_ORIGIN)
     }
+    const port = match?.[2] ?? ''
+    // `(:\d{1,5})` admits 65536-99999, which new URL() rejects by throwing.
+    if (port && Number(port.slice(1)) > 65535) return null
     const incoming = new URL(request.url)
-    return new URL(
-        DOCS_PATH,
-        `${incoming.protocol}//localhost${match?.[2] ?? ''}`,
-    )
+    return new URL(DOCS_PATH, `${incoming.protocol}//localhost${port}`)
 }
 
 export function middleware(request: NextRequest) {
