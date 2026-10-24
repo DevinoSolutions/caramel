@@ -301,7 +301,11 @@ describe('submitShopperCoupon (real pg :58005)', () => {
             userId: USER_B,
         })
 
-        expect(second).toEqual({ couponId: first.couponId, created: false })
+        expect(second).toEqual({
+            couponId: first.couponId,
+            created: false,
+            submittedByUser: false,
+        })
         expect(await prisma.coupon.count({ where: { site: BASE } })).toBe(1)
     })
 
@@ -323,7 +327,11 @@ describe('submitShopperCoupon (real pg :58005)', () => {
                 source: 'manual',
                 userId: USER_A,
             })
-            expect(result).toEqual({ couponId: '700080001', created: false })
+            expect(result).toEqual({
+                couponId: '700080001',
+                created: false,
+                submittedByUser: false,
+            })
         } finally {
             await prisma.coupon.delete({ where: { id: '700080001' } })
         }

@@ -2,6 +2,7 @@ import * as Sentry from '@sentry/nextjs'
 import { SENTRY_RELEASE } from './src/lib/buildInfo'
 import { scrubRejectedRedirectEvent } from './src/lib/rejectedRedirectEventScrub'
 import {
+    SENTRY_DATA_COLLECTION,
     scrubSentryBreadcrumb,
     scrubSentryEvent,
 } from './src/lib/sentryPiiScrub'
@@ -27,16 +28,20 @@ export function initSentry(
         // tests/unit/sentry-traces-sample-rate.test.ts holds the ceiling.
         tracesSampleRate: 0.05,
         debug: false,
-        // OFF on purpose (T-5535 M5; it was `true`). On, the SDK attaches the
-        // caller's IP, the Cookie / Authorization headers and the request URL
-        // with its `?code=…&state=…` OAuth query to every event. Off loses only
-        // the IP, cookies, request bodies and a few headers; triage here runs
-        // on route / method / status tags, the release, the trace id and the
-        // user id, all of which stay (the id is set explicitly by
-        // Sentry.setUser, which sendDefaultPii never governed). Off is also
-        // the SDK default, so no integration quietly turns it back on.
-        sendDefaultPii: false,
-        // Defence in depth on top of the flag: sentryPiiScrub strips
+        // Restrictive on purpose (T-5535 M5 turned `sendDefaultPii` off; SDK v11
+        // replaced that flag with `dataCollection`, whose unset default is now
+        // permissive). Loose, the SDK attaches the caller's IP, the Cookie /
+        // Authorization headers, request bodies and DB queries to events. This
+        // baseline loses only those; triage here runs on route / method /
+        // status tags, the release, the trace id and the user id, all of which
+        // stay (the id is set explicitly by Sentry.setUser, which
+        // `userInfo` does not govern).
+        dataCollection: SENTRY_DATA_COLLECTION,
+        // SDK v11 streams spans by default, and under streaming
+        // beforeSendTransaction never runs, so span urls would skip the scrub
+        // below. 'static' keeps the v10 transaction model the scrub is built on.
+        traceLifecycle: 'static',
+        // Defence in depth on top of the baseline: sentryPiiScrub strips
         // credential-shaped headers, params, bearer tokens, e-mails and IPs
         // from errors, transactions (incl. span urls) and breadcrumbs, whatever
         // the SDK or a call site put there. The rejected-redirect scrub then

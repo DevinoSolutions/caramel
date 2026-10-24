@@ -4,7 +4,7 @@ import SwiftUI
 struct SearchView: View {
     @EnvironmentObject private var favorites: FavoritesStore
 
-    @State private var query = ""
+    @State private var query = ScreenshotLaunch.searchQuery ?? "" // non-empty only for App Store screenshot capture
     @State private var state: LoadState<[String]> = .idle
 
     var body: some View {

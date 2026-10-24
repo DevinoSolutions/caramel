@@ -8,6 +8,7 @@
 //
 // This is app-owned user/ops state, like coupon_reports and favorite_stores —
 // NOT the coupon catalog (couponsRepo.ts owns that, with its own write rules).
+import type { Prisma } from '@/generated/prisma/client'
 import { env } from '@/lib/env'
 import prisma from '@/lib/prisma'
 import { foldRequesterEmail } from '@/lib/siteSuggestionIdentity'
@@ -16,7 +17,6 @@ import {
     sendSupportedOpsNotice,
 } from '@/lib/siteSuggestionNotices'
 import { resolveStoreDomain } from '@/lib/storeDomain'
-import type { Prisma } from '@prisma/client'
 import * as Sentry from '@sentry/nextjs'
 import { z } from 'zod'
 
@@ -115,7 +115,11 @@ export function normalizeSuggestedDomain(rawUrl: string): string | null {
     try {
         hostname = new URL(
             /^https?:\/\//i.test(input) ? input : `https://${input}`,
-        ).hostname.toLowerCase()
+        ).hostname
+            .toLowerCase()
+            // `store.com.` is the same host as `store.com`; kept, it would
+            // dodge the per-(domain, requester) dedupe (T-6224).
+            .replace(/\.$/, '')
     } catch {
         return null
     }
@@ -249,10 +253,7 @@ export async function listSiteSuggestions(
 /** Why an id did NOT move. Reported per id so the caller can tell "I sent a
  * stale list" (`already`/`backwards`) from "I sent a wrong id" (`not_found`). */
 export type SiteSuggestionRefusalReason =
-    | 'not_found'
-    | 'already'
-    | 'backwards'
-    | 'raced'
+    'not_found' | 'already' | 'backwards' | 'raced'
 
 export interface SiteSuggestionRefusal {
     id: string
@@ -435,10 +436,7 @@ async function pendingNoticeIds(ids: string[]): Promise<string[]> {
 // ---------------------------------------------------------------------------
 
 export type SiteSuggestionNotifyOutcome =
-    | 'sent'
-    | 'already_notified'
-    | 'not_eligible'
-    | 'failed'
+    'sent' | 'already_notified' | 'not_eligible' | 'failed'
 
 export interface SiteSuggestionNotifyResult {
     id: string

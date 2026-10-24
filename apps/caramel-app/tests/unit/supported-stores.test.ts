@@ -114,12 +114,16 @@ describe('GET /api/extension/supported-stores — qualification predicate (D1 fi
         // resolved at ingest, so it must NOT appear as a query predicate.
         expect(queryCapture.sql).not.toMatch(/extension_compatible/)
         // Who wrote a row (store_configs.origin: the pipeline or the
-        // extension's coupon-box save) never reaches the extension: a saved
-        // row is served exactly like a pipeline row. origin is read only by
-        // the WHERE that stops serving a saved box once it is
-        // AUTO_DETECT_CONFIG_MAX_AGE_DAYS old.
+        // extension's coupon-box save) is read for two things: the WHERE that
+        // stops serving a saved box once it is AUTO_DETECT_CONFIG_MAX_AGE_DAYS
+        // old, and the feed's `savedBox` mark (supportedStoresCache.ts), which
+        // only changes how the extension READS the store's answer (a saved box
+        // names no error area; T-6310). It is never a filter.
         const selected = queryCapture.sql.split(/\bFROM\b/)[0] ?? ''
-        expect(selected).not.toMatch(/\borigin\b/)
+        expect(selected).toMatch(/\borigin\b/)
+        expect(queryCapture.sql.split(/\bWHERE\b/)[1] ?? '').not.toMatch(
+            /\borigin\s*=/,
+        )
         expect(queryCapture.sql).toMatch(
             /store_configs\.origin IS DISTINCT FROM .* OR store_configs\.updated_at > now\(\) - make_interval/,
         )

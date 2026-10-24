@@ -181,6 +181,35 @@ const serverObjectSchema = z.object({
         .enum(['true', 'false'])
         .default('false')
         .transform(value => value === 'true'),
+    // Quarantine + write budget of the same route (T-6221). A saved box is a
+    // PROPOSAL until MIN_AGREEING_INSTALLS distinct signed-in users proposed
+    // the same box for the same store (couponBoxSave.recordBoxProposal); only
+    // then does it become a served store_configs row. Minimum 2 on purpose:
+    // 1 would put a single account back in control of what other installs
+    // click. Default 5, not 3: this counts ACCOUNTS, and an attacker needs only
+    // that many email signups, so every extra account is cost. The residual
+    // risk stays until accounts are weighted by age (TODO(T-6221) in
+    // couponBoxSave.ts recordBoxProposal). The three caps count NEW proposals in the last 24 hours: per
+    // user, per store, and across all callers; over a cap the route answers
+    // 429 and nothing is written. Non-negative integers; 0 = refuse every
+    // save on that axis. A blank value reads as unset (z.coerce would turn ''
+    // into 0 and silently switch saving off); garbage fails boot.
+    COUPON_BOX_SAVE_MIN_AGREEING_INSTALLS: z.preprocess(
+        v => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+        z.coerce.number().int().min(2).default(5),
+    ),
+    COUPON_BOX_SAVE_USER_DAILY_CAP: z.preprocess(
+        v => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+        z.coerce.number().int().min(0).default(10),
+    ),
+    COUPON_BOX_SAVE_STORE_DAILY_CAP: z.preprocess(
+        v => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+        z.coerce.number().int().min(0).default(20),
+    ),
+    COUPON_BOX_SAVE_GLOBAL_DAILY_CAP: z.preprocess(
+        v => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+        z.coerce.number().int().min(0).default(500),
+    ),
     OPENROUTER_API_KEY: z.string().optional(),
     // Base URL of the OpenAI-compatible chat API that openrouter.ts POSTs
     // `${OPENROUTER_API_URL}/chat/completions` to. Unset (or blank) =
@@ -224,10 +253,45 @@ const serverObjectSchema = z.object({
         v => (typeof v === 'string' && v.trim() === '' ? undefined : v),
         z.coerce.number().int().min(0).default(2000),
     ),
+    // Coupon trust signals (T-6222 / T-6227): who may move a code's "Verified" /
+    // "failing" state. All three read a blank value as unset (z.coerce would turn
+    // '' into 0 and silently switch a guard off); garbage fails boot.
+    //  - COUPON_TRUST_MIN_ACCOUNT_AGE_DAYS: an account younger than this counts
+    //    as an anonymous network toward a failure quorum, and may not stamp
+    //    "worked" on a code somebody else listed (accountReputation.ts).
+    //    0 = every account is established (the guard off).
+    //  - COUPON_REPORT_MAX_PER_COUPON_PER_HOUR: most worked reports, and most
+    //    failed reports, counted PER COUPON per hour whoever sends them
+    //    (couponReportVelocity.ts). Over it a report is accepted and not counted.
+    //  - COUPON_REPORT_MAX_LOW_TRUST_PER_COUPON_PER_HOUR: the same cap for the
+    //    LOW-TRUST reporters alone (anonymous networks, young accounts), a
+    //    separate smaller bucket so a swarm of them cannot use up the hourly
+    //    slots established accounts report into.
+    //  - COUPON_WORKED_STAMPS_PER_USER_PER_DAY: most "worked" attributions one
+    //    account may stamp in a rolling 24h, through the checkout capture
+    //    (checkoutWorkedStamp.ts) AND through POST /api/coupons/<id>/report
+    //    {worked}, new rows and already-listed codes alike. Past it an
+    //    established account's report counts as low-trust (accepted, no stamp).
+    COUPON_TRUST_MIN_ACCOUNT_AGE_DAYS: z.preprocess(
+        v => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+        z.coerce.number().int().min(0).default(7),
+    ),
+    COUPON_REPORT_MAX_PER_COUPON_PER_HOUR: z.preprocess(
+        v => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+        z.coerce.number().int().positive().default(10),
+    ),
+    COUPON_REPORT_MAX_LOW_TRUST_PER_COUPON_PER_HOUR: z.preprocess(
+        v => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+        z.coerce.number().int().positive().default(5),
+    ),
+    COUPON_WORKED_STAMPS_PER_USER_PER_DAY: z.preprocess(
+        v => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+        z.coerce.number().int().positive().default(30),
+    ),
     // Paid fallback through the Devino proxy (src/lib/proxy-fallback-headers.ts):
     // the app's OWN OpenRouter org key, sent as X-ORF-Fallback-Key only to
-    // https://proxyai.devino.ca and only for a signed-in caller; no request
-    // sends it today (src/lib/proxy-fallback-env.ts). The wait before it goes
+    // https://proxyai.devino.ca and only by the coupon-box pick, the one
+    // caller (src/lib/proxy-fallback-env.ts). The wait before it goes
     // paid is at most 12 s. Unset = no header, behaviour
     // unchanged. Blank is fine; a malformed value refuses boot here (the
     // message names the variable, never the value) because a key with a

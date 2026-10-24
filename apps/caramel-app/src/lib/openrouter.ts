@@ -1,4 +1,5 @@
 import { env } from '@/lib/env'
+import { fetchWithoutRedirects } from '@/lib/proxy-fallback-headers'
 import * as Sentry from '@sentry/nextjs'
 
 const DEFAULT_MODEL = env.OPENROUTER_MODEL
@@ -69,7 +70,14 @@ export async function chat(
         // trailing slash), so with it unset this is exactly the URL this file
         // used to hardcode; set, it points at an OpenAI-compatible relay such
         // as the Devino proxy (https://proxyai.devino.ca/v1).
-        const res = await fetch(`${env.OPENROUTER_API_URL}/chat/completions`, {
+        // A request carrying the paid-fallback key follows no redirect: fetch
+        // strips only Authorization and cookies on a cross-origin redirect,
+        // so a plain fetch would hand X-ORF-Fallback-Key to the new host.
+        const carriesFallbackKey = Object.keys(opts.headers ?? {}).some(
+            name => name.toLowerCase() === 'x-orf-fallback-key',
+        )
+        const send = carriesFallbackKey ? fetchWithoutRedirects : fetch
+        const res = await send(`${env.OPENROUTER_API_URL}/chat/completions`, {
             method: 'POST',
             signal: controller.signal,
             headers: {

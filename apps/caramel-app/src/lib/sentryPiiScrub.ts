@@ -3,9 +3,9 @@
 // The last line of defence between this app and the self-hosted Sentry. Wired
 // as beforeSend + beforeSendTransaction + beforeBreadcrumb on every init
 // (sentry.common.config.ts for server and edge, instrumentation-client.ts for
-// the browser). It runs on top of `sendDefaultPii: false`, so a future flip of
-// that flag, a new integration or an `extra: { ... }` added at a call site
-// cannot start shipping credentials without a test failing.
+// the browser). It runs on top of SENTRY_DATA_COLLECTION (below), so a future
+// loosening of that baseline, a new integration or an `extra: { ... }` added at
+// a call site cannot start shipping credentials without a test failing.
 //
 // What never leaves the process: Authorization / Cookie / Set-Cookie headers,
 // Bearer tokens, OAuth `code` / `state` / `id_token` / `access_token` (and any
@@ -34,6 +34,41 @@ type TransactionEvent = Parameters<
     >
 >[0]
 type Scrubbable = ErrorEvent | TransactionEvent
+type DataCollection = NonNullable<
+    NonNullable<Parameters<typeof init>[0]>['dataCollection']
+>
+
+const SDK_SENSITIVE_HEADER_PARTS = [
+    'forwarded',
+    '-ip',
+    'remote-',
+    'via',
+    '-user',
+]
+
+/**
+ * What the SDK itself may collect, shared by every init. SDK v11 replaced
+ * `sendDefaultPii` with `dataCollection` and made the unset default
+ * PERMISSIVE (user IP, cookies, request/response bodies, DB queries, GenAI
+ * inputs/outputs). This is the SDK's documented "keep the v10 default"
+ * baseline, i.e. exactly what `sendDefaultPii: false` collected (T-5535 M5
+ * turned that flag off on purpose). tests/unit/sentry-pii-scrub.test.ts pins
+ * it, so leaving it out of an init or loosening a field fails a test.
+ */
+export const SENTRY_DATA_COLLECTION = {
+    userInfo: false,
+    cookies: false,
+    httpHeaders: {
+        request: { deny: SDK_SENSITIVE_HEADER_PARTS },
+        response: { deny: SDK_SENSITIVE_HEADER_PARTS },
+    },
+    httpBodies: [],
+    urlQueryParams: { deny: SDK_SENSITIVE_HEADER_PARTS },
+    genAI: { inputs: false, outputs: false },
+    databaseQueryData: false,
+    queues: false,
+    graphQL: { document: false, variables: false },
+} satisfies DataCollection
 
 export const FILTERED = '[Filtered]'
 const FILTERED_EMAIL = '[Filtered email]'

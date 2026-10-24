@@ -118,7 +118,8 @@ function syncSentryPosthogContext(posthog: PostHog): void {
  * ID ONLY, deliberately: it is the same UUID PostHog identifies on
  * (`identifyUser` below) and the same `users.id` the DB and every API route are
  * keyed by, so one id joins Sentry ↔ PostHog ↔ Postgres. Email is NOT sent —
- * `sendDefaultPii` is off and an error report does not need the address.
+ * the SDK's `dataCollection.userInfo` is off and an error report does not
+ * need the address.
  */
 export function setSentryUser(userId: string | null): void {
     Sentry.setUser(userId ? { id: userId } : null)

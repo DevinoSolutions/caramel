@@ -24,9 +24,19 @@
 // a slot per coupon per kind: the second one's repeat of the same report within
 // 24h is not counted.
 //
+// What this dedupe does NOT do (T-6222 / T-6227): it limits one reporter, not a
+// swarm. The per-coupon speed limit across all reporters is
+// couponReportVelocity.ts; the weight of a reporter (anonymous network, young
+// account, established account) is accountReputation.ts + couponSignals.ts.
+//
 // STATE: an in-memory Map<key, expiry>, per process. It resets on every deploy
 // and restart (a reporter can re-report once after one), and a multi-instance
-// deploy would give each instance its own window. TODO: move to a shared store
+// deploy would give each instance its own window. That reset cannot inflate a
+// failure quorum: the quorum is counted from the PERSISTED
+// coupon_signal_reporters rows (couponSignals.ts), one per distinct reporter, so
+// a reporter re-admitted after a restart only refreshes its own row. A 'worked'
+// re-admitted after a restart re-stamps the same timestamp, and a repeated use
+// bumps a counter that moves no ranking. TODO: move to a shared store
 // if the app is ever scaled past one instance (same stance as rateLimit.ts and
 // classifyCartModelBudget.ts).
 //
@@ -49,7 +59,7 @@
 // 'worked' report and a use, so honest success traffic is the bulk of the keys;
 // in one shared table it could fill the cap and switch off the 'failed' dedupe,
 // which is the one that stops a code being flagged by a single reporter.
-import { getClientIp } from '@/lib/rateLimit'
+import { readEdgeClientIp } from '@/lib/clientIp'
 import * as Sentry from '@sentry/nextjs'
 import type { NextRequest } from 'next/server'
 
@@ -89,22 +99,53 @@ const tables: Record<ReportKind, KindTable> = {
 }
 
 export type ReportReporter =
-    | { kind: 'user'; userId: string }
+    | {
+          kind: 'user'
+          userId: string
+          /**
+           * accountReputation.isEstablishedAccount: old enough to weigh as an
+           * account toward a failure quorum. Not part of the identity: the
+           * dedupe key and reporterHash read userId only.
+           */
+          established: boolean
+      }
     | { kind: 'ip'; ip: string }
 
 /**
- * The reporter a request counts as: its signed-in user, else its client
- * network (getClientIp, the same address the rate limiter uses, with an IPv6
- * address cut to its /64). Both report routes call this, so a shopper is one
- * reporter on both.
+ * The one anonymous reporter every request WITHOUT the Cloudflare edge header
+ * counts as. Such a request reached the app around the edge (direct origin
+ * hit, local dev, e2e), so its X-Real-IP / X-Forwarded-For are client input
+ * and must not mint identities: forging them would otherwise make as many
+ * "distinct reporters" as the caller likes. Collapsing them into one is the
+ * safe direction (they can never reach a quorum alone); the cost is that an
+ * environment with no Cloudflare in front sees all its anonymous shoppers as a
+ * single reporter. To exercise distinct anonymous reporters locally, send
+ * CF-Connecting-IP yourself.
+ */
+export const NO_EDGE_REPORTER_NETWORK = 'no-edge-header'
+
+/**
+ * The reporter a request counts as: its signed-in user (`established` says
+ * whether that account is old enough to be trusted, see accountReputation.ts;
+ * default false, so a caller that forgets to look gets the low-trust weight),
+ * else its client network (the Cloudflare edge address, readEdgeClientIp, with an IPv6 address
+ * cut to its /64; NO_EDGE_REPORTER_NETWORK when the edge header is absent).
+ * Both report routes call this, so a shopper is one reporter on both. This is
+ * deliberately NOT getClientIp (the rate limiter's key): the limiter may fall
+ * back to forgeable headers, an identity that decides what other shoppers see
+ * may not.
  */
 export function reporterFor(
     userId: string | null,
     req: NextRequest,
+    established: boolean = false,
 ): ReportReporter {
-    return userId
-        ? { kind: 'user', userId }
-        : { kind: 'ip', ip: reporterNetwork(getClientIp(req)) }
+    if (userId) return { kind: 'user', userId, established }
+    const edgeIp = readEdgeClientIp(req.headers)
+    return {
+        kind: 'ip',
+        ip: edgeIp ? reporterNetwork(edgeIp) : NO_EDGE_REPORTER_NETWORK,
+    }
 }
 
 /**

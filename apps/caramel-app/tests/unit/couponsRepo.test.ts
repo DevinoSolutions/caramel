@@ -11,8 +11,12 @@ import {
     listRecentlyWorkedCoupons,
     listStoreCoupons,
     listStoreSitemapEntries,
+    MAX_REQUESTED_SOURCES,
     requestSource,
     submitShopperCoupon,
+    writeFailedSignal,
+    writeUsageSignal,
+    writeWorkedSignal,
 } from '@/lib/couponsRepo'
 import {
     SHOPPER_COUPON_DESCRIPTION,
@@ -46,6 +50,12 @@ let capturedValues: unknown[][] = []
 let executeRawResult = 0
 // Args every prisma.source.create() was called with (requestSource).
 let capturedSourceCreates: unknown[] = []
+// What the mocked prisma.source.findFirst / count answer (requestSource's
+// duplicate and queue-depth checks), plus the args they were asked with.
+let existingSourceRow: { id: string } | null = null
+let requestedSourceCount = 0
+let capturedSourceFinds: unknown[] = []
+let capturedSourceCounts: unknown[] = []
 // How many prisma.$transaction() calls were opened (submitShopperCoupon).
 let transactionCount = 0
 function mockRows(match: (sql: string) => boolean, rows: unknown[]) {
@@ -89,6 +99,14 @@ vi.mock('@/lib/prisma', () => {
                 capturedSourceCreates.push(arg)
                 return Promise.resolve({})
             },
+            findFirst: (arg: unknown) => {
+                capturedSourceFinds.push(arg)
+                return Promise.resolve(existingSourceRow)
+            },
+            count: (arg: unknown) => {
+                capturedSourceCounts.push(arg)
+                return Promise.resolve(requestedSourceCount)
+            },
         },
     }
     return { default: client }
@@ -100,6 +118,10 @@ beforeEach(() => {
     capturedValues = []
     executeRawResult = 0
     capturedSourceCreates = []
+    existingSourceRow = null
+    requestedSourceCount = 0
+    capturedSourceFinds = []
+    capturedSourceCounts = []
     transactionCount = 0
 })
 
@@ -335,8 +357,8 @@ describe('expireCoupons (write, app catalog via prisma.$executeRaw)', () => {
 })
 
 describe('requestSource (write, app sources INSERT via prisma.source.create)', () => {
-    it('creates a REQUESTED source row (empty websites[], minted id) and resolves void', async () => {
-        await expect(requestSource('example.com')).resolves.toBeUndefined()
+    it('creates a REQUESTED source row (empty websites[], minted id) and reports created', async () => {
+        await expect(requestSource('example.com')).resolves.toBe('created')
 
         expect(capturedSourceCreates).toHaveLength(1)
         const arg = capturedSourceCreates[0] as {
@@ -353,6 +375,37 @@ describe('requestSource (write, app sources INSERT via prisma.source.create)', (
         // id is minted app-side (Source.id has no DB default) — a non-empty string.
         expect(typeof arg.data.id).toBe('string')
         expect(arg.data.id.length).toBeGreaterThan(0)
+    })
+
+    it('T-6225: a host that already has a row (any status) is a duplicate and writes nothing', async () => {
+        existingSourceRow = { id: 'src-1' }
+
+        await expect(requestSource('example.com')).resolves.toBe('duplicate')
+
+        expect(capturedSourceCreates).toHaveLength(0)
+        // An exact match (the route lowercases the host) and NOT status-filtered.
+        expect(capturedSourceFinds).toEqual([
+            { where: { source: 'example.com' }, select: { id: true } },
+        ])
+    })
+
+    it('T-6225: at the REQUESTED cap the request is refused as queue_full and writes nothing', async () => {
+        requestedSourceCount = MAX_REQUESTED_SOURCES
+
+        await expect(requestSource('example.com')).resolves.toBe('queue_full')
+
+        expect(capturedSourceCreates).toHaveLength(0)
+        expect(capturedSourceCounts).toEqual([
+            { where: { status: 'REQUESTED' } },
+        ])
+    })
+
+    it('T-6225: one below the cap still creates', async () => {
+        requestedSourceCount = MAX_REQUESTED_SOURCES - 1
+
+        await expect(requestSource('example.com')).resolves.toBe('created')
+
+        expect(capturedSourceCreates).toHaveLength(1)
     })
 })
 
@@ -819,16 +872,43 @@ describe('submitShopperCoupon (THIRD sanctioned write: shopper-submitted codes)'
     })
 
     it('(b) returns the existing row and inserts nothing when the code is already listed', async () => {
-        mockRows(isDedupe, [{ id: '812345' }])
+        // A supplier row: nobody submitted it.
+        mockRows(isDedupe, [{ id: '812345', submittedByUserId: null }])
 
         await expect(submitShopperCoupon(ARGS)).resolves.toEqual({
             couponId: '812345',
             created: false,
+            submittedByUser: false,
         })
         expect(capturedQueries.some(isInsert)).toBe(false)
         // A duplicate is a hit, not a new submission: it must not burn the
         // shopper's daily allowance, so the cap is never even counted.
         expect(capturedQueries.some(isCap)).toBe(false)
+    })
+
+    it("(b) reports whether the already-listed row is this shopper's own (T-6222: only their own code may be vouched for freely)", async () => {
+        mockRows(isDedupe, [
+            { id: '900000000000000003', submittedByUserId: 'user-uuid-1' },
+        ])
+        await expect(submitShopperCoupon(ARGS)).resolves.toEqual({
+            couponId: '900000000000000003',
+            created: false,
+            submittedByUser: true,
+        })
+
+        rules = []
+        capturedQueries = []
+        mockRows(isKnownStoreProbe, [{ known: true }])
+        mockRows(isDedupe, [
+            { id: '900000000000000004', submittedByUserId: 'someone-else' },
+        ])
+        await expect(submitShopperCoupon(ARGS)).resolves.toMatchObject({
+            created: false,
+            submittedByUser: false,
+        })
+        // The lookup selects the submitter alongside the id.
+        const sql = capturedQueries[queryIndex(isDedupe)] ?? ''
+        expect(sql).toContain('submitted_by_user_id AS "submittedByUserId"')
     })
 
     it("(c) counts the shopper's submissions in the last 24h and throws ShopperSubmissionLimitError at the cap", async () => {
@@ -854,6 +934,7 @@ describe('submitShopperCoupon (THIRD sanctioned write: shopper-submitted codes)'
         await expect(submitShopperCoupon(ARGS)).resolves.toEqual({
             couponId: INSERTED_ID,
             created: true,
+            submittedByUser: true,
         })
     })
 
@@ -863,7 +944,11 @@ describe('submitShopperCoupon (THIRD sanctioned write: shopper-submitted codes)'
 
         const result = await submitShopperCoupon(ARGS)
 
-        expect(result).toEqual({ couponId: INSERTED_ID, created: true })
+        expect(result).toEqual({
+            couponId: INSERTED_ID,
+            created: true,
+            submittedByUser: true,
+        })
         const i = queryIndex(isInsert)
         const sql = capturedQueries[i] ?? ''
         expect(sql).toContain("nextval('shopper_coupon_id_seq')::text")
@@ -1011,5 +1096,108 @@ describe('submitShopperCoupon (THIRD sanctioned write: shopper-submitted codes)'
         await expect(submitShopperCoupon(ARGS)).rejects.toThrow(
             /submitShopperCoupon/,
         )
+    })
+})
+
+describe('coupon_signals writers: the catalog existence check is folded into the one write statement', () => {
+    const WRITERS = [
+        {
+            name: 'writeWorkedSignal',
+            write: (client?: Parameters<typeof writeWorkedSignal>[1]) =>
+                writeWorkedSignal('42', client),
+            values: ['42', '42'],
+            owns: 'last_worked_at = EXCLUDED.last_worked_at',
+        },
+        {
+            name: 'writeFailedSignal',
+            write: (client?: Parameters<typeof writeFailedSignal>[2]) =>
+                writeFailedSignal('42', 'min spend', client),
+            values: ['42', 'min spend', '42'],
+            owns: 'fail_count = coupon_signals.fail_count + 1',
+        },
+        {
+            name: 'writeUsageSignal',
+            write: (client?: Parameters<typeof writeUsageSignal>[1]) =>
+                writeUsageSignal('42', client),
+            values: ['42', '42'],
+            owns: 'work_count = coupon_signals.work_count + 1',
+        },
+    ] as const
+
+    for (const writer of WRITERS) {
+        describe(writer.name, () => {
+            it('is ONE INSERT ... SELECT ... WHERE EXISTS (catalog row) ON CONFLICT ... RETURNING statement, ids bound never inlined', async () => {
+                mockRows(
+                    sql => sql.includes('INSERT INTO coupon_signals'),
+                    [{ failWeight: 0 }],
+                )
+
+                await writer.write()
+
+                expect(capturedQueries).toHaveLength(1)
+                expect(capturedQueries[0]).toMatch(
+                    /INSERT INTO coupon_signals \([^)]+\)\s+SELECT[\s\S]*WHERE EXISTS \(SELECT 1 FROM coupons WHERE id = \?::text\)\s+ON CONFLICT \(coupon_id\) DO UPDATE SET[\s\S]*RETURNING fail_weight AS "failWeight"/,
+                )
+                expect(capturedQueries[0]).toContain(writer.owns)
+                expect(capturedValues[0]).toEqual(writer.values)
+                // Status-agnostic: a hidden or expired catalog row is still a
+                // catalog row, so a stale cached card's vote is not an error.
+                expect(capturedQueries[0]).not.toMatch(/status|expired/i)
+                // UTC wall-clock into timestamp(3) columns, like the other
+                // app writes in this file.
+                expect(capturedQueries[0]).toContain(
+                    "(NOW() AT TIME ZONE 'UTC')",
+                )
+                expect(capturedQueries[0]).toContain(
+                    'updated_at = EXCLUDED.updated_at',
+                )
+            })
+
+            it('resolves the written row (its fail_weight) when the id is a catalog row', async () => {
+                mockRows(
+                    sql => sql.includes('INSERT INTO coupon_signals'),
+                    [{ failWeight: 4 }],
+                )
+
+                expect(await writer.write()).toEqual({ failWeight: 4 })
+            })
+
+            it('resolves null when the statement returns no row: the id is not a catalog row and nothing was written', async () => {
+                mockRows(sql => sql.includes('INSERT INTO coupon_signals'), [])
+
+                expect(await writer.write()).toBeNull()
+                expect(capturedQueries).toHaveLength(1)
+            })
+
+            it('a returned row that drifts from the schema is a loud error, never a silent write', async () => {
+                mockRows(
+                    sql => sql.includes('INSERT INTO coupon_signals'),
+                    [{ failWeight: 'lots' }],
+                )
+
+                await expect(writer.write()).rejects.toThrow(/schema drift/)
+            })
+
+            it('runs on the transaction client it is handed, not the singleton', async () => {
+                const txQueryRaw = vi.fn(async () => [{ failWeight: 0 }])
+
+                await writer.write({ $queryRaw: txQueryRaw } as never)
+
+                expect(txQueryRaw).toHaveBeenCalledTimes(1)
+                expect(capturedQueries).toHaveLength(0)
+            })
+        })
+    }
+
+    it('the failed writer binds a null reason as null (typed text), never the string "null"', async () => {
+        mockRows(
+            sql => sql.includes('INSERT INTO coupon_signals'),
+            [{ failWeight: 0 }],
+        )
+
+        await writeFailedSignal('42', null)
+
+        expect(capturedValues[0]).toEqual(['42', null, '42'])
+        expect(capturedQueries[0]).toContain('?::text')
     })
 })

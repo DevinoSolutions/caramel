@@ -14,8 +14,8 @@
             "effect": "3.20.0",
             "vitest>picomatch": "4.0.4",
             "vite": "8.1.6",
-            "postcss": "8.5.23",
-            "sharp": ">=0.35.5",
+            "postcss": "8.5.31",
+            "sharp": "0.35.5",
             "fast-uri": "3.1.8",
             "brace-expansion@5": "5.0.12",
             "nanoid@<3.3.18": "3.3.18",
@@ -72,16 +72,16 @@
         ]
     },
     "devDependencies": {
-        "eslint": "9.31.0",
+        "eslint": "9.39.5",
         "eslint-config-next": "16.4.2",
-        "eslint-config-prettier": "10.1.5",
+        "eslint-config-prettier": "10.1.8",
         "husky": "9.1.7",
-        "lint-staged": "16.4.0",
-        "oxlint": "1.73.0",
-        "playwright": "1.59.1",
-        "prettier": "3.6.2",
-        "prettier-plugin-organize-imports": "4.1.0",
+        "lint-staged": "17.6.0",
+        "oxlint": "1.89.0",
+        "playwright": "1.64.1",
+        "prettier": "3.9.10",
+        "prettier-plugin-organize-imports": "4.3.0",
         "prettier-plugin-tailwindcss": "0.6.14",
-        "turbo": "2.9.14"
+        "turbo": "2.11.10"
     }
 }

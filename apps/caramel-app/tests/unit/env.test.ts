@@ -253,6 +253,37 @@ describe('parseServerEnv', () => {
         ).toThrow(/COUPON_BOX_SAVE_ENABLED/)
     })
 
+    it('the coupon-box-save quorum and daily caps default to 5 / 10 / 20 / 500, read blank as unset, and refuse garbage or a quorum of 1', () => {
+        const env = parseServerEnv(validServerFixture)
+        expect(env.COUPON_BOX_SAVE_MIN_AGREEING_INSTALLS).toBe(5)
+        expect(env.COUPON_BOX_SAVE_USER_DAILY_CAP).toBe(10)
+        expect(env.COUPON_BOX_SAVE_STORE_DAILY_CAP).toBe(20)
+        expect(env.COUPON_BOX_SAVE_GLOBAL_DAILY_CAP).toBe(500)
+        const blank = parseServerEnv({
+            ...validServerFixture,
+            COUPON_BOX_SAVE_MIN_AGREEING_INSTALLS: ' ',
+            COUPON_BOX_SAVE_USER_DAILY_CAP: '',
+        })
+        expect(blank.COUPON_BOX_SAVE_MIN_AGREEING_INSTALLS).toBe(5)
+        expect(blank.COUPON_BOX_SAVE_USER_DAILY_CAP).toBe(10)
+        expect(
+            parseServerEnv({
+                ...validServerFixture,
+                COUPON_BOX_SAVE_GLOBAL_DAILY_CAP: '0',
+            }).COUPON_BOX_SAVE_GLOBAL_DAILY_CAP,
+        ).toBe(0)
+        for (const [name, value] of [
+            ['COUPON_BOX_SAVE_MIN_AGREEING_INSTALLS', '1'],
+            ['COUPON_BOX_SAVE_MIN_AGREEING_INSTALLS', 'many'],
+            ['COUPON_BOX_SAVE_USER_DAILY_CAP', '-1'],
+            ['COUPON_BOX_SAVE_STORE_DAILY_CAP', '2.5'],
+        ] as const) {
+            expect(() =>
+                parseServerEnv({ ...validServerFixture, [name]: value }),
+            ).toThrow(new RegExp(name))
+        }
+    })
+
     it('COUPON_BOX_LLM_ENABLED is a strict boolean (default off) and a typo fails boot', () => {
         expect(parseServerEnv(validServerFixture).COUPON_BOX_LLM_ENABLED).toBe(
             false,

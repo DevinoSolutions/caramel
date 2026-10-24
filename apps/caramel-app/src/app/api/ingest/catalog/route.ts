@@ -1,6 +1,9 @@
 import { withRoute } from '@/lib/api/withRoute'
 import { applyCatalogRows } from '@/lib/catalog/applyCatalogRows'
-import { IngestCatalogPayloadSchema } from '@/lib/catalog/ingestSchemas'
+import {
+    INGEST_CATALOG_MAX_BODY_BYTES,
+    IngestCatalogPayloadSchema,
+} from '@/lib/catalog/ingestSchemas'
 import { resetSupportedStoresCache } from '@/lib/supportedStoresCache'
 import { NextResponse } from 'next/server'
 
@@ -34,6 +37,10 @@ export const POST = withRoute(
         routeName: 'ingest/catalog',
         apiKey: 'ingest',
         body: IngestCatalogPayloadSchema,
+        // Equals Next's own 4mb body ceiling (see ingestSchemas.ts): a chunked
+        // body longer than that is truncated by Next before this route runs, so
+        // it arrives at exactly the cap and answers 422 (invalid JSON), not 413.
+        maxBodyBytes: INGEST_CATALOG_MAX_BODY_BYTES,
     },
     async ({ body }) => {
         const result = await applyCatalogRows(body)

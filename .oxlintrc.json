@@ -13,6 +13,7 @@
         "**/dist/**",
         "**/.next/**",
         "**/node_modules/**",
-        "apps/caramel-app/public/**"
+        "apps/caramel-app/public/**",
+        "apps/caramel-app/src/generated/**"
     ]
 }

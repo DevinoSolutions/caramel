@@ -4,8 +4,14 @@ import {
     type CouponSubmitSource,
 } from '@/lib/analytics/couponSubmitOutcome'
 import { withRoute } from '@/lib/api/withRoute'
-import { recordWorked } from '@/lib/couponSignals'
-import { submitShopperCoupon } from '@/lib/couponsRepo'
+import {
+    stampCheckoutWorked,
+    type CheckoutStampOutcome,
+} from '@/lib/checkoutWorkedStamp'
+import {
+    submitShopperCoupon,
+    type SubmitShopperCouponResult,
+} from '@/lib/couponsRepo'
 import { env } from '@/lib/env'
 import { isExtensionOrigin } from '@/lib/rateLimit'
 import {
@@ -43,7 +49,12 @@ import { z } from 'zod'
 // accept it, so it must not stamp a trust signal. A 'checkout' capture IS a
 // store acceptance, so it also records the coupon as worked through the
 // existing couponSignals.recordWorked (the same writer POST /coupons/[id]/report
-// uses) and the #284 "just worked" display logic needs no new code. Checkout
+// uses) and the #284 "just worked" display logic needs no new code, BUT only
+// through checkoutWorkedStamp.ts: the claim is client-asserted, so the stamp
+// needs reputation (the shopper listed the code themselves, or has an aged
+// account), a per-coupon-per-day dedupe, a per-account daily cap and the
+// per-coupon velocity cap. A stamp that is refused still answers 200 (the code
+// is listed either way) with status 'unverified' instead of 'worked'. Checkout
 // capture is switchable globally: SHOPPER_CODE_CAPTURE_ENABLED off → 403
 // 'capture-disabled' and nothing is written. Only the extension may send
 // source 'checkout': a request carrying an Origin that is not an extension
@@ -51,7 +62,7 @@ import { z } from 'zod'
 // 'checkout-source-extension-only'. A MISSING Origin is accepted, since a
 // background fetch under host_permissions may omit it. This is depth, not
 // authentication: Origin is trivially forged by a non-browser client (see the
-// recordWorked TODO below).
+// stamp policy in checkoutWorkedStamp.ts).
 //
 // Consent proof (owner rule 2026-10-06: a shopper's code may be captured ONLY
 // after an explicit in-extension opt-in). SHOPPER_CODE_CAPTURE_ENABLED is
@@ -236,7 +247,7 @@ const submitRoute = withRoute(
         }
         noteFor(req).store = base
 
-        let result: { couponId: string; created: boolean }
+        let result: SubmitShopperCouponResult
         try {
             result = await submitShopperCoupon({
                 base,
@@ -271,22 +282,40 @@ const submitRoute = withRoute(
             throw error
         }
 
+        let stamp: CheckoutStampOutcome | null = null
         if (body.source === 'checkout') {
             // Awaited and NOT caught: if the stamp fails the shopper-visible
             // result ("worked") would be a lie, so the failure surfaces as a 500
-            // and the extension retries/logs it. Re-stamping on a retry is
-            // idempotent (an upsert of lastWorkedAt).
-            // TODO: checkout worked-stamps are client-asserted; weight/cap per user before trusting them for ranking.
-            await recordWorked(result.couponId)
+            // and the extension retries/logs it. A retry is safe: the stamp's
+            // dedupe slot is given back on failure and re-stamping is idempotent.
+            stamp = await stampCheckoutWorked({
+                couponId: result.couponId,
+                userId,
+                accountCreatedAt: session?.user?.createdAt,
+                submittedByUser: result.submittedByUser,
+            })
         }
+        // 'deduped' is a success: the earlier stamp (inside the dedupe window)
+        // still stands. Only a refused stamp reads 'unverified' and gets its own
+        // outcome event.
+        const stampRefused = stamp === 'gated' || stamp === 'capped'
 
         return respond(
             req,
-            result.created ? 'created' : 'already-listed',
+            stamp === 'gated'
+                ? 'worked-stamp-gated'
+                : stamp === 'capped'
+                  ? 'worked-stamp-capped'
+                  : result.created
+                    ? 'created'
+                    : 'already-listed',
             NextResponse.json({
                 couponId: result.couponId,
                 created: result.created,
-                status: body.source === 'checkout' ? 'worked' : 'unverified',
+                status:
+                    body.source === 'checkout' && !stampRefused
+                        ? 'worked'
+                        : 'unverified',
             }),
         )
     },

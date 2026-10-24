@@ -51,7 +51,12 @@ export default function SearchSection({
     useEffect(() => () => debouncedSearch.cancel(), [debouncedSearch])
 
     useEffect(() => {
-        if (!query.trim()) {
+        // The API answers nothing for a one-character term (T-6226), so the
+        // box stays idle until there are two characters to look up.
+        if (query.trim().length < 2) {
+            // A search queued for an earlier, longer value must not land on
+            // top of the idle state.
+            debouncedSearch.cancel()
             setSites([])
             setSearched(false)
         } else {

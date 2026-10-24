@@ -1,5 +1,5 @@
 {
-    "$schema": "https://unpkg.com/knip@5/schema.json",
+    "$schema": "https://unpkg.com/knip@6/schema.json",
     "entry": [
         "caramel-env.js",
         "coupon-constants.generated.js",
@@ -23,25 +23,11 @@
         "background.js",
         "popup-core.js",
         "entrypoints/*.ts",
-        "entrypoints/popup/main.tsx",
         "eslint.config.cjs",
-        "wxt.config.ts",
-        "vitest.config.ts",
         "scripts/**/*.mjs",
         "tests/**/*.{mjs,tsx}",
     ],
     "project": ["**/*.{js,cjs,mjs,ts,tsx}"],
     "ignoreBinaries": ["eslint"],
-    "ignoreDependencies": [
-        "prettier-plugin-organize-imports",
-        // knip 5's resolver doesn't credit an import that resolves into
-        // another pnpm workspace package (the imports are real: App.tsx and
-        // views/LoadErrorView.tsx consume caramel-ui; `main`/`types`
-        // fallbacks were tried and don't help). Dated 2026-08-13 — re-test
-        // on the next knip upgrade.
-        "caramel-ui",
-        // Referenced only as a string in wxt.config.ts `modules`; there is
-        // no import statement for knip to see. Dated 2026-08-13.
-        "@wxt-dev/module-react",
-    ],
+    "ignoreDependencies": ["prettier-plugin-organize-imports"],
 }

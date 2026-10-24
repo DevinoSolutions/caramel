@@ -5,7 +5,6 @@ import {
     reporterFor,
 } from '@/lib/couponReportDedupe'
 import { recordUsage } from '@/lib/couponSignals'
-import { couponExists } from '@/lib/couponsRepo'
 import { isExtensionOrigin } from '@/lib/rateLimit'
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
@@ -27,10 +26,12 @@ const IncrementBodySchema = z.object({
 // via recordUsage(), NOT an `UPDATE coupons SET times_used…` on the external
 // catalog — that write would bump the catalog row's updated_at and freeze it
 // under the ingest only-if-newer rule. coupon_signals has no FK to coupons, so
-// the id is checked against the catalog first (couponsRepo.couponExists): an
-// id that is not a catalog row is a 404 and writes nothing (the extension
-// fire-and-forgets this call and reads nothing from the response, so the 404
-// costs it nothing; the HTTP contract stays POST / JSON, same rate limit).
+// the id is checked against the catalog IN the write (couponsRepo.writeUsageSignal:
+// one INSERT ... SELECT ... WHERE EXISTS statement, so a known id costs one
+// statement, not a lookup plus a write): an id that is not a catalog row is a
+// 404 and writes nothing (the extension fire-and-forgets this call and reads
+// nothing from the response, so the 404 costs it nothing; the HTTP contract
+// stays POST / JSON, same rate limit).
 // DB errors are NOT swallowed:
 // a throw from recordUsage propagates to withRoute's try/catch → handleRouteError
 // → Sentry (same as coupons/[id]/report).
@@ -90,16 +91,15 @@ export const POST = withRoute(
         // app-side (Coupon.id: string, CouponSignal.couponId: string).
         try {
             // An unknown id counts nothing and gives its dedupe slot back. The
-            // slot is taken BEFORE this lookup so a tracked duplicate stays a
+            // slot is taken BEFORE the write so a tracked duplicate stays a
             // database-free no-op.
-            if (!(await couponExists(idRaw))) {
+            if (!(await recordUsage(idRaw))) {
                 releaseReport('used', reporter, idRaw)
                 return NextResponse.json(
                     { error: 'Unknown coupon' },
                     { status: 404 },
                 )
             }
-            await recordUsage(idRaw)
         } catch (error) {
             // The use never landed: free its slot so a retry is counted.
             releaseReport('used', reporter, idRaw)
