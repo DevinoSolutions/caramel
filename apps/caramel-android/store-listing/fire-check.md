@@ -3,7 +3,15 @@
 Date: 2026-10-24. Tools: Android SDK build-tools 36.1.0 (`aapt2`, `apksigner`), JDK 21 (`jarsigner`, `keytool`), Python 3 stdlib.
 `$SDK` below = `~/AppData/Local/Android/Sdk/build-tools/36.1.0`.
 
-Files checked (the staged release build as handed over; origin assumed to be the signed `bundleRelease` + `assembleRelease` output of `release-android-app.yml`, not verified):
+Files checked (the staged release build)
+
+Provenance (checked 2026-10-24): the folder layout (`apk/release`, `bundle/release`, `mapping/release`) is exactly the layout of the
+`caramel-android-release` artifact, versionCode 107 equals 100 + run number 7, and workflow run 40055342509 (#7, `workflow_dispatch` on
+`main`) ran just before the files were written. This is consistent with the files being that workflow artifact (a CI build, not a local
+build), but the artifact digest was not compared, so it is not proven. Signing key: the APK/AAB signer SHA-256
+(`32:81:07:E2:...:6A:0D:CE`) was compared with the certificate in the upload keystore `~/.secrets/caramel-android/caramel-upload.jks`
+(opened inside a script with the password read from the local secrets file; nothing printed): **match**. So the staged files are signed
+with the Caramel upload key.:
 
 | File                                                      | Size   | sha256                                                             |
 | --------------------------------------------------------- | ------ | ------------------------------------------------------------------ |

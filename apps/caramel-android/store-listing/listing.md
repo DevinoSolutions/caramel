@@ -30,11 +30,11 @@ wanted, `Caramel: Coupon Finder & Promo Codes` is the existing Safari name, EXT 
 
 ### Short description
 
-> Find coupon codes for the stores you shop at, copy them in one tap, and save your favourite stores.
+> Find coupon codes for the stores you shop at, tap a code to copy it, and save your favorite stores.
 
 - "find coupon codes for the stores you shop at": ONB `INTRO` (`OnboardingScreen.kt:32`).
 - "copy them": UI `StoreDetailScreen.kt` (Copy button, `copyToClipboard`).
-- "save your favourite stores": UI `SavedScreen.kt` and the heart in `StoreDetailScreen.kt`.
+- "save your favorite stores": UI `SavedScreen.kt` and the heart in `StoreDetailScreen.kt`.
 
 100 characters. Amazon's field limit is not verified (the console is off limits); it is under the 132 the Chrome Web Store allows.
 
@@ -74,7 +74,7 @@ price tracking.
 1. Coupon codes for the stores you shop at, in one place
 2. Deals tab: codes that recently worked, plus top stores
 3. Search any store by name or domain, then tap to copy a code
-4. Save favourite stores; sign in (optional) to keep them across devices
+4. Save favorite stores; sign in (optional) to keep them across devices
 5. Free, open source (AGPL-3.0), and no data selling
 
 Each maps to a sentence above. Amazon's per-bullet limit is not verified.
@@ -91,11 +91,17 @@ Amazon Appstore: **Shopping**. (Play: Shopping, to be confirmed in Play Console;
 ### Support
 
 - Support URL: https://grabcaramel.com/support (HTTP 200, checked with curl 2026-10-24).
-- Support email: **none is public.** The support form's recipient is a private deploy env value
-  (`apps/caramel-app/src/lib/env.ts` `SUPPORT_EMAIL_TO`), and the TODO next to it says a public `support@grabcaramel.com`
-  is not set up yet. Amazon asks for a support email: **the owner must supply one [BLOCKER for the form]**.
+- Support email: `hello@devino.ca` is the address published on the privacy page
+  (`apps/caramel-app/src/components/PrivacyPolicy.tsx:466`). The support form's own recipient is a private deploy env value
+  (`apps/caramel-app/src/lib/env.ts` `SUPPORT_EMAIL_TO`), and a dedicated `support@grabcaramel.com` is still a TODO there.
+  Whether to put `hello@devino.ca` on the Amazon form is **the owner's decision**.
 - Privacy policy URL: https://grabcaramel.com/privacy (HTTP 200, checked with curl 2026-10-24).
 - Website: https://grabcaramel.com
+
+Owner note on "what Caramel has saved you": the Android app records no savings (only the browser extension does), so an
+Android-only user sees "Savings are not synced" in the Account tab. The long description keeps that sentence limited to
+"see what Caramel has saved you" for signed-in users who also use the extension; reword it if the listing should not
+imply Android records savings.
 
 ### Other form facts
 

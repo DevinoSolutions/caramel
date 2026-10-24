@@ -1,6 +1,6 @@
 # DRAFT - privacy / data-safety answers for com.devino.caramel (Android 1.5.0)
 
-Status: DRAFT for the owner. Derived from the code at `origin/main` d7af267 plus PR #465's app. Not submitted anywhere.
+Status: DRAFT for the owner. Derived from the code at `origin/main` d7af267 (PR #465 merged later as 95b4535; the app code described is the #465 head 8d82c07, whose files are unchanged by the merge). Not submitted anywhere.
 Privacy policy URL: https://grabcaramel.com/privacy (HTTP 200, checked with curl 2026-10-24).
 Server-side facts (what grabcaramel.com stores) come from the existing, already-reviewed `docs/store-listing.md` (CWS privacy tab,
 2026-10-15) and `apps/caramel-app/src/components/PrivacyPolicy.tsx`; they must match this file. Paths below are under
@@ -45,8 +45,11 @@ Overall:
 - Is all of the user data collected by your app encrypted in transit? **Yes** (HTTPS only: `usesCleartextTraffic=false`).
 - Do you provide a way for users to request that their data be deleted? **Yes** - in the app (Account tab: "Delete my synced
   data", "Delete my account", `ui/AccountScreen.kt:138-142`, calls `core/CaramelApi.kt:187,200`) and via the web:
-  https://grabcaramel.com/privacy / https://grabcaramel.com/profile. Account deletion URL to give Play: https://grabcaramel.com/profile
-  **(owner to confirm that page offers deletion; the in-app path is verified in code only, not on a device)**.
+  . Account-deletion URL to give Play: https://grabcaramel.com/privacy, because the only web path today is the email process
+  described there (`PrivacyPolicy.tsx:466`: email hello@devino.ca from the account address; deletion acted on within 30 days).
+  `/profile` is NOT a deletion page: web account deletion is deliberately absent and `/profile` only deletes synced data
+  (`DataPrivacySection.tsx:19-24`). **[BLOCKER for the Play form until a dedicated web deletion page exists - tracked as
+  T-7505.]** The in-app path is verified in code only, not on a device.
 
 | Data type (Play category)                                                                 | Collected?                 | Shared? | Required or optional           | Purpose            | Evidence                                                                                                                         |
 | ----------------------------------------------------------------------------------------- | -------------------------- | ------- | ------------------------------ | ------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
@@ -95,7 +98,7 @@ the live form.
 
 ## Things to settle before submitting
 
-1. Server-side retention of search text (`q=`) and request IPs: not stated in code; confirm against the privacy policy.
+1. Retention (`PrivacyPolicy.tsx:305-309`): session records, which carry the IP, are kept until the account is deleted; per-code report hashes for 30 days; server logs, which can include IPs, up to 90 days. The policy does not say how long the search text (`q=`) is kept in those logs: confirm.
 2. Whether to declare IP address like the CWS tab does (see notes).
 3. A public support email (see `listing.md`).
 4. The privacy policy page should name the Android app before the listing goes live; `PrivacyPolicy.tsx` (no mention of Android or the iOS app found by grep) currently
