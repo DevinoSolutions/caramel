@@ -1,0 +1,103 @@
+# DRAFT - privacy / data-safety answers for com.devino.caramel (Android 1.5.0)
+
+Status: DRAFT for the owner. Derived from the code at `origin/main` d7af267 plus PR #465's app. Not submitted anywhere.
+Privacy policy URL: https://grabcaramel.com/privacy (HTTP 200, checked with curl 2026-10-24).
+Server-side facts (what grabcaramel.com stores) come from the existing, already-reviewed `docs/store-listing.md` (CWS privacy tab,
+2026-10-15) and `apps/caramel-app/src/components/PrivacyPolicy.tsx`; they must match this file. Paths below are under
+`apps/caramel-android/app/src/main/` unless noted.
+
+## What the app does with the network (the facts every answer rests on)
+
+| Fact                                                                                                                       | Evidence                                                                                                                                               |
+| -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Only permission is `INTERNET`. No location, contacts, storage, camera, phone, ad-id, notifications permission.             | `AndroidManifest.xml:6`; staged APK badging lists only `INTERNET` plus the app-private `...DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION` (`fire-check.md`) |
+| Cleartext HTTP is off; one API host, `https://grabcaramel.com`.                                                            | `AndroidManifest.xml:11`, `java/com/devino/caramel/core/AppConfig.kt:6`                                                                                |
+| Every request carries a random per-request id header `x-request-id` (a fresh UUID, not a device id).                       | `core/CaramelApi.kt:106` (id from `UUID.randomUUID()`)                                                                                                 |
+| Signed-in requests carry `Authorization: Bearer <session token>`.                                                          | `core/CaramelApi.kt:107`                                                                                                                               |
+| Redirects are not followed (a bearer is never replayed elsewhere).                                                         | `core/CaramelApi.kt:59`                                                                                                                                |
+| No ads, no analytics/crash SDK, no Firebase, no Play Services, no Play Billing: only AndroidX, Compose, kotlinx libraries. | dependency list in `fire-check.md`; `app/build.gradle.kts` dependencies; dex/manifest scan = 0 hits                                                    |
+| Sign-in is OAuth in the browser (Chrome Custom Tab), PKCE S256; the app never sees a Google/Apple password.                | `MainActivity.kt:78`, `core/CaramelApi.kt:213-236`, `core/SignIn.kt`                                                                                   |
+| Session token is AES-GCM encrypted under a non-exportable Android Keystore key, kept in app-private storage.               | `core/Persistence.kt:45-122` (`ANDROID_KEYSTORE`, `AES/GCM/NoPadding`, alias `caramel_session_key`)                                                    |
+| Saved-store list is kept in app-private SharedPreferences; excluded from cloud backup and device transfer.                 | `core/Persistence.kt:22`, `res/xml/data_extraction_rules.xml`, `AndroidManifest.xml:10,12` (`allowBackup=false`)                                       |
+| Nothing is collected for signed-out use beyond what the public catalog calls imply (see "Browsing" below).                 | `core/CaramelApi.kt:140-157`                                                                                                                           |
+
+### What each call sends (all to grabcaramel.com, `core/CaramelApi.kt`)
+
+- Signed out: `GET /api/coupons/recently-worked`, `/api/sites/top-sites`, `/api/coupons/stores?q=<typed search text>&limit=`
+  (line 148), `/api/coupons?site=<store domain>&page=&limit=` (line 153). So the **text the shopper types in Search and the store
+  domain they open** reach the server (no account attached). The server sees the request IP like any HTTP request.
+- Sign-in: `GET /api/extension/oauth/authorize?provider&redirect_uri&code_challenge...` (213-221) and
+  `POST /api/extension/oauth` with the code, state, redirect and PKCE verifier (224-236). The server then holds the account's
+  provider-supplied name, email, image and provider id (per `docs/store-listing.md`, PII row).
+- Signed in: `GET /api/extension/me`, `GET /api/account/overview` (163: savings totals, member-since), `GET/PUT/DELETE
+/api/account/favorites[/store]` (167-175: the saved-store list), `GET /api/account/export`, `POST /api/account/data/delete`,
+  `POST /api/account/delete`, `DELETE /api/extension/session` (180-201).
+- The Android app **never sends** savings events, cart contents, page content, browsing history, contacts, files or device
+  identifiers. (The savings figures shown come from events the browser extension recorded; the app only reads totals.)
+
+## Play Console - Data safety form (draft answers)
+
+Overall:
+
+- Does the app collect or share any of the required user data types? **Yes (collects), No (shares).** No data is sold or shared
+  with third parties for their own use. Only grabcaramel.com (the developer's own server) receives data; no third-party SDK is
+  present to receive any.
+- Is all of the user data collected by your app encrypted in transit? **Yes** (HTTPS only: `usesCleartextTraffic=false`).
+- Do you provide a way for users to request that their data be deleted? **Yes** - in the app (Account tab: "Delete my synced
+  data", "Delete my account", `ui/AccountScreen.kt:138-142`, calls `core/CaramelApi.kt:187,200`) and via the web:
+  https://grabcaramel.com/privacy / https://grabcaramel.com/profile. Account deletion URL to give Play: https://grabcaramel.com/profile
+  **(owner to confirm that page offers deletion; the in-app path is verified in code only, not on a device)**.
+
+| Data type (Play category)                                                                 | Collected?                 | Shared? | Required or optional           | Purpose            | Evidence                                                                                                                         |
+| ----------------------------------------------------------------------------------------- | -------------------------- | ------- | ------------------------------ | ------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| Personal info: Name                                                                       | Yes (only when signed in)  | No      | Optional (sign-in is optional) | Account management | OAuth result `OAuthSessionResult.username`, `core/Models.kt (OAuthSessionResult)`; shown on `AccountScreen.kt:110`               |
+| Personal info: Email address                                                              | Yes (only when signed in)  | No      | Optional                       | Account management | Held server-side from the provider (`docs/store-listing.md` PII row); the app itself reads no email                              |
+| Personal info: User IDs (account/provider id)                                             | Yes (only when signed in)  | No      | Optional                       | Account management | Same OAuth exchange, `core/CaramelApi.kt:224-236`                                                                                |
+| Photos and videos / profile picture                                                       | Yes (image URL, signed in) | No      | Optional                       | Account management | `MeResponse.image`, `core/Models.kt:67`. Declare under "Personal info" if Play has no better bucket                              |
+| App activity: Other user-generated content / app interactions                             | Yes (signed in)            | No      | Optional                       | App functionality  | Saved-store list synced to the account: `core/FavoritesStore.kt`, `core/CaramelApi.kt:167-175`                                   |
+| App activity: In-app search history                                                       | Yes (even signed out)      | No      | Required for Search to work    | App functionality  | Search text sent as `q=` (`core/CaramelApi.kt:148`). Not stored per user by the app; server-side retention: **owner to confirm** |
+| Financial info: Purchase history / other financial info (savings)                         | Not collected by this app  | No      | n/a                            | n/a                | The app only **reads** savings totals (`GET /api/account/overview`); savings events are written by the extension, not the app    |
+| Device or other IDs                                                                       | **No**                     | n/a     | n/a                            | n/a                | No ad id, no Android id, no install id in code; `x-request-id` is a random per-request UUID, not persisted (`CaramelApi.kt:106`) |
+| Location, Contacts, Messages, Photos/files, Audio, Calendar, Health, Web browsing history | **No**                     | n/a     | n/a                            | n/a                | No permission or API for any of them (`AndroidManifest.xml`)                                                                     |
+| App info and performance (crash logs, diagnostics)                                        | **No**                     | n/a     | n/a                            | n/a                | No crash/analytics SDK. See TODO in `CaramelApplication.kt` (no reporting yet). Play-collected vitals are Google's, not declared |
+
+Notes for the owner:
+
+- IP address: the server receives and uses it for rate limiting and records it with sign-in sessions (`docs/store-listing.md`,
+  Location row). Play's form does not have a separate "IP address" row; the CWS tab ticked "Location" for the same reason. Decide
+  whether to declare it the same way here **[owner decision]**.
+- "Shared" is No everywhere: grabcaramel.com is the developer's own backend (a service provider processing for the app's own function).
+- Security practices: data encrypted in transit **Yes**; deletion mechanism **Yes**; Families/ads: **no ads**; "independent
+  security review": **No**.
+- Target audience: general audience, not a children's app.
+
+## Amazon Appstore - privacy questionnaire (draft answers)
+
+Amazon's exact questions could not be read (the console is off limits), so these follow the usual Appstore topics; re-check against
+the live form.
+
+| Topic                                 | Draft answer                                                                                                                                     | Evidence                                           |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------- |
+| Privacy policy URL                    | https://grabcaramel.com/privacy (HTTP 200)                                                                                                       | curl 2026-10-24                                    |
+| Collects personal information         | Yes, only if the shopper signs in: name, email, profile image, provider id. Optional.                                                            | rows above                                         |
+| Shares data with third parties        | No. Only grabcaramel.com (the developer) is contacted.                                                                                           | `AppConfig.kt:6`, no SDKs                          |
+| Uses advertising / ad identifiers     | No                                                                                                                                               | no ad SDK, no ad-id permission                     |
+| Third-party analytics / tracking SDKs | No                                                                                                                                               | `fire-check.md` scan                               |
+| In-app purchases / subscriptions      | No (free; no billing code)                                                                                                                       | `fire-check.md` scan for billing = 0               |
+| Location                              | Not accessed                                                                                                                                     | manifest                                           |
+| Contacts, camera, microphone, storage | Not accessed. Data export is saved through the system file picker (`ActivityResultContracts.CreateDocument`), which needs no storage permission. | `ui/AccountScreen.kt:71`; manifest                 |
+| Device identifiers                    | Not collected                                                                                                                                    | code review above                                  |
+| Data encrypted in transit             | Yes, HTTPS only                                                                                                                                  | `AndroidManifest.xml:11`                           |
+| Data stored on device                 | Saved-store list (SharedPreferences, app-private) and the encrypted session token (Android Keystore AES-GCM). No backup of either.               | `core/Persistence.kt`, `data_extraction_rules.xml` |
+| Account / data deletion               | In-app account deletion and synced-data deletion; data export                                                                                    | `ui/AccountScreen.kt:136-142`                      |
+| Google Mobile Services dependency     | None (works on Fire OS)                                                                                                                          | `fire-check.md`                                    |
+| Children                              | Not directed to children                                                                                                                         | n/a                                                |
+
+## Things to settle before submitting
+
+1. Server-side retention of search text (`q=`) and request IPs: not stated in code; confirm against the privacy policy.
+2. Whether to declare IP address like the CWS tab does (see notes).
+3. A public support email (see `listing.md`).
+4. The privacy policy page should name the Android app before the listing goes live; `PrivacyPolicy.tsx` (no mention of Android or the iOS app found by grep) currently
+   describes the extension (`docs/store-listing.md` says they change together). That is a `caramel-app` edit and was NOT made in this PR.
+5. Sign-in has not been exercised on a device; the deletion path is verified in code and unit tests, not end to end on Android.
