@@ -256,7 +256,7 @@ describe('Markdown twin registry and Next configuration', () => {
 })
 
 describe('Markdown document responses', () => {
-    it.each(['index', 'pricing', 'faq'])(
+    it.each(['index', 'pricing', 'faq', 'docs'])(
         'serves %s with canonical, negotiated caching and no noindex',
         async path => {
             const response = await request([path])

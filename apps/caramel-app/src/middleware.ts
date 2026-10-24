@@ -20,6 +20,11 @@
 //    the replacement for everything else, so no page is served at two URLs.
 //    The logic is src/lib/trailingSlash.ts (pure, unit-tested).
 //
+// 4. docs.<apex> -> <apex>/docs (301, T-7855). Caramel has no docs site: the
+//    /docs page IS the docs, and the docs host reaches the same container
+//    (DNS wildcard + a Dokploy domain). EVERY path on the docs host goes to
+//    /docs and the query string is dropped; other subdomains are untouched.
+//
 // Any combination redirects ONCE, straight to the final URL. The target origin
 // is the visitor's public Host on https (see redirectOrigin), never the
 // container's internal http origin.
@@ -39,6 +44,11 @@ function cameThroughHttpsProxy(request: NextRequest): boolean {
     const forwardedProto = request.headers.get('x-forwarded-proto') ?? ''
     return forwardedProto.split(',')[0]?.trim().toLowerCase() === 'https'
 }
+
+// docs.<apex>, captured as the apex (with any :port). Applied only to a Host
+// that already passed HOST_HEADER, so the remainder is a plausible host.
+const DOCS_HOST = /^docs\.([a-z0-9][a-z0-9.-]*(?::\d{1,5})?)$/i
+const DOCS_PATH = '/docs'
 
 // A plausible Host value (hostname or host:port). Anything else is ignored
 // rather than trusted into a Location header.
@@ -68,9 +78,30 @@ function redirectOrigin(
     return new URL(incoming.origin)
 }
 
+/**
+ * The docs host redirect target: the apex's /docs on the public origin. https
+ * behind the proxy (or when the docs host itself was https); local dev
+ * (docs.localhost:port, no proxy signal) keeps its own scheme.
+ */
+function docsRedirectTarget(request: NextRequest, apexHost: string): URL {
+    const incoming = new URL(request.url)
+    const scheme =
+        cameThroughHttpsProxy(request) || incoming.protocol === 'https:'
+            ? 'https:'
+            : incoming.protocol
+    return new URL(DOCS_PATH, `${scheme}//${apexHost}`)
+}
+
 export function middleware(request: NextRequest) {
     const rawHost = request.headers.get('host') ?? ''
     const hostHeader = HOST_HEADER.test(rawHost) ? rawHost : ''
+    const docsApexHost = DOCS_HOST.exec(hostHeader)?.[1]
+    if (docsApexHost) {
+        return NextResponse.redirect(
+            docsRedirectTarget(request, docsApexHost),
+            301,
+        )
+    }
     const isWww = hostHeader.startsWith('www.')
     const isPlainHttp = CF_VISITOR_PLAIN_HTTP.test(
         request.headers.get('cf-visitor') ?? '',

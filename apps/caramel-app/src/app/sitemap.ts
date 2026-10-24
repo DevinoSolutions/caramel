@@ -4,6 +4,7 @@ import {
 } from '@/lib/agentSetup/agentSetup.config'
 import { listActiveSources, listStoreSitemapEntries } from '@/lib/couponsRepo'
 import { BASE_URL } from '@/lib/env.client'
+import { DOCS_PATH } from '@/lib/marketing/docsContent'
 import { COMPARISON_PATH } from '@/lib/seo/extensionComparison'
 import { HONEY_GUIDE_PATH } from '@/lib/seo/honeyExtensionGuide'
 import {
@@ -38,6 +39,7 @@ const STATIC_ROUTES: ReadonlyArray<StaticRoute> = [
     { path: '/supported-stores', changeFrequency: 'weekly', priority: 0.8 },
     { path: '/apps', changeFrequency: 'weekly', priority: 0.8 },
     { path: '/faq', changeFrequency: 'monthly', priority: 0.7 },
+    { path: DOCS_PATH, changeFrequency: 'monthly', priority: 0.7 },
     { path: COMPARISON_PATH, changeFrequency: 'monthly', priority: 0.7 },
     { path: HONEY_GUIDE_PATH, changeFrequency: 'monthly', priority: 0.7 },
     { path: AGENT_SETUP_PATH, changeFrequency: 'monthly', priority: 0.6 },

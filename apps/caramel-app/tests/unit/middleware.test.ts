@@ -105,3 +105,94 @@ describe('middleware — canonical origin (www -> apex, http -> https)', () => {
         expect(matcher.test('/favicon.ico')).toBe(false)
     })
 })
+
+function expectDocsRedirect(res: Response, location: string): void {
+    expect(res.status).toBe(301)
+    expect(res.headers.get('location')).toBe(location)
+}
+
+describe('middleware — docs host (docs.<apex> -> <apex>/docs, T-7855)', () => {
+    it('301s the docs host root to the apex /docs over https', () => {
+        expectDocsRedirect(
+            middleware(requestFor('https://docs.grabcaramel.com/', CF_HTTPS)),
+            'https://grabcaramel.com/docs',
+        )
+    })
+
+    it('sends a deep path and its query to /docs, forwarding neither', () => {
+        expectDocsRedirect(
+            middleware(
+                requestFor(
+                    'https://docs.grabcaramel.com/getting-started/install?x=1',
+                    CF_HTTPS,
+                ),
+            ),
+            'https://grabcaramel.com/docs',
+        )
+    })
+
+    it('redirects ONCE to https even when the docs host was plain http', () => {
+        expectDocsRedirect(
+            middleware(requestFor('http://docs.grabcaramel.com/', CF_HTTP)),
+            'https://grabcaramel.com/docs',
+        )
+    })
+
+    it('uses https behind the proxy even when the container sees http', () => {
+        expectDocsRedirect(
+            middleware(
+                requestFor('http://docs.grabcaramel.com/x', {
+                    'x-forwarded-proto': 'https',
+                }),
+            ),
+            'https://grabcaramel.com/docs',
+        )
+    })
+
+    it('keeps the local scheme and port in dev (docs.localhost:58000)', () => {
+        expectDocsRedirect(
+            middleware(requestFor('http://docs.localhost:58000/anything')),
+            'http://localhost:58000/docs',
+        )
+    })
+
+    it('leaves www and the apex exactly as they were', () => {
+        expectRedirect(
+            middleware(
+                requestFor('https://www.grabcaramel.com/docs', CF_HTTPS),
+            ),
+            'https://grabcaramel.com/docs',
+        )
+        expectServed(
+            middleware(requestFor('https://grabcaramel.com/docs', CF_HTTPS)),
+        )
+    })
+
+    it('does not redirect other subdomains or look-alike hosts', () => {
+        for (const host of [
+            'faq.grabcaramel.com',
+            'dev.grabcaramel.com',
+            'mydocs.grabcaramel.com',
+            'docs-grabcaramel.com',
+        ]) {
+            expectServed(middleware(requestFor(`https://${host}/`, CF_HTTPS)))
+        }
+    })
+
+    it('a hostile Host header falls through as before', () => {
+        for (const host of [
+            'docs.evil.com/../x',
+            'docs.grabcaramel.com@evil.com',
+            'docs.',
+            'docs..x',
+            'docs.grabcaramel.com:99999999',
+        ]) {
+            const res = middleware(
+                new NextRequest('https://grabcaramel.com/pricing', {
+                    headers: { host },
+                }),
+            )
+            expectServed(res)
+        }
+    })
+})
