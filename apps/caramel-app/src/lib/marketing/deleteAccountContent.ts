@@ -192,12 +192,13 @@ export const DELETE_ACCOUNT_SECTIONS: ReadonlyArray<DeleteAccountSection> = [
             'A one-way keyed hash of your account (or of your IP address, for a result sent while signed out) is kept with each coupon result to stop fake reports. It is not stored with your account or your IP address, and it is deleted after 30 days.',
             'Server logs, which can include IP addresses and browser type, for up to 90 days. The text of store searches is not written to them.',
             // TODO(T-7505): confirm Sentry replay retention in sentry-selfhost before stating a duration for replays.
-            'Error records (Sentry), kept for 90 days, and a sample of session replays (Sentry), kept for as long as our self-hosted Sentry retains them. They can hold your user id and the pages or errors you hit while signed in. Since October 25, 2026 they are stored without store-search text; ones captured before then may contain it until they expire (by January 23, 2027 at the latest). Session recordings made before then may also contain it.',
+            'Error records (Sentry), kept for 90 days, and a sample of session replays (Sentry), kept for as long as our self-hosted Sentry retains them. They can hold your user id and the pages or errors you hit while signed in. Since our October 25, 2026 update they are stored without store-search text; error records captured before that update may contain it until they expire (by January 23, 2027 at the latest), and replays captured before it until Sentry deletes them.',
             ...(ANALYTICS_DELETION_COPY.keptBullet
                 ? [ANALYTICS_DELETION_COPY.keptBullet]
                 : []),
             // TODO(T-7505): recording retention sentence withheld (MASTER 2026-10-25) until posthog-selfhost confirms new recordings are stamped 30d and the storage purge (A78, T-8392) is done; do not add a duration or deletion claim before then.
             'Session recordings of your visits (a sample of sessions is recorded, with every form field masked) in our self-hosted PostHog.',
+            'PostHog session recordings made before our October 25, 2026 update may contain store-search text.',
             'Analytics events that are not linked to your account: visits from before you signed in that were never joined to your account, and the extension’s install and anonymous diagnostic events.',
             'Usage data collected by Google Analytics on our website. Google holds it under its own retention settings; deleting your account does not remove it.',
             'Messages you sent to support (the support form or hello@devino.ca). They stay in our support inbox; deleting your account does not remove them. Include them in your email if you want them removed.',

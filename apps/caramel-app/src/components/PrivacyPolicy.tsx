@@ -315,14 +315,15 @@ const PrivacyPolicy = () => {
                         the access log of our own proxy is switched off.
                         Cloudflare, our network provider, passes the request on
                         and may briefly cache the response and keep its own
-                        request records. Since October 25, 2026 we also remove
-                        search text from error reports and from the web
-                        addresses recorded in session replays before they are
-                        stored, and we mask what you type in session replays.
-                        Error reports captured before that date may still
-                        contain it until they expire, 90 days after capture (by
-                        January 23, 2027 at the latest). Session recordings made
-                        before then may also contain it.
+                        request records. Since our October 25, 2026 update we
+                        also remove search text from error reports and from the
+                        web addresses recorded in session replays before they
+                        are stored, and we mask what you type in session
+                        replays. Error reports captured before that update may
+                        still contain it until they expire, 90 days after
+                        capture (by January 23, 2027 at the latest). PostHog
+                        session recordings made before that update may also
+                        contain it.
                     </Para>
                     <Para>
                         {/* TODO(T-7505): recording retention sentence withheld (MASTER 2026-10-25) until posthog-selfhost confirms new recordings are stamped 30d and the storage purge (A78, T-8392) is done; do not add a duration or deletion claim before then. */}
@@ -465,7 +466,7 @@ const PrivacyPolicy = () => {
                             'Promo-box suggestions (the store’s hostname and the selectors described above) are kept with your account. A suggestion older than 30 days no longer counts toward a store’s saved rules but is not deleted automatically; it is removed when you delete your account.',
                             'Server logs, which can include IP addresses and browser type, are kept for up to 90 days for security and troubleshooting. The text of store searches is not written to them.',
                             // TODO(T-7505): confirm Sentry replay retention in sentry-selfhost before stating a duration for replays.
-                            'Error records (Sentry) are kept for 90 days, and a sample of session replays (Sentry) are kept for as long as our self-hosted Sentry retains them. Since October 25, 2026 they are stored without store-search text (it is removed from error reports and from recorded web addresses, and what you type is masked in replays); ones captured before then may contain it until they expire (by January 23, 2027 at the latest).',
+                            'Error records (Sentry) are kept for 90 days, and a sample of session replays (Sentry) is kept for as long as our self-hosted Sentry retains them. Since our October 25, 2026 update they are stored without store-search text (it is removed from error reports and from recorded web addresses, and what you type is masked in replays); error records captured before that update may contain it until they expire (by January 23, 2027 at the latest), and replays captured before it until Sentry deletes them.',
                             // TODO(T-7505): recording retention sentence withheld (MASTER 2026-10-25) until posthog-selfhost confirms new recordings are stamped 30d and the storage purge (A78, T-8392) is done; do not add a duration or deletion claim before then.
                             'A sample of sessions is recorded in our self-hosted PostHog, with every form field masked.',
                         ]}

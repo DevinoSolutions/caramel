@@ -123,12 +123,13 @@ describe('privacy policy coverage', () => {
             'the text you type is sent to our server',
             'We do not write it to our application logs, and the access log of our own proxy is switched off.',
             'passes the request on and may briefly cache the response and keep its own request records',
-            'Since October 25, 2026 we also remove search text from error reports and from the web addresses recorded in session replays before they are stored, and we mask what you type in session replays.',
+            'Since our October 25, 2026 update we also remove search text from error reports and from the web addresses recorded in session replays before they are stored, and we mask what you type in session replays.',
             'A sample of sessions is also recorded in our self-hosted PostHog, with every form field masked.',
             'A sample of sessions is recorded in our self-hosted PostHog, with every form field masked.',
-            'until they expire, 90 days after capture (by January 23, 2027 at the latest). Session recordings made before then may also contain it.',
+            'Error reports captured before that update may still contain it until they expire, 90 days after capture (by January 23, 2027 at the latest). PostHog session recordings made before that update may also contain it.',
             'The text of store searches is not written to them.',
-            'Error records (Sentry) are kept for 90 days, and a sample of session replays (Sentry) are kept for as long as our self-hosted Sentry retains them.',
+            'Error records (Sentry) are kept for 90 days, and a sample of session replays (Sentry) is kept for as long as our self-hosted Sentry retains them. Since our October 25, 2026 update they are stored without store-search text',
+            'error records captured before that update may contain it until they expire (by January 23, 2027 at the latest), and replays captured before it until Sentry deletes them.',
             'Your analytics profile in our self-hosted analytics (PostHog) is deleted immediately. Events already recorded under it are not yet removed automatically; ask us at hello@devino.ca and we will delete them.',
         ]) {
             expect(normalized).toContain(claim)
@@ -153,13 +154,13 @@ describe('privacy policy coverage', () => {
         )
         expect(recordingOnly).toHaveLength(4)
         expect(recordingOnly).toContain(
-            'Session recordings made before then may also contain it.',
+            'PostHog session recordings made before that update may also contain it.',
         )
         // Direct check on the disclosure itself: no duration, no deletion claim.
         expect(
-            'Session recordings made before then may also contain it.',
+            'PostHog session recordings made before that update may also contain it.',
         ).not.toMatch(
-            /d+s*days?|within|at most|up to|retention|expire|removed|purge|deleted|delete|clean-up|no backlog/i,
+            /\b\d+\s*days?\b|within|at most|up to|retention|expire|removed|purge|deleted|delete|clean-up|no backlog/i,
         )
         expect(
             recordingOnly.filter(sentence =>
