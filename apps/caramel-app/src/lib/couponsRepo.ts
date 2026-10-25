@@ -1083,17 +1083,16 @@ export type RequestSourceOutcome = 'created' | 'duplicate' | 'queue_full'
  * (mirrors the pre-W4 gen_random_uuid()::text); created_at/updated_at fill via
  * their @default(now()).
  *
- * Bounded (T-6225): a host that already has a row (any status; an exact
- * match, since the route lowercases) is a `duplicate` and writes nothing; once MAX_REQUESTED_SOURCES requests are
- * waiting the answer is `queue_full`. The check-then-insert is not atomic
- * (there is no unique index on `source` and this PR ships no migration), so
- * concurrent identical requests can both insert; the per-IP rate limit bounds
- * that race. TODO(T-6225): a unique index on lower(source) would close it.
+ * Bounded (T-6225): a host that already has a row (any status) is a
+ * `duplicate` and writes nothing; once MAX_REQUESTED_SOURCES requests are
+ * waiting the answer is `queue_full`. The unique index on `source` closes
+ * the check-then-insert race: a concurrent insert throws P2002, caught as
+ * `duplicate`.
  */
 export async function requestSource(
     host: string,
 ): Promise<RequestSourceOutcome> {
-    const existing = await prisma.source.findFirst({
+    const existing = await prisma.source.findUnique({
         where: { source: host },
         select: { id: true },
     })
@@ -1102,14 +1101,24 @@ export async function requestSource(
         where: { status: 'REQUESTED' },
     })
     if (waiting >= MAX_REQUESTED_SOURCES) return 'queue_full'
-    await prisma.source.create({
-        data: {
-            id: randomUUID(),
-            source: host,
-            websites: [],
-            status: 'REQUESTED',
-        },
-    })
+    try {
+        await prisma.source.create({
+            data: {
+                id: randomUUID(),
+                source: host,
+                websites: [],
+                status: 'REQUESTED',
+            },
+        })
+    } catch (error) {
+        if (
+            error instanceof Prisma.PrismaClientKnownRequestError &&
+            error.code === 'P2002'
+        ) {
+            return 'duplicate'
+        }
+        throw error
+    }
     return 'created'
 }
 

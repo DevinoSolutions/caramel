@@ -271,7 +271,7 @@ model StoreConfig {
 /// `id` is TEXT (requestSource inserts gen_random_uuid()::text).
 model Source {
   id        String   @id
-  source    String
+  source    String   @unique
   websites  String[] @default([])
   status    String
   createdAt DateTime @default(now()) @map("created_at")
