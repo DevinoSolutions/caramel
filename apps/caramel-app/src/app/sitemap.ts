@@ -4,6 +4,7 @@ import {
 } from '@/lib/agentSetup/agentSetup.config'
 import { listActiveSources, listStoreSitemapEntries } from '@/lib/couponsRepo'
 import { BASE_URL } from '@/lib/env.client'
+import { DELETE_ACCOUNT_PATH } from '@/lib/marketing/deleteAccountContent'
 import { DOCS_PATH } from '@/lib/marketing/docsContent'
 import { COMPARISON_PATH } from '@/lib/seo/extensionComparison'
 import { HONEY_GUIDE_PATH } from '@/lib/seo/honeyExtensionGuide'
@@ -51,6 +52,7 @@ const STATIC_ROUTES: ReadonlyArray<StaticRoute> = [
     { path: '/pricing', changeFrequency: 'monthly', priority: 0.7 },
     { path: '/support', changeFrequency: 'monthly', priority: 0.5 },
     { path: '/privacy', changeFrequency: 'yearly', priority: 0.3 },
+    { path: DELETE_ACCOUNT_PATH, changeFrequency: 'yearly', priority: 0.3 },
 ]
 
 // /sources renders a table of ACTIVE sources. With none (prod had 0 on

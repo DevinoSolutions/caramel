@@ -153,6 +153,8 @@ ${honeyGuideFaq}
   coupon codes come from.
 - [Privacy policy](${origin}/privacy): what data Caramel does and does not
   collect.
+- [Delete your account](${origin}/delete-account): how to delete a Caramel
+  account, what is deleted and what is kept.
 - [Support](${origin}/support): contact the team.
 
 ## Privacy summary

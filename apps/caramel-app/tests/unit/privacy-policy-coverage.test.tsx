@@ -77,7 +77,7 @@ describe('privacy policy coverage', () => {
             "Devino's own AI model proxy",
             "which currently passes the request to NVIDIA's hosted model service (NIM)",
             'The only other page content the extension sends is the trimmed cart-page outline described under “Finding the promo-code box on a cart page”, and only as described there.',
-            'Effective Date: October 14, 2026',
+            'Effective Date: October 25, 2026',
             'for that store and page shape',
             'Your IP address is used to rate-limit these requests.',
         ]) {
@@ -88,9 +88,130 @@ describe('privacy policy coverage', () => {
     it('carries the owner-approved coupon-report hash disclosure verbatim (approved 2026-10-21) and no longer claims anonymous-only totals', () => {
         const normalized = text.replace(/\s+/g, ' ')
         expect(normalized).toContain(
-            'Coupon results are kept as per-code totals (when a code last worked or failed, and the store’s last error message). To stop fake reports from hiding or reviving a code, each “worked” or “didn’t work” report also keeps a one-way keyed hash of your IP address, or of your account if you are signed in. It cannot be turned back into your IP or account, and it is deleted after 30 days.',
+            'Coupon results are kept as per-code totals (when a code last worked or failed, and the store’s last error message). To stop fake reports from hiding or reviving a code, each “worked” or “didn’t work” report also keeps a one-way keyed hash of your IP address, or of your account if you are signed in. It is not stored with your account or your IP address, and it is deleted after 30 days.',
         )
         expect(normalized).not.toContain('only as anonymous per-code totals')
+    })
+
+    // DRAFT wording (2026-10-24, T-7842 / T-7505), pending owner sign-off. Each
+    // pin is a claim the apps, the extension or the account-delete route make
+    // true; change the sentence and the code evidence together.
+    it('covers the iOS and Android apps, in-app account deletion and the web deletion page', () => {
+        const normalized = text
+            .replace(/&quot;/g, '"')
+            .replace(/&amp;/g, '&')
+            .replace(/\s+/g, ' ')
+        for (const claim of [
+            'the Caramel iOS and Android apps and the grabcaramel.com website collect',
+            'Our Mobile Apps',
+            'The iOS app',
+            'The Android app',
+            'The Caramel Safari extension is bundled with the app.',
+            'The only Android permission it asks for is Internet access',
+            'The apps contain no advertising or analytics tools of their own.',
+            'Account → Delete my account on iOS',
+            'Account and privacy icon → Delete my account (or the Account tab → Data & privacy → Delete my account)',
+            'asks Apple to revoke the Sign in with Apple tokens',
+            'Delete your account yourself: on grabcaramel.com at Profile → Data & privacy → Delete my account',
+            'if you signed in with Apple and hid your email, delete your account yourself as above instead',
+            'Android’s web view uses Google Safe Browsing',
+            "the Android web view's Safe Browsing check",
+            'it asks our server for a one-time code that works for 60 seconds',
+            'A copy of your saved stores is kept on your device so alerts can run.',
+            'signing out clears it from the device',
+            'The app has four tabs: Deals, Search, Saved and Account.',
+            'the text you type is sent to our server',
+            'We do not write it to our application logs, and the access log of our own proxy is switched off.',
+            'passes the request on and may briefly cache the response and keep its own request records',
+            'Since our October 25, 2026 update we also remove search text from error reports and from the web addresses recorded in session replays before they are stored, and we mask what you type in session replays.',
+            'A sample of sessions is also recorded in our self-hosted PostHog, with every form field masked.',
+            'A sample of sessions is recorded in our self-hosted PostHog, with every form field masked.',
+            'Error reports captured before that update may still contain it until they expire, 90 days after capture (by January 23, 2027 at the latest). PostHog session recordings made before that update may also contain it.',
+            'The text of store searches is not written to them.',
+            'Error records (Sentry) are kept for 90 days, and a sample of session replays (Sentry) is kept for as long as our self-hosted Sentry retains them. Since our October 25, 2026 update they are stored without store-search text',
+            'error records captured before that update may contain it until they expire (by January 23, 2027 at the latest), and replays captured before it until Sentry deletes them.',
+            'Your analytics profile in our self-hosted analytics (PostHog) is deleted immediately. Events already recorded under it are not yet removed automatically; ask us at hello@devino.ca and we will delete them.',
+        ]) {
+            expect(normalized).toContain(claim)
+        }
+        // The recording retention sentence is WITHHELD (MASTER, T-7505): no
+        // sentence about PostHog session recordings may carry a retention,
+        // expiry or duration claim until posthog-selfhost and A78 report.
+        const recordingSentences = normalized
+            .split(/(?<=[.!?])\s*(?=[A-Z“])/)
+            .filter(sentence => /record(ing|ed)/i.test(sentence))
+        // Expected: the two sample/masking sentences ("On our website", "Where
+        // is it stored"), the "Website Analytics & Cookies" PostHog bullet, and
+        // the pre-scrub disclosure sentence. A rewording that makes a sentence escape
+        // this filter fails here instead of silently dropping out of the check.
+        // Left out: sentences that also make a Sentry replay claim (a different,
+        // documented one, e.g. the apps' analytics note) and
+        // the event-deletion sentences ("Events already recorded", "profile"),
+        // which have their own tests.
+        const recordingOnly = recordingSentences.filter(
+            sentence =>
+                !/profile|Events already recorded|replay/i.test(sentence),
+        )
+        expect(recordingOnly).toHaveLength(4)
+        expect(recordingOnly).toContain(
+            'PostHog session recordings made before that update may also contain it.',
+        )
+        // Direct check on the disclosure itself: no duration, no deletion claim.
+        expect(
+            'PostHog session recordings made before that update may also contain it.',
+        ).not.toMatch(
+            /\b\d+\s*days?\b|within|at most|up to|retention|expire|removed|purge|deleted|delete|clean-up|no backlog/i,
+        )
+        expect(
+            recordingOnly.filter(sentence =>
+                sentence.includes(
+                    'A sample of sessions is also recorded in our self-hosted PostHog',
+                ),
+            ),
+        ).toHaveLength(1)
+        expect(
+            recordingOnly.filter(sentence =>
+                sentence.includes(
+                    'A sample of sessions is recorded in our self-hosted PostHog',
+                ),
+            ),
+        ).toHaveLength(1)
+        for (const sentence of recordingOnly) {
+            expect(sentence).not.toMatch(
+                /\b\d+\s*days?\b|within|at most|up to|retention|expire|removed|purge|deleted|delete|clean-up|no backlog/i,
+            )
+        }
+        expect(html).toContain('href="/delete-account"')
+    })
+
+    it('says the extension has no third-party analytics but sends opt-in diagnostics, and that site analytics also run inside the apps', () => {
+        const normalized = text.replace(/\s+/g, ' ')
+        expect(normalized).toContain(
+            'no ads, no third-party trackers and no third-party analytics code. The only analytics it starts itself are the optional anonymous usage diagnostics described below',
+        )
+        expect(normalized).toContain(
+            'the outcome event our server records for a promo-code box lookup, and the install ID and first-touch record sent when you sign in',
+        )
+        expect(normalized).not.toContain('no ads, no analytics and no third')
+        expect(normalized).toContain(
+            'including its pages shown inside our iOS and Android apps (but not in the extension)',
+        )
+        expect(normalized).toContain(
+            'including its pages shown inside our apps, never from the extension',
+        )
+    })
+
+    it('discloses the signed-in promo-box suggestion (hostname plus up to four selectors) and where it is kept', () => {
+        const normalized = text.replace(/\s+/g, ' ')
+        for (const claim of [
+            'Promo-box suggestions, only while Caramel has this feature switched on.',
+            "the store's hostname and up to four CSS selectors",
+            'at most once per store in a browser session',
+            'It never sends the code, the price, your cart or anything you typed.',
+            'Promo-box suggestions (the store’s hostname and the selectors described above) are kept with your account. A suggestion older than 30 days no longer counts toward a store’s saved rules but is not deleted automatically; it is removed when you delete your account.',
+        ]) {
+            expect(normalized.replace(/&#x27;/g, "'")).toContain(claim)
+        }
     })
 
     it('carries the owner-approved checkout code sharing sentence verbatim (approved 2026-10-06)', () => {

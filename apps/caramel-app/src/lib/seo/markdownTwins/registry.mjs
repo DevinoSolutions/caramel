@@ -6,6 +6,7 @@ export const MARKDOWN_TWIN_PATHS = [
     '/pricing',
     '/faq',
     '/docs',
+    '/delete-account',
     '/honey-extension',
     '/compare/coupon-extensions',
     '/coupons',
