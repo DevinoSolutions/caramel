@@ -1,4 +1,5 @@
 import { motion } from 'framer-motion'
+import Link from 'next/link'
 import type { ReactNode } from 'react'
 import {
     FaBan,
@@ -7,6 +8,7 @@ import {
     FaEdit,
     FaEnvelope,
     FaLock,
+    FaMobileAlt,
     FaShareAlt,
     FaShieldAlt,
     FaUserShield,
@@ -18,13 +20,18 @@ import {
 // Every item below maps to a real data flow; when the extension or the server
 // starts touching new data, this page changes in the same PR. Wording is the
 // owner's (DESIGN.md §2(l′)): edits need owner sign-off.
+//
+// DRAFT 2026-10-24 (T-7842, T-7505), awaiting owner sign-off: the "Our Mobile
+// Apps" section, the extension analytics sentence, the promo-box suggestion
+// bullets and the in-app deletion bullet came with the iOS and Android apps.
+// Each maps to code; the PR body lists the file:line evidence per sentence.
 
 function Bullets({ items }: { items: ReactNode[] }) {
     return (
         <ul className="mb-4 space-y-2 text-gray-600 dark:text-gray-400">
             {items.map((item, i) => (
                 <li key={i} className="flex items-start gap-3">
-                    <span className="bg-caramel mt-2 h-2 w-2 shrink-0 rounded-full"></span>
+                    <span className="mt-2 h-2 w-2 shrink-0 rounded-full bg-caramel"></span>
                     <span>{item}</span>
                 </li>
             ))}
@@ -38,7 +45,7 @@ function Para({ children }: { children: ReactNode }) {
 
 function Sub({ children }: { children: ReactNode }) {
     return (
-        <h3 className="mb-3 mt-2 text-lg font-semibold text-gray-900 dark:text-white">
+        <h3 className="mt-2 mb-3 text-lg font-semibold text-gray-900 dark:text-white">
             {children}
         </h3>
     )
@@ -55,7 +62,10 @@ const PrivacyPolicy = () => {
                     <Para>
                         The Caramel extension talks only to Caramel&apos;s own
                         server (grabcaramel.com). The extension itself contains
-                        no ads, no analytics and no third-party trackers.
+                        no ads and no third-party trackers or analytics tools.
+                        Its only analytics are the optional anonymous usage
+                        diagnostics described below, which go to Caramel&apos;s
+                        own server and are off unless you opt in.
                     </Para>
                     <Sub>Whether or not you are signed in</Sub>
                     <Bullets
@@ -231,6 +241,27 @@ const PrivacyPolicy = () => {
                                 turn checkout sharing off at any time in the
                                 extension&apos;s settings.
                             </>,
+                            <>
+                                <strong>
+                                    Promo-box suggestions, only while Caramel
+                                    has this feature switched on.
+                                </strong>{' '}
+                                If you&apos;re signed in and the extension finds
+                                a promo-code box on a store we have no saved
+                                rules for, and a code applied there takes money
+                                off the total, the extension sends our server
+                                the store&apos;s hostname and up to four CSS
+                                selectors (page-element identifiers) that locate
+                                that box: the code field, the apply button, a
+                                button that opens the box, and the order total.
+                                It sends this at most once per store in a
+                                browser session. It never sends the code, the
+                                price, your cart or anything you typed. We store
+                                the suggestion with your account to limit abuse,
+                                and a store&apos;s saved rules change only after
+                                several different signed-in shoppers suggest the
+                                same box.
+                            </>,
                         ]}
                     />
                     <Sub>On our website</Sub>
@@ -255,6 +286,64 @@ const PrivacyPolicy = () => {
             ),
         },
         {
+            id: 'mobile-apps',
+            title: 'Our Mobile Apps',
+            icon: <FaMobileAlt />,
+            content: (
+                <>
+                    <Para>
+                        Caramel also has an iOS app and an Android app. The
+                        apps&apos; own network requests go only to
+                        Caramel&apos;s server (grabcaramel.com), and each app
+                        shows pages from grabcaramel.com, so what this policy
+                        says about our website applies to those pages inside the
+                        apps.
+                    </Para>
+                    <Sub>The iOS app</Sub>
+                    <Bullets
+                        items={[
+                            'The app has five tabs. Deals, Search and Saved show grabcaramel.com pages in a web view; Get started and Account are native screens.',
+                            'The Caramel Safari extension is bundled with the app. It is the extension described in this policy.',
+                            'You can sign in with Apple or Google. The sign-in opens in a system sign-in sheet, so the app does not see your Google or Apple password. The sign-in token is kept in the Keychain on your device.',
+                            'The stores you save are kept on your device and, when you are signed in, copied to your account as favorite stores.',
+                            'New-code alerts are optional and run on your device: the app asks our server for the number of codes for each saved store, and shows a notification on your device only if you allow notifications. We do not send push notifications.',
+                        ]}
+                    />
+                    <Sub>The Android app</Sub>
+                    <Bullets
+                        items={[
+                            'The app shows grabcaramel.com in a web view. The only Android permission it asks for is Internet access: no location, contacts, storage or advertising ID.',
+                            'You can sign in with Apple or Google. The sign-in opens in your browser, so the app does not see your Google or Apple password. The sign-in token is stored encrypted with a key held in the Android Keystore, and is excluded from Android backups.',
+                            'The Account and privacy icon in the top bar offers Sign in or Sign out, Delete my account (once you are signed in) and a link to this policy.',
+                        ]}
+                    />
+                    <Sub>In both apps</Sub>
+                    <Bullets
+                        items={[
+                            'The apps contain no advertising or analytics tools of their own. The website pages they show do run the website analytics and error tools described under “Website Analytics & Cookies” below (Google Analytics, self-hosted PostHog with masked session recordings, and self-hosted Sentry with session replay).',
+                            <>
+                                You can delete your account inside either app:
+                                Account → Delete my account on iOS, or the
+                                Account and privacy icon → Delete my account on
+                                Android. It takes effect immediately, ends every
+                                sign-in, and, if you signed in with Apple, asks
+                                Apple to revoke the Sign in with Apple tokens.
+                                What is deleted and what is kept is listed on
+                                our{' '}
+                                <Link
+                                    href="/delete-account"
+                                    className="font-semibold text-caramel underline hover:no-underline"
+                                >
+                                    Delete your account
+                                </Link>{' '}
+                                page.
+                            </>,
+                        ]}
+                    />
+                </>
+            ),
+        },
+        {
             id: 'info-use',
             title: 'How Do We Use Your Information?',
             icon: <FaLock />,
@@ -270,6 +359,7 @@ const PrivacyPolicy = () => {
                             'Publish codes you choose to share so other shoppers can use them.',
                             'Keep Caramel secure and working: limit abuse, and find and fix errors.',
                             'Find the promo-code box on a cart page when a store’s known rules cannot (an AI model reads the cart-page outline described above).',
+                            'Learn a store’s promo-code box from the suggestions of several signed-in shoppers, where we have no saved rules for it (while that feature is switched on).',
                         ]}
                     />
                     <Para>
@@ -308,6 +398,7 @@ const PrivacyPolicy = () => {
                             'Cart-page outlines (see “Finding the promo-code box” above) are not stored in our database. The model’s answer, which control is the code box, is kept in temporary memory for up to 24 hours for that store and page shape so the same page is not processed twice, looked up by a one-way hash of the store and outline rather than by the outline itself. Your IP address is used to rate-limit these requests. The outcome event described above is kept in our self-hosted analytics.',
                             'Coupon results are kept as per-code totals (when a code last worked or failed, and the store’s last error message). To stop fake reports from hiding or reviving a code, each “worked” or “didn’t work” report also keeps a one-way keyed hash of your IP address, or of your account if you are signed in. It cannot be turned back into your IP or account, and it is deleted after 30 days.',
                             'Shared codes stay published while they are valid; deleting your account removes the link between a shared code and you.',
+                            'Promo-box suggestions (the store’s hostname and the selectors described above) are kept with your account until you delete your account.',
                             'Server logs, which can include IP addresses and browser type, are kept for up to 90 days for security and troubleshooting.',
                         ]}
                     />
@@ -371,8 +462,8 @@ const PrivacyPolicy = () => {
                             </>,
                             <>
                                 <strong>Google Analytics</strong>: usage
-                                analytics on our website only, never from the
-                                extension.
+                                analytics on our website, including its pages
+                                shown inside our apps, never from the extension.
                             </>,
                             <>
                                 <strong>Other Caramel shoppers</strong>: coupon
@@ -416,7 +507,8 @@ const PrivacyPolicy = () => {
             content: (
                 <>
                     <Para>
-                        On grabcaramel.com (not in the extension) we use:
+                        On grabcaramel.com, including its pages shown inside our
+                        iOS and Android apps (but not in the extension), we use:
                     </Para>
                     <Bullets
                         items={[
@@ -463,6 +555,7 @@ const PrivacyPolicy = () => {
                         'Pause Caramel on any site, or turn auto-apply off, from the extension.',
                         'Turn checkout sharing and savings sync on or off at any time in the extension’s settings.',
                         'Download your data, or delete your saved Caramel data (savings, favorite stores and coupon results), from Profile → Data & privacy on grabcaramel.com.',
+                        'Delete your account yourself in the iOS app (Account → Delete my account) or the Android app (Account and privacy icon → Delete my account). Our Delete your account page lists what is deleted and what is kept.',
                         'Ask us to access, correct or delete your account and everything linked to it by emailing hello@devino.ca from the address on your account. We act on deletion requests within 30 days; deleting your account removes your login, sign-in sessions, favorite stores, savings history and coupon results, and unlinks you from codes you shared.',
                         'Uninstall the extension at any time; this stops all collection and removes what it stored in your browser.',
                     ]}
@@ -480,17 +573,18 @@ const PrivacyPolicy = () => {
                 transition={{ duration: 0.6 }}
                 className="mb-16 text-center"
             >
-                <div className="bg-caramel/10 text-caramel mb-6 inline-flex items-center gap-3 rounded-full px-6 py-3 text-sm font-semibold">
+                <div className="mb-6 inline-flex items-center gap-3 rounded-full bg-caramel/10 px-6 py-3 text-sm font-semibold text-caramel">
                     <FaShieldAlt className="h-4 w-4" />
-                    Effective Date: October 14, 2026
+                    Effective Date: October 24, 2026
                 </div>
                 <p className="mx-auto max-w-4xl text-lg leading-relaxed text-gray-600 dark:text-gray-300">
                     Welcome to{' '}
-                    <span className="text-caramel font-semibold">Caramel!</span>{' '}
+                    <span className="font-semibold text-caramel">Caramel!</span>{' '}
                     Caramel is made by Devino. This Privacy Policy explains what
-                    information the Caramel browser extension and the
-                    grabcaramel.com website collect, how we use it, where it is
-                    stored and for how long, and who it is shared with.
+                    information the Caramel browser extension, the Caramel iOS
+                    and Android apps and the grabcaramel.com website collect,
+                    how we use it, where it is stored and for how long, and who
+                    it is shared with.
                 </p>
             </motion.div>
 
@@ -504,7 +598,7 @@ const PrivacyPolicy = () => {
                         whileInView={{ opacity: 1, x: 0 }}
                         viewport={{ once: true }}
                         transition={{ duration: 0.6, delay: index * 0.1 }}
-                        className="border-caramel/20 from-caramel/5 to-caramel/5 dark:border-caramel/30 dark:from-caramel/10 dark:to-caramel/10 relative overflow-hidden rounded-3xl border bg-gradient-to-br via-orange-50/30 p-8 dark:via-orange-900/20"
+                        className="relative overflow-hidden rounded-3xl border border-caramel/20 bg-gradient-to-br from-caramel/5 via-orange-50/30 to-caramel/5 p-8 dark:border-caramel/30 dark:from-caramel/10 dark:via-orange-900/20 dark:to-caramel/10"
                     >
                         {/* Background Pattern */}
                         <div className="absolute inset-0 opacity-5">
@@ -535,11 +629,11 @@ const PrivacyPolicy = () => {
 
                         <div className="relative z-10">
                             <div className="mb-6 flex items-start gap-4">
-                                <div className="bg-caramel/10 text-caramel dark:bg-caramel/20 flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-xl">
+                                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-caramel/10 text-xl text-caramel dark:bg-caramel/20">
                                     {section.icon}
                                 </div>
                                 <div className="flex-1">
-                                    <h2 className="mb-4 text-2xl font-bold text-gray-900 lg:text-xl dark:text-white">
+                                    <h2 className="mb-4 text-2xl font-bold text-gray-900 dark:text-white lg:text-xl">
                                         {section.title}
                                     </h2>
                                     <div className="text-base leading-relaxed">
@@ -559,10 +653,10 @@ const PrivacyPolicy = () => {
                     whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true }}
                     transition={{ duration: 0.6 }}
-                    className="border-caramel/20 from-caramel/5 to-caramel/5 dark:border-caramel/30 dark:from-caramel/10 dark:to-caramel/10 rounded-3xl border bg-gradient-to-br via-orange-50/30 p-8 dark:via-orange-900/20"
+                    className="rounded-3xl border border-caramel/20 bg-gradient-to-br from-caramel/5 via-orange-50/30 to-caramel/5 p-8 dark:border-caramel/30 dark:from-caramel/10 dark:via-orange-900/20 dark:to-caramel/10"
                 >
                     <div className="flex items-start gap-4">
-                        <div className="bg-caramel/10 text-caramel dark:bg-caramel/20 flex h-12 w-12 items-center justify-center rounded-2xl text-xl">
+                        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-caramel/10 text-xl text-caramel dark:bg-caramel/20">
                             <FaEdit />
                         </div>
                         <div>
@@ -575,7 +669,7 @@ const PrivacyPolicy = () => {
                             </p>
                             <a
                                 href="mailto:hello@devino.ca"
-                                className="text-caramel focus-visible:ring-caramel dark:focus-visible:ring-offset-darkBg inline-flex items-center gap-2 rounded-md font-semibold transition-colors duration-200 hover:text-orange-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
+                                className="inline-flex items-center gap-2 rounded-md font-semibold text-caramel transition-colors duration-200 hover:text-orange-600 focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 focus-visible:outline-none dark:focus-visible:ring-offset-darkBg"
                             >
                                 <FaEnvelope className="h-4 w-4" />
                                 hello@devino.ca
@@ -589,10 +683,10 @@ const PrivacyPolicy = () => {
                     whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true }}
                     transition={{ duration: 0.6, delay: 0.1 }}
-                    className="border-caramel/20 from-caramel/5 to-caramel/5 dark:border-caramel/30 dark:from-caramel/10 dark:to-caramel/10 rounded-3xl border bg-gradient-to-br via-orange-50/30 p-8 dark:via-orange-900/20"
+                    className="rounded-3xl border border-caramel/20 bg-gradient-to-br from-caramel/5 via-orange-50/30 to-caramel/5 p-8 dark:border-caramel/30 dark:from-caramel/10 dark:via-orange-900/20 dark:to-caramel/10"
                 >
                     <div className="flex items-start gap-4">
-                        <div className="bg-caramel/10 text-caramel dark:bg-caramel/20 flex h-12 w-12 items-center justify-center rounded-2xl text-xl">
+                        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-caramel/10 text-xl text-caramel dark:bg-caramel/20">
                             <FaEnvelope />
                         </div>
                         <div>
@@ -605,7 +699,7 @@ const PrivacyPolicy = () => {
                             </p>
                             <a
                                 href="mailto:hello@devino.ca"
-                                className="text-caramel focus-visible:ring-caramel dark:focus-visible:ring-offset-darkBg inline-flex items-center gap-2 rounded-md font-semibold transition-colors duration-200 hover:text-orange-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
+                                className="inline-flex items-center gap-2 rounded-md font-semibold text-caramel transition-colors duration-200 hover:text-orange-600 focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 focus-visible:outline-none dark:focus-visible:ring-offset-darkBg"
                             >
                                 <FaEnvelope className="h-4 w-4" />
                                 hello@devino.ca
@@ -621,7 +715,7 @@ const PrivacyPolicy = () => {
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true }}
                 transition={{ duration: 0.6 }}
-                className="from-caramel mx-auto mt-12 max-w-4xl rounded-3xl bg-gradient-to-r to-orange-600 p-8 text-center text-white shadow-lg"
+                className="mx-auto mt-12 max-w-4xl rounded-3xl bg-gradient-to-r from-caramel to-orange-600 p-8 text-center text-white shadow-lg"
             >
                 <h3 className="mb-4 text-xl font-semibold">
                     Changes to This Privacy Policy

@@ -77,7 +77,7 @@ describe('privacy policy coverage', () => {
             "Devino's own AI model proxy",
             "which currently passes the request to NVIDIA's hosted model service (NIM)",
             'The only other page content the extension sends is the trimmed cart-page outline described under “Finding the promo-code box on a cart page”, and only as described there.',
-            'Effective Date: October 14, 2026',
+            'Effective Date: October 24, 2026',
             'for that store and page shape',
             'Your IP address is used to rate-limit these requests.',
         ]) {
@@ -91,6 +91,56 @@ describe('privacy policy coverage', () => {
             'Coupon results are kept as per-code totals (when a code last worked or failed, and the store’s last error message). To stop fake reports from hiding or reviving a code, each “worked” or “didn’t work” report also keeps a one-way keyed hash of your IP address, or of your account if you are signed in. It cannot be turned back into your IP or account, and it is deleted after 30 days.',
         )
         expect(normalized).not.toContain('only as anonymous per-code totals')
+    })
+
+    // DRAFT wording (2026-10-24, T-7842 / T-7505), pending owner sign-off. Each
+    // pin is a claim the apps, the extension or the account-delete route make
+    // true; change the sentence and the code evidence together.
+    it('covers the iOS and Android apps, in-app account deletion and the web deletion page', () => {
+        const normalized = text.replace(/&quot;/g, '"').replace(/\s+/g, ' ')
+        for (const claim of [
+            'the Caramel iOS and Android apps and the grabcaramel.com website collect',
+            'Our Mobile Apps',
+            'The iOS app',
+            'The Android app',
+            'The Caramel Safari extension is bundled with the app.',
+            'The only Android permission it asks for is Internet access',
+            'The apps contain no advertising or analytics tools of their own.',
+            'Account → Delete my account on iOS',
+            'the Account and privacy icon → Delete my account on Android',
+            'asks Apple to revoke the Sign in with Apple tokens',
+            'Delete your account yourself in the iOS app',
+        ]) {
+            expect(normalized).toContain(claim)
+        }
+        expect(html).toContain('href="/delete-account"')
+    })
+
+    it('says the extension has no third-party analytics but sends opt-in diagnostics, and that site analytics also run inside the apps', () => {
+        const normalized = text.replace(/\s+/g, ' ')
+        expect(normalized).toContain(
+            'no ads and no third-party trackers or analytics tools. Its only analytics are the optional anonymous usage diagnostics described below',
+        )
+        expect(normalized).not.toContain('no ads, no analytics and no third')
+        expect(normalized).toContain(
+            'including its pages shown inside our iOS and Android apps (but not in the extension)',
+        )
+        expect(normalized).toContain(
+            'including its pages shown inside our apps, never from the extension',
+        )
+    })
+
+    it('discloses the signed-in promo-box suggestion (hostname plus up to four selectors) and where it is kept', () => {
+        const normalized = text.replace(/\s+/g, ' ')
+        for (const claim of [
+            'Promo-box suggestions, only while Caramel has this feature switched on.',
+            "the store's hostname and up to four CSS selectors",
+            'at most once per store in a browser session',
+            'It never sends the code, the price, your cart or anything you typed.',
+            'Promo-box suggestions (the store’s hostname and the selectors described above) are kept with your account until you delete your account.',
+        ]) {
+            expect(normalized.replace(/&#x27;/g, "'")).toContain(claim)
+        }
     })
 
     it('carries the owner-approved checkout code sharing sentence verbatim (approved 2026-10-06)', () => {

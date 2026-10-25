@@ -1,6 +1,11 @@
 import { GITHUB_REPO_URL } from '@/lib/brandLinks'
 import { faqItems } from '@/lib/faqItems'
 import {
+    DELETE_ACCOUNT_EMAIL,
+    DELETE_ACCOUNT_PAGE_COPY,
+    DELETE_ACCOUNT_SECTIONS,
+} from '@/lib/marketing/deleteAccountContent'
+import {
     DOCS_PAGE_COPY,
     DOCS_SECTIONS,
     absoluteDocsHref,
@@ -183,13 +188,50 @@ function buildDocs(): MarkdownPageContent {
     }
 }
 
+function buildDeleteAccount(): MarkdownPageContent {
+    return {
+        title: DELETE_ACCOUNT_PAGE_COPY.heading,
+        summary: DELETE_ACCOUNT_PAGE_COPY.summary,
+        body: [
+            ...DELETE_ACCOUNT_SECTIONS.map(section =>
+                [
+                    heading(section.heading),
+                    ...section.paragraphs.map(markdownText),
+                    (section.steps ?? [])
+                        .map(
+                            (step, index) =>
+                                `${index + 1}. ${markdownText(step)}`,
+                        )
+                        .join('\n'),
+                    (section.bullets ?? [])
+                        .map(bullet => `- ${markdownText(bullet)}`)
+                        .join('\n'),
+                    section.emailLink
+                        ? markdownLink(
+                              DELETE_ACCOUNT_PAGE_COPY.emailLabel,
+                              `mailto:${DELETE_ACCOUNT_EMAIL}`,
+                          )
+                        : '',
+                ]
+                    .filter(Boolean)
+                    .join('\n\n'),
+            ),
+            `${markdownText(DELETE_ACCOUNT_PAGE_COPY.privacyLead)} ${markdownLink(DELETE_ACCOUNT_PAGE_COPY.privacyLabel, `${origin}/privacy`)}.`,
+        ].join('\n\n'),
+    }
+}
+
 // Pages with inline JSX that has not been extracted remain deliberately absent:
 // a twin may only advertise copy consumed by the corresponding HTML page.
 export const staticPageBuilders: Readonly<
-    Record<'/' | '/pricing' | '/faq' | '/docs', () => MarkdownPageContent>
+    Record<
+        '/' | '/pricing' | '/faq' | '/docs' | '/delete-account',
+        () => MarkdownPageContent
+    >
 > = {
     '/': buildHome,
     '/pricing': buildPricing,
     '/faq': buildFaq,
     '/docs': buildDocs,
+    '/delete-account': buildDeleteAccount,
 }

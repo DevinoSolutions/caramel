@@ -206,6 +206,12 @@ export const DOCS_SECTIONS: ReadonlyArray<DocsSection> = [
                 href: '/privacy',
                 description: 'what data Caramel does and does not collect',
             },
+            {
+                label: 'Delete your account',
+                href: '/delete-account',
+                description:
+                    'how to delete a Caramel account, what is deleted and what is kept',
+            },
         ],
     },
     {
