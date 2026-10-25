@@ -21,7 +21,7 @@ export type RecentlyAddedStore = {
  *
  * The grid is `grid-cols-2 md:grid-cols-1`, the same idiom as the page's other
  * two grids: this project overrides Tailwind's `screens` to MAX-width
- * (tailwind.config.ts), so `md:` reads "at 767px and below", making that
+ * (globals.css @custom-variant), so `md:` reads "at 767px and below", making that
  * two-up on a desktop and one column on a phone — the opposite of what the
  * same class list means under stock Tailwind. Two of these cards cannot fit
  * side by side at 375px (56px favicon + a domain that must not truncate +
@@ -43,7 +43,7 @@ export default function RecentlyAddedSection({
                 initial={false}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.3 }}
-                className="mb-10 border-b border-caramel/15 pb-10 text-center text-2xl font-bold text-gray-800 dark:border-white/10 dark:text-gray-200"
+                className="border-caramel/15 mb-10 border-b pb-10 text-center text-2xl font-bold text-gray-800 dark:border-white/10 dark:text-gray-200"
             >
                 ✨ Recently added
             </motion.h2>

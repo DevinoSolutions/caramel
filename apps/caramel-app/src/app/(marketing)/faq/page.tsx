@@ -1,5 +1,6 @@
 import FaqSection from '@/components/FaqSection'
 import { BASE_URL } from '@/lib/env.client'
+import { faqItems } from '@/lib/faqItems'
 import type { Metadata } from 'next'
 
 // /faq — the landing FAQ at its own URL (fleet agent-onboarding spec §4:
@@ -11,16 +12,7 @@ import type { Metadata } from 'next'
 
 const origin = BASE_URL.replace(/\/+$/, '')
 const title = 'Caramel FAQ — free coupon extension questions answered'
-// FROZEN (2026-10-02): titles and meta descriptions are held byte-identical
-// while the SEO measurement window runs (re-measure after 2026-10-23, see the
-// caramel-seo-measure note). This string used to interpolate `faqItems.length`;
-// adding the "Can I share a coupon code with Caramel?" FAQ item would have
-// silently rewritten it to "11 answers", so the count is pinned at the 10 it
-// had when the window opened (pinned by tests/unit/faq-page-metadata.test.ts).
-// TODO: after 2026-10-23, restore the `${faqItems.length}` interpolation (and
-// update that test) so the count tracks the FAQ again.
-const description =
-    '10 answers about the free, open-source Caramel coupon extension: browsers, privacy, affiliate links, how codes are found and applied.'
+const description = `${faqItems.length} answers about the free, open-source Caramel coupon extension: browsers, privacy, affiliate links, how codes are found and applied.`
 
 export const metadata: Metadata = {
     title,
@@ -38,7 +30,7 @@ export const metadata: Metadata = {
 
 export default function FaqPage() {
     return (
-        <main className="flex min-h-screen w-full flex-col items-center px-6 pt-16 dark:bg-darkBg">
+        <main className="dark:bg-darkBg flex min-h-screen w-full flex-col items-center px-6 pt-16">
             <div className="w-full max-w-4xl">
                 <h1 className="sr-only">Caramel frequently asked questions</h1>
                 <FaqSection />

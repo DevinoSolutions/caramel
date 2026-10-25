@@ -144,9 +144,9 @@ export default async function StoreDirectoryLetterPage(input: {
     }
 
     return (
-        <main className="relative min-h-screen px-6 pt-32 dark:bg-darkBg lg:px-8">
+        <main className="dark:bg-darkBg relative min-h-screen px-6 pt-32 lg:px-8">
             <header className="mx-auto max-w-4xl pb-10">
-                <h1 className="mb-4 text-4xl font-extrabold tracking-tight text-gray-900 dark:text-white md:text-3xl">
+                <h1 className="mb-4 text-4xl font-extrabold tracking-tight text-gray-900 md:text-3xl dark:text-white">
                     Stores starting with {label}
                 </h1>
                 <p className="leading-relaxed text-gray-600 dark:text-gray-400">
@@ -172,7 +172,7 @@ export default async function StoreDirectoryLetterPage(input: {
                 >
                     {label} stores with coupon codes
                 </h2>
-                <ul className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm text-gray-600 dark:text-gray-400 sm:grid-cols-1 [&>li>a]:font-semibold [&>li>a]:text-gray-900 [&>li>a]:underline-offset-2 hover:[&>li>a]:text-caramel hover:[&>li>a]:underline dark:[&>li>a]:text-white">
+                <ul className="hover:[&>li>a]:text-caramel grid grid-cols-2 gap-x-6 gap-y-2 text-sm text-gray-600 sm:grid-cols-1 dark:text-gray-400 [&>li>a]:font-semibold [&>li>a]:text-gray-900 [&>li>a]:underline-offset-2 hover:[&>li>a]:underline dark:[&>li>a]:text-white">
                     {page.stores.map(store => (
                         <li key={store.base}>
                             <a
@@ -187,7 +187,7 @@ export default async function StoreDirectoryLetterPage(input: {
                 {page.pageCount > 1 ? (
                     <nav
                         aria-label="Pagination"
-                        className="mt-8 flex items-center gap-4 text-sm font-semibold text-caramel"
+                        className="text-caramel mt-8 flex items-center gap-4 text-sm font-semibold"
                     >
                         {page.page > 1 ? (
                             <a

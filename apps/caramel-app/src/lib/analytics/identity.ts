@@ -35,6 +35,8 @@ import {
     type PosthogTarget,
 } from './posthogDataset'
 import { resolveBrowserPosthogHosts } from './posthogHosts'
+import { clearPersistedPosthogStorage } from './posthogPersistence'
+import { scrubRecordedNetworkRequest } from './recordingNetworkScrub'
 import { browserSignalsTrackingOptOut } from './trackingOptOut'
 
 export { isPosthogActive }
@@ -227,6 +229,10 @@ export function initPosthogInstance(
             maskTextSelector:
                 '[data-sentry-mask], [data-ph-mask], .ph-sensitive',
             blockSelector: '#card-element',
+            // The recording keeps every request URL; strip typed store-search
+            // text (?q=, ?search=, ?key_words=, body query) from it with the
+            // same helper that scrubs Sentry (T-7505).
+            maskCapturedNetworkRequestFn: scrubRecordedNetworkRequest,
         },
         // The Caramel project has no surveys (checked 2026-09-26), so don't
         // fetch the surveys bundle (30 KB, 102 KB to parse, measured on prod)
@@ -325,9 +331,29 @@ export function identifyUser(user: IdentityUser): void {
     }
 }
 
+/**
+ * Remove posthog-js's persisted id straight from storage when the SDK is not
+ * live. Failures are reported, never swallowed.
+ */
+function clearPersistedStorageWithoutSdk(): void {
+    const target = resolveClientPosthogTarget()
+    if (!target || typeof window === 'undefined') return
+    try {
+        clearPersistedPosthogStorage(target.token)
+    } catch (error) {
+        reportIdentityFailure('posthog_clear_persisted', error)
+    }
+}
+
 /** Clear identity on logout (fresh anonymous id + reset Sentry correlation). */
 export function resetPosthogIdentity(): void {
-    if (!isPosthogActive()) return
+    if (!isPosthogActive()) {
+        // SDK not running (blocked, failed to load, or capture off), but an id
+        // persisted by an earlier visit can still be in storage. After an
+        // account deletion it must not survive to be reused (T-7505).
+        clearPersistedStorageWithoutSdk()
+        return
+    }
     // Drop the dedupe fingerprint too: after a reset the next identify — even
     // for the same person — must actually re-send the profile.
     lastIdentitySignature = null

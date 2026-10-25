@@ -14,75 +14,25 @@ import java.io.IOException
 
 class CaramelApiTest {
     @Test
-    fun recentlyWorkedDecodesAndLabelsDiscount() = runBlocking {
-        val (api, transport) = testApi {
-            ok(
-                """{"coupons":[{"id":"1","code":"SAVE10","title":"10 off","storeDomain":"nike.com",
-                "discountType":"PERCENTAGE","discountAmount":10,"lastWorkedAt":"2026-10-23T10:00:00.000Z","extra":"ignored"}]}""",
-            )
-        }
-        val coupons = api.recentlyWorked()
-        assertEquals("nike.com", coupons.single().storeDomain)
-        assertEquals("10% off", coupons.single().discountLabel)
-        val request = transport.requests.single()
-        assertEquals("GET", request.method)
-        assertEquals("https://example.test/api/coupons/recently-worked", request.url)
-        assertEquals("req-1", request.headers["x-request-id"])
-        assertNull(request.headers["Authorization"])
-    }
-
-    @Test
-    fun topStoresDropsNullSites() = runBlocking {
-        val (api, _) = testApi { ok("""{"sites":["a.com",null,"b.com"]}""") }
-        assertEquals(listOf("a.com", "b.com"), api.topStores())
-    }
-
-    @Test
-    fun storeOptionsSendsQueryAndLimit() = runBlocking {
-        val (api, transport) = testApi { ok("""{"sites":["nike.com"]}""") }
-        api.storeOptions("nike shoes")
-        assertEquals("https://example.test/api/coupons/stores?q=nike%20shoes&limit=30", transport.requests.single().url)
-    }
-
-    @Test
-    fun couponsDecodesSnakeCaseDiscountFields() = runBlocking {
-        val (api, transport) = testApi {
-            ok(
-                """{"coupons":[{"id":"c1","code":"X","title":"T","description":"","discount_type":"FIXED","discount_amount":5,
-                "expired":false,"keepsFailing":true}],"page":1,"limit":50,"total":1,"hasMore":false}""",
-            )
-        }
-        val page = api.coupons("nike.com")
-        assertEquals("\$5 off", page.coupons.single().discountLabel)
-        assertEquals(true, page.coupons.single().keepsFailing)
-        assertEquals("https://example.test/api/coupons?site=nike.com&page=1&limit=50", transport.requests.single().url)
-    }
-
-    @Test
     fun bearerIsSentOnAccountCalls() = runBlocking {
         val (api, transport) = testApi { ok("""{"username":"sam","image":null}""") }
         assertEquals("sam", api.me("tok").username)
-        assertEquals("Bearer tok", transport.requests.single().headers["Authorization"])
-    }
-
-    @Test
-    fun setFavoriteUsesPutAndDeleteAndReturnsServerKey() = runBlocking {
-        val (api, transport) = testApi { ok("""{"store":"nike.com","favorited":true}""") }
-        assertEquals("nike.com", api.setFavorite("www.nike.com", true, "tok"))
-        api.setFavorite("nike.com", false, "tok")
-        assertEquals(listOf("PUT", "DELETE"), transport.requests.map { it.method })
-        assertEquals("https://example.test/api/account/favorites/www.nike.com", transport.requests.first().url)
-    }
-
-    @Test
-    fun deleteAccountPostsTheConfirmBody() = runBlocking {
-        val (api, transport) = testApi { HttpResponse(200, "{}") }
-        api.deleteAccount("tok")
         val request = transport.requests.single()
-        assertEquals("POST", request.method)
-        assertEquals("https://example.test/api/account/delete", request.url)
-        assertEquals("""{"confirm":"DELETE"}""", request.body)
-        assertEquals("application/json", request.headers["Content-Type"])
+        assertEquals("GET", request.method)
+        assertEquals("https://example.test/api/extension/me", request.url)
+        assertEquals("Bearer tok", request.headers["Authorization"])
+        assertEquals("req-1", request.headers["x-request-id"])
+    }
+
+    @Test
+    fun revokeSessionSendsDeleteWithTheBearer() = runBlocking {
+        val (api, transport) = testApi { HttpResponse(200, "{}") }
+        api.revokeSession("tok")
+        val request = transport.requests.single()
+        assertEquals("DELETE", request.method)
+        assertEquals("https://example.test/api/extension/session", request.url)
+        assertEquals("Bearer tok", request.headers["Authorization"])
+        assertNull(request.body)
     }
 
     @Test
@@ -96,7 +46,7 @@ class CaramelApiTest {
     @Test
     fun nonJsonErrorBodyStillReportsTheStatus() {
         val (api, _) = testApi { HttpResponse(502, "<html>bad gateway</html>") }
-        val error = assertThrows(ApiError::class.java) { runBlocking { api.topStores() } }
+        val error = assertThrows(ApiError::class.java) { runBlocking { api.me("tok") } }
         assertEquals(502, error.status)
         assertEquals("unexpected status", error.detail)
         assertFalse(error.isRateLimited)
@@ -105,15 +55,15 @@ class CaramelApiTest {
     @Test
     fun networkFailureBecomesApiErrorWithoutStatus() {
         val (api, _) = testApi { throw IOException("offline") }
-        val error = assertThrows(ApiError::class.java) { runBlocking { api.topStores() } }
+        val error = assertThrows(ApiError::class.java) { runBlocking { api.me("tok") } }
         assertNull(error.status)
-        assertEquals("GET /api/sites/top-sites failed (no response): offline [request req-1]", error.message)
+        assertEquals("GET /api/extension/me failed (no response): offline [request req-1]", error.message)
     }
 
     @Test
     fun wrongShapeFailsLoudly() {
         val (api, _) = testApi { ok("""{"unexpected":true}""") }
-        val error = assertThrows(ApiError::class.java) { runBlocking { api.topStores() } }
+        val error = assertThrows(ApiError::class.java) { runBlocking { api.oauthAuthorize(OAuthProvider.GOOGLE, "chal") } }
         assertTrue(error.detail.startsWith("Response did not match the expected shape"))
     }
 
@@ -138,5 +88,16 @@ class CaramelApiTest {
             """{"provider":"apple","code":"code1","state":"s1","redirectUri":"com.devino.caramel://auth/callback","codeVerifier":"verifier1"}""",
             transport.requests.single().body,
         )
+    }
+
+    @Test
+    fun deleteAccountPostsTheConfirmBody() = runBlocking {
+        val (api, transport) = testApi { HttpResponse(200, "{}") }
+        api.deleteAccount("tok")
+        val request = transport.requests.single()
+        assertEquals("POST", request.method)
+        assertEquals("https://example.test/api/account/delete", request.url)
+        assertEquals("""{"confirm":"DELETE"}""", request.body)
+        assertEquals("application/json", request.headers["Content-Type"])
     }
 }

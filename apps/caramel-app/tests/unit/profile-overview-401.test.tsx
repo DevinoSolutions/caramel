@@ -60,7 +60,9 @@ describe('useProfileOverview — 401 is a signed-out user (CARAMEL-N)', () => {
 
         const { result } = renderHook(() => useProfileOverview(true))
 
-        await waitFor(() => expect(assignMock).toHaveBeenCalledWith('/login'))
+        await waitFor(() =>
+            expect(assignMock).toHaveBeenCalledWith('/login?next=%2Fprofile'),
+        )
         expect(endClientSessionMock).toHaveBeenCalledTimes(1)
         expect(promptSupportMock).not.toHaveBeenCalled()
         // No error notice flashes before the navigation lands.
@@ -94,7 +96,9 @@ describe('useProfileOverview — 401 is a signed-out user (CARAMEL-N)', () => {
 
         renderHook(() => useProfileOverview(true))
 
-        await waitFor(() => expect(assignMock).toHaveBeenCalledWith('/login'))
+        await waitFor(() =>
+            expect(assignMock).toHaveBeenCalledWith('/login?next=%2Fprofile'),
+        )
         expect(promptSupportMock).not.toHaveBeenCalled()
     })
 })

@@ -1,5 +1,10 @@
 import { GITHUB_REPO_URL } from '@/lib/brandLinks'
 import { faqItems } from '@/lib/faqItems'
+import {
+    DOCS_PAGE_COPY,
+    DOCS_SECTIONS,
+    absoluteDocsHref,
+} from '@/lib/marketing/docsContent'
 import { FAQ_COPY } from '@/lib/marketing/faqContent'
 import {
     HOME_BROWSERS,
@@ -154,12 +159,37 @@ function buildFaq(): MarkdownPageContent {
     }
 }
 
+function buildDocs(): MarkdownPageContent {
+    return {
+        title: DOCS_PAGE_COPY.heading,
+        summary: DOCS_PAGE_COPY.summary,
+        body: DOCS_SECTIONS.map(section =>
+            [
+                heading(section.heading),
+                ...section.paragraphs.map(markdownText),
+                (section.steps ?? [])
+                    .map((step, index) => `${index + 1}. ${markdownText(step)}`)
+                    .join('\n'),
+                section.links
+                    .map(
+                        link =>
+                            `- ${markdownLink(link.label, absoluteDocsHref(link.href, origin))}${link.description ? `: ${markdownText(link.description)}` : ''}`,
+                    )
+                    .join('\n'),
+            ]
+                .filter(Boolean)
+                .join('\n\n'),
+        ).join('\n\n'),
+    }
+}
+
 // Pages with inline JSX that has not been extracted remain deliberately absent:
 // a twin may only advertise copy consumed by the corresponding HTML page.
 export const staticPageBuilders: Readonly<
-    Record<'/' | '/pricing' | '/faq', () => MarkdownPageContent>
+    Record<'/' | '/pricing' | '/faq' | '/docs', () => MarkdownPageContent>
 > = {
     '/': buildHome,
     '/pricing': buildPricing,
     '/faq': buildFaq,
+    '/docs': buildDocs,
 }

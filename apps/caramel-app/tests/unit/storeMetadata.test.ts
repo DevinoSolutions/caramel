@@ -288,18 +288,21 @@ describe('buildStoreTitle', () => {
 })
 
 describe('buildStoreDescription', () => {
-    it('coursera.org: the searched words, the domain, the best listed discount and what to do', () => {
+    it('groupon.com: the searched words, the domain, the best listed discount and what to do', () => {
         const description = buildStoreDescription({
-            base: 'coursera.org',
+            base: 'groupon.com',
             total: 22,
             facts: facts(),
             uk: false,
             now: NOW,
         })
         expect(description).toBe(
-            "22 Coursera promo codes, coupons & discount codes for coursera.org, up to 50% off. Copy a code, or let Caramel's free extension try them at checkout.",
+            "22 Groupon promo codes, coupons & discount codes for groupon.com, up to 50% off. Copy a code, or let Caramel's free extension try them at checkout.",
         )
     })
+
+    // T-7856 pilot (storeIntentPilot.ts) changed this one: coursera.org now
+    // says what the store is. tests/unit/storeIntentPilot.test.tsx pins it.
 
     it('claims no percentage when no listed code states one', () => {
         expect(

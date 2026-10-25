@@ -7,6 +7,7 @@ import {
     normalizeShopperCode,
 } from '@/lib/shopperCoupons'
 import Link from 'next/link'
+import { usePathname } from 'next/navigation'
 import { useEffect, useId, useRef, useState } from 'react'
 
 // The "Add a code" form on /coupons/[store]: a signed-in shopper shares a coupon
@@ -32,10 +33,6 @@ import { useEffect, useId, useRef, useState } from 'react'
 // and the repo use (shopperCoupons.ts is pure, no server-only imports), so an
 // obviously invalid code never costs a round trip. The server stays the
 // authority: it re-validates and its 422 'invalid-code' gets the same message.
-//
-// TODO: /login has no return-path support (it always lands on `/` after sign-in,
-// LoginPageClient.tsx), so the sign-in link is a plain /login. Adding a vetted
-// `next` param is its own change (open-redirect surface).
 
 type Feedback = { kind: 'success' | 'info' | 'error'; text: string }
 
@@ -147,6 +144,7 @@ async function submitCode(
 
 export default function AddCodeForm({ store }: { store: string }) {
     const { data: session, isPending } = useSession()
+    const pathname = usePathname()
     const [mounted, setMounted] = useState(false)
     const [code, setCode] = useState('')
     const [busy, setBusy] = useState(false)
@@ -179,9 +177,9 @@ export default function AddCodeForm({ store }: { store: string }) {
                     Know a code for {store}?
                 </h2>
                 <Link
-                    href="/login"
+                    href={`/login?next=${encodeURIComponent(pathname)}`}
                     rel="nofollow"
-                    className="font-semibold text-caramel underline underline-offset-2 hover:text-orange-600"
+                    className="text-caramel font-semibold underline underline-offset-2 hover:text-orange-600"
                 >
                     Sign in to share a code
                 </Link>
@@ -271,7 +269,7 @@ export default function AddCodeForm({ store }: { store: string }) {
                         spellCheck={false}
                         maxLength={64}
                         aria-describedby={feedbackId}
-                        className="w-full rounded-full border-2 border-caramel/30 bg-white px-6 py-3 placeholder-gray-400 shadow-sm outline-none transition-all focus:border-caramel dark:bg-darkSurface dark:text-white dark:placeholder-gray-500 dark:focus:border-orange-400"
+                        className="border-caramel/30 focus:border-caramel dark:bg-darkSurface w-full rounded-full border-2 bg-white px-6 py-3 placeholder-gray-400 shadow-sm outline-none transition-all dark:text-white dark:placeholder-gray-500 dark:focus:border-orange-400"
                     />
                 </div>
                 <button
@@ -280,7 +278,7 @@ export default function AddCodeForm({ store }: { store: string }) {
                     // keyboard focus mid-submit. onSubmit's inFlight guard is
                     // what actually blocks the second submit.
                     aria-disabled={busy}
-                    className="min-h-[44px] rounded-full bg-gradient-to-r from-caramel to-orange-600 px-8 py-3 font-semibold text-white shadow transition-all hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 aria-disabled:cursor-not-allowed aria-disabled:opacity-70 dark:focus-visible:ring-offset-darkBg"
+                    className="from-caramel focus-visible:ring-caramel dark:focus-visible:ring-offset-darkBg min-h-[44px] rounded-full bg-gradient-to-r to-orange-600 px-8 py-3 font-semibold text-white shadow transition-all hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 aria-disabled:cursor-not-allowed aria-disabled:opacity-70"
                 >
                     {busy ? 'Adding…' : 'Add code'}
                 </button>

@@ -59,7 +59,7 @@ export default async function AgentGuidePage({
     if (!guide) notFound()
 
     return (
-        <main className="flex min-h-screen w-full flex-col items-center px-6 pb-20 pt-32 dark:bg-darkBg">
+        <main className="dark:bg-darkBg flex min-h-screen w-full flex-col items-center px-6 pb-20 pt-32">
             <div className="flex w-full max-w-3xl flex-col gap-8">
                 <header className="flex flex-col gap-4">
                     <p className="text-sm">
@@ -93,7 +93,7 @@ export default async function AgentGuidePage({
                     <ol className="list-decimal space-y-3 pl-5 text-sm text-gray-600 dark:text-gray-300">
                         {guide.commands.map(command => (
                             <li key={command}>
-                                <pre className="mt-1 whitespace-pre-wrap break-words rounded-xl bg-darkBg px-4 py-3 text-gray-100 ring-1 ring-white/10">
+                                <pre className="bg-darkBg mt-1 whitespace-pre-wrap break-words rounded-xl px-4 py-3 text-gray-100 ring-1 ring-white/10">
                                     <code>
                                         <UrlBreakableText text={command} />
                                     </code>
@@ -103,7 +103,7 @@ export default async function AgentGuidePage({
                         {guide.configFile && (
                             <li>
                                 Write <code>{guide.configFile.path}</code>:
-                                <pre className="mt-1 whitespace-pre-wrap break-words rounded-xl bg-darkBg px-4 py-3 text-gray-100 ring-1 ring-white/10">
+                                <pre className="bg-darkBg mt-1 whitespace-pre-wrap break-words rounded-xl px-4 py-3 text-gray-100 ring-1 ring-white/10">
                                     <code>{guide.configFile.contents}</code>
                                 </pre>
                             </li>
@@ -124,7 +124,7 @@ export default async function AgentGuidePage({
                     >
                         Verify
                     </h2>
-                    <pre className="whitespace-pre-wrap break-words rounded-xl bg-darkBg px-4 py-3 text-sm text-gray-100 ring-1 ring-white/10">
+                    <pre className="bg-darkBg whitespace-pre-wrap break-words rounded-xl px-4 py-3 text-sm text-gray-100 ring-1 ring-white/10">
                         <code>
                             <UrlBreakableText
                                 text={`curl -s "${API.verifyUrl}"`}
@@ -138,7 +138,7 @@ export default async function AgentGuidePage({
                         The machine-readable version of this page is{' '}
                         <a
                             href={PROMPT_MD_URL}
-                            className="break-words font-mono text-caramel underline hover:no-underline"
+                            className="text-caramel break-words font-mono underline hover:no-underline"
                         >
                             <UrlBreakableText text={PROMPT_MD_URL} />
                         </a>

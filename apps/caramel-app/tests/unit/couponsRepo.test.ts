@@ -50,7 +50,7 @@ let capturedValues: unknown[][] = []
 let executeRawResult = 0
 // Args every prisma.source.create() was called with (requestSource).
 let capturedSourceCreates: unknown[] = []
-// What the mocked prisma.source.findFirst / count answer (requestSource's
+// What the mocked prisma.source.findUnique / count answer (requestSource's
 // duplicate and queue-depth checks), plus the args they were asked with.
 let existingSourceRow: { id: string } | null = null
 let requestedSourceCount = 0
@@ -99,7 +99,7 @@ vi.mock('@/lib/prisma', () => {
                 capturedSourceCreates.push(arg)
                 return Promise.resolve({})
             },
-            findFirst: (arg: unknown) => {
+            findUnique: (arg: unknown) => {
                 capturedSourceFinds.push(arg)
                 return Promise.resolve(existingSourceRow)
             },

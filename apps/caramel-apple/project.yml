@@ -14,6 +14,9 @@
 # apps/caramel-extension/.output/safari-mv3, copied into the .appex by the
 # "Copy WXT Safari build" phase below. They are never committed.
 #
+# T-7842: Deals, Search and Saved are the grabcaramel.com web screens in a WKWebView
+# (App/Web); onboarding, account and alerts stay native.
+#
 # TODO(T-4905): a macOS target at parity (same bundle id, universal purchase)
 # is not wired yet; the converter-built macOS app keeps shipping from
 # release-extension.yml until it is.
@@ -25,7 +28,7 @@ options:
     iOS: '16.4' # MV3 floor, same as IOS_DEPLOYMENT_FLOOR in release-extension.yml
 settings:
   base:
-    MARKETING_VERSION: '1.5.0' # the tag apple-v1.5.0 must match this (asserted in release-apple-app.yml)
+    MARKETING_VERSION: '1.6.0' # the tag apple-v1.6.0 must match this (asserted in release-apple-app.yml)
     CURRENT_PROJECT_VERSION: '1' # overridden at archive time by the CI build-number scheme
     SWIFT_VERSION: '5.0'
     CODE_SIGN_STYLE: Automatic # DEVELOPMENT_TEAM is passed on the xcodebuild command line from the APPLE_TEAM_ID secret
@@ -133,7 +136,30 @@ targets:
           mkdir -p "${dest}"
           rsync -a --exclude='.DS_Store' "${src}/" "${dest}/"
         basedOnDependencyAnalysis: false
+  # Logic tests for the web shell's link guard (T-7842). Host-less: the pure-Foundation
+  # sources under test are compiled straight into the bundle, so the tests need no
+  # simulator app launch, no signing and no WXT build. Run by the PR job of
+  # release-apple-app.yml through the CaramelTests scheme.
+  CaramelTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests
+      - path: App/Web/AppLinkGuard.swift
+      - path: App/Web/ShellConfig.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.devino.CaramelTests
+        GENERATE_INFOPLIST_FILE: YES
 schemes:
+  CaramelTests:
+    build:
+      targets:
+        CaramelTests: all
+    test:
+      config: Debug
+      targets:
+        - CaramelTests
   Caramel:
     build:
       targets:

@@ -31,7 +31,7 @@ export default function AuthCard({
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
         >
-            <h1 className="text-3xl font-bold tracking-tight text-gray-900 dark:text-white sm:text-2xl">
+            <h1 className="text-3xl font-bold tracking-tight text-gray-900 sm:text-2xl dark:text-white">
                 {title}
             </h1>
             {subtitle ? (
@@ -56,7 +56,7 @@ export function AuthDivider({ label = 'or' }: { label?: string }) {
                 <div className="w-full border-t border-gray-200 dark:border-gray-800" />
             </div>
             <div className="relative flex justify-center">
-                <span className="bg-white px-3 text-xs font-medium uppercase tracking-wider text-gray-500 dark:bg-darkBg dark:text-gray-400">
+                <span className="dark:bg-darkBg bg-white px-3 text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
                     {label}
                 </span>
             </div>

@@ -24,7 +24,7 @@ function Bullets({ items }: { items: ReactNode[] }) {
         <ul className="mb-4 space-y-2 text-gray-600 dark:text-gray-400">
             {items.map((item, i) => (
                 <li key={i} className="flex items-start gap-3">
-                    <span className="mt-2 h-2 w-2 flex-shrink-0 rounded-full bg-caramel"></span>
+                    <span className="bg-caramel mt-2 h-2 w-2 shrink-0 rounded-full"></span>
                     <span>{item}</span>
                 </li>
             ))}
@@ -480,13 +480,13 @@ const PrivacyPolicy = () => {
                 transition={{ duration: 0.6 }}
                 className="mb-16 text-center"
             >
-                <div className="mb-6 inline-flex items-center gap-3 rounded-full bg-caramel/10 px-6 py-3 text-sm font-semibold text-caramel">
+                <div className="bg-caramel/10 text-caramel mb-6 inline-flex items-center gap-3 rounded-full px-6 py-3 text-sm font-semibold">
                     <FaShieldAlt className="h-4 w-4" />
                     Effective Date: October 14, 2026
                 </div>
                 <p className="mx-auto max-w-4xl text-lg leading-relaxed text-gray-600 dark:text-gray-300">
                     Welcome to{' '}
-                    <span className="font-semibold text-caramel">Caramel!</span>{' '}
+                    <span className="text-caramel font-semibold">Caramel!</span>{' '}
                     Caramel is made by Devino. This Privacy Policy explains what
                     information the Caramel browser extension and the
                     grabcaramel.com website collect, how we use it, where it is
@@ -504,7 +504,7 @@ const PrivacyPolicy = () => {
                         whileInView={{ opacity: 1, x: 0 }}
                         viewport={{ once: true }}
                         transition={{ duration: 0.6, delay: index * 0.1 }}
-                        className="relative overflow-hidden rounded-3xl border border-caramel/20 bg-gradient-to-br from-caramel/5 via-orange-50/30 to-caramel/5 p-8 dark:border-caramel/30 dark:from-caramel/10 dark:via-orange-900/20 dark:to-caramel/10"
+                        className="border-caramel/20 from-caramel/5 to-caramel/5 dark:border-caramel/30 dark:from-caramel/10 dark:to-caramel/10 relative overflow-hidden rounded-3xl border bg-gradient-to-br via-orange-50/30 p-8 dark:via-orange-900/20"
                     >
                         {/* Background Pattern */}
                         <div className="absolute inset-0 opacity-5">
@@ -535,11 +535,11 @@ const PrivacyPolicy = () => {
 
                         <div className="relative z-10">
                             <div className="mb-6 flex items-start gap-4">
-                                <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl bg-caramel/10 text-xl text-caramel dark:bg-caramel/20">
+                                <div className="bg-caramel/10 text-caramel dark:bg-caramel/20 flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-xl">
                                     {section.icon}
                                 </div>
                                 <div className="flex-1">
-                                    <h2 className="mb-4 text-2xl font-bold text-gray-900 dark:text-white lg:text-xl">
+                                    <h2 className="mb-4 text-2xl font-bold text-gray-900 lg:text-xl dark:text-white">
                                         {section.title}
                                     </h2>
                                     <div className="text-base leading-relaxed">
@@ -559,10 +559,10 @@ const PrivacyPolicy = () => {
                     whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true }}
                     transition={{ duration: 0.6 }}
-                    className="rounded-3xl border border-caramel/20 bg-gradient-to-br from-caramel/5 via-orange-50/30 to-caramel/5 p-8 dark:border-caramel/30 dark:from-caramel/10 dark:via-orange-900/20 dark:to-caramel/10"
+                    className="border-caramel/20 from-caramel/5 to-caramel/5 dark:border-caramel/30 dark:from-caramel/10 dark:to-caramel/10 rounded-3xl border bg-gradient-to-br via-orange-50/30 p-8 dark:via-orange-900/20"
                 >
                     <div className="flex items-start gap-4">
-                        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-caramel/10 text-xl text-caramel dark:bg-caramel/20">
+                        <div className="bg-caramel/10 text-caramel dark:bg-caramel/20 flex h-12 w-12 items-center justify-center rounded-2xl text-xl">
                             <FaEdit />
                         </div>
                         <div>
@@ -575,7 +575,7 @@ const PrivacyPolicy = () => {
                             </p>
                             <a
                                 href="mailto:hello@devino.ca"
-                                className="inline-flex items-center gap-2 rounded-md font-semibold text-caramel transition-colors duration-200 hover:text-orange-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 dark:focus-visible:ring-offset-darkBg"
+                                className="text-caramel focus-visible:ring-caramel dark:focus-visible:ring-offset-darkBg inline-flex items-center gap-2 rounded-md font-semibold transition-colors duration-200 hover:text-orange-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
                             >
                                 <FaEnvelope className="h-4 w-4" />
                                 hello@devino.ca
@@ -589,10 +589,10 @@ const PrivacyPolicy = () => {
                     whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true }}
                     transition={{ duration: 0.6, delay: 0.1 }}
-                    className="rounded-3xl border border-caramel/20 bg-gradient-to-br from-caramel/5 via-orange-50/30 to-caramel/5 p-8 dark:border-caramel/30 dark:from-caramel/10 dark:via-orange-900/20 dark:to-caramel/10"
+                    className="border-caramel/20 from-caramel/5 to-caramel/5 dark:border-caramel/30 dark:from-caramel/10 dark:to-caramel/10 rounded-3xl border bg-gradient-to-br via-orange-50/30 p-8 dark:via-orange-900/20"
                 >
                     <div className="flex items-start gap-4">
-                        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-caramel/10 text-xl text-caramel dark:bg-caramel/20">
+                        <div className="bg-caramel/10 text-caramel dark:bg-caramel/20 flex h-12 w-12 items-center justify-center rounded-2xl text-xl">
                             <FaEnvelope />
                         </div>
                         <div>
@@ -605,7 +605,7 @@ const PrivacyPolicy = () => {
                             </p>
                             <a
                                 href="mailto:hello@devino.ca"
-                                className="inline-flex items-center gap-2 rounded-md font-semibold text-caramel transition-colors duration-200 hover:text-orange-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 dark:focus-visible:ring-offset-darkBg"
+                                className="text-caramel focus-visible:ring-caramel dark:focus-visible:ring-offset-darkBg inline-flex items-center gap-2 rounded-md font-semibold transition-colors duration-200 hover:text-orange-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
                             >
                                 <FaEnvelope className="h-4 w-4" />
                                 hello@devino.ca
@@ -621,7 +621,7 @@ const PrivacyPolicy = () => {
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true }}
                 transition={{ duration: 0.6 }}
-                className="mx-auto mt-12 max-w-4xl rounded-3xl bg-gradient-to-r from-caramel to-orange-600 p-8 text-center text-white shadow-lg"
+                className="from-caramel mx-auto mt-12 max-w-4xl rounded-3xl bg-gradient-to-r to-orange-600 p-8 text-center text-white shadow-lg"
             >
                 <h3 className="mb-4 text-xl font-semibold">
                     Changes to This Privacy Policy

@@ -20,6 +20,11 @@
 //    the replacement for everything else, so no page is served at two URLs.
 //    The logic is src/lib/trailingSlash.ts (pure, unit-tested).
 //
+// 4. docs.<apex> -> <apex>/docs (301, T-7855). Caramel has no docs site: the
+//    /docs page IS the docs, and the docs host reaches the same container
+//    (DNS wildcard + a Dokploy domain). EVERY path on the docs host goes to
+//    /docs and the query string is dropped; other subdomains are untouched.
+//
 // Any combination redirects ONCE, straight to the final URL. The target origin
 // is the visitor's public Host on https (see redirectOrigin), never the
 // container's internal http origin.
@@ -39,6 +44,21 @@ function cameThroughHttpsProxy(request: NextRequest): boolean {
     const forwardedProto = request.headers.get('x-forwarded-proto') ?? ''
     return forwardedProto.split(',')[0]?.trim().toLowerCase() === 'https'
 }
+
+// docs.<apex>, split into the apex hostname and an optional :port. Applied
+// only to a Host that already passed HOST_HEADER.
+const DOCS_HOST = /^docs\.([a-z0-9.-]+?)(:\d{1,5})?$/i
+const DOCS_PATH = '/docs'
+// The ONLY apexes the docs host redirects to. The Location is never built from
+// an arbitrary Host: `Host: docs.evil.com` must not answer a cacheable 301 to
+// evil.com, and a numeric remainder (`docs.999.1`) must not reach new URL()
+// and throw. Production is pinned to its literal origin; localhost keeps the
+// dev port.
+const DOCS_PRODUCTION_ORIGIN = 'https://grabcaramel.com'
+const DOCS_APEX_HOSTNAMES: ReadonlySet<string> = new Set([
+    'grabcaramel.com',
+    'localhost',
+])
 
 // A plausible Host value (hostname or host:port). Anything else is ignored
 // rather than trusted into a Location header.
@@ -68,9 +88,33 @@ function redirectOrigin(
     return new URL(incoming.origin)
 }
 
+/**
+ * The docs host redirect target, or null when the Host is not docs.<one of
+ * DOCS_APEX_HOSTNAMES>. Production always lands on DOCS_PRODUCTION_ORIGIN;
+ * local dev (docs.localhost:port) keeps its own scheme and port.
+ */
+function docsRedirectTarget(
+    request: NextRequest,
+    hostHeader: string,
+): URL | null {
+    const match = DOCS_HOST.exec(hostHeader)
+    const apexHostname = match?.[1]?.toLowerCase()
+    if (!apexHostname || !DOCS_APEX_HOSTNAMES.has(apexHostname)) return null
+    if (apexHostname !== 'localhost') {
+        return new URL(DOCS_PATH, DOCS_PRODUCTION_ORIGIN)
+    }
+    const port = match?.[2] ?? ''
+    // `(:\d{1,5})` admits 65536-99999, which new URL() rejects by throwing.
+    if (port && Number(port.slice(1)) > 65535) return null
+    const incoming = new URL(request.url)
+    return new URL(DOCS_PATH, `${incoming.protocol}//localhost${port}`)
+}
+
 export function middleware(request: NextRequest) {
     const rawHost = request.headers.get('host') ?? ''
     const hostHeader = HOST_HEADER.test(rawHost) ? rawHost : ''
+    const docsTarget = docsRedirectTarget(request, hostHeader)
+    if (docsTarget) return NextResponse.redirect(docsTarget, 301)
     const isWww = hostHeader.startsWith('www.')
     const isPlainHttp = CF_VISITOR_PLAIN_HTTP.test(
         request.headers.get('cf-visitor') ?? '',

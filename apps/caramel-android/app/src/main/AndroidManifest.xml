@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- The only permission: every call goes to grabcaramel.com. No push, no
+    <!-- The only permission: every call goes to grabcaramel.com (the WebView and the sign-in API). No push, no
          location, no ad id. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
@@ -16,10 +16,16 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Caramel">
 
+        <!-- Requests WebView Safe Browsing (also set in code, ShellWebView.kt). It needs Google Play services, so it is a no-op on Fire; it is not a protection the app can claim there. -->
+        <meta-data
+            android:name="android.webkit.WebView.EnableSafeBrowsing"
+            android:value="true" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:launchMode="singleTop">
+            android:launchMode="singleTop"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|uiMode|locale|layoutDirection|fontScale|density">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -36,6 +42,10 @@
                     android:host="auth"
                     android:path="/callback" />
             </intent-filter>
+            <!-- TODO(T-7817): no https://grabcaramel.com App Link filter yet. It needs android:autoVerify and a
+                 /.well-known/assetlinks.json on the site (web team) naming this package and the signing
+                 certificate. MainActivity already guards any https VIEW intent (AppLinkGuard), so adding the
+                 filter later changes no code. -->
         </activity>
     </application>
 </manifest>

@@ -77,8 +77,7 @@ class SessionStore(
             mutableState.update { it.copy(username = me.username) }
         } catch (e: ApiError) {
             if (e.isUnauthorized) {
-                clearLocalSession()
-                mutableState.update { it.copy(errorMessage = "Your session expired. Please sign in again.") }
+                endExpiredSession()
             } else {
                 mutableState.update { it.copy(errorMessage = e.message) }
             }
@@ -88,16 +87,21 @@ class SessionStore(
     /**
      * Step 1: asks the server for the provider URL. Returns the URL to open in a browser tab, or
      * null with [SessionState.errorMessage] set. The answer arrives in [completeSignIn].
+     * [keepError] leaves a message already showing (a failed sign-out revoke that came first) in place
+     * instead of clearing it, and joins a new failure to it.
      */
-    suspend fun beginSignIn(provider: OAuthProvider): String? {
-        mutableState.update { it.copy(isSigningIn = true, errorMessage = null) }
+    suspend fun beginSignIn(provider: OAuthProvider, keepError: Boolean = false): String? {
+        mutableState.update { it.copy(isSigningIn = true, errorMessage = if (keepError) it.errorMessage else null) }
         return try {
             val pkce = newPkce()
             val start = api.oauthAuthorize(provider, pkce.challenge)
             pending = PendingSignIn(provider, start.state, pkce)
             start.authorizationUrl
         } catch (e: ApiError) {
-            mutableState.update { it.copy(isSigningIn = false, errorMessage = e.message) }
+            mutableState.update {
+                val message = if (keepError) listOfNotNull(it.errorMessage, e.message).joinToString("\n") else e.message
+                it.copy(isSigningIn = false, errorMessage = message)
+            }
             null
         }
     }
@@ -171,6 +175,10 @@ class SessionStore(
      * Deletes the account on the server (POST /api/account/delete, which also ends every session,
      * this one included) and clears the local session. Returns false, with the error set, when the
      * server refused: nothing was deleted and the shopper stays signed in.
+     *
+     * TODO(T-7505): reached from the native "Account & privacy" dialog (ui/CaramelApp.kt) because the web
+     * /profile has no account deletion yet (Google Play / Apple 5.1.1(v) need it in-app). Once T-7505 ships
+     * and the WebView shows that page, this can move to the web.
      */
     suspend fun deleteAccount(): Boolean {
         val bearer = token ?: return false
@@ -179,8 +187,7 @@ class SessionStore(
         } catch (e: ApiError) {
             if (e.isUnauthorized) {
                 // The session is already dead, so there is nothing left to delete under it.
-                clearLocalSession()
-                mutableState.update { it.copy(errorMessage = "Your session expired. Please sign in again.") }
+                endExpiredSession()
             } else {
                 mutableState.update { it.copy(errorMessage = "Could not delete your account: ${e.message}") }
             }
@@ -188,6 +195,12 @@ class SessionStore(
         }
         clearLocalSession()
         return true
+    }
+
+    /** The server answered 401 to this bearer (expired or revoked): clear it and ask the shopper to sign in again. */
+    suspend fun endExpiredSession() {
+        clearLocalSession()
+        mutableState.update { it.copy(errorMessage = "Your session expired. Please sign in again.") }
     }
 
     private suspend fun clearLocalSession() {

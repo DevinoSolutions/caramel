@@ -70,17 +70,17 @@ export default function GetStartedChecklist({
                     {steps.map(step => (
                         <li
                             key={step.key}
-                            className="flex items-start gap-4 xs:gap-3"
+                            className="xs:gap-3 flex items-start gap-4"
                         >
                             {step.done ? (
                                 <HiCheckCircle
                                     aria-hidden="true"
-                                    className="mt-0.5 h-6 w-6 shrink-0 text-caramel"
+                                    className="text-caramel mt-0.5 h-6 w-6 shrink-0"
                                 />
                             ) : (
                                 <span
                                     aria-hidden="true"
-                                    className="mt-0.5 h-6 w-6 shrink-0 rounded-full border-2 border-caramel/40"
+                                    className="border-caramel/40 mt-0.5 h-6 w-6 shrink-0 rounded-full border-2"
                                 />
                             )}
                             <div className="min-w-0 flex-1">

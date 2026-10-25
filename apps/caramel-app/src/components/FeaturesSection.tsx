@@ -56,8 +56,8 @@ export default function FeaturesSection() {
         <section id="features" className="relative overflow-hidden py-32">
             {/* Background Elements */}
             <div className="absolute inset-0">
-                <div className="absolute left-0 top-0 h-px w-full bg-gradient-to-r from-transparent via-caramel/20 to-transparent"></div>
-                <div className="absolute bottom-0 left-0 h-px w-full bg-gradient-to-r from-transparent via-caramel/20 to-transparent"></div>
+                <div className="via-caramel/20 absolute left-0 top-0 h-px w-full bg-gradient-to-r from-transparent to-transparent"></div>
+                <div className="via-caramel/20 absolute bottom-0 left-0 h-px w-full bg-gradient-to-r from-transparent to-transparent"></div>
             </div>
 
             <div className="relative z-10 mx-auto max-w-7xl px-6 lg:px-8">
@@ -69,10 +69,10 @@ export default function FeaturesSection() {
                     transition={{ duration: 0.6, ease: 'easeOut' }}
                     className="mb-20 text-center"
                 >
-                    <h2 className="mb-8 text-5xl font-extrabold leading-tight tracking-tight text-caramel lg:text-4xl">
+                    <h2 className="text-caramel mb-8 text-5xl font-extrabold leading-tight tracking-tight lg:text-4xl">
                         {HOME_FEATURES_COPY.heading}
                     </h2>
-                    <p className="mx-auto max-w-3xl text-xl leading-relaxed text-gray-600 dark:text-gray-300 lg:text-lg">
+                    <p className="mx-auto max-w-3xl text-xl leading-relaxed text-gray-600 lg:text-lg dark:text-gray-300">
                         {HOME_FEATURES_COPY.summary}
                     </p>
                 </m.div>
@@ -85,7 +85,7 @@ export default function FeaturesSection() {
                     transition={{ duration: 0.6, delay: 0.2, ease: 'easeOut' }}
                     className="mb-24"
                 >
-                    <div className="grid grid-cols-3 gap-8 lg:grid-cols-2 sm:grid-cols-1">
+                    <div className="grid grid-cols-3 gap-8 sm:grid-cols-1 lg:grid-cols-2">
                         {features.map((feat, index) => (
                             <m.div
                                 key={feat.title}
@@ -115,7 +115,7 @@ export default function FeaturesSection() {
                                     framer leaves an inline `transform: none` on
                                     anything it animates, which would outrank
                                     the hover-lift class. */}
-                                <div className="group relative h-full overflow-hidden rounded-2xl border border-caramel/20 bg-gradient-to-br from-caramel/5 via-orange-50/30 to-caramel/5 p-8 shadow-md transition-all duration-300 hover:-translate-y-1 hover:border-caramel/60 hover:shadow-[0_12px_32px_-8px_rgba(234,105,37,0.35)] dark:border-caramel/30 dark:from-caramel/10 dark:via-orange-900/20 dark:to-caramel/10 sm:p-6">
+                                <div className="border-caramel/20 from-caramel/5 to-caramel/5 hover:border-caramel/60 dark:border-caramel/30 dark:from-caramel/10 dark:to-caramel/10 group relative h-full overflow-hidden rounded-2xl border bg-gradient-to-br via-orange-50/30 p-8 shadow-md transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_12px_32px_-8px_rgba(234,105,37,0.35)] sm:p-6 dark:via-orange-900/20">
                                     {/* Animated Background Pattern */}
                                     <div
                                         aria-hidden="true"
@@ -158,7 +158,7 @@ export default function FeaturesSection() {
                                         transform; nesting lets both compose. */}
                                         <div
                                             aria-hidden="true"
-                                            className="mx-auto mb-6 text-6xl text-caramel transition-transform duration-300 group-hover:scale-110 xl:block lg:hidden"
+                                            className="text-caramel mx-auto mb-6 text-6xl transition-transform duration-300 group-hover:scale-110 lg:hidden xl:block"
                                         >
                                             <m.div
                                                 animate={
@@ -189,28 +189,28 @@ export default function FeaturesSection() {
                                             <div className="mb-3 flex items-center">
                                                 <span
                                                     aria-hidden="true"
-                                                    className="mr-3 flex-shrink-0 text-2xl text-caramel transition-transform duration-300 group-hover:scale-110"
+                                                    className="text-caramel mr-3 shrink-0 text-2xl transition-transform duration-300 group-hover:scale-110"
                                                 >
                                                     {feat.icon}
                                                 </span>
-                                                <h3 className="text-2xl font-bold tracking-tight text-gray-800 dark:text-white sm:text-xl">
+                                                <h3 className="text-2xl font-bold tracking-tight text-gray-800 sm:text-xl dark:text-white">
                                                     {feat.title}
                                                 </h3>
                                             </div>
-                                            <p className="ml-11 text-base leading-relaxed text-gray-600 dark:text-gray-400 sm:text-sm">
+                                            <p className="ml-11 text-base leading-relaxed text-gray-600 sm:text-sm dark:text-gray-400">
                                                 {feat.desc}
                                             </p>
                                         </div>
 
                                         {/* Desktop layout - original centered layout */}
-                                        <div className="xl:block lg:hidden">
-                                            <h3 className="mb-4 text-3xl font-bold tracking-tight text-gray-800 dark:text-white sm:text-2xl">
+                                        <div className="lg:hidden xl:block">
+                                            <h3 className="mb-4 text-3xl font-bold tracking-tight text-gray-800 sm:text-2xl dark:text-white">
                                                 {feat.title}
                                             </h3>
-                                            <p className="mb-4 text-lg leading-relaxed text-gray-600 dark:text-gray-400 sm:text-base">
+                                            <p className="mb-4 text-lg leading-relaxed text-gray-600 sm:text-base dark:text-gray-400">
                                                 {feat.desc}
                                             </p>
-                                            <p className="text-sm leading-relaxed text-gray-500 dark:text-gray-400 sm:text-xs">
+                                            <p className="text-sm leading-relaxed text-gray-500 sm:text-xs dark:text-gray-400">
                                                 {feat.detail}
                                             </p>
                                         </div>
@@ -230,7 +230,7 @@ export default function FeaturesSection() {
                     className="mb-24"
                 >
                     <div className="mb-12 text-center">
-                        <h3 className="mb-4 text-3xl font-extrabold tracking-tight text-gray-900 dark:text-white lg:text-2xl">
+                        <h3 className="mb-4 text-3xl font-extrabold tracking-tight text-gray-900 lg:text-2xl dark:text-white">
                             {HOME_FEATURES_COPY.comparisonHeading}
                         </h3>
                         <p className="mx-auto max-w-2xl text-gray-600 dark:text-gray-400">
@@ -245,10 +245,10 @@ export default function FeaturesSection() {
                             Padding here mirrors the row cells' so the two
                             column edges line up. */}
                         <div className="mb-4 grid grid-cols-2">
-                            <div className="px-6 text-sm font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400 sm:px-4">
+                            <div className="px-6 text-sm font-medium uppercase tracking-wide text-gray-500 sm:px-4 dark:text-gray-400">
                                 {HOME_FEATURES_COPY.otherHeading}
                             </div>
-                            <div className="px-6 text-sm font-semibold uppercase tracking-wide text-caramel sm:px-4">
+                            <div className="text-caramel px-6 text-sm font-semibold uppercase tracking-wide sm:px-4">
                                 {HOME_FEATURES_COPY.caramelHeading}
                             </div>
                         </div>
@@ -281,12 +281,12 @@ export default function FeaturesSection() {
                                         comparison only reads as a comparison
                                         side by side, and the labels that used
                                         to carry a stacked layout are gone. */}
-                                    <div className="grid grid-cols-2 overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm transition-all duration-300 ease-caramel hover:-translate-y-1 hover:border-caramel/60 hover:shadow-[0_12px_32px_-8px_rgba(234,105,37,0.35)] dark:border-caramel/30 dark:bg-darkSurface">
+                                    <div className="ease-caramel hover:border-caramel/60 dark:border-caramel/30 dark:bg-darkSurface grid grid-cols-2 overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_12px_32px_-8px_rgba(234,105,37,0.35)]">
                                         {/* Losing column — neutral card surface
                                             (never darker than the page) and
                                             muted so the eye lands on Caramel. */}
                                         <div className="flex items-center space-x-4 p-6 opacity-50 sm:space-x-3 sm:p-4">
-                                            <div className="flex-shrink-0">
+                                            <div className="shrink-0">
                                                 <HiXCircle
                                                     aria-hidden="true"
                                                     className="h-8 w-8 rounded-full bg-gray-400/20 text-gray-500 dark:bg-white/10 dark:text-gray-400"
@@ -301,11 +301,11 @@ export default function FeaturesSection() {
                                             at full strength. The ring is inset
                                             so the card's overflow-hidden can't
                                             clip it. */}
-                                        <div className="flex items-center space-x-4 bg-caramel/[0.08] p-6 ring-1 ring-inset ring-caramel/40 sm:space-x-3 sm:p-4">
-                                            <div className="flex-shrink-0">
+                                        <div className="bg-caramel/[0.08] ring-caramel/40 flex items-center space-x-4 p-6 ring-1 ring-inset sm:space-x-3 sm:p-4">
+                                            <div className="shrink-0">
                                                 <HiCheckCircle
                                                     aria-hidden="true"
-                                                    className="h-8 w-8 text-caramel"
+                                                    className="text-caramel h-8 w-8"
                                                 />
                                             </div>
                                             <p className="flex-1 font-medium text-gray-900 dark:text-white">
@@ -333,7 +333,7 @@ export default function FeaturesSection() {
                             delay: 0.2,
                             ease: 'easeOut',
                         }}
-                        className="rounded-3xl border border-transparent bg-gradient-to-br from-caramel to-[#c9531a] p-12 text-center text-white shadow-lg ring-1 ring-inset ring-white/20 dark:border-caramel/30 dark:bg-caramel/[0.12] dark:bg-none dark:ring-0 lg:p-8"
+                        className="from-caramel dark:border-caramel/30 dark:bg-caramel/[0.12] rounded-3xl border border-transparent bg-gradient-to-br to-[#c9531a] p-12 text-center text-white shadow-lg ring-1 ring-inset ring-white/20 lg:p-8 dark:bg-none dark:ring-0"
                     >
                         <h3 className="mb-6 text-3xl font-extrabold tracking-tight lg:text-2xl">
                             {HOME_FEATURES_COPY.browsersHeading}
@@ -341,7 +341,7 @@ export default function FeaturesSection() {
                         <p className="mx-auto mb-8 max-w-2xl text-lg leading-relaxed opacity-90">
                             {HOME_FEATURES_COPY.browsersSummary}
                         </p>
-                        <div className="flex justify-center gap-6 lg:gap-4 sm:flex-col sm:items-center sm:gap-4">
+                        <div className="flex justify-center gap-6 sm:flex-col sm:items-center sm:gap-4 lg:gap-4">
                             {browsers.map((browser, index) => (
                                 <m.div
                                     key={browser.name}
@@ -376,7 +376,7 @@ export default function FeaturesSection() {
                                                 transition: { duration: 0.2 },
                                             }}
                                             whileTap={{ scale: 0.95 }}
-                                            className="inline-flex items-center rounded-full bg-white px-8 py-4 font-semibold text-caramel shadow-md transition-all duration-200 ease-caramel hover:bg-orange-50 hover:shadow-xl md:min-w-[200px]"
+                                            className="text-caramel ease-caramel inline-flex items-center rounded-full bg-white px-8 py-4 font-semibold shadow-md transition-all duration-200 hover:bg-orange-50 hover:shadow-xl md:min-w-[200px]"
                                         >
                                             <span
                                                 aria-hidden="true"

@@ -130,7 +130,10 @@ const userIds: string[] = []
 
 async function newUser(): Promise<string> {
     const user = await prisma.user.create({
-        data: { email: `cbsave-${randomUUID()}@example.com` },
+        data: {
+            email: `cbsave-${randomUUID()}@example.com`,
+            createdAt: new Date(Date.now() - 30 * 86_400_000),
+        },
     })
     userIds.push(user.id)
     return user.id

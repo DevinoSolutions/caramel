@@ -10,7 +10,8 @@ name: Release – Android App (Kotlin + Compose, com.devino.caramel)
 #     `apple-v*` to release-apple-app.yml.
 #   - workflow_dispatch (the workflow file must exist on the default branch): same as a tag, but
 #     `dry_run` (default true) builds + signs + verifies and SKIPS the Play upload, mirroring the
-#     other Devino Android callers (marka-pwa-android release.yml).
+#     other Devino Android callers (marka-pwa-android release.yml). `internal_preview` (default
+#     false) lets a dispatch FROM main past the T-7852 gate for an INTERNAL-only build; see below.
 #
 # INTERNAL track only: nothing here promotes a build to closed/open/production. The universal APK
 # (app-release.apk) is attached as a workflow artifact for the Amazon Appstore; it is the same
@@ -36,6 +37,12 @@ name: Release – Android App (Kotlin + Compose, com.devino.caramel)
 #     there so such a reset cannot fall below codes already uploaded; if it ever happens, raise the
 #     offset in the Build step past the highest versionCode in Play Console.
 #
+# The release job also refuses to run while any TODO(T-7852) marker is left in the app source (the WebView web-session
+# handoff is unfinished: see the "Block the release" step). The only way past it is a workflow_dispatch from main with
+# `internal_preview` = true: the markers are then printed as warnings and the run is labelled INTERNAL PREVIEW. Such a
+# build (Play internal track) has signed-out web tabs and must never be submitted for review or promoted. Tag pushes
+# ignore the input and stay blocked.
+#
 # Release gating (no GitHub Environment, which is a repo-settings change): a real upload needs a
 # commit on main (dispatch from main, or a tag whose commit is an ancestor of origin/main) and a tag
 # equal to android-v<versionName>. TODO(owner): add a protected Environment with required reviewers
@@ -55,6 +62,10 @@ on:
         type: choice
         options: [completed, draft]
         default: completed
+      internal_preview:
+        description: 'true = allow an INTERNAL-only build (Play internal track) while TODO(T-7852) markers remain; web tabs are signed out. Tag pushes ignore this and stay blocked. Never submit such a build for review.'
+        type: boolean
+        default: false
   pull_request:
     paths:
       - 'apps/caramel-android/**'
@@ -76,10 +87,15 @@ jobs:
     name: Build debug, unit tests, lint
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # DevinoSolutions/artifact/upload@v1 authenticates with a GitHub OIDC token (T-7021: GitHub
+    # artifacts are blocked org-wide); a job-level block replaces the workflow-level one.
+    permissions:
+      id-token: write
+      contents: read
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: '21'
@@ -96,15 +112,33 @@ jobs:
         working-directory: ${{ env.ANDROID_DIR }}
         run: ./gradlew --no-daemon assembleRelease lintVitalRelease
 
+      # Evidence, not a gate: the build and test steps above are what fail the job, and `release`
+      # needs it. A store blip must not red a run that passed them, so this is continue-on-error;
+      # the summary below keeps the outcome reachable regardless.
+      - name: Summarize the reports
+        if: always()
+        run: |
+          {
+            echo '### Android verify reports'
+            echo
+            echo "Unit-test result files: $(find "$ANDROID_DIR/app/build/test-results" -name '*.xml' 2>/dev/null | wc -l)"
+            echo "Lint/HTML report files: $(find "$ANDROID_DIR/app/build/reports" -type f 2>/dev/null | wc -l)"
+            echo
+            echo 'Full reports: artifact android-verify-reports in the self-hosted store (3 days).'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload reports
         if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        continue-on-error: true
+        uses: DevinoSolutions/artifact/upload@v1
         with:
           name: android-verify-reports
           path: |
             ${{ env.ANDROID_DIR }}/app/build/reports
             ${{ env.ANDROID_DIR }}/app/build/test-results
           if-no-files-found: ignore
+          # T-7021: org artifact quota; reports are only read on the run that produced them.
+          retention-days: 3
 
   release:
     name: Sign release AAB + APK, upload to Play internal unless dry run
@@ -112,6 +146,11 @@ jobs:
     needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    # The post-Play evidence upload uses DevinoSolutions/artifact (GitHub OIDC token); a job-level
+    # block replaces the workflow-level one.
+    permissions:
+      id-token: write
+      contents: read
     env:
       UPLOAD_TO_PLAY: ${{ github.event_name == 'push' || inputs.dry_run == false }}
       PLAY_STATUS: ${{ inputs.play_status || 'completed' }}
@@ -137,9 +176,42 @@ jobs:
           fi
           exit $missing
 
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # the tag-is-on-main check needs history
+
+      # The 1.6 shell shows grabcaramel.com in a WebView with NO web session until the handoff
+      # (POST /api/app/web-session/handoff, T-7852) is wired: the Saved and Account tabs bounce to
+      # Deals. Every TODO(T-7852) marker in the app source is part of that unfinished work, so a
+      # release build stops while any is left. Runs only in this release job (never on PRs).
+      # Passes with warnings ONLY for a workflow_dispatch from main with internal_preview = true.
+      # Tag pushes, a plain dispatch and a dispatch from a branch all fail exactly as before.
+      - name: Block the release while the web-session handoff (T-7852) is unfinished
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INTERNAL_PREVIEW: ${{ inputs.internal_preview }}
+          REF: ${{ github.ref }}
+        run: |
+          markers="$(grep -rn 'TODO(T-7852)' "$ANDROID_DIR/app/src/main" || true)"
+          if [ -n "$markers" ]; then
+            if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$INTERNAL_PREVIEW" = "true" ] && [ "$REF" = "refs/heads/main" ]; then
+              while IFS= read -r line; do echo "::warning::$line"; done <<<"$markers"
+              echo "::warning::INTERNAL PREVIEW build: the Android WebView shell has no web session yet (T-7852 unfinished), so the Saved and Account tabs are signed out. Play internal track only; never submit or promote this build."
+              {
+                echo "### INTERNAL PREVIEW — not for Play production submission; T-7852 markers present"
+                echo
+                echo "The web tabs of this build are signed out. Markers still present:"
+                echo
+                echo '```'
+                echo "$markers"
+                echo '```'
+              } >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::error::Release stopped on purpose: the Android WebView shell has no web session yet, so the Saved and Account tabs do not work for signed-in users. T-7852 (POST /api/app/web-session/handoff, wired into MainActivity.handleCallback and AppContainer.webSessionActive) is unfinished. Remove the TODO(T-7852) markers once it ships, then re-tag with a new tag. Markers still present:"
+              echo "$markers"
+              exit 1
+            fi
+          fi
 
       - name: Release gating (main only for real uploads; tag must match versionName)
         env:
@@ -164,7 +236,7 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: '21'
@@ -197,16 +269,6 @@ jobs:
           apksigner="$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)"
           "$apksigner" verify --print-certs apk/release/app-release.apk
 
-      - name: Upload AAB + universal APK
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: caramel-android-release
-          path: |
-            ${{ env.ANDROID_DIR }}/app/build/outputs/bundle/release/app-release.aab
-            ${{ env.ANDROID_DIR }}/app/build/outputs/apk/release/app-release.apk
-            ${{ env.ANDROID_DIR }}/app/build/outputs/mapping/release/mapping.txt
-          if-no-files-found: error
-
       - name: Upload to Play internal track
         if: env.UPLOAD_TO_PLAY == 'true'
         uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5 # v1.1.5
@@ -217,6 +279,37 @@ jobs:
           track: internal
           status: ${{ env.PLAY_STATUS }}
           mappingFile: ${{ env.ANDROID_DIR }}/app/build/outputs/mapping/release/mapping.txt
+
+      # After the Play upload on purpose: this copy is a convenience (the AAB of record is the one
+      # on the Play internal track), so no store or quota problem may stop or fail the release. It
+      # goes to the self-hosted store (T-7021: GitHub artifacts are blocked org-wide). The hashes in
+      # the summary are the evidence that survives even when the upload does not.
+      - name: Summarize the signed outputs
+        if: ${{ !cancelled() }}
+        working-directory: ${{ env.ANDROID_DIR }}/app/build/outputs
+        run: |
+          {
+            echo '### Android release outputs'
+            echo
+            for f in bundle/release/app-release.aab apk/release/app-release.apk mapping/release/mapping.txt; do
+              if [ -f "$f" ]; then echo "- \`$f\`: $(wc -c < "$f") bytes, sha256 $(sha256sum "$f" | cut -d' ' -f1)"; else echo "- \`$f\`: missing"; fi
+            done
+            echo
+            echo "Play upload: $UPLOAD_TO_PLAY"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload AAB + universal APK (evidence, non-blocking)
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: DevinoSolutions/artifact/upload@v1
+        with:
+          name: caramel-android-release
+          path: |
+            ${{ env.ANDROID_DIR }}/app/build/outputs/bundle/release/app-release.aab
+            ${{ env.ANDROID_DIR }}/app/build/outputs/apk/release/app-release.apk
+            ${{ env.ANDROID_DIR }}/app/build/outputs/mapping/release/mapping.txt
+          if-no-files-found: warn
+          retention-days: 3
 
       - name: Remove the keystore
         if: always()

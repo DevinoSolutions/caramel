@@ -12,7 +12,13 @@ import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 
-export default function VerifyPageClient({ signup }: { signup?: string }) {
+export default function VerifyPageClient({
+    signup,
+    returnPath = '/',
+}: {
+    signup?: string
+    returnPath?: string
+}) {
     const [email, setEmail] = useState('')
     const [resendingEmail, setResendingEmail] = useState(false)
     const isNewSignup = signup === 'success'
@@ -41,7 +47,10 @@ export default function VerifyPageClient({ signup }: { signup?: string }) {
         try {
             const result = await authClient.sendVerificationEmail({
                 email: email.trim().toLowerCase(),
-                callbackURL: '/login?verified=true',
+                callbackURL:
+                    returnPath !== '/'
+                        ? `/login?verified=true&next=${encodeURIComponent(returnPath)}`
+                        : '/login?verified=true',
             })
             // The Better Auth client RETURNS { error } instead of throwing, so
             // the try/catch alone never saw a failure: every call reported

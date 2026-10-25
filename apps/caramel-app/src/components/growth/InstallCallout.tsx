@@ -46,7 +46,7 @@ export default function InstallCallout({
                 hydration — the e2e waits on it before asserting the link. */}
             <div
                 data-surface={surface}
-                className="mt-6 flex items-center justify-between gap-4 rounded-3xl border border-caramel/20 bg-white/80 px-6 py-4 shadow-sm dark:border-caramel/30 dark:bg-darkSurface sm:flex-col sm:text-center"
+                className="border-caramel/20 dark:border-caramel/30 dark:bg-darkSurface mt-6 flex items-center justify-between gap-4 rounded-3xl border bg-white/80 px-6 py-4 shadow-sm sm:flex-col sm:text-center"
             >
                 <p className="text-sm text-gray-700 dark:text-gray-300">
                     <span className="font-semibold text-gray-900 dark:text-white">
@@ -70,7 +70,7 @@ export default function InstallCallout({
                                 placement,
                             })
                         }
-                        className="shrink-0 rounded-full bg-gradient-to-r from-caramel to-orange-600 px-5 py-2.5 text-sm font-semibold text-white shadow-md transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 dark:focus-visible:ring-offset-darkSurface"
+                        className="from-caramel focus-visible:ring-caramel dark:focus-visible:ring-offset-darkSurface shrink-0 rounded-full bg-gradient-to-r to-orange-600 px-5 py-2.5 text-sm font-semibold text-white shadow-md transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
                     >
                         Add to {listing.browserLabel}
                     </a>
@@ -84,7 +84,7 @@ export default function InstallCallout({
                                 placement,
                             })
                         }
-                        className="shrink-0 rounded-full bg-gradient-to-r from-caramel to-orange-600 px-5 py-2.5 text-sm font-semibold text-white shadow-md transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 dark:focus-visible:ring-offset-darkSurface"
+                        className="from-caramel focus-visible:ring-caramel dark:focus-visible:ring-offset-darkSurface shrink-0 rounded-full bg-gradient-to-r to-orange-600 px-5 py-2.5 text-sm font-semibold text-white shadow-md transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
                     >
                         Get Caramel
                     </Link>

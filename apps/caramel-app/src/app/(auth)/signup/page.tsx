@@ -1,3 +1,4 @@
+import { safeReturnPath } from '@/lib/auth/safeReturnPath'
 import { BASE_URL } from '@/lib/env.client'
 import type { Metadata } from 'next'
 import SignupPageClient from './SignupPageClient'
@@ -44,6 +45,12 @@ export const metadata: Metadata = {
     },
 }
 
-export default function Signup() {
-    return <SignupPageClient />
+export default async function Signup({
+    searchParams,
+}: {
+    searchParams: Promise<{ next?: string }>
+}) {
+    const { next } = await searchParams
+    const returnPath = safeReturnPath(next)
+    return <SignupPageClient returnPath={returnPath} />
 }

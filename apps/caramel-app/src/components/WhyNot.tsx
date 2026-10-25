@@ -63,7 +63,7 @@ export default function WhyNotHoneySection() {
             {/* Background Elements */}
             <div className="absolute inset-0">
                 <div className="absolute left-0 top-0 h-px w-full bg-gradient-to-r from-transparent via-red-500/20 to-transparent"></div>
-                <div className="absolute bottom-0 left-0 h-px w-full bg-gradient-to-r from-transparent via-caramel/20 to-transparent"></div>
+                <div className="via-caramel/20 absolute bottom-0 left-0 h-px w-full bg-gradient-to-r from-transparent to-transparent"></div>
                 {/* Floating warning elements */}
                 <m.div
                     className="left-1/6 absolute top-1/4 h-24 w-24 rounded-full bg-red-500/5 blur-xl"
@@ -109,17 +109,17 @@ export default function WhyNotHoneySection() {
                     transition={{ duration: 0.6, ease: 'easeOut' }}
                     className="mb-20 text-center"
                 >
-                    <h2 className="mb-8 text-5xl font-extrabold leading-tight tracking-tight text-caramel lg:text-4xl">
+                    <h2 className="text-caramel mb-8 text-5xl font-extrabold leading-tight tracking-tight lg:text-4xl">
                         {HOME_HONEY_COPY.heading}
                     </h2>
-                    <p className="mx-auto mb-8 max-w-4xl text-xl leading-relaxed text-gray-600 dark:text-gray-300 lg:text-lg">
+                    <p className="mx-auto mb-8 max-w-4xl text-xl leading-relaxed text-gray-600 lg:text-lg dark:text-gray-300">
                         Reports show{' '}
                         <span className="font-semibold text-red-600">
                             Honey and many other extensions override affiliate
                             links
                         </span>{' '}
                         — cutting creatorsʼ revenue and your savings.{' '}
-                        <span className="font-semibold text-caramel">
+                        <span className="text-caramel font-semibold">
                             Caramel is the transparent, open-source fix.
                         </span>{' '}
                         <span className="font-semibold">Watch why →</span>
@@ -157,7 +157,7 @@ export default function WhyNotHoneySection() {
                                     />
                                     <span
                                         aria-hidden="true"
-                                        className="absolute inset-0 bg-darkerBg/55"
+                                        className="bg-darkerBg/55 absolute inset-0"
                                     />
                                     <span className="absolute inset-0 flex items-center justify-center">
                                         <m.span
@@ -165,7 +165,7 @@ export default function WhyNotHoneySection() {
                                                 hover: { scale: 1.08 },
                                                 tap: { scale: 0.95 },
                                             }}
-                                            className="flex h-20 w-20 items-center justify-center rounded-full bg-caramel shadow-lg shadow-black/40 sm:h-16 sm:w-16"
+                                            className="bg-caramel flex h-20 w-20 items-center justify-center rounded-full shadow-lg shadow-black/40 sm:h-16 sm:w-16"
                                         >
                                             <FaPlay
                                                 aria-hidden="true"
@@ -173,7 +173,7 @@ export default function WhyNotHoneySection() {
                                             />
                                         </m.span>
                                     </span>
-                                    <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-darkerBg/85 to-transparent px-6 pb-4 pt-10 text-left text-sm font-semibold text-white sm:px-4 sm:text-xs">
+                                    <span className="from-darkerBg/85 absolute inset-x-0 bottom-0 bg-gradient-to-t to-transparent px-6 pb-4 pt-10 text-left text-sm font-semibold text-white sm:px-4 sm:text-xs">
                                         {VIDEO_TITLE}
                                     </span>
                                 </m.button>
@@ -192,7 +192,7 @@ export default function WhyNotHoneySection() {
                             href={`https://www.youtube.com/watch?v=${VIDEO_ID}`}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="mt-4 inline-flex items-center gap-2 text-sm text-gray-600 transition-colors duration-200 hover:text-caramel dark:text-gray-400"
+                            className="hover:text-caramel mt-4 inline-flex items-center gap-2 text-sm text-gray-600 transition-colors duration-200 dark:text-gray-400"
                             whileHover={{ scale: 1.02 }}
                         >
                             <FaExternalLinkAlt aria-hidden="true" />
@@ -214,7 +214,7 @@ export default function WhyNotHoneySection() {
                     className="mb-24"
                 >
                     <div className="mb-12 text-center">
-                        <h3 className="mb-4 text-3xl font-extrabold tracking-tight text-gray-900 dark:text-white lg:text-2xl">
+                        <h3 className="mb-4 text-3xl font-extrabold tracking-tight text-gray-900 lg:text-2xl dark:text-white">
                             {HOME_HONEY_COPY.comparisonHeading}
                         </h3>
                         <p className="mx-auto max-w-2xl text-gray-600 dark:text-gray-400">
@@ -226,10 +226,10 @@ export default function WhyNotHoneySection() {
                         {/* ONE column header for the whole table; padding
                             mirrors the row cells' so the edges line up. */}
                         <div className="mb-4 grid grid-cols-2">
-                            <div className="px-6 text-sm font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400 sm:px-4">
+                            <div className="px-6 text-sm font-medium uppercase tracking-wide text-gray-500 sm:px-4 dark:text-gray-400">
                                 Honey
                             </div>
-                            <div className="px-6 text-sm font-semibold uppercase tracking-wide text-caramel sm:px-4">
+                            <div className="text-caramel px-6 text-sm font-semibold uppercase tracking-wide sm:px-4">
                                 Caramel
                             </div>
                         </div>
@@ -261,13 +261,13 @@ export default function WhyNotHoneySection() {
                                             transform on the motion wrapper,
                                             which would beat any Tailwind
                                             hover translate placed there. */}
-                                        <div className="grid grid-cols-2 overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm transition-all duration-300 ease-caramel hover:-translate-y-1 hover:border-caramel/60 hover:shadow-[0_12px_32px_-8px_rgba(234,105,37,0.35)] dark:border-caramel/30 dark:bg-darkSurface">
+                                        <div className="ease-caramel hover:border-caramel/60 dark:border-caramel/30 dark:bg-darkSurface grid grid-cols-2 overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_12px_32px_-8px_rgba(234,105,37,0.35)]">
                                             {/* Losing column — muted so the
                                                 eye lands on Caramel. */}
                                             <div className="flex items-start gap-4 p-6 opacity-50 sm:gap-3 sm:p-4">
                                                 <span
                                                     aria-hidden="true"
-                                                    className="mt-1 flex-shrink-0 text-xl text-red-500"
+                                                    className="mt-1 shrink-0 text-xl text-red-500"
                                                 >
                                                     {problem.icon}
                                                 </span>
@@ -283,10 +283,10 @@ export default function WhyNotHoneySection() {
 
                                             {/* Winning column — inset ring so
                                                 overflow-hidden can't clip it. */}
-                                            <div className="flex items-start gap-4 bg-caramel/[0.08] p-6 ring-1 ring-inset ring-caramel/40 sm:gap-3 sm:p-4">
+                                            <div className="bg-caramel/[0.08] ring-caramel/40 flex items-start gap-4 p-6 ring-1 ring-inset sm:gap-3 sm:p-4">
                                                 <HiCheckCircle
                                                     aria-hidden="true"
-                                                    className="mt-1 h-6 w-6 flex-shrink-0 text-caramel"
+                                                    className="text-caramel mt-1 h-6 w-6 shrink-0"
                                                 />
                                                 <div>
                                                     <h4 className="mb-1 font-bold text-gray-900 dark:text-white">
@@ -311,7 +311,7 @@ export default function WhyNotHoneySection() {
                     whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true }}
                     transition={{ duration: 0.6, delay: 0.15, ease: 'easeOut' }}
-                    className="rounded-3xl bg-gradient-to-br from-caramel to-[#c9531a] p-12 text-center text-white shadow-2xl ring-1 ring-inset ring-white/20 dark:border dark:border-caramel/30 dark:bg-caramel/[0.12] dark:bg-none dark:ring-0 lg:p-8 sm:p-6"
+                    className="from-caramel dark:border-caramel/30 dark:bg-caramel/[0.12] rounded-3xl bg-gradient-to-br to-[#c9531a] p-12 text-center text-white shadow-2xl ring-1 ring-inset ring-white/20 sm:p-6 lg:p-8 dark:border dark:bg-none dark:ring-0"
                 >
                     <h3 className="mb-6 text-3xl font-semibold tracking-tight text-white lg:text-2xl">
                         {HOME_HONEY_COPY.switchHeading}
@@ -323,7 +323,7 @@ export default function WhyNotHoneySection() {
                         <InstallSurfaceGate className="contents">
                             <m.a
                                 href="#install-extension"
-                                className="inline-flex items-center rounded-full bg-white px-8 py-4 font-semibold text-caramel shadow-md transition-all duration-200 hover:bg-orange-50 hover:shadow-xl"
+                                className="text-caramel inline-flex items-center rounded-full bg-white px-8 py-4 font-semibold shadow-md transition-all duration-200 hover:bg-orange-50 hover:shadow-xl"
                                 whileHover={{
                                     scale: 1.05,
                                     transition: { duration: 0.2 },
@@ -335,7 +335,7 @@ export default function WhyNotHoneySection() {
                         </InstallSurfaceGate>
                         <m.a
                             href="#features"
-                            className="inline-flex items-center rounded-full border-2 border-white bg-transparent px-8 py-4 font-semibold text-white transition-all duration-200 hover:bg-white hover:text-caramel"
+                            className="hover:text-caramel inline-flex items-center rounded-full border-2 border-white bg-transparent px-8 py-4 font-semibold text-white transition-all duration-200 hover:bg-white"
                             whileHover={{
                                 scale: 1.05,
                                 transition: { duration: 0.2 },

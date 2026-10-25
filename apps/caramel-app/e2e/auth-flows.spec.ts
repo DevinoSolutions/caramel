@@ -456,7 +456,12 @@ test.describe('Auth Flows — Protected Routes', () => {
         )
 
         // The stubbed 500 is reported by the page and must not reach prod Sentry.
-        await page.route('**/monitoring**', route =>
+        // The browser posts envelopes straight to the self-hosted DSN
+        // (<host>/api/<projectId>/envelope/): @sentry/nextjs applies the
+        // /monitoring tunnelRoute only to SaaS *.ingest.sentry.io DSNs, so a
+        // /monitoring-only stub let CARAMEL-N events through (T-7525). Both
+        // forms are blocked so the stub survives a DSN move.
+        await page.route(/\/api\/\d+\/envelope\/|\/monitoring(\?|$)/, route =>
             route.fulfill({ status: 200, body: '' }),
         )
 

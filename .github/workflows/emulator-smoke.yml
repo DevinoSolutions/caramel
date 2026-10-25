@@ -1,0 +1,370 @@
+# Emulator smoke for the native Android shell (apps/caramel-android, com.devino.caramel).
+#
+# What it proves: the debug APK builds, installs on a real headless Android emulator (KVM, API 35),
+# and the emulator resolves grabcaramel.com BEFORE the app launches. After the settle window the
+# assertions are, in order: the process is still alive; logcat holds no FATAL EXCEPTION for the app;
+# a uiautomator dump shows the real Deals page ("Coupon Codes" heading) and neither "Something went
+# wrong" nor "net::ERR_" (so a WebView error page can no longer pass); and the captured screenshot
+# (smoke.png) is a non-trivial rendered screen rather than a blank frame. Nothing more.
+#
+# What it does NOT prove: any physical-device behaviour (real GPU, OEM skins, Play Services, push,
+# biometrics, WebView versions shipped on actual phones). There is no physical-device run.
+#
+# Why it is inlined instead of calling the org reusable (DevinoSolutions/.github
+# pwa-emulator-smoke.yml): this repo is PUBLIC and that reusable lives in a PRIVATE repo, which a
+# public repo cannot call ("workflow was not found" at startup). The org's self-hosted KVM runner
+# group (ubuntu-devino-kvm) also excludes public repositories. So this is ONE self-contained job on
+# a GitHub-hosted runner. The boot recipe (AVD config, emulator flags, boot wait, install, launch,
+# alive and screenshot assertions) is copied from that reusable on purpose, so the two stay
+# comparable, EXCEPT two deliberate differences: the wait for the device is bounded (a dead emulator
+# fails fast with its log instead of hanging until the job timeout) and the AVD directory is
+# discovered (avdmanager wrote to ~/.config/.android/avd on this runner image). On top of the
+# reusable's checks this job also asserts the installed versionName equals build.gradle.kts and that
+# logcat holds no FATAL EXCEPTION for the app. There is no APK hand-off through the org MinIO store:
+# the same job builds and boots.
+# TODO: replace this job with a call to DevinoSolutions/.github pwa-emulator-smoke.yml@main if that
+# reusable ever becomes callable from this repo (kit-path apps/caramel-android, android-path '.').
+# TODO: wire this as a nightly schedule or a required check once the KVM path has proven stable
+# (it runs only on edits to this file today, so an app regression is not caught by it).
+#
+# Triggers:
+#   - pull_request touching ONLY this file. It deliberately does not watch apps/caramel-android/**:
+#     every dependabot bump would burn a ~15-minute KVM emulator boot.
+#   - workflow_dispatch, no inputs.
+#
+# Evidence: smoke.png is uploaded through DevinoSolutions/artifact (the org is over its GitHub
+# artifact quota, so actions/upload-artifact is not used), and ALWAYS also written as base64 to the
+# job summary and the log. Recover it from the log with:
+# `gh run view --log` also echoes the step's own source, so match the TIMESTAMPED marker lines:
+#   gh run view <id> --log | sed -n '/Z BEGIN SMOKE PNG/,/Z END SMOKE PNG/p' \
+#     | sed -E 's/.*Z base64\| //' | grep -v 'SMOKE PNG' | tr -d '\r' | base64 -d > smoke.png
+name: Emulator smoke (Android shell)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/emulator-smoke.yml'
+
+concurrency:
+  group: emulator-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  # REQUIRED: DevinoSolutions/artifact authenticates to the org MinIO with this job's OIDC token.
+  id-token: write
+
+env:
+  ANDROID_DIR: apps/caramel-android
+  APP_ID: com.devino.caramel
+  APK_REL: apps/caramel-android/app/build/outputs/apk/debug/app-debug.apk
+  SYSTEM_IMAGE: 'system-images;android-35;google_apis;x86_64'
+  LAUNCH_SETTLE_SECONDS: '20'
+  SCREENSHOT_MIN_BYTES: '50000'
+
+jobs:
+  smoke:
+    name: smoke
+    # 24.04 pinned (not -latest): the image the emulator-on-KVM recipe is proven on.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # GitHub-hosted Linux runners have /dev/kvm but not world-accessible; the standard udev rule
+      # opens it. The check afterwards is the reusable's fail-fast guard.
+      - name: Enable /dev/kvm and assert it is usable (fail fast — everything below needs hardware accel)
+        run: |
+          set -euo pipefail
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -la /dev/kvm
+          (exec 3<>/dev/kvm) && echo "KVM_OK" || { echo "::error::/dev/kvm not openable on this runner"; exit 1; }
+
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: assembleDebug
+        working-directory: ${{ env.ANDROID_DIR }}
+        run: ./gradlew --no-daemon assembleDebug
+
+      - name: Assert the debug APK exists
+        run: |
+          if [ ! -s "$APK_REL" ]; then
+            echo "::error::assembleDebug produced no $APK_REL"
+            exit 1
+          fi
+          echo "debug APK: $(stat -c%s "$APK_REL") bytes"
+
+      # The runner's preinstalled SDK ($ANDROID_HOME); only the emulator and the system image are added.
+      - name: Install the emulator and system image
+        run: |
+          set -euo pipefail
+          SM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SM" --licenses >/dev/null 2>&1 || true # `yes` dies on SIGPIPE; real license faults surface below
+          "$SM" --install "platform-tools" "emulator" "$SYSTEM_IMAGE" >/dev/null
+          {
+            echo "$ANDROID_HOME/platform-tools"
+            echo "$ANDROID_HOME/emulator"
+          } >> "$GITHUB_PATH"
+
+      - name: Create AVD
+        run: |
+          set -euo pipefail
+          echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd \
+            -n smoke -k "$SYSTEM_IMAGE" --force
+          # Where avdmanager writes depends on ANDROID_AVD_HOME / XDG on the runner image, so find the
+          # file it actually created instead of assuming ~/.android/avd.
+          CFG=$(find "$HOME" -path '*/smoke.avd/config.ini' -print -quit)
+          [ -n "$CFG" ] || { echo "::error::avdmanager created no smoke.avd/config.ini under $HOME"; exit 1; }
+          echo "AVD config: $CFG"
+          # avdmanager honours XDG (~/.config/.android/avd here) but the emulator only looks in
+          # $ANDROID_AVD_HOME, $ANDROID_SDK_HOME/avd and ~/.android/avd, so point it at the real dir.
+          echo "ANDROID_AVD_HOME=$(dirname "$(dirname "$CFG")")" >> "$GITHUB_ENV"
+          # A default AVD boots at a tiny skin; pin a phone-shaped screen so the
+          # screenshot is real evidence. printf rather than a heredoc: YAML
+          # forbids tabs, so <<- cannot strip this block's indentation.
+          printf '%s\n' \
+            'hw.lcd.width=1080' \
+            'hw.lcd.height=1920' \
+            'hw.lcd.density=420' \
+            'hw.ramSize=3072' \
+            'hw.gpu.enabled=yes' \
+            'hw.gpu.mode=swiftshader_indirect' \
+            'hw.keyboard=yes' \
+            'disk.dataPartition.size=4096M' >> "$CFG"
+          cat "$CFG"
+
+      - name: Boot emulator headless and wait for sys.boot_completed
+        run: |
+          set -euo pipefail
+          adb start-server
+          nohup "$ANDROID_HOME/emulator/emulator" -avd smoke \
+            -no-window -no-audio -no-boot-anim -no-snapshot -no-metrics \
+            -gpu swiftshader_indirect -camera-back none -camera-front none \
+            -accel on -netdelay none -netspeed full > "$RUNNER_TEMP/emulator.log" 2>&1 &
+          EMU_PID=$!
+          # Unlike the reusable, bound the wait and notice a dead emulator: a bare
+          # `adb wait-for-device` blocks until the job timeout when the emulator exits at start.
+          sleep 10
+          if ! kill -0 "$EMU_PID" 2>/dev/null; then
+            echo "::error::emulator process exited right after start"
+            cat "$RUNNER_TEMP/emulator.log" || true
+            exit 1
+          fi
+          timeout 300 adb wait-for-device || {
+            echo "::error::no emulator device appeared within 5 minutes"
+            cat "$RUNNER_TEMP/emulator.log" || true
+            exit 1
+          }
+          for i in $(seq 1 120); do
+            BOOTED=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)
+            if [ "$BOOTED" = "1" ]; then echo "Booted after ~$((i*5))s"; break; fi
+            if [ "$i" = "120" ]; then
+              echo "::error::Emulator did not report sys.boot_completed within 10 minutes"
+              tail -60 "$RUNNER_TEMP/emulator.log" || true
+              exit 1
+            fi
+            sleep 5
+          done
+          adb shell input keyevent 82 || true # dismiss the lock screen
+          adb shell settings put global window_animation_scale 0 || true
+          adb shell settings put global transition_animation_scale 0 || true
+          adb shell settings put global animator_duration_scale 0 || true
+
+      - name: Install the debug APK
+        run: |
+          set -euo pipefail
+          [ -f "$APK_REL" ] || { echo "::error::Debug APK not found at $APK_REL"; exit 1; }
+          adb install -r "$APK_REL"
+          # Capture the package list into a variable before matching. Piping
+          # `pm list packages` straight into `grep -q` makes grep close the pipe
+          # on its first match, `tr` dies of SIGPIPE (141), and `pipefail` reds
+          # the step even though the install said Success.
+          PKGS=$(adb shell pm list packages | tr -d '\r')
+          case "$PKGS" in
+            *"package:$APP_ID"*) echo "$APP_ID present in pm list packages." ;;
+            *) echo "::error::$APP_ID is not installed after adb install"; exit 1 ;;
+          esac
+          # The smoked build must be the one the source says it is (same read as release-android-app.yml).
+          EXPECTED=$(sed -n 's/^ *versionName = "\(.*\)"$/\1/p' "$ANDROID_DIR/app/build.gradle.kts")
+          [ -n "$EXPECTED" ] || { echo "::error::Could not read versionName from build.gradle.kts."; exit 1; }
+          DUMP=$(adb shell dumpsys package "$APP_ID" | tr -d '\r')
+          INSTALLED=$(printf '%s\n' "$DUMP" | sed -n 's/^ *versionName=//p' | head -n 1)
+          echo "installed: versionName=$INSTALLED (build.gradle.kts: $EXPECTED)"
+          if [ "$INSTALLED" != "$EXPECTED" ]; then
+            echo "::error::installed versionName '$INSTALLED' differs from build.gradle.kts '$EXPECTED'"
+            exit 1
+          fi
+
+      # The emulator reports sys.boot_completed well before its user-mode network resolves names (run
+      # 40140700725 launched the app into net::ERR_NAME_NOT_RESOLVED and still passed). Wait until the
+      # guest itself resolves the host the app loads. Android has no nslookup; toybox ping resolves
+      # first and prints "PING <host> (<addr>)" or "ping: unknown host", so a resolved address is the
+      # signal, whether or not the echo reply comes back (ICMP through the emulator's NAT is not
+      # reliable; name resolution is what the WebView needs).
+      - name: Wait for the emulator to resolve grabcaramel.com
+        env:
+          DNS_HOST: grabcaramel.com
+          DNS_WAIT_SECONDS: '120'
+        run: |
+          set -uo pipefail
+          deadline=$((SECONDS + DNS_WAIT_SECONDS))
+          while :; do
+            OUT=$(adb shell "ping -c1 -W2 $DNS_HOST" 2>&1 | tr -d '\r' || true)
+            echo "ping $DNS_HOST -> $(printf '%s' "$OUT" | head -n 2 | tr '\n' ' ')"
+            if printf '%s\n' "$OUT" | grep -Eq "^PING $DNS_HOST \([0-9a-fA-F.:]+\)"; then
+              echo "emulator resolves $DNS_HOST."
+              break
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error::emulator could not resolve $DNS_HOST within ${DNS_WAIT_SECONDS}s; last ping output: $OUT"
+              echo "net.dns1=$(adb shell getprop net.dns1 | tr -d '\r')  net.dns2=$(adb shell getprop net.dns2 | tr -d '\r')"
+              tail -n 40 "$RUNNER_TEMP/emulator.log" || true
+              exit 1
+            fi
+            sleep 5
+          done
+
+      - name: Launch the app and let it settle
+        run: |
+          set -euo pipefail
+          adb logcat -c || true
+          adb shell monkey -p "$APP_ID" -c android.intent.category.LAUNCHER 1
+          sleep "$LAUNCH_SETTLE_SECONDS"
+          adb shell pidof "$APP_ID" | tr -d '\r' > "$RUNNER_TEMP/pid.txt" || true
+          echo "pidof output: $(cat "$RUNNER_TEMP/pid.txt")"
+
+      - name: Assert the app process is alive (THE smoke assertion)
+        run: |
+          set -euo pipefail
+          PID=$(tr -d '[:space:]' < "$RUNNER_TEMP/pid.txt" 2>/dev/null || true)
+          if [ -z "$PID" ]; then
+            echo "::error::$APP_ID is not running ${LAUNCH_SETTLE_SECONDS}s after launch — the shell crashed or never started."
+            echo "---- logcat (crash/error lines) ----"
+            adb logcat -d -t 400 2>/dev/null | grep -Ei "FATAL|AndroidRuntime|ActivityManager.*(die|crash)|$APP_ID" || true
+            exit 1
+          fi
+          echo "$APP_ID alive with pid $PID."
+          # Late-crash / crash-dialog guard: the process can be alive while a crash was logged.
+          # Keep a FATAL EXCEPTION block (the marker plus 8 lines) only when it names this package.
+          CRASH=$(adb logcat -d 2>/dev/null | tr -d '\r' | awk -v app="$APP_ID" '
+            function flush() { if (blk != "" && index(blk, "Process: " app) > 0) printf "%s", blk }
+            /FATAL EXCEPTION/ { flush(); blk = $0 "\n"; n = 1; next }
+            n > 0 && n < 9 { blk = blk $0 "\n"; n++ }
+            END { flush() }')
+          if [ -n "$CRASH" ]; then
+            echo "::error::logcat holds a FATAL EXCEPTION for $APP_ID"
+            printf '%s\n' "$CRASH"
+            exit 1
+          fi
+          echo "no FATAL EXCEPTION for $APP_ID in logcat."
+
+      # The alive check cannot see a WebView stuck on an error page (a dead network leaves the
+      # process running). uiautomator dumps the accessibility tree: the shell's own "Something went
+      # wrong" banner is native text, and the page's text comes through the WebView's accessibility
+      # nodes. PASS needs the body heading "Today's Coupon Codes" of grabcaramel.com/coupons, not the
+      # document title ("Coupon Codes & Promo Codes ..."), which also sits in the dump;
+      # either error marker FAILS at once. The loop only covers a slow first paint after the DNS wait.
+      # If a run shows the heading is on screen but missing from the dump, the WebView content is not
+      # exposed to uiautomator on this image: replace this signal, do not weaken it.
+      - name: Assert the Deals page rendered (uiautomator dump, no error page)
+        env:
+          PAGE_MARKER: Today's Coupon Codes
+          PAGE_WAIT_SECONDS: '90'
+        run: |
+          set -uo pipefail
+          deadline=$((SECONDS + PAGE_WAIT_SECONDS))
+          attempt=0
+          while :; do
+            attempt=$((attempt + 1))
+            adb shell rm -f /sdcard/ui.xml
+            adb shell uiautomator dump /sdcard/ui.xml 2>&1 | tr -d '\r' || true
+            adb exec-out cat /sdcard/ui.xml 2>/dev/null | tr -d '\r' > ui.xml || true
+            echo "attempt $attempt: ui.xml $(stat -c%s ui.xml 2>/dev/null || echo 0) bytes"
+            ERR=$(grep -oE 'Something went wrong|net::ERR_[A-Z_]+' ui.xml | sort -u | tr '\n' ' ' || true)
+            if [ -n "$ERR" ]; then
+              echo "::error::the app shows an error page, not the Deals page: $ERR"
+              grep -oE '(text|content-desc)="[^"]+"' ui.xml | head -n 40 || true
+              exit 1
+            fi
+            if grep -qF "$PAGE_MARKER" ui.xml; then
+              echo "uiautomator evidence: found '$PAGE_MARKER' in the dump: $(grep -oE "(text|content-desc)=\"[^\"]*$PAGE_MARKER[^\"]*\"" ui.xml | head -n 3 | tr '\n' ' ')"
+              break
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error::no '$PAGE_MARKER' in the uiautomator dump after ${PAGE_WAIT_SECONDS}s: the Deals page did not render, or the WebView content is not exposed to uiautomator on this image. Visible text nodes:"
+              grep -oE '(text|content-desc)="[^"]+"' ui.xml | head -n 60 || true
+              exit 1
+            fi
+            sleep 5
+          done
+
+      - name: Capture screenshot
+        if: always()
+        run: adb exec-out screencap -p > smoke.png && ls -l smoke.png
+
+      - name: Assert the screenshot is non-trivial evidence (not a blank/failed capture)
+        run: |
+          set -euo pipefail
+          [ -f smoke.png ] || { echo "::error::smoke.png was not captured"; exit 1; }
+          BYTES=$(stat -c%s smoke.png)
+          file smoke.png
+          if [ "$BYTES" -lt "$SCREENSHOT_MIN_BYTES" ]; then
+            echo "::error::smoke.png is only $BYTES bytes — a real rendered screen is >${SCREENSHOT_MIN_BYTES}; the capture is blank or truncated"
+            exit 1
+          fi
+          echo "smoke.png $BYTES bytes, sha256 $(sha256sum smoke.png | cut -d' ' -f1)"
+
+      # Evidence, not a gate: the app-alive and screenshot-size assertions above are what fail the
+      # job. A MinIO or OIDC blip must not red a run that passed them, so this is continue-on-error;
+      # the base64 step below keeps the evidence reachable regardless.
+      - uses: DevinoSolutions/artifact/upload@v1
+        if: always()
+        continue-on-error: true
+        with:
+          name: emulator-smoke-screenshot-com.devino.caramel
+          path: smoke.png
+          if-no-files-found: warn
+          retention-days: 1
+
+      # Always (not only when the upload failed): the screenshot has to be retrievable from the log
+      # by whoever reviews this run. Step summaries have no REST API, run logs do.
+      - name: Emit the screenshot into the log and the job summary
+        if: always()
+        run: |
+          set -euo pipefail
+          [ -s smoke.png ] || { echo "::warning::smoke.png is missing or empty; nothing to emit"; exit 0; }
+          echo "::group::smoke.png base64"
+          echo "BEGIN SMOKE PNG"
+          base64 -w 120 smoke.png | sed 's/^/base64| /'
+          echo "END SMOKE PNG"
+          echo "::endgroup::"
+          # A step summary is capped at 1 MiB; the log copy above is the one that always lands.
+          if [ "$(stat -c%s smoke.png)" -gt 700000 ]; then
+            echo "::warning::smoke.png is over 700000 bytes; base64 left out of the job summary (log copy above is complete)"
+            exit 0
+          fi
+          {
+            echo "### Emulator smoke screenshot"
+            echo ""
+            echo "\`$(file -b smoke.png)\`, $(stat -c%s smoke.png) bytes, sha256 \`$(sha256sum smoke.png | cut -d' ' -f1)\`"
+            echo ""
+            echo "<details><summary>base64 smoke.png</summary>"
+            echo ""
+            echo '```'
+            echo "-----BEGIN SMOKE PNG-----"
+            base64 -w 120 smoke.png
+            echo "-----END SMOKE PNG-----"
+            echo '```'
+            echo ""
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Dump the emulator log (diagnostics, only on failure)
+        if: failure()
+        run: tail -n 120 "$RUNNER_TEMP/emulator.log" || true

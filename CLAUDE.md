@@ -78,7 +78,8 @@ Every convention here has an enforcing check. The full convention → check map 
 - Coupons SQL lives only in `src/lib/couponsRepo.ts` (never inline in a route/page); raw coupon-status literals are banned outside `coupons.ts`/the generated file; the scraper's PIPELINE-INTERNAL tables stay out of `prisma/schema.prisma`.
 - The e2e suite runs hermetic (`DATABASE_URL` set) AND deployed (no `DATABASE_URL`, no generated prisma client): any spec asserting DB content or touching the DB MUST gate on `test.skip(!process.env.DATABASE_URL, …)` and MUST NOT import the generated Prisma client at module top level (open it via `e2e/support/test-prisma.ts` `openTestPrisma()`, which imports lazily).
 - Model/prompt changes need `pnpm eval` green ×2 + a dated `evals/SCOREBOARD.md` row (eval gate ≥0.85 primary-match).
-- Unenforced (memory only): new routes must use `withRoute`; env reads only via the env modules; new `.eval.ts` stays out of the unit glob.
+- Env reads only via `src/lib/env.ts` (server) or `env.client.ts` (client), never raw `process.env.X` → `tests/unit/env-module-enforcement.test.ts` (allowlisted exceptions: instrumentation, prisma.ts, buildInfo.ts, decryptJsonData.ts — each with a documented reason; `process.env.NODE_ENV`/`NEXT_PHASE`/`NEXT_RUNTIME` are compile-time constants and always permitted).
+- New routes must use `withRoute` → `tests/unit/api-routes-use-withRoute.test.ts`. Eval files (`.eval.ts`) stay out of the unit glob → `vitest.config.ts` exclude pattern.
 
 ## Gotchas (each cost a real debugging round)
 

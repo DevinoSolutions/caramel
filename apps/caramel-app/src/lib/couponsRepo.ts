@@ -77,10 +77,12 @@ import {
     StoreCouponAggregateRowSchema,
     StoreListRowSchema,
     TotalCountRowSchema,
+    WorkedCountRowSchema,
     parseCouponRows,
 } from '@/lib/couponsDb'
 import { shopperCouponTitle } from '@/lib/couponTitleText'
 import { shopperVerificationText } from '@/lib/couponVerificationText'
+import { likeLiteral } from '@/lib/likeLiteral'
 import prisma from '@/lib/prisma'
 import {
     SHOPPER_COUPON_DESCRIPTION,
@@ -195,18 +197,6 @@ const percentOffSql = () =>
     Prisma.sql`UPPER(discount_type) = 'PERCENTAGE' AND discount_amount > 0 AND discount_amount < 100`
 const fixedAmountOffSql = () =>
     Prisma.sql`UPPER(discount_type) IS DISTINCT FROM 'PERCENTAGE' AND discount_amount > 0`
-
-/**
- * What a shopper typed, made safe to put inside a LIKE/ILIKE pattern: `\`, `%`
- * and `_` are backslash-escaped, the escape Postgres uses by default, so each
- * one matches itself. The backslash goes first so the escapes added here are
- * not escaped again. Every pattern built from input goes through this, and the
- * caller adds its own `%` around the result. Without it a search for `%`
- * listed every code and `e_ay` found ebay.com (2026-09-27, fleet ILIKE sweep).
- * The value is still a bound parameter; this changes what the pattern means,
- * not how it reaches the database.
- */
-const likeLiteral = (typed: string) => typed.replace(/[\\%_]/g, '\\$&')
 
 /**
  * A coupon belongs to a store when its `site` IS the store or one of its
@@ -433,6 +423,38 @@ export async function listStoreCoupons(
         },
         hasSupplierRow,
     }
+}
+
+/**
+ * How many of one store's visible codes a shopper's checkout applied
+ * successfully (coupon_signals.last_worked_at) within the last `days` days.
+ * Read-only. The T-7856 pilot's freshness note ("3 worked in the last 7 days",
+ * storeIntentPilot.ts) is the only caller: it counts the whole store, not just
+ * the 20 rows the page lists. The window compares against UTC because Prisma
+ * writes the timestamp-WITHOUT-time-zone column as UTC (see failingSinkSql).
+ */
+export async function countStoreCodesWorkedWithinDays(
+    baseSite: string,
+    days: number,
+): Promise<number> {
+    if (!Number.isInteger(days) || days <= 0) {
+        throw new Error(
+            `countStoreCodesWorkedWithinDays: days must be a positive integer, got ${days}`,
+        )
+    }
+    const [row] = parseCouponRows(
+        WorkedCountRowSchema,
+        await prisma.$queryRaw(Prisma.sql`
+            SELECT COUNT(*)::int AS worked
+            FROM coupon_signals s
+            JOIN coupons c ON c.id = s.coupon_id
+            WHERE ${visibleCouponsWhere()}
+              AND ${onStoreSql(baseSite.toLowerCase())}
+              AND s.last_worked_at > (NOW() AT TIME ZONE 'UTC') - (${days}::int * INTERVAL '1 day')
+        `),
+        'store-page.worked-count',
+    )
+    return row?.worked ?? 0
 }
 
 /**
@@ -1061,17 +1083,16 @@ export type RequestSourceOutcome = 'created' | 'duplicate' | 'queue_full'
  * (mirrors the pre-W4 gen_random_uuid()::text); created_at/updated_at fill via
  * their @default(now()).
  *
- * Bounded (T-6225): a host that already has a row (any status; an exact
- * match, since the route lowercases) is a `duplicate` and writes nothing; once MAX_REQUESTED_SOURCES requests are
- * waiting the answer is `queue_full`. The check-then-insert is not atomic
- * (there is no unique index on `source` and this PR ships no migration), so
- * concurrent identical requests can both insert; the per-IP rate limit bounds
- * that race. TODO(T-6225): a unique index on lower(source) would close it.
+ * Bounded (T-6225): a host that already has a row (any status) is a
+ * `duplicate` and writes nothing; once MAX_REQUESTED_SOURCES requests are
+ * waiting the answer is `queue_full`. The unique index on `source` closes
+ * the check-then-insert race: a concurrent insert throws P2002, caught as
+ * `duplicate`.
  */
 export async function requestSource(
     host: string,
 ): Promise<RequestSourceOutcome> {
-    const existing = await prisma.source.findFirst({
+    const existing = await prisma.source.findUnique({
         where: { source: host },
         select: { id: true },
     })
@@ -1080,14 +1101,24 @@ export async function requestSource(
         where: { status: 'REQUESTED' },
     })
     if (waiting >= MAX_REQUESTED_SOURCES) return 'queue_full'
-    await prisma.source.create({
-        data: {
-            id: randomUUID(),
-            source: host,
-            websites: [],
-            status: 'REQUESTED',
-        },
-    })
+    try {
+        await prisma.source.create({
+            data: {
+                id: randomUUID(),
+                source: host,
+                websites: [],
+                status: 'REQUESTED',
+            },
+        })
+    } catch (error) {
+        if (
+            error instanceof Prisma.PrismaClientKnownRequestError &&
+            error.code === 'P2002'
+        ) {
+            return 'duplicate'
+        }
+        throw error
+    }
     return 'created'
 }
 

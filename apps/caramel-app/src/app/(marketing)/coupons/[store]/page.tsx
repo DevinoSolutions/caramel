@@ -2,10 +2,12 @@ import AddCodeForm from '@/components/coupons/AddCodeForm'
 import CouponsSection from '@/components/coupons/coupons-section'
 import PopularStores from '@/components/coupons/popular-stores'
 import StoreFavoriteStar from '@/components/coupons/store-favorite-star'
+import StoreIntentPilotNote from '@/components/coupons/store-intent-pilot-note'
 import StoreNeighbours from '@/components/coupons/store-neighbours'
 import { attachSignals } from '@/lib/couponSignals'
 import {
     type StoreCouponFacts,
+    countStoreCodesWorkedWithinDays,
     isKnownStore,
     listStoreCoupons,
 } from '@/lib/couponsRepo'
@@ -13,6 +15,11 @@ import { BASE_URL } from '@/lib/env.client'
 import { faqPageJsonLd, jsonLdString } from '@/lib/jsonLd'
 import { buildStoreFaq } from '@/lib/seo/storeFaq'
 import { evaluateStorePageIndexability } from '@/lib/seo/storeIndexability'
+import {
+    WORKED_WINDOW_DAYS,
+    buildStoreFreshnessLine,
+    storeIntentPilotFor,
+} from '@/lib/seo/storeIntentPilot'
 import {
     buildStoreDescription,
     buildStoreTitle,
@@ -273,6 +280,26 @@ export default async function StoreCouponsPage({
     // title says it (storeMetadata.ts). The domain stays in the prose below.
     const name = storeDisplayName(base)
 
+    // T-7856 store-intent pilot (storeIntentPilot.ts): four stores get a
+    // query-matched H1 and a freshness note. Every other store renders exactly
+    // what it did. The note needs listed codes: a zero-coupon page (noindexed)
+    // says nothing about freshness.
+    const pilot = total > 0 ? storeIntentPilotFor(base) : null
+    let workedInWindow = 0
+    if (pilot) {
+        // Same stance as isKnownStore above: a failed count drops the "k
+        // worked" clause LOUDLY (Sentry), it must never 500 the store page.
+        workedInWindow = await countStoreCodesWorkedWithinDays(
+            base,
+            WORKED_WINDOW_DAYS,
+        ).catch((error: unknown) => {
+            Sentry.captureException(error, {
+                tags: { area: 'storePage.workedCount' },
+            })
+            return 0
+        })
+    }
+
     // Every coupon lives on this one page, so a ListItem carries no `url` (the
     // same URL twenty times made the list read as a broken carousel), and an
     // empty description is left out rather than published as "".
@@ -312,7 +339,7 @@ export default async function StoreCouponsPage({
     }
 
     return (
-        <main className="relative min-h-screen px-6 pt-32 dark:bg-darkBg lg:px-8">
+        <main className="dark:bg-darkBg relative min-h-screen px-6 pt-32 sm:pt-8 lg:px-8">
             <CouponsSection
                 defaultFilters={{ site: base }}
                 initialCoupons={coupons}
@@ -334,8 +361,21 @@ export default async function StoreCouponsPage({
                 heroAction={
                     base ? <StoreFavoriteStar store={base} /> : undefined
                 }
-                heroTitle={`Best ${name} ${codeNoun} codes today`}
+                heroTitle={pilot?.h1 ?? `Best ${name} ${codeNoun} codes today`}
                 heroSubtitle={`Save at ${base} with Caramel—the privacy-first coupon finder that applies the top deals automatically at checkout.`}
+                heroNote={
+                    pilot ? (
+                        <StoreIntentPilotNote
+                            line={buildStoreFreshnessLine({
+                                total,
+                                lastUpdated: facts.lastUpdated,
+                                workedInWindow,
+                                now: new Date(),
+                            })}
+                            confusedWith={pilot.confusedWith}
+                        />
+                    ) : undefined
+                }
             />
             {/* Client-only (renders nothing until the session is known), so the
                 server HTML crawlers and the AEO prose below see is unchanged. */}

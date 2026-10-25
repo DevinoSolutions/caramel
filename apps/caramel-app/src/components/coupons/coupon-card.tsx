@@ -89,11 +89,11 @@ export default function CouponCard({ coupon, index }: CouponCardProps) {
             // the whole list, and a 20-card page would otherwise hold the
             // next page's cards back 1-2s.
             transition={{ duration: 0.3, delay: (index % 10) * 0.05 }}
-            className="group relative overflow-hidden rounded-3xl border border-orange-100 bg-gradient-to-br from-orange-50/50 via-white to-orange-50/40 p-5 shadow-md transition-all duration-200 hover:-translate-y-0.5 hover:border-orange-200 hover:shadow-lg dark:border-orange-900/50 dark:from-darkSurface dark:via-darkSurface dark:to-darkSurface dark:hover:border-orange-800/70"
+            className="dark:from-darkSurface dark:via-darkSurface dark:to-darkSurface group relative overflow-hidden rounded-3xl border border-orange-100 bg-gradient-to-br from-orange-50/50 via-white to-orange-50/40 p-5 shadow-md transition-all duration-200 hover:-translate-y-0.5 hover:border-orange-200 hover:shadow-lg dark:border-orange-900/50 dark:hover:border-orange-800/70"
         >
             <div className="flex items-center gap-5 md:flex-col md:items-start">
                 {/* Left: Discount Badge */}
-                <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-caramel to-orange-600 text-white shadow-md ring-1 ring-orange-200 dark:ring-orange-900/50">
+                <div className="from-caramel flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br to-orange-600 text-white shadow-md ring-1 ring-orange-200 dark:ring-orange-900/50">
                     <div className="text-center leading-tight">
                         {discount ? (
                             <>
@@ -169,7 +169,7 @@ export default function CouponCard({ coupon, index }: CouponCardProps) {
                     <button
                         type="button"
                         onClick={handleCopyCode}
-                        className="whitespace-nowrap rounded-2xl bg-gradient-to-r from-caramel to-orange-600 px-6 py-3 font-semibold text-white shadow-md transition-all hover:scale-105 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 dark:focus-visible:ring-offset-darkSurface md:w-full"
+                        className="from-caramel focus-visible:ring-caramel dark:focus-visible:ring-offset-darkSurface whitespace-nowrap rounded-2xl bg-gradient-to-r to-orange-600 px-6 py-3 font-semibold text-white shadow-md transition-all hover:scale-105 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 md:w-full"
                     >
                         Get Coupon Code
                     </button>
@@ -190,7 +190,7 @@ export default function CouponCard({ coupon, index }: CouponCardProps) {
                 >
                     <div className="text-center">
                         <p className="mb-2 text-sm text-gray-300">Your Code:</p>
-                        <p className="mb-3 bg-gradient-to-r from-caramel to-orange-600 bg-clip-text text-3xl font-black text-transparent">
+                        <p className="from-caramel mb-3 bg-gradient-to-r to-orange-600 bg-clip-text text-3xl font-black text-transparent">
                             {coupon.code}
                         </p>
                         <p className="text-xs text-gray-400">

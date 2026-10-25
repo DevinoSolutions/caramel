@@ -27,7 +27,7 @@ export default function EmptyState({
         <div className="text-center">
             <div
                 aria-hidden="true"
-                className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-caramel/10 text-2xl text-caramel dark:bg-caramel/20"
+                className="bg-caramel/10 text-caramel dark:bg-caramel/20 mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full text-2xl"
             >
                 {icon}
             </div>

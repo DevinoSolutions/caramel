@@ -1,3 +1,4 @@
+import { safeReturnPath } from '@/lib/auth/safeReturnPath'
 import { BASE_URL } from '@/lib/env.client'
 import type { Metadata } from 'next'
 import { Suspense } from 'react'
@@ -60,12 +61,13 @@ export const metadata: Metadata = {
 export default async function VerifyPage({
     searchParams,
 }: {
-    searchParams: Promise<{ signup?: string }>
+    searchParams: Promise<{ signup?: string; next?: string }>
 }) {
-    const { signup } = await searchParams
+    const { signup, next } = await searchParams
+    const returnPath = safeReturnPath(next)
     return (
         <Suspense fallback={<div>Loading...</div>}>
-            <VerifyPageClient signup={signup} />
+            <VerifyPageClient signup={signup} returnPath={returnPath} />
         </Suspense>
     )
 }

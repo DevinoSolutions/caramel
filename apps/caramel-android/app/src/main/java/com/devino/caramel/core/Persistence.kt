@@ -5,10 +5,6 @@ import android.content.SharedPreferences
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
-import kotlinx.serialization.SerializationException
-import kotlinx.serialization.builtins.ListSerializer
-import kotlinx.serialization.builtins.serializer
-import kotlinx.serialization.json.Json
 import java.security.GeneralSecurityException
 import java.security.KeyStore
 import java.security.ProviderException
@@ -16,30 +12,6 @@ import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
-
-/** Saved-store lists in SharedPreferences, as JSON arrays. */
-class PrefsListStore(context: Context) : ListStore {
-    private val prefs: SharedPreferences = context.getSharedPreferences("caramel_lists", Context.MODE_PRIVATE)
-    private val serializer = ListSerializer(String.serializer())
-
-    override fun read(key: String): List<String> {
-        val raw = prefs.getString(key, null) ?: return emptyList()
-        try {
-            return Json.decodeFromString(serializer, raw)
-        } catch (e: SerializationException) {
-            // A corrupt list must not crash-loop the app at launch: drop it and say so.
-            val cleared = prefs.edit().remove(key).commit()
-            val suffix = if (cleared) "" else " (and the damaged copy could not be removed)"
-            throw ListStoreException("Your saved stores on this device were damaged and have been reset$suffix.", e)
-        }
-    }
-
-    override fun write(key: String, values: List<String>) {
-        if (!prefs.edit().putString(key, Json.encodeToString(serializer, values)).commit()) {
-            throw ListStoreException("Could not save your stores on this device.")
-        }
-    }
-}
 
 /**
  * The session bearer, AES-GCM encrypted under a key that never leaves the Android Keystore (the

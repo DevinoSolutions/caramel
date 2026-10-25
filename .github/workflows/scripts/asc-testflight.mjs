@@ -13,6 +13,11 @@
 //   node asc-testflight.mjs attach-build <marketing-version> <build-number> <group-name>
 //       Waits for the uploaded build to finish processing, adds it to the named
 //       INTERNAL TestFlight group, and verifies membership + IN_BETA_TESTING.
+//   node asc-testflight.mjs version-state <marketing-version>
+//       Read-only train guard for internal_preview builds: exits non-zero when an iOS
+//       App Store version with that versionString exists in any state other than a closed
+//       one (being prepared, in review, awaiting release...), so a preview build can never
+//       land in a train someone is shipping. Fails CLOSED on any API error or unknown state.
 // Env: ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_PATH (path to AuthKey_<id>.p8),
 //      ASC_BUNDLE_ID (com.devino.Caramel).
 import { createPrivateKey, sign } from 'node:crypto'
@@ -127,6 +132,72 @@ async function nextBuildNumber() {
         `${builds.length} existing iOS build(s); highest CFBundleVersion ${highest}.`,
     )
     process.stdout.write(String(highest + 1))
+}
+
+// App Store version states in which the train is over: the version is live or was live and has
+// since been replaced or pulled. Source: Apple's AppVersionState (READY_FOR_DISTRIBUTION is the
+// current name of READY_FOR_SALE) and the deprecated AppStoreVersionState. Anything else
+// (PREPARE_FOR_SUBMISSION, WAITING_FOR_REVIEW, IN_REVIEW, REJECTED, PENDING_DEVELOPER_RELEASE,
+// ... or a state this list has never heard of) means the train is still being prepared or reviewed.
+const CLOSED_TRAIN_STATES = new Set([
+    'READY_FOR_SALE',
+    'READY_FOR_DISTRIBUTION',
+    'REPLACED_WITH_NEW_VERSION',
+    'REMOVED_FROM_SALE',
+    'DEVELOPER_REMOVED_FROM_SALE',
+])
+
+// Pure: given ALL of the app's iOS appStoreVersions rows, returns the rows of the train
+// `marketingVersion` that keep it open as "<id>: <state>" strings (empty = the preview build may
+// proceed). Nothing is silently skipped: a row with no versionString cannot be ruled out of the
+// train, so it counts as open; a row with no state attribute counts as open (fail closed). Both
+// state attributes are read because Apple is moving appStoreState -> appVersionState; if either is
+// non-closed the train is open. The platform is filtered server-side; a row that EXPLICITLY names
+// another platform is ignored, a row that names none is trusted to be iOS.
+function openTrainVersions(rows, marketingVersion) {
+    return rows.flatMap(row => {
+        const { versionString, platform } = row.attributes ?? {}
+        if (typeof versionString !== 'string' || versionString === '') {
+            return [`${row.id}: <no versionString>`]
+        }
+        if (versionString !== marketingVersion) return []
+        if (typeof platform === 'string' && platform !== 'IOS') return []
+        const states = [
+            row.attributes?.appVersionState,
+            row.attributes?.appStoreState,
+        ].filter(state => typeof state === 'string' && state !== '')
+        if (states.length === 0) return [`${row.id}: <no state attribute>`]
+        return states.every(state => CLOSED_TRAIN_STATES.has(state))
+            ? []
+            : [`${row.id}: ${states.join('/')}`]
+    })
+}
+
+async function assertTrainClosed(marketingVersion) {
+    const appId = await resolveAppId()
+    // No versionString filter and no fields[] filter: the whole iOS list with every attribute, so an
+    // empty answer can be told apart from "this version does not exist" and an unknown field name
+    // can never 400 the guard.
+    const rows = await listAll(
+        `/apps/${appId}/appStoreVersions?filter[platform]=IOS&limit=200`,
+    )
+    if (rows.length === 0) {
+        throw new Error(
+            `App ${appId} lists no iOS App Store versions, which cannot be right for a shipped app: refusing to guess that the ${marketingVersion} train is closed.`,
+        )
+    }
+    const open = openTrainVersions(rows, marketingVersion)
+    if (open.length > 0) {
+        throw new Error(
+            `App Store version ${marketingVersion} (iOS) is still open on app ${appId} [${open.join(', ')}]: refusing an internal preview build into that TestFlight train.`,
+        )
+    }
+    const sameTrain = rows.filter(
+        row => row.attributes?.versionString === marketingVersion,
+    ).length
+    summary(
+        `### Train guard\n\niOS version \`${marketingVersion}\`: ${sameTrain} App Store version row(s) of ${rows.length} iOS rows, none open. The internal preview build may use this train.`,
+    )
 }
 
 async function findBuild(appId, marketingVersion, buildNumber) {
@@ -259,8 +330,10 @@ if (command === 'next-build-number') {
     await nextBuildNumber()
 } else if (command === 'attach-build' && args.length === 3) {
     await attachBuild(...args)
+} else if (command === 'version-state' && args.length === 1) {
+    await assertTrainClosed(args[0])
 } else {
     throw new Error(
-        'Usage: asc-testflight.mjs next-build-number | attach-build <marketing-version> <build-number> <group-name>',
+        'Usage: asc-testflight.mjs next-build-number | attach-build <marketing-version> <build-number> <group-name> | version-state <marketing-version>',
     )
 }

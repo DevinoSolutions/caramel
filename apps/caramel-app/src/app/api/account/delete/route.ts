@@ -1,4 +1,5 @@
 import type { Prisma } from '@/generated/prisma/client'
+import { deletePosthogPerson } from '@/lib/analytics/posthogPersonDeletion'
 import { withRoute } from '@/lib/api/withRoute'
 import {
     loadAppleRevocationTargets,
@@ -62,11 +63,13 @@ import { z } from 'zod'
 // `appleRevocation` ('not_applicable' | 'revoked' | 'failed'); a user without
 // an Apple account triggers no call at all.
 //
-// Also NOT done: deleting the user's PostHog person. posthogServer.ts holds a
-// capture-only client (project token, no personal API key), and a person delete
-// is a private-API call.
-// TODO(T-4906): give the server a PostHog personal API key and delete the
-// person (distinct id = the user id) here, or on a queue, once it exists.
+// POSTHOG (T-7505): after the commit, the user's PostHog person and events are
+// deleted through PostHog's private API (posthogPersonDeletion.ts). The user id
+// is still in hand because it comes from the session, not the deleted row. Like
+// the Apple revoke, a failure never fails the request (the account is already
+// gone): it goes to Sentry and the response says `analyticsDeletion: 'failed'`.
+// 'not_applicable' means PostHog is disabled for this deploy. Success means
+// PostHog QUEUED the delete; it finishes in the background.
 const DELETE_CONFIRMATION = 'DELETE'
 
 /** better-auth's email-OTP identifier is `${type}-otp-${email}` (toOTPIdentifier
@@ -144,10 +147,16 @@ export const POST = withRoute(
             ? await revokeAppleGrants(appleTargets)
             : 'not_applicable'
 
+        // Same rule as the revoke: only the request that deleted the user.
+        const analyticsDeletion = deleted
+            ? await deletePosthogPerson(userId)
+            : 'not_applicable'
+
         return NextResponse.json({
             deleted,
             scrubbed: { siteSuggestions: siteSuggestions.count },
             appleRevocation,
+            analyticsDeletion,
         })
     },
 )

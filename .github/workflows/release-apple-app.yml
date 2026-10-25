@@ -12,7 +12,11 @@ name: Release – Apple App (iOS container + Safari extension)
 # Triggers (owner pushes the tags; agents never do):
 #   - tag `apple-v<MARKETING_VERSION>` (must equal MARKETING_VERSION in
 #     apps/caramel-apple/project.yml; `v*` tags belong to release-extension.yml)
-#   - workflow_dispatch (the workflow file must exist on the default branch)
+#   - workflow_dispatch (the workflow file must exist on the default branch). `internal_preview`
+#     (default false) lets a dispatch FROM main past the T-7852 gate for an INTERNAL-only
+#     TestFlight build; see the gate note below. Tag pushes ignore it and stay blocked. A preview
+#     is also refused when the App Store version it would upload into (MARKETING_VERSION) is open
+#     (asc-testflight.mjs version-state), so it can never join a train being shipped.
 #   - pull_request touching apps/caramel-apple: builds and archives UNSIGNED and
 #     verifies the committed Xcode project matches project.yml. It never signs
 #     or uploads, so CI proves the build before anything can ship.
@@ -32,6 +36,11 @@ on:
   push:
     tags: ['apple-v*']
   workflow_dispatch:
+    inputs:
+      internal_preview:
+        description: 'true = allow an INTERNAL-only build (TestFlight group Devino) while TODO(T-7852) markers remain; web tabs are signed out. Tag pushes ignore this and stay blocked. Never submit such a build for review.'
+        type: boolean
+        default: false
   pull_request:
     paths:
       - 'apps/caramel-apple/**'
@@ -60,8 +69,13 @@ jobs:
     name: ${{ github.event_name == 'pull_request' && 'Build + archive (unsigned, no upload)' || 'Archive, sign, upload to TestFlight' }}
     runs-on: macos-latest
     timeout-minutes: 90
+    # The drift-diagnostics upload uses DevinoSolutions/artifact (GitHub OIDC token; T-7021: GitHub
+    # artifacts are blocked org-wide); a job-level block replaces the workflow-level one.
+    permissions:
+      id-token: write
+      contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
       # project.yml is the one version authority for the Apple app. A tag must
       # say exactly that version, so a stale tag can never ship a different one.
@@ -80,6 +94,45 @@ jobs:
           fi
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "Apple app marketing version: ${version}" >> "$GITHUB_STEP_SUMMARY"
+
+      # The 1.6 shell shows grabcaramel.com in a WKWebView with NO web session until the handoff
+      # (POST /api/app/web-session/handoff, T-7852) is wired: the Saved and Account tabs open signed
+      # out. Every TODO(T-7852) marker in the app source is part of that unfinished work, so a
+      # tag/dispatch build stops while any is left. Never runs on pull requests. The only way past
+      # it is a workflow_dispatch from main with internal_preview = true (INTERNAL TestFlight group
+      # only; the markers print as warnings and the run is labelled INTERNAL PREVIEW).
+      - name: Show the unfinished web-session handoff (T-7852) markers (warning only on pull requests)
+        if: github.event_name == 'pull_request'
+        run: |
+          grep -rn 'TODO(T-7852)' "$APPLE_DIR/App" | while IFS= read -r line; do echo "::warning::$line"; done
+
+      - name: Block the release while the web-session handoff (T-7852) is unfinished
+        if: github.event_name != 'pull_request'
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INTERNAL_PREVIEW: ${{ inputs.internal_preview }}
+          REF: ${{ github.ref }}
+        run: |
+          markers="$(grep -rn 'TODO(T-7852)' "$APPLE_DIR/App" || true)"
+          if [ -n "$markers" ]; then
+            if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$INTERNAL_PREVIEW" = "true" ] && [ "$REF" = "refs/heads/main" ]; then
+              while IFS= read -r line; do echo "::warning::$line"; done <<<"$markers"
+              echo "::warning::INTERNAL PREVIEW build: the iOS web tabs have no web session yet (T-7852 unfinished), so Saved and Account open signed out. TestFlight group Devino only; never submit this build for review."
+              {
+                echo "### INTERNAL PREVIEW — not for App Store submission; T-7852 markers present"
+                echo
+                echo "The web tabs of this build are signed out. Markers still present:"
+                echo
+                echo '```'
+                echo "$markers"
+                echo '```'
+              } >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::error::Release stopped on purpose: the iOS web tabs have no web session yet, so Saved and Account do not work for signed-in users. T-7852 (POST /api/app/web-session/handoff, wired into ShellRouter.signInFromWeb) is unfinished. Remove the TODO(T-7852) markers once it ships, then the owner re-tags. Markers still present:"
+              echo "$markers"
+              exit 1
+            fi
+          fi
 
       - name: Select Xcode
         uses: maxim-lobanov/setup-xcode@v1
@@ -104,10 +157,25 @@ jobs:
             echo "drift=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # The summary carries the drift itself, so the fix does not depend on the artifact below.
+      - name: Summarize the project drift
+        if: steps.drift.outputs.drift == 'true'
+        run: |
+          {
+            echo '### Xcode project drift'
+            echo
+            echo "\`${APPLE_DIR}\` differs from what project.yml generates:"
+            echo
+            echo '```'
+            git status --short -- "${APPLE_DIR}"
+            git diff --stat -- "${APPLE_DIR}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload the generated project (drift diagnostics)
         if: steps.drift.outputs.drift == 'true'
         continue-on-error: true
-        uses: actions/upload-artifact@v7
+        uses: DevinoSolutions/artifact/upload@v1
         with:
           name: generated-caramel-apple
           path: |
@@ -116,12 +184,35 @@ jobs:
             ${{ env.APPLE_DIR }}/App/Caramel.entitlements
             ${{ env.APPLE_DIR }}/Extension/Info.plist
             ${{ env.APPLE_DIR }}/Extension/CaramelExtension.entitlements
+          # T-7021: org artifact quota; a drift diff is only read on the run that failed.
+          retention-days: 3
 
       - name: Fail on project drift
         if: steps.drift.outputs.drift == 'true'
         run: |
           echo "::error::${APPLE_DIR} does not match what project.yml generates. Run ${APPLE_DIR}/scripts/generate-project.sh on a Mac (or take the 'generated-caramel-apple' artifact of this run) and commit the result."
           exit 1
+
+      # PR mode only: the web shell's link-guard unit tests (CaramelTests scheme;
+      # host-less, so no WXT build or signing is needed). The signed tag runs skip
+      # it: the PR that changed the code already ran it.
+      - name: Test the web shell link guard (unit tests)
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          command -v jq >/dev/null 2>&1 || brew install jq
+          udid=$(xcrun simctl list devices available -j | jq -r '
+            [.devices | to_entries[] | select(.key | test("iOS")) | . as $rt
+              | $rt.value[] | select(.name | test("^iPhone")) | {rt: $rt.key, name: .name, udid: .udid}]
+            | sort_by(.rt, .name) | last | .udid // empty')
+          [ -n "$udid" ] || { echo "::error::No available iPhone simulator on this runner image."; exit 1; }
+          xcodebuild test \
+            -project "${APPLE_DIR}/Caramel.xcodeproj" \
+            -scheme CaramelTests \
+            -destination "platform=iOS Simulator,id=${udid}" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
@@ -157,6 +248,22 @@ jobs:
           set -euo pipefail
           echo "${ASC_API_KEY_BASE64}" | base64 --decode > "/tmp/AuthKey_${ASC_KEY_ID}.p8"
           ls -l "/tmp/AuthKey_${ASC_KEY_ID}.p8"
+
+      # internal_preview only: a main-branch preview build must never land in a TestFlight train
+      # that is being prepared or reviewed for the App Store (someone could pick it for submission).
+      # Read-only ASC call; fails closed (API error, unknown state, missing state = refuse).
+      - name: Refuse an internal preview into an open App Store train
+        if: github.event_name == 'workflow_dispatch' && inputs.internal_preview
+        env:
+          ASC_KEY_PATH: /tmp/AuthKey_${{ secrets.ASC_KEY_ID }}.p8
+          ASC_BUNDLE_ID: ${{ env.BUNDLE_ID }}
+          MARKETING_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          if ! node .github/workflows/scripts/asc-testflight.mjs version-state "$MARKETING_VERSION"; then
+            echo "::error::Internal preview refused: App Store version $MARKETING_VERSION is open (being prepared or reviewed) or its state could not be read. Bump MARKETING_VERSION in project.yml to the next train, or wait for that version to close. See the log above."
+            exit 1
+          fi
 
       - name: Resolve the next TestFlight build number
         id: build_number

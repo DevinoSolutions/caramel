@@ -1,27 +1,24 @@
 package com.devino.caramel
 
 import android.app.Application
+import android.webkit.CookieManager
 import com.devino.caramel.core.CaramelApi
-import com.devino.caramel.core.FavoritesStore
 import com.devino.caramel.core.KeystoreTokenStore
-import com.devino.caramel.core.PrefsListStore
 import com.devino.caramel.core.SessionStore
+import com.devino.caramel.web.AppLinkGuard
+import com.devino.caramel.web.WebSessionCookie
+import com.devino.caramel.web.WebSessionHandoff
+import com.devino.caramel.web.WebSessionHandoffClient
 
-/** The bytes of an account export between "download" and the file picker's answer. */
-class PendingExport {
-    @Volatile
-    var bytes: ByteArray? = null
-
-    /** Returns the held bytes and forgets them. */
-    fun take(): ByteArray? = bytes.also { bytes = null }
-}
-
-/** The app-wide objects, created once (the iOS app creates the same three in CaramelApp.swift). */
+/** The app-wide objects, created once. */
 class AppContainer(application: Application) {
     val api = CaramelApi()
-    val pendingExport = PendingExport()
     val session = SessionStore(api, KeystoreTokenStore(application))
-    val favorites = FavoritesStore(api, PrefsListStore(application)) { session.token }
+
+    /** Hands the native sign-in to the WebView as a grabcaramel.com web session (T-7852). */
+    val webSession = WebSessionHandoff(WebSessionHandoffClient(api), session) {
+        WebSessionCookie.isPresent(CookieManager.getInstance().getCookie(AppLinkGuard.APP_ORIGIN))
+    }
 }
 
 // TODO(T-7474): no crash / error reporting and no trace propagation yet. The repo rule is that

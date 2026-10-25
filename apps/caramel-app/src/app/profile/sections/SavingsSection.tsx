@@ -152,7 +152,7 @@ export default function SavingsSection({
                     <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
                         You&apos;ve saved
                     </p>
-                    <p className="mt-1 text-5xl font-extrabold tracking-tight text-caramel md:text-4xl">
+                    <p className="text-caramel mt-1 text-5xl font-extrabold tracking-tight md:text-4xl">
                         {heroTotal
                             ? formatMoney(
                                   heroTotal.minorUnits,

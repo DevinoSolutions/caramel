@@ -28,6 +28,8 @@ enum AppGroup {
         /// [String] saved stores not yet confirmed by the account (signed in only); a sync never drops these.
         static let savedStoresPendingPush = "savedStoresPendingPush"
         static let alertsNotifyEnabled = "alertsNotifyEnabled"
+        /// [String] saved stores whose web page was opened since the last alerts check (AlertsEngine.noteVisited).
+        static let alertsVisitedStores = "alertsVisitedStores"
         /// [String: Int] store -> coupon total the shopper last looked at.
         static let alertsLastSeenTotals = "alertsLastSeenTotals"
         /// [String: Int] store -> coupon total a notification was last sent for.

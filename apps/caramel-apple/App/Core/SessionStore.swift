@@ -79,9 +79,13 @@ final class WebSignIn: NSObject, ASWebAuthenticationPresentationContextProviding
                 }
             }
             session.presentationContextProvider = self
-            // A fresh browsing context: the shared Safari cookies would keep the
-            // previous Apple/Google account selected after a sign-out or delete.
-            session.prefersEphemeralWebBrowserSession = true
+            // Share Safari's cookies so the shopper's existing Google/Apple
+            // sign-in shows up in the account chooser (and iOS shows its
+            // "Caramel Wants to Use ... to Sign In" consent). An ephemeral
+            // session opened an empty Google login every time. Picking a
+            // different account after a sign-out or delete still works: the
+            // Google URL carries prompt=select_account (extension/oauth/authorize).
+            session.prefersEphemeralWebBrowserSession = false
             activeSession = session
             if !session.start() {
                 continuation.resume(throwing: SignInError.couldNotStartSheet)
@@ -152,11 +156,18 @@ final class SessionStore: ObservableObject {
             let me = try await api.me(bearer: token)
             username = me.username
         } catch let error as APIError where error.isUnauthorized {
-            clearLocalSession()
-            errorMessage = "Your session expired. Please sign in again."
+            endSessionRejectedByServer()
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    /// The server answered 401 to this bearer (expired or revoked): the stored session is
+    /// dead. Clears it and says why; CaramelApp resets the web shells when the token goes.
+    /// Used by validate(), deleteAccount() and the web-session handoff.
+    func endSessionRejectedByServer() {
+        clearLocalSession()
+        errorMessage = "Your session expired. Please sign in again."
     }
 
     func signIn(with provider: OAuthProvider) async {
@@ -217,8 +228,7 @@ final class SessionStore: ObservableObject {
         } catch let error as APIError where error.isUnauthorized {
             // The session is already dead, so there is nothing left to delete
             // under it: end the local session as validate() does.
-            clearLocalSession()
-            errorMessage = "Your session expired. Please sign in again."
+            endSessionRejectedByServer()
             return false
         } catch {
             errorMessage = "Could not delete your account: \(error.localizedDescription)"

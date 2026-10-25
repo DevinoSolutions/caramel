@@ -1,5 +1,6 @@
 import { cachedSearchSupportedSites } from '@/lib/anonymousReadCaches'
 import { handleRouteError } from '@/lib/api/handleRouteError'
+import { withoutSearchText } from '@/lib/api/withoutSearchText'
 import { withRoute } from '@/lib/api/withRoute'
 import { storeSearchTerm } from '@/lib/storeDomain'
 import { NextResponse } from 'next/server'
@@ -49,8 +50,17 @@ export const POST = withRoute(
                 sites: rows.map(r => r.site).filter(Boolean),
             })
         } catch (err) {
-            console.error('search-supported failed:', err)
-            return handleRouteError(err, { req, message: 'Search failed' })
+            // The typed search text must not reach the log or Sentry through
+            // an error message (withoutSearchText.ts).
+            const safeError = withoutSearchText(err, [
+                q,
+                typeof body?.query === 'string' ? body.query : undefined,
+            ])
+            console.error('search-supported failed:', safeError)
+            return handleRouteError(safeError, {
+                req,
+                message: 'Search failed',
+            })
         }
     },
 )

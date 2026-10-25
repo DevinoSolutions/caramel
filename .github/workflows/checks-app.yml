@@ -49,7 +49,7 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
       - uses: pnpm/action-setup@v6
         with:
@@ -112,7 +112,7 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
       - uses: pnpm/action-setup@v6
         with:
@@ -185,7 +185,7 @@ jobs:
           --health-retries 5
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
       - uses: pnpm/action-setup@v6
         with:
@@ -228,7 +228,7 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
       - uses: pnpm/action-setup@v6
         with:
@@ -293,7 +293,7 @@ jobs:
       SHADOW_DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/caramel_ci_shadow'
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
       - uses: pnpm/action-setup@v6
         with:
@@ -389,7 +389,7 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
       - uses: pnpm/action-setup@v6
         with:
@@ -444,11 +444,13 @@ jobs:
 
       - name: Upload test report
         uses: DevinoSolutions/artifact/upload@v1
-        if: ${{ !cancelled() }}
+        if: failure()
+        # T-7021: HTML report + traces only when the job failed; a flaky-but-green
+        # run (trace: on-first-retry) must not fill the artifact store.
         with:
           name: playwright-report-pr
           path: apps/caramel-app/playwright-report/
-          retention-days: 14
+          retention-days: 3
 
   # ─────────────────────────────────────────────────────────────
   # E2E & Visual Regression (push – deployed site baseline)
@@ -474,7 +476,7 @@ jobs:
       NEXT_PUBLIC_BASE_URL: ${{ github.ref == 'refs/heads/dev' && 'https://dev.grabcaramel.com' || 'https://grabcaramel.com' }}
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
       - uses: pnpm/action-setup@v6
         with:
@@ -539,11 +541,13 @@ jobs:
 
       - name: Upload test report
         uses: DevinoSolutions/artifact/upload@v1
-        if: ${{ !cancelled() }}
+        if: failure()
+        # T-7021: HTML report + traces only when the job failed; a flaky-but-green
+        # run (trace: on-first-retry) must not fill the artifact store.
         with:
           name: playwright-report-push
           path: apps/caramel-app/playwright-report/
-          retention-days: 14
+          retention-days: 3
 
   # ─────────────────────────────────────────────────────────────
   # Lighthouse (PR – prod build, SEO/a11y budgets)
@@ -587,7 +591,7 @@ jobs:
       NEXT_PUBLIC_BASE_URL: https://grabcaramel.com
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
       - uses: pnpm/action-setup@v6
         with:
@@ -640,7 +644,7 @@ jobs:
           path: |
             apps/caramel-app/lighthouse-reports/
             apps/caramel-app/lighthouse-reports-mobile/
-          retention-days: 14
+          retention-days: 3
 
   # ─────────────────────────────────────────────────────────────
   # One-root-compose build (F-016) — clean-volume build + boot + migrate proof
@@ -656,7 +660,7 @@ jobs:
     timeout-minutes: 25
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
 

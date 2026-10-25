@@ -5,8 +5,7 @@ export const isValidUrl = (str: string): boolean => {
             ? new URL(raw)
             : new URL(`https://${raw}`)
         return url.hostname.includes('.') // must have a dot
-    } catch (e) {
-        console.log(e)
+    } catch {
         return false
     }
 }

@@ -113,6 +113,52 @@ class SessionStoreTest {
     }
 
     @Test
+    fun aFailedRevokeStaysVisibleWhenSignInBeginsRightAfterWithKeepError() = runBlocking {
+        val (api, _) = routed { method, _ -> if (method == "DELETE") HttpResponse(500, "{}") else null }
+        val store = SessionStore(api, MemoryTokenStore("tok")) { pkce }
+        store.load()
+        store.signOut()
+        val revokeFailure = store.state.value.errorMessage!!
+
+        assertEquals("https://accounts.example/auth", store.beginSignIn(OAuthProvider.GOOGLE, keepError = true))
+
+        assertEquals(revokeFailure, store.state.value.errorMessage)
+        assertTrue(store.state.value.isSigningIn)
+    }
+
+    @Test
+    fun beginSignInClearsAnOldMessageUnlessToldToKeepIt() = runBlocking {
+        val (api, _) = routed { method, _ -> if (method == "DELETE") HttpResponse(500, "{}") else null }
+        val store = SessionStore(api, MemoryTokenStore("tok")) { pkce }
+        store.load()
+        store.signOut()
+
+        store.beginSignIn(OAuthProvider.GOOGLE)
+
+        assertNull(store.state.value.errorMessage)
+    }
+
+    @Test
+    fun aSignInFailureIsJoinedToTheKeptRevokeFailure() = runBlocking {
+        val (api, _) = routed { method, path ->
+            when {
+                method == "DELETE" -> HttpResponse(500, "{}")
+                path == "/api/extension/oauth/authorize" -> HttpResponse(503, """{"error":"down"}""")
+                else -> null
+            }
+        }
+        val store = SessionStore(api, MemoryTokenStore("tok")) { pkce }
+        store.load()
+        store.signOut()
+
+        assertNull(store.beginSignIn(OAuthProvider.GOOGLE, keepError = true))
+
+        val message = store.state.value.errorMessage!!
+        assertTrue(message, message.startsWith("Signed out on this device, but the server could not end the session"))
+        assertTrue(message, message.contains("down"))
+    }
+
+    @Test
     fun signOutClearsLocallyEvenWhenTheRevokeFails() = runBlocking {
         val (api, _) = routed { method, _ -> if (method == "DELETE") HttpResponse(500, "{}") else null }
         val tokens = MemoryTokenStore("tok")

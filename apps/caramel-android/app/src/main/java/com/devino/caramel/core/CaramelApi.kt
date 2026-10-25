@@ -37,7 +37,11 @@ data class HttpRequest(
     val url: String,
     val headers: Map<String, String>,
     val body: String?,
+    val timeoutMs: Int = DEFAULT_TIMEOUT_MS,
 )
+
+/** Connect and read timeout of an ordinary API call. */
+const val DEFAULT_TIMEOUT_MS = 20_000
 
 data class HttpResponse(val status: Int, val body: String)
 
@@ -57,8 +61,8 @@ class HttpUrlConnectionTransport : HttpTransport {
             connection.requestMethod = request.method
             // The API never redirects a JSON call; following one would resend the bearer elsewhere.
             connection.instanceFollowRedirects = false
-            connection.connectTimeout = TIMEOUT_MS
-            connection.readTimeout = TIMEOUT_MS
+            connection.connectTimeout = request.timeoutMs
+            connection.readTimeout = request.timeoutMs
             request.headers.forEach { (name, value) -> connection.setRequestProperty(name, value) }
             val body = request.body
             // PUT/POST always send a (possibly empty) body so the request carries Content-Length.
@@ -73,10 +77,6 @@ class HttpUrlConnectionTransport : HttpTransport {
         } finally {
             connection.disconnect()
         }
-    }
-
-    private companion object {
-        const val TIMEOUT_MS = 20_000
     }
 }
 
@@ -101,13 +101,14 @@ class CaramelApi(
         query: List<Pair<String, String>> = emptyList(),
         body: String? = null,
         bearer: String? = null,
+        timeoutMs: Int = DEFAULT_TIMEOUT_MS,
     ): ApiResponse {
         val requestId = newRequestId()
         val headers = linkedMapOf("Accept" to "application/json", "x-request-id" to requestId)
         if (bearer != null) headers["Authorization"] = "Bearer $bearer"
         if (body != null) headers["Content-Type"] = "application/json"
         val response = try {
-            transport.execute(HttpRequest(method, buildUrl(path, query), headers, body))
+            transport.execute(HttpRequest(method, buildUrl(path, query), headers, body, timeoutMs))
         } catch (e: IOException) {
             throw ApiError(method, path, null, requestId, e.message ?: e.javaClass.simpleName, e)
         }
@@ -135,58 +136,10 @@ class CaramelApi(
         throw ApiError(method, path, null, response.requestId, "Response did not match the expected shape: ${e.message}", e)
     }
 
-    // region Public catalog routes
-
-    /** GET /api/coupons/recently-worked */
-    suspend fun recentlyWorked(): List<RecentlyWorkedCoupon> =
-        get<RecentlyWorkedResponse>("/api/coupons/recently-worked").coupons
-
-    /** GET /api/sites/top-sites */
-    suspend fun topStores(): List<String> = get<SitesResponse>("/api/sites/top-sites").sites.filterNotNull()
-
-    /** GET /api/coupons/stores?q=&limit= (empty [query] browses). */
-    suspend fun storeOptions(query: String, limit: Int = 30): List<String> =
-        get<SitesResponse>("/api/coupons/stores", listOf("q" to query, "limit" to limit.toString())).sites.filterNotNull()
-
-    /** GET /api/coupons?site=&page=&limit= */
-    suspend fun coupons(site: String, page: Int = 1, limit: Int = 50): CouponsPage =
-        get("/api/coupons", listOf("site" to site, "page" to page.toString(), "limit" to limit.toString()))
-
-    // endregion
-
     // region Account routes (bearer)
 
     /** GET /api/extension/me */
     suspend fun me(bearer: String): MeResponse = get("/api/extension/me", bearer = bearer)
-
-    /** GET /api/account/overview */
-    suspend fun overview(bearer: String): OverviewResponse = get("/api/account/overview", bearer = bearer)
-
-    /** GET /api/account/favorites */
-    suspend fun favorites(bearer: String): List<String> =
-        get<FavoritesResponse>("/api/account/favorites", bearer = bearer).favorites.map { it.store }
-
-    /**
-     * PUT or DELETE /api/account/favorites/:store. Returns the store key the server actually
-     * wrote (it normalizes to the registrable domain).
-     */
-    suspend fun setFavorite(store: String, favorited: Boolean, bearer: String): String {
-        val method = if (favorited) "PUT" else "DELETE"
-        val path = "/api/account/favorites/$store"
-        return decode<FavoriteWriteResponse>(send(method, path, bearer = bearer), method, path).store
-    }
-
-    /** GET /api/account/export (the JSON download), returned as the bytes of the body. */
-    suspend fun exportData(bearer: String): ByteArray =
-        send("GET", "/api/account/export", bearer = bearer).body.toByteArray(Charsets.UTF_8)
-
-    /**
-     * POST /api/account/delete. Deletes the account itself (the user, every session including this
-     * bearer, linked sign-ins and synced data).
-     */
-    suspend fun deleteAccount(bearer: String) {
-        send("POST", "/api/account/delete", body = confirmDeleteBody(), bearer = bearer)
-    }
 
     /** DELETE /api/extension/session. Revokes THIS bearer on the server (idempotent). */
     suspend fun revokeSession(bearer: String) {
@@ -194,11 +147,28 @@ class CaramelApi(
     }
 
     /**
-     * POST /api/account/data/delete. Removes synced savings, followed stores and reports; it does
-     * NOT delete the account (see [deleteAccount]).
+     * POST /api/account/delete. Deletes the account itself (the user, every session including this
+     * bearer, linked sign-ins and synced data). TODO(T-7505): see SessionStore.deleteAccount.
      */
-    suspend fun deleteSyncedData(bearer: String) {
-        send("POST", "/api/account/data/delete", body = confirmDeleteBody(), bearer = bearer)
+    suspend fun deleteAccount(bearer: String) {
+        send("POST", "/api/account/delete", body = confirmDeleteBody(), bearer = bearer)
+    }
+
+    // endregion
+
+    // region Web session handoff (bearer)
+
+    /**
+     * POST /api/app/web-session/handoff. Trades the bearer for a one-time (60 s) redeem URL that the
+     * WebView loads to receive the web session cookie. [next] is the path the redeem lands on; the
+     * server accepts only "/" and paths under /coupons, /profile and /welcome (see
+     * [com.devino.caramel.web.HandoffNext]). A dead bearer answers 401 ([ApiError.isUnauthorized]).
+     * The response carries a credential: callers must not log [HandoffResponse.url].
+     */
+    suspend fun webSessionHandoff(bearer: String, next: String): HandoffResponse {
+        val body = buildJsonObject { put("next", next) }.toString()
+        val path = "/api/app/web-session/handoff"
+        return decode(send("POST", path, body = body, bearer = bearer, timeoutMs = HANDOFF_TIMEOUT_MS), "POST", path)
     }
 
     // endregion
@@ -238,6 +208,11 @@ class CaramelApi(
     }
 
     // endregion
+
+    private companion object {
+        /** Shorter than an ordinary call: the shopper is waiting on a tap, and the code lives only 60 s. */
+        const val HANDOFF_TIMEOUT_MS = 10_000
+    }
 
     private fun confirmDeleteBody(): String = buildJsonObject { put("confirm", "DELETE") }.toString()
 
