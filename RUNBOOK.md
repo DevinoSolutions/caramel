@@ -366,7 +366,7 @@ BASE_URL=https://grabcaramel.com UPKUMA_HEALTH_SECRET=*** \
   pnpm --filter caramel-app run smoke
 ```
 
-`BASE_URL` defaults to `http://localhost:58000` (the local dev port) if
+`BASE_URL` defaults to `http://localhost:28000` (the local dev port) if
 unset. **Not wired into the Dokploy deploy pipeline** — this is a callable
 command a human (or a future CI/CD step) runs after a deploy, not an
 automatic gate. TODO(human): wire this into the actual Dokploy post-deploy

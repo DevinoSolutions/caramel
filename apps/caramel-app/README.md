@@ -8,7 +8,7 @@ Commands below assume `cd apps/caramel-app` (or prefix with `pnpm --filter caram
 
 | Command                                       | Does                                                              |
 | --------------------------------------------- | ----------------------------------------------------------------- |
-| `pnpm dev`                                    | Dev server, `:58000`                                              |
+| `pnpm dev`                                    | Dev server, `:28000`                                              |
 | `pnpm test` / `pnpm test:e2e`                 | Unit tests (vitest) / e2e (Playwright — needs migrations applied) |
 | `pnpm eval`                                   | Cart-classifier AI eval suite — see `evals/README.md`             |
 | `pnpm db:migrate:deploy`                      | Apply migrations (the onboarding one — see `docs/LOCAL-DEV.md`)   |

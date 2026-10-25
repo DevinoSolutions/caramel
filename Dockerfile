@@ -49,7 +49,7 @@ COPY --from=pruner /git-sha.txt /git-sha.txt
 # LOCAL-SAFE or EMPTY only; NEVER a production identifier (public repo). Deploy
 # platforms pass real values via --build-arg. env.client.ts never throws on a
 # missing/empty public var, so empty defaults are safe.
-ARG NEXT_PUBLIC_BASE_URL=http://localhost:58000
+ARG NEXT_PUBLIC_BASE_URL=http://localhost:28000
 ARG NEXT_PUBLIC_SENTRY_DSN=
 ARG NEXT_PUBLIC_GOOGLE_ANALYTICS_ID=
 ARG NEXT_PUBLIC_API_ENCRYPTION_ENABLED=

@@ -26,7 +26,7 @@ if (fs.existsSync(envPath)) {
 const baseURL =
     process.env.E2E_SEED_BASE_URL ||
     process.env.NEXT_PUBLIC_BASE_URL ||
-    'http://localhost:58000'
+    'http://localhost:28000'
 
 // test@caramel.dev / test1234 are the extension suite's documented fixture
 // credentials (test-extension.mjs TEST_EMAIL / TEST_PASSWORD).

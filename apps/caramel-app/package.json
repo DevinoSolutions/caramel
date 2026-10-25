@@ -3,7 +3,7 @@
     "version": "0.1.0",
     "private": true,
     "scripts": {
-        "dev": "npx prisma generate && next dev -p 58000",
+        "dev": "npx prisma generate && next dev -p 28000",
         "build": "npx prisma generate && next build",
         "start": "next start",
         "lint": "eslint .",

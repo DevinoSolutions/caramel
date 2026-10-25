@@ -59,8 +59,8 @@
 
 ## Commands
 
-- Setup: `pnpm install` → `cp apps/caramel-app/.env.example apps/caramel-app/.env` (secrets table in README) → `pnpm dev` (F-016 one-root-compose: `docker compose up --build` builds web, boots pg :58005, runs `prisma migrate deploy` in-container).
-- Run: `pnpm dev` (docker compose up --build → app :58000; one root compose = local/CI/prod graph, hot reload traded away 2026-07-09) · host escape hatches (need `docker compose up postgres -d` first): `pnpm dev:next` (app :58000 with hot reload), `pnpm dev:extension` (web-ext). See docs/LOCAL-DEV.md.
+- Setup: `pnpm install` → `cp apps/caramel-app/.env.example apps/caramel-app/.env` (secrets table in README) → `pnpm dev` (F-016 one-root-compose: `docker compose up --build` builds web, boots pg :28005, runs `prisma migrate deploy` in-container).
+- Run: `pnpm dev` (docker compose up --build → app :28000; one root compose = local/CI/prod graph, hot reload traded away 2026-07-09) · host escape hatches (need `docker compose up postgres -d` first): `pnpm dev:next` (app :28000 with hot reload), `pnpm dev:extension` (web-ext). See docs/LOCAL-DEV.md.
 - Test: `pnpm test` (turbo → vitest: app `tests/unit/**/*.test.{ts,tsx}` + extension `tests/*.mjs`) · single file: `pnpm --filter caramel-app exec vitest run tests/unit/<file>` · e2e: `pnpm --filter caramel-app test:e2e` (needs DB+migrations) · evals (live LLM, costs money): `pnpm --filter caramel-app eval` (needs `OPENROUTER_API_KEY`).
 - Gates (all also run in husky pre-commit + CI): `pnpm lint` · `pnpm lint:oxlint` · `pnpm prettier-check` · `pnpm --filter caramel-app knip` · `pnpm -r run type-check`. Ops: `pnpm --filter caramel-app smoke`, `... test:integration` (needs local pg), `... bridge:sync` (migration-period external→app catalog feed; needs `COUPONS_DATABASE_URL`) — see RUNBOOK.md.
 

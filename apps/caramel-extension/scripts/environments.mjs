@@ -36,7 +36,7 @@ export const ENVIRONMENTS = {
         baseUrl: 'https://dev.grabcaramel.com',
         trustedOrigins: [
             'https://dev.grabcaramel.com',
-            'http://localhost:58000',
+            'http://localhost:28000',
         ],
         verbose: true,
     },

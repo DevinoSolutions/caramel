@@ -21,7 +21,7 @@ pnpm dev                                                  # docker compose up --
 - boots **Postgres 18.4** and **web**,
 - runs `prisma migrate deploy` automatically inside the web container at start
   (the entrypoint fail-hards if a migration fails),
-- serves the app + API at **http://localhost:58000**.
+- serves the app + API at **http://localhost:28000**.
 
 There is no separate "apply migrations" step for the compose flow — the
 container entrypoint does it. Stop everything with `Ctrl-C` (or
@@ -32,8 +32,8 @@ volume.
 
 | Service    | Image           | Host port (default)        | Purpose                                             |
 | ---------- | --------------- | -------------------------- | --------------------------------------------------- |
-| `web`      | built locally   | `127.0.0.1:58000` → `3000` | Next.js app + API (`apps/caramel-app`)              |
-| `postgres` | `postgres:18.4` | `127.0.0.1:58005` → `5432` | Auth DB (`caramel`) — owned + migrated by this repo |
+| `web`      | built locally   | `127.0.0.1:28000` → `3000` | Next.js app + API (`apps/caramel-app`)              |
+| `postgres` | `postgres:18.4` | `127.0.0.1:28005` → `5432` | Auth DB (`caramel`) — owned + migrated by this repo |
 
 No Redis service: rate limiting is in-memory single-instance by design (NF-13).
 No second coupons DB service: the coupon catalog is **app-owned** and lives in
@@ -59,7 +59,7 @@ the platform env) to override:
 | `docker-compose.yml` `environment:` | Yes (tracked)   | **Topology only** — the in-container `DATABASE_URL` (no `COUPONS_DATABASE_URL`: the catalog is app-owned) | the `web` container at runtime (overrides the app `.env`'s localhost values)                         |
 
 The compose `environment:` block points the in-container app at the `postgres`
-**service** (`@postgres:5432`), overriding whatever `localhost:58005` value the
+**service** (`@postgres:5432`), overriding whatever `localhost:28005` value the
 app `.env` ships. The app `.env`'s localhost values still serve the `pnpm
 dev:next` escape hatch and host-side `prisma` / integration-test commands.
 
@@ -73,10 +73,10 @@ source of truth for secrets; this file doesn't repeat it.
 one package directly:
 
 ```bash
-# 1. Bring up ONLY Postgres (published on 127.0.0.1:58005, matching .env.example):
+# 1. Bring up ONLY Postgres (published on 127.0.0.1:28005, matching .env.example):
 docker compose up postgres -d
 
-# 2a. Web app on the host with hot reload (Next.js dev server on :58000):
+# 2a. Web app on the host with hot reload (Next.js dev server on :28000):
 pnpm dev:next            # = pnpm --filter caramel-app dev
 #     First run / after new migrations, apply them against the compose Postgres:
 pnpm --filter caramel-app db:migrate:deploy
@@ -86,7 +86,7 @@ pnpm dev:extension       # = pnpm --filter caramel-extension dev
 ```
 
 `pnpm dev:next` reads `apps/caramel-app/.env` (whose `DATABASE_URL` points at
-`localhost:58005`), so the single `docker compose up postgres -d` above is all
+`localhost:28005`), so the single `docker compose up postgres -d` above is all
 the infra it needs.
 
 ## Catalog topology (app-owned since the ownership inversion)
@@ -131,7 +131,7 @@ pre-inversion "degraded mode" is retired:
 
 ## Connecting
 
-- Postgres (host): `postgresql://caramel:caramel_password@127.0.0.1:58005/caramel`
+- Postgres (host): `postgresql://caramel:caramel_password@127.0.0.1:28005/caramel`
 - Container-internal hostname: `postgres` (used by the `web` service).
 
 `caramel` is the role the compose Postgres creates (`POSTGRES_USER: caramel`),
@@ -154,7 +154,7 @@ and it is exactly what `apps/caramel-app/.env.example` ships in `DATABASE_URL`
 ## Troubleshooting
 
 - **Port already in use**: override the host port(s), e.g.
-  `WEB_PORT=59000 PG_PORT=59005 pnpm dev`, or bind elsewhere with `BIND_HOST`.
+  `WEB_PORT=29000 PG_PORT=29005 pnpm dev`, or bind elsewhere with `BIND_HOST`.
 - **Coupon routes return 500 / health check shows `catalog: error`**: NOT
   expected anymore — the catalog is app-owned and seeded by `prisma migrate
 deploy`. Confirm the migrations actually ran against the compose Postgres

@@ -9,7 +9,7 @@ import prisma from '@/lib/prisma'
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 // W1 integration — recordWorked / recordFailed / attachSignals exercised
-// against the REAL prisma client + a live local Postgres (:58005). Assumes the
+// against the REAL prisma client + a live local Postgres (:28005). Assumes the
 // DB is migrated (the harness/CI runs `prisma migrate deploy` first). Uses
 // synthetic coupon ids in a private 999000xxx range so they never collide with
 // real catalog ids, and deletes them after each test so the suite is
@@ -67,7 +67,7 @@ const ESTABLISHED = {
     established: true,
 } as const
 
-describe('couponSignals (real prisma, live pg :58005)', () => {
+describe('couponSignals (real prisma, live pg :28005)', () => {
     it('LOW-TRUST worked reports NEVER stamp lastWorkedAt, however many distinct reporters, and store nothing about them (real pg)', async () => {
         const anon = (n: number) =>
             ({ kind: 'ip', ip: `203.0.113.${n}` }) as const

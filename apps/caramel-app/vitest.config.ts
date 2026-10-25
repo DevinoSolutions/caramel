@@ -22,9 +22,9 @@ export default defineConfig({
         // no test relies on them being reachable/real.
         env: {
             DATABASE_URL:
-                'postgresql://postgres:postgres@localhost:58005/caramel?schema=public',
+                'postgresql://postgres:postgres@localhost:28005/caramel?schema=public',
             COUPONS_DATABASE_URL:
-                'postgresql://postgres:postgres@localhost:58005/caramel_coupons',
+                'postgresql://postgres:postgres@localhost:28005/caramel_coupons',
             BETTER_AUTH_SECRET: 'vitest-fixture-better-auth-secret',
         },
     },

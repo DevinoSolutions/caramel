@@ -15,7 +15,7 @@ const seedBaseURL =
     process.env.PLAYWRIGHT_BASE_URL ||
     process.env.BASE_URL ||
     process.env.NEXT_PUBLIC_BASE_URL ||
-    'http://localhost:58000'
+    'http://localhost:28000'
 
 test.describe('Auth Flows — Login (real session)', () => {
     test.skip(!SEEDABLE, 'needs a seedable local/CI Postgres (DATABASE_URL)')
