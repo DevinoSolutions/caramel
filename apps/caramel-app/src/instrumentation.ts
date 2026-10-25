@@ -102,9 +102,8 @@ export async function register() {
 
     // Retention of coupon_box_proposals: rows older than the 30-day promotion
     // window are dead (can never count toward a quorum). Six-hourly sweep.
-    const { startCouponProposalRetentionSweep } = await import(
-        '@/lib/couponProposalRetention'
-    )
+    const { startCouponProposalRetentionSweep } =
+        await import('@/lib/couponProposalRetention')
     const proposalRetention = startCouponProposalRetentionSweep()
     console.log(
         `[boot] coupon proposal retention sweep ${proposalRetention.enabled ? 'ENABLED' : 'DISABLED'} — ${proposalRetention.reason}`,
