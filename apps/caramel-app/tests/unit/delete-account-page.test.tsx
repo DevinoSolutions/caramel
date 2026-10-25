@@ -91,7 +91,7 @@ describe('delete-account content', () => {
             'It is not stored with your account or your IP address, and it is deleted after 30 days.',
             'The text of store searches is not written to them.',
             'Error records (Sentry), kept for 90 days, and a sample of session replays (Sentry), kept for as long as our self-hosted Sentry retains them.',
-            'by January 23, 2027 at the latest',
+            'by January 23, 2027 at the latest). Session recordings made before then may also contain it.',
             'Analytics events that are not linked to your account',
             'Google Analytics',
             'support inbox',

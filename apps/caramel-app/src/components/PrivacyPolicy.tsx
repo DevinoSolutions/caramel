@@ -321,7 +321,8 @@ const PrivacyPolicy = () => {
                         stored, and we mask what you type in session replays.
                         Error reports captured before that date may still
                         contain it until they expire, 90 days after capture (by
-                        January 23, 2027 at the latest).
+                        January 23, 2027 at the latest). Session recordings made
+                        before then may also contain it.
                     </Para>
                     <Para>
                         {/* TODO(T-7505): recording retention sentence withheld (MASTER 2026-10-25) until posthog-selfhost confirms new recordings are stamped 30d and the storage purge (A78, T-8392) is done; do not add a duration or deletion claim before then. */}

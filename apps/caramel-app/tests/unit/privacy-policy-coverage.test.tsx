@@ -126,7 +126,7 @@ describe('privacy policy coverage', () => {
             'Since October 25, 2026 we also remove search text from error reports and from the web addresses recorded in session replays before they are stored, and we mask what you type in session replays.',
             'A sample of sessions is also recorded in our self-hosted PostHog, with every form field masked.',
             'A sample of sessions is recorded in our self-hosted PostHog, with every form field masked.',
-            'until they expire, 90 days after capture (by January 23, 2027 at the latest)',
+            'until they expire, 90 days after capture (by January 23, 2027 at the latest). Session recordings made before then may also contain it.',
             'The text of store searches is not written to them.',
             'Error records (Sentry) are kept for 90 days, and a sample of session replays (Sentry) are kept for as long as our self-hosted Sentry retains them.',
             'Your analytics profile in our self-hosted analytics (PostHog) is deleted immediately. Events already recorded under it are not yet removed automatically; ask us at hello@devino.ca and we will delete them.',
@@ -138,21 +138,23 @@ describe('privacy policy coverage', () => {
         // expiry or duration claim until posthog-selfhost and A78 report.
         const recordingSentences = normalized
             .split(/(?<=[.!?])\s*(?=[A-Z“])/)
-            .filter(
-                sentence =>
-                    /record(ing|ed)/i.test(sentence) &&
-                    /PostHog/.test(sentence),
-            )
-        // The two sample/masking sentences ("On our website", "Where is it
-        // stored") plus the two other places PostHog recordings are named
-        // (the apps' analytics note and "Website Analytics & Cookies"). A
-        // rewording that makes a sentence escape this filter fails here instead
-        // of silently dropping out of the check. Event-deletion sentences name
-        // PostHog and "recorded" too; they are checked by their own tests.
+            .filter(sentence => /record(ing|ed)/i.test(sentence))
+        // Expected: the two sample/masking sentences ("On our website", "Where
+        // is it stored"), the "Website Analytics & Cookies" PostHog bullet, and
+        // the pre-scrub disclosure sentence. A rewording that makes a sentence escape
+        // this filter fails here instead of silently dropping out of the check.
+        // Left out: sentences that also make a Sentry replay claim (a different,
+        // documented one, e.g. the apps' analytics note) and
+        // the event-deletion sentences ("Events already recorded", "profile"),
+        // which have their own tests.
         const recordingOnly = recordingSentences.filter(
-            sentence => !/profile|Events already recorded/.test(sentence),
+            sentence =>
+                !/profile|Events already recorded|replay/i.test(sentence),
         )
         expect(recordingOnly).toHaveLength(4)
+        expect(recordingOnly).toContain(
+            'Session recordings made before then may also contain it.',
+        )
         expect(
             recordingOnly.filter(sentence =>
                 sentence.includes(
