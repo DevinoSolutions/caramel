@@ -61,8 +61,6 @@ function walk(dir: string): string[] {
     return found
 }
 
-const PROCESS_ENV_RE = /process\.env\.(\w+)/g
-
 interface Violation {
     file: string
     variable: string
@@ -81,7 +79,9 @@ function findViolations(files: string[]): Violation[] {
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i]
             if (line.trimStart().startsWith('//')) continue
-            for (const match of line.matchAll(PROCESS_ENV_RE)) {
+            const re = /process\.env\.(\w+)/g
+            let match: RegExpExecArray | null
+            while ((match = re.exec(line)) !== null) {
                 const varName = match[1]
                 if (NEXT_COMPILE_TIME_VARS.has(varName)) continue
                 violations.push({
