@@ -41,9 +41,13 @@ export const metadata: Metadata = {
 
 const linkClassName = 'font-semibold text-caramel underline hover:no-underline'
 
+// Mixes custom colours (darkBg) with standard classes, which sort differently under the repo-root prettier (husky) and apps/caramel-app (CI). A constant is not sorted, so both agree.
+const PAGE_CLASS =
+    'dark:bg-darkBg flex min-h-screen w-full flex-col items-center px-6 pb-20 pt-32'
+
 export default function DeleteAccountPage(): React.JSX.Element {
     return (
-        <main className="flex min-h-screen w-full flex-col items-center px-6 pt-32 pb-20 dark:bg-darkBg">
+        <main className={PAGE_CLASS}>
             <div className="flex w-full max-w-4xl flex-col gap-8">
                 <header className="flex flex-col gap-4">
                     <h1 className="text-3xl font-bold tracking-tight text-gray-900 dark:text-white">

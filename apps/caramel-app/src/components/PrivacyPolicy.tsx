@@ -26,12 +26,47 @@ import {
 // bullets and the in-app deletion bullet came with the iOS and Android apps.
 // Each maps to code; the PR body lists the file:line evidence per sentence.
 
+// Class strings that mix custom colours (caramel, darkBg) with standard ones sort differently under the repo-root prettier (husky) and apps/caramel-app (CI). Held in constants, which prettier-plugin-tailwindcss does not sort, so both agree.
+const BULLET_DOT_CLASS = 'bg-caramel mt-2 h-2 w-2 shrink-0 rounded-full'
+
+const SUB_HEADING_CLASS =
+    'mb-3 mt-2 text-lg font-semibold text-gray-900 dark:text-white'
+
+const INLINE_LINK_CLASS =
+    'text-caramel font-semibold underline hover:no-underline'
+
+const EFFECTIVE_DATE_BADGE_CLASS =
+    'bg-caramel/10 text-caramel mb-6 inline-flex items-center gap-3 rounded-full px-6 py-3 text-sm font-semibold'
+
+const BRAND_NAME_CLASS = 'text-caramel font-semibold'
+
+const SECTION_CARD_CLASS =
+    'border-caramel/20 from-caramel/5 to-caramel/5 dark:border-caramel/30 dark:from-caramel/10 dark:to-caramel/10 relative overflow-hidden rounded-3xl border bg-gradient-to-br via-orange-50/30 p-8 dark:via-orange-900/20'
+
+const SECTION_ICON_CLASS =
+    'bg-caramel/10 text-caramel dark:bg-caramel/20 flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-xl'
+
+const SECTION_TITLE_CLASS =
+    'mb-4 text-2xl font-bold text-gray-900 lg:text-xl dark:text-white'
+
+const CONTACT_CARD_CLASS =
+    'border-caramel/20 from-caramel/5 to-caramel/5 dark:border-caramel/30 dark:from-caramel/10 dark:to-caramel/10 rounded-3xl border bg-gradient-to-br via-orange-50/30 p-8 dark:via-orange-900/20'
+
+const CONTACT_ICON_CLASS =
+    'bg-caramel/10 text-caramel dark:bg-caramel/20 flex h-12 w-12 items-center justify-center rounded-2xl text-xl'
+
+const MAILTO_LINK_CLASS =
+    'text-caramel focus-visible:ring-caramel dark:focus-visible:ring-offset-darkBg inline-flex items-center gap-2 rounded-md font-semibold transition-colors duration-200 hover:text-orange-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2'
+
+const UPDATES_BANNER_CLASS =
+    'from-caramel mx-auto mt-12 max-w-4xl rounded-3xl bg-gradient-to-r to-orange-600 p-8 text-center text-white shadow-lg'
+
 function Bullets({ items }: { items: ReactNode[] }) {
     return (
         <ul className="mb-4 space-y-2 text-gray-600 dark:text-gray-400">
             {items.map((item, i) => (
                 <li key={i} className="flex items-start gap-3">
-                    <span className="mt-2 h-2 w-2 shrink-0 rounded-full bg-caramel"></span>
+                    <span className={BULLET_DOT_CLASS}></span>
                     <span>{item}</span>
                 </li>
             ))}
@@ -44,11 +79,7 @@ function Para({ children }: { children: ReactNode }) {
 }
 
 function Sub({ children }: { children: ReactNode }) {
-    return (
-        <h3 className="mt-2 mb-3 text-lg font-semibold text-gray-900 dark:text-white">
-            {children}
-        </h3>
-    )
+    return <h3 className={SUB_HEADING_CLASS}>{children}</h3>
 }
 
 const PrivacyPolicy = () => {
@@ -332,7 +363,7 @@ const PrivacyPolicy = () => {
                                 our{' '}
                                 <Link
                                     href="/delete-account"
-                                    className="font-semibold text-caramel underline hover:no-underline"
+                                    className={INLINE_LINK_CLASS}
                                 >
                                     Delete your account
                                 </Link>{' '}
@@ -573,14 +604,14 @@ const PrivacyPolicy = () => {
                 transition={{ duration: 0.6 }}
                 className="mb-16 text-center"
             >
-                <div className="mb-6 inline-flex items-center gap-3 rounded-full bg-caramel/10 px-6 py-3 text-sm font-semibold text-caramel">
+                <div className={EFFECTIVE_DATE_BADGE_CLASS}>
                     <FaShieldAlt className="h-4 w-4" />
                     Effective Date: October 24, 2026
                 </div>
                 <p className="mx-auto max-w-4xl text-lg leading-relaxed text-gray-600 dark:text-gray-300">
                     Welcome to{' '}
-                    <span className="font-semibold text-caramel">Caramel!</span>{' '}
-                    Caramel is made by Devino. This Privacy Policy explains what
+                    <span className={BRAND_NAME_CLASS}>Caramel!</span> Caramel
+                    is made by Devino. This Privacy Policy explains what
                     information the Caramel browser extension, the Caramel iOS
                     and Android apps and the grabcaramel.com website collect,
                     how we use it, where it is stored and for how long, and who
@@ -598,7 +629,7 @@ const PrivacyPolicy = () => {
                         whileInView={{ opacity: 1, x: 0 }}
                         viewport={{ once: true }}
                         transition={{ duration: 0.6, delay: index * 0.1 }}
-                        className="relative overflow-hidden rounded-3xl border border-caramel/20 bg-gradient-to-br from-caramel/5 via-orange-50/30 to-caramel/5 p-8 dark:border-caramel/30 dark:from-caramel/10 dark:via-orange-900/20 dark:to-caramel/10"
+                        className={SECTION_CARD_CLASS}
                     >
                         {/* Background Pattern */}
                         <div className="absolute inset-0 opacity-5">
@@ -629,11 +660,11 @@ const PrivacyPolicy = () => {
 
                         <div className="relative z-10">
                             <div className="mb-6 flex items-start gap-4">
-                                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-caramel/10 text-xl text-caramel dark:bg-caramel/20">
+                                <div className={SECTION_ICON_CLASS}>
                                     {section.icon}
                                 </div>
                                 <div className="flex-1">
-                                    <h2 className="mb-4 text-2xl font-bold text-gray-900 dark:text-white lg:text-xl">
+                                    <h2 className={SECTION_TITLE_CLASS}>
                                         {section.title}
                                     </h2>
                                     <div className="text-base leading-relaxed">
@@ -653,10 +684,10 @@ const PrivacyPolicy = () => {
                     whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true }}
                     transition={{ duration: 0.6 }}
-                    className="rounded-3xl border border-caramel/20 bg-gradient-to-br from-caramel/5 via-orange-50/30 to-caramel/5 p-8 dark:border-caramel/30 dark:from-caramel/10 dark:via-orange-900/20 dark:to-caramel/10"
+                    className={CONTACT_CARD_CLASS}
                 >
                     <div className="flex items-start gap-4">
-                        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-caramel/10 text-xl text-caramel dark:bg-caramel/20">
+                        <div className={CONTACT_ICON_CLASS}>
                             <FaEdit />
                         </div>
                         <div>
@@ -669,7 +700,7 @@ const PrivacyPolicy = () => {
                             </p>
                             <a
                                 href="mailto:hello@devino.ca"
-                                className="inline-flex items-center gap-2 rounded-md font-semibold text-caramel transition-colors duration-200 hover:text-orange-600 focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 focus-visible:outline-none dark:focus-visible:ring-offset-darkBg"
+                                className={MAILTO_LINK_CLASS}
                             >
                                 <FaEnvelope className="h-4 w-4" />
                                 hello@devino.ca
@@ -683,10 +714,10 @@ const PrivacyPolicy = () => {
                     whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true }}
                     transition={{ duration: 0.6, delay: 0.1 }}
-                    className="rounded-3xl border border-caramel/20 bg-gradient-to-br from-caramel/5 via-orange-50/30 to-caramel/5 p-8 dark:border-caramel/30 dark:from-caramel/10 dark:via-orange-900/20 dark:to-caramel/10"
+                    className={CONTACT_CARD_CLASS}
                 >
                     <div className="flex items-start gap-4">
-                        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-caramel/10 text-xl text-caramel dark:bg-caramel/20">
+                        <div className={CONTACT_ICON_CLASS}>
                             <FaEnvelope />
                         </div>
                         <div>
@@ -699,7 +730,7 @@ const PrivacyPolicy = () => {
                             </p>
                             <a
                                 href="mailto:hello@devino.ca"
-                                className="inline-flex items-center gap-2 rounded-md font-semibold text-caramel transition-colors duration-200 hover:text-orange-600 focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 focus-visible:outline-none dark:focus-visible:ring-offset-darkBg"
+                                className={MAILTO_LINK_CLASS}
                             >
                                 <FaEnvelope className="h-4 w-4" />
                                 hello@devino.ca
@@ -715,7 +746,7 @@ const PrivacyPolicy = () => {
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true }}
                 transition={{ duration: 0.6 }}
-                className="mx-auto mt-12 max-w-4xl rounded-3xl bg-gradient-to-r from-caramel to-orange-600 p-8 text-center text-white shadow-lg"
+                className={UPDATES_BANNER_CLASS}
             >
                 <h3 className="mb-4 text-xl font-semibold">
                     Changes to This Privacy Policy
