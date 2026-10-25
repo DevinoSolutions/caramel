@@ -885,3 +885,45 @@ final class BounceGuardTests: XCTestCase {
         XCTAssertFalse(WebSessionHandoff.pageNeedsSession(URL(string: "https://evil.com/profile")!))
     }
 }
+
+/// RedeemNavigation: what a navigation means while the shell's own redeem is in flight.
+final class RedeemNavigationTests: XCTestCase {
+    private func classify(_ string: String, inFlight: Bool = true, mainFrame: Bool = true) -> RedeemNavigation {
+        RedeemNavigation.classify(URL(string: string)!, redeemInFlight: inFlight, isMainFrame: mainFrame)
+    }
+
+    func testAPlainLoginEndsTheRedeemAsABounce() {
+        XCTAssertEqual(classify("https://grabcaramel.com/login"), .signInBounce)
+        XCTAssertEqual(classify("https://grabcaramel.com/login?next=%2Fprofile"), .signInBounce)
+        XCTAssertEqual(classify("https://grabcaramel.com/login?error=other"), .signInBounce)
+        XCTAssertEqual(classify("https://grabcaramel.com/signup"), .signInBounce)
+    }
+
+    func testTheHandoffExpiredRedirectIsExpired() {
+        XCTAssertEqual(classify("https://grabcaramel.com/login?error=handoff_expired"), .expired)
+    }
+
+    func testTheLandingPagesProceed() {
+        for path in ["/", "/coupons", "/profile", "/profile#favorites", "/welcome/extension"] {
+            XCTAssertEqual(classify("https://grabcaramel.com" + path), .proceed, path)
+        }
+    }
+
+    func testTheRedeemRouteItselfProceeds() {
+        let code = String(repeating: "a", count: 43)
+        XCTAssertEqual(classify("https://grabcaramel.com/api/app/web-session/redeem?code=\(code)"), .proceed)
+    }
+
+    func testNothingChangesWhenNoRedeemIsInFlight() {
+        XCTAssertEqual(classify("https://grabcaramel.com/login", inFlight: false), .proceed)
+        XCTAssertEqual(classify("https://grabcaramel.com/login?error=handoff_expired", inFlight: false), .proceed)
+    }
+
+    func testAFrameNavigationNeverEndsTheRedeem() {
+        XCTAssertEqual(classify("https://grabcaramel.com/login", mainFrame: false), .proceed)
+    }
+
+    func testOtherSitesProceedToTheNormalDecision() {
+        XCTAssertEqual(classify("https://evil.com/login"), .proceed)
+    }
+}

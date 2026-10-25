@@ -106,6 +106,9 @@ final class ShellRouter: ObservableObject {
         lastToken = current
         if WebSessionLifecycle.shouldWipeWebSession(previous: previous, current: current) {
             abandonWebSession()
+            for model in allModels {
+                model.stopLoading()
+            }
             wipesInFlight += 1
             enqueueLifecycle { [weak self] in
                 guard let self = self else { return }
@@ -136,6 +139,9 @@ final class ShellRouter: ObservableObject {
     /// back to its guarded home page. Without this the next person on the device would open the
     /// previous account's web session. Only ever called from the lifecycle chain.
     private func wipeWebState() async {
+        for model in allModels {
+            model.stopLoading()
+        }
         await WKWebsiteDataStore.default().removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast)
         heldLoads = [:]
         for model in allModels {

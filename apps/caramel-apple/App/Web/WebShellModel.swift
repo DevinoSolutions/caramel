@@ -186,6 +186,13 @@ final class WebShellModel: NSObject, ObservableObject {
         pageState = .needsSignIn
     }
 
+    /// Stops whatever this shell is loading, a redeem included, so it cannot set a cookie after a wipe.
+    func stopLoading() {
+        webView.stopLoading()
+        redeemInFlight = false
+        issuedRedeemURL = nil
+    }
+
     /// Back to the guarded home page (after sign-out or account deletion, once the web data is cleared).
     /// Discards the WKWebView for a fresh one: reloading the old one would keep its
     /// back-forward list (and WebKit's page cache), so the next person on the device
@@ -382,14 +389,25 @@ extension WebShellModel: WKNavigationDelegate {
         }
         // The redeem route answers a dead code with a redirect to /login. While our own redeem is
         // in flight that is the handoff failing, not a page asking the shopper to sign in.
-        if redeemInFlight && WebSessionHandoff.isExpiredRedirect(url) {
+        // A navigation with no target frame is treated as main-frame (the stricter policy).
+        let isMainFrame = navigationAction.targetFrame?.isMainFrame ?? true
+        switch RedeemNavigation.classify(url, redeemInFlight: redeemInFlight, isMainFrame: isMainFrame) {
+        case .expired:
             redeemInFlight = false
             decisionHandler(.cancel)
             onRedeemOutcome(self, .expired)
             return
+        case .signInBounce:
+            // Any other /login or /signup ends the redeem too; without this the cancel below is
+            // swallowed as NSURLErrorCancelled and the shell would wait on the handoff forever.
+            redeemInFlight = false
+            issuedRedeemURL = nil
+            decisionHandler(.cancel)
+            onRedeemOutcome(self, .failed("Your account page asked you to sign in again. Please try again."))
+            return
+        case .proceed:
+            break
         }
-        // A navigation with no target frame is treated as main-frame (the stricter policy).
-        let isMainFrame = navigationAction.targetFrame?.isMainFrame ?? true
         let kind = Self.kind(of: navigationAction.navigationType)
         switch AppLinkGuard.gate(AppLinkGuard.decision(for: url, isMainFrame: isMainFrame), kind: kind) {
         case .loadInShell(let allowed):

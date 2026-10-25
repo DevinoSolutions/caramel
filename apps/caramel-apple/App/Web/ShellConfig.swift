@@ -466,3 +466,21 @@ struct BounceGuard: Equatable {
         return true
     }
 }
+
+/// What a main-frame navigation means while our own redeem is in flight (CARAMEL-2Y follow-up):
+/// the redeem chain must end on an allowlisted page, so a sign-in page ends it as a failure
+/// instead of leaving the shell spinning on a handoff nobody will complete.
+enum RedeemNavigation: Equatable {
+    /// Not a redeem-ending navigation: the normal AppLinkGuard decision applies (this includes the landing page).
+    case proceed
+    /// `/login?error=handoff_expired`: the code was dead; the router may retry once.
+    case expired
+    /// Any other /login or /signup (cookie or origin drift, the session revoked mid-redeem): the redeem failed.
+    case signInBounce
+
+    static func classify(_ url: URL, redeemInFlight: Bool, isMainFrame: Bool = true) -> RedeemNavigation {
+        guard redeemInFlight, isMainFrame else { return .proceed }
+        if WebSessionHandoff.isExpiredRedirect(url) { return .expired }
+        return AppLinkGuard.decision(for: url, isMainFrame: true) == .signIn ? .signInBounce : .proceed
+    }
+}
