@@ -242,7 +242,12 @@ function writeCookieRecord(record: FirstTouchRecord): boolean {
         }
         document.cookie = [cookie, ...attributes].join('; ')
         if (firstTouchCookiePresent()) return true
-        throw new Error('browser did not store the first-touch cookie')
+        // Expected in Safari ITP, private browsing, and webviews — the
+        // localStorage fallback handles it. Not a Sentry event (T-6353).
+        console.debug(
+            '[posthog] cookie write had no effect; falling back to localStorage',
+        )
+        return false
     } catch (error) {
         reportFirstTouchFailure('posthog_first_touch_cookie_write', error)
         return false
