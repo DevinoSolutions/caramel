@@ -521,9 +521,8 @@ enum Role {
 /// four selectors; the selectors are kept so a promotion needs no second source
 /// and an operator can see what was proposed. Also the write-budget ledger:
 /// the per-user, per-store and global daily caps count rows by created_at.
-/// TODO(T-6221): no retention sweep yet; rows older than
-/// AUTO_DETECT_CONFIG_MAX_AGE_DAYS no longer count toward a promotion and
-/// should be deleted by a scheduled job.
+/// Retention: couponProposalRetention.ts sweeps rows older than
+/// AUTO_DETECT_CONFIG_MAX_AGE_DAYS every 6 hours in production.
 model CouponBoxProposal {
   storeName String   @map("store_name")
   boxHash   String   @map("box_hash")

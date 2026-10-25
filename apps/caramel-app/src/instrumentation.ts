@@ -99,6 +99,16 @@ export async function register() {
     console.log(
         `[boot] coupon reporter retention sweep ${retention.enabled ? 'ENABLED' : 'DISABLED'} — ${retention.reason}`,
     )
+
+    // Retention of coupon_box_proposals: rows older than the 30-day promotion
+    // window are dead (can never count toward a quorum). Six-hourly sweep.
+    const { startCouponProposalRetentionSweep } = await import(
+        '@/lib/couponProposalRetention'
+    )
+    const proposalRetention = startCouponProposalRetentionSweep()
+    console.log(
+        `[boot] coupon proposal retention sweep ${proposalRetention.enabled ? 'ENABLED' : 'DISABLED'} — ${proposalRetention.reason}`,
+    )
 }
 
 export const onRequestError = Sentry.captureRequestError
