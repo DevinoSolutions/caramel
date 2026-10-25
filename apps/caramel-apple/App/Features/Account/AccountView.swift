@@ -4,9 +4,10 @@ import SwiftUI
 /// sign out, data export and deletion (App Review 5.1.1(v) account deletion stays
 /// in-app), deal alerts, the privacy policy, and a door to the framed web account.
 ///
-/// TODO(T-7852): the web account page opens signed out until the session handoff
-/// exists, which is why export and "Delete my synced data" are still native here.
-/// Drop them once /profile in the shell is signed in.
+/// TODO(T-7842): "Your Caramel account" opens signed in now (T-7852 handoff), so the
+/// native "Download my data" and "Delete my synced data" rows duplicate the web page.
+/// Drop them once a device run confirms /profile offers both; account deletion stays
+/// native either way (App Review 5.1.1(v)).
 struct AccountView: View {
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var favorites: FavoritesStore

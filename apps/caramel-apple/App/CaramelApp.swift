@@ -6,13 +6,14 @@ struct CaramelApp: App {
     @StateObject private var session: SessionStore
     @StateObject private var favorites: FavoritesStore
     @StateObject private var extensionStatus = ExtensionStatus()
-    @StateObject private var router = ShellRouter()
+    @StateObject private var router: ShellRouter
 
     init() {
         ScreenshotLaunch.seedSavedStoresIfRequested() // App Store screenshot capture only; inert without its launch argument
         let session = SessionStore()
         _session = StateObject(wrappedValue: session)
         _favorites = StateObject(wrappedValue: FavoritesStore(session: session))
+        _router = StateObject(wrappedValue: ShellRouter(session: session))
     }
 
     var body: some Scene {
@@ -34,6 +35,9 @@ struct CaramelApp: App {
                     // validate()/deleteAccount()) wipes the web data; AccountView no longer does it itself.
                     if session.token == nil {
                         Task { await router.resetWebState() }
+                    } else {
+                        // Every sign-in, from any screen: hand the new session to the web views (T-7852).
+                        router.startWebSession()
                     }
                 }
                 .onChange(of: scenePhase) { phase in

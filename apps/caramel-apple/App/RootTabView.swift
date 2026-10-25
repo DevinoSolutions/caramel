@@ -13,7 +13,6 @@ enum RootTab: String {
 /// once in CaramelApp and injected.
 struct RootTabView: View {
     @EnvironmentObject private var router: ShellRouter
-    @EnvironmentObject private var session: SessionStore
 
     var body: some View {
         // The launch argument behind the initial selection only exists for App Store screenshot capture (ScreenshotLaunch).
@@ -36,8 +35,8 @@ struct RootTabView: View {
         }
         .tint(.orange)
         .confirmationDialog("Sign in to Caramel", isPresented: $router.isChoosingSignInProvider, titleVisibility: .visible) {
-            Button("Continue with Apple") { Task { await router.signInFromWeb(.apple, session: session) } }
-            Button("Continue with Google") { Task { await router.signInFromWeb(.google, session: session) } }
+            Button("Continue with Apple") { Task { await router.signInFromWeb(.apple) } }
+            Button("Continue with Google") { Task { await router.signInFromWeb(.google) } }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Signing in happens in a secure sheet, because Google does not allow sign-in inside an app's web view.")

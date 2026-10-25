@@ -152,11 +152,18 @@ final class SessionStore: ObservableObject {
             let me = try await api.me(bearer: token)
             username = me.username
         } catch let error as APIError where error.isUnauthorized {
-            clearLocalSession()
-            errorMessage = "Your session expired. Please sign in again."
+            endSessionRejectedByServer()
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    /// The server answered 401 to this bearer (expired or revoked): the stored session is
+    /// dead. Clears it and says why; CaramelApp resets the web shells when the token goes.
+    /// Used by validate(), deleteAccount() and the web-session handoff.
+    func endSessionRejectedByServer() {
+        clearLocalSession()
+        errorMessage = "Your session expired. Please sign in again."
     }
 
     func signIn(with provider: OAuthProvider) async {
@@ -217,8 +224,7 @@ final class SessionStore: ObservableObject {
         } catch let error as APIError where error.isUnauthorized {
             // The session is already dead, so there is nothing left to delete
             // under it: end the local session as validate() does.
-            clearLocalSession()
-            errorMessage = "Your session expired. Please sign in again."
+            endSessionRejectedByServer()
             return false
         } catch {
             errorMessage = "Could not delete your account: \(error.localizedDescription)"

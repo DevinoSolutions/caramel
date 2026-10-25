@@ -4,6 +4,16 @@ import SwiftUI
 import UIKit
 import WebKit
 
+/// How the web-session redeem navigation (T-7852) ended, reported by the shell that loaded it.
+enum RedeemOutcome: Equatable {
+    /// The redeem 303 landed on an allowlisted page: the session cookie is set.
+    case landed
+    /// The server redirected to `/login?error=handoff_expired` (expired, used or revoked code).
+    case expired
+    /// The navigation failed or ended somewhere unexpected; the message is safe to show.
+    case failed(String)
+}
+
 /// One framed grabcaramel.com page: owns the WKWebView, its navigation policy and
 /// its load state. Every navigation, new-window request and incoming URL is
 /// decided by AppLinkGuard; nothing is loaded that it refused.
@@ -30,7 +40,7 @@ final class WebShellModel: NSObject, ObservableObject {
         case idle
         case loading
         case loaded
-        /// The page wants a signed-in web session, which the shell does not have yet (TODO(T-7852)).
+        /// The page wants a signed-in web session and the shopper has none (not signed in, or the handoff could not make one).
         case needsSignIn
         case failed(String)
     }
@@ -45,6 +55,16 @@ final class WebShellModel: NSObject, ObservableObject {
     /// Set by ShellRouter: a /login or /signup navigation asks the app to run the native sign-in.
     var onSignInRequested: () -> Void = {}
 
+    /// Set by ShellRouter: asked before every ordinary page load. True means the router took
+    /// over (it runs the web-session handoff, then loads the page through `openNow`).
+    var webSessionGate: (WebShellModel, URL) -> Bool = { _, _ in false }
+
+    /// Set by ShellRouter: how the redeem navigation started by `openRedeem` ended.
+    var onRedeemOutcome: (WebShellModel, RedeemOutcome) -> Void = { _, _ in }
+
+    /// The page this shell shows or is about to show (what a handoff should land on).
+    var targetURL: URL { lastRequestedURL ?? home }
+
     private static let log = Logger(subsystem: "com.devino.Caramel", category: "web-shell")
 
     private let home: URL
@@ -52,6 +72,10 @@ final class WebShellModel: NSObject, ObservableObject {
     private var lastObservedURL: URL?
     private var lastRequestedURL: URL?
     private var didStartLoading = false
+    /// True from `openRedeem` until the redeem navigation lands, expires or fails.
+    private var redeemInFlight = false
+    /// The one redeem URL the router issued: it may load once, and no other redeem URL may load at all.
+    private var issuedRedeemURL: URL?
 
     init(home: URL) {
         self.home = home
@@ -105,10 +129,56 @@ final class WebShellModel: NSObject, ObservableObject {
     }
 
     /// Loads an AppLinkGuard-approved URL. The guard runs again in decidePolicyFor.
+    /// While the shopper is signed in natively but the web view has no web session, the
+    /// router holds the load until the handoff (T-7852) has made one.
     func open(_ url: URL) {
         didStartLoading = true
         lastRequestedURL = url
+        if webSessionGate(self, url) {
+            pageState = .loading
+        } else {
+            webView.load(URLRequest(url: url))
+        }
+    }
+
+    /// `open` without asking the router: for the router's own loads once the web session exists.
+    func openNow(_ url: URL) {
+        didStartLoading = true
+        lastRequestedURL = url
         webView.load(URLRequest(url: url))
+    }
+
+    /// Loads the one-time redeem URL (vetted by WebSessionHandoffClient) through the same
+    /// guarded path as every other navigation; its 303 sets the session cookie in this
+    /// web view's data store and lands on `target`. The redeem URL is never remembered as
+    /// the page to retry: it is single use.
+    func openRedeem(_ redeemURL: URL, target: URL) {
+        didStartLoading = true
+        lastRequestedURL = target
+        redeemInFlight = true
+        issuedRedeemURL = redeemURL
+        pageState = .loading
+        webView.load(URLRequest(url: redeemURL))
+    }
+
+    /// A web session now exists (another shell's redeem set the cookie): show this shell's page signed in.
+    func reloadForWebSession() {
+        guard didStartLoading else { return }
+        if webView.url == nil || pageState == .needsSignIn {
+            openNow(targetURL)
+        } else {
+            webView.reload()
+        }
+    }
+
+    /// The web session could not be made; the page shows `message` with a retry.
+    func showFailure(_ message: String) {
+        pageState = .failed(message)
+    }
+
+    /// The page needs a web session the app could not make; the shopper is offered native sign-in.
+    func showSignInNeeded() {
+        pageState = .needsSignIn
     }
 
     /// Back to the guarded home page (after sign-out or account deletion, once the web data is cleared).
@@ -127,8 +197,10 @@ final class WebShellModel: NSObject, ObservableObject {
         urlObservation = nil
         lastObservedURL = nil
         lastRequestedURL = nil
+        redeemInFlight = false
+        issuedRedeemURL = nil
         pageState = .idle
-        // Not started: the visible tab's onAppear (loadHomeIfNeeded) loads home. Loading all four
+        // Not started: the visible tab's .task (loadHomeIfNeeded) loads home. Loading all four
         // shells eagerly would let a signed-out /profile redirect to /login and pop the native sign-in.
         didStartLoading = false
         webView = Self.makeWebView()
@@ -225,7 +297,39 @@ final class WebShellModel: NSObject, ObservableObject {
         // request) reports NSURLErrorCancelled; it is not a failure to show.
         if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled { return }
         Self.log.error("Page load failed: \(nsError.domain, privacy: .public) \(nsError.code)")
+        if redeemInFlight {
+            // Fixed text: the error's own description could quote the one-time redeem URL.
+            redeemInFlight = false
+            onRedeemOutcome(self, .failed("Could not open your account page (\(nsError.domain) \(nsError.code)). Check your connection and try again."))
+            return
+        }
         pageState = .failed("\(nsError.localizedDescription) (\(nsError.domain) \(nsError.code))")
+    }
+
+    /// The redeem navigation finished: it worked when it ended on a page the handoff `next`
+    /// allowlist covers (the 303 sets the cookie before it redirects).
+    /// The cookie is read from this web view's own data store (the one resetWebState wipes), so a
+    /// landing on an allowlisted page only counts when the signed session cookie is really there.
+    private func settleRedeem(finishedAt url: URL?) {
+        redeemInFlight = false
+        issuedRedeemURL = nil
+        guard let url = url, WebSessionHandoff.isSessionPage(url) else {
+            Self.log.error("The web-session redeem ended on an unexpected page.")
+            onRedeemOutcome(self, .failed("Your account page did not open as expected. Please try again."))
+            return
+        }
+        let view = webView
+        view.configuration.websiteDataStore.httpCookieStore.getAllCookies { [weak self] cookies in
+            Task {  in
+                guard let self = self, self.webView === view else { return }
+                if WebSessionHandoff.hasSessionCookie(cookies) {
+                    self.onRedeemOutcome(self, .landed)
+                } else {
+                    Self.log.error("The web-session redeem landed without a session cookie.")
+                    self.onRedeemOutcome(self, .failed("Your account page opened without signing in. Please try again."))
+                }
+            }
+        }
     }
 }
 
@@ -240,12 +344,32 @@ extension WebShellModel: WKNavigationDelegate {
             decisionHandler(.cancel)
             return
         }
+        // Only the URL the router issued loads, and only once; any other redeem URL is refused.
+        if WebSessionHandoff.isRedeemURL(url) {
+            guard url == issuedRedeemURL else {
+                Self.log.error("Refused a redeem URL that was not issued by the handoff.")
+                decisionHandler(.cancel)
+                return
+            }
+            issuedRedeemURL = nil
+        }
+        // The redeem route answers a dead code with a redirect to /login. While our own redeem is
+        // in flight that is the handoff failing, not a page asking the shopper to sign in.
+        if redeemInFlight && WebSessionHandoff.isExpiredRedirect(url) {
+            redeemInFlight = false
+            decisionHandler(.cancel)
+            onRedeemOutcome(self, .expired)
+            return
+        }
         // A navigation with no target frame is treated as main-frame (the stricter policy).
         let isMainFrame = navigationAction.targetFrame?.isMainFrame ?? true
         let kind = Self.kind(of: navigationAction.navigationType)
         switch AppLinkGuard.gate(AppLinkGuard.decision(for: url, isMainFrame: isMainFrame), kind: kind) {
         case .loadInShell(let allowed):
-            lastRequestedURL = allowed
+            // The single-use redeem URL is never the page to retry (openRedeem keeps the target).
+            if !WebSessionHandoff.isRedeemURL(allowed) {
+                lastRequestedURL = allowed
+            }
             decisionHandler(.allow)
         case .allowEmbedded:
             decisionHandler(.allow)
@@ -271,6 +395,9 @@ extension WebShellModel: WKNavigationDelegate {
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         webView.scrollView.refreshControl?.endRefreshing()
         pageState = .loaded
+        if redeemInFlight {
+            settleRedeem(finishedAt: webView.url)
+        }
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
@@ -283,6 +410,11 @@ extension WebShellModel: WKNavigationDelegate {
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         Self.log.error("The web content process terminated.")
+        if redeemInFlight {
+            redeemInFlight = false
+            onRedeemOutcome(self, .failed("The page stopped unexpectedly. Please try again."))
+            return
+        }
         pageState = .failed("The page stopped unexpectedly.")
     }
 }
@@ -356,6 +488,9 @@ struct WebShellView: View {
                         .padding()
                 }
             }
-            .onAppear { model.loadHomeIfNeeded() }
+            // Keyed on the web view: resetToHome swaps it, which restarts the task and loads
+            // the new view. A plain .onAppear does not fire again for a tab that stays on
+            // screen, which left a blank tab after a launch-time 401 reset.
+            .task(id: ObjectIdentifier(model.webView)) { @MainActor in model.loadHomeIfNeeded() }
     }
 }

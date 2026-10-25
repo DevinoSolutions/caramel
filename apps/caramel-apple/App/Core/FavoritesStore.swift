@@ -11,8 +11,13 @@ import SwiftUI
 /// never dropped, they stay in the persisted "pending push" set until the server
 /// has confirmed them.
 ///
-/// TODO(T-7852): signed-out shell pages cannot save stores until the web-session
-/// handoff exists, so alerts only see stores from a signed-in account.
+/// A signed-in shopper's web pages save to the account (the shell has a web session
+/// through the T-7852 handoff); a signed-out shopper cannot save, so alerts only see
+/// stores from a signed-in account.
+///
+/// TODO(T-7842): a store saved on the web page reaches this mirror (and so the deal
+/// alerts) at the next launch, sign-in or Account data action. Nothing refreshes it
+/// when the app returns to the foreground or when the Saved tab changes.
 @MainActor
 final class FavoritesStore: ObservableObject {
     @Published private(set) var stores: [String]
