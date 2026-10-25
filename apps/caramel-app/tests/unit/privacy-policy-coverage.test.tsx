@@ -128,7 +128,7 @@ describe('privacy policy coverage', () => {
             'A sample of sessions is recorded in our self-hosted PostHog, with every form field masked.',
             'until they expire, 90 days after capture (by January 23, 2027 at the latest)',
             'The text of store searches is not written to them.',
-            'Error records and session replays (Sentry) are kept for 90 days.',
+            'Error records (Sentry) are kept for 90 days, and a sample of session replays (Sentry) are kept for as long as our self-hosted Sentry retains them.',
             'Your analytics profile in our self-hosted analytics (PostHog) is deleted immediately. Events already recorded under it are not yet removed automatically; ask us at hello@devino.ca and we will delete them.',
         ]) {
             expect(normalized).toContain(claim)
@@ -138,9 +138,36 @@ describe('privacy policy coverage', () => {
         // expiry or duration claim until posthog-selfhost and A78 report.
         const recordingSentences = normalized
             .split(/(?<=[.!?])\s*(?=[A-Z“])/)
-            .filter(sentence => /recording/i.test(sentence))
-        expect(recordingSentences.length).toBeGreaterThan(0)
-        for (const sentence of recordingSentences) {
+            .filter(
+                sentence =>
+                    /record(ing|ed)/i.test(sentence) &&
+                    /PostHog/.test(sentence),
+            )
+        // The two sample/masking sentences ("On our website", "Where is it
+        // stored") plus the two other places PostHog recordings are named
+        // (the apps' analytics note and "Website Analytics & Cookies"). A
+        // rewording that makes a sentence escape this filter fails here instead
+        // of silently dropping out of the check. Event-deletion sentences name
+        // PostHog and "recorded" too; they are checked by their own tests.
+        const recordingOnly = recordingSentences.filter(
+            sentence => !/profile|Events already recorded/.test(sentence),
+        )
+        expect(recordingOnly).toHaveLength(4)
+        expect(
+            recordingOnly.filter(sentence =>
+                sentence.includes(
+                    'A sample of sessions is also recorded in our self-hosted PostHog',
+                ),
+            ),
+        ).toHaveLength(1)
+        expect(
+            recordingOnly.filter(sentence =>
+                sentence.includes(
+                    'A sample of sessions is recorded in our self-hosted PostHog',
+                ),
+            ),
+        ).toHaveLength(1)
+        for (const sentence of recordingOnly) {
             expect(sentence).not.toMatch(
                 /\b\d+\s*days?\b|within|at most|up to|retention|expire|removed|purge|deleted|delete|clean-up|no backlog/i,
             )

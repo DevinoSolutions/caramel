@@ -191,7 +191,8 @@ export const DELETE_ACCOUNT_SECTIONS: ReadonlyArray<DeleteAccountSection> = [
             'Per-code coupon totals (when a code last worked or failed). They are not tied to you.',
             'A one-way keyed hash of your account (or of your IP address, for a result sent while signed out) is kept with each coupon result to stop fake reports. It is not stored with your account or your IP address, and it is deleted after 30 days.',
             'Server logs, which can include IP addresses and browser type, for up to 90 days. The text of store searches is not written to them.',
-            'Error records and session replays (Sentry), kept for 90 days. They can hold your user id and the pages or errors you hit while signed in. Since October 25, 2026 they are stored without store-search text; ones captured before then may contain it until they expire (by January 23, 2027 at the latest).',
+            // TODO(T-7505): confirm Sentry replay retention in sentry-selfhost before stating a duration for replays.
+            'Error records (Sentry), kept for 90 days, and a sample of session replays (Sentry), kept for as long as our self-hosted Sentry retains them. They can hold your user id and the pages or errors you hit while signed in. Since October 25, 2026 they are stored without store-search text; ones captured before then may contain it until they expire (by January 23, 2027 at the latest).',
             ...(ANALYTICS_DELETION_COPY.keptBullet
                 ? [ANALYTICS_DELETION_COPY.keptBullet]
                 : []),
