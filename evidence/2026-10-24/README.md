@@ -64,3 +64,6 @@
     - the train guard reported "1.6.0: 0 of 13 iOS rows, none open";
     - UPLOAD SUCCEEDED, build 1.6.0 (14960028392) VALID, IN_BETA_TESTING in internal group Devino, not submitted for review.
   - Stray build: 1.5.0 (14960028391), from run 40140709420, contains the 1.6 shell and is mislabelled. Expiring it is the owner's call; submit 1.5.0 with 14960028388.
+- #498 (eb81700, T-7852 Android handoff): `pr498-checks-headed.png` shows all checks green on the PR page. `t7852-android-smoke-main-eb81700.png` is the emulator smoke on main after the merge (run 40155734126): versionName 1.6.0, app alive, "Today's Coupon Codes" on screen.
+- T-7842 / 1.5.0 checklist (ASC): `t7842-testflight-14960028391-expired.png` shows stray build 14960028391 expired. `t7842-asc-app-privacy-published.png` shows the App Privacy label published: 11 types, none used for tracking.
+- T-7474 Play Data Safety: `t7474-play-datasafety-saved-collected.png` and `t7474-play-datasafety-saved.png` show the entered types kept after a reload, nothing shared. The final Save stays disabled until reviewer "Sign in details" exist (owner decision), so the banner in the second shot is stale. Retake after the final save.
