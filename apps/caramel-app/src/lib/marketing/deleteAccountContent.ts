@@ -20,8 +20,11 @@
 // - the email path and its 30 days: src/components/PrivacyPolicy.tsx
 //   ("Your Choices"); the by-hand steps are RUNBOOK.md "Privacy-policy
 //   commitments" and must delete exactly what the lists below promise
-// - the 30-day reporter hash and 90-day logs: PrivacyPolicy.tsx "Where Is It
-//   Stored, and for How Long?"
+// - the 30-day reporter hash, 90-day logs and Sentry, and the store-search
+//   text rules (no app log, proxy access log off, scrubbed from Sentry since
+//   2026-10-25): PrivacyPolicy.tsx "Where Is It Stored, and for How Long?"
+// - the analytics deletion: src/lib/analytics/posthogPersonDeletion.ts
+//   (queued with PostHog, finished in the background; no time bound claimed)
 export const DELETE_ACCOUNT_PATH = '/delete-account'
 
 export const DELETE_ACCOUNT_EMAIL = 'hello@devino.ca'
@@ -105,7 +108,7 @@ export const DELETE_ACCOUNT_SECTIONS: ReadonlyArray<DeleteAccountSection> = [
         paragraphs: [
             'Email hello@devino.ca from the email address on your account and ask us to delete your account. We act on deletion requests within 30 days.',
             'If you signed in with Apple and chose to hide your email, you may not be able to write from that address: delete your account on the website or in an app instead.',
-            'When you ask by email we delete the same records by hand. The Sign in with Apple tokens are revoked automatically only when you delete your account yourself on the website or in an app.',
+            'When you ask by email we delete the same records by hand, including asking PostHog to delete your analytics profile. The Sign in with Apple tokens are revoked automatically only when you delete your account yourself on the website or in an app.',
         ],
         emailLink: true,
     },
@@ -121,6 +124,7 @@ export const DELETE_ACCOUNT_SECTIONS: ReadonlyArray<DeleteAccountSection> = [
             'The coupon results (worked or did not work) linked to your account.',
             'Promo-box suggestions your signed-in extension sent for a store, if that feature was switched on.',
             'Sign-in, email-verification and password-reset codes issued for your email address.',
+            'Your analytics profile in our self-hosted PostHog, with the events and session recordings linked to it. When you delete your account we ask PostHog to delete them. PostHog queues the request and finishes it in the background, so the data may not disappear the moment you confirm.',
             'The email address, the store address you typed and the browser type on any store request you made. The store request itself stays (see below).',
             'If you signed in with Apple and delete the account yourself: we ask Apple to revoke the Sign in with Apple tokens for your account.',
         ],
@@ -135,8 +139,9 @@ export const DELETE_ACCOUNT_SECTIONS: ReadonlyArray<DeleteAccountSection> = [
             'If several shoppers’ promo-box suggestions caused a store’s saved rules to be published, those rules (page-element selectors, not personal data) stay.',
             'Per-code coupon totals (when a code last worked or failed). They are not tied to you.',
             'A one-way keyed hash of your account (or of your IP address, for a result sent while signed out) is kept with each coupon result to stop fake reports. It is not stored with your account or your IP address, and it is deleted after 30 days.',
-            'Server and proxy logs, which can include IP addresses, browser type and the text of store searches, for up to 90 days.',
-            'Analytics and error records. Our self-hosted analytics (PostHog) and error monitoring (Sentry) can hold events and a profile linked to your account from when you were signed in. Deleting your account does not remove them automatically.',
+            'Server logs, which can include IP addresses and browser type, for up to 90 days. The text of store searches is not written to them.',
+            'Error records (Sentry), kept for 90 days. They can hold your user id and the pages or errors you hit while signed in. Since October 25, 2026 they are stored without store-search text; records captured before then may contain it until they expire (by January 23, 2027 at the latest).',
+            'Analytics events that are not linked to your account: visits from before you signed in that were never joined to your account, and the extension’s install and anonymous diagnostic events.',
             'Usage data collected by Google Analytics on our website. Google holds it under its own retention settings; deleting your account does not remove it.',
             'Messages you sent to support (the support form or hello@devino.ca). They stay in our support inbox; deleting your account does not remove them. Include them in your email if you want them removed.',
             'Delivery records for the account emails we sent you (sign-up verification, password resets). Sendly and Amazon SES keep these under their own retention periods.',

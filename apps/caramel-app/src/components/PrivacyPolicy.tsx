@@ -308,11 +308,17 @@ const PrivacyPolicy = () => {
                     <Para>
                         If you type in a store search box on the website or in
                         our apps, the text you type is sent to our server (to
-                        /api/coupons/stores or to the supported-stores search)
-                        so we can return matching stores. It can appear in our
-                        server and proxy logs, which are kept for up to 90 days
-                        (see &quot;Where Is It Stored, and for How Long?&quot;
-                        below).
+                        /api/coupons/stores, /api/coupons or the
+                        supported-stores search) so we can return matching
+                        stores. We do not write it to our application logs, and
+                        the access log of our own proxy is switched off.
+                        Cloudflare, our network provider, passes the request to
+                        our servers in transit. Since October 25, 2026 we also
+                        remove search text from error reports (including session
+                        replays) before they are stored. Error reports captured
+                        before that date may still contain it until they expire,
+                        90 days after capture (by January 23, 2027 at the
+                        latest).
                     </Para>
                     <Para>
                         If you use our store-request form we collect the store
@@ -448,7 +454,8 @@ const PrivacyPolicy = () => {
                             'Coupon results are kept as per-code totals (when a code last worked or failed, and the store’s last error message). To stop fake reports from hiding or reviving a code, each “worked” or “didn’t work” report also keeps a one-way keyed hash of your IP address, or of your account if you are signed in. It is not stored with your account or your IP address, and it is deleted after 30 days.',
                             'Shared codes stay published while they are valid; deleting your account removes the link between a shared code and you.',
                             'Promo-box suggestions (the store’s hostname and the selectors described above) are kept with your account. A suggestion older than 30 days no longer counts toward a store’s saved rules but is not deleted automatically; it is removed when you delete your account.',
-                            'Server logs, which can include IP addresses and browser type, are kept for up to 90 days for security and troubleshooting.',
+                            'Server logs, which can include IP addresses and browser type, are kept for up to 90 days for security and troubleshooting. The text of store searches is not written to them.',
+                            'Error reports (Sentry) are kept for 90 days. Since October 25, 2026 they are stored without store-search text; reports captured before then may contain it until they expire (by January 23, 2027 at the latest).',
                         ]}
                     />
                 </>
@@ -605,7 +612,7 @@ const PrivacyPolicy = () => {
                         'Turn checkout sharing and savings sync on or off at any time in the extension’s settings.',
                         'Download your data, or delete your saved Caramel data (savings, favorite stores and coupon results), from Profile → Data & privacy on grabcaramel.com.',
                         'Delete your account yourself: on grabcaramel.com at Profile → Data & privacy → Delete my account (also reachable from the Android app’s Account tab), in the iOS app (Account → Delete my account), or in the Android app (Account and privacy icon → Delete my account). Our Delete your account page lists what is deleted and what is kept.',
-                        'Ask us to access, correct or delete your account and everything linked to it by emailing hello@devino.ca from the address on your account (if you signed in with Apple and hid your email, delete your account yourself as above instead). We act on deletion requests within 30 days; deleting your account removes your login, sign-in sessions, favorite stores, savings history and coupon results, and unlinks you from codes you shared.',
+                        'Ask us to access, correct or delete your account and everything linked to it by emailing hello@devino.ca from the address on your account (if you signed in with Apple and hid your email, delete your account yourself as above instead). We act on deletion requests within 30 days; deleting your account removes your login, sign-in sessions, favorite stores, savings history and coupon results, and unlinks you from codes you shared. We also ask our self-hosted analytics (PostHog) to delete the profile linked to your account, with its events and session recordings; PostHog queues that request and finishes it in the background. Error records (Sentry), Google Analytics data, and analytics events that were never linked to your account are not removed by this.',
                         'Uninstall the extension at any time; this stops all collection and removes what it stored in your browser.',
                     ]}
                 />
@@ -624,7 +631,7 @@ const PrivacyPolicy = () => {
             >
                 <div className={EFFECTIVE_DATE_BADGE_CLASS}>
                     <FaShieldAlt className="h-4 w-4" />
-                    Effective Date: October 24, 2026
+                    Effective Date: October 25, 2026
                 </div>
                 <p className="mx-auto max-w-4xl text-lg leading-relaxed text-gray-600 dark:text-gray-300">
                     Welcome to{' '}

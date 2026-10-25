@@ -76,8 +76,10 @@ describe('delete-account content', () => {
         for (const claim of [
             'saved rules to be published, those rules',
             'It is not stored with your account or your IP address, and it is deleted after 30 days.',
-            'the text of store searches, for up to 90 days',
-            'PostHog',
+            'The text of store searches is not written to them.',
+            'Error records (Sentry), kept for 90 days',
+            'by January 23, 2027 at the latest',
+            'Analytics events that are not linked to your account',
             'Google Analytics',
             'support inbox',
             'Sendly and Amazon SES',
@@ -85,6 +87,20 @@ describe('delete-account content', () => {
             expect(kept, claim).toContain(claim)
         }
         expect(kept).not.toContain('cannot be turned back')
+    })
+
+    it('says the analytics profile is requested from PostHog and finishes in the background, with no time bound', () => {
+        const deleted = DELETE_ACCOUNT_SECTIONS.find(
+            section => section.id === 'what-is-deleted',
+        )?.bullets?.join(' ')
+        expect(deleted).toContain(
+            'analytics profile in our self-hosted PostHog',
+        )
+        expect(deleted).toContain(
+            'PostHog queues the request and finishes it in the background',
+        )
+        // Not backed by PostHog's self-hosted docs: no promised completion time.
+        expect(deleted).not.toMatch(/PostHog[^.]*within d+ days/)
     })
 
     it('is linked from the docs hub privacy section', () => {
