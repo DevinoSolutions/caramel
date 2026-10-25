@@ -7,9 +7,7 @@
         "scripts/*.ts"
     ],
     "project": ["src/**/*.{ts,tsx}", "e2e/**/*.ts", "evals/**/*.ts"],
-    "ignore": [
-        "postcss.config.mjs"
-    ],
+    "ignore": ["postcss.config.mjs"],
     "ignoreDependencies": [
         "@argos-ci/cli",
         "@types/gtag.js",
