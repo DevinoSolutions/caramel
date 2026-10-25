@@ -161,4 +161,15 @@ describe('requestSource (real pg :58005) — app sources INSERT', () => {
         expect(typeof row.id).toBe('string')
         expect(row.id.length).toBeGreaterThan(0)
     })
+
+    it('returns duplicate for a host that already has a row (unique constraint)', async () => {
+        await requestSource(REQUEST_WEBSITE)
+        const second = await requestSource(REQUEST_WEBSITE)
+        expect(second).toBe('duplicate')
+
+        const rows = await prisma.source.findMany({
+            where: { source: REQUEST_WEBSITE },
+        })
+        expect(rows).toHaveLength(1)
+    })
 })
