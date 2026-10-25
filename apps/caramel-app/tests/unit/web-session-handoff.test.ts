@@ -1,8 +1,10 @@
 // tests/unit/web-session-handoff.test.ts — T-7852 acceptance checks 5–6
 //
-// Validates the next-path allowlist and the CSRF gate (cookie-only rejected).
-// Integration tests for the full round trip (checks 1–4, 7–8) live in
-// tests/integration/web-session-handoff.itest.ts.
+// Validates the next-path allowlist. The routes themselves (the shell-only
+// redeem, the handoff body cap, 401 without a bearer) are tested in
+// tests/unit/web-session-routes.test.ts.
+// TODO(T-7852): no integration test runs the full round trip (checks 1–4,
+// 7–8) on real Postgres yet; the device runs are the only end-to-end proof.
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 

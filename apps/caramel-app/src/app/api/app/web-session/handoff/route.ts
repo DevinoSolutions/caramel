@@ -11,6 +11,7 @@
 // a web page returns 401), no CORS headers are sent, and the code is single-use
 // with a 60 s TTL.
 import { handleRouteError } from '@/lib/api/handleRouteError'
+import { readBodyCapped } from '@/lib/api/readBodyCapped'
 import { env } from '@/lib/env'
 import { BASE_URL } from '@/lib/env.client'
 import prisma from '@/lib/prisma'
@@ -18,6 +19,9 @@ import { checkRateLimit } from '@/lib/rateLimit'
 import { createHash, randomBytes } from 'crypto'
 import { NextResponse, type NextRequest } from 'next/server'
 import { z } from 'zod'
+
+// The body is one short `next` path (max 512 chars): 4 KiB is generous.
+const MAX_BODY_BYTES = 4 * 1024
 
 // Must start with one of these prefixes (or be exactly "/").
 const ALLOWED_NEXT_PREFIXES = ['/coupons', '/profile', '/welcome']
@@ -100,9 +104,24 @@ export async function POST(req: NextRequest) {
     }
 
     // --- Parse and validate body ---
+    // Capped like every withRoute body (T-6223): this route skips withRoute
+    // for its bearer-only check, not for an unbounded read.
+    const body = await readBodyCapped(req, MAX_BODY_BYTES)
+    if (!body.ok) {
+        return NextResponse.json(
+            { error: 'payload too large' },
+            {
+                status: 413,
+                headers: {
+                    'Cache-Control': 'no-store',
+                    'Referrer-Policy': 'no-referrer',
+                },
+            },
+        )
+    }
     let raw: unknown
     try {
-        raw = await req.json()
+        raw = body.text ? JSON.parse(body.text) : undefined
     } catch {
         raw = undefined
     }

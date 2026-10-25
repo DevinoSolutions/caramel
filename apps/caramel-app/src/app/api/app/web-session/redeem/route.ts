@@ -5,9 +5,19 @@
 // and redirects the WebView to the stored `next` path.
 //
 // No CORS, no bearer — it is a document navigation, not a fetch.
+//
+// Only the native shell may redeem. A code is a sign-in for whoever minted
+// it, so an ordinary browser that opens a redeem link (one an attacker minted
+// from their own account and sent on) would be silently signed in to the
+// attacker's account, and whatever it then saved would land there. The shells
+// load this URL themselves as a top-level navigation, with their
+// "CaramelApp/<version> (<platform>)" user agent and no cross-site initiator;
+// anything else is refused before the code is touched, so a link preview or a
+// stray browser tab cannot burn the shell's code either.
 import { env } from '@/lib/env'
 import { BASE_URL } from '@/lib/env.client'
 import prisma from '@/lib/prisma'
+import { detectAppShell } from '@/lib/surface/detectSurface'
 import * as Sentry from '@sentry/nextjs'
 import { createHash, createHmac } from 'crypto'
 import { NextResponse, type NextRequest } from 'next/server'
@@ -33,7 +43,19 @@ function signCookieValue(value: string, secret: string): string {
 
 const FAILED_REDIRECT = '/login?error=handoff_expired'
 
+/** A navigation the shell itself started: its user agent, and no other site
+ *  behind it (`Sec-Fetch-Site` is `none` for a WebView's own load). */
+function isShellNavigation(req: NextRequest): boolean {
+    if (!detectAppShell(req.headers.get('user-agent') ?? '')) return false
+    const site = req.headers.get('sec-fetch-site')
+    return site === null || site === 'none' || site === 'same-origin'
+}
+
 export async function GET(req: NextRequest) {
+    if (!isShellNavigation(req)) {
+        return redirect303(FAILED_REDIRECT)
+    }
+
     const code = req.nextUrl.searchParams.get('code')
     if (!code || code.length !== 43) {
         return redirect303(FAILED_REDIRECT)
