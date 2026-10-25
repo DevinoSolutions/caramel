@@ -25,6 +25,7 @@ type ProposalRow = {
 }
 type ProposalWhere = Partial<Omit<ProposalRow, 'createdAt'>> & {
     createdAt?: { gt: Date }
+    user?: { createdAt?: { lte: Date } }
 }
 const {
     envMock,
@@ -35,6 +36,7 @@ const {
     getSessionMock,
     sentry,
     proposals,
+    users,
 } = vi.hoisted(() => ({
     envMock: {} as Record<string, unknown>,
     knownMock: vi.fn(
@@ -72,6 +74,7 @@ const {
             createdAt: Date
         }
     >,
+    users: new Map<string, { createdAt: Date }>(),
 }))
 vi.mock('@/lib/env', async importOriginal => {
     const actual = await importOriginal<typeof import('@/lib/env')>()
@@ -97,7 +100,10 @@ vi.mock('@/lib/prisma', () => {
         (where.storeName === undefined || row.storeName === where.storeName) &&
         (where.boxHash === undefined || row.boxHash === where.boxHash) &&
         (where.userId === undefined || row.userId === where.userId) &&
-        (where.createdAt === undefined || row.createdAt > where.createdAt.gt)
+        (where.createdAt === undefined || row.createdAt > where.createdAt.gt) &&
+        (where.user?.createdAt?.lte === undefined ||
+            (users.get(row.userId)?.createdAt ?? new Date()) <=
+                where.user.createdAt.lte)
     return {
         default: {
             couponBoxProposal: {
@@ -178,10 +184,16 @@ const goodBody = (
     },
 })
 
-/** The test names the signed-in user in `x-test-user`; absent = no session. */
+/** The test names the signed-in user in `x-test-user`; absent = no session.
+ * Users default to established (created 30 days ago); tests that need a fresh
+ * account set `users.set(id, { createdAt: new Date() })` before the request. */
 getSessionMock.mockImplementation(async opts => {
     const id = opts.headers.get('x-test-user')
-    return id ? { user: { id }, session: { id: 'session' } } : null
+    if (!id) return null
+    if (!users.has(id)) {
+        users.set(id, { createdAt: new Date(Date.now() - 30 * 86_400_000) })
+    }
+    return { user: { id }, session: { id: 'session' } }
 })
 
 function post(
@@ -221,7 +233,9 @@ beforeEach(() => {
     envMock.COUPON_BOX_SAVE_USER_DAILY_CAP = 10
     envMock.COUPON_BOX_SAVE_STORE_DAILY_CAP = 20
     envMock.COUPON_BOX_SAVE_GLOBAL_DAILY_CAP = 500
+    envMock.COUPON_TRUST_MIN_ACCOUNT_AGE_DAYS = 7
     proposals.length = 0
+    users.clear()
     knownMock.mockReset()
     knownMock.mockImplementation(async () => ['shop-example.com'])
     servedMock.mockReset()
@@ -310,6 +324,31 @@ describe('POST /api/extension/coupon-box-save', () => {
         expect(insertMock).toHaveBeenCalledWith(
             expect.objectContaining({ couponInputXpath: '#promo' }),
         )
+    })
+
+    it('QUARANTINE: fresh accounts do not count toward the quorum (Sybil resistance)', async () => {
+        for (let i = 1; i <= QUORUM; i++) {
+            const uid = `fresh-${i}`
+            users.set(uid, { createdAt: new Date() })
+            await post(goodBody(), { user: uid })
+        }
+
+        expect(proposals).toHaveLength(QUORUM)
+        expect(insertMock).not.toHaveBeenCalled()
+    })
+
+    it('QUARANTINE: the quorum counts only established accounts among a mix of fresh and aged', async () => {
+        users.set('fresh-1', { createdAt: new Date() })
+        users.set('fresh-2', { createdAt: new Date() })
+        await post(goodBody(), { user: 'fresh-1' })
+        await post(goodBody(), { user: 'fresh-2' })
+        for (let i = 1; i < QUORUM; i++) {
+            await post(goodBody(), { user: `established-${i}` })
+        }
+        expect(insertMock).not.toHaveBeenCalled()
+
+        await post(goodBody(), { user: `established-${QUORUM}` })
+        expect(insertMock).toHaveBeenCalledTimes(1)
     })
 
     it('1. flag off: 404 disabled, the body is never read and nothing is asked', async () => {

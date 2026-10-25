@@ -296,13 +296,11 @@ function reportCapHit(
  * read-then-write, so a burst of simultaneous requests can overshoot a cap by
  * the burst size; the caps bound growth, they are not a strict invariant.
  *
- * RESIDUAL RISK (T-6221): corroboration counts distinct ACCOUNTS, so an
- * attacker with COUPON_BOX_SAVE_MIN_AGREEING_INSTALLS accounts (any email
- * signup) can still get a box served. The selector gates (couponBoxSelector.ts)
- * and the extension's on-page control guard are what limit the damage then.
- * TODO(T-6221): count only established accounts (accountReputation.ts
- * isEstablishedAccount, from the T-6222/T-6227 PR) once it lands; do not
- * re-implement that helper here.
+ * RESIDUAL RISK (T-6221): corroboration counts distinct ESTABLISHED accounts
+ * (isEstablishedAccount, COUPON_TRUST_MIN_ACCOUNT_AGE_DAYS old), so an
+ * attacker needs aged accounts — a fresh batch of signups cannot meet the
+ * quorum. The selector gates and the on-page control guard limit what even
+ * an aged-account attacker can click.
  */
 export async function recordBoxProposal(args: {
     storeName: string
@@ -365,11 +363,15 @@ export async function recordBoxProposal(args: {
     }
 
     const needed = env.COUPON_BOX_SAVE_MIN_AGREEING_INSTALLS
+    const establishedCutoff = new Date(
+        Date.now() - env.COUPON_TRUST_MIN_ACCOUNT_AGE_DAYS * DAY_MS,
+    )
     const agreeing = await prisma.couponBoxProposal.count({
         where: {
             storeName,
             boxHash: hash,
             createdAt: { gt: new Date(Date.now() - PROPOSAL_WINDOW_MS) },
+            user: { createdAt: { lte: establishedCutoff } },
         },
     })
     if (agreeing < needed) return { kind: 'pending', agreeing, needed }
