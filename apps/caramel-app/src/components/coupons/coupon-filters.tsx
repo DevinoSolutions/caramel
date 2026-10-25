@@ -102,7 +102,7 @@ export default function CouponFilters({
                 minHeight: '44px',
                 // react-select can't take Tailwind classes, so these hexes must
                 // track the brand surfaces: darkSurface #1E1916 (warm charcoal,
-                // tailwind.config.ts) instead of the blue-hued gray-900/800.
+                // globals.css @theme) instead of the blue-hued gray-900/800.
                 backgroundColor: isDarkMode ? '#1E1916' : '#ffffff',
                 width: '100%',
             }),

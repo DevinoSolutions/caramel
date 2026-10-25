@@ -22,8 +22,8 @@ const brandPoints = [
 // everywhere else: the `dark` class scope, the page background, and a theme
 // toggle. Pages render only their form column.
 //
-// LAYOUT NOTE: this repo's Tailwind is DESKTOP-FIRST (tailwind.config.ts uses
-// `max` screens) — unprefixed = desktop, and `lg:` is a MAX-width override
+// LAYOUT NOTE: this repo's Tailwind is DESKTOP-FIRST (globals.css uses
+// max-width @custom-variant screens) — unprefixed = desktop, and `lg:` is a MAX-width override
 // applying at ≤1023px. So `lg:hidden` removes the brand panel on tablet/mobile.
 //
 // The previous shell centered two separately-rounded cards side by side inside

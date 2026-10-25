@@ -3,7 +3,7 @@
 //
 // The ONE shared surface every growth prompt renders in: a bottom-right card
 // on desktop, a bottom sheet on small screens (fleet growth-prompts spec §B).
-// NOTE: this repo's Tailwind screens are MAX-width (tailwind.config.ts), so
+// NOTE: this repo's Tailwind screens are MAX-width (globals.css @custom-variant), so
 // the unprefixed classes are the desktop card and `md:` (<=767px) turns it
 // into the full-width sheet. Pinned by tests/unit/growth-prompt-card-layout.test.tsx.
 // Prompts supply copy; this owns layout, dark mode, focus and the two exits,
