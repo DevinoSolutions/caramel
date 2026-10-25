@@ -137,7 +137,7 @@ jobs:
         with:
           name: cart-classifier-eval-report
           path: apps/caramel-app/eval-report.txt
-          retention-days: 14
+          retention-days: 3
 
   eval-coupon-box-pick:
     name: Coupon box pick eval
@@ -213,7 +213,7 @@ jobs:
         with:
           name: coupon-box-pick-eval-report
           path: apps/caramel-app/eval-report.txt
-          retention-days: 14
+          retention-days: 3
 
   notify-on-nightly-failure:
     name: Open issue on nightly failure

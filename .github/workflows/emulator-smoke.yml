@@ -330,7 +330,7 @@ jobs:
           name: emulator-smoke-screenshot-com.devino.caramel
           path: smoke.png
           if-no-files-found: warn
-          retention-days: 7
+          retention-days: 1
 
       # Always (not only when the upload failed): the screenshot has to be retrievable from the log
       # by whoever reviews this run. Step summaries have no REST API, run logs do.
