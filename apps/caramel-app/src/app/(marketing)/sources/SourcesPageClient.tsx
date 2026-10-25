@@ -3,6 +3,7 @@ import Doodles from '@/components/Doodles'
 import { ThemeContext } from '@/lib/contexts'
 import { decryptJsonData } from '@/lib/securityHelpers/decryptJsonData'
 import type { SourceMetrics } from '@/lib/sourceMetrics'
+import { isValidUrl } from '@/lib/urlHelper'
 import { motion } from 'framer-motion'
 import { useContext, useState } from 'react'
 import {
@@ -56,15 +57,6 @@ export default function SourcesPageClient({
             toast.error('Could not load sources')
         } finally {
             setLoading(false)
-        }
-    }
-
-    const isValidUrl = (url: string): boolean => {
-        try {
-            new URL(url)
-            return true
-        } catch {
-            return false
         }
     }
 
