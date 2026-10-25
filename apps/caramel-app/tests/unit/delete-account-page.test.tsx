@@ -39,9 +39,10 @@ describe('delete-account content', () => {
         const ids = DELETE_ACCOUNT_SECTIONS.map(section => section.id)
         expect(new Set(ids).size).toBe(ids.length)
         expect(ids).toEqual([
+            'on-the-website',
             'ios-app',
             'android-app',
-            'extension-and-website',
+            'browser-extension',
             'by-email',
             'what-is-deleted',
             'what-is-kept',
@@ -61,6 +62,29 @@ describe('delete-account content', () => {
         )
         expect(all).toContain('We act on deletion requests within 30 days.')
         expect(DELETE_ACCOUNT_EMAIL).toBe('hello@devino.ca')
+        // The web path (profile deletion) comes first.
+        expect(DELETE_ACCOUNT_SECTIONS[0].steps?.join(' ')).toContain(
+            'Open Data & privacy. Click Delete my account.',
+        )
+        expect(all).toContain('chose to hide your email')
+    })
+
+    it('lists the records that stay, including the ones handled by other parties', () => {
+        const kept = DELETE_ACCOUNT_SECTIONS.find(
+            section => section.id === 'what-is-kept',
+        )?.bullets?.join(' ')
+        for (const claim of [
+            'saved rules to be published, those rules',
+            'It is not stored with your account or your IP address, and it is deleted after 30 days.',
+            'the text of store searches, for up to 90 days',
+            'PostHog',
+            'Google Analytics',
+            'support inbox',
+            'Sendly and Amazon SES',
+        ]) {
+            expect(kept, claim).toContain(claim)
+        }
+        expect(kept).not.toContain('cannot be turned back')
     })
 
     it('is linked from the docs hub privacy section', () => {

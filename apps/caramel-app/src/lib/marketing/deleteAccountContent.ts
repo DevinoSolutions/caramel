@@ -7,15 +7,19 @@
 // and needs owner sign-off before it merges. Every sentence restates what the
 // code does; when one of these sources changes, change the sentence here too
 // (the policy at src/components/PrivacyPolicy.tsx links here):
+// - the website flow: src/app/profile/sections/DataPrivacySection.tsx
+//   (Profile > Data & privacy > "Delete my account", type DELETE)
 // - the in-app flows: apps/caramel-apple/App/Features/Account/AccountView.swift
 //   (Account tab > "Delete my account" > "Delete account") and
 //   apps/caramel-android/app/src/main/java/com/devino/caramel/ui/CaramelApp.kt
-//   (top-bar "Account and privacy" icon > "Delete my account" > "Delete account")
+//   (top-bar "Account and privacy" icon > "Delete my account" > "Delete
+//   account"; the Account tab shows /profile, ShellRoutes.kt ShellTab.ACCOUNT)
 // - what is deleted and kept: POST /api/account/delete
 //   (src/app/api/account/delete/route.ts) plus the foreign keys in
 //   prisma/schema.prisma (the route adds no per-table deletes of its own)
 // - the email path and its 30 days: src/components/PrivacyPolicy.tsx
-//   ("Your Choices"), RUNBOOK.md "Privacy-policy commitments"
+//   ("Your Choices"); the by-hand steps are RUNBOOK.md "Privacy-policy
+//   commitments" and must delete exactly what the lists below promise
 // - the 30-day reporter hash and 90-day logs: PrivacyPolicy.tsx "Where Is It
 //   Stored, and for How Long?"
 export const DELETE_ACCOUNT_PATH = '/delete-account'
@@ -25,10 +29,10 @@ export const DELETE_ACCOUNT_EMAIL = 'hello@devino.ca'
 export const DELETE_ACCOUNT_PAGE_COPY = {
     title: 'Delete your Caramel account | Caramel',
     description:
-        'How to delete your Caramel account in the iOS app, in the Android app or by email, what is deleted, and what is kept.',
+        'How to delete your Caramel account on the website, in the iOS or Android app, or by email, what is deleted, and what is kept.',
     heading: 'Delete your Caramel account',
     summary:
-        'You can delete your Caramel account in the iOS app or the Android app, or by emailing us from the address on your account. This page says how, what is deleted and what is kept.',
+        'You can delete your Caramel account on the website, in the iOS app or the Android app, or by emailing us. This page says how, what is deleted and what is kept.',
     privacyLead: 'For everything Caramel collects and why, see the',
     privacyLabel: 'Privacy Policy',
     emailLabel: 'Email hello@devino.ca',
@@ -48,6 +52,19 @@ type DeleteAccountSection = {
 
 export const DELETE_ACCOUNT_SECTIONS: ReadonlyArray<DeleteAccountSection> = [
     {
+        id: 'on-the-website',
+        heading: 'On the website',
+        paragraphs: [
+            'Deleting your account takes effect straight away, signs you out of every device and cannot be undone. You can download a copy of your data from the same page first.',
+        ],
+        steps: [
+            'Sign in at grabcaramel.com and open your Profile (grabcaramel.com/profile).',
+            'Open Data & privacy.',
+            'Click Delete my account.',
+            'Type DELETE and confirm with Delete my account.',
+        ],
+    },
+    {
         id: 'ios-app',
         heading: 'In the iOS app',
         paragraphs: [
@@ -65,6 +82,7 @@ export const DELETE_ACCOUNT_SECTIONS: ReadonlyArray<DeleteAccountSection> = [
         heading: 'In the Android app',
         paragraphs: [
             'Deleting your account in the app takes effect straight away and cannot be undone.',
+            'The app’s Account tab shows the same Profile page as the website, so you can also delete your account there: open the Account tab, then Data & privacy, then Delete my account.',
         ],
         steps: [
             'Open the Caramel app and sign in if you are not already signed in.',
@@ -74,11 +92,11 @@ export const DELETE_ACCOUNT_SECTIONS: ReadonlyArray<DeleteAccountSection> = [
         ],
     },
     {
-        id: 'extension-and-website',
-        heading: 'In the browser extension or on the website',
+        id: 'browser-extension',
+        heading: 'In the browser extension',
         paragraphs: [
-            'The Caramel browser extension and the grabcaramel.com website have no button that deletes your account. Use one of the apps above, or email us below.',
-            'On the website, Profile → Data & privacy can delete your saved Caramel data (savings, favorite stores and coupon results) without deleting your account.',
+            'The Caramel browser extension has no button that deletes your account. Use the website or one of the apps; deleting your account also signs the extension out.',
+            'Data & privacy on the website also has a separate Delete my data button, which removes your savings, favorite stores and coupon results but keeps your account.',
         ],
     },
     {
@@ -86,6 +104,8 @@ export const DELETE_ACCOUNT_SECTIONS: ReadonlyArray<DeleteAccountSection> = [
         heading: 'By email',
         paragraphs: [
             'Email hello@devino.ca from the email address on your account and ask us to delete your account. We act on deletion requests within 30 days.',
+            'If you signed in with Apple and chose to hide your email, you may not be able to write from that address: delete your account on the website or in an app instead.',
+            'When you ask by email we delete the same records by hand. The Sign in with Apple tokens are revoked automatically only when you delete your account yourself on the website or in an app.',
         ],
         emailLink: true,
     },
@@ -102,7 +122,7 @@ export const DELETE_ACCOUNT_SECTIONS: ReadonlyArray<DeleteAccountSection> = [
             'Promo-box suggestions your signed-in extension sent for a store, if that feature was switched on.',
             'Sign-in, email-verification and password-reset codes issued for your email address.',
             'The email address, the store address you typed and the browser type on any store request you made. The store request itself stays (see below).',
-            'If you signed in with Apple: we ask Apple to revoke the Sign in with Apple tokens for your account.',
+            'If you signed in with Apple and delete the account yourself: we ask Apple to revoke the Sign in with Apple tokens for your account.',
         ],
     },
     {
@@ -112,10 +132,14 @@ export const DELETE_ACCOUNT_SECTIONS: ReadonlyArray<DeleteAccountSection> = [
         bullets: [
             'Coupon codes you shared stay published while they are valid. They are shown without your name and are no longer linked to you.',
             'The store and status of any store request you made, so the store can still be added. Your email address and browser type are removed from it.',
+            'If several shoppers’ promo-box suggestions caused a store’s saved rules to be published, those rules (page-element selectors, not personal data) stay.',
             'Per-code coupon totals (when a code last worked or failed). They are not tied to you.',
-            'A one-way keyed hash of your account (or of your IP address, for a result sent while signed out), kept with each coupon result to stop fake reports. It cannot be turned back into your account or IP address, and it is deleted after 30 days.',
-            'Server logs, which can include IP addresses and browser type, for up to 90 days.',
+            'A one-way keyed hash of your account (or of your IP address, for a result sent while signed out) is kept with each coupon result to stop fake reports. It is not stored with your account or your IP address, and it is deleted after 30 days.',
+            'Server and proxy logs, which can include IP addresses, browser type and the text of store searches, for up to 90 days.',
             'Analytics and error records. Our self-hosted analytics (PostHog) and error monitoring (Sentry) can hold events and a profile linked to your account from when you were signed in. Deleting your account does not remove them automatically.',
+            'Usage data collected by Google Analytics on our website. Google holds it under its own retention settings; deleting your account does not remove it.',
+            'Messages you sent to support (the support form or hello@devino.ca). They stay in our support inbox; deleting your account does not remove them. Include them in your email if you want them removed.',
+            'Delivery records for the account emails we sent you (sign-up verification, password resets). Sendly and Amazon SES keep these under their own retention periods.',
         ],
     },
 ]

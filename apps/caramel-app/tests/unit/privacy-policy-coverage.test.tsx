@@ -88,7 +88,7 @@ describe('privacy policy coverage', () => {
     it('carries the owner-approved coupon-report hash disclosure verbatim (approved 2026-10-21) and no longer claims anonymous-only totals', () => {
         const normalized = text.replace(/\s+/g, ' ')
         expect(normalized).toContain(
-            'Coupon results are kept as per-code totals (when a code last worked or failed, and the store’s last error message). To stop fake reports from hiding or reviving a code, each “worked” or “didn’t work” report also keeps a one-way keyed hash of your IP address, or of your account if you are signed in. It cannot be turned back into your IP or account, and it is deleted after 30 days.',
+            'Coupon results are kept as per-code totals (when a code last worked or failed, and the store’s last error message). To stop fake reports from hiding or reviving a code, each “worked” or “didn’t work” report also keeps a one-way keyed hash of your IP address, or of your account if you are signed in. It is not stored with your account or your IP address, and it is deleted after 30 days.',
         )
         expect(normalized).not.toContain('only as anonymous per-code totals')
     })
@@ -97,7 +97,10 @@ describe('privacy policy coverage', () => {
     // pin is a claim the apps, the extension or the account-delete route make
     // true; change the sentence and the code evidence together.
     it('covers the iOS and Android apps, in-app account deletion and the web deletion page', () => {
-        const normalized = text.replace(/&quot;/g, '"').replace(/\s+/g, ' ')
+        const normalized = text
+            .replace(/&quot;/g, '"')
+            .replace(/&amp;/g, '&')
+            .replace(/\s+/g, ' ')
         for (const claim of [
             'the Caramel iOS and Android apps and the grabcaramel.com website collect',
             'Our Mobile Apps',
@@ -107,9 +110,18 @@ describe('privacy policy coverage', () => {
             'The only Android permission it asks for is Internet access',
             'The apps contain no advertising or analytics tools of their own.',
             'Account → Delete my account on iOS',
-            'the Account and privacy icon → Delete my account on Android',
+            'Account and privacy icon → Delete my account (or the Account tab → Data & privacy → Delete my account)',
             'asks Apple to revoke the Sign in with Apple tokens',
-            'Delete your account yourself in the iOS app',
+            'Delete your account yourself: on grabcaramel.com at Profile → Data & privacy → Delete my account',
+            'if you signed in with Apple and hid your email, delete your account yourself as above instead',
+            'Android’s web view uses Google Safe Browsing',
+            "the Android web view's Safe Browsing check",
+            'it asks our server for a one-time code that works for 60 seconds',
+            'A copy of your saved stores is kept on your device so alerts can run.',
+            'signing out clears it from the device',
+            'The app has four tabs: Deals, Search, Saved and Account.',
+            'the text you type is sent to our server',
+            'which are kept for up to 90 days',
         ]) {
             expect(normalized).toContain(claim)
         }
@@ -119,7 +131,10 @@ describe('privacy policy coverage', () => {
     it('says the extension has no third-party analytics but sends opt-in diagnostics, and that site analytics also run inside the apps', () => {
         const normalized = text.replace(/\s+/g, ' ')
         expect(normalized).toContain(
-            'no ads and no third-party trackers or analytics tools. Its only analytics are the optional anonymous usage diagnostics described below',
+            'no ads, no third-party trackers and no third-party analytics code. The only analytics it starts itself are the optional anonymous usage diagnostics described below',
+        )
+        expect(normalized).toContain(
+            'the outcome event our server records for a promo-code box lookup, and the install ID and first-touch record sent when you sign in',
         )
         expect(normalized).not.toContain('no ads, no analytics and no third')
         expect(normalized).toContain(
@@ -137,7 +152,7 @@ describe('privacy policy coverage', () => {
             "the store's hostname and up to four CSS selectors",
             'at most once per store in a browser session',
             'It never sends the code, the price, your cart or anything you typed.',
-            'Promo-box suggestions (the store’s hostname and the selectors described above) are kept with your account until you delete your account.',
+            'Promo-box suggestions (the store’s hostname and the selectors described above) are kept with your account. A suggestion older than 30 days no longer counts toward a store’s saved rules but is not deleted automatically; it is removed when you delete your account.',
         ]) {
             expect(normalized.replace(/&#x27;/g, "'")).toContain(claim)
         }
