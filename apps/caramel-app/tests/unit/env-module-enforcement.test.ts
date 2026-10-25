@@ -102,10 +102,7 @@ describe('env-module enforcement', () => {
         const violations = findViolations(files)
         if (violations.length > 0) {
             const msg = violations
-                .map(
-                    v =>
-                        `  ${v.file}:${v.line} — process.env.${v.variable}`,
-                )
+                .map(v => `  ${v.file}:${v.line} — process.env.${v.variable}`)
                 .join('\n')
             expect.fail(
                 `Found ${violations.length} direct process.env read(s) outside env modules:\n${msg}\n\n` +
