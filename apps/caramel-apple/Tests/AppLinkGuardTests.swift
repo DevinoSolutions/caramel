@@ -592,12 +592,12 @@ final class WebSessionHandoffClientTests: XCTestCase {
         ]
         for (status, body) in cases {
             HandoffStubURLProtocol.handler = { request in self.respond(status: status, body: body, for: request) }
-            if let error = await failure({ try await makeClient().redeemURL(next: "/", bearer: bearer) }) {
+            if let error = await failure(of: { try await makeClient().redeemURL(next: "/", bearer: bearer) }) {
                 errors.append(error)
             }
         }
         HandoffStubURLProtocol.handler = { _ in throw URLError(.timedOut) }
-        if let error = await failure({ try await makeClient().redeemURL(next: "/", bearer: bearer) }) {
+        if let error = await failure(of: { try await makeClient().redeemURL(next: "/", bearer: bearer) }) {
             errors.append(error)
         }
         XCTAssertEqual(errors.count, 6)
