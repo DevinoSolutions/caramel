@@ -69,6 +69,11 @@ jobs:
     name: ${{ github.event_name == 'pull_request' && 'Build + archive (unsigned, no upload)' || 'Archive, sign, upload to TestFlight' }}
     runs-on: macos-latest
     timeout-minutes: 90
+    # The drift-diagnostics upload uses DevinoSolutions/artifact (GitHub OIDC token; T-7021: GitHub
+    # artifacts are blocked org-wide); a job-level block replaces the workflow-level one.
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - uses: actions/checkout@v7
 
@@ -152,10 +157,25 @@ jobs:
             echo "drift=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # The summary carries the drift itself, so the fix does not depend on the artifact below.
+      - name: Summarize the project drift
+        if: steps.drift.outputs.drift == 'true'
+        run: |
+          {
+            echo '### Xcode project drift'
+            echo
+            echo "\`${APPLE_DIR}\` differs from what project.yml generates:"
+            echo
+            echo '```'
+            git status --short -- "${APPLE_DIR}"
+            git diff --stat -- "${APPLE_DIR}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload the generated project (drift diagnostics)
         if: steps.drift.outputs.drift == 'true'
         continue-on-error: true
-        uses: actions/upload-artifact@v7
+        uses: DevinoSolutions/artifact/upload@v1
         with:
           name: generated-caramel-apple
           path: |

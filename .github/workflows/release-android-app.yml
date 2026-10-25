@@ -87,6 +87,11 @@ jobs:
     name: Build debug, unit tests, lint
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # DevinoSolutions/artifact/upload@v1 authenticates with a GitHub OIDC token (T-7021: GitHub
+    # artifacts are blocked org-wide); a job-level block replaces the workflow-level one.
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
@@ -107,9 +112,25 @@ jobs:
         working-directory: ${{ env.ANDROID_DIR }}
         run: ./gradlew --no-daemon assembleRelease lintVitalRelease
 
+      # Evidence, not a gate: the build and test steps above are what fail the job, and `release`
+      # needs it. A store blip must not red a run that passed them, so this is continue-on-error;
+      # the summary below keeps the outcome reachable regardless.
+      - name: Summarize the reports
+        if: always()
+        run: |
+          {
+            echo '### Android verify reports'
+            echo
+            echo "Unit-test result files: $(find "$ANDROID_DIR/app/build/test-results" -name '*.xml' 2>/dev/null | wc -l)"
+            echo "Lint/HTML report files: $(find "$ANDROID_DIR/app/build/reports" -type f 2>/dev/null | wc -l)"
+            echo
+            echo 'Full reports: artifact android-verify-reports in the self-hosted store (3 days).'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload reports
         if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        continue-on-error: true
+        uses: DevinoSolutions/artifact/upload@v1
         with:
           name: android-verify-reports
           path: |
@@ -125,6 +146,11 @@ jobs:
     needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    # The post-Play evidence upload uses DevinoSolutions/artifact (GitHub OIDC token); a job-level
+    # block replaces the workflow-level one.
+    permissions:
+      id-token: write
+      contents: read
     env:
       UPLOAD_TO_PLAY: ${{ github.event_name == 'push' || inputs.dry_run == false }}
       PLAY_STATUS: ${{ inputs.play_status || 'completed' }}
@@ -243,20 +269,6 @@ jobs:
           apksigner="$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)"
           "$apksigner" verify --print-certs apk/release/app-release.apk
 
-      - name: Upload AAB + universal APK
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: caramel-android-release
-          path: |
-            ${{ env.ANDROID_DIR }}/app/build/outputs/bundle/release/app-release.aab
-            ${{ env.ANDROID_DIR }}/app/build/outputs/apk/release/app-release.apk
-            ${{ env.ANDROID_DIR }}/app/build/outputs/mapping/release/mapping.txt
-          if-no-files-found: error
-          # T-7021: org artifact quota. This copy is a convenience: the AAB of record is
-          # the one uploaded to the Play internal track below. A bundle that must outlive
-          # 3 days goes to MinIO via the shared keep-artifacts path (DevinoSolutions/.github).
-          retention-days: 3
-
       - name: Upload to Play internal track
         if: env.UPLOAD_TO_PLAY == 'true'
         uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5 # v1.1.5
@@ -267,6 +279,37 @@ jobs:
           track: internal
           status: ${{ env.PLAY_STATUS }}
           mappingFile: ${{ env.ANDROID_DIR }}/app/build/outputs/mapping/release/mapping.txt
+
+      # After the Play upload on purpose: this copy is a convenience (the AAB of record is the one
+      # on the Play internal track), so no store or quota problem may stop or fail the release. It
+      # goes to the self-hosted store (T-7021: GitHub artifacts are blocked org-wide). The hashes in
+      # the summary are the evidence that survives even when the upload does not.
+      - name: Summarize the signed outputs
+        if: ${{ !cancelled() }}
+        working-directory: ${{ env.ANDROID_DIR }}/app/build/outputs
+        run: |
+          {
+            echo '### Android release outputs'
+            echo
+            for f in bundle/release/app-release.aab apk/release/app-release.apk mapping/release/mapping.txt; do
+              if [ -f "$f" ]; then echo "- \`$f\`: $(wc -c < "$f") bytes, sha256 $(sha256sum "$f" | cut -d' ' -f1)"; else echo "- \`$f\`: missing"; fi
+            done
+            echo
+            echo "Play upload: $UPLOAD_TO_PLAY"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload AAB + universal APK (evidence, non-blocking)
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: DevinoSolutions/artifact/upload@v1
+        with:
+          name: caramel-android-release
+          path: |
+            ${{ env.ANDROID_DIR }}/app/build/outputs/bundle/release/app-release.aab
+            ${{ env.ANDROID_DIR }}/app/build/outputs/apk/release/app-release.apk
+            ${{ env.ANDROID_DIR }}/app/build/outputs/mapping/release/mapping.txt
+          if-no-files-found: warn
+          retention-days: 3
 
       - name: Remove the keystore
         if: always()

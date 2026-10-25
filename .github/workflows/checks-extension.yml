@@ -25,6 +25,13 @@ jobs:
     name: checks
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # DevinoSolutions/artifact/upload@v1 authenticates to the self-hosted store with a
+    # GitHub OIDC token, so this job needs `id-token: write` (T-7021: GitHub artifacts are
+    # blocked org-wide). A job-level block REPLACES the workflow-level one, hence
+    # `contents: read` is restated here.
+    permissions:
+      id-token: write
+      contents: read
     defaults:
       run:
         working-directory: ${{ env.WORKING_DIRECTORY }}
@@ -71,7 +78,7 @@ jobs:
       # `pnpm run build` step used to rebuild the same chrome production
       # output a second time; it is gone.
       - name: Upload chrome builds for the e2e job
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        uses: DevinoSolutions/artifact/upload@v1
         with:
           name: extension-chrome-builds
           path: |
@@ -100,6 +107,10 @@ jobs:
     needs: lint_and_build
     runs-on: ubuntu-24.04 # Playwright does not support ubuntu 26.04 (T-5003)
     timeout-minutes: 15
+    # Same reason as `checks`: DevinoSolutions/artifact/download@v1 uses a GitHub OIDC token.
+    permissions:
+      id-token: write
+      contents: read
     services:
       postgres:
         # Matches e2e-pr's pin (postgres:15) so the two e2e tiers run the same
@@ -137,10 +148,10 @@ jobs:
 
       # Chrome production (.output/chrome-mv3) and development
       # (.output/chrome-mv3-dev) builds from the `checks` job; nothing below
-      # rebuilds them. upload-artifact keeps the path relative to the common
-      # root, so restore into the package's .output directory.
+      # rebuilds them. The self-hosted store keeps the path relative to the common
+      # root (like actions/upload-artifact), so restore into the package's .output directory.
       - name: Download chrome builds
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        uses: DevinoSolutions/artifact/download@v1
         with:
           name: extension-chrome-builds
           path: ${{ env.WORKING_DIRECTORY }}/.output
