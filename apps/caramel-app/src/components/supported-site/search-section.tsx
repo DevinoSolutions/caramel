@@ -40,8 +40,7 @@ export default function SearchSection({
             const data = await res.json()
             setSites(data.sites || [])
         } catch (err) {
-            console.log('Failed to search sites, Try again.')
-            console.error(err)
+            console.error('[search-supported-sites]', err)
         }
         setLoading(false)
         setSearched(true)
