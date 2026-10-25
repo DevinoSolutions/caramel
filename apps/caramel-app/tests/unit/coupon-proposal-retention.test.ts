@@ -21,9 +21,7 @@ describe('sweepExpiredProposals', () => {
 
     it('deletes proposals older than the 30-day promotion window', async () => {
         deleteMany.mockResolvedValueOnce({ count: 42 })
-        const { sweepExpiredProposals } = await import(
-            '@/lib/couponBoxSave'
-        )
+        const { sweepExpiredProposals } = await import('@/lib/couponBoxSave')
         const deleted = await sweepExpiredProposals()
 
         expect(deleted).toBe(42)
@@ -38,9 +36,7 @@ describe('sweepExpiredProposals', () => {
 
     it('returns 0 and reports to Sentry on failure', async () => {
         deleteMany.mockRejectedValueOnce(new Error('db down'))
-        const { sweepExpiredProposals } = await import(
-            '@/lib/couponBoxSave'
-        )
+        const { sweepExpiredProposals } = await import('@/lib/couponBoxSave')
         const { captureException } = await import('@sentry/nextjs')
 
         const deleted = await sweepExpiredProposals()
@@ -61,9 +57,8 @@ describe('startCouponProposalRetentionSweep', () => {
 
     it('is disabled in non-production', async () => {
         vi.stubEnv('NODE_ENV', 'test')
-        const { startCouponProposalRetentionSweep } = await import(
-            '@/lib/couponProposalRetention'
-        )
+        const { startCouponProposalRetentionSweep } =
+            await import('@/lib/couponProposalRetention')
         const decision = startCouponProposalRetentionSweep()
         expect(decision.enabled).toBe(false)
     })
