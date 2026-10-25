@@ -77,8 +77,7 @@ class SessionStore(
             mutableState.update { it.copy(username = me.username) }
         } catch (e: ApiError) {
             if (e.isUnauthorized) {
-                clearLocalSession()
-                mutableState.update { it.copy(errorMessage = "Your session expired. Please sign in again.") }
+                endExpiredSession()
             } else {
                 mutableState.update { it.copy(errorMessage = e.message) }
             }
@@ -183,8 +182,7 @@ class SessionStore(
         } catch (e: ApiError) {
             if (e.isUnauthorized) {
                 // The session is already dead, so there is nothing left to delete under it.
-                clearLocalSession()
-                mutableState.update { it.copy(errorMessage = "Your session expired. Please sign in again.") }
+                endExpiredSession()
             } else {
                 mutableState.update { it.copy(errorMessage = "Could not delete your account: ${e.message}") }
             }
@@ -192,6 +190,12 @@ class SessionStore(
         }
         clearLocalSession()
         return true
+    }
+
+    /** The server answered 401 to this bearer (expired or revoked): clear it and ask the shopper to sign in again. */
+    suspend fun endExpiredSession() {
+        clearLocalSession()
+        mutableState.update { it.copy(errorMessage = "Your session expired. Please sign in again.") }
     }
 
     private suspend fun clearLocalSession() {

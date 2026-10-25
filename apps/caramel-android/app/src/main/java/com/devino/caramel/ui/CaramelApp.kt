@@ -51,6 +51,9 @@ import com.devino.caramel.web.AccountPanel
 import com.devino.caramel.web.AuthAction
 import com.devino.caramel.web.ExternalLink
 import com.devino.caramel.web.ExternalLinkPolicy
+import com.devino.caramel.web.HandoffStep
+import com.devino.caramel.web.LoginBounceDecision
+import com.devino.caramel.web.RedeemUrl
 import com.devino.caramel.web.ShellHost
 import com.devino.caramel.web.ShellRoutes
 import com.devino.caramel.web.ShellTab
@@ -89,6 +92,7 @@ fun CaramelApp(
     val context = LocalContext.current
     val session by container.session.state.collectAsStateWithLifecycle()
     val currentSession by rememberUpdatedState(session)
+    val handoffFailure by container.webSession.failure.collectAsStateWithLifecycle()
     val currentOnNotice by rememberUpdatedState(onNotice)
     val currentOnOpenOutside by rememberUpdatedState(onOpenOutside)
 
@@ -107,10 +111,32 @@ fun CaramelApp(
     // After sign-out or account deletion the next person on the device must not reach a signed-in page: wipe
     // cookies, DOM storage and the HTTP cache, then discard the WebView (and with it its back stack) for a
     // fresh one, which loads Deals. Main thread only.
+    // Sign-out revokes the session row the web cookie points at (DELETE /api/extension/session) and account
+    // deletion removes every session, so the cookie is dead server-side too: only the WebView's copy is left to wipe.
     val resetWebSession: () -> Unit = {
+        container.webSession.reset()
         clearWebSessionState()
         webViewHolder[0]?.clearCache(true)
         webViewGeneration += 1
+    }
+
+    // Every load goes through the sink guard (WebView.loadGuarded); a refusal is reported, not dropped. A load
+    // that is not the handoff's own redeem URL means a landing afterwards no longer proves the redeem worked.
+    val navigate: (String) -> Unit = { url ->
+        if (!RedeemUrl.matches(url)) container.webSession.abandonInFlight()
+        if (webViewHolder[0]?.loadGuarded(url) != true) currentOnNotice("Caramel did not open a page because it is not on grabcaramel.com.")
+    }
+
+    // What to do with a handoff attempt; a failure is already on screen through webSession.failure.
+    val applyHandoffStep: (HandoffStep) -> Unit = { step ->
+        when (step) {
+            is HandoffStep.Load -> navigate(step.redeemUrl)
+            HandoffStep.SignInRequired -> showSignIn = true
+            is HandoffStep.Failed, HandoffStep.Busy, HandoffStep.Superseded -> Unit
+        }
+    }
+    val startHandoff: (String) -> Unit = { targetPath ->
+        scope.launch { applyHandoffStep(container.webSession.startFresh(targetPath)) }
     }
 
     // Launch: read the stored bearer, then confirm it is still alive (a 401 clears it).
@@ -144,9 +170,18 @@ fun CaramelApp(
                         }
                         true
                     }
-                    AuthAction.WEB_SESSION_UNAVAILABLE -> {
-                        // TODO(T-7852): replace with the web-session handoff once that endpoint exists.
-                        currentOnNotice("You are signed in on this device, but the web pages are not signed in yet.")
+                    AuthAction.LINK_WEB_SESSION -> {
+                        // Includes /login?error=handoff_expired: at most one automatic handoff, then native sign-in.
+                        when (container.webSession.onLoginWhileUnlinked()) {
+                            LoginBounceDecision.IGNORE -> Unit
+                            LoginBounceDecision.RETRY_HANDOFF -> scope.launch {
+                                applyHandoffStep(container.webSession.continueRetry(selectedTab.startPath))
+                            }
+                            LoginBounceDecision.NATIVE_SIGN_IN -> {
+                                currentOnNotice("Caramel could not link your sign-in to the web pages. Please sign in again.")
+                                showSignIn = true
+                            }
+                        }
                         true
                     }
                 }
@@ -160,6 +195,7 @@ fun CaramelApp(
             }
 
             override fun onPageVisited(url: String, webCanGoBack: Boolean) {
+                container.webSession.onPageVisited(url)
                 ShellRoutes.tabFor(url)?.let { selectedTab = it }
                 canGoBack = webCanGoBack
             }
@@ -177,20 +213,15 @@ fun CaramelApp(
     }
     val webView = remember(webViewGeneration) { createShellWebView(context, host) }
     webViewHolder[0] = webView
-    // Every load goes through the sink guard (WebView.loadGuarded); a refusal is reported, not dropped.
-    val load: (String) -> Unit = { url ->
-        if (!webView.loadGuarded(url)) currentOnNotice("Caramel did not open a page because it is not on grabcaramel.com.")
-    }
-
     var started by remember(webView) { mutableStateOf(false) }
     LaunchedEffect(webView, requestedUrl) {
         if (requestedUrl != null) {
             started = true
-            load(requestedUrl)
+            navigate(requestedUrl)
             onRequestedUrlConsumed()
         } else if (!started) {
             started = true
-            load(ShellRoutes.homeUrl())
+            navigate(ShellRoutes.homeUrl())
         }
     }
 
@@ -204,7 +235,12 @@ fun CaramelApp(
                         selected = selectedTab == tab,
                         onClick = {
                             selectedTab = tab
-                            load(ShellRoutes.urlFor(tab))
+                            if (tab.needsWebSession && session.isSignedIn && !container.webSession.active) {
+                                // Signed in natively, no web session yet: link it first, landing on this tab.
+                                startHandoff(tab.startPath)
+                            } else {
+                                navigate(ShellRoutes.urlFor(tab))
+                            }
                         },
                         icon = { Icon(tab.icon(), contentDescription = null) },
                         label = { Text(tab.label) },
@@ -226,6 +262,12 @@ fun CaramelApp(
             }
             session.errorMessage?.let { ErrorBanner(it, retryTitle = "Dismiss") { container.session.dismissError() } }
             notice?.let { ErrorBanner(it, retryTitle = "Dismiss") { onNotice(null) } }
+            handoffFailure?.let {
+                ErrorBanner(it) {
+                    container.webSession.dismissFailure()
+                    startHandoff(selectedTab.startPath)
+                }
+            }
             if (session.isSigningIn) {
                 Text(
                     "Waiting for sign-in to finish...",
@@ -320,7 +362,7 @@ fun CaramelApp(
                                 modifier = Modifier.fillMaxWidth(),
                                 onClick = {
                                     showAccount = false
-                                    load(ShellRoutes.privacyUrl())
+                                    navigate(ShellRoutes.privacyUrl())
                                 },
                             ) { Text("Privacy policy") }
                         }
@@ -343,10 +385,8 @@ fun CaramelApp(
                     confirmingDelete = false
                     // On success the session clears (signed out); on failure SessionStore.errorMessage shows in the banner.
                     scope.launch {
-                        if (container.session.deleteAccount()) {
-                            // TODO(T-7852): also end the server-side web session once the handoff exists.
-                            resetWebSession()
-                        }
+                        // Account deletion ends every server-side session, the web one included.
+                        if (container.session.deleteAccount()) resetWebSession()
                     }
                 }) { Text("Delete account", color = MaterialTheme.colorScheme.error) }
             },

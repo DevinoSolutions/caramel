@@ -26,3 +26,10 @@ data class OAuthAuthorizeResponse(val authorizationUrl: String, val state: Strin
 /** POST /api/extension/oauth (200): the minted session. */
 @Serializable
 data class OAuthSessionResult(val token: String, val username: String? = null, val image: String? = null)
+
+/**
+ * POST /api/app/web-session/handoff (200). [url] is the one-time redeem URL (a credential: never log it);
+ * the code in it expires after [expiresInSeconds].
+ */
+@Serializable
+data class HandoffResponse(val url: String, val expiresInSeconds: Int = 0)

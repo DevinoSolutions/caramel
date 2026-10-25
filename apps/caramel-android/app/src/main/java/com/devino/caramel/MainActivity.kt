@@ -17,8 +17,10 @@ import com.devino.caramel.ui.CaramelApp
 import com.devino.caramel.ui.CaramelTheme
 import com.devino.caramel.web.ExternalLink
 import com.devino.caramel.web.ExternalLinkPolicy
+import com.devino.caramel.web.HandoffStep
 import com.devino.caramel.web.IntentTarget
 import com.devino.caramel.web.ShellIntents
+import com.devino.caramel.web.ShellTab
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -93,10 +95,13 @@ class MainActivity : ComponentActivity() {
             if (container.session.completeSignIn(data.toString())) {
                 awaitingBrowser = false
                 leftForBrowser = false
-                // TODO(T-7852): after native sign-in, POST /api/app/web-session/handoff with the bearer and
-                // load the returned redeem URL (it must pass AppLinkGuard.allowedTarget) so the WebView gets
-                // a web session, then set AppContainer.webSessionActive. Not written yet: the endpoint
-                // does not exist, so the request and response shapes are unknown.
+                // The callback answered the sign-in but the exchange may still have failed (no token): only a
+                // stored bearer is handed to the WebView. The redeem URL loads through the shell's guarded sink
+                // (requestedUrl); a failed handoff shows its own retry banner, a dead bearer the sign-in error.
+                if (container.session.token != null) {
+                    val step = container.webSession.startFresh(ShellTab.DEALS.startPath)
+                    if (step is HandoffStep.Load) requestedUrl = step.redeemUrl
+                }
             }
         }
     }

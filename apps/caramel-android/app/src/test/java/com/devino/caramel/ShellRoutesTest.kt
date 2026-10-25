@@ -72,9 +72,22 @@ class ShellRoutesTest {
     @Test
     fun aWebSignOutClearsTheNativeTokenOnlyOnceAWebSessionWasHandedOver() {
         assertEquals(AuthAction.SIGN_OUT_NATIVE_THEN_SIGN_IN, ShellRoutes.authAction("$origin/login", true, true))
-        // T-7852 not wired: /login while signed in is a page without a session, not a sign-out. Never clear the token.
-        assertEquals(AuthAction.WEB_SESSION_UNAVAILABLE, ShellRoutes.authAction("$origin/login", true, false))
+        // No web session handed over yet: /login while signed in is a page without a session, not a sign-out. Never clear the token.
+        assertEquals(AuthAction.LINK_WEB_SESSION, ShellRoutes.authAction("$origin/login", true, false))
         assertEquals(AuthAction.NONE, ShellRoutes.authAction("$origin/profile", true, true))
+    }
+
+    @Test
+    fun aFailedRedeemRedirectIsAnUnlinkedLoginNotASignOut() {
+        // The server answers a bad redeem with 303 -> /login?error=handoff_expired; the normalized intercept sees a sign-in route.
+        assertEquals(AuthAction.LINK_WEB_SESSION, ShellRoutes.authAction("$origin/login?error=handoff_expired", true, false))
+        assertEquals(AuthAction.LINK_WEB_SESSION, ShellRoutes.authAction("$origin/%4cOGIN?error=handoff_expired", true, false))
+        assertEquals(AuthAction.START_NATIVE_SIGN_IN, ShellRoutes.authAction("$origin/login?error=handoff_expired", false, false))
+    }
+
+    @Test
+    fun onlySavedAndAccountNeedTheWebSession() {
+        assertEquals(listOf(ShellTab.SAVED, ShellTab.ACCOUNT), ShellTab.entries.filter { it.needsWebSession })
     }
 
     @Test

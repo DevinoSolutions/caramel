@@ -37,7 +37,11 @@ data class HttpRequest(
     val url: String,
     val headers: Map<String, String>,
     val body: String?,
+    val timeoutMs: Int = DEFAULT_TIMEOUT_MS,
 )
+
+/** Connect and read timeout of an ordinary API call. */
+const val DEFAULT_TIMEOUT_MS = 20_000
 
 data class HttpResponse(val status: Int, val body: String)
 
@@ -57,8 +61,8 @@ class HttpUrlConnectionTransport : HttpTransport {
             connection.requestMethod = request.method
             // The API never redirects a JSON call; following one would resend the bearer elsewhere.
             connection.instanceFollowRedirects = false
-            connection.connectTimeout = TIMEOUT_MS
-            connection.readTimeout = TIMEOUT_MS
+            connection.connectTimeout = request.timeoutMs
+            connection.readTimeout = request.timeoutMs
             request.headers.forEach { (name, value) -> connection.setRequestProperty(name, value) }
             val body = request.body
             // PUT/POST always send a (possibly empty) body so the request carries Content-Length.
@@ -73,10 +77,6 @@ class HttpUrlConnectionTransport : HttpTransport {
         } finally {
             connection.disconnect()
         }
-    }
-
-    private companion object {
-        const val TIMEOUT_MS = 20_000
     }
 }
 
@@ -101,13 +101,14 @@ class CaramelApi(
         query: List<Pair<String, String>> = emptyList(),
         body: String? = null,
         bearer: String? = null,
+        timeoutMs: Int = DEFAULT_TIMEOUT_MS,
     ): ApiResponse {
         val requestId = newRequestId()
         val headers = linkedMapOf("Accept" to "application/json", "x-request-id" to requestId)
         if (bearer != null) headers["Authorization"] = "Bearer $bearer"
         if (body != null) headers["Content-Type"] = "application/json"
         val response = try {
-            transport.execute(HttpRequest(method, buildUrl(path, query), headers, body))
+            transport.execute(HttpRequest(method, buildUrl(path, query), headers, body, timeoutMs))
         } catch (e: IOException) {
             throw ApiError(method, path, null, requestId, e.message ?: e.javaClass.simpleName, e)
         }
@@ -155,6 +156,23 @@ class CaramelApi(
 
     // endregion
 
+    // region Web session handoff (bearer)
+
+    /**
+     * POST /api/app/web-session/handoff. Trades the bearer for a one-time (60 s) redeem URL that the
+     * WebView loads to receive the web session cookie. [next] is the path the redeem lands on; the
+     * server accepts only "/" and paths under /coupons, /profile and /welcome (see
+     * [com.devino.caramel.web.HandoffNext]). A dead bearer answers 401 ([ApiError.isUnauthorized]).
+     * The response carries a credential: callers must not log [HandoffResponse.url].
+     */
+    suspend fun webSessionHandoff(bearer: String, next: String): HandoffResponse {
+        val body = buildJsonObject { put("next", next) }.toString()
+        val path = "/api/app/web-session/handoff"
+        return decode(send("POST", path, body = body, bearer = bearer, timeoutMs = HANDOFF_TIMEOUT_MS), "POST", path)
+    }
+
+    // endregion
+
     // region Sign-in routes (the extension OAuth flow with the app's redirect URI)
 
     /**
@@ -190,6 +208,11 @@ class CaramelApi(
     }
 
     // endregion
+
+    private companion object {
+        /** Shorter than an ordinary call: the shopper is waiting on a tap, and the code lives only 60 s. */
+        const val HANDOFF_TIMEOUT_MS = 10_000
+    }
 
     private fun confirmDeleteBody(): String = buildJsonObject { put("confirm", "DELETE") }.toString()
 

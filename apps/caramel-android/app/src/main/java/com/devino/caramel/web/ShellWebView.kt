@@ -133,8 +133,10 @@ fun WebView.loadGuarded(url: String): Boolean {
 
 /**
  * Forgets the web session the WebView holds: cookies (flushed to disk) and DOM storage. Called on
- * sign-out and on account deletion so the next person on the device does not inherit it.
- * TODO(T-7852): once the web-session handoff exists, also end the session server-side.
+ * sign-out and on account deletion so the next person on the device does not inherit it. The
+ * server-side session ends separately: sign-out revokes the bearer's session row (DELETE
+ * /api/extension/session) and account deletion removes every session, which kills the cookie the
+ * web-session handoff minted (it signs that same session).
  */
 fun clearWebSessionState() {
     val cookies = CookieManager.getInstance()
