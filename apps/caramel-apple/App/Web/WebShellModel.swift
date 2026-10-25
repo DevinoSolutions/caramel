@@ -320,7 +320,7 @@ final class WebShellModel: NSObject, ObservableObject {
         }
         let view = webView
         view.configuration.websiteDataStore.httpCookieStore.getAllCookies { [weak self] cookies in
-            Task {  in
+            Task { @MainActor in
                 guard let self = self, self.webView === view else { return }
                 if WebSessionHandoff.hasSessionCookie(cookies) {
                     self.onRedeemOutcome(self, .landed)
