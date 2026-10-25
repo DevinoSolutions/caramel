@@ -21,6 +21,7 @@ class SessionStoreTest {
         extra(request.method, path) ?: when (path) {
             "/api/extension/oauth/authorize" -> ok("""{"authorizationUrl":"https://accounts.example/auth","state":"st"}""")
             "/api/extension/oauth" -> ok("""{"token":"bearer-1","username":"sam"}""")
+            "/api/extension/oauth/google-id-token" -> ok("""{"token":"bearer-g","username":"gina"}""")
             "/api/extension/me" -> ok("""{"username":"sam"}""")
             else -> HttpResponse(200, "{}")
         }
@@ -186,5 +187,48 @@ class SessionStoreTest {
         assertFalse(badStore.deleteAccount())
         assertEquals("tok", badTokens.token)
         assertTrue(badStore.state.value.errorMessage!!.startsWith("Could not delete your account"))
+    }
+
+    @Test
+    fun nativeGoogleSignInStoresTheBearer() = runBlocking {
+        val (api, transport) = routed()
+        val tokens = MemoryTokenStore()
+        val store = SessionStore(api, tokens) { pkce }
+
+        store.beginNativeSignIn()
+        assertTrue(store.state.value.isSigningIn)
+        store.completeGoogleSignIn("id-token-1")
+
+        assertEquals("bearer-g", tokens.token)
+        assertEquals("gina", store.state.value.username)
+        assertFalse(store.state.value.isSigningIn)
+        assertNull(store.state.value.errorMessage)
+        assertEquals("""{"idToken":"id-token-1"}""", transport.requests.single().body)
+    }
+
+    @Test
+    fun nativeGoogleSignInRefusedByTheServerShowsWhyAndSignsNobodyIn() = runBlocking {
+        val (api, _) = routed { _, path ->
+            if (path == "/api/extension/oauth/google-id-token") HttpResponse(401, """{"error":"Invalid or expired Google sign-in"}""") else null
+        }
+        val tokens = MemoryTokenStore()
+        val store = SessionStore(api, tokens) { pkce }
+        store.beginNativeSignIn()
+        store.completeGoogleSignIn("bad")
+
+        assertNull(tokens.token)
+        assertFalse(store.state.value.isSignedIn)
+        assertFalse(store.state.value.isSigningIn)
+        assertTrue(store.state.value.errorMessage!!.contains("Invalid or expired Google sign-in"))
+    }
+
+    @Test
+    fun cancellingTheNativeSheetIsNotAnError() {
+        val (api, _) = routed()
+        val store = SessionStore(api, MemoryTokenStore()) { pkce }
+        store.beginNativeSignIn()
+        store.cancelNativeSignIn()
+        assertFalse(store.state.value.isSigningIn)
+        assertNull(store.state.value.errorMessage)
     }
 }

@@ -100,4 +100,15 @@ class CaramelApiTest {
         assertEquals("""{"confirm":"DELETE"}""", request.body)
         assertEquals("application/json", request.headers["Content-Type"])
     }
+
+    @Test
+    fun googleIdTokenSignInPostsTheTokenToTheNativeRoute() = runBlocking {
+        val (api, transport) = testApi { ok("""{"token":"bearer","username":"sam"}""") }
+        val session = api.googleIdTokenSignIn("id-token-1")
+        assertEquals("bearer", session.token)
+        val request = transport.requests.single()
+        assertEquals("POST", request.method)
+        assertEquals("https://example.test/api/extension/oauth/google-id-token", request.url)
+        assertEquals("""{"idToken":"id-token-1"}""", request.body)
+    }
 }

@@ -6,6 +6,8 @@ coreKtx = "1.17.0"
 activityCompose = "1.11.0"
 lifecycle = "2.9.4"
 browser = "1.9.0"
+credentials = "1.5.0"
+googleid = "1.1.1"
 serialization = "1.9.0"
 coroutines = "1.10.2"
 junit = "4.13.2"
@@ -15,6 +17,9 @@ androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx"
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
 androidx-lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "lifecycle" }
 androidx-browser = { module = "androidx.browser:browser", version.ref = "browser" }
+androidx-credentials = { module = "androidx.credentials:credentials", version.ref = "credentials" }
+androidx-credentials-play-services-auth = { module = "androidx.credentials:credentials-play-services-auth", version.ref = "credentials" }
+googleid = { module = "com.google.android.libraries.identity.googleid:googleid", version.ref = "googleid" }
 androidx-compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }
 androidx-compose-ui = { module = "androidx.compose.ui:ui" }
 androidx-compose-material3 = { module = "androidx.compose.material3:material3" }

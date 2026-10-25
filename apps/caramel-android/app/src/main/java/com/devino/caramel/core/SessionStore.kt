@@ -30,9 +30,10 @@ data class SessionState(
 }
 
 /**
- * The signed-in state: Apple / Google through the web OAuth flow in a browser tab (Custom Tabs,
- * no Google Play Services, so the same build runs on Fire devices), then the bearer in [TokenStore].
- * The same flow, endpoints and PKCE as apps/caramel-apple SessionStore.swift.
+ * The signed-in state, then the bearer in [TokenStore]. Google signs in natively (Credential
+ * Manager, [completeGoogleSignIn]) where Google Play Services is present. Apple, and Google on
+ * devices without Play Services (Fire), use the web OAuth flow in a browser tab (Custom Tabs):
+ * the same flow, endpoints and PKCE as apps/caramel-apple SessionStore.swift.
  */
 class SessionStore(
     private val api: CaramelApi,
@@ -149,6 +150,35 @@ class SessionStore(
             mutableState.update { it.copy(isSigningIn = false, errorMessage = e.message) }
         }
         return true
+    }
+
+    /**
+     * Native Google sign-in (Credential Manager's bottom sheet, see GoogleCredentialSignIn): the
+     * sheet is about to open. Ends with [completeGoogleSignIn], [cancelNativeSignIn] or
+     * [reportError]. [keepError] as in [beginSignIn].
+     */
+    fun beginNativeSignIn(keepError: Boolean = false) {
+        mutableState.update { it.copy(isSigningIn = true, errorMessage = if (keepError) it.errorMessage else null) }
+    }
+
+    /** The shopper dismissed the native sheet: not an error to report. */
+    fun cancelNativeSignIn() {
+        mutableState.update { it.copy(isSigningIn = false) }
+    }
+
+    /** Trades the Google ID token from the native sheet for a session bearer and stores it. */
+    suspend fun completeGoogleSignIn(idToken: String) {
+        try {
+            val result = api.googleIdTokenSignIn(idToken)
+            withContext(io) { tokens.write(result.token) }
+            mutableState.update {
+                it.copy(token = result.token, username = result.username, isSigningIn = false, errorMessage = null)
+            }
+        } catch (e: ApiError) {
+            mutableState.update { it.copy(isSigningIn = false, errorMessage = e.message) }
+        } catch (e: TokenStoreException) {
+            mutableState.update { it.copy(isSigningIn = false, errorMessage = e.message) }
+        }
     }
 
     /**

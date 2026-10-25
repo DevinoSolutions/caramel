@@ -13,6 +13,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.lifecycleScope
 import com.devino.caramel.core.AppConfig
+import com.devino.caramel.core.OAuthProvider
 import com.devino.caramel.ui.CaramelApp
 import com.devino.caramel.ui.CaramelTheme
 import com.devino.caramel.web.ExternalLink
@@ -21,6 +22,7 @@ import com.devino.caramel.web.HandoffStep
 import com.devino.caramel.web.IntentTarget
 import com.devino.caramel.web.ShellIntents
 import com.devino.caramel.web.ShellTab
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -58,6 +60,7 @@ class MainActivity : ComponentActivity() {
                     notice = notice,
                     onNotice = { notice = it },
                     onStartSignIn = ::openSignInTab,
+                    onStartGoogleSignIn = ::startGoogleSignIn,
                     onOpenOutside = ::openOutside,
                 )
             }
@@ -96,14 +99,47 @@ class MainActivity : ComponentActivity() {
                 awaitingBrowser = false
                 leftForBrowser = false
                 // The callback answered the sign-in but the exchange may still have failed (no token): only a
-                // stored bearer is handed to the WebView. The redeem URL loads through the shell's guarded sink
-                // (requestedUrl); a failed handoff shows its own retry banner, a dead bearer the sign-in error.
-                if (container.session.token != null) {
-                    val step = container.webSession.startFresh(ShellTab.DEALS.startPath)
-                    if (step is HandoffStep.Load) requestedUrl = step.redeemUrl
-                }
+                // stored bearer is handed to the WebView.
+                if (container.session.token != null) linkWebSessionToDeals()
             }
         }
+    }
+
+    /**
+     * Google signs in natively (Credential Manager's bottom sheet with the device's accounts). The
+     * browser tab is used only where this device cannot do that (no Play Services, as on Fire, or
+     * no Google account). [keepError] as in SessionStore.beginSignIn.
+     */
+    private fun startGoogleSignIn(keepError: Boolean) {
+        val session = container.session
+        lifecycleScope.launch {
+            session.beginNativeSignIn(keepError)
+            try {
+                when (val outcome = GoogleCredentialSignIn(this@MainActivity).requestIdToken()) {
+                    is GoogleCredentialSignIn.Outcome.Token -> {
+                        session.completeGoogleSignIn(outcome.idToken)
+                        if (session.token != null) linkWebSessionToDeals()
+                    }
+                    GoogleCredentialSignIn.Outcome.Cancelled -> session.cancelNativeSignIn()
+                    GoogleCredentialSignIn.Outcome.Unavailable ->
+                        session.beginSignIn(OAuthProvider.GOOGLE, keepError)?.let(::openSignInTab)
+                    is GoogleCredentialSignIn.Outcome.Failed -> session.reportError(outcome.message)
+                }
+            } catch (e: CancellationException) {
+                // The activity went away mid-sign-in: give the buttons back for the next one.
+                session.cancelNativeSignIn()
+                throw e
+            }
+        }
+    }
+
+    /**
+     * Hands a fresh native session to the WebView. The redeem URL loads through the shell's guarded
+     * sink (requestedUrl); a failed handoff shows its own retry banner, a dead bearer the sign-in error.
+     */
+    private suspend fun linkWebSessionToDeals() {
+        val step = container.webSession.startFresh(ShellTab.DEALS.startPath)
+        if (step is HandoffStep.Load) requestedUrl = step.redeemUrl
     }
 
     /**

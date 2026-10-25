@@ -72,7 +72,8 @@ private fun ShellTab.icon(): ImageVector = when (this) {
 
 /**
  * The app shell: grabcaramel.com in a WebView under four tabs, plus the native sign-in sheet (the
- * only native screen left; Google refuses OAuth inside a WebView). The session store and the
+ * only native screen left; Google refuses OAuth inside a WebView). Google signs in through
+ * Credential Manager ([onStartGoogleSignIn]); Apple through the browser tab ([onStartSignIn]). The session store and the
  * Keystore-backed token live in [AppContainer].
  *
  * [requestedUrl] is an AppLinkGuard-approved URL from an intent (or null); the shell loads it and
@@ -87,6 +88,7 @@ fun CaramelApp(
     notice: String?,
     onNotice: (String?) -> Unit,
     onStartSignIn: (String) -> Unit,
+    onStartGoogleSignIn: (keepError: Boolean) -> Unit,
     onOpenOutside: (String) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -164,7 +166,10 @@ fun CaramelApp(
                 container.session.signOut()
             }
             // A failed revoke from that sign-out stays on screen (keepError) instead of being cleared by the new sign-in.
-            container.session.beginSignIn(provider, keepError = hadToken)?.let(onStartSignIn)
+            when (provider) {
+                OAuthProvider.GOOGLE -> onStartGoogleSignIn(hadToken)
+                OAuthProvider.APPLE -> container.session.beginSignIn(provider, keepError = hadToken)?.let(onStartSignIn)
+            }
         }
     }
 
@@ -326,7 +331,7 @@ fun CaramelApp(
             title = { Text("Sign in to Caramel") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Sign-in opens in your browser, because Google does not allow it inside an app's web view.")
+                    Text("Google uses the accounts on this device. Apple sign-in opens in your browser.")
                     Button(
                         modifier = Modifier.fillMaxWidth(),
                         enabled = !session.isSigningIn,

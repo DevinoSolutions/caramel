@@ -7,3 +7,9 @@
 -keepclasseswithmembers class com.devino.caramel.core.** {
     kotlinx.serialization.KSerializer serializer(...);
 }
+
+# Credential Manager finds its Play Services provider by reflection (androidx.credentials docs).
+-if class androidx.credentials.CredentialManager
+-keep class androidx.credentials.playservices.** {
+  *;
+}
