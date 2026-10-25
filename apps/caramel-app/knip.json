@@ -8,9 +8,7 @@
     ],
     "project": ["src/**/*.{ts,tsx}", "e2e/**/*.ts", "evals/**/*.ts"],
     "ignore": [
-        "postcss.config.mjs",
-        "src/components/StoreButtons.tsx",
-        "src/lib/capitalizeFirst.ts"
+        "postcss.config.mjs"
     ],
     "ignoreDependencies": [
         "@argos-ci/cli",
