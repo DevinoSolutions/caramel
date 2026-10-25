@@ -1,3 +1,4 @@
+import { ANALYTICS_DELETION_COPY } from '@/lib/marketing/deleteAccountContent'
 import { motion } from 'framer-motion'
 import Link from 'next/link'
 import type { ReactNode } from 'react'
@@ -324,12 +325,12 @@ const PrivacyPolicy = () => {
                     </Para>
                     <Para>
                         A sample of sessions is also recorded in our self-hosted
-                        PostHog, with every form field masked. From
-                        [TODO(T-7505): date the PostHog recording fix goes live]
-                        search text is removed from the request addresses in
-                        those recordings; older recordings may contain it until
-                        they are deleted [TODO(T-7505): recording retention
-                        period, MASTER decides].
+                        PostHog, with every form field masked, and kept up to 30
+                        days. A recording includes the web addresses of the
+                        page&apos;s requests, so it can contain store-search
+                        text; recordings made after [TODO(T-7505): date the
+                        PostHog recording fix goes live] have it removed from
+                        those addresses.
                     </Para>
                     <Para>
                         If you use our store-request form we collect the store
@@ -467,7 +468,7 @@ const PrivacyPolicy = () => {
                             'Promo-box suggestions (the store’s hostname and the selectors described above) are kept with your account. A suggestion older than 30 days no longer counts toward a store’s saved rules but is not deleted automatically; it is removed when you delete your account.',
                             'Server logs, which can include IP addresses and browser type, are kept for up to 90 days for security and troubleshooting. The text of store searches is not written to them.',
                             'Error records and session replays (Sentry) are kept for 90 days. Since October 25, 2026 they are stored without store-search text (it is removed from error reports and from recorded web addresses, and what you type is masked in replays); ones captured before then may contain it until they expire (by January 23, 2027 at the latest).',
-                            'PostHog session recordings (a sample of sessions, form fields masked) are kept for [TODO(T-7505): recording retention period, MASTER decides]. They are stored without store-search text from [TODO(T-7505): date the PostHog recording fix goes live]; older recordings may contain it until they are deleted.',
+                            'PostHog session recordings (a sample of sessions, form fields masked) are kept up to 30 days. Recordings made before [TODO(T-7505): date the PostHog recording fix goes live] may contain store-search text until they expire; later ones have it removed from recorded request addresses.',
                         ]}
                     />
                 </>
@@ -624,7 +625,7 @@ const PrivacyPolicy = () => {
                         'Turn checkout sharing and savings sync on or off at any time in the extension’s settings.',
                         'Download your data, or delete your saved Caramel data (savings, favorite stores and coupon results), from Profile → Data & privacy on grabcaramel.com.',
                         'Delete your account yourself: on grabcaramel.com at Profile → Data & privacy → Delete my account (also reachable from the Android app’s Account tab), in the iOS app (Account → Delete my account), or in the Android app (Account and privacy icon → Delete my account). Our Delete your account page lists what is deleted and what is kept.',
-                        'Ask us to access, correct or delete your account and everything linked to it by emailing hello@devino.ca from the address on your account (if you signed in with Apple and hid your email, delete your account yourself as above instead). We act on deletion requests within 30 days; deleting your account removes your login, sign-in sessions, favorite stores, savings history and coupon results, and unlinks you from codes you shared. We also ask our self-hosted analytics (PostHog) to delete the profile linked to your account, with its events and session recordings; PostHog queues that request and finishes it in the background. Error records (Sentry), Google Analytics data, and analytics events that were never linked to your account are not removed by this.',
+                        `Ask us to access, correct or delete your account and everything linked to it by emailing hello@devino.ca from the address on your account (if you signed in with Apple and hid your email, delete your account yourself as above instead). We act on deletion requests within 30 days; deleting your account removes your login, sign-in sessions, favorite stores, savings history and coupon results, and unlinks you from codes you shared. ${ANALYTICS_DELETION_COPY.policyChoice} Error records (Sentry), Google Analytics data, and analytics events that were never linked to your account are not removed by this.`,
                         'Uninstall the extension at any time; this stops all collection and removes what it stored in your browser.',
                     ]}
                 />

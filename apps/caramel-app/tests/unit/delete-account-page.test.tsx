@@ -10,6 +10,9 @@ import {
     DELETE_ACCOUNT_PAGE_COPY,
     DELETE_ACCOUNT_PATH,
     DELETE_ACCOUNT_SECTIONS,
+    GATED_ANALYTICS_DELETION,
+    POSTHOG_EVENT_DELETION_CADENCE_VERIFIED,
+    selectAnalyticsDeletionCopy,
 } from '@/lib/marketing/deleteAccountContent'
 import { DOCS_SECTIONS } from '@/lib/marketing/docsContent'
 import { markdownText } from '@/lib/seo/markdownTwins/content'
@@ -89,18 +92,54 @@ describe('delete-account content', () => {
         expect(kept).not.toContain('cannot be turned back')
     })
 
-    it('says the analytics profile is requested from PostHog and finishes in the background, with no time bound', () => {
-        const deleted = DELETE_ACCOUNT_SECTIONS.find(
-            section => section.id === 'what-is-deleted',
+    // PostHog's bulk_delete removes the person at once, but on our instance the
+    // job that deletes the EVENTS does not run yet (posthog-selfhost is adding a
+    // weekly one). Until POSTHOG_EVENT_DELETION_CADENCE_VERIFIED is flipped after
+    // that job is live and verified, no page may say the events are deleted or
+    // give a time bound; it must say what is true and offer deletion on request.
+    it('says only what is true about analytics deletion while the event-deletion job is unverified', () => {
+        expect(POSTHOG_EVENT_DELETION_CADENCE_VERIFIED).toBe(false)
+        const all = DELETE_ACCOUNT_SECTIONS.flatMap(section => [
+            ...section.paragraphs,
+            ...(section.bullets ?? []),
+        ]).join(' ')
+        expect(all).toContain(
+            'Your analytics profile in our self-hosted PostHog. When you delete your account we delete it straight away.',
+        )
+        expect(all).toContain(
+            'Analytics events already recorded under that profile are not yet removed automatically. Email hello@devino.ca and we will delete them.',
+        )
+        expect(all).not.toMatch(
+            /weekly|clean-up|finishes it in the background|queue/i,
+        )
+        expect(all).not.toMatch(
+            /PostHog[^.]*within (about )?(a |\d+ )?(days?|weeks?)/i,
+        )
+    })
+
+    it('the post-fix sentence exists, is gated, and only the gate can render it', () => {
+        expect(GATED_ANALYTICS_DELETION.policyChoice).toContain(
+            'deleted by a weekly clean-up, within about a week',
+        )
+        expect(GATED_ANALYTICS_DELETION.deletedBullet).toContain(
+            'a weekly clean-up deletes within about a week',
+        )
+        expect(selectAnalyticsDeletionCopy(true)).toBe(GATED_ANALYTICS_DELETION)
+        expect(selectAnalyticsDeletionCopy(false)).not.toBe(
+            GATED_ANALYTICS_DELETION,
+        )
+        expect(selectAnalyticsDeletionCopy(false).policyChoice).not.toMatch(
+            /weekly|within/,
+        )
+    })
+
+    it('says recordings can stay up to 30 days', () => {
+        const kept = DELETE_ACCOUNT_SECTIONS.find(
+            section => section.id === 'what-is-kept',
         )?.bullets?.join(' ')
-        expect(deleted).toContain(
-            'analytics profile in our self-hosted PostHog',
+        expect(kept).toContain(
+            'Session recordings of your visits (a sample of sessions, with every form field masked) can stay in our self-hosted PostHog until they expire, up to 30 days after they were made.',
         )
-        expect(deleted).toContain(
-            'PostHog queues the request and finishes it in the background',
-        )
-        // Not backed by PostHog's self-hosted docs: no promised completion time.
-        expect(deleted).not.toMatch(/PostHog[^.]*within d+ days/)
     })
 
     it('is linked from the docs hub privacy section', () => {

@@ -23,11 +23,62 @@
 // - the 30-day reporter hash, 90-day logs and Sentry, and the store-search
 //   text rules (no app log, proxy access log off, scrubbed from Sentry since
 //   2026-10-25): PrivacyPolicy.tsx "Where Is It Stored, and for How Long?"
-// - the analytics deletion: src/lib/analytics/posthogPersonDeletion.ts
-//   (queued with PostHog, finished in the background; no time bound claimed)
+// - the analytics deletion: src/lib/analytics/posthogPersonDeletion.ts. On our
+//   self-hosted PostHog, bulk_delete removes the PERSON immediately, but the
+//   EVENTS are only queued as AsyncDeletion rows, and the job that processes
+//   them does not run on our instance yet (posthog-selfhost is adding a weekly
+//   one, a Dokploy Schedule on the posthog compose, owner-managed, not a host
+//   cron). See ANALYTICS_DELETION_COPY below.
 export const DELETE_ACCOUNT_PATH = '/delete-account'
 
 export const DELETE_ACCOUNT_EMAIL = 'hello@devino.ca'
+
+// TODO(T-7505): GATE. Flip to true ONLY after posthog-selfhost's weekly
+// event-deletion job is live AND verified on our instance (HogQL shows the
+// events of a deleted person actually disappear). While false, every public
+// page renders the interim sentences, which promise only what is true today:
+// the profile is deleted at once, the events are not removed automatically,
+// and we delete them on request (RUNBOOK.md "Account deletion: the PostHog
+// person", step "events on request"). Until then no sentence may say the events
+// are deleted, queued-and-finishing, or give a time bound (the unit tests
+// enforce it).
+export const POSTHOG_EVENT_DELETION_CADENCE_VERIFIED = false
+
+type AnalyticsDeletionCopy = {
+    /** One sentence for the policy's "Your Choices" email bullet. */
+    policyChoice: string
+    /** The /delete-account "What is deleted" bullet. */
+    deletedBullet: string
+    /** The /delete-account "What is kept" bullet, when something stays. */
+    keptBullet: string | null
+}
+
+const INTERIM_ANALYTICS_DELETION: AnalyticsDeletionCopy = {
+    policyChoice: `Your analytics profile in our self-hosted analytics (PostHog) is deleted immediately. Events already recorded under it are not yet removed automatically; ask us at ${DELETE_ACCOUNT_EMAIL} and we will delete them.`,
+    deletedBullet:
+        'Your analytics profile in our self-hosted PostHog. When you delete your account we delete it straight away.',
+    keptBullet: `Analytics events already recorded under that profile are not yet removed automatically. Email ${DELETE_ACCOUNT_EMAIL} and we will delete them.`,
+}
+
+// TODO(T-7505): GATED. Drafted for the state after the weekly job is live and
+// verified; rendered only when POSTHOG_EVENT_DELETION_CADENCE_VERIFIED is true.
+export const GATED_ANALYTICS_DELETION: AnalyticsDeletionCopy = {
+    policyChoice:
+        'Your analytics profile in our self-hosted analytics (PostHog) is deleted immediately, and the events linked to it are deleted by a weekly clean-up, within about a week.',
+    deletedBullet:
+        'Your analytics profile in our self-hosted PostHog, which we delete straight away, and the events linked to it, which a weekly clean-up deletes within about a week.',
+    keptBullet: null,
+}
+
+export function selectAnalyticsDeletionCopy(
+    verified: boolean,
+): AnalyticsDeletionCopy {
+    return verified ? GATED_ANALYTICS_DELETION : INTERIM_ANALYTICS_DELETION
+}
+
+export const ANALYTICS_DELETION_COPY = selectAnalyticsDeletionCopy(
+    POSTHOG_EVENT_DELETION_CADENCE_VERIFIED,
+)
 
 export const DELETE_ACCOUNT_PAGE_COPY = {
     title: 'Delete your Caramel account | Caramel',
@@ -108,7 +159,7 @@ export const DELETE_ACCOUNT_SECTIONS: ReadonlyArray<DeleteAccountSection> = [
         paragraphs: [
             'Email hello@devino.ca from the email address on your account and ask us to delete your account. We act on deletion requests within 30 days.',
             'If you signed in with Apple and chose to hide your email, you may not be able to write from that address: delete your account on the website or in an app instead.',
-            'When you ask by email we delete the same records by hand, including asking PostHog to delete your analytics profile. The Sign in with Apple tokens are revoked automatically only when you delete your account yourself on the website or in an app.',
+            'When you ask by email we delete the same records by hand, including your analytics profile in PostHog. The Sign in with Apple tokens are revoked automatically only when you delete your account yourself on the website or in an app.',
         ],
         emailLink: true,
     },
@@ -124,7 +175,7 @@ export const DELETE_ACCOUNT_SECTIONS: ReadonlyArray<DeleteAccountSection> = [
             'The coupon results (worked or did not work) linked to your account.',
             'Promo-box suggestions your signed-in extension sent for a store, if that feature was switched on.',
             'Sign-in, email-verification and password-reset codes issued for your email address.',
-            'Your analytics profile in our self-hosted PostHog, with the events and session recordings linked to it. When you delete your account we ask PostHog to delete them. PostHog queues the request and finishes it in the background, so the data may not disappear the moment you confirm.',
+            ANALYTICS_DELETION_COPY.deletedBullet,
             'The email address, the store address you typed and the browser type on any store request you made. The store request itself stays (see below).',
             'If you signed in with Apple and delete the account yourself: we ask Apple to revoke the Sign in with Apple tokens for your account.',
         ],
@@ -141,6 +192,10 @@ export const DELETE_ACCOUNT_SECTIONS: ReadonlyArray<DeleteAccountSection> = [
             'A one-way keyed hash of your account (or of your IP address, for a result sent while signed out) is kept with each coupon result to stop fake reports. It is not stored with your account or your IP address, and it is deleted after 30 days.',
             'Server logs, which can include IP addresses and browser type, for up to 90 days. The text of store searches is not written to them.',
             'Error records and session replays (Sentry), kept for 90 days. They can hold your user id and the pages or errors you hit while signed in. Since October 25, 2026 they are stored without store-search text; ones captured before then may contain it until they expire (by January 23, 2027 at the latest).',
+            ...(ANALYTICS_DELETION_COPY.keptBullet
+                ? [ANALYTICS_DELETION_COPY.keptBullet]
+                : []),
+            'Session recordings of your visits (a sample of sessions, with every form field masked) can stay in our self-hosted PostHog until they expire, up to 30 days after they were made.',
             'Analytics events that are not linked to your account: visits from before you signed in that were never joined to your account, and the extension’s install and anonymous diagnostic events.',
             'Usage data collected by Google Analytics on our website. Google holds it under its own retention settings; deleting your account does not remove it.',
             'Messages you sent to support (the support form or hello@devino.ca). They stay in our support inbox; deleting your account does not remove them. Include them in your email if you want them removed.',

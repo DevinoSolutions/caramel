@@ -124,12 +124,14 @@ describe('privacy policy coverage', () => {
             'We do not write it to our application logs, and the access log of our own proxy is switched off.',
             'passes the request on and may briefly cache the response and keep its own request records',
             'Since October 25, 2026 we also remove search text from error reports and from the web addresses recorded in session replays before they are stored, and we mask what you type in session replays.',
-            'A sample of sessions is also recorded in our self-hosted PostHog, with every form field masked.',
-            'older recordings may contain it until they are deleted',
+            'A sample of sessions is also recorded in our self-hosted PostHog, with every form field masked, and kept up to 30 days.',
+            'so it can contain store-search text; recordings made after',
+            'PostHog session recordings (a sample of sessions, form fields masked) are kept up to 30 days.',
+            'may contain store-search text until they expire',
             'until they expire, 90 days after capture (by January 23, 2027 at the latest)',
             'The text of store searches is not written to them.',
             'Error records and session replays (Sentry) are kept for 90 days.',
-            'We also ask our self-hosted analytics (PostHog) to delete the profile linked to your account, with its events and session recordings; PostHog queues that request and finishes it in the background.',
+            'Your analytics profile in our self-hosted analytics (PostHog) is deleted immediately. Events already recorded under it are not yet removed automatically; ask us at hello@devino.ca and we will delete them.',
         ]) {
             expect(normalized).toContain(claim)
         }
