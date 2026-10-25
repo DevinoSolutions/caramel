@@ -4,6 +4,7 @@ import { SENTRY_RELEASE } from '@/lib/buildInfo'
 import { INJECTED_SCRIPT_DENY_URLS } from '@/lib/sentryInjectedScriptNoise'
 import {
     SENTRY_DATA_COLLECTION,
+    scrubReplayRecordingEvent,
     scrubSentryBreadcrumb,
     scrubSentryEvent,
 } from '@/lib/sentryPiiScrub'
@@ -56,6 +57,10 @@ function addReplay(): void {
                     // Added to Sentry's default block list. PostHog blocks
                     // `.ph-no-capture` by default; this mirrors it here.
                     block: ['.ph-no-capture'],
+                    // The network/navigation frames Replay records hold request
+                    // URLs, which beforeSend/beforeBreadcrumb never see: scrub
+                    // typed store-search text (?q=, ?search=) there too (T-7505).
+                    beforeAddRecordingEvent: scrubReplayRecordingEvent,
                 }),
             )
         })

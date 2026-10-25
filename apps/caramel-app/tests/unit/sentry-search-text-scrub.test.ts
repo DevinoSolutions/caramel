@@ -1,10 +1,16 @@
 import {
     FILTERED,
     redactSensitiveText,
+    scrubReplayRecordingEvent,
     scrubSentryBreadcrumb,
     scrubSentryEvent,
 } from '@/lib/sentryPiiScrub'
-import type { Breadcrumb, ErrorEvent, init } from '@sentry/nextjs'
+import type {
+    Breadcrumb,
+    ErrorEvent,
+    init,
+    replayIntegration,
+} from '@sentry/nextjs'
 import { describe, expect, it } from 'vitest'
 
 // T-7505: what a shopper types into a store search must not survive in Sentry,
@@ -13,6 +19,13 @@ import { describe, expect, it } from 'vitest'
 // GET /api/coupons?search=&key_words=, and the `query` body field of
 // POST /api/sites/search-supported.
 
+type ReplayFrameEvent = Parameters<
+    NonNullable<
+        NonNullable<
+            Parameters<typeof replayIntegration>[0]
+        >['beforeAddRecordingEvent']
+    >
+>[0]
 type TransactionEvent = Parameters<
     NonNullable<
         NonNullable<Parameters<typeof init>[0]>['beforeSendTransaction']
@@ -154,5 +167,89 @@ describe('store-search text is scrubbed from Sentry events', () => {
         const url =
             'https://grabcaramel.com/coupons?site=nike.com&page=2&sort=newest&request=1&equal=2'
         expect(redactSensitiveText(url)).toBe(url)
+    })
+})
+
+describe('Session Replay recording frames', () => {
+    const RECORDED_URL = `https://grabcaramel.com/api/coupons/stores?q=${TYPED_ENCODED}&limit=20`
+
+    it('scrubs the URL of a recorded fetch, a navigation and a breadcrumb frame', () => {
+        const fetchFrame: ReplayFrameEvent = {
+            type: 5,
+            timestamp: 1,
+            data: {
+                tag: 'performanceSpan',
+                payload: {
+                    op: 'resource.fetch',
+                    description: RECORDED_URL,
+                    startTimestamp: 1,
+                    endTimestamp: 2,
+                    data: { method: 'GET', statusCode: 200 },
+                },
+            },
+        }
+        const navFrame: ReplayFrameEvent = {
+            type: 5,
+            timestamp: 3,
+            data: {
+                tag: 'performanceSpan',
+                payload: {
+                    op: 'navigation.navigate',
+                    description: `https://grabcaramel.com/coupons?search=${TYPED_ENCODED}`,
+                    startTimestamp: 3,
+                    endTimestamp: 4,
+                    data: { size: 1 },
+                },
+            },
+        }
+        const crumbFrame: ReplayFrameEvent = {
+            type: 5,
+            timestamp: 5,
+            data: {
+                tag: 'breadcrumb',
+                payload: {
+                    type: 'default',
+                    category: 'navigation',
+                    timestamp: 5,
+                    data: {
+                        from: '/coupons',
+                        to: `/coupons?key_words=${TYPED_ENCODED}&page=2`,
+                    },
+                },
+            },
+        }
+
+        for (const frame of [fetchFrame, navFrame, crumbFrame]) {
+            const out = scrubReplayRecordingEvent(frame)
+            expect(out).not.toBeNull()
+            expectNoSearchText(out)
+        }
+        expect(scrubReplayRecordingEvent(fetchFrame)).toMatchObject({
+            data: {
+                payload: {
+                    description: `https://grabcaramel.com/api/coupons/stores?q=${FILTERED}&limit=20`,
+                    data: { method: 'GET', statusCode: 200 },
+                },
+            },
+        })
+    })
+
+    it('leaves an unrelated frame as it was', () => {
+        const frame: ReplayFrameEvent = {
+            type: 5,
+            timestamp: 1,
+            data: {
+                tag: 'performanceSpan',
+                payload: {
+                    op: 'resource.fetch',
+                    description: 'https://grabcaramel.com/api/coupons?page=2',
+                    startTimestamp: 1,
+                    endTimestamp: 2,
+                    data: { method: 'GET', statusCode: 200 },
+                },
+            },
+        }
+        const before = JSON.stringify(frame)
+        expect(JSON.stringify(scrubReplayRecordingEvent(frame))).toBe(before)
     })
 })

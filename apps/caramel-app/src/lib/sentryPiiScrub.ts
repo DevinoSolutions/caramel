@@ -24,7 +24,12 @@
 // `sdkProcessingMetadata`) has getter-only fields and is not ours to rewrite,
 // and `sdkProcessingMetadata` is never entered at all. And a hook that fails
 // inside never lets the event through unscrubbed: it logs and drops it.
-import type { Breadcrumb, ErrorEvent, init } from '@sentry/nextjs'
+import type {
+    Breadcrumb,
+    ErrorEvent,
+    init,
+    replayIntegration,
+} from '@sentry/nextjs'
 
 // @sentry/nextjs re-exports ErrorEvent but not TransactionEvent; take the type
 // from the hook that receives it.
@@ -34,6 +39,13 @@ type TransactionEvent = Parameters<
     >
 >[0]
 type Scrubbable = ErrorEvent | TransactionEvent
+// The Replay integration's own hook, typed from its options (the frame types
+// are not re-exported by @sentry/nextjs).
+type BeforeAddRecordingEvent = NonNullable<
+    NonNullable<
+        Parameters<typeof replayIntegration>[0]
+    >['beforeAddRecordingEvent']
+>
 type DataCollection = NonNullable<
     NonNullable<Parameters<typeof init>[0]>['dataCollection']
 >
@@ -381,6 +393,24 @@ export function scrubSentryBreadcrumb(
         return breadcrumb
     } catch (error) {
         reportScrubFailure('beforeBreadcrumb', error)
+        return null
+    }
+}
+
+/** Replay's `beforeAddRecordingEvent`: the network and navigation frames Replay
+ * records (resource.fetch / resource.xhr / navigation descriptions and
+ * `data.url`, breadcrumb frames) carry request URLs, so `?q=` and `?search=`
+ * would reach Sentry through a replay even though beforeSend and
+ * beforeBreadcrumb never see them. Same helper as the event scrub. Replay's DOM
+ * snapshots (rrweb) are not passed to this hook; they are masked by the
+ * replayIntegration mask options instead. Returns null (drops this one
+ * recording event, not the replay) if scrubbing fails. */
+export const scrubReplayRecordingEvent: BeforeAddRecordingEvent = event => {
+    try {
+        scrubNode(event, 0)
+        return event
+    } catch (error) {
+        reportScrubFailure('beforeAddRecordingEvent', error)
         return null
     }
 }

@@ -82,6 +82,7 @@ import {
 } from '@/lib/couponsDb'
 import { shopperCouponTitle } from '@/lib/couponTitleText'
 import { shopperVerificationText } from '@/lib/couponVerificationText'
+import { likeLiteral } from '@/lib/likeLiteral'
 import prisma from '@/lib/prisma'
 import {
     SHOPPER_COUPON_DESCRIPTION,
@@ -196,18 +197,6 @@ const percentOffSql = () =>
     Prisma.sql`UPPER(discount_type) = 'PERCENTAGE' AND discount_amount > 0 AND discount_amount < 100`
 const fixedAmountOffSql = () =>
     Prisma.sql`UPPER(discount_type) IS DISTINCT FROM 'PERCENTAGE' AND discount_amount > 0`
-
-/**
- * What a shopper typed, made safe to put inside a LIKE/ILIKE pattern: `\`, `%`
- * and `_` are backslash-escaped, the escape Postgres uses by default, so each
- * one matches itself. The backslash goes first so the escapes added here are
- * not escaped again. Every pattern built from input goes through this, and the
- * caller adds its own `%` around the result. Without it a search for `%`
- * listed every code and `e_ay` found ebay.com (2026-09-27, fleet ILIKE sweep).
- * The value is still a bound parameter; this changes what the pattern means,
- * not how it reaches the database.
- */
-const likeLiteral = (typed: string) => typed.replace(/[\\%_]/g, '\\$&')
 
 /**
  * A coupon belongs to a store when its `site` IS the store or one of its
