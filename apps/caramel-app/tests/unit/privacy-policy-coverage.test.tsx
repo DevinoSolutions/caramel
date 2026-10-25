@@ -125,8 +125,7 @@ describe('privacy policy coverage', () => {
             'passes the request on and may briefly cache the response and keep its own request records',
             'Since October 25, 2026 we also remove search text from error reports and from the web addresses recorded in session replays before they are stored, and we mask what you type in session replays.',
             'A sample of sessions is also recorded in our self-hosted PostHog, with every form field masked.',
-            'Session recordings are removed from the product within 30 days, and their stored data is purged in a scheduled clean-up.',
-            'A sample of sessions is recorded in our self-hosted PostHog, with every form field masked. Session recordings are removed from the product within 30 days, and their stored data is purged in a scheduled clean-up.',
+            'A sample of sessions is recorded in our self-hosted PostHog, with every form field masked.',
             'until they expire, 90 days after capture (by January 23, 2027 at the latest)',
             'The text of store searches is not written to them.',
             'Error records and session replays (Sentry) are kept for 90 days.',
@@ -134,17 +133,17 @@ describe('privacy policy coverage', () => {
         ]) {
             expect(normalized).toContain(claim)
         }
-        // Whether retention expiry purges a recording's stored data is
-        // unconfirmed: no sentence about recordings may say "at most" / "deleted
-        // after" / "until they expire" (the 30-day keyed hash is a different claim).
+        // The recording retention sentence is WITHHELD (MASTER, T-7505): no
+        // sentence about PostHog session recordings may carry a retention,
+        // expiry or duration claim until posthog-selfhost and A78 report.
         const recordingSentences = normalized
             .split(/(?<=[.!?])\s*(?=[A-Z“])/)
             .filter(sentence => /recording/i.test(sentence))
         expect(recordingSentences.length).toBeGreaterThan(0)
         for (const sentence of recordingSentences) {
-            expect(sentence).not.toMatch(/at most 30 days|up to 30 days/i)
-            expect(sentence).not.toMatch(/deleted after|until they expire/i)
-            expect(sentence).not.toMatch(/no backlog/i)
+            expect(sentence).not.toMatch(
+                /\b\d+\s*days?\b|retention|expire|purge|clean-up|removed from the product|deleted after|at most|up to|no backlog/i,
+            )
         }
         expect(html).toContain('href="/delete-account"')
     })

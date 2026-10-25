@@ -324,10 +324,13 @@ const PrivacyPolicy = () => {
                         January 23, 2027 at the latest).
                     </Para>
                     <Para>
+                        {/* TODO(T-7505): the recording retention sentence is
+                            WITHHELD (MASTER). Do not add one until posthog-selfhost
+                            reports on purging the stored recording data and A78 is
+                            answered; the tests pin that no retention or duration
+                            claim about recordings renders. */}
                         A sample of sessions is also recorded in our self-hosted
-                        PostHog, with every form field masked. Session
-                        recordings are removed from the product within 30 days,
-                        and their stored data is purged in a scheduled clean-up.
+                        PostHog, with every form field masked.
                     </Para>
                     <Para>
                         If you use our store-request form we collect the store
@@ -465,7 +468,9 @@ const PrivacyPolicy = () => {
                             'Promo-box suggestions (the store’s hostname and the selectors described above) are kept with your account. A suggestion older than 30 days no longer counts toward a store’s saved rules but is not deleted automatically; it is removed when you delete your account.',
                             'Server logs, which can include IP addresses and browser type, are kept for up to 90 days for security and troubleshooting. The text of store searches is not written to them.',
                             'Error records and session replays (Sentry) are kept for 90 days. Since October 25, 2026 they are stored without store-search text (it is removed from error reports and from recorded web addresses, and what you type is masked in replays); ones captured before then may contain it until they expire (by January 23, 2027 at the latest).',
-                            'A sample of sessions is recorded in our self-hosted PostHog, with every form field masked. Session recordings are removed from the product within 30 days, and their stored data is purged in a scheduled clean-up.',
+                            // TODO(T-7505): recording retention sentence WITHHELD, see the
+                            // note in "What Information Do We Collect?" above.
+                            'A sample of sessions is recorded in our self-hosted PostHog, with every form field masked.',
                         ]}
                     />
                 </>

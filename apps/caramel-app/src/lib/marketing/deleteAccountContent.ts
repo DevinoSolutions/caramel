@@ -195,7 +195,10 @@ export const DELETE_ACCOUNT_SECTIONS: ReadonlyArray<DeleteAccountSection> = [
             ...(ANALYTICS_DELETION_COPY.keptBullet
                 ? [ANALYTICS_DELETION_COPY.keptBullet]
                 : []),
-            'Session recordings of your visits (a sample of sessions is recorded, with every form field masked) in our self-hosted PostHog. Session recordings are removed from the product within 30 days, and their stored data is purged in a scheduled clean-up.',
+            // TODO(T-7505): recording retention sentence WITHHELD (MASTER) until
+            // posthog-selfhost reports on purging the stored recording data and
+            // A78 is answered. No retention or duration claim may render here.
+            'Session recordings of your visits (a sample of sessions is recorded, with every form field masked) in our self-hosted PostHog.',
             'Analytics events that are not linked to your account: visits from before you signed in that were never joined to your account, and the extension’s install and anonymous diagnostic events.',
             'Usage data collected by Google Analytics on our website. Google holds it under its own retention settings; deleting your account does not remove it.',
             'Messages you sent to support (the support form or hello@devino.ca). They stay in our support inbox; deleting your account does not remove them. Include them in your email if you want them removed.',

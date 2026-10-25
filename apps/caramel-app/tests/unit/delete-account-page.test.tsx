@@ -28,14 +28,14 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 afterEach(cleanup)
 
-// Whether retention expiry purges the stored snapshot data of a recording is
-// unconfirmed (deleting one on our instance removes only its metadata). Until it
-// is, no copy may say recordings are kept at most / deleted after N days, or
-// that nothing is left behind.
-function expectNoStrongerRecordingClaim(text: string): void {
-    expect(text).not.toMatch(/at most 30 days|up to 30 days/i)
-    expect(text).not.toMatch(/deleted after|until they expire/i)
-    expect(text).not.toMatch(/no backlog/i)
+// The recording retention sentence is WITHHELD (MASTER, T-7505): deleting a
+// recording on our instance removes only its metadata, and whether retention
+// expiry purges the stored data is unconfirmed. No copy about recordings may
+// state a retention, expiry or duration until posthog-selfhost and A78 report.
+function expectNoRecordingRetentionClaim(text: string): void {
+    expect(text).not.toMatch(
+        /\b\d+\s*days?\b|retention|expire|purge|clean-up|removed from the product|deleted after|at most|up to|no backlog/i,
+    )
 }
 
 async function twinText(): Promise<string> {
@@ -141,23 +141,14 @@ describe('delete-account content', () => {
         )
     })
 
-    it('describes recording retention with the unconfirmed-purge wording and nothing stronger', () => {
-        const kept = DELETE_ACCOUNT_SECTIONS.find(
-            section => section.id === 'what-is-kept',
-        )?.bullets?.join(' ')
-        expect(kept).toContain(
-            'a sample of sessions is recorded, with every form field masked',
-        )
-        expect(kept).toContain(
-            'Session recordings are removed from the product within 30 days, and their stored data is purged in a scheduled clean-up.',
-        )
-        const recordingBullet = DELETE_ACCOUNT_SECTIONS.flatMap(
+    it('mentions recordings only as a masked sample, with no retention or duration claim', () => {
+        const bullets = DELETE_ACCOUNT_SECTIONS.flatMap(
             section => section.bullets ?? [],
         ).filter(bullet => /recording/i.test(bullet))
-        expect(recordingBullet.length).toBeGreaterThan(0)
-        for (const bullet of recordingBullet) {
-            expectNoStrongerRecordingClaim(bullet)
-        }
+        expect(bullets).toEqual([
+            'Session recordings of your visits (a sample of sessions is recorded, with every form field masked) in our self-hosted PostHog.',
+        ])
+        expectNoRecordingRetentionClaim(bullets.join(' '))
     })
 
     it('is linked from the docs hub privacy section', () => {
