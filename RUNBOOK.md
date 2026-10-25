@@ -470,6 +470,17 @@ The public privacy policy (`/privacy`) promises two operational things; keep the
 - **Server logs are kept up to 90 days.** Mechanisms: root `docker-compose.yml` sets `json-file` rotation (`max-size: 10m`, `max-file: 3`) on every service, and Dokploy's log-cleanup cron (`0 0 * * *`, check with `settings-getLogCleanupStatus`) truncates Traefik access logs daily. A new compose service MUST carry the same `logging:` block.
 - **Account deletion is manual, on request to hello@devino.ca within 30 days** (there is no account-deletion endpoint; the in-app "Delete my data" only removes data, not the login). Verify the requester writes from the account's address, delete the `users` row (the DB cascades sessions, accounts, savings_events, favorite_stores and coupon_reports; shared coupons are set to `submitted_by_user_id = NULL`), AND also scrub `site_suggestions.requester_email` (and `user_agent`) for that address by hand: it is NOT cascaded (`siteSuggestionIdentityWhere` in `src/lib/siteSuggestionIdentity.ts` is the matcher the in-app delete uses).
 
+## Account deletion: the PostHog person (T-7505)
+
+`POST /api/account/delete` deletes the user's PostHog person and events after the database commit (`src/lib/analytics/posthogPersonDeletion.ts`). It is the only part of account deletion that needs a secret the capture path does not.
+
+- **Env (deploy env only, both optional at boot):** `POSTHOG_PERSONAL_API_KEY` (a personal API key scoped to `person:write` only) and `POSTHOG_PROJECT_ID` (the numeric id of the project `POSTHOG_DATASET` captures into). The API host is `NEXT_PUBLIC_POSTHOG_HOST`. Create the key under PostHog > Settings > Personal API keys, scope `person:write`, restricted to the Caramel project.
+- **Unset is a defect, not a mode:** the account is still deleted, but every deletion then sends a Sentry error (`operation: posthog_person_delete`, `reason: not_configured`) and the response carries `analyticsDeletion: "failed"`. `POSTHOG_DATASET=disabled` is the one quiet case (`not_applicable`, logged).
+- **What it does:** `POST /api/projects/{id}/persons/bulk_delete/` with the user id as the only distinct id, `delete_events` and `delete_recordings` true. PostHog answers 202 and removes the person, events and recordings in the background; the response means "queued", not "gone". Only events captured before the request are deleted.
+- **Other ids:** only the user id is sent. `identify(user.id)` merges the browser's earlier anonymous id into that person, so the whole person goes. Anonymous ids of signed-out visits that never signed in, `extension_installed` events keyed by install id, and diagnostics events under the extension's random device id are not linked to the account and are not deleted.
+- **Failures:** read them in Sentry by `operation: posthog_person_delete`; the `userHash` extra is a short SHA-256 of the user id (no email). To retry by hand, run the same bulk_delete call with that user id (look it up from the `userHash` only if you still have the id; the account row is gone).
+- **Live check:** `tests/integration/posthog-person-deletion.itest.ts` (skipped unless the `POSTHOG_PERSON_DELETE_ITEST_*` variables for a scratch project are set; never the production project).
+
 ## Cross-hop trace correlation (coarse — known debt)
 
 Sentry APM tracing (`tracesSampleRate: 1`, production-only) covers

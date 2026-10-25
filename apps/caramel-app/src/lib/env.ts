@@ -337,6 +337,15 @@ const serverObjectSchema = z.object({
     // Unset → support emails simply carry no PostHog link. The real value lives
     // in the deploy env, not in this public repo.
     POSTHOG_PROJECT_UI_URL: z.string().optional(),
+    // Account deletion also deletes the user's PostHog person and events
+    // (src/lib/analytics/posthogPersonDeletion.ts). That is PostHog's PRIVATE
+    // API: it needs a personal API key with the "person:write" scope and the
+    // numeric id of the project the dataset above captures into. Both are
+    // OPTIONAL on purpose, so a deploy without them still boots and deletes
+    // accounts; the deletion then reports analytics_deletion=failed to Sentry
+    // instead of staying silent. The key is a secret: deploy env only.
+    POSTHOG_PERSONAL_API_KEY: z.string().optional(),
+    POSTHOG_PROJECT_ID: z.string().optional(),
 })
 
 const APPLE_SIGNING_KEYS = [

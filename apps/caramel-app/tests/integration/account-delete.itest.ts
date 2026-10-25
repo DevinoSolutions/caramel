@@ -241,6 +241,7 @@ describe('POST /api/account/delete — what the real foreign keys do', () => {
             deleted: true,
             scrubbed: { siteSuggestions: 2 },
             appleRevocation: 'not_applicable',
+            analyticsDeletion: 'not_applicable',
         })
 
         // The user and everything that cascades.
@@ -316,6 +317,8 @@ describe('POST /api/account/delete — what the real foreign keys do', () => {
             deleted: false,
             scrubbed: { siteSuggestions: 0 },
             appleRevocation: 'not_applicable',
+            // POSTHOG_DATASET is 'disabled' in the integration environment.
+            analyticsDeletion: 'not_applicable',
         })
     })
 })

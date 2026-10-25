@@ -2,6 +2,7 @@
 
 import ConfirmDialog from '@/components/profile/ConfirmDialog'
 import ProfileSection from '@/components/profile/ProfileSection'
+import { resetPosthogIdentity } from '@/lib/analytics/identity'
 import { promptSupportOnFailure } from '@/lib/feedback/promptSupportOnFailure'
 import {
     bodyTextClasses,
@@ -15,6 +16,11 @@ import { useState } from 'react'
 import { toast } from 'sonner'
 
 const CONFIRM_WORD = 'DELETE'
+
+// Held in a constant: a class string that mixes the custom `xs` breakpoint with
+// standard ones sorts differently under the repo-root prettier (husky) and
+// apps/caramel-app (CI), and a constant is not sorted by either.
+const DANGER_ACTION_BUTTON_CLASS = `${dangerButtonClasses} mt-4 md:w-full xs:w-full`
 
 export default function DataPrivacySection({
     overview,
@@ -86,6 +92,10 @@ export default function DataPrivacySection({
             })
             if (!res.ok) throw new Error(`Delete failed with ${res.status}`)
             setAccountDialogOpen(false)
+            // The server has just deleted this id's PostHog person. Drop the
+            // browser's persisted distinct id before the redirect, or posthog-js
+            // keeps sending events under it and re-creates the person.
+            resetPosthogIdentity()
             toast.success('Your account has been deleted.')
             window.location.href = '/login'
         } catch (error) {
@@ -167,7 +177,7 @@ export default function DataPrivacySection({
                             type="button"
                             onClick={() => setDialogOpen(true)}
                             disabled={nothingToDelete}
-                            className={`${dangerButtonClasses} xs:w-full mt-4 md:w-full`}
+                            className={DANGER_ACTION_BUTTON_CLASS}
                         >
                             {nothingToDelete
                                 ? 'Nothing to delete'
@@ -188,7 +198,7 @@ export default function DataPrivacySection({
                         <button
                             type="button"
                             onClick={() => setAccountDialogOpen(true)}
-                            className={`${dangerButtonClasses} xs:w-full mt-4 md:w-full`}
+                            className={DANGER_ACTION_BUTTON_CLASS}
                         >
                             Delete my account
                         </button>
