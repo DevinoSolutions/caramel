@@ -36,6 +36,7 @@ import {
 } from './posthogDataset'
 import { resolveBrowserPosthogHosts } from './posthogHosts'
 import { clearPersistedPosthogStorage } from './posthogPersistence'
+import { scrubRecordedNetworkRequest } from './recordingNetworkScrub'
 import { browserSignalsTrackingOptOut } from './trackingOptOut'
 
 export { isPosthogActive }
@@ -228,6 +229,10 @@ export function initPosthogInstance(
             maskTextSelector:
                 '[data-sentry-mask], [data-ph-mask], .ph-sensitive',
             blockSelector: '#card-element',
+            // The recording keeps every request URL; strip typed store-search
+            // text (?q=, ?search=, ?key_words=, body query) from it with the
+            // same helper that scrubs Sentry (T-7505).
+            maskCapturedNetworkRequestFn: scrubRecordedNetworkRequest,
         },
         // The Caramel project has no surveys (checked 2026-09-26), so don't
         // fetch the surveys bundle (30 KB, 102 KB to parse, measured on prod)
