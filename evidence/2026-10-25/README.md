@@ -9,3 +9,7 @@
   - `t7505-prod-697d229-profile-delete-ui.png`: /profile Data & privacy Danger zone with "Delete my data" + "Delete my account" (not clicked). Signed in via Google amin@devino.ca, then signed out.
   - Push E2E 40167442375 rerun green against prod.
   - Sentry: only CARAMEL-2Y/2Z, the iOS 1.6 shell /profile<->/login loop that predates the deploy (T-8305, fix in #503).
+- #508 (056e37d8, PostHog recording network URLs scrubbed): `pr508-checks-headed.png` shows checks green. Review MERGE. Prod deploy live 07:30:23Z (backup caramel-prod-compose/2026-10-25T07-17-22-330Z.sql.gz first). Health ok.
+  - `pr508-prod-coupons-search-typed.png`: prod /coupons in a headed stealth clone, in a sampled PostHog session (project 6). Marker searches typed: search box `zzscrubthree`, store filter `zzscrubq`.
+  - `pr508-prod-recording-payload-scrubbed.png`: the page SENT `?search=zzscrubthree` and `?q=zzscrubq`. The replay payload it POSTed to /_t/k3v/s/ was captured by a pre-load fetch hook (2 gzip batches, 196,240 chars decompressed) and records `search=[Filtered]` and `q=[Filtered]`. The marker appears nowhere in the payload. PostHog ingested that session (01a17201…, 20 keypresses). Both test recordings were then deleted from PostHog. The PostHog UI replay view was not used: this clone only got a password login.
+  - Sentry devino/5 after deploy: only CARAMEL-2Y (the known iOS shell loop, T-8305/#503, last seen before the deploy).
