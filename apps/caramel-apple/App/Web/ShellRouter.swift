@@ -40,12 +40,19 @@ final class ShellRouter: ObservableObject {
     private var handoffTask: Task<Void, Never>?
     /// Loads asked for while a handoff was in flight, replayed once the web session exists.
     private var heldLoads: [ObjectIdentifier: (model: WebShellModel, url: URL)] = [:]
+    /// The last native bearer seen, to tell sign-in (nil to A) from sign-out (A to nil) from a switch (A to B).
+    private var lastToken: String?
+    /// Every lifecycle step (wipe, relink) is chained here, so each one finishes before the next
+    /// starts and no handoff can run while the web data is being wiped.
+    private var lifecycleTask: Task<Void, Never>?
+    private var wipesInFlight = 0
 
     private var allModels: [WebShellModel] { [deals, stores, saved, profile] }
 
     init(session: SessionStore, handoffClient: WebSessionHandoffClient = WebSessionHandoffClient()) {
         self.session = session
         self.handoffClient = handoffClient
+        lastToken = session.token
         selection = ScreenshotLaunch.initialTab ?? .onboarding
         for model in allModels {
             model.onSignInRequested = { [weak self] in self?.isChoosingSignInProvider = true }
@@ -86,13 +93,48 @@ final class ShellRouter: ObservableObject {
         deals.open(target)
     }
 
-    /// Sign-out and account deletion: the web side holds its own cookies and storage,
-    /// so wipe all of it and send every shell back to its guarded home page. Without
-    /// this the next person on the device would open the previous account's web session.
-    /// The web session is over too, so a handoff in flight is abandoned first.
-    func resetWebState() async {
-        abandonWebSession()
+    /// The one place the native bearer's changes reach the web views (CaramelApp calls it on
+    /// every session.token change). A token that was there and is gone or replaced wipes the
+    /// web data (sign-out, account deletion, a 401, and A to B, which never passes through nil
+    /// when a new sign-in lands while the old token is set); the wipe finishes before the next
+    /// handoff starts. A token that is present afterwards gets its own handoff.
+    func sessionTokenChanged(to current: String?) {
+        let previous = lastToken
+        lastToken = current
+        if WebSessionLifecycle.shouldWipeWebSession(previous: previous, current: current) {
+            abandonWebSession()
+            wipesInFlight += 1
+            enqueueLifecycle { [weak self] in
+                guard let self = self else { return }
+                await self.wipeWebState()
+                self.wipesInFlight -= 1
+                if WebSessionLifecycle.shouldRelinkAfterWipe(current: current), self.lastToken == current {
+                    self.startWebSessionIfIdle()
+                }
+            }
+        } else if previous == nil, current != nil {
+            abandonWebSession()
+            enqueueLifecycle { [weak self] in
+                guard let self = self, self.lastToken == current else { return }
+                self.startWebSessionIfIdle()
+            }
+        }
+    }
+
+    private func enqueueLifecycle(_ step: @escaping @MainActor () async -> Void) {
+        let previous = lifecycleTask
+        lifecycleTask = Task { @MainActor in
+            await previous?.value
+            await step()
+        }
+    }
+
+    /// The web side holds its own cookies and storage, so wipe all of it and send every shell
+    /// back to its guarded home page. Without this the next person on the device would open the
+    /// previous account's web session. Only ever called from the lifecycle chain.
+    private func wipeWebState() async {
         await WKWebsiteDataStore.default().removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast)
+        heldLoads = [:]
         for model in allModels {
             model.resetToHome()
         }
@@ -100,10 +142,22 @@ final class ShellRouter: ObservableObject {
 
     /// Runs the native sign-in a web page asked for. A failure is shown on the
     /// Account tab (where SessionStore's error banner lives) instead of vanishing.
-    /// The web session itself starts from the session change (startWebSession, called
+    /// The web session itself starts from the session change (sessionTokenChanged, called
     /// by CaramelApp), so every sign-in entry point gets it, not just this one.
+    /// A token that is still set (the handoff gave up and offered sign-in) is signed out first,
+    /// server side too, so one account's session never sits under another's sign-in.
     func signInFromWeb(_ provider: OAuthProvider) async {
+        var revokeFailure: String?
+        if session.isSignedIn {
+            abandonWebSession()
+            await session.signOut()
+            revokeFailure = session.errorMessage
+        }
         await session.signIn(with: provider)
+        // signIn clears the error banner; a failed revoke of the old bearer must stay visible.
+        if let revokeFailure = revokeFailure, session.errorMessage == nil {
+            session.errorMessage = revokeFailure
+        }
         if session.errorMessage != nil {
             selection = .account
         }
@@ -111,12 +165,12 @@ final class ShellRouter: ObservableObject {
 
     // MARK: Web session handoff (T-7852)
 
-    /// A sign-in just completed (from any screen): give the web views a web session for
-    /// this account. Any earlier web session is abandoned first, so a different account
-    /// never reuses the previous one's cookie (the redeem overwrites it). The visible web
-    /// tab, or Deals, hosts the redeem and ends on the page it was showing.
-    func startWebSession() {
-        abandonWebSession()
+    /// Gives the web views a web session for the signed-in account, unless a page load already
+    /// started the handoff. The visible web tab, or Deals, hosts the redeem and ends on the page
+    /// it was showing. Runs only from the lifecycle chain, after any wipe.
+    private func startWebSessionIfIdle() {
+        if case .handingOff = webSession.phase { return }
+        if webSession.isActive { return }
         let host = model(for: selection) ?? deals
         host.open(host.targetURL)
     }
@@ -124,6 +178,11 @@ final class ShellRouter: ObservableObject {
     /// WebShellModel.webSessionGate: true when this load must wait for the handoff.
     private func holdForWebSession(_ model: WebShellModel, _ url: URL) -> Bool {
         guard session.isSignedIn else { return false }
+        // A wipe is in flight: hold every load until it has finished, so a handoff never races it.
+        if wipesInFlight > 0 {
+            heldLoads[ObjectIdentifier(model)] = (model, url)
+            return true
+        }
         switch webSession.phase {
         case .active:
             return false

@@ -274,7 +274,7 @@ struct WebSessionHandoffClient {
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await session.data(for: request)
+            (data, response) = try await session.data(for: request, delegate: NoRedirectTaskDelegate())
         } catch is CancellationError {
             throw CancellationError()
         } catch let error as URLError where error.code == .cancelled {
@@ -398,5 +398,37 @@ struct WebSessionMachine: Equatable {
     mutating func reset() {
         phase = .inactive
         generation += 1
+    }
+}
+
+/// When the web views' copy of the web session must be wiped, decided from the native session
+/// bearer's identity (mirrors Android's WebSessionLifecycle). The tokens are only compared,
+/// never logged.
+enum WebSessionLifecycle {
+    /// True when a token that was there is gone (A to nil) or replaced by another one (A to B,
+    /// which skips nil when a new sign-in lands while the old token is still set). False at the
+    /// first sign-in (nil to A) and when the token is unchanged.
+    static func shouldWipeWebSession(previous: String?, current: String?) -> Bool {
+        previous != nil && previous != current
+    }
+
+    /// After a wipe, a token that is still present (A to B) belongs to a new sign-in that needs
+    /// its own handoff.
+    static func shouldRelinkAfterWipe(current: String?) -> Bool {
+        current != nil
+    }
+}
+
+/// Declines every redirect, so the handoff POST (which carries the bearer) never follows one
+/// anywhere: the 3xx itself is returned to the caller. Android sets instanceFollowRedirects=false.
+final class NoRedirectTaskDelegate: NSObject, URLSessionTaskDelegate {
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        completionHandler(nil)
     }
 }

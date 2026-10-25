@@ -31,14 +31,10 @@ struct CaramelApp: App {
                 }
                 .onChange(of: session.token) { _ in
                     Task { await favorites.sessionChanged() }
-                    // Every way the session ends (sign-out, account deletion, a 401 expiry in
-                    // validate()/deleteAccount()) wipes the web data; AccountView no longer does it itself.
-                    if session.token == nil {
-                        Task { await router.resetWebState() }
-                    } else {
-                        // Every sign-in, from any screen: hand the new session to the web views (T-7852).
-                        router.startWebSession()
-                    }
+                    // Every token change reaches the web views here: the web data is wiped when a token
+                    // goes or is replaced (sign-out, deletion, a 401, A to B) and a present token gets
+                    // its web session handoff (T-7852). AccountView no longer does any of it itself.
+                    router.sessionTokenChanged(to: session.token)
                 }
                 .onChange(of: scenePhase) { phase in
                     switch phase {

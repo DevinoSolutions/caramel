@@ -405,13 +405,24 @@ final class HandoffStubURLProtocol: URLProtocol {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
+    /// Every URL the stub was asked to load, so a test can prove a redirect was not followed.
+    static var requestedURLs: [URL] = []
+
     override func startLoading() {
         guard let handler = Self.handler else {
             client?.urlProtocol(self, didFailWithError: URLError(.unknown))
             return
         }
+        if let url = request.url { Self.requestedURLs.append(url) }
         do {
             let (response, data) = try handler(request)
+            if (300..<400).contains(response.statusCode),
+               let location = response.value(forHTTPHeaderField: "Location"),
+               let target = URL(string: location) {
+                // A real redirect: URLSession asks the task delegate, and follows it unless the delegate declines.
+                client?.urlProtocol(self, wasRedirectedTo: URLRequest(url: target), redirectResponse: response)
+                return
+            }
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
             client?.urlProtocol(self, didLoad: data)
             client?.urlProtocolDidFinishLoading(self)
@@ -445,9 +456,49 @@ final class WebSessionHandoffClientTests: XCTestCase {
     private let code = String(repeating: "c", count: 43)
     private var redeemURLString: String { "https://grabcaramel.com/api/app/web-session/redeem?code=\(code)" }
 
+    override func setUp() {
+        super.setUp()
+        HandoffStubURLProtocol.requestedURLs = []
+    }
+
     override func tearDown() {
         HandoffStubURLProtocol.handler = nil
         super.tearDown()
+    }
+
+    func testTheDelegateDeclinesEveryRedirect() {
+        let session = URLSession(configuration: .ephemeral)
+        let task = session.dataTask(with: URL(string: "https://grabcaramel.com/api/app/web-session/handoff")!)
+        let response = HTTPURLResponse(url: task.originalRequest!.url!, statusCode: 307, httpVersion: nil, headerFields: ["Location": "https://evil.com/steal"])!
+        var answered = false
+        var followed: URLRequest? = URLRequest(url: URL(string: "https://unset.invalid")!)
+        NoRedirectTaskDelegate().urlSession(session, task: task, willPerformHTTPRedirection: response, newRequest: URLRequest(url: URL(string: "https://evil.com/steal")!)) { request in
+            answered = true
+            followed = request
+        }
+        XCTAssertTrue(answered)
+        XCTAssertNil(followed, "a nil request is how a task delegate declines the redirect")
+        session.invalidateAndCancel()
+    }
+
+    func testTheBearerIsNeverSentOnToARedirectTarget() async {
+        HandoffStubURLProtocol.handler = { [self] request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 307, httpVersion: "HTTP/1.1", headerFields: ["Location": "https://evil.com/steal"])!
+            return (response, Data())
+        }
+        let done = expectation(description: "the handoff call settled")
+        var outcome: WebSessionHandoffError?
+        let client = makeClient()
+        Task {
+            outcome = await failure(of: { try await client.redeemURL(next: "/", bearer: bearer) })
+            done.fulfill()
+        }
+        await fulfillment(of: [done], timeout: 15)
+        guard case .rejected(let status, _)? = outcome else {
+            return XCTFail("a declined redirect should surface as the 3xx being rejected, got \(String(describing: outcome))")
+        }
+        XCTAssertEqual(status, 307)
+        XCTAssertFalse(HandoffStubURLProtocol.requestedURLs.contains { $0.host == "evil.com" }, "the redirect target must never be requested")
     }
 
     private func makeClient() -> WebSessionHandoffClient {
@@ -755,5 +806,28 @@ final class WebSessionMachineTests: XCTestCase {
         XCTAssertEqual(machine.handoffRequestFailed(.unauthorized), .none, "a late 401 must not end an active session")
         XCTAssertEqual(machine.redeemExpired(), .none)
         XCTAssertTrue(machine.isActive)
+    }
+}
+
+/// WebSessionLifecycle: when a token change wipes the web views' session (T-7852).
+final class WebSessionLifecycleTests: XCTestCase {
+    func testFirstSignInDoesNotWipe() {
+        XCTAssertFalse(WebSessionLifecycle.shouldWipeWebSession(previous: nil, current: "A"))
+        XCTAssertTrue(WebSessionLifecycle.shouldRelinkAfterWipe(current: "A"))
+    }
+
+    func testSignOutWipesAndDoesNotRelink() {
+        XCTAssertTrue(WebSessionLifecycle.shouldWipeWebSession(previous: "A", current: nil))
+        XCTAssertFalse(WebSessionLifecycle.shouldRelinkAfterWipe(current: nil))
+    }
+
+    func testSwitchingAccountsNeverPassesThroughNilAndStillWipesThenRelinks() {
+        XCTAssertTrue(WebSessionLifecycle.shouldWipeWebSession(previous: "A", current: "B"))
+        XCTAssertTrue(WebSessionLifecycle.shouldRelinkAfterWipe(current: "B"))
+    }
+
+    func testAnUnchangedTokenOrNoTokenDoesNothing() {
+        XCTAssertFalse(WebSessionLifecycle.shouldWipeWebSession(previous: "A", current: "A"))
+        XCTAssertFalse(WebSessionLifecycle.shouldWipeWebSession(previous: nil, current: nil))
     }
 }

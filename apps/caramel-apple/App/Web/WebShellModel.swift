@@ -308,7 +308,7 @@ final class WebShellModel: NSObject, ObservableObject {
 
     /// The redeem navigation finished: it worked when it ended on a page the handoff `next`
     /// allowlist covers (the 303 sets the cookie before it redirects).
-    /// The cookie is read from this web view's own data store (the one resetWebState wipes), so a
+    /// The cookie is read from this web view's own data store (the one the router wipes on a token change), so a
     /// landing on an allowlisted page only counts when the signed session cookie is really there.
     private func settleRedeem(finishedAt url: URL?) {
         redeemInFlight = false
