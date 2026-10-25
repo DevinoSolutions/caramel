@@ -43,18 +43,49 @@ object HandoffNext {
     private fun isUnder(path: String, prefix: String): Boolean = path == prefix || path.startsWith("$prefix/")
 }
 
-/** The redeem URL the handoff route returns; only this exact address may be loaded as a handoff. */
+/** The redeem URL the handoff route returns; only this exact shape may be loaded as a handoff. */
 object RedeemUrl {
     const val PATH = "/api/app/web-session/redeem"
 
-    /** True for an AppLinkGuard-approved URL whose path is exactly [PATH], with a non-empty `code` query and no fragment. */
+    // The server mints 32 random bytes as base64url: always 43 characters.
+    private const val CODE_LENGTH = 43
+
+    /** True for an AppLinkGuard-approved URL that reads as the redeem route (any query), however it is spelled. */
+    fun hasRedeemPath(url: String?): Boolean {
+        val allowed = AppLinkGuard.allowedTarget(url) ?: return false
+        return ShellRoutes.normalizedPath(allowed) == PATH
+    }
+
+    /** True for exactly `https://grabcaramel.com/api/app/web-session/redeem?code=<43 base64url characters>`: no other query, no fragment. */
     fun matches(url: String?): Boolean {
         val allowed = AppLinkGuard.allowedTarget(url) ?: return false
         val rest = allowed.removePrefix(AppLinkGuard.APP_ORIGIN)
-        if ('#' in rest) return false
-        val query = rest.substringAfter('?', "")
-        return rest.substringBefore('?') == PATH && query.startsWith("code=") && query.length > "code=".length
+        if (!rest.startsWith("$PATH?code=")) return false
+        val code = rest.removePrefix("$PATH?code=")
+        return code.length == CODE_LENGTH && code.all { it in 'A'..'Z' || it in 'a'..'z' || it in '0'..'9' || it == '-' || it == '_' }
     }
+}
+
+/**
+ * The web session cookie the redeem route sets (better-auth's, `__Secure-` prefixed because the site is https). Its presence in
+ * the WebView's cookie jar after the redeem landed is the proof the handoff worked; landing on an allowlisted page alone is not.
+ */
+object WebSessionCookie {
+    const val NAME = "__Secure-better-auth.session_token"
+
+    /** [cookieHeader] is `CookieManager.getCookie(origin)`: "a=1; b=2". Never log it. */
+    fun isPresent(cookieHeader: String?): Boolean {
+        if (cookieHeader == null) return false
+        return cookieHeader.split(';').any {
+            val pair = it.trim()
+            pair.startsWith("$NAME=") && pair.length > NAME.length + 1
+        }
+    }
+}
+
+/** True exactly when the native token went from present to gone: the WebView's copy of the web session must be wiped then. */
+object WebSessionLifecycle {
+    fun shouldWipeWebSession(wasSignedIn: Boolean, isSignedIn: Boolean): Boolean = wasSignedIn && !isSignedIn
 }
 
 /** What asking the server for a redeem URL came to. */
@@ -108,37 +139,38 @@ sealed interface HandoffStep {
     /** Shown through [WebSessionHandoff.failure]; nothing was loaded. */
     data class Failed(val message: String) : HandoffStep
 
-    /** Another handoff request is already running; this call did nothing. */
-    data object Busy : HandoffStep
-
-    /** The web session was reset (sign-out, deletion) while the request ran; the result was dropped. */
+    /** A newer tap, a sign-out or a reset overtook this request; its result was dropped. */
     data object Superseded : HandoffStep
 }
 
-/** What to do with a /login visit while the app is signed in natively and the WebView has no web session. */
-enum class LoginBounceDecision {
+/** What to do with a /login visit while the app is signed in natively. */
+sealed interface LoginBounceOutcome {
     /** A handoff request is already running; the bounce belongs to the page it replaces. */
-    IGNORE,
+    data object Ignore : LoginBounceOutcome
 
-    /** First bounce: request one fresh handoff (the permit is already held; call [WebSessionHandoff.continueRetry]). */
-    RETRY_HANDOFF,
+    /** The one automatic retry was already spent: stop, show the native sign-in. */
+    data object NativeSignIn : LoginBounceOutcome
 
-    /** The retry already failed too: stop, show the native sign-in. */
-    NATIVE_SIGN_IN,
+    /** The one automatic retry ran. */
+    data class Retried(val step: HandoffStep) : LoginBounceOutcome
 }
 
 /**
  * Owns whether the WebView holds a web session that mirrors the native sign-in ([active]) and the
- * no-loop rules around getting one. Main thread only.
+ * no-loop rules around getting one. Main thread only. [hasSessionCookie] reads the WebView's cookie jar.
  *
- * Rules: a user-initiated handoff ([startFresh]: sign-in completed, a tab that needs the session)
- * gets a clean slate; if the WebView then bounces to /login (including `/login?error=handoff_expired`
- * from a failed redeem) exactly ONE automatic handoff follows; a second bounce falls back to native
- * sign-in. [active] turns true only when a redeemed page lands on an allowlisted path.
+ * Rules:
+ * - The latest user action wins: [startFresh] and any other load ([admitLoad]) cancel a running request.
+ * - [active] turns true only when the redeem URL this class issued landed on an allowlisted path AND the
+ *   session cookie is in the jar. A load error, a /login landing or a landing without the cookie never activates.
+ * - A /login visit while signed in natively ([retryAfterLoginBounce]), whether or not [active] was true, marks
+ *   the web session inactive and starts at most ONE automatic handoff; the next bounce falls back to native
+ *   sign-in. It never ends the native session: only a 401 does that.
  */
 class WebSessionHandoff(
     private val client: WebSessionHandoffClient,
     private val session: SessionStore,
+    private val hasSessionCookie: () -> Boolean,
 ) {
     private val mutableFailure = MutableStateFlow<String?>(null)
 
@@ -149,68 +181,99 @@ class WebSessionHandoff(
     var active: Boolean = false
         private set
 
-    // A handoff request is running (or its retry was granted by onLoginWhileUnlinked).
+    // A handoff request is running.
     private var requesting = false
 
-    // A redeem URL was handed to the WebView and has not landed yet.
+    // The redeem URL handed to the WebView that has not landed yet; the only redeem URL admitLoad lets through, once.
+    private var issuedRedeemUrl: String? = null
     private var redeemInFlight = false
 
     // The one automatic handoff after a bounce has been spent.
     private var retryUsed = false
 
-    // Bumped by reset(), so a request that finishes after a sign-out is dropped.
-    private var epoch = 0
+    // Bumped by cancelPending(), so a request that finishes after being overtaken is dropped.
+    private var generation = 0
 
-    /** A user-initiated handoff to [targetPath]; Busy when one is already running. */
+    /** A user-initiated handoff to [targetPath]; it overtakes any running request. */
     suspend fun startFresh(targetPath: String?): HandoffStep {
-        if (requesting) return HandoffStep.Busy
+        cancelPending()
         requesting = true
         retryUsed = false
         mutableFailure.value = null
         return run(targetPath)
     }
 
-    /** The WebView went to /login while signed in natively without a web session (decides retry vs native sign-in). */
-    fun onLoginWhileUnlinked(): LoginBounceDecision {
-        if (requesting) return LoginBounceDecision.IGNORE
+    /**
+     * The WebView went to /login while signed in natively (the shell cancelled that navigation).
+     * Everything that changes state happens before the first suspension, so a caller that starts this
+     * undispatched can never leave a permit behind, and a cancelled call releases it in `finally`.
+     */
+    suspend fun retryAfterLoginBounce(targetPath: String?): LoginBounceOutcome {
+        if (requesting) return LoginBounceOutcome.Ignore
+        active = false
         redeemInFlight = false
-        // Stays spent after the fallback: only a user-initiated handoff (startFresh) or a landing re-arms it.
-        if (retryUsed) return LoginBounceDecision.NATIVE_SIGN_IN
+        issuedRedeemUrl = null
+        // Stays spent after the fallback: only a user-initiated handoff (startFresh) or a verified landing re-arms it.
+        if (retryUsed) return LoginBounceOutcome.NativeSignIn
         retryUsed = true
         requesting = true
         mutableFailure.value = null
-        return LoginBounceDecision.RETRY_HANDOFF
+        return LoginBounceOutcome.Retried(run(targetPath))
     }
 
-    /** Runs the handoff [onLoginWhileUnlinked] granted. */
-    suspend fun continueRetry(targetPath: String?): HandoffStep {
-        check(requesting) { "continueRetry needs the RETRY_HANDOFF permit from onLoginWhileUnlinked" }
-        return run(targetPath)
+    /**
+     * Call before the guarded sink loads [url]. False means do not load it: it reads as the redeem route but
+     * is not the one URL issued (an intent or a page cannot smuggle a redeem in). Any other load cancels a
+     * running request and stops waiting for a redeem to land.
+     */
+    fun admitLoad(url: String): Boolean {
+        if (url == issuedRedeemUrl) {
+            issuedRedeemUrl = null // single use: a reload of it would only meet "handoff_expired"
+            return true
+        }
+        if (RedeemUrl.hasRedeemPath(url)) return false
+        cancelPending()
+        return true
     }
 
-    /** The WebView reached [url] (any visit). Confirms an in-flight redeem once it lands on an allowlisted page. */
+    /** The WebView reached [url] (any visit). Decides whether an in-flight redeem proved the web session. */
     fun onPageVisited(url: String) {
         if (!redeemInFlight) return
-        val allowed = AppLinkGuard.allowedTarget(url) ?: return
+        val allowed = AppLinkGuard.allowedTarget(url)
+        if (allowed == null) {
+            redeemInFlight = false // left the site: this redeem is over
+            return
+        }
         val path = ShellRoutes.normalizedPath(allowed) ?: return
-        if (HandoffNext.isAllowlistedLanding(path)) {
-            redeemInFlight = false
+        if (path == RedeemUrl.PATH) return // the redeem itself; its 303 is still coming
+        redeemInFlight = false
+        if (!HandoffNext.isAllowlistedLanding(path)) return // /login and the like: not linked
+        if (hasSessionCookie()) {
             active = true
             retryUsed = false
+        } else {
+            mutableFailure.value = LANDED_WITHOUT_COOKIE
         }
     }
 
-    /** Something other than a redeem is being loaded: a landing after this no longer proves the redeem worked. */
-    fun abandonInFlight() {
+    /** The main frame failed to load: an in-flight redeem is over and proved nothing. */
+    fun onLoadFailed() {
         redeemInFlight = false
+        issuedRedeemUrl = null
     }
 
-    /** Sign-out or account deletion: the WebView's web session is gone. */
-    fun reset() {
-        epoch += 1
-        active = false
+    /** Cancels a running request and forgets an in-flight redeem. Does not touch [active]. */
+    fun cancelPending() {
+        generation += 1
         requesting = false
         redeemInFlight = false
+        issuedRedeemUrl = null
+    }
+
+    /** Sign-out or the native session ending: the WebView's web session is gone. */
+    fun reset() {
+        cancelPending()
+        active = false
         retryUsed = false
         mutableFailure.value = null
     }
@@ -220,16 +283,19 @@ class WebSessionHandoff(
     }
 
     private suspend fun run(targetPath: String?): HandoffStep {
-        val startedEpoch = epoch
+        val started = generation
         // Any new handoff re-links from scratch: a web session left over from an earlier sign-in must not count.
         active = false
         redeemInFlight = false
+        issuedRedeemUrl = null
         try {
             val bearer = session.token ?: return HandoffStep.SignInRequired
             val request = client.requestRedeemUrl(bearer, targetPath)
-            if (epoch != startedEpoch) return HandoffStep.Superseded
+            // Overtaken by a newer tap or a reset, or the native session ended meanwhile (a late answer must not load for nobody).
+            if (started != generation || session.token != bearer) return HandoffStep.Superseded
             return when (request) {
                 is RedeemRequest.Url -> {
+                    issuedRedeemUrl = request.url
                     redeemInFlight = true
                     HandoffStep.Load(request.url)
                 }
@@ -243,7 +309,11 @@ class WebSessionHandoff(
                 }
             }
         } finally {
-            if (epoch == startedEpoch) requesting = false
+            if (started == generation) requesting = false
         }
+    }
+
+    private companion object {
+        const val LANDED_WITHOUT_COOKIE = "Could not link your sign-in to the web pages (the page opened without a session)"
     }
 }

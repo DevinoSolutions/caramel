@@ -64,25 +64,25 @@ class ShellRoutesTest {
 
     @Test
     fun signedOutOpensTheNativeSignIn() {
-        assertEquals(AuthAction.START_NATIVE_SIGN_IN, ShellRoutes.authAction("$origin/login", false, false))
-        assertEquals(AuthAction.START_NATIVE_SIGN_IN, ShellRoutes.authAction("$origin/signup", false, true))
-        assertEquals(AuthAction.NONE, ShellRoutes.authAction("$origin/coupons", false, false))
+        assertEquals(AuthAction.START_NATIVE_SIGN_IN, ShellRoutes.authAction("$origin/login", false))
+        assertEquals(AuthAction.START_NATIVE_SIGN_IN, ShellRoutes.authAction("$origin/signup", false))
+        assertEquals(AuthAction.NONE, ShellRoutes.authAction("$origin/coupons", false))
     }
 
     @Test
-    fun aWebSignOutClearsTheNativeTokenOnlyOnceAWebSessionWasHandedOver() {
-        assertEquals(AuthAction.SIGN_OUT_NATIVE_THEN_SIGN_IN, ShellRoutes.authAction("$origin/login", true, true))
-        // No web session handed over yet: /login while signed in is a page without a session, not a sign-out. Never clear the token.
-        assertEquals(AuthAction.LINK_WEB_SESSION, ShellRoutes.authAction("$origin/login", true, false))
-        assertEquals(AuthAction.NONE, ShellRoutes.authAction("$origin/profile", true, true))
+    fun aLoginVisitWhileSignedInNeverSignsTheNativeSessionOut() {
+        // With or without a web session: /login while signed in is a page to relink, never a reason to clear the token.
+        assertEquals(AuthAction.LINK_WEB_SESSION, ShellRoutes.authAction("$origin/login", true))
+        assertEquals(AuthAction.LINK_WEB_SESSION, ShellRoutes.authAction("$origin/signup", true))
+        assertEquals(AuthAction.NONE, ShellRoutes.authAction("$origin/profile", true))
     }
 
     @Test
     fun aFailedRedeemRedirectIsAnUnlinkedLoginNotASignOut() {
         // The server answers a bad redeem with 303 -> /login?error=handoff_expired; the normalized intercept sees a sign-in route.
-        assertEquals(AuthAction.LINK_WEB_SESSION, ShellRoutes.authAction("$origin/login?error=handoff_expired", true, false))
-        assertEquals(AuthAction.LINK_WEB_SESSION, ShellRoutes.authAction("$origin/%4cOGIN?error=handoff_expired", true, false))
-        assertEquals(AuthAction.START_NATIVE_SIGN_IN, ShellRoutes.authAction("$origin/login?error=handoff_expired", false, false))
+        assertEquals(AuthAction.LINK_WEB_SESSION, ShellRoutes.authAction("$origin/login?error=handoff_expired", true))
+        assertEquals(AuthAction.LINK_WEB_SESSION, ShellRoutes.authAction("$origin/%4cOGIN?error=handoff_expired", true))
+        assertEquals(AuthAction.START_NATIVE_SIGN_IN, ShellRoutes.authAction("$origin/login?error=handoff_expired", false))
     }
 
     @Test
@@ -158,7 +158,7 @@ class ShellRoutesTest {
         )
         for (path in spellings) assertTrue(path, ShellRoutes.isSignInRoute("$origin$path"))
         for (path in spellings) {
-            assertEquals(path, AuthAction.START_NATIVE_SIGN_IN, ShellRoutes.authAction("$origin$path", false, false))
+            assertEquals(path, AuthAction.START_NATIVE_SIGN_IN, ShellRoutes.authAction("$origin$path", false))
         }
     }
 

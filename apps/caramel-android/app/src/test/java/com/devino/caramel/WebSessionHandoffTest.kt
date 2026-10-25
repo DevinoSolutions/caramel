@@ -7,15 +7,22 @@ import com.devino.caramel.core.HttpTransport
 import com.devino.caramel.core.SessionStore
 import com.devino.caramel.web.HandoffNext
 import com.devino.caramel.web.HandoffStep
-import com.devino.caramel.web.LoginBounceDecision
+import com.devino.caramel.web.LoginBounceOutcome
 import com.devino.caramel.web.RedeemRequest
 import com.devino.caramel.web.RedeemUrl
 import com.devino.caramel.web.ShellTab
+import com.devino.caramel.web.WebSessionCookie
 import com.devino.caramel.web.WebSessionHandoff
 import com.devino.caramel.web.WebSessionHandoffClient
+import com.devino.caramel.web.WebSessionLifecycle
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -200,47 +207,165 @@ class WebSessionHandoffClientTest {
     }
 }
 
+class RedeemUrlStrictnessTest {
+    @Test
+    fun theCodeIsExactlyOneParamOf43Base64urlCharacters() {
+        assertTrue(RedeemUrl.matches("$ORIGIN/api/app/web-session/redeem?code=AZaz09-_AZaz09-_AZaz09-_AZaz09-_AZaz09-_AZa"))
+        assertFalse("42 characters", RedeemUrl.matches("$ORIGIN/api/app/web-session/redeem?code=${CODE.dropLast(1)}"))
+        assertFalse("44 characters", RedeemUrl.matches("$ORIGIN/api/app/web-session/redeem?code=${CODE}A"))
+        assertFalse("base64 plus", RedeemUrl.matches("$ORIGIN/api/app/web-session/redeem?code=${CODE.dropLast(1)}+"))
+        assertFalse("percent escape", RedeemUrl.matches("$ORIGIN/api/app/web-session/redeem?code=${CODE.dropLast(3)}%41%41"))
+        assertFalse("second param after", RedeemUrl.matches("$ORIGIN/api/app/web-session/redeem?code=$CODE&next=/login"))
+        assertFalse("second code", RedeemUrl.matches("$ORIGIN/api/app/web-session/redeem?code=$CODE&code=$CODE"))
+        assertFalse("param before", RedeemUrl.matches("$ORIGIN/api/app/web-session/redeem?next=/login&code=$CODE"))
+    }
+
+    @Test
+    fun anyRedeemSpellingReadsAsTheRedeemPath() {
+        assertTrue(RedeemUrl.hasRedeemPath(REDEEM))
+        assertTrue(RedeemUrl.hasRedeemPath("$ORIGIN/API/app/web-session/redeem?code=x"))
+        assertTrue(RedeemUrl.hasRedeemPath("$ORIGIN/api/app/web-session/%72edeem?code=x"))
+        assertTrue(RedeemUrl.hasRedeemPath("$ORIGIN/api/app/./web-session//redeem"))
+        assertFalse(RedeemUrl.hasRedeemPath("$ORIGIN/api/app/web-session/handoff"))
+        assertFalse(RedeemUrl.hasRedeemPath("$ORIGIN/coupons"))
+        assertFalse(RedeemUrl.hasRedeemPath("https://evil.com/api/app/web-session/redeem"))
+        assertFalse(RedeemUrl.hasRedeemPath(null))
+    }
+}
+
+class WebSessionCookieTest {
+    @Test
+    fun onlyTheNamedNonEmptyCookieCounts() {
+        assertTrue(WebSessionCookie.isPresent("a=1; __Secure-better-auth.session_token=abc.def; b=2"))
+        assertTrue(WebSessionCookie.isPresent("__Secure-better-auth.session_token=abc"))
+        assertFalse(WebSessionCookie.isPresent(null))
+        assertFalse(WebSessionCookie.isPresent(""))
+        assertFalse(WebSessionCookie.isPresent("__Secure-better-auth.session_token="))
+        assertFalse("the non-secure name is not what the https site sets", WebSessionCookie.isPresent("better-auth.session_token=abc"))
+        assertFalse(WebSessionCookie.isPresent("x__Secure-better-auth.session_token=abc"))
+        assertFalse(WebSessionCookie.isPresent("a=__Secure-better-auth.session_token=abc"))
+    }
+}
+
+class WebSessionLifecycleTest {
+    @Test
+    fun theWebViewIsWipedOnlyWhenTheNativeTokenGoesAway() {
+        assertTrue(WebSessionLifecycle.shouldWipeWebSession(wasSignedIn = true, isSignedIn = false))
+        assertFalse("launch: nothing was signed in yet", WebSessionLifecycle.shouldWipeWebSession(wasSignedIn = false, isSignedIn = false))
+        assertFalse("sign-in", WebSessionLifecycle.shouldWipeWebSession(wasSignedIn = false, isSignedIn = true))
+        assertFalse(WebSessionLifecycle.shouldWipeWebSession(wasSignedIn = true, isSignedIn = true))
+    }
+
+    @Test
+    fun everyPathThatNullsTheTokenFlipsIsSignedIn() = runBlocking {
+        // validate 401, deleteAccount 401 and the handoff 401 all end in SessionStore.endExpiredSession (the wipe keys off isSignedIn).
+        val (api, _) = testApi { request ->
+            if (request.url.endsWith("/api/extension/me")) HttpResponse(401, """{"error":"expired"}""") else HttpResponse(401, "{}")
+        }
+        for (trigger in listOf<suspend (SessionStore) -> Unit>(
+            { it.validate() },
+            { it.deleteAccount() },
+            { WebSessionHandoff(WebSessionHandoffClient(api), it) { true }.startFresh("/profile") },
+        )) {
+            val store = SessionStore(api, MemoryTokenStore(BEARER))
+            store.load()
+            assertTrue(store.state.value.isSignedIn)
+            trigger(store)
+            assertFalse(store.state.value.isSignedIn)
+        }
+    }
+}
+
 class WebSessionHandoffTest {
     private class Harness(
         token: String? = BEARER,
-        handler: suspend (HttpRequest, WebSessionHandoff) -> HttpResponse = { _, _ -> ok(handoffBody()) },
+        var cookiePresent: Boolean = true,
+        handler: suspend Harness.(HttpRequest) -> HttpResponse = { ok(handoffBody()) },
     ) {
         val requests = mutableListOf<HttpRequest>()
         val tokens = MemoryTokenStore(token)
-        lateinit var webSession: WebSessionHandoff
         val session: SessionStore
+        val webSession: WebSessionHandoff
 
         init {
             val transport = object : HttpTransport {
                 override suspend fun execute(request: HttpRequest): HttpResponse {
                     requests += request
-                    return handler(request, webSession)
+                    return handler(this@Harness, request)
                 }
             }
             val api = CaramelApi("https://example.test", transport) { "req-${requests.size + 1}" }
             session = SessionStore(api, tokens)
-            webSession = WebSessionHandoff(WebSessionHandoffClient(api), session)
+            webSession = WebSessionHandoff(WebSessionHandoffClient(api), session) { cookiePresent }
         }
     }
 
     private fun Harness.signedIn(): Harness = also { runBlocking { it.session.load() } }
 
+    // region active state: a landing alone is not proof
+
     @Test
-    fun webSessionIsActiveOnlyAfterTheRedeemLandsOnAnAllowlistedPath() = runBlocking {
+    fun webSessionIsActiveOnlyAfterTheIssuedRedeemLandsOnAnAllowlistedPathWithTheCookie() = runBlocking {
         val h = Harness().signedIn()
         assertFalse(h.webSession.active)
 
-        val step = h.webSession.startFresh("/profile")
-        assertEquals(HandoffStep.Load(REDEEM), step)
+        assertEquals(HandoffStep.Load(REDEEM), h.webSession.startFresh("/profile"))
         assertFalse("a redeem URL handed out is not a landing", h.webSession.active)
 
-        h.webSession.onPageVisited(REDEEM)
-        h.webSession.onPageVisited("$ORIGIN/login?error=handoff_expired")
-        h.webSession.onPageVisited("https://evil.com/profile")
+        assertTrue(h.webSession.admitLoad(REDEEM))
+        h.webSession.onPageVisited(REDEEM) // the redeem itself: its 303 is still coming
         assertFalse(h.webSession.active)
 
         h.webSession.onPageVisited("$ORIGIN/profile")
         assertTrue(h.webSession.active)
+    }
+
+    @Test
+    fun aMainFrameErrorEndsTheRedeemSoALaterVisitNeverActivates() = runBlocking {
+        val h = Harness().signedIn()
+        h.webSession.startFresh("/profile")
+        h.webSession.admitLoad(REDEEM)
+
+        h.webSession.onLoadFailed()
+        h.webSession.onPageVisited("$ORIGIN/profile")
+
+        assertFalse(h.webSession.active)
+    }
+
+    @Test
+    fun aNonAllowlistedLandingEndsTheRedeemSoALaterVisitNeverActivates() = runBlocking {
+        val h = Harness().signedIn()
+        h.webSession.startFresh("/profile")
+        h.webSession.admitLoad(REDEEM)
+
+        h.webSession.onPageVisited("$ORIGIN/login?error=handoff_expired")
+        h.webSession.onPageVisited("$ORIGIN/profile")
+
+        assertFalse(h.webSession.active)
+    }
+
+    @Test
+    fun leavingTheSiteEndsTheRedeem() = runBlocking {
+        val h = Harness().signedIn()
+        h.webSession.startFresh("/profile")
+        h.webSession.admitLoad(REDEEM)
+
+        h.webSession.onPageVisited("https://evil.com/profile")
+        h.webSession.onPageVisited("$ORIGIN/profile")
+
+        assertFalse(h.webSession.active)
+    }
+
+    @Test
+    fun aLandingWithoutTheSessionCookieDoesNotActivateAndShowsAFailure() = runBlocking {
+        val h = Harness(cookiePresent = false).signedIn()
+        h.webSession.startFresh("/profile")
+        h.webSession.admitLoad(REDEEM)
+
+        h.webSession.onPageVisited("$ORIGIN/profile")
+
+        assertFalse(h.webSession.active)
+        assertNotNull(h.webSession.failure.value)
     }
 
     @Test
@@ -250,7 +375,7 @@ class WebSessionHandoffTest {
         assertFalse(h.webSession.active)
 
         h.webSession.startFresh("/profile")
-        h.webSession.abandonInFlight() // the shopper loaded something else before the redeem landed
+        assertTrue(h.webSession.admitLoad("$ORIGIN/coupons")) // the shopper loaded something else before the redeem
         h.webSession.onPageVisited("$ORIGIN/coupons")
         assertFalse(h.webSession.active)
     }
@@ -259,10 +384,11 @@ class WebSessionHandoffTest {
     fun resetClearsTheWebSession() = runBlocking {
         val h = Harness().signedIn()
         h.webSession.startFresh("/profile")
+        h.webSession.admitLoad(REDEEM)
         h.webSession.onPageVisited("$ORIGIN/profile")
         assertTrue(h.webSession.active)
 
-        h.webSession.reset() // sign-out or account deletion
+        h.webSession.reset() // sign-out
         assertFalse(h.webSession.active)
         h.webSession.onPageVisited("$ORIGIN/profile") // nothing in flight: stays inactive
         assertFalse(h.webSession.active)
@@ -272,6 +398,7 @@ class WebSessionHandoffTest {
     fun aNewHandoffStartsFromNoWebSession() = runBlocking {
         val h = Harness().signedIn()
         h.webSession.startFresh("/profile")
+        h.webSession.admitLoad(REDEEM)
         h.webSession.onPageVisited("$ORIGIN/profile")
         assertTrue(h.webSession.active)
 
@@ -279,81 +406,196 @@ class WebSessionHandoffTest {
         assertFalse(h.webSession.active)
     }
 
+    // endregion
+
+    // region /login bounces: one retry, never a native sign-out
+
     @Test
     fun anExpiredRedeemGetsExactlyOneFreshHandoffThenNativeSignIn() = runBlocking {
         val h = Harness().signedIn()
         assertTrue(h.webSession.startFresh("/profile") is HandoffStep.Load)
         assertEquals(1, h.requests.size)
 
-        // The redeem answered 303 -> /login?error=handoff_expired: first bounce retries once.
-        assertEquals(LoginBounceDecision.RETRY_HANDOFF, h.webSession.onLoginWhileUnlinked())
-        assertTrue(h.webSession.continueRetry("/profile") is HandoffStep.Load)
+        // The redeem answered 303 -> /login?error=handoff_expired: the first bounce retries once.
+        assertEquals(LoginBounceOutcome.Retried(HandoffStep.Load(REDEEM)), h.webSession.retryAfterLoginBounce("/profile"))
         assertEquals(2, h.requests.size)
 
         // It bounced again: no third handoff, native sign-in, and it stays that way.
-        assertEquals(LoginBounceDecision.NATIVE_SIGN_IN, h.webSession.onLoginWhileUnlinked())
-        assertEquals(LoginBounceDecision.NATIVE_SIGN_IN, h.webSession.onLoginWhileUnlinked())
+        assertEquals(LoginBounceOutcome.NativeSignIn, h.webSession.retryAfterLoginBounce("/profile"))
+        assertEquals(LoginBounceOutcome.NativeSignIn, h.webSession.retryAfterLoginBounce("/profile"))
         assertEquals(2, h.requests.size)
         assertFalse(h.webSession.active)
     }
 
     @Test
-    fun aUserInitiatedHandoffOrALandingRearmsTheRetry() = runBlocking {
+    fun aLoginBounceWhileActiveMarksItInactiveUsesTheRetryAndNeverEndsTheNativeSession() = runBlocking {
         val h = Harness().signedIn()
-        assertEquals(LoginBounceDecision.RETRY_HANDOFF, h.webSession.onLoginWhileUnlinked())
-        h.webSession.continueRetry("/profile")
-        assertEquals(LoginBounceDecision.NATIVE_SIGN_IN, h.webSession.onLoginWhileUnlinked())
+        h.webSession.startFresh("/profile")
+        h.webSession.admitLoad(REDEEM)
+        h.webSession.onPageVisited("$ORIGIN/profile")
+        assertTrue(h.webSession.active)
+
+        val first = h.webSession.retryAfterLoginBounce("/profile")
+        assertTrue(first is LoginBounceOutcome.Retried)
+        assertFalse(h.webSession.active)
+        assertTrue(h.session.state.value.isSignedIn)
+        assertEquals(BEARER, h.tokens.token)
+
+        assertEquals(LoginBounceOutcome.NativeSignIn, h.webSession.retryAfterLoginBounce("/profile"))
+        assertTrue(h.session.state.value.isSignedIn)
+        assertEquals(BEARER, h.tokens.token)
+        assertFalse(h.requests.any { it.method == "DELETE" })
+    }
+
+    @Test
+    fun aUserInitiatedHandoffOrAVerifiedLandingRearmsTheRetry() = runBlocking {
+        val h = Harness().signedIn()
+        h.webSession.retryAfterLoginBounce("/profile")
+        assertEquals(LoginBounceOutcome.NativeSignIn, h.webSession.retryAfterLoginBounce("/profile"))
 
         h.webSession.startFresh("/profile") // the shopper tapped a tab again
-        assertEquals(LoginBounceDecision.RETRY_HANDOFF, h.webSession.onLoginWhileUnlinked())
-        h.webSession.continueRetry("/profile")
-        h.webSession.onPageVisited("$ORIGIN/profile") // landed: linked
+        assertTrue(h.webSession.retryAfterLoginBounce("/profile") is LoginBounceOutcome.Retried)
+        h.webSession.admitLoad(REDEEM)
+        h.webSession.onPageVisited("$ORIGIN/profile") // landed with the cookie: linked
         assertTrue(h.webSession.active)
+        assertTrue(h.webSession.retryAfterLoginBounce("/profile") is LoginBounceOutcome.Retried)
     }
 
     @Test
     fun aBounceWhileARequestIsRunningIsIgnored() = runBlocking {
-        var decision: LoginBounceDecision? = null
-        val h = Harness { _, webSession ->
-            decision = webSession.onLoginWhileUnlinked()
-            ok(handoffBody())
-        }.signedIn()
+        var outcome: LoginBounceOutcome? = null
+        val h = Harness { outcome = webSession.retryAfterLoginBounce("/profile"); ok(handoffBody()) }.signedIn()
 
         h.webSession.startFresh("/profile")
 
-        assertEquals(LoginBounceDecision.IGNORE, decision)
+        assertEquals(LoginBounceOutcome.Ignore, outcome)
+    }
+
+    // endregion
+
+    // region permit cannot stick
+
+    @Test
+    fun aCancelledRetryReleasesItsPermit() = runBlocking {
+        val h = Harness { awaitCancellation() }.signedIn()
+
+        val job = launch(start = CoroutineStart.UNDISPATCHED) { h.webSession.retryAfterLoginBounce("/profile") }
+        assertTrue(job.isActive) // suspended inside the request, permit held
+        job.cancelAndJoin() // the composition scope went away
+
+        // Not Ignore: the container is not stuck Busy. The one retry was spent, so the next bounce falls back.
+        assertEquals(LoginBounceOutcome.NativeSignIn, h.webSession.retryAfterLoginBounce("/profile"))
     }
 
     @Test
-    fun aSecondHandoffWhileOneIsRunningIsBusy() = runBlocking {
-        var inner: HandoffStep? = null
-        val h = Harness { _, webSession ->
-            inner = webSession.startFresh("/coupons")
-            ok(handoffBody())
-        }.signedIn()
+    fun aRetryCancelledBeforeItStartsLeavesNothingBehind() = runBlocking {
+        val h = Harness().signedIn()
 
-        val outer = h.webSession.startFresh("/profile")
+        val job = launch(start = CoroutineStart.LAZY) { h.webSession.retryAfterLoginBounce("/profile") }
+        job.cancelAndJoin()
 
-        assertEquals(HandoffStep.Busy, inner)
-        assertTrue(outer is HandoffStep.Load)
-        assertEquals(1, h.requests.size)
+        assertEquals(0, h.requests.size)
+        assertTrue(h.webSession.retryAfterLoginBounce("/profile") is LoginBounceOutcome.Retried)
     }
 
     @Test
-    fun aRequestThatFinishesAfterSignOutIsDropped() = runBlocking {
-        val h = Harness { _, webSession ->
-            webSession.reset()
-            ok(handoffBody())
-        }.signedIn()
+    fun aCancelledFreshHandoffReleasesItsPermit() = runBlocking {
+        var hang = true
+        val h = Harness { if (hang) awaitCancellation() else ok(handoffBody()) }.signedIn()
+
+        val job = launch(start = CoroutineStart.UNDISPATCHED) { h.webSession.startFresh("/profile") }
+        job.cancelAndJoin()
+        hang = false
+
+        assertEquals(LoginBounceOutcome.Retried(HandoffStep.Load(REDEEM)), h.webSession.retryAfterLoginBounce("/profile"))
+    }
+
+    // endregion
+
+    // region ordering: sign-out, tabs
+
+    @Test
+    fun aRequestThatFinishesAfterResetIsDropped() = runBlocking {
+        val h = Harness { webSession.reset(); ok(handoffBody()) }.signedIn()
 
         assertEquals(HandoffStep.Superseded, h.webSession.startFresh("/profile"))
+
+        assertFalse(h.webSession.admitLoad(REDEEM)) // nothing was issued
         h.webSession.onPageVisited("$ORIGIN/profile")
         assertFalse(h.webSession.active)
     }
 
     @Test
+    fun aRequestThatFinishesAfterTheNativeSessionEndedIsDropped() = runBlocking {
+        val h = Harness { session.endExpiredSession(); ok(handoffBody()) }.signedIn()
+
+        assertEquals(HandoffStep.Superseded, h.webSession.startFresh("/profile"))
+        assertFalse(h.webSession.admitLoad(REDEEM))
+    }
+
+    @Test
+    fun theLatestTapWinsOverARunningHandoff() = runBlocking {
+        var calls = 0
+        var inner: HandoffStep? = null
+        val h = Harness {
+            calls += 1
+            if (calls == 1) inner = webSession.startFresh("/coupons") // a second tap while the first request runs
+            ok(handoffBody())
+        }.signedIn()
+
+        val outer = h.webSession.startFresh("/profile#favorites")
+
+        assertEquals(HandoffStep.Superseded, outer)
+        assertEquals(HandoffStep.Load(REDEEM), inner)
+        assertEquals(2, h.requests.size)
+        assertEquals("""{"next":"/coupons"}""", h.requests.last().body)
+    }
+
+    @Test
+    fun aDealsLoadCancelsAPendingSavedHandoff() = runBlocking {
+        val h = Harness { assertTrue(webSession.admitLoad("$ORIGIN/coupons")); ok(handoffBody()) }.signedIn()
+
+        assertEquals(HandoffStep.Superseded, h.webSession.startFresh("/profile#favorites"))
+
+        assertFalse(h.webSession.admitLoad(REDEEM))
+    }
+
+    // endregion
+
+    // region redeem URL: exactly the issued one
+
+    @Test
+    fun onlyTheIssuedRedeemUrlLoadsAndOnlyOnce() = runBlocking {
+        val h = Harness().signedIn()
+        assertFalse("nothing issued yet", h.webSession.admitLoad(REDEEM))
+
+        h.webSession.startFresh("/profile")
+        val other = "$ORIGIN/api/app/web-session/redeem?code=${CODE.reversed()}"
+        assertFalse(h.webSession.admitLoad(other))
+        assertFalse(h.webSession.admitLoad("$ORIGIN/API/app/web-session/redeem?code=$CODE"))
+        assertFalse(h.webSession.admitLoad("$REDEEM&extra=1"))
+
+        assertTrue(h.webSession.admitLoad(REDEEM))
+        assertFalse("single use", h.webSession.admitLoad(REDEEM))
+    }
+
+    @Test
+    fun aRefusedRedeemLookalikeDoesNotCancelThePendingRedeem() = runBlocking {
+        val h = Harness().signedIn()
+        h.webSession.startFresh("/profile")
+
+        assertFalse(h.webSession.admitLoad("$ORIGIN/api/app/web-session/redeem?code=${CODE.reversed()}"))
+
+        assertTrue(h.webSession.admitLoad(REDEEM))
+        h.webSession.onPageVisited("$ORIGIN/profile")
+        assertTrue(h.webSession.active)
+    }
+
+    // endregion
+
+    @Test
     fun a401EndsTheNativeSessionAndAsksForSignIn() = runBlocking {
-        val h = Harness { _, _ -> HttpResponse(401, """{"error":"unauthorized"}""") }.signedIn()
+        val h = Harness { HttpResponse(401, """{"error":"unauthorized"}""") }.signedIn()
 
         assertEquals(HandoffStep.SignInRequired, h.webSession.startFresh("/profile"))
 
@@ -367,7 +609,7 @@ class WebSessionHandoffTest {
     @Test
     fun aServerErrorShowsAFailureAndLoadsNothing() = runBlocking {
         var status = 503
-        val h = Harness { _, _ -> if (status == 200) ok(handoffBody()) else HttpResponse(status, "{}") }.signedIn()
+        val h = Harness { if (status == 200) ok(handoffBody()) else HttpResponse(status, "{}") }.signedIn()
 
         val step = h.webSession.startFresh("/profile")
 
@@ -375,6 +617,7 @@ class WebSessionHandoffTest {
         assertEquals((step as HandoffStep.Failed).message, h.webSession.failure.value)
         assertTrue(h.session.state.value.isSignedIn) // a server error does not sign the shopper out
         assertFalse(h.webSession.active)
+        assertFalse(h.webSession.admitLoad(REDEEM))
 
         // Retry from the banner: the failure clears and the next attempt can succeed.
         status = 200
@@ -393,8 +636,9 @@ class WebSessionHandoffTest {
     @Test
     fun theWebSessionStaysOffWhenTheRequestFailsAfterAnEarlierLink() = runBlocking {
         var fail = false
-        val h = Harness { _, _ -> if (fail) HttpResponse(500, "{}") else ok(handoffBody()) }.signedIn()
+        val h = Harness { if (fail) HttpResponse(500, "{}") else ok(handoffBody()) }.signedIn()
         h.webSession.startFresh("/profile")
+        h.webSession.admitLoad(REDEEM)
         h.webSession.onPageVisited("$ORIGIN/profile")
         assertTrue(h.webSession.active)
 

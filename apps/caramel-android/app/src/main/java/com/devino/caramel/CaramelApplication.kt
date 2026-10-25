@@ -1,9 +1,12 @@
 package com.devino.caramel
 
 import android.app.Application
+import android.webkit.CookieManager
 import com.devino.caramel.core.CaramelApi
 import com.devino.caramel.core.KeystoreTokenStore
 import com.devino.caramel.core.SessionStore
+import com.devino.caramel.web.AppLinkGuard
+import com.devino.caramel.web.WebSessionCookie
 import com.devino.caramel.web.WebSessionHandoff
 import com.devino.caramel.web.WebSessionHandoffClient
 
@@ -13,14 +16,9 @@ class AppContainer(application: Application) {
     val session = SessionStore(api, KeystoreTokenStore(application))
 
     /** Hands the native sign-in to the WebView as a grabcaramel.com web session (T-7852). */
-    val webSession = WebSessionHandoff(WebSessionHandoffClient(api), session)
-
-    /**
-     * Whether the WebView holds a web session that mirrors the native sign-in. While false, a web
-     * navigation to /login cannot mean "the shopper signed out on the web", so the shell never clears
-     * the native token on it (see ShellRoutes.authAction).
-     */
-    val webSessionActive: Boolean get() = webSession.active
+    val webSession = WebSessionHandoff(WebSessionHandoffClient(api), session) {
+        WebSessionCookie.isPresent(CookieManager.getInstance().getCookie(AppLinkGuard.APP_ORIGIN))
+    }
 }
 
 // TODO(T-7474): no crash / error reporting and no trace propagation yet. The repo rule is that
