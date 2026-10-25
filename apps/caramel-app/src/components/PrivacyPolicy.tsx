@@ -325,12 +325,9 @@ const PrivacyPolicy = () => {
                     </Para>
                     <Para>
                         A sample of sessions is also recorded in our self-hosted
-                        PostHog, with every form field masked, and kept up to 30
-                        days. A recording includes the web addresses of the
-                        page&apos;s requests, so it can contain store-search
-                        text; recordings made after [TODO(T-7505): date the
-                        PostHog recording fix goes live] have it removed from
-                        those addresses.
+                        PostHog, with every form field masked. Session
+                        recordings are removed from the product within 30 days,
+                        and their stored data is purged in a scheduled clean-up.
                     </Para>
                     <Para>
                         If you use our store-request form we collect the store
@@ -468,7 +465,7 @@ const PrivacyPolicy = () => {
                             'Promo-box suggestions (the store’s hostname and the selectors described above) are kept with your account. A suggestion older than 30 days no longer counts toward a store’s saved rules but is not deleted automatically; it is removed when you delete your account.',
                             'Server logs, which can include IP addresses and browser type, are kept for up to 90 days for security and troubleshooting. The text of store searches is not written to them.',
                             'Error records and session replays (Sentry) are kept for 90 days. Since October 25, 2026 they are stored without store-search text (it is removed from error reports and from recorded web addresses, and what you type is masked in replays); ones captured before then may contain it until they expire (by January 23, 2027 at the latest).',
-                            'PostHog session recordings (a sample of sessions, form fields masked) are kept up to 30 days. Recordings made before [TODO(T-7505): date the PostHog recording fix goes live] may contain store-search text until they expire; later ones have it removed from recorded request addresses.',
+                            'A sample of sessions is recorded in our self-hosted PostHog, with every form field masked. Session recordings are removed from the product within 30 days, and their stored data is purged in a scheduled clean-up.',
                         ]}
                     />
                 </>

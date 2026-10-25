@@ -124,16 +124,27 @@ describe('privacy policy coverage', () => {
             'We do not write it to our application logs, and the access log of our own proxy is switched off.',
             'passes the request on and may briefly cache the response and keep its own request records',
             'Since October 25, 2026 we also remove search text from error reports and from the web addresses recorded in session replays before they are stored, and we mask what you type in session replays.',
-            'A sample of sessions is also recorded in our self-hosted PostHog, with every form field masked, and kept up to 30 days.',
-            'so it can contain store-search text; recordings made after',
-            'PostHog session recordings (a sample of sessions, form fields masked) are kept up to 30 days.',
-            'may contain store-search text until they expire',
+            'A sample of sessions is also recorded in our self-hosted PostHog, with every form field masked.',
+            'Session recordings are removed from the product within 30 days, and their stored data is purged in a scheduled clean-up.',
+            'A sample of sessions is recorded in our self-hosted PostHog, with every form field masked. Session recordings are removed from the product within 30 days, and their stored data is purged in a scheduled clean-up.',
             'until they expire, 90 days after capture (by January 23, 2027 at the latest)',
             'The text of store searches is not written to them.',
             'Error records and session replays (Sentry) are kept for 90 days.',
             'Your analytics profile in our self-hosted analytics (PostHog) is deleted immediately. Events already recorded under it are not yet removed automatically; ask us at hello@devino.ca and we will delete them.',
         ]) {
             expect(normalized).toContain(claim)
+        }
+        // Whether retention expiry purges a recording's stored data is
+        // unconfirmed: no sentence about recordings may say "at most" / "deleted
+        // after" / "until they expire" (the 30-day keyed hash is a different claim).
+        const recordingSentences = normalized
+            .split(/(?<=[.!?])\s*(?=[A-Z“])/)
+            .filter(sentence => /recording/i.test(sentence))
+        expect(recordingSentences.length).toBeGreaterThan(0)
+        for (const sentence of recordingSentences) {
+            expect(sentence).not.toMatch(/at most 30 days|up to 30 days/i)
+            expect(sentence).not.toMatch(/deleted after|until they expire/i)
+            expect(sentence).not.toMatch(/no backlog/i)
         }
         expect(html).toContain('href="/delete-account"')
     })

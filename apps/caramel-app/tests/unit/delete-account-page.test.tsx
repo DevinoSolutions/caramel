@@ -28,6 +28,16 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 afterEach(cleanup)
 
+// Whether retention expiry purges the stored snapshot data of a recording is
+// unconfirmed (deleting one on our instance removes only its metadata). Until it
+// is, no copy may say recordings are kept at most / deleted after N days, or
+// that nothing is left behind.
+function expectNoStrongerRecordingClaim(text: string): void {
+    expect(text).not.toMatch(/at most 30 days|up to 30 days/i)
+    expect(text).not.toMatch(/deleted after|until they expire/i)
+    expect(text).not.toMatch(/no backlog/i)
+}
+
 async function twinText(): Promise<string> {
     const res = await getMarkdownTwin(
         new Request('https://grabcaramel.com/delete-account.md'),
@@ -109,9 +119,7 @@ describe('delete-account content', () => {
         expect(all).toContain(
             'Analytics events already recorded under that profile are not yet removed automatically. Email hello@devino.ca and we will delete them.',
         )
-        expect(all).not.toMatch(
-            /weekly|clean-up|finishes it in the background|queue/i,
-        )
+        expect(all).not.toMatch(/weekly|finishes it in the background|queue/i)
         expect(all).not.toMatch(
             /PostHog[^.]*within (about )?(a |\d+ )?(days?|weeks?)/i,
         )
@@ -133,13 +141,23 @@ describe('delete-account content', () => {
         )
     })
 
-    it('says recordings can stay up to 30 days', () => {
+    it('describes recording retention with the unconfirmed-purge wording and nothing stronger', () => {
         const kept = DELETE_ACCOUNT_SECTIONS.find(
             section => section.id === 'what-is-kept',
         )?.bullets?.join(' ')
         expect(kept).toContain(
-            'Session recordings of your visits (a sample of sessions, with every form field masked) can stay in our self-hosted PostHog until they expire, up to 30 days after they were made.',
+            'a sample of sessions is recorded, with every form field masked',
         )
+        expect(kept).toContain(
+            'Session recordings are removed from the product within 30 days, and their stored data is purged in a scheduled clean-up.',
+        )
+        const recordingBullet = DELETE_ACCOUNT_SECTIONS.flatMap(
+            section => section.bullets ?? [],
+        ).filter(bullet => /recording/i.test(bullet))
+        expect(recordingBullet.length).toBeGreaterThan(0)
+        for (const bullet of recordingBullet) {
+            expectNoStrongerRecordingClaim(bullet)
+        }
     })
 
     it('is linked from the docs hub privacy section', () => {
