@@ -20,10 +20,12 @@ export default function LoginPageClient({
     verified,
     error,
     autoProvider,
+    returnPath = '/',
 }: {
     verified?: string
     error?: string | string[]
     autoProvider?: 'google' | 'apple'
+    returnPath?: string
 }) {
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
@@ -85,7 +87,7 @@ export default function LoginPageClient({
             return
         }
         toast.success('Welcome back!')
-        window.location.href = '/'
+        window.location.href = returnPath
         setLoading(false)
     }
 
@@ -125,7 +127,11 @@ export default function LoginPageClient({
                 </div>
             )}
 
-            <SocialSignIn verb="Sign in" autoStart={autoProvider} />
+            <SocialSignIn
+                verb="Sign in"
+                autoStart={autoProvider}
+                callbackURL={returnPath}
+            />
             <AuthDivider />
 
             {/* No noValidate here, unlike signup: this form has no client-side

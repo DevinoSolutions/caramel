@@ -7,6 +7,7 @@ import {
     normalizeShopperCode,
 } from '@/lib/shopperCoupons'
 import Link from 'next/link'
+import { usePathname } from 'next/navigation'
 import { useEffect, useId, useRef, useState } from 'react'
 
 // The "Add a code" form on /coupons/[store]: a signed-in shopper shares a coupon
@@ -32,10 +33,6 @@ import { useEffect, useId, useRef, useState } from 'react'
 // and the repo use (shopperCoupons.ts is pure, no server-only imports), so an
 // obviously invalid code never costs a round trip. The server stays the
 // authority: it re-validates and its 422 'invalid-code' gets the same message.
-//
-// TODO: /login has no return-path support (it always lands on `/` after sign-in,
-// LoginPageClient.tsx), so the sign-in link is a plain /login. Adding a vetted
-// `next` param is its own change (open-redirect surface).
 
 type Feedback = { kind: 'success' | 'info' | 'error'; text: string }
 
@@ -147,6 +144,7 @@ async function submitCode(
 
 export default function AddCodeForm({ store }: { store: string }) {
     const { data: session, isPending } = useSession()
+    const pathname = usePathname()
     const [mounted, setMounted] = useState(false)
     const [code, setCode] = useState('')
     const [busy, setBusy] = useState(false)
@@ -179,7 +177,7 @@ export default function AddCodeForm({ store }: { store: string }) {
                     Know a code for {store}?
                 </h2>
                 <Link
-                    href="/login"
+                    href={`/login?next=${encodeURIComponent(pathname)}`}
                     rel="nofollow"
                     className="text-caramel font-semibold underline underline-offset-2 hover:text-orange-600"
                 >
