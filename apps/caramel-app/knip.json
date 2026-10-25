@@ -14,12 +14,7 @@
         "@typescript-eslint/parser",
         "eslint-config-next",
         "prettier-plugin-organize-imports",
-        "prettier-plugin-tailwindcss",
-        "@use-gesture/react",
-        "gsap",
-        "react-fast-marquee",
-        "react-lottie-player",
-        "react-type-animation"
+        "prettier-plugin-tailwindcss"
     ],
     "ignoreBinaries": ["eslint"],
     "ignoreExportsUsedInFile": true
