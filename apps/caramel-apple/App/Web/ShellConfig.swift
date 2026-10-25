@@ -432,3 +432,37 @@ final class NoRedirectTaskDelegate: NSObject, URLSessionTaskDelegate {
         completionHandler(nil)
     }
 }
+
+extension WebSessionHandoff {
+    /// True for the pages that bounce a signed-out visitor to /login: the account pages (/profile*).
+    /// Stepping back into one without a web session loops (CARAMEL-2Y).
+    static func pageNeedsSession(_ url: URL) -> Bool {
+        guard let parsed = encodedSegments(of: url) else { return false }
+        return parsed.segments.first == "profile"
+    }
+}
+
+/// Stops a /login bounce from becoming a loop: the shell steps back after a bounce only if the
+/// page it would step back into has not already bounced, and not within `window` of the last
+/// bounce. Pure; WebShellModel owns one per web view.
+struct BounceGuard: Equatable {
+    /// A second bounce inside this many seconds is a loop, not a shopper.
+    static let window: TimeInterval = 2
+
+    private var lastBounceAt: Date?
+    private var lastBackURL: URL?
+
+    /// Records this bounce and says whether stepping back to `backURL` is allowed. False when
+    /// there is nothing to step back to, when the previous bounce was under `window` ago, and
+    /// when the previous bounce stepped back to the same URL.
+    mutating func allowsStepBack(at now: Date, backURL: URL?) -> Bool {
+        let previousAt = lastBounceAt
+        let previousURL = lastBackURL
+        lastBounceAt = now
+        lastBackURL = backURL
+        guard let backURL = backURL else { return false }
+        if let previousAt = previousAt, now.timeIntervalSince(previousAt) < Self.window { return false }
+        if previousURL == backURL { return false }
+        return true
+    }
+}

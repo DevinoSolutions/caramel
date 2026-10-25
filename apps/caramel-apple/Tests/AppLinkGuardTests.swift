@@ -831,3 +831,57 @@ final class WebSessionLifecycleTests: XCTestCase {
         XCTAssertFalse(WebSessionLifecycle.shouldWipeWebSession(previous: nil, current: nil))
     }
 }
+
+/// BounceGuard and the pages that bounce signed-out visitors (CARAMEL-2Y, T-8305): a
+/// /profile#favorites to /login loop every ~150 ms until Safari refused pushState.
+final class BounceGuardTests: XCTestCase {
+    private let start = Date(timeIntervalSince1970: 1_000_000)
+    private let home = URL(string: "https://grabcaramel.com/coupons")!
+    private let other = URL(string: "https://grabcaramel.com/coupons/stores")!
+
+    func testTheFirstBounceMayStepBack() {
+        var guardrail = BounceGuard()
+        XCTAssertTrue(guardrail.allowsStepBack(at: start, backURL: home))
+    }
+
+    func testNothingToStepBackToIsNeverAllowed() {
+        var guardrail = BounceGuard()
+        XCTAssertFalse(guardrail.allowsStepBack(at: start, backURL: nil))
+    }
+
+    func testASecondBounceWithinTheWindowStops() {
+        var guardrail = BounceGuard()
+        XCTAssertTrue(guardrail.allowsStepBack(at: start, backURL: home))
+        XCTAssertFalse(guardrail.allowsStepBack(at: start.addingTimeInterval(0.15), backURL: other), "150 ms later is a loop, even for a different back URL")
+    }
+
+    func testTwoBouncesForTheSameBackURLStopEvenFarApart() {
+        var guardrail = BounceGuard()
+        XCTAssertTrue(guardrail.allowsStepBack(at: start, backURL: home))
+        XCTAssertFalse(guardrail.allowsStepBack(at: start.addingTimeInterval(60), backURL: home))
+    }
+
+    func testALaterBounceFromAnotherPageMayStepBack() {
+        var guardrail = BounceGuard()
+        XCTAssertTrue(guardrail.allowsStepBack(at: start, backURL: home))
+        XCTAssertTrue(guardrail.allowsStepBack(at: start.addingTimeInterval(BounceGuard.window + 0.5), backURL: other))
+    }
+
+    func testTheWindowIsMeasuredFromTheLatestBounce() {
+        var guardrail = BounceGuard()
+        XCTAssertTrue(guardrail.allowsStepBack(at: start, backURL: home))
+        XCTAssertFalse(guardrail.allowsStepBack(at: start.addingTimeInterval(1.5), backURL: other))
+        XCTAssertFalse(guardrail.allowsStepBack(at: start.addingTimeInterval(3), backURL: URL(string: "https://grabcaramel.com/coupons/amazon.com")!), "1.5 s after the last bounce")
+        XCTAssertTrue(guardrail.allowsStepBack(at: start.addingTimeInterval(6), backURL: URL(string: "https://grabcaramel.com/coupons/target.com")!))
+    }
+
+    func testOnlyTheAccountPagesNeedAWebSession() {
+        for path in ["/profile", "/profile#favorites", "/profile/settings?x=1"] {
+            XCTAssertTrue(WebSessionHandoff.pageNeedsSession(URL(string: "https://grabcaramel.com" + path)!), path)
+        }
+        for path in ["/", "/coupons", "/coupons/stores", "/login", "/support", "/profiles"] {
+            XCTAssertFalse(WebSessionHandoff.pageNeedsSession(URL(string: "https://grabcaramel.com" + path)!), path)
+        }
+        XCTAssertFalse(WebSessionHandoff.pageNeedsSession(URL(string: "https://evil.com/profile")!))
+    }
+}

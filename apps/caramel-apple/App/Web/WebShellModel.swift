@@ -62,6 +62,10 @@ final class WebShellModel: NSObject, ObservableObject {
     /// Set by ShellRouter: how the redeem navigation started by `openRedeem` ended.
     var onRedeemOutcome: (WebShellModel, RedeemOutcome) -> Void = { _, _ in }
 
+    /// Set by ShellRouter: a page that needs a web session bounced to /login. True means the
+    /// router is running the handoff for it (native session, no web session yet).
+    var webSessionRecovery: (WebShellModel, URL) -> Bool = { _, _ in false }
+
     /// The page this shell shows or is about to show (what a handoff should land on).
     var targetURL: URL { lastRequestedURL ?? home }
 
@@ -74,6 +78,7 @@ final class WebShellModel: NSObject, ObservableObject {
     private var didStartLoading = false
     /// True from `openRedeem` until the redeem navigation lands, expires or fails.
     private var redeemInFlight = false
+    private var bounceGuard = BounceGuard()
     /// The one redeem URL the router issued: it may load once, and no other redeem URL may load at all.
     private var issuedRedeemURL: URL?
 
@@ -199,6 +204,7 @@ final class WebShellModel: NSObject, ObservableObject {
         lastRequestedURL = nil
         redeemInFlight = false
         issuedRedeemURL = nil
+        bounceGuard = BounceGuard()
         pageState = .idle
         // Not started: the visible tab's .task (loadHomeIfNeeded) loads home. Loading all four
         // shells eagerly would let a signed-out /profile redirect to /login and pop the native sign-in.
@@ -238,15 +244,36 @@ final class WebShellModel: NSObject, ObservableObject {
         }
     }
 
-    /// A page asked for /login or /signup. The native sign-in is offered; the web login
-    /// page itself is never left on screen. Reloading home would loop for a page that
-    /// bounces signed-out visitors to /login, so with nothing to step back to the shell
-    /// shows a "sign in" state instead.
+    /// A page asked for /login or /signup. The web login page itself is never left on screen.
+    ///
+    /// Stepping back into a page that bounces signed-out visitors to /login makes it bounce
+    /// again at once (CARAMEL-2Y: /profile#favorites to /login in a ~150 ms loop until Safari
+    /// refused pushState). So:
+    ///  - a page that needs a web session (/profile*) is never stepped back into: with a native
+    ///    session the router runs the handoff for it, without one the shell shows "sign in" and stops;
+    ///  - any other page is stepped back to only once per back URL and not twice within
+    ///    BounceGuard.window, else the shell shows "sign in" and stops.
     private func pageAskedForSignIn(stepBack: Bool) {
+        let bouncedFrom = stepBack ? (webView.backForwardList.backItem?.url ?? lastRequestedURL) : (webView.url ?? lastRequestedURL)
+        if let page = bouncedFrom, WebSessionHandoff.pageNeedsSession(page) {
+            if webSessionRecovery(self, page) {
+                // A handoff for that page is under way; it ends on the page itself.
+                pageState = .loading
+                return
+            }
+            onSignInRequested()
+            pageState = .needsSignIn
+            return
+        }
         onSignInRequested()
-        if stepBack, webView.canGoBack {
+        guard stepBack else {
+            if webView.url == nil { pageState = .needsSignIn }
+            return
+        }
+        if bounceGuard.allowsStepBack(at: Date(), backURL: webView.backForwardList.backItem?.url) {
             webView.goBack()
-        } else if stepBack || webView.url == nil {
+        } else {
+            Self.log.error("A page bounced to sign-in again; not stepping back into it.")
             pageState = .needsSignIn
         }
     }

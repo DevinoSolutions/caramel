@@ -57,7 +57,10 @@ final class ShellRouter: ObservableObject {
         for model in allModels {
             model.onSignInRequested = { [weak self] in self?.isChoosingSignInProvider = true }
             model.webSessionGate = { [weak self] model, url in self?.holdForWebSession(model, url) ?? false }
-            model.onRedeemOutcome = { [weak self] model, outcome in self?.redeemFinished(on: model, outcome) }
+            // A page that needs a web session bounced to /login: same rules as a load (handoff when signed in
+            // natively and no web session yet; false when there is nothing to hand off or the session is active).
+            model.webSessionRecovery = { [weak self] model, page in self?.holdForWebSession(model, page) ?? false }
+            model.onRedeemOutcome ={ [weak self] model, outcome in self?.redeemFinished(on: model, outcome) }
         }
         // App Store screenshot capture only: `-screenshotTab store:DOMAIN` opens that store's page.
         if let domain = ScreenshotLaunch.storeDomain, let page = ShellDestination.storePage(domain: domain) {
