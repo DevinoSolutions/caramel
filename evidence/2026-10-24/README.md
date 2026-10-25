@@ -47,3 +47,20 @@
   - first pass fix-needed: the representable never swapped in the new WKWebView, and nilled delegates left the visible view unguarded;
   - delta at 852c865: merge. The host is keyed on the view; the old view is removed before its delegates drop; lazy reload; PR-mode ::warning:: marker step; ::error:: tag gate while TODO(T-7852) markers remain.
   Merged as 1c0b170. Nits carried to T-7842: .task(id:) instead of onAppear (blank tab after a launch-time 401), and `|| true` on the warning grep.
+
+- **T-7842, 1.6 shell proof (MASTER 21:0xZ: Android = CI emulator, iOS = TestFlight internal build; gap: no physical-device run)**
+  - rails38-pr-diff-headed.png: DevinoSolutions/.github#38 diff, headed. The reusable smoke accepts Kotlin-DSL (.kts) Gradle projects. Review verdict merge, CI green; merged as a3fa568.
+  - pr494-smoke-run-headed.png: caramel#494 smoke run 40139594021, headed, green. Merged as ce96cbe.
+  - t7842-android-emulator-smoke-1.6.0.png: the PR run's screenshot, showing the real Deals page.
+  - t7842-android-emulator-smoke-main-ce96cbe.png: the first run on main (40140700725) went green but shows the WebView error page `net::ERR_NAME_NOT_RESOLVED`. NOT counted as proof; it led to #496.
+  - pr496-checks-headed.png: caramel#496, headed, "All checks have passed". It sets iOS 1.6.0, adds the train guard, the DNS wait and the page-loaded assertion. Merged as 85e52c2.
+  - t7842-android-smoke-pr-fixes*.png: the #496 PR runs, showing the Deals page.
+  - **t7842-android-emulator-smoke-main-85e52c2.png** is the Android proof (run 40148305795 on main):
+    - versionName=1.6.0, matching build.gradle.kts;
+    - DNS resolved and the app was alive (pid 2623), with no FATAL EXCEPTION;
+    - uiautomator found "Today's Coupon Codes";
+    - 151785 B, sha256 1366ec99…
+  - The iOS proof is run 40148314838 on main:
+    - the train guard reported "1.6.0: 0 of 13 iOS rows, none open";
+    - UPLOAD SUCCEEDED, build 1.6.0 (14960028392) VALID, IN_BETA_TESTING in internal group Devino, not submitted for review.
+  - Stray build: 1.5.0 (14960028391), from run 40140709420, contains the 1.6 shell and is mislabelled. Expiring it is the owner's call; submit 1.5.0 with 14960028388.
