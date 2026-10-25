@@ -55,7 +55,11 @@ const validationSchema = object().shape({
         .required('Please re-type your password'),
 })
 
-export default function SignupPageClient() {
+export default function SignupPageClient({
+    returnPath = '/',
+}: {
+    returnPath?: string
+}) {
     const [showPasswordChecker, setShowPasswordChecker] = useState(false)
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState('')
@@ -93,7 +97,11 @@ export default function SignupPageClient() {
                 }
 
                 // Redirect to verify page with success message
-                window.location.href = '/verify?signup=success'
+                const verifyUrl =
+                    returnPath !== '/'
+                        ? `/verify?signup=success&next=${encodeURIComponent(returnPath)}`
+                        : '/verify?signup=success'
+                window.location.href = verifyUrl
             } catch {
                 toast.error('Something went wrong. Please try again later.')
                 setError('Something went wrong. Please try again later.')
@@ -116,7 +124,14 @@ export default function SignupPageClient() {
             footer={
                 <p className="text-center text-sm text-gray-600 dark:text-gray-400">
                     Already have an account?{' '}
-                    <Link href="/login" className={linkClasses}>
+                    <Link
+                        href={
+                            returnPath !== '/'
+                                ? `/login?next=${encodeURIComponent(returnPath)}`
+                                : '/login'
+                        }
+                        className={linkClasses}
+                    >
                         Sign in
                     </Link>
                 </p>

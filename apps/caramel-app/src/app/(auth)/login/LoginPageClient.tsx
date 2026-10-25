@@ -98,7 +98,14 @@ export default function LoginPageClient({
             footer={
                 <p className="text-center text-sm text-gray-600 dark:text-gray-400">
                     Don&apos;t have an account?{' '}
-                    <Link className={linkClasses} href="/signup">
+                    <Link
+                        className={linkClasses}
+                        href={
+                            returnPath !== '/'
+                                ? `/signup?next=${encodeURIComponent(returnPath)}`
+                                : '/signup'
+                        }
+                    >
                         Create one free
                     </Link>
                 </p>
