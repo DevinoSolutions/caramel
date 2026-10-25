@@ -96,6 +96,15 @@ const SENSITIVE_PARAM_EXACT: ReadonlySet<string> = new Set([
     'hint',
     'user',
     'username',
+    // What a shopper TYPED into a store search (T-7505): /api/coupons/stores?q=,
+    // /api/coupons?search=&key_words=, and the `query` body field of
+    // /api/sites/search-supported. It can be a name, an address or anything else
+    // a person types, so it is personal data like the credentials above, and
+    // the policy promises it is not kept longer than the logs.
+    'q',
+    'search',
+    'key_words',
+    'query',
 ])
 
 /** Substrings that make a param or header name sensitive (`id_token`,
