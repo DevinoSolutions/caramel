@@ -352,8 +352,9 @@ const _caramelMarkerAlt = [
         w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
     ).join('|'),
 ].join('|')
-// Digits with either grouping convention: 1,234.56 / 1.234,56 / 1 234,56.
-const _caramelNumberPart = String.raw`\d{1,3}(?:[.,   ]\d{3})*(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?`
+// Digits with either grouping convention: 1,234.56 / 1.234,56 / 1 234,56,
+// and the Swiss apostrophe grouping: CHF 1'249.90 / 1’249.90.
+const _caramelNumberPart = String.raw`\d{1,3}(?:['’.,   ]\d{3})*(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?`
 const _caramelMoneyRe = new RegExp(
     `(?:(${_caramelMarkerAlt})\\s?(${_caramelNumberPart}))|(?:(${_caramelNumberPart})\\s?(${_caramelMarkerAlt}))`,
     'g',
@@ -392,6 +393,9 @@ export function caramelParseMoneyNumber(raw) {
 // Consumed by getPrice; pinned directly by tests.
 export function caramelFindMoney(text) {
     if (typeof text !== 'string' || !text) return []
+    // A label and a code-marked amount in adjacent inline elements read as one
+    // word ("TotalCHF 89.90"): no \b before the code, so no money at all.
+    text = text.replace(/([a-z])(?=[A-Z]{2,4}\$?\s?\d)/g, '$1 ')
     const out = []
     _caramelMoneyRe.lastIndex = 0
     let m

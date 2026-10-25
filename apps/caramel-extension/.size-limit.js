@@ -136,7 +136,11 @@ module.exports = [
         // store enables a tick after typing, holds a moved total before
         // calling it a saving, and refuses a drop beside the store's fresh
         // refusal of the code. Measured 99.77 kB.
-        limit: '101 KB',
+        // 2026-10-25 (T-8655/T-8656), raised 101 -> 102 kB: the cart gate
+        // knows localised cart and checkout slugs (/warenkorb, /panier,
+        // /carrito, /koszyk...), and the price reader reads Swiss apostrophe
+        // grouping and a label glued to a currency code. Measured 101.13 kB.
+        limit: '102 KB',
         brotli: false,
     },
     {

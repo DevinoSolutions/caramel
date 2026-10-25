@@ -1296,12 +1296,12 @@ function findToggle(doc, input) {
 // last one in document order (the bottom line of a summary). A cart with no
 // total row at all is read by its subtotal; never when a total row exists.
 const TOTAL_LABEL =
-    /^(order |estimated |grand |cart |basket |bag |your )?total( due| to pay| \(.*\))?:?$|^total\b|^(est\.?|estimated) (order )?total|^order total|^amount due|^total à payer|^gesamt|^summe|^totale|^合計/i
+    /^(order |estimated |grand |cart |basket |bag |your )?total( due| to pay| \(.*\))?:?$|^total\b|^(est\.?|estimated) (order )?total|^order total|^amount due|^total à payer|^gesamt|^summe|^totale|^totaal|^te betalen|^totalt\b|^summa\b|^att betala|^razem|^suma\b|^do zapłaty|^yhteensä|^maksettava|^合計/i
 // A total before tax ("Gesamtnettosumme", "Total excl. VAT", "Total HT") is
 // not what the shopper pays: it loses to the gross total, and a cart that
 // shows only a net total shows no total. "incl. VAT" rows are gross and stay.
 const TOTAL_NOT =
-    /sub[- ]?total|sav(ed?|ings?)\b|discount|items? total|total items|shipping|tax|points|weight|qty|quantity|calculated|netto|\bnet\b|\bex(cl|kl)\b|\bex\.? ?(vat|btw|ust)\b|excluding|exclusief|zzgl|ohne (mwst|ust|steuer)|\bht\b|hors taxes?|sans tva|sin iva|imponibile/i
+    /sub[- ]?totaa?l|częściow|sav(ed?|ings?)\b|discount|items? total|total items|shipping|tax|points|weight|qty|quantity|calculated|netto|\bnet\b|\bex(cl|kl)\b|\bex\.? ?(vat|btw|ust)\b|excluding|exclusief|zzgl|ohne (mwst|ust|steuer)|\bht\b|hors taxes?|sans tva|sin iva|imponibile/i
 const SUB_LABEL =
     /^(order |cart |merchandise |product |est\.? |estimated )?sub[- ]?total( \(.*\))?:?$|^product total:?$/i
 const SUB_NOT = /sav(ed?|ings?)\b|discount|shipping|tax|points/i
@@ -1315,11 +1315,11 @@ const CODES =
 // open-ended run is tried again from every digit of a long number, and a
 // 40 KiB one took seconds.
 const MONEY_RE = new RegExp(
-    `(?:${SIGN}|R\\$|\\b(?:${CODES})\\b)\\s?-?\\d[\\d.,]{0,24}|\\d[\\d.,]{0,24}\\s?(?:${SIGN}|\\b(?:USD|EUR|GBP|CHF|kr)\\b|zł)|\\d[\\d,]{0,24}[.,]\\d{2}\\b`,
+    `(?:${SIGN}|R\\$|\\b(?:${CODES})\\b)\\s?-?\\d[\\d.,'’]{0,24}|\\d[\\d.,'’]{0,24}\\s?(?:${SIGN}|\\b(?:USD|EUR|GBP|CHF|kr)\\b|zł)|\\d[\\d,'’]{0,24}[.,]\\d{2}\\b`,
     'i',
 )
 const AMOUNT_ONLY = new RegExp(
-    `^[^\\w${SIGN.slice(1, -1)}]{0,3}\\S{0,4}\\s?-?\\d[\\d.,\\s]*\\S{0,4}$`,
+    `^[^\\w${SIGN.slice(1, -1)}]{0,3}\\S{0,4}\\s?-?\\d[\\d.,'’\\s]*\\S{0,4}$`,
 )
 // A parenthetical ("incl. 15,17 € VAT") is commentary on the amount, not a
 // second total. One is at most 200 characters, so an unclosed "(" is not
@@ -1362,7 +1362,7 @@ function scanTotalRows(
     NOT,
     {
         root = doc.body,
-        words = /total|amount due|gesamt|summe|totale|合計/i,
+        words = /total|totaal|amount due|gesamt|summe|summa|suma|razem|zapłaty|betala|yhteensä|maksettava|合計/i,
     } = {},
 ) {
     const hits = []
