@@ -40,7 +40,7 @@ test.describe('Add a code — signed out', () => {
             name: 'Sign in to share a code',
         })
         await expect(prompt).toBeVisible({ timeout: 15000 })
-        await expect(prompt).toHaveAttribute('href', '/login')
+        await expect(prompt).toHaveAttribute('href', /^\/login\?next=/)
         // No form for a signed-out visitor.
         await expect(
             page.getByRole('textbox', { name: 'Coupon code' }),
