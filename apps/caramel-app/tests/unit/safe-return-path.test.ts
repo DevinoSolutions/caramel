@@ -42,4 +42,19 @@ describe('safeReturnPath', () => {
     it('trims whitespace', () => {
         expect(safeReturnPath('  /profile  ')).toBe('/profile')
     })
+
+    it('rejects backslash smuggling (browsers normalise \\ to /)', () => {
+        expect(safeReturnPath('/\\evil.com')).toBe('/')
+        expect(safeReturnPath('/\\\\evil.com')).toBe('/')
+    })
+
+    it('rejects control characters (tab/newline URL smuggling)', () => {
+        expect(safeReturnPath('/\tevil.com')).toBe('/')
+        expect(safeReturnPath('/\nevil.com')).toBe('/')
+        expect(safeReturnPath('/\revil.com')).toBe('/')
+    })
+
+    it('preserves hash fragments', () => {
+        expect(safeReturnPath('/coupons#top')).toBe('/coupons#top')
+    })
 })
