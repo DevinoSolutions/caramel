@@ -38,7 +38,7 @@ export const metadata: Metadata = {
 
 export default function FaqPage() {
     return (
-        <main className="flex min-h-screen w-full flex-col items-center px-6 pt-16 dark:bg-darkBg">
+        <main className="dark:bg-darkBg flex min-h-screen w-full flex-col items-center px-6 pt-16">
             <div className="w-full max-w-4xl">
                 <h1 className="sr-only">Caramel frequently asked questions</h1>
                 <FaqSection />

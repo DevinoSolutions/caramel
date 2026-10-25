@@ -151,7 +151,7 @@ export default function DataPrivacySection({
                             type="button"
                             onClick={() => setDialogOpen(true)}
                             disabled={nothingToDelete}
-                            className={`${dangerButtonClasses} mt-4 md:w-full xs:w-full`}
+                            className={`${dangerButtonClasses} xs:w-full mt-4 md:w-full`}
                         >
                             {nothingToDelete
                                 ? 'Nothing to delete'

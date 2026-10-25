@@ -78,7 +78,7 @@ export default function PasswordField({
                     onClick={() => setRevealed(current => !current)}
                     aria-label={revealed ? 'Hide password' : 'Show password'}
                     aria-pressed={revealed}
-                    className="absolute inset-y-0 right-0 flex w-12 items-center justify-center rounded-r-xl text-gray-500 transition hover:text-caramel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/50 dark:text-gray-400"
+                    className="hover:text-caramel focus-visible:ring-caramel/50 absolute inset-y-0 right-0 flex w-12 items-center justify-center rounded-r-xl text-gray-500 transition focus-visible:outline-none focus-visible:ring-2 dark:text-gray-400"
                 >
                     {revealed ? (
                         <HiEyeOff aria-hidden="true" className="h-5 w-5" />

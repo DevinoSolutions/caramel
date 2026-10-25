@@ -105,7 +105,7 @@ export default function LoginPageClient({
             {errorNotice && (
                 <div
                     role="alert"
-                    className="mb-6 rounded-xl border border-orange-300 bg-orange-50 p-4 dark:border-caramel/40 dark:bg-caramel/10"
+                    className="dark:border-caramel/40 dark:bg-caramel/10 mb-6 rounded-xl border border-orange-300 bg-orange-50 p-4"
                 >
                     <p className="text-sm font-semibold text-orange-800 dark:text-orange-200">
                         {errorNotice.title}
@@ -117,7 +117,7 @@ export default function LoginPageClient({
                         <button
                             type="button"
                             onClick={() => router.push(errorAction.href)}
-                            className="mt-3 w-full rounded-lg border border-orange-300 bg-white px-4 py-2 text-sm font-semibold text-caramel shadow-sm transition duration-200 hover:bg-orange-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/50 focus-visible:ring-offset-2 dark:border-caramel/40 dark:bg-darkBg dark:shadow-none dark:hover:bg-caramel/10 dark:focus-visible:ring-offset-darkerBg"
+                            className="text-caramel focus-visible:ring-caramel/50 dark:border-caramel/40 dark:bg-darkBg dark:hover:bg-caramel/10 dark:focus-visible:ring-offset-darkerBg mt-3 w-full rounded-lg border border-orange-300 bg-white px-4 py-2 text-sm font-semibold shadow-sm transition duration-200 hover:bg-orange-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 dark:shadow-none"
                         >
                             {errorAction.label}
                         </button>
@@ -160,7 +160,7 @@ export default function LoginPageClient({
                     trailingLabel={
                         <Link
                             href="/forgot-password"
-                            className="text-sm font-medium text-caramel underline-offset-2 transition hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/50"
+                            className="text-caramel focus-visible:ring-caramel/50 text-sm font-medium underline-offset-2 transition hover:underline focus-visible:outline-none focus-visible:ring-2"
                         >
                             Forgot password?
                         </Link>

@@ -43,7 +43,7 @@ export default function RecentlyAddedSection({
                 initial={false}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.3 }}
-                className="mb-10 border-b border-caramel/15 pb-10 text-center text-2xl font-bold text-gray-800 dark:border-white/10 dark:text-gray-200"
+                className="border-caramel/15 mb-10 border-b pb-10 text-center text-2xl font-bold text-gray-800 dark:border-white/10 dark:text-gray-200"
             >
                 ✨ Recently added
             </motion.h2>

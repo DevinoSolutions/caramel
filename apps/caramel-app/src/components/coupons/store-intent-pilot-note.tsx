@@ -37,7 +37,7 @@ export default function StoreIntentPilotNote({
                     {`Looking for ${confusedWith.name}? ${confusedWith.name} (${confusedWith.domain}) is a different site — see `}
                     <a
                         href={`/coupons/${encodeURIComponent(confusedWith.domain)}`}
-                        className="font-medium text-caramel underline underline-offset-2"
+                        className="text-caramel font-medium underline underline-offset-2"
                     >
                         {confusedWith.name} codes →
                     </a>

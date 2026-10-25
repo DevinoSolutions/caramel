@@ -63,10 +63,10 @@ export default function ForgotPasswordPageClient() {
                     </p>
                 }
             >
-                <div className="flex items-start gap-3 rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600 dark:border-gray-800 dark:bg-darkerBg dark:text-gray-400">
+                <div className="dark:bg-darkerBg flex items-start gap-3 rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600 dark:border-gray-800 dark:text-gray-400">
                     <HiOutlineMail
                         aria-hidden="true"
-                        className="mt-0.5 h-5 w-5 shrink-0 text-caramel"
+                        className="text-caramel mt-0.5 h-5 w-5 shrink-0"
                     />
                     <p>
                         Nothing after a few minutes? Check your spam folder, or{' '}

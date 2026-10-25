@@ -1,10 +1,86 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss';
+
+/* --- Tailwind v4 theme (migrated from tailwind.config.ts) --- */
+
+@theme {
+    --breakpoint-*: initial;
+
+    --color-caramel: #ea6925;
+    --color-caramelLight: #da7f52;
+    --color-darkBg: #191a1c;
+    --color-darkerBg: #101010;
+    --color-darkSurface: #1e1916;
+
+    --shadow-caramel-sm: 0 6px 18px -8px rgba(234, 105, 37, 0.25);
+    --shadow-caramel-lg: 0 20px 40px -12px rgba(234, 105, 37, 0.3);
+
+    --ease-caramel: cubic-bezier(0.22, 1, 0.36, 1);
+    --ease-motion-out: var(--motion-ease-out);
+
+    --animate-motion-fade-in: motion-fade-in var(--motion-dur-base)
+        var(--motion-ease-out) both;
+    --animate-motion-fade-up: motion-fade-up var(--motion-dur-base)
+        var(--motion-ease-out) both;
+    --animate-motion-scale-in: motion-scale-in var(--motion-dur-base)
+        var(--motion-ease-out) both;
+
+    @keyframes motion-fade-in {
+        from {
+            opacity: 0;
+        }
+        to {
+            opacity: 1;
+        }
+    }
+    @keyframes motion-fade-up {
+        from {
+            opacity: 0;
+            transform: translateY(var(--motion-rise, 6px));
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+    @keyframes motion-scale-in {
+        from {
+            opacity: 0;
+            transform: scale(0.96);
+        }
+        to {
+            opacity: 1;
+            transform: scale(1);
+        }
+    }
+}
+
+@custom-variant dark (&:where(.dark, .dark *));
+@custom-variant 3xl (@media (max-width: 1600px));
+@custom-variant 2xl (@media (max-width: 1535px));
+@custom-variant xl (@media (max-width: 1279px));
+@custom-variant lg (@media (max-width: 1023px));
+@custom-variant md (@media (max-width: 767px));
+@custom-variant sm (@media (max-width: 639px));
+@custom-variant xs (@media (max-width: 475px));
+@custom-variant tall (@media (max-height: 800px));
+
+/*
+  The default border color changed to `currentcolor` in v4.
+  This compat layer keeps existing borders looking the same.
+*/
+@layer base {
+    *,
+    ::after,
+    ::before,
+    ::backdrop,
+    ::file-selector-button {
+        border-color: var(--color-gray-200, currentcolor);
+    }
+}
 
 /* Motion tokens for the subtle motion pass (docs/motion-audit.md). Tailwind
    exposes them as duration-fast/base/slow, ease-motion-out and the
-   animate-motion-* utilities (tailwind.config.ts). */
+   animate-motion-* utilities (see @theme above). */
 :root {
     --motion-dur-fast: 120ms;
     --motion-dur-base: 180ms;
@@ -27,7 +103,6 @@
 
 html {
     scroll-behavior: smooth;
-    /* Reserve gutter so the layout doesn't jump when scrollbars appear/disappear */
     scrollbar-gutter: stable both-edges;
 }
 
@@ -55,18 +130,8 @@ html[data-app-shell] body {
 
 /* The `dark` class lives on an INNER wrapper div (Layout.tsx, (auth)/layout.tsx)
    AND, since SSR was restored, on <html> itself (stamped pre-hydration by the
-   script in app/layout.tsx). Tailwind's `dark:` variant compiles to a
-   `.dark <el>` DESCENDANT selector, so it can never style html/body; without a
-   background of their own they showed the browser-default white wherever the
-   themed wrapper didn't cover — the strip at the viewport bottom, overscroll,
-   the scrollbar gutter. Mirror the wrappers' exact backgrounds (light:
-   bg-gray-50, dark: bg-darkBg).
-
-   `html.dark` is the one that matters BEFORE hydration (the inner wrapper is
-   still server-rendered `light` at that point, so :has() would miss); the
-   :has() rules keep working for the inner wrapper after hydration and for the
-   theme toggle. `html.dark body` is needed because plain `body` below would
-   otherwise out-specify the inherited page background. */
+   script in app/layout.tsx). Mirror the wrappers' exact backgrounds (light:
+   bg-gray-50, dark: bg-darkBg). */
 html,
 body {
     @apply bg-gray-50;
@@ -80,7 +145,6 @@ body:has(.dark) {
 }
 
 body {
-    /* Keep a consistent vertical scrollbar to avoid layout shifts as content loads */
     overflow-y: scroll;
 }
 
@@ -103,7 +167,6 @@ body {
     width: 20px;
 }
 
-/* Mobile responsive scrollbar */
 @media (max-width: 768px) {
     ::-webkit-scrollbar {
         width: 8px;
@@ -128,7 +191,6 @@ body {
     transition: background-color 0.3s ease;
 }
 
-/* Adjust border for mobile */
 @media (max-width: 768px) {
     ::-webkit-scrollbar-thumb {
         border: 2px solid transparent;
@@ -238,19 +300,7 @@ body {
     border-radius: 360px;
 }
 
-/* WebKit paints its own background on autofilled inputs and ignores
-   `background-color` / `background-image` outright, so the near-black auth
-   cards flashed a bright lavender-white field the moment Chrome filled them.
-   The only lever that works is a huge inset box-shadow, which sits under the
-   text but over the UA layer. Colors mirror the auth inputs' own dark styling
-   (`dark:bg-darkBg` + `dark:text-gray-100` in the (auth) forms) so a filled
-   field is indistinguishable from a typed one.
-
-   Setting box-shadow also wipes Tailwind's `focus:ring-2 ring-caramel/30`, so
-   the :focus variant re-states that ring after the fill layer.
-
-   Light mode is left alone: Chrome's default fill (#e8f0fe) against the white
-   auth card still renders gray-900 text well above AA. */
+/* WebKit autofill styling for dark mode auth inputs */
 html.dark input:-webkit-autofill,
 html.dark input:-webkit-autofill:hover,
 html.dark input:-webkit-autofill:active,
@@ -271,8 +321,6 @@ html.dark select:-webkit-autofill:focus {
     caret-color: #f3f4f6;
 }
 
-/* Landing refinement (additive): crafted keyboard focus ring in brand color.
-   :focus-visible only — mouse/touch interactions are unaffected. */
 @layer base {
     :where(a, button, [role='button'], summary):focus-visible {
         outline: 2px solid rgb(234 105 37 / 0.9);
@@ -280,33 +328,14 @@ html.dark select:-webkit-autofill:focus {
     }
 }
 
-/* Landing refinement (additive): honor reduced-motion for smooth scrolling. */
 @media (prefers-reduced-motion: reduce) {
     html {
         scroll-behavior: auto;
     }
 }
 
-/* Hero entrance (mobile LCP fix, 2026-09-12). The hero copy — the h1, the
-   wordmark, the lead paragraph and the CTA row — used to enter through
-   framer-motion `initial={{ opacity: 0 }}`, which framer serialises into the
-   server HTML as `style="opacity:0"`. Every LCP candidate was therefore
-   invisible until the whole first-load bundle had downloaded, parsed and
-   hydrated, and PageSpeed measured the home page's mobile LCP at 8.6 s
-   (desktop hid it behind a fast CPU). These keyframes keep the same rise /
-   scale-in motion (same 0.6 s / cubic-bezier(0.22,1,0.36,1) / per-element
-   delays) as a CSS animation, so the entrance starts at first paint with no
-   JavaScript on the critical path.
-
-   TRANSFORM ONLY — deliberately no opacity. A first attempt kept the fade
-   (opacity 0 → 1) and measured LCP barely moved: Chrome's paint-timing
-   detector skips an element that first paints at opacity 0, and a
-   compositor-driven opacity animation never repaints it on the main thread,
-   so the hero copy simply never became an LCP candidate — the metric fell
-   through to the stat cards that appear after hydration (render delay
-   5.3 s). Transform-only means the h1, wordmark and paragraph are painted
-   (and recorded) on the very first frame and just settle into place.
-   Reduced motion: no animation at all (the elements are already at rest). */
+/* Hero entrance (mobile LCP fix, 2026-09-12). Transform-only to ensure
+   the h1/wordmark/paragraph are painted on the very first frame. */
 @keyframes caramel-hero-enter {
     from {
         transform: translateY(20px);
@@ -341,14 +370,7 @@ html.dark select:-webkit-autofill:focus {
 }
 
 /* Subtle motion pass 3/3 (docs/motion-audit.md rows 1, 4, 5): FAQ answer,
-   native dialogs and the growth prompt card enter softly. All three are only
-   ever shown after an interaction or client-side state (details[open],
-   showModal(), the growth host's effect), so a backwards-fill keyframe starting at
-   opacity 0 never hides server-rendered content. Exits stay instant. The
-   opacity-only keyframes run for everyone; the translate/scale ones sit under
-   no-preference. The global reduced-motion net above also collapses every
-   duration, and ::backdrop is outside its selector, so the backdrop fade is
-   no-preference-only. */
+   native dialogs and the growth prompt card enter softly. */
 @keyframes motion-faq-answer-fade {
     from {
         opacity: 0;
@@ -432,15 +454,10 @@ html.dark select:-webkit-autofill:focus {
     }
 
     .motion-dialog[open]::backdrop {
-        /* Literal easing (= --motion-ease-out): custom-property inheritance
-           into ::backdrop is not guaranteed in every browser. */
         animation: motion-dialog-fade 150ms cubic-bezier(0.16, 1, 0.3, 1)
             backwards;
     }
 
-    /* One 8px rise for every layout: the card is bottom-anchored in all of
-       them (note the tailwind screens here are max-width, so md: is the
-       corner card at <=767px and the default is the full-width bar). */
     .motion-growth-card {
         animation-name: motion-growth-rise;
     }

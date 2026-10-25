@@ -111,10 +111,10 @@ export default function SourcesPageClient({
     }))
 
     return (
-        <main className="relative min-h-screen overflow-x-clip bg-gray-50 p-6 text-gray-800 dark:bg-darkBg dark:text-gray-50">
+        <main className="dark:bg-darkBg relative min-h-screen overflow-x-clip bg-gray-50 p-6 text-gray-800 dark:text-gray-50">
             <Doodles />
             <motion.h1
-                className="mb-4 text-center text-4xl font-bold text-caramel"
+                className="text-caramel mb-4 text-center text-4xl font-bold"
                 initial={{ opacity: 0, y: -20 }}
                 animate={{ opacity: 1, y: 0 }}
             >
@@ -126,14 +126,14 @@ export default function SourcesPageClient({
                         role="dialog"
                         aria-modal="true"
                         aria-label="Submit a New Source"
-                        className="relative w-full max-w-md rounded-2xl bg-white p-6 shadow-xl dark:border dark:border-caramel/30 dark:bg-darkSurface"
+                        className="dark:border-caramel/30 dark:bg-darkSurface relative w-full max-w-md rounded-2xl bg-white p-6 shadow-xl dark:border"
                         initial={{ opacity: 0, y: -20 }}
                         animate={{ opacity: 1, y: 0 }}
                     >
                         <button
                             type="button"
                             aria-label="Close"
-                            className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel dark:hover:bg-darkBg dark:hover:text-gray-300"
+                            className="focus-visible:ring-caramel dark:hover:bg-darkBg absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 focus-visible:outline-none focus-visible:ring-2 dark:hover:text-gray-300"
                             onClick={() => setShowModal(false)}
                         >
                             X
@@ -161,20 +161,20 @@ export default function SourcesPageClient({
                                     onChange={e =>
                                         setWebsitesInput(e.target.value)
                                     }
-                                    className="mt-1 w-full rounded-lg border border-gray-300 p-2 text-black transition focus:border-caramel focus:outline-none focus:ring-2 focus:ring-caramel/40 dark:border-white/10 dark:bg-darkBg dark:text-white dark:placeholder-gray-500"
+                                    className="focus:border-caramel focus:ring-caramel/40 dark:bg-darkBg mt-1 w-full rounded-lg border border-gray-300 p-2 text-black transition focus:outline-none focus:ring-2 dark:border-white/10 dark:text-white dark:placeholder-gray-500"
                                 />
                             </div>
                             <div className="flex justify-end space-x-2">
                                 <button
                                     type="button"
-                                    className="transform rounded-lg bg-gray-500 px-4 py-2 text-white transition hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-darkSurface"
+                                    className="dark:focus-visible:ring-offset-darkSurface transform rounded-lg bg-gray-500 px-4 py-2 text-white transition hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 focus-visible:ring-offset-2"
                                     onClick={() => setShowModal(false)}
                                 >
                                     Cancel
                                 </button>
                                 <button
                                     type="submit"
-                                    className="transform rounded-lg bg-caramel px-4 py-2 font-semibold text-white transition hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 dark:focus-visible:ring-offset-darkSurface"
+                                    className="bg-caramel focus-visible:ring-caramel dark:focus-visible:ring-offset-darkSurface transform rounded-lg px-4 py-2 font-semibold text-white transition hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
                                 >
                                     Submit
                                 </button>
@@ -191,7 +191,7 @@ export default function SourcesPageClient({
                     <button
                         type="button"
                         onClick={() => setShowModal(true)}
-                        className="transform rounded-lg bg-caramel px-4 py-2 font-semibold text-white shadow-md transition hover:scale-105 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 dark:focus-visible:ring-offset-darkBg"
+                        className="bg-caramel focus-visible:ring-caramel dark:focus-visible:ring-offset-darkBg transform rounded-lg px-4 py-2 font-semibold text-white shadow-md transition hover:scale-105 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
                     >
                         Add New Source
                     </button>
@@ -203,14 +203,14 @@ export default function SourcesPageClient({
                         aria-label="Search sources"
                         value={searchTerm}
                         onChange={e => setSearchTerm(e.target.value)}
-                        className="w-full rounded-lg border border-gray-300 bg-white p-2.5 text-black shadow-sm transition focus:border-caramel focus:outline-none focus:ring-2 focus:ring-caramel/40 dark:border-white/10 dark:bg-darkSurface dark:text-white dark:placeholder-gray-500"
+                        className="focus:border-caramel focus:ring-caramel/40 dark:bg-darkSurface w-full rounded-lg border border-gray-300 bg-white p-2.5 text-black shadow-sm transition focus:outline-none focus:ring-2 dark:border-white/10 dark:text-white dark:placeholder-gray-500"
                     />
                 </div>
                 <div className="grid grid-cols-1 gap-6">
-                    <div className="overflow-x-auto rounded-xl border border-gray-100 bg-white p-6 shadow dark:border-caramel/30 dark:bg-darkSurface">
+                    <div className="dark:border-caramel/30 dark:bg-darkSurface overflow-x-auto rounded-xl border border-gray-100 bg-white p-6 shadow">
                         <table className="w-full text-left">
                             <thead>
-                                <tr className="bg-gray-100 text-xs font-semibold uppercase tracking-wider text-gray-600 dark:bg-darkBg dark:text-gray-300">
+                                <tr className="dark:bg-darkBg bg-gray-100 text-xs font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-300">
                                     <th className="rounded-l-lg px-4 py-3">
                                         Source
                                     </th>
@@ -245,7 +245,7 @@ export default function SourcesPageClient({
                                     filteredSources.map(src => (
                                         <tr
                                             key={src.id}
-                                            className="border-b border-gray-100 transition-colors hover:bg-gray-50 dark:border-white/10 dark:hover:bg-darkBg/50"
+                                            className="dark:hover:bg-darkBg/50 border-b border-gray-100 transition-colors hover:bg-gray-50 dark:border-white/10"
                                         >
                                             <td className="px-4 py-3 font-medium">
                                                 {src.source}
@@ -277,7 +277,7 @@ export default function SourcesPageClient({
                             </tbody>
                         </table>
                     </div>
-                    <div className="rounded-xl border border-gray-100 bg-white p-6 shadow dark:border-caramel/30 dark:bg-darkSurface">
+                    <div className="dark:border-caramel/30 dark:bg-darkSurface rounded-xl border border-gray-100 bg-white p-6 shadow">
                         <div className="h-96 w-full">
                             {loading ? (
                                 <div className="flex h-full items-center justify-center text-gray-500">

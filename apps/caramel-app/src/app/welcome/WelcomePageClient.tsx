@@ -55,7 +55,7 @@ export default function WelcomePageClient({
     return (
         <main className="mx-auto flex min-h-[70vh] w-full max-w-2xl flex-col justify-center gap-8 px-6 py-24 text-center">
             <div>
-                <h1 className="text-4xl font-bold tracking-tight text-gray-900 dark:text-white sm:text-3xl">
+                <h1 className="text-4xl font-bold tracking-tight text-gray-900 sm:text-3xl dark:text-white">
                     Caramel is installed. Thank you!
                 </h1>
                 <p className="mt-3 text-lg text-gray-600 dark:text-gray-400">
@@ -66,7 +66,7 @@ export default function WelcomePageClient({
 
             <section
                 aria-labelledby="pin-heading"
-                className="rounded-3xl border border-caramel/20 bg-white/80 p-6 text-left shadow-sm dark:border-caramel/30 dark:bg-darkSurface"
+                className="border-caramel/20 dark:border-caramel/30 dark:bg-darkSurface rounded-3xl border bg-white/80 p-6 text-left shadow-sm"
             >
                 <h2
                     id="pin-heading"
@@ -96,13 +96,13 @@ export default function WelcomePageClient({
                 <div className="mt-4 flex justify-center gap-3">
                     <Link
                         href="/signup"
-                        className="rounded-full bg-caramel px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2"
+                        className="bg-caramel focus-visible:ring-caramel rounded-full px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
                     >
                         Create an account
                     </Link>
                     <Link
                         href="/login"
-                        className="rounded-full border border-gray-300 px-5 py-2.5 text-sm font-semibold text-gray-800 transition hover:border-caramel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 dark:border-gray-700 dark:text-gray-200"
+                        className="hover:border-caramel focus-visible:ring-caramel rounded-full border border-gray-300 px-5 py-2.5 text-sm font-semibold text-gray-800 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 dark:border-gray-700 dark:text-gray-200"
                     >
                         Sign in
                     </Link>
@@ -125,7 +125,7 @@ export default function WelcomePageClient({
                                 href={browser.href}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="font-semibold text-caramel underline-offset-2 hover:underline"
+                                className="text-caramel font-semibold underline-offset-2 hover:underline"
                             >
                                 Caramel for {browser.label}
                             </a>

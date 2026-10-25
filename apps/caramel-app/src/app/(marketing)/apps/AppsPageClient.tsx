@@ -65,7 +65,7 @@ function StoreBadgeLink({
                     browser: isMatch ? platform : undefined,
                 })
             }
-            className="inline-flex min-h-[44px] w-fit items-center rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-caramel"
+            className="focus-visible:outline-caramel inline-flex min-h-[44px] w-fit items-center rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
         >
             <img
                 src={badge.src}
@@ -116,7 +116,7 @@ function BrowserCard({ card, isMatch }: { card: StoreCard; isMatch: boolean }) {
             className={`flex h-full flex-col gap-4 rounded-2xl border p-5 ${
                 isMatch
                     ? 'border-caramel bg-caramel/5 shadow-caramel-lg dark:bg-caramel/10'
-                    : 'border-gray-200 bg-white dark:border-white/10 dark:bg-darkSurface'
+                    : 'dark:bg-darkSurface border-gray-200 bg-white dark:border-white/10'
             }`}
         >
             <div className="flex items-start gap-3">
@@ -131,7 +131,7 @@ function BrowserCard({ card, isMatch }: { card: StoreCard; isMatch: boolean }) {
                     </p>
                 </div>
                 {isMatch && (
-                    <span className="ml-auto shrink-0 rounded-full bg-caramel px-2 py-0.5 text-xs font-semibold text-white">
+                    <span className="bg-caramel ml-auto shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold text-white">
                         Your browser
                     </span>
                 )}
@@ -144,7 +144,7 @@ function BrowserCard({ card, isMatch }: { card: StoreCard; isMatch: boolean }) {
                         className="flex items-start gap-2 text-sm text-gray-600 dark:text-gray-300"
                     >
                         <FiCheck
-                            className="mt-0.5 h-4 w-4 shrink-0 text-caramel"
+                            className="text-caramel mt-0.5 h-4 w-4 shrink-0"
                             aria-hidden="true"
                         />
                         <span>{advantage.text}</span>
@@ -194,11 +194,11 @@ export default function AppsPageClient() {
         : STORE_CARDS
 
     return (
-        <main className="flex min-h-screen w-full flex-col items-center px-6 pb-20 pt-32 dark:bg-darkBg">
+        <main className="dark:bg-darkBg flex min-h-screen w-full flex-col items-center px-6 pb-20 pt-32">
             <div className="flex w-full max-w-5xl flex-col gap-8">
                 <header className="flex flex-col gap-3">
                     <div className="flex items-center gap-3">
-                        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-caramel text-white shadow-caramel-sm">
+                        <span className="bg-caramel shadow-caramel-sm flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-white">
                             <FiDownload
                                 className="h-5 w-5"
                                 aria-hidden="true"
@@ -218,10 +218,10 @@ export default function AppsPageClient() {
                     ) : (
                         <p
                             data-testid="apps-installed-note"
-                            className="flex max-w-3xl items-start gap-2 rounded-2xl border border-caramel/40 bg-caramel/5 px-4 py-3 text-gray-700 dark:text-gray-200"
+                            className="border-caramel/40 bg-caramel/5 flex max-w-3xl items-start gap-2 rounded-2xl border px-4 py-3 text-gray-700 dark:text-gray-200"
                         >
                             <FiCheckCircle
-                                className="mt-0.5 h-5 w-5 shrink-0 text-caramel"
+                                className="text-caramel mt-0.5 h-5 w-5 shrink-0"
                                 aria-hidden="true"
                             />
                             <span>
@@ -292,7 +292,7 @@ export default function AppsPageClient() {
                                             surface,
                                         })
                                     }
-                                    className="group flex h-full items-start gap-3 rounded-2xl border border-gray-200 bg-white px-5 py-4 transition-shadow duration-200 hover:shadow-caramel-lg dark:border-white/10 dark:bg-darkSurface"
+                                    className="hover:shadow-caramel-lg dark:bg-darkSurface group flex h-full items-start gap-3 rounded-2xl border border-gray-200 bg-white px-5 py-4 transition-shadow duration-200 dark:border-white/10"
                                 >
                                     <img
                                         src={app.icon}
@@ -332,7 +332,7 @@ export default function AppsPageClient() {
                             <li key={link.href}>
                                 <Link
                                     href={link.href}
-                                    className="text-sm text-caramel underline hover:no-underline"
+                                    className="text-caramel text-sm underline hover:no-underline"
                                 >
                                     {link.label}
                                 </Link>

@@ -54,7 +54,7 @@ export default async function SupportPage() {
         <main className="flex min-h-screen flex-col items-center px-6 pb-16 pt-32">
             <div className="w-full max-w-lg">
                 <div className="mb-8 text-center">
-                    <h1 className="mb-3 bg-gradient-to-r from-caramel to-orange-600 bg-clip-text text-4xl font-extrabold text-transparent dark:from-orange-400 dark:to-caramel sm:text-3xl">
+                    <h1 className="from-caramel dark:to-caramel mb-3 bg-gradient-to-r to-orange-600 bg-clip-text text-4xl font-extrabold text-transparent sm:text-3xl dark:from-orange-400">
                         Contact Support
                     </h1>
                     <p className="mx-auto max-w-md text-gray-600 dark:text-gray-300">
@@ -69,7 +69,7 @@ export default async function SupportPage() {
                     target="_blank"
                     rel="noopener noreferrer"
                     data-testid="support-community-discord"
-                    className="mt-6 flex items-center gap-4 rounded-2xl border border-caramel/20 bg-white p-4 shadow-sm transition hover:border-caramel/50 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/60 dark:border-caramel/30 dark:bg-darkerBg"
+                    className="border-caramel/20 hover:border-caramel/50 focus-visible:ring-caramel/60 dark:border-caramel/30 dark:bg-darkerBg mt-6 flex items-center gap-4 rounded-2xl border bg-white p-4 shadow-sm transition hover:shadow-md focus-visible:outline-none focus-visible:ring-2"
                 >
                     <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#5865F2] text-xl text-white">
                         <FaDiscord aria-hidden="true" />

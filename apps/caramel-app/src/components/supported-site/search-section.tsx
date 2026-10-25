@@ -73,7 +73,7 @@ export default function SearchSection({
                 server HTML, so this text could not paint (and could not be
                 the LCP) until hydration — mobile LCP 4.7-8.6 s. CSS,
                 transform only, paints on the first frame. */}
-                <h1 className="hero-enter mb-10 bg-gradient-to-r from-caramel to-orange-600 bg-clip-text text-center text-4xl font-extrabold text-transparent dark:from-orange-400 dark:to-caramel md:text-3xl">
+                <h1 className="hero-enter from-caramel dark:to-caramel mb-10 bg-gradient-to-r to-orange-600 bg-clip-text text-center text-4xl font-extrabold text-transparent md:text-3xl dark:from-orange-400">
                     Is your favourite store supported?
                 </h1>
 
@@ -84,7 +84,7 @@ export default function SearchSection({
                     onChange={e => setQuery(e.target.value)}
                     placeholder="https://example.com"
                     aria-label="Search for a supported store"
-                    className="w-full rounded-full border-2 border-caramel/30 bg-white px-6 py-4 text-lg placeholder-gray-400 shadow-md outline-none transition-all focus:border-caramel focus:shadow-lg dark:bg-darkSurface dark:text-white dark:placeholder-gray-500 dark:focus:border-orange-400 sm:text-base"
+                    className="border-caramel/30 focus:border-caramel dark:bg-darkSurface w-full rounded-full border-2 bg-white px-6 py-4 text-lg placeholder-gray-400 shadow-md outline-none transition-all focus:shadow-lg sm:text-base dark:text-white dark:placeholder-gray-500 dark:focus:border-orange-400"
                 />
 
                 <InstallCallout
@@ -159,7 +159,7 @@ export default function SearchSection({
                                             initial={false}
                                             animate={{ opacity: 1, y: 0 }}
                                             transition={{ duration: 0.3 }}
-                                            className="mb-10 border-b border-caramel/15 pb-10 text-center text-2xl font-bold text-gray-800 dark:border-white/10 dark:text-gray-200"
+                                            className="border-caramel/15 mb-10 border-b pb-10 text-center text-2xl font-bold text-gray-800 dark:border-white/10 dark:text-gray-200"
                                         >
                                             🏆 Top Supported Websites
                                         </motion.h2>

@@ -151,14 +151,14 @@ export default function CouponFilters({
                         Search
                     </label>
                     <div className="relative">
-                        <MagnifyingGlassIcon className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-caramel" />
+                        <MagnifyingGlassIcon className="text-caramel absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2" />
                         <input
                             id="coupon-search"
                             type="text"
                             value={localSearch}
                             onChange={e => handleSearchChange(e.target.value)}
                             placeholder="Search coupons by site, title, or description..."
-                            className="w-full rounded-md border-2 border-caramel/30 bg-white px-3 py-[11px] pl-10 text-sm outline-none transition-all focus:border-caramel dark:bg-darkSurface dark:text-white dark:placeholder-gray-500 dark:focus:border-orange-400"
+                            className="border-caramel/30 focus:border-caramel dark:bg-darkSurface w-full rounded-md border-2 bg-white px-3 py-[11px] pl-10 text-sm outline-none transition-all dark:text-white dark:placeholder-gray-500 dark:focus:border-orange-400"
                         />
                     </div>
                 </div>
@@ -231,7 +231,7 @@ export default function CouponFilters({
                             onChange({ search: '', site: '', type: 'all' })
                             onClearAll?.()
                         }}
-                        className="flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-r from-caramel to-orange-600 text-white shadow-md transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 dark:focus-visible:ring-offset-darkBg"
+                        className="from-caramel focus-visible:ring-caramel dark:focus-visible:ring-offset-darkBg flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-r to-orange-600 text-white shadow-md transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
                         title="Clear filters"
                         aria-label="Clear filters"
                     >
@@ -245,7 +245,7 @@ export default function CouponFilters({
                 type="button"
                 aria-expanded={showFilters}
                 onClick={() => setShowFilters(!showFilters)}
-                className="mt-2 hidden w-full items-center justify-center gap-2 rounded-full bg-white px-6 py-3 text-caramel shadow-md transition-all hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 dark:bg-darkSurface dark:text-orange-400 dark:focus-visible:ring-offset-darkBg md:flex"
+                className="text-caramel focus-visible:ring-caramel dark:bg-darkSurface dark:focus-visible:ring-offset-darkBg mt-2 hidden w-full items-center justify-center gap-2 rounded-full bg-white px-6 py-3 shadow-md transition-all hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 md:flex dark:text-orange-400"
             >
                 <FaFilter className="h-4 w-4" />
                 <span className="font-semibold">Filters</span>

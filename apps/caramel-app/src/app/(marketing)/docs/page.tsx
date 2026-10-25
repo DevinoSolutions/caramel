@@ -73,7 +73,7 @@ function DocsAnchor({ link }: { link: DocsLink }): React.JSX.Element {
 
 export default function DocsPage(): React.JSX.Element {
     return (
-        <main className="flex min-h-screen w-full flex-col items-center px-6 pb-20 pt-32 dark:bg-darkBg">
+        <main className="dark:bg-darkBg flex min-h-screen w-full flex-col items-center px-6 pb-20 pt-32">
             <div className="flex w-full max-w-4xl flex-col gap-8">
                 <header className="flex flex-col gap-4">
                     <h1 className="text-3xl font-bold tracking-tight text-gray-900 dark:text-white">
@@ -86,7 +86,7 @@ export default function DocsPage(): React.JSX.Element {
 
                 <nav
                     aria-label={DOCS_PAGE_COPY.contentsLabel}
-                    className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-white/10 dark:bg-darkSurface"
+                    className="dark:bg-darkSurface rounded-2xl border border-gray-200 bg-white p-5 dark:border-white/10"
                 >
                     <p className="mb-2 text-sm font-semibold text-gray-900 dark:text-white">
                         {DOCS_PAGE_COPY.contentsLabel}

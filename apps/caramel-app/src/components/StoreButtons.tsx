@@ -11,16 +11,16 @@ export default function StoreButtons() {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.6 }}
-                className="m-auto w-full text-start text-3xl font-bold tracking-tight text-black drop-shadow-2xl dark:text-white md:text-lg"
+                className="m-auto w-full text-start text-3xl font-bold tracking-tight text-black drop-shadow-2xl md:text-lg dark:text-white"
             >
                 Where to get Caramel?
             </motion.div>
-            <div className="grid grid-cols-2 gap-8 xs:grid-cols-1">
+            <div className="xs:grid-cols-1 grid grid-cols-2 gap-8">
                 <motion.a
                     href={CHROME_WEB_STORE_URL}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center gap-2 rounded-xl border-[1.5px] border-black px-3 py-1.5 text-black transition-[transform,background-color,border-color,color] duration-fast ease-motion-out hover:border-caramel hover:bg-caramel hover:text-white motion-safe:active:scale-[0.98] dark:border-white dark:text-white"
+                    className="duration-fast ease-motion-out hover:border-caramel hover:bg-caramel flex items-center gap-2 rounded-xl border-[1.5px] border-black px-3 py-1.5 text-black transition-[transform,background-color,border-color,color] hover:text-white motion-safe:active:scale-[0.98] dark:border-white dark:text-white"
                 >
                     <div className="w-10">
                         <FaChrome aria-hidden="true" size={40} />
@@ -38,7 +38,7 @@ export default function StoreButtons() {
                     target="_blank"
                     href={FIREFOX_ADDONS_URL}
                     rel="noopener noreferrer"
-                    className="flex items-center gap-2 rounded-xl border-[1.5px] border-black px-3 py-1.5 text-black transition-[transform,background-color,border-color,color] duration-fast ease-motion-out hover:border-caramel hover:bg-caramel hover:text-white motion-safe:active:scale-[0.98] dark:border-white dark:text-white"
+                    className="duration-fast ease-motion-out hover:border-caramel hover:bg-caramel flex items-center gap-2 rounded-xl border-[1.5px] border-black px-3 py-1.5 text-black transition-[transform,background-color,border-color,color] hover:text-white motion-safe:active:scale-[0.98] dark:border-white dark:text-white"
                 >
                     <div className="w-10">
                         <FaFirefox aria-hidden="true" size={40} />

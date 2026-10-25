@@ -196,7 +196,7 @@ export default function FavoriteStoresSection({
                                     onClick={() => void unstar(store)}
                                     aria-pressed={true}
                                     aria-label={`Remove ${store.domain} from your stores`}
-                                    className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-caramel transition hover:bg-caramel/10"
+                                    className="text-caramel hover:bg-caramel/10 flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg transition"
                                 >
                                     <FaStar
                                         aria-hidden="true"

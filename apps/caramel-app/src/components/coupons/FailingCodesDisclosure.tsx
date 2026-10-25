@@ -55,7 +55,7 @@ export default function FailingCodesDisclosure({
                 aria-expanded={open}
                 aria-controls={regionId}
                 onClick={() => setOpen(value => !value)}
-                className="flex w-full items-center justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50/60 px-5 py-3 text-left text-sm font-semibold text-amber-800 transition hover:bg-amber-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-300 dark:hover:bg-amber-950/30 dark:focus-visible:ring-offset-darkSurface"
+                className="focus-visible:ring-caramel dark:focus-visible:ring-offset-darkSurface flex w-full items-center justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50/60 px-5 py-3 text-left text-sm font-semibold text-amber-800 transition hover:bg-amber-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-300 dark:hover:bg-amber-950/30"
             >
                 <span>{label}</span>
                 <ChevronDownIcon

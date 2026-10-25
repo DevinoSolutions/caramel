@@ -90,7 +90,7 @@ export default function SuggestionForm({
     return (
         <form
             onSubmit={submit}
-            className="flex w-full flex-col items-center gap-6 rounded-3xl border border-caramel/20 bg-gradient-to-br from-caramel/5 via-orange-50/20 to-caramel/5 p-8 shadow-md dark:border-caramel/30 dark:from-caramel/10 dark:via-orange-900/10 dark:to-caramel/10 sm:p-6"
+            className="border-caramel/20 from-caramel/5 to-caramel/5 dark:border-caramel/30 dark:from-caramel/10 dark:to-caramel/10 flex w-full flex-col items-center gap-6 rounded-3xl border bg-gradient-to-br via-orange-50/20 p-8 shadow-md sm:p-6 dark:via-orange-900/10"
         >
             <p className="text-center leading-relaxed text-gray-700 dark:text-gray-300">
                 We don’t support that store yet. Let us know and we’ll add it!
@@ -102,7 +102,7 @@ export default function SuggestionForm({
                 onChange={e => setUrl(e.target.value)}
                 placeholder="https://example.com"
                 aria-label="Store URL"
-                className="w-full rounded-full border-2 border-caramel/30 bg-white px-6 py-3 text-center placeholder-gray-400 shadow-sm outline-none transition-all focus:border-caramel dark:bg-darkSurface dark:text-white dark:placeholder-gray-500 dark:focus:border-orange-400"
+                className="border-caramel/30 focus:border-caramel dark:bg-darkSurface w-full rounded-full border-2 bg-white px-6 py-3 text-center placeholder-gray-400 shadow-sm outline-none transition-all dark:text-white dark:placeholder-gray-500 dark:focus:border-orange-400"
             />
             <input
                 type="email"
@@ -112,13 +112,13 @@ export default function SuggestionForm({
                 onChange={e => setEmail(e.target.value)}
                 placeholder="you@example.com (optional — we’ll email you when it’s supported)"
                 aria-label="Email me when this store is supported (optional)"
-                className="w-full rounded-full border-2 border-caramel/30 bg-white px-6 py-3 text-center placeholder-gray-400 shadow-sm outline-none transition-all focus:border-caramel dark:bg-darkSurface dark:text-white dark:placeholder-gray-500 dark:focus:border-orange-400"
+                className="border-caramel/30 focus:border-caramel dark:bg-darkSurface w-full rounded-full border-2 bg-white px-6 py-3 text-center placeholder-gray-400 shadow-sm outline-none transition-all dark:text-white dark:placeholder-gray-500 dark:focus:border-orange-400"
             />
             <motion.button
                 type="submit"
                 disabled={loading}
                 whileTap={{ scale: 0.95 }}
-                className="max-w-full truncate rounded-full bg-gradient-to-r from-caramel to-orange-600 px-8 py-3 font-semibold text-white shadow transition-all hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-70 dark:focus-visible:ring-offset-darkBg"
+                className="from-caramel focus-visible:ring-caramel dark:focus-visible:ring-offset-darkBg max-w-full truncate rounded-full bg-gradient-to-r to-orange-600 px-8 py-3 font-semibold text-white shadow transition-all hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-70"
             >
                 {loading ? (
                     'Sending…'

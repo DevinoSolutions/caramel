@@ -51,10 +51,10 @@ export default async function StoreNeighbours({ base }: { base: string }) {
                         <li key={store.base}>
                             <a
                                 href={`/coupons/${encodeURIComponent(store.base)}`}
-                                className="inline-flex items-center gap-2 rounded-full border border-gray-100 bg-white px-4 py-2 text-sm font-medium text-gray-800 shadow-sm transition hover:border-orange-200 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 dark:border-white/10 dark:bg-darkSurface dark:text-gray-100 dark:hover:border-orange-800/70 dark:focus-visible:ring-offset-darkSurface"
+                                className="focus-visible:ring-caramel dark:bg-darkSurface dark:focus-visible:ring-offset-darkSurface inline-flex items-center gap-2 rounded-full border border-gray-100 bg-white px-4 py-2 text-sm font-medium text-gray-800 shadow-sm transition hover:border-orange-200 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 dark:border-white/10 dark:text-gray-100 dark:hover:border-orange-800/70"
                             >
                                 {store.base}
-                                <span className="rounded-full bg-caramel/10 px-2 py-0.5 text-xs font-semibold text-caramel dark:bg-caramel/20">
+                                <span className="bg-caramel/10 text-caramel dark:bg-caramel/20 rounded-full px-2 py-0.5 text-xs font-semibold">
                                     {store.couponCount.toLocaleString('en-US')}{' '}
                                     {store.couponCount === 1 ? 'code' : 'codes'}
                                 </span>
@@ -66,14 +66,14 @@ export default async function StoreNeighbours({ base }: { base: string }) {
             <p className="mt-4 text-sm text-gray-600 dark:text-gray-400">
                 <a
                     href={directoryPath(letter)}
-                    className="font-semibold text-caramel underline-offset-2 hover:underline"
+                    className="text-caramel font-semibold underline-offset-2 hover:underline"
                 >
                     All stores starting with {directoryLetterLabel(letter)}
                 </a>
                 {' · '}
                 <a
                     href={directoryPath()}
-                    className="font-semibold text-caramel underline-offset-2 hover:underline"
+                    className="text-caramel font-semibold underline-offset-2 hover:underline"
                 >
                     Store directory A–Z
                 </a>

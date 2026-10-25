@@ -339,7 +339,7 @@ export default async function StoreCouponsPage({
     }
 
     return (
-        <main className="relative min-h-screen px-6 pt-32 dark:bg-darkBg lg:px-8 sm:pt-8">
+        <main className="dark:bg-darkBg relative min-h-screen px-6 pt-32 sm:pt-8 lg:px-8">
             <CouponsSection
                 defaultFilters={{ site: base }}
                 initialCoupons={coupons}

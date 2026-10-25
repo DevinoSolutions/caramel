@@ -79,7 +79,7 @@ export default async function CouponsPage() {
     }
 
     return (
-        <main className="relative min-h-screen px-6 pt-32 dark:bg-darkBg lg:px-8">
+        <main className="dark:bg-darkBg relative min-h-screen px-6 pt-32 lg:px-8">
             <CouponsSection
                 initialCoupons={couponsWithSignals}
                 initialTotal={total}

@@ -45,12 +45,12 @@ export default function AuthLayout({
         // so this needs no hydration suppression. <html> already carries the
         // real theme pre-paint — see app/layout.tsx.
         <div className={isDarkMode ? 'dark' : 'light'}>
-            <div className="flex min-h-screen bg-white dark:bg-darkBg">
+            <div className="dark:bg-darkBg flex min-h-screen bg-white">
                 {/* Brand panel — desktop only. Static markup, no client-only
                     branching → hydration-safe. The gradient pair matches the
                     AA-fixed footer slab (#c14e14/#a63f10: white text ≥4.5:1 at
                     both stops — from-caramel fails). */}
-                <aside className="relative flex w-[44%] shrink-0 flex-col justify-between overflow-hidden bg-gradient-to-br from-[#c14e14] to-[#a63f10] p-12 text-white xl:w-[42%] lg:hidden">
+                <aside className="relative flex w-[44%] shrink-0 flex-col justify-between overflow-hidden bg-gradient-to-br from-[#c14e14] to-[#a63f10] p-12 text-white lg:hidden xl:w-[42%]">
                     <div
                         aria-hidden="true"
                         className="pointer-events-none absolute -right-24 -top-24 h-80 w-80 rounded-full bg-white/10 blur-3xl"
@@ -78,7 +78,7 @@ export default function AuthLayout({
                             height={48}
                             className="brightness-0 invert"
                         />
-                        <p className="mt-7 max-w-sm text-[28px] font-bold leading-[1.25] 3xl:text-2xl">
+                        <p className="3xl:text-2xl mt-7 max-w-sm text-[28px] font-bold leading-[1.25]">
                             The open-source, privacy-first way to save at
                             checkout.
                         </p>
@@ -93,8 +93,8 @@ export default function AuthLayout({
                             className="relative -mx-12 my-9"
                         >
                             <div className="border-t-2 border-dashed border-white/30" />
-                            <div className="absolute left-0 top-1/2 h-9 w-9 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white dark:bg-darkBg" />
-                            <div className="absolute right-0 top-1/2 h-9 w-9 -translate-y-1/2 translate-x-1/2 rounded-full bg-white dark:bg-darkBg" />
+                            <div className="dark:bg-darkBg absolute left-0 top-1/2 h-9 w-9 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white" />
+                            <div className="dark:bg-darkBg absolute right-0 top-1/2 h-9 w-9 -translate-y-1/2 translate-x-1/2 rounded-full bg-white" />
                         </div>
 
                         <ul className="space-y-3.5">
@@ -122,16 +122,16 @@ export default function AuthLayout({
                 </aside>
 
                 {/* Form column */}
-                <main className="relative flex flex-1 flex-col items-center justify-center px-8 py-14 sm:px-5 sm:py-10 xs:px-4">
+                <main className="xs:px-4 relative flex flex-1 flex-col items-center justify-center px-8 py-14 sm:px-5 sm:py-10">
                     <ThemeToggle className="absolute right-6 top-6 sm:right-4 sm:top-4" />
 
                     {/* Compact brand header, mobile/tablet only — the panel is
                         gone there, and a form with no logo above it reads as a
                         stray page rather than as Caramel. */}
-                    <div className="mb-9 hidden w-full max-w-[26rem] lg:block sm:mb-7">
+                    <div className="mb-9 hidden w-full max-w-[26rem] sm:mb-7 lg:block">
                         <Link
                             href="/"
-                            className="inline-flex items-center gap-2 rounded-sm text-sm font-medium text-gray-500 transition hover:text-caramel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/50 dark:text-gray-400"
+                            className="hover:text-caramel focus-visible:ring-caramel/50 inline-flex items-center gap-2 rounded-sm text-sm font-medium text-gray-500 transition focus-visible:outline-none focus-visible:ring-2 dark:text-gray-400"
                         >
                             <HiArrowLeft aria-hidden="true" />
                             Back to home

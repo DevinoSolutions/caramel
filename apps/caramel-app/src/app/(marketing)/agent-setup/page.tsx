@@ -39,7 +39,7 @@ export const metadata: Metadata = {
 
 export default function AgentSetupPage() {
     return (
-        <main className="flex min-h-screen w-full flex-col items-center px-6 pb-20 pt-32 dark:bg-darkBg">
+        <main className="dark:bg-darkBg flex min-h-screen w-full flex-col items-center px-6 pb-20 pt-32">
             <div className="flex w-full max-w-4xl flex-col gap-8">
                 <header className="flex flex-col gap-4">
                     <h1 className="text-3xl font-bold tracking-tight text-gray-900 dark:text-white">
@@ -50,7 +50,7 @@ export default function AgentSetupPage() {
                         agent. The agent fetches{' '}
                         <a
                             href={PROMPT_MD_URL}
-                            className="font-mono text-caramel underline hover:no-underline"
+                            className="text-caramel font-mono underline hover:no-underline"
                         >
                             {PROMPT_MD_URL.replace(`${origin}`, '')}
                         </a>{' '}
@@ -59,7 +59,7 @@ export default function AgentSetupPage() {
                         through our public API. No API key, no account.
                     </p>
                     <AgentSetupPill surface="agent-setup" className="w-fit" />
-                    <pre className="whitespace-pre-wrap break-words rounded-xl bg-darkBg px-4 py-3 text-sm text-gray-100 ring-1 ring-white/10">
+                    <pre className="bg-darkBg whitespace-pre-wrap break-words rounded-xl px-4 py-3 text-sm text-gray-100 ring-1 ring-white/10">
                         <code>
                             <UrlBreakableText text={AGENT_SETUP_COPY_TEXT} />
                         </code>
@@ -78,7 +78,7 @@ export default function AgentSetupPage() {
                             <li key={guide.id}>
                                 <Link
                                     href={`${AGENT_SETUP_PATH}/${guide.id}`}
-                                    className="flex h-full flex-col gap-2 rounded-2xl border border-gray-200 bg-white p-5 transition-shadow hover:shadow-caramel-lg dark:border-white/10 dark:bg-darkSurface"
+                                    className="hover:shadow-caramel-lg dark:bg-darkSurface flex h-full flex-col gap-2 rounded-2xl border border-gray-200 bg-white p-5 transition-shadow dark:border-white/10"
                                 >
                                     <span className="text-lg font-semibold text-gray-900 dark:text-white">
                                         {guide.name}
@@ -145,7 +145,7 @@ export default function AgentSetupPage() {
                     >
                         Verify
                     </h2>
-                    <pre className="whitespace-pre-wrap break-words rounded-xl bg-darkBg px-4 py-3 text-sm text-gray-100 ring-1 ring-white/10">
+                    <pre className="bg-darkBg whitespace-pre-wrap break-words rounded-xl px-4 py-3 text-sm text-gray-100 ring-1 ring-white/10">
                         <code>
                             <UrlBreakableText
                                 text={`curl -s "${API.verifyUrl}"`}

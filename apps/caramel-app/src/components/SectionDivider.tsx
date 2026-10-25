@@ -52,7 +52,7 @@ export default function SectionDivider({
                     <div
                         className={`absolute inset-x-0 top-0 h-px ${glowClassName}`}
                     ></div>
-                    <div className="absolute inset-x-0 top-0 border-t-2 border-dashed border-caramel/25 dark:border-caramel/35"></div>
+                    <div className="border-caramel/25 dark:border-caramel/35 absolute inset-x-0 top-0 border-t-2 border-dashed"></div>
                 </m.div>
 
                 {/* Punch holes at each end of the perforation. Filled with the
@@ -69,7 +69,7 @@ export default function SectionDivider({
                     child therefore carries the fade and nothing else. */}
                 <span className="absolute left-0 top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2">
                     <m.span
-                        className="block h-full w-full rounded-full bg-gray-50 ring-1 ring-caramel/25 dark:bg-darkBg dark:ring-caramel/35"
+                        className="ring-caramel/25 dark:bg-darkBg dark:ring-caramel/35 block h-full w-full rounded-full bg-gray-50 ring-1"
                         initial={reduceMotion ? false : { opacity: 0 }}
                         whileInView={{ opacity: 1 }}
                         viewport={{ once: true, margin: '0px 0px -40px 0px' }}
@@ -82,7 +82,7 @@ export default function SectionDivider({
                 </span>
                 <span className="absolute right-0 top-1/2 h-3 w-3 -translate-y-1/2 translate-x-1/2">
                     <m.span
-                        className="block h-full w-full rounded-full bg-gray-50 ring-1 ring-caramel/25 dark:bg-darkBg dark:ring-caramel/35"
+                        className="ring-caramel/25 dark:bg-darkBg dark:ring-caramel/35 block h-full w-full rounded-full bg-gray-50 ring-1"
                         initial={reduceMotion ? false : { opacity: 0 }}
                         whileInView={{ opacity: 1 }}
                         viewport={{ once: true, margin: '0px 0px -40px 0px' }}
