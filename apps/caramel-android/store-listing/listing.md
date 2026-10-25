@@ -67,8 +67,8 @@ Claim trace:
   it in the browser, so the app itself does not browse other sites, but the claim is not worth the risk.
 - "Open source ... AGPL-3.0 ... github.com/DevinoSolutions/caramel": EXT bullet.
 - Sign in with Apple or Google: SHELL `ui/CaramelApp.kt` (sign-in sheet) and `core/SessionStore.kt`. Sync and savings: WEB `/profile`
-  once the web session handoff exists (**TODO T-7852: not built yet, so a signed-in app does not yet show a signed-in `/profile`; do
-  not submit before it does**).
+  through the web session handoff (T-7852, `web/WebSessionHandoff.kt`; **wired but never run on a device: do a real sign-in on a device
+  and confirm Saved and Account show a signed-in `/profile` before submitting**).
 - Support sentence: SUP, "a human replies within 1 business day".
 - REMOVED vs the 1.5.0 draft: "download your data" and "delete your synced data" (the native Account screen is gone). KEPT: "delete
   your account from inside the app", via the native "Account & privacy" dialog (top-bar icon; `ui/CaramelApp.kt`, T-7505 note).
