@@ -11,9 +11,7 @@ export function safeReturnPath(raw: string | undefined | null): string {
     if (!raw) return '/'
     const trimmed = raw.trim()
     if (!trimmed.startsWith('/')) return '/'
-    // Reject backslashes and control characters before parsing — browsers
-    // normalise these into path separators or strip them silently.
-    if (/[\\\x00-\x1f]/.test(trimmed)) return '/'
+    if (hasBackslashOrControl(trimmed)) return '/'
     try {
         const parsed = new URL(trimmed, PLACEHOLDER)
         if (parsed.origin !== PLACEHOLDER) return '/'
@@ -27,4 +25,12 @@ export function safeReturnPath(raw: string | undefined | null): string {
     } catch {
         return '/'
     }
+}
+
+function hasBackslashOrControl(s: string): boolean {
+    for (let i = 0; i < s.length; i++) {
+        const c = s.charCodeAt(i)
+        if (c === 0x5c || c < 0x20) return true
+    }
+    return false
 }
