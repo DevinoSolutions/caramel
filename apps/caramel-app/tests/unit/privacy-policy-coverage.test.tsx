@@ -155,6 +155,12 @@ describe('privacy policy coverage', () => {
         expect(recordingOnly).toContain(
             'Session recordings made before then may also contain it.',
         )
+        // Direct check on the disclosure itself: no duration, no deletion claim.
+        expect(
+            'Session recordings made before then may also contain it.',
+        ).not.toMatch(
+            /d+s*days?|within|at most|up to|retention|expire|removed|purge|deleted|delete|clean-up|no backlog/i,
+        )
         expect(
             recordingOnly.filter(sentence =>
                 sentence.includes(
