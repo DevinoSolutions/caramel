@@ -34,7 +34,7 @@ afterEach(cleanup)
 // state a retention, expiry or duration until posthog-selfhost and A78 report.
 function expectNoRecordingRetentionClaim(text: string): void {
     expect(text).not.toMatch(
-        /\b\d+\s*days?\b|retention|expire|purge|clean-up|removed from the product|deleted after|at most|up to|no backlog/i,
+        /\b\d+\s*days?\b|within|at most|up to|retention|expire|removed|purge|deleted|delete|clean-up|no backlog/i,
     )
 }
 

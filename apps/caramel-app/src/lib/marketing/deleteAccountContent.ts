@@ -195,9 +195,7 @@ export const DELETE_ACCOUNT_SECTIONS: ReadonlyArray<DeleteAccountSection> = [
             ...(ANALYTICS_DELETION_COPY.keptBullet
                 ? [ANALYTICS_DELETION_COPY.keptBullet]
                 : []),
-            // TODO(T-7505): recording retention sentence WITHHELD (MASTER) until
-            // posthog-selfhost reports on purging the stored recording data and
-            // A78 is answered. No retention or duration claim may render here.
+            // TODO(T-7505): recording retention sentence withheld (MASTER 2026-10-25) until posthog-selfhost confirms new recordings are stamped 30d and the storage purge (A78, T-8392) is done; do not add a duration or deletion claim before then.
             'Session recordings of your visits (a sample of sessions is recorded, with every form field masked) in our self-hosted PostHog.',
             'Analytics events that are not linked to your account: visits from before you signed in that were never joined to your account, and the extension’s install and anonymous diagnostic events.',
             'Usage data collected by Google Analytics on our website. Google holds it under its own retention settings; deleting your account does not remove it.',
