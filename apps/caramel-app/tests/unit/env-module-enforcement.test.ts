@@ -43,6 +43,7 @@ const SKIP_DIR_NAMES = new Set([
     '.next',
     'dist',
     'coverage',
+    'generated',
     '.output',
     '.size-cache',
 ])
