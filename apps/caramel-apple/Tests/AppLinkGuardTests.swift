@@ -421,7 +421,7 @@ final class HandoffStubURLProtocol: URLProtocol {
                let target = URL(string: location) {
                 // A real redirect: URLSession asks the task delegate, and follows it unless the delegate declines.
                 client?.urlProtocol(self, wasRedirectedTo: URLRequest(url: target), redirectResponse: response)
-                return
+                // The 3xx itself is then delivered: what the task sees when its delegate declines the redirect.
             }
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
             client?.urlProtocol(self, didLoad: data)
