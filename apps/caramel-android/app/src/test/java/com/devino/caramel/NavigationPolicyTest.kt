@@ -8,6 +8,16 @@ import org.junit.Test
 
 class NavigationPolicyTest {
     @Test
+    fun aPageCannotNavigateToTheRedeemRouteHoweverItIsSpelled() {
+        val code = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ"
+        assertTrue(NavigationPolicy.isPageInitiatedRedeem("https://grabcaramel.com/api/app/web-session/redeem?code=$code"))
+        assertTrue(NavigationPolicy.isPageInitiatedRedeem("https://grabcaramel.com/API/app/web-session/%72edeem?code=$code"))
+        assertTrue(NavigationPolicy.isPageInitiatedRedeem("https://grabcaramel.com/api/app/web-session/redeem"))
+        assertFalse(NavigationPolicy.isPageInitiatedRedeem("https://grabcaramel.com/profile"))
+        assertFalse(NavigationPolicy.isPageInitiatedRedeem("https://grabcaramel.com/api/app/web-session/handoff"))
+    }
+
+    @Test
     fun aMainFrameRequestToAForeignOriginIsBlockedWhateverItsMethod() {
         // shouldInterceptRequest sees POSTs and 307/308 redirects that shouldOverrideUrlLoading never does.
         val foreign = listOf(

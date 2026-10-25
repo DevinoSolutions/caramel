@@ -118,16 +118,12 @@ fun CaramelApp(
         webViewHolder[0]?.clearCache(true)
         webViewGeneration += 1
     }
-    var wasSignedIn by remember { mutableStateOf(false) }
-    LaunchedEffect(session.isSignedIn) {
-        if (WebSessionLifecycle.shouldWipeWebSession(wasSignedIn, session.isSignedIn)) wipeWebSession()
-        wasSignedIn = session.isSignedIn
-    }
-
     // Every load goes through the sink guard (WebView.loadGuarded); a refusal is reported, not dropped. admitLoad refuses
     // a redeem URL the handoff did not issue, and any other load cancels a pending handoff (the latest tap wins).
     val navigate: (String) -> Unit = { url ->
-        if (!container.webSession.admitLoad(url) || webViewHolder[0]?.loadGuarded(url) != true) {
+        if (!container.webSession.admitLoad(url)) {
+            currentOnNotice("Caramel did not open a sign-in link because the app did not create it.")
+        } else if (webViewHolder[0]?.loadGuarded(url) != true) {
             currentOnNotice("Caramel did not open a page because it is not on grabcaramel.com.")
         }
     }
@@ -143,6 +139,31 @@ fun CaramelApp(
     // UNDISPATCHED: the handoff's state changes happen before its first suspension, so a cancelled scope cannot strand them.
     val startHandoff: (String) -> Unit = { targetPath ->
         scope.launch(start = CoroutineStart.UNDISPATCHED) { applyHandoffStep(container.webSession.startFresh(targetPath)) }
+    }
+
+    // Wipe whenever the native token goes away or is replaced by another one (A to B skips null when a new sign-in lands while
+    // A is still set). A new token that is still present then gets its own handoff, since the wipe superseded the one it started.
+    var lastToken by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(session.token) {
+        val previous = lastToken
+        lastToken = session.token
+        if (WebSessionLifecycle.shouldWipeWebSession(previous, session.token)) {
+            wipeWebSession()
+            if (WebSessionLifecycle.shouldRelinkAfterWipe(session.token)) startHandoff(ShellTab.DEALS.startPath)
+        }
+    }
+
+    // Signing in natively while a token is still set (the link fallback) signs the old one out first, so its web session
+    // and its server session end before another account can sign in.
+    val signInWith: (OAuthProvider) -> Unit = { provider ->
+        showSignIn = false
+        scope.launch {
+            if (container.session.token != null) {
+                container.webSession.reset()
+                container.session.signOut()
+            }
+            container.session.beginSignIn(provider)?.let(onStartSignIn)
+        }
     }
 
     // Launch: read the stored bearer, then confirm it is still alive (a 401 clears it).
@@ -183,6 +204,10 @@ fun CaramelApp(
                         true
                     }
                 }
+
+            override fun onRefusedRedeemNavigation() {
+                currentOnNotice("Caramel did not follow a sign-in link that the app did not create.")
+            }
 
             override fun onBlockedNavigation() {
                 currentOnNotice("Caramel blocked a page that tried to leave grabcaramel.com.")
@@ -303,18 +328,12 @@ fun CaramelApp(
                     Button(
                         modifier = Modifier.fillMaxWidth(),
                         enabled = !session.isSigningIn,
-                        onClick = {
-                            showSignIn = false
-                            scope.launch { container.session.beginSignIn(OAuthProvider.APPLE)?.let(onStartSignIn) }
-                        },
+                        onClick = { signInWith(OAuthProvider.APPLE) },
                     ) { Text("Continue with Apple") }
                     OutlinedButton(
                         modifier = Modifier.fillMaxWidth(),
                         enabled = !session.isSigningIn,
-                        onClick = {
-                            showSignIn = false
-                            scope.launch { container.session.beginSignIn(OAuthProvider.GOOGLE)?.let(onStartSignIn) }
-                        },
+                        onClick = { signInWith(OAuthProvider.GOOGLE) },
                     ) { Text("Continue with Google") }
                 }
             },

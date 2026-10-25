@@ -249,11 +249,26 @@ class WebSessionCookieTest {
 
 class WebSessionLifecycleTest {
     @Test
-    fun theWebViewIsWipedOnlyWhenTheNativeTokenGoesAway() {
-        assertTrue(WebSessionLifecycle.shouldWipeWebSession(wasSignedIn = true, isSignedIn = false))
-        assertFalse("launch: nothing was signed in yet", WebSessionLifecycle.shouldWipeWebSession(wasSignedIn = false, isSignedIn = false))
-        assertFalse("sign-in", WebSessionLifecycle.shouldWipeWebSession(wasSignedIn = false, isSignedIn = true))
-        assertFalse(WebSessionLifecycle.shouldWipeWebSession(wasSignedIn = true, isSignedIn = true))
+    fun theWebViewIsWipedWhenTheNativeTokenGoesAway() {
+        assertTrue("A to null: sign-out, deletion, any 401", WebSessionLifecycle.shouldWipeWebSession("token-a", null))
+    }
+
+    @Test
+    fun theWebViewIsWipedWhenAnotherAccountReplacesTheToken() {
+        assertTrue("A to B never passes through null", WebSessionLifecycle.shouldWipeWebSession("token-a", "token-b"))
+    }
+
+    @Test
+    fun noWipeAtLaunchOrWhileTheTokenIsUnchanged() {
+        assertFalse("null to A: launch load or a first sign-in", WebSessionLifecycle.shouldWipeWebSession(null, "token-a"))
+        assertFalse("A to A", WebSessionLifecycle.shouldWipeWebSession("token-a", "token-a"))
+        assertFalse("null to null", WebSessionLifecycle.shouldWipeWebSession(null, null))
+    }
+
+    @Test
+    fun onlyAReplacementTokenIsRelinkedAfterTheWipe() {
+        assertTrue(WebSessionLifecycle.shouldRelinkAfterWipe("token-b"))
+        assertFalse(WebSessionLifecycle.shouldRelinkAfterWipe(null))
     }
 
     @Test

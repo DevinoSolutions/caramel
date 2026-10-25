@@ -11,6 +11,13 @@ object NavigationPolicy {
         isForMainFrame && AppLinkGuard.allowedTarget(url) == null
 
     /**
+     * Whether an [AppLinkGuard]-approved main-frame navigation reads as the handoff redeem route. The shell's
+     * own redeem load goes through `loadGuarded`, which `shouldOverrideUrlLoading` never sees, so anything
+     * that arrives there (a link, a script, a redirect) is a redeem the shell did not issue and is refused.
+     */
+    fun isPageInitiatedRedeem(allowedUrl: String): Boolean = RedeemUrl.hasRedeemPath(allowedUrl)
+
+    /**
      * Whether an off-origin navigation may be handed to the system (Custom Tab, dialer). A link the
      * shopper tapped has a gesture; a redirect is allowed only when the navigation that led to it had
      * one. A script or timer that navigates away on its own never opens another app.

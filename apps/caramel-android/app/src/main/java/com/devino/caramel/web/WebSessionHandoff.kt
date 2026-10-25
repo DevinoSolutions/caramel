@@ -83,9 +83,18 @@ object WebSessionCookie {
     }
 }
 
-/** True exactly when the native token went from present to gone: the WebView's copy of the web session must be wiped then. */
+/** When the WebView's copy of the web session must be wiped, decided from the native session bearer's identity. */
 object WebSessionLifecycle {
-    fun shouldWipeWebSession(wasSignedIn: Boolean, isSignedIn: Boolean): Boolean = wasSignedIn && !isSignedIn
+    /**
+     * True when a token that was there is gone ([previousToken] to null) or replaced by another one (A to B,
+     * which skips null when a new sign-in lands while the old token is still set). False at launch
+     * (null to a token) and when the token is unchanged. The tokens are only compared, never logged.
+     */
+    fun shouldWipeWebSession(previousToken: String?, currentToken: String?): Boolean =
+        previousToken != null && previousToken != currentToken
+
+    /** After a wipe, a token that is still present (A to B) belongs to a new sign-in that needs its own handoff. */
+    fun shouldRelinkAfterWipe(currentToken: String?): Boolean = currentToken != null
 }
 
 /** What asking the server for a redeem URL came to. */
@@ -222,9 +231,10 @@ class WebSessionHandoff(
     }
 
     /**
-     * Call before the guarded sink loads [url]. False means do not load it: it reads as the redeem route but
-     * is not the one URL issued (an intent or a page cannot smuggle a redeem in). Any other load cancels a
-     * running request and stops waiting for a redeem to land.
+     * Call before the shell's guarded sink loads [url] (tabs, intents, the shell's own loads). False means do
+     * not load it: it reads as the redeem route but is not the one URL issued. A page's own navigation never
+     * comes through here; the WebView client refuses those ([NavigationPolicy.isPageInitiatedRedeem]). Any
+     * other load cancels a running request and stops waiting for a redeem to land.
      */
     fun admitLoad(url: String): Boolean {
         if (url == issuedRedeemUrl) {
