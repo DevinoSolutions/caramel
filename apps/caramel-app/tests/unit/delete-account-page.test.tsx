@@ -77,7 +77,7 @@ describe('delete-account content', () => {
             'saved rules to be published, those rules',
             'It is not stored with your account or your IP address, and it is deleted after 30 days.',
             'The text of store searches is not written to them.',
-            'Error records (Sentry), kept for 90 days',
+            'Error records and session replays (Sentry), kept for 90 days',
             'by January 23, 2027 at the latest',
             'Analytics events that are not linked to your account',
             'Google Analytics',

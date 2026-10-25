@@ -312,13 +312,24 @@ const PrivacyPolicy = () => {
                         supported-stores search) so we can return matching
                         stores. We do not write it to our application logs, and
                         the access log of our own proxy is switched off.
-                        Cloudflare, our network provider, passes the request to
-                        our servers in transit. Since October 25, 2026 we also
-                        remove search text from error reports (including session
-                        replays) before they are stored. Error reports captured
-                        before that date may still contain it until they expire,
-                        90 days after capture (by January 23, 2027 at the
-                        latest).
+                        Cloudflare, our network provider, passes the request on
+                        and may briefly cache the response and keep its own
+                        request records. Since October 25, 2026 we also remove
+                        search text from error reports and from the web
+                        addresses recorded in session replays before they are
+                        stored, and we mask what you type in session replays.
+                        Error reports captured before that date may still
+                        contain it until they expire, 90 days after capture (by
+                        January 23, 2027 at the latest).
+                    </Para>
+                    <Para>
+                        A sample of sessions is also recorded in our self-hosted
+                        PostHog, with every form field masked. From
+                        [TODO(T-7505): date the PostHog recording fix goes live]
+                        search text is removed from the request addresses in
+                        those recordings; older recordings may contain it until
+                        they are deleted [TODO(T-7505): recording retention
+                        period, MASTER decides].
                     </Para>
                     <Para>
                         If you use our store-request form we collect the store
@@ -455,7 +466,8 @@ const PrivacyPolicy = () => {
                             'Shared codes stay published while they are valid; deleting your account removes the link between a shared code and you.',
                             'Promo-box suggestions (the store’s hostname and the selectors described above) are kept with your account. A suggestion older than 30 days no longer counts toward a store’s saved rules but is not deleted automatically; it is removed when you delete your account.',
                             'Server logs, which can include IP addresses and browser type, are kept for up to 90 days for security and troubleshooting. The text of store searches is not written to them.',
-                            'Error reports (Sentry) are kept for 90 days. Since October 25, 2026 they are stored without store-search text; reports captured before then may contain it until they expire (by January 23, 2027 at the latest).',
+                            'Error records and session replays (Sentry) are kept for 90 days. Since October 25, 2026 they are stored without store-search text (it is removed from error reports and from recorded web addresses, and what you type is masked in replays); ones captured before then may contain it until they expire (by January 23, 2027 at the latest).',
+                            'PostHog session recordings (a sample of sessions, form fields masked) are kept for [TODO(T-7505): recording retention period, MASTER decides]. They are stored without store-search text from [TODO(T-7505): date the PostHog recording fix goes live]; older recordings may contain it until they are deleted.',
                         ]}
                     />
                 </>

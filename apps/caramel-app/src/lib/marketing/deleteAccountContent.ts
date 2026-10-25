@@ -140,7 +140,7 @@ export const DELETE_ACCOUNT_SECTIONS: ReadonlyArray<DeleteAccountSection> = [
             'Per-code coupon totals (when a code last worked or failed). They are not tied to you.',
             'A one-way keyed hash of your account (or of your IP address, for a result sent while signed out) is kept with each coupon result to stop fake reports. It is not stored with your account or your IP address, and it is deleted after 30 days.',
             'Server logs, which can include IP addresses and browser type, for up to 90 days. The text of store searches is not written to them.',
-            'Error records (Sentry), kept for 90 days. They can hold your user id and the pages or errors you hit while signed in. Since October 25, 2026 they are stored without store-search text; records captured before then may contain it until they expire (by January 23, 2027 at the latest).',
+            'Error records and session replays (Sentry), kept for 90 days. They can hold your user id and the pages or errors you hit while signed in. Since October 25, 2026 they are stored without store-search text; ones captured before then may contain it until they expire (by January 23, 2027 at the latest).',
             'Analytics events that are not linked to your account: visits from before you signed in that were never joined to your account, and the extension’s install and anonymous diagnostic events.',
             'Usage data collected by Google Analytics on our website. Google holds it under its own retention settings; deleting your account does not remove it.',
             'Messages you sent to support (the support form or hello@devino.ca). They stay in our support inbox; deleting your account does not remove them. Include them in your email if you want them removed.',
