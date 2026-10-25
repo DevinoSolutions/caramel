@@ -344,7 +344,19 @@ export async function waitUntilReady(rec, timeout = 2000) {
 const CARAMEL_CURRENCY_SYMBOLS = '$£€¥₹₩₪₺₽฿₫₴₦₱﷼¢ت'
 // Lowercase or non-Latin markers common enough to be worth naming explicitly.
 // Uppercase codes are matched by shape instead (see the pattern below).
-const CARAMEL_CURRENCY_WORDS = ['kr', 'zł', 'Kč', 'Ft', 'lei', 'zt', 'руб']
+const CARAMEL_CURRENCY_WORDS = [
+    'kr',
+    'zł',
+    'Kč',
+    'Ft',
+    'lei',
+    'zt',
+    'руб',
+    'грн',
+    'Rp',
+    '원',
+    '元',
+]
 const _caramelMarkerAlt = [
     `[${CARAMEL_CURRENCY_SYMBOLS}]`,
     String.raw`\b[A-Z]{2,4}\$?`, // USD, AED, CHF, DT, RM, CA$, R$

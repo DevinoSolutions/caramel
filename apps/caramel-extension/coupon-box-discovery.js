@@ -1295,27 +1295,91 @@ function findToggle(doc, input) {
 // "items total") whose money value is readable. Visible rows win, then the
 // last one in document order (the bottom line of a summary). A cart with no
 // total row at all is read by its subtotal; never when a total row exists.
-const TOTAL_LABEL =
-    /^(order |estimated |grand |cart |basket |bag |your )?total( due| to pay| \(.*\))?:?$|^total\b|^(est\.?|estimated) (order )?total|^order total|^amount due|^total à payer|^gesamt|^summe|^totale|^totaal|^te betalen|^totalt\b|^summa\b|^att betala|^razem|^suma\b|^do zapłaty|^yhteensä|^maksettava|^合計/i
+// The total row in the other languages our stores check out in, each anchored
+// at the start of the label: Danish/Norwegian, Czech/Slovak, Turkish,
+// Russian/Ukrainian, Hungarian, Greek, Portuguese, Korean, Chinese, Hebrew,
+// Thai, Vietnamese, Arabic. Their subtotals start with another word
+// ("Ara toplam", "Υποσύνολο", "小计", "Tạm tính") or are refused by TOTAL_NOT.
+const TOTAL_INTL = [
+    'i alt\\b',
+    '(å|at) betale',
+    'totalsum',
+    'samlet',
+    'celkem',
+    'celkom',
+    'celková',
+    'spolu\\b',
+    'genel toplam',
+    'toplam\\b',
+    'итого',
+    'всего',
+    'к оплате',
+    'разом',
+    'до сплати',
+    'усього',
+    'összesen',
+    'végösszeg',
+    'fizetendő',
+    'σύνολο',
+    'πληρωτέο',
+    'valor total',
+    '(총|최종) ?(결제|주문)? ?금액',
+    '결제 ?(예정 ?)?금액',
+    '합계',
+    '총계',
+    '[总總](计|計|额|額|金额|金額)',
+    '合计',
+    '[应應]付',
+    '[实實]付',
+    '订单总额',
+    '訂單總額',
+    'סה["״]כ',
+    'סך הכל',
+    'ยอดรวมทั้งสิ้น',
+    'ยอดชำระ',
+    'ยอดสุทธิ',
+    'รวมทั้ง',
+    'tổng cộng',
+    'tổng thanh toán',
+    'thành tiền',
+    'الإجمالي',
+    'إجمالي',
+    'المجموع(?! الفرعي)',
+]
+const TOTAL_LABEL = new RegExp(
+    /^(order |estimated |grand |cart |basket |bag |your )?total( due| to pay| \(.*\))?:?$|^total\b|^(est\.?|estimated) (order )?total|^order total|^amount due|^total à payer|^gesamt|^summe|^totale|^totaal|^te betalen|^totalt\b|^summa\b|^att betala|^razem|^suma\b|^do zapłaty|^yhteensä|^maksettava|^合計/
+        .source + `|^(?:${TOTAL_INTL.join('|')})`,
+    'i',
+)
 // A total before tax ("Gesamtnettosumme", "Total excl. VAT", "Total HT") is
 // not what the shopper pays: it loses to the gross total, and a cart that
 // shows only a net total shows no total. "incl. VAT" rows are gross and stay.
+// A partial total ("Totale parziale", "Total parcial", "Totalt för varor")
+// is a subtotal that starts with the total's own word.
 const TOTAL_NOT =
-    /sub[- ]?totaa?l|częściow|sav(ed?|ings?)\b|discount|items? total|total items|shipping|tax|points|weight|qty|quantity|calculated|netto|\bnet\b|\bex(cl|kl)\b|\bex\.? ?(vat|btw|ust)\b|excluding|exclusief|zzgl|ohne (mwst|ust|steuer)|\bht\b|hors taxes?|sans tva|sin iva|imponibile/i
+    /sub[- ]?totaa?l|częściow|parziale|parcial|för varor|sav(ed?|ings?)\b|discount|items? total|total items|shipping|tax|points|weight|qty|quantity|calculated|netto|\bnet\b|\bex(cl|kl)\b|\bex\.? ?(vat|btw|ust)\b|excluding|exclusief|zzgl|ohne (mwst|ust|steuer)|\bht\b|hors taxes?|sans tva|sin iva|imponibile/i
+// A cart that shows only a subtotal, in the same languages.
 const SUB_LABEL =
-    /^(order |cart |merchandise |product |est\.? |estimated )?sub[- ]?total( \(.*\))?:?$|^product total:?$/i
+    /^(order |cart |merchandise |product |est\.? |estimated )?sub[- ]?total( \(.*\))?:?$|^product total:?$|^zwischensumme|^sous-total|^subtota(al|le)\b|^del ?summ?a?\b|^välisumma|^suma częściowa|^totale parziale|^total parcial|^小[计計]|^mezisoučet|^medzisúčet|^ara toplam|^részösszeg|^υποσύνολο|^tạm tính|^المجموع الفرعي|^ยอดรวมย่อย/i
 const SUB_NOT = /sav(ed?|ings?)\b|discount|shipping|tax|points/i
+// The words a total or subtotal label is made of: a text node holding none of
+// them is no label, and scanTotalRows never looks at it.
+const TOTAL_WORDS =
+    /total|totaal|amount due|gesamt|summe|summa|suma\b|razem|zapłaty|betala|yhteensä|maksettava|合計|i alt|betale|samlet|celk|spolu|toplam|итог|всего|оплат|разом|сплат|усього|összes|végösszeg|fizetendő|σύνολο|πληρωτέο|금액|합계|총계|[总總][计計额額金]|合计|[应應]付|[实實]付|小[计計]|סה|סך|ยอด|รวม|tổng|thành tiền|tạm tính|إجمالي|الإجمالي|المجموع|mezisoučet|medzisúčet|részösszeg|delsum|välisumma/i
 // A currency sign. One spelling, shared by every money pattern below.
-const SIGN = '[$£€¥₹₩₺₱₪₫฿₦]'
+const SIGN = '[$£€¥₹₩₺₱₪₫฿₦₽₴]'
 // ...and the currency codes written beside an amount.
 const CODES =
-    'USD|CAD|AUD|NZD|EUR|GBP|CHF|SEK|NOK|DKK|PLN|AED|SAR|INR|JPY|HKD|SGD|MXN|ZAR|kr'
+    'USD|CAD|AUD|NZD|EUR|GBP|CHF|SEK|NOK|DKK|PLN|AED|SAR|INR|JPY|HKD|SGD|MXN|ZAR|CZK|HUF|RON|TRY|KRW|CNY|IDR|kr|Rp'
+// Written after the amount. The non-Latin ones end in a letter \b does not
+// see as one, so they go without it.
+const AFTER = '\\b(?:USD|EUR|GBP|CHF|kr|TL|Ft|lei)\\b|zł|Kč|руб|грн|원|元'
 // An amount: a currency mark beside digits, or digits with cents. A run of
 // digits is read at most 25 characters long, longer than any price: an
 // open-ended run is tried again from every digit of a long number, and a
 // 40 KiB one took seconds.
 const MONEY_RE = new RegExp(
-    `(?:${SIGN}|R\\$|\\b(?:${CODES})\\b)\\s?-?\\d[\\d.,'’]{0,24}|\\d[\\d.,'’]{0,24}\\s?(?:${SIGN}|\\b(?:USD|EUR|GBP|CHF|kr)\\b|zł)|\\d[\\d,'’]{0,24}[.,]\\d{2}\\b`,
+    `(?:${SIGN}|R\\$|\\b(?:${CODES})\\b)\\s?-?\\d[\\d.,'’]{0,24}|\\d[\\d.,'’]{0,24}\\s?(?:${SIGN}|${AFTER})|\\d[\\d,'’]{0,24}[.,]\\d{2}\\b`,
     'i',
 )
 const AMOUNT_ONLY = new RegExp(
@@ -1360,10 +1424,7 @@ function scanTotalRows(
     doc,
     LABEL,
     NOT,
-    {
-        root = doc.body,
-        words = /total|totaal|amount due|gesamt|summe|summa|suma|razem|zapłaty|betala|yhteensä|maksettava|合計/i,
-    } = {},
+    { root = doc.body, words = TOTAL_WORDS } = {},
 ) {
     const hits = []
     const labels = new Set()

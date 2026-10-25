@@ -301,9 +301,13 @@ module.exports = [
         // 2026-10-19, raised 32 -> 37.5 kB: the server pick mode, the
         // remembered coupon box and the checks on a learned apply ship in the
         // finder now that it loads on demand. Measured 36.73 kB.
+        // 2026-10-26 (T-8654 round 2), raised 37.5 -> 38.8 kB: the total and
+        // subtotal rows in 17 more languages (Danish to Arabic), partial
+        // totals refused ("Totale parziale"), and the won, yuan, rupiah,
+        // hryvnia and koruna amounts. Measured 38.31 kB.
         // It is written only here: tests/finder-module-build.test.mjs reads
         // it.
-        limit: '37.5 KB',
+        limit: '38.8 KB',
         brotli: false,
     },
     {
