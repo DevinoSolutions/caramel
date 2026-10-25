@@ -87,16 +87,21 @@ class SessionStore(
     /**
      * Step 1: asks the server for the provider URL. Returns the URL to open in a browser tab, or
      * null with [SessionState.errorMessage] set. The answer arrives in [completeSignIn].
+     * [keepError] leaves a message already showing (a failed sign-out revoke that came first) in place
+     * instead of clearing it, and joins a new failure to it.
      */
-    suspend fun beginSignIn(provider: OAuthProvider): String? {
-        mutableState.update { it.copy(isSigningIn = true, errorMessage = null) }
+    suspend fun beginSignIn(provider: OAuthProvider, keepError: Boolean = false): String? {
+        mutableState.update { it.copy(isSigningIn = true, errorMessage = if (keepError) it.errorMessage else null) }
         return try {
             val pkce = newPkce()
             val start = api.oauthAuthorize(provider, pkce.challenge)
             pending = PendingSignIn(provider, start.state, pkce)
             start.authorizationUrl
         } catch (e: ApiError) {
-            mutableState.update { it.copy(isSigningIn = false, errorMessage = e.message) }
+            mutableState.update {
+                val message = if (keepError) listOfNotNull(it.errorMessage, e.message).joinToString("\n") else e.message
+                it.copy(isSigningIn = false, errorMessage = message)
+            }
             null
         }
     }

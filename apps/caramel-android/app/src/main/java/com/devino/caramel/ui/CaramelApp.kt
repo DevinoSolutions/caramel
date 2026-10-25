@@ -158,11 +158,13 @@ fun CaramelApp(
     val signInWith: (OAuthProvider) -> Unit = { provider ->
         showSignIn = false
         scope.launch {
-            if (container.session.token != null) {
+            val hadToken = container.session.token != null
+            if (hadToken) {
                 container.webSession.reset()
                 container.session.signOut()
             }
-            container.session.beginSignIn(provider)?.let(onStartSignIn)
+            // A failed revoke from that sign-out stays on screen (keepError) instead of being cleared by the new sign-in.
+            container.session.beginSignIn(provider, keepError = hadToken)?.let(onStartSignIn)
         }
     }
 
