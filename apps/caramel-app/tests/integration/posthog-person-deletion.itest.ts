@@ -5,7 +5,7 @@ import { afterAll, describe, expect, it, vi } from 'vitest'
 // SKIPPED unless every POSTHOG_PERSON_DELETE_ITEST_* variable below is set, so
 // CI and a plain `pnpm test:integration` never reach PostHog.
 //
-// NEVER POINT THIS AT THE PRODUCTION PROJECT. It creates a fixture person with
+// NEVER POINT THIS AT THE PRODUCTION PROJECT (project id 6 is refused outright). It creates a fixture person with
 // a random id, deletes it, and touches nothing else, but it uses a personal
 // API key with person:write. Use a throwaway project (PostHog Cloud free
 // project, or a scratch project on the self-hosted instance):
@@ -27,16 +27,21 @@ const API_KEY = process.env.POSTHOG_PERSON_DELETE_ITEST_PERSONAL_API_KEY
 const CONFIRMED_NOT_PROD =
     process.env.POSTHOG_PERSON_DELETE_ITEST_NOT_PRODUCTION === 'yes'
 
+// Project 6 is Caramel's production project on the self-hosted instance; the
+// scratch project must be a different one even if the host and tokens differ.
+const PRODUCTION_PROJECT_ID = '6'
+
 const configured = Boolean(
     HOST && PROJECT_ID && CAPTURE_TOKEN && API_KEY && CONFIRMED_NOT_PROD,
 )
 const pointsAtProduction =
     configured &&
-    Boolean(process.env.NEXT_PUBLIC_POSTHOG_HOST) &&
-    new URL(HOST!).origin ===
-        new URL(process.env.NEXT_PUBLIC_POSTHOG_HOST!).origin &&
-    Boolean(process.env.NEXT_PUBLIC_POSTHOG_KEY) &&
-    CAPTURE_TOKEN === process.env.NEXT_PUBLIC_POSTHOG_KEY
+    (PROJECT_ID!.trim() === PRODUCTION_PROJECT_ID ||
+        (Boolean(process.env.NEXT_PUBLIC_POSTHOG_HOST) &&
+            new URL(HOST!).origin ===
+                new URL(process.env.NEXT_PUBLIC_POSTHOG_HOST!).origin &&
+            Boolean(process.env.NEXT_PUBLIC_POSTHOG_KEY) &&
+            CAPTURE_TOKEN === process.env.NEXT_PUBLIC_POSTHOG_KEY))
 
 // deletePosthogPerson reads these two modules; stand them in with the scratch
 // project so the REAL fetch path runs.

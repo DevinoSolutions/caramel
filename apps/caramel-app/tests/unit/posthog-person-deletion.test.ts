@@ -84,7 +84,7 @@ describe('deletePosthogPerson', () => {
         expect(Sentry.captureException).not.toHaveBeenCalled()
     })
 
-    it('a person PostHog never had (found 0, or a 404) is success: nothing left to delete', async () => {
+    it('a person PostHog never had (202, found 0) is success: nothing left to delete', async () => {
         fetchMock.mockResolvedValueOnce(
             Response.json(
                 { persons_found: 0, deletion_errors: [] },
@@ -92,12 +92,22 @@ describe('deletePosthogPerson', () => {
             ),
         )
         expect(await run()).toBe('deleted')
+        expect(Sentry.captureException).not.toHaveBeenCalled()
+    })
 
+    it('a 404 is a misconfiguration (wrong project/host/key scope), not a deleted person', async () => {
         fetchMock.mockResolvedValueOnce(
             Response.json({ detail: 'Not found.' }, { status: 404 }),
         )
-        expect(await run()).toBe('deleted')
-        expect(Sentry.captureException).not.toHaveBeenCalled()
+
+        expect(await run()).toBe('failed')
+
+        const [{ error, hint }] = sentryCalls()
+        expect((error as Error).message).toContain('http_error')
+        expect(hint).toMatchObject({
+            tags: { reason: 'http_error' },
+            extra: { status: 404 },
+        })
     })
 
     it('a 5xx is a Sentry error and a failed outcome, never a throw', async () => {

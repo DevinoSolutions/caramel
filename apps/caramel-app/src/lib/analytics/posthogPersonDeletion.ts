@@ -16,9 +16,9 @@
 // "queued", not "gone".
 //
 // CONTRACT: never throws and never blocks the account deletion. Returns
-//   'deleted'        PostHog accepted the request (or had no such person: a user
-//                    who never reached PostHog has nothing to delete, which is
-//                    the goal state, not an error)
+//   'deleted'        PostHog accepted the request (a user who never reached
+//                    PostHog answers 202 with persons_found: 0: nothing to
+//                    delete is the goal state, not an error)
 //   'not_applicable' PostHog capture is disabled for this deploy (POSTHOG_DATASET)
 //   'failed'         anything else; always with a Sentry error (never silent) that
 //                    carries a one-way hash of the user id, never the email.
@@ -109,9 +109,10 @@ export async function deletePosthogPerson(
             }),
             signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         })
-        // 404: no such person (or project-scoped miss for this id). A person
-        // that does not exist is already deleted.
-        if (res.status === 404) return 'deleted'
+        // No 404 shortcut: bulk_delete answers 202 with persons_found: 0 for an
+        // id PostHog never saw, so a 404 can only mean a wrong project id, a
+        // wrong host, or a project this key cannot see. That is a
+        // misconfiguration, reported below as http_error.
         if (!res.ok) return report('http_error', userId, { status: res.status })
 
         const summary: unknown = await res.json().catch(() => null)
