@@ -1,5 +1,6 @@
 import { GET as filtersGET } from '@/app/api/coupons/filters/route'
 import { GET as statsGET } from '@/app/api/coupons/stats/route'
+import { GET as storesGET } from '@/app/api/coupons/stores/route'
 import { POST as searchSupportedPOST } from '@/app/api/sites/search-supported/route'
 import { GET as topSitesGET } from '@/app/api/sites/top-sites/route'
 import { GET as sourcesGET, POST as sourcesPOST } from '@/app/api/sources/route'
@@ -24,6 +25,9 @@ const repo = vi.hoisted(() => ({
         { site: 'a.com' },
     ]),
     listTopSites: vi.fn(async () => [{ site: 'a.com', coupon_count: 3 }]),
+    listStoreOptions: vi.fn(async (_q: string, _limit: number) => [
+        { site: 'a.com' },
+    ]),
     searchSupportedSites: vi.fn(async (_q: string) => [{ site: 'amazon.com' }]),
     requestSource: vi.fn(
         async (_host: string) =>
@@ -125,6 +129,48 @@ describe('GET /api/coupons/filters — sitesLimit parsing (T-6229)', () => {
             sites: ['a.com', 'b.com'],
             discountTypes: ['percentage'],
         })
+    })
+})
+
+describe('GET /api/coupons/stores — limit parsing (same T-6229 class)', () => {
+    it.each([
+        ['abc', 20],
+        ['', 20],
+        ['NaN', 20],
+        ['Infinity', 20],
+        ['1e3', 20],
+        ['5abc', 20],
+        ['0x10', 20],
+        ['--5', 20],
+        ['99999999999999999999', 20],
+        ['5', 5],
+        [' 7 ', 7],
+        ['50', 50],
+        ['999', 50],
+        ['-5', 1],
+        ['0', 1],
+    ])('limit=%j reaches the repo as %i, never NaN', async (raw, want) => {
+        const res = await storesGET(
+            get(`/api/coupons/stores?limit=${encodeURIComponent(raw)}`),
+        )
+        expect(res.status).toBe(200)
+        expect(repo.listStoreOptions).toHaveBeenCalledWith('', want)
+    })
+
+    it('no limit at all keeps the documented default of 20', async () => {
+        await storesGET(get('/api/coupons/stores'))
+        expect(repo.listStoreOptions).toHaveBeenCalledWith('', 20)
+    })
+
+    it('every limit the repo can be called with is a finite integer in 1..50', async () => {
+        for (const raw of ['abc', 'NaN', '1e9', '-1', '0', '50', '500', '']) {
+            await storesGET(get(`/api/coupons/stores?limit=${raw}`))
+        }
+        for (const [, limit] of repo.listStoreOptions.mock.calls) {
+            expect(Number.isInteger(limit)).toBe(true)
+            expect(limit).toBeGreaterThanOrEqual(1)
+            expect(limit).toBeLessThanOrEqual(50)
+        }
     })
 })
 
