@@ -955,12 +955,23 @@ export async function startApplyingCoupons(rec, options) {
     // remaining codes over to copy. A VALID code still wins instantly (success
     // breaks the loop below), so this only ever trims trailing *failing* tries.
     // Time-based, never store-specific.
+    //
+    // The first FLOW_MIN_TRIES codes are always tried, however long they take
+    // (T-9105): on a slow machine one refusal alone can outrun the budget, and
+    // bumbleandbumble.com (2026-10-26) then never tried TEXT15, the second of
+    // two codes and the one that took $5.40 off. The budget trims a long tail
+    // of failures; it must not decide a short list.
     const FLOW_BUDGET_MS = 35000
+    const FLOW_MIN_TRIES = 3
     const loopStart = performance.now()
 
     for (let i = 0; i < coupons.length; i++) {
         if (globalThis._caramelCancelled) break
-        if (!bestCode && performance.now() - loopStart > FLOW_BUDGET_MS) {
+        if (
+            !bestCode &&
+            i >= FLOW_MIN_TRIES &&
+            performance.now() - loopStart > FLOW_BUDGET_MS
+        ) {
             log('AUTO_INSERT_TIME_BUDGET', {
                 tried: i,
                 elapsed: performance.now() - loopStart,
