@@ -207,6 +207,9 @@ export function caramelCaptureAccepted(verdict, code, { combined } = {}) {
                 _namesCode(row.text, code) &&
                 !_readsAsStoredValue(row),
         )
+    // A plain box counts row NODES only, textSeenBefore included: retrying a
+    // code after signing in makes the store re-draw that code's row, and a
+    // box that never mentions a gift card has no gift-card row to mistake.
     return (
         verdict.priceDropped === true ||
         rows.some(row => _namesCode(row.text, code))
