@@ -6,7 +6,8 @@ name: Proof T-8305 – iOS shell /profile <-> /login loop (Simulator)
 # native sign-in sheet must open and cancel cleanly (nothing is typed, no account used).
 # The same walk runs against the pre-fix 1.6.0 commit (697d229) to show the detector
 # catches the loop. Debug simulator builds, unsigned; nothing is uploaded to App Store
-# Connect. Runs on the self-hosted aladdin-mac runner (Maestro + simulators installed).
+# Connect. GitHub-hosted macOS runner (this repo is public, and the org's self-hosted
+# runner group refuses public repos); Maestro drives the simulator.
 # Owner of this file: ios-testing lane (T-8305); caramel app code is not touched.
 
 on:
@@ -20,14 +21,13 @@ permissions:
 jobs:
   proof:
     name: ${{ matrix.variant }} (expect ${{ matrix.expect }})
-    runs-on: [self-hosted, macos-devino]
-    timeout-minutes: 50
+    runs-on: macos-latest
+    timeout-minutes: 60
     permissions:
       id-token: write   # DevinoSolutions/artifact (T-7021: GitHub artifacts blocked org-wide)
       contents: read
     strategy:
       fail-fast: false
-      max-parallel: 1
       matrix:
         include:
           - variant: fixed-main
@@ -41,26 +41,36 @@ jobs:
       OUT: ${{ github.workspace }}/proof-out/${{ matrix.variant }}
     steps:
       - name: Checkout proof scripts
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
         with:
           path: proof-src
           sparse-checkout: .github/proof
 
       - name: Checkout app at ${{ matrix.ref }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
         with:
           ref: ${{ matrix.ref }}
           path: app
 
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           package_json_file: app/package.json
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 24
+
+      - name: Install Maestro
+        run: |
+          curl -fsSL "https://get.maestro.mobile.dev" | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
 
       - name: Build the Safari extension (the Xcode project embeds it)
         working-directory: app
@@ -101,7 +111,3 @@ jobs:
           path: ${{ env.OUT }}
           if-no-files-found: warn
           retention-days: 7
-
-      - name: Remove the derived data
-        if: always()
-        run: rm -rf "${RUNNER_TEMP}/DD-${{ matrix.variant }}"
