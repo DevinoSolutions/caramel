@@ -39,6 +39,7 @@ export default function ConfirmDialog({
     typeToConfirm,
     tone = 'default',
     busy,
+    excludeFromAutocapture = false,
 }: {
     open: boolean
     onClose: () => void
@@ -51,6 +52,9 @@ export default function ConfirmDialog({
     typeToConfirm?: string
     tone?: 'default' | 'danger'
     busy?: boolean
+    /** Marks the whole dialog `ph-no-capture` so posthog-js never autocaptures
+     * clicks or input inside it. */
+    excludeFromAutocapture?: boolean
 }) {
     const dialogRef = useRef<HTMLDialogElement>(null)
     const inputRef = useRef<HTMLInputElement>(null)
@@ -82,7 +86,7 @@ export default function ConfirmDialog({
                 if (e.target === dialogRef.current) onClose()
             }}
             aria-labelledby={headingId}
-            className="motion-dialog w-[92vw] max-w-md bg-transparent p-0 backdrop:bg-black/60 backdrop:backdrop-blur-sm"
+            className={`motion-dialog w-[92vw] max-w-md bg-transparent p-0 backdrop:bg-black/60 backdrop:backdrop-blur-sm ${excludeFromAutocapture ? 'ph-no-capture' : ''}`}
         >
             {open ? (
                 <div className={cardClasses}>
