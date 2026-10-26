@@ -797,9 +797,21 @@ export async function pickCouponBox(
         )
     } catch (error) {
         console.error('[coupon-box-pick] model call failed', error)
+        // openrouter.ts aborts the fetch at TIMEOUT_MS: a slow upstream, not
+        // a defect here, so a warning. The fingerprint groups by cause, not
+        // by the minified stack frames, which change every build and reopened
+        // the same timeout as a "new" issue each release (CARAMEL-27/2G/2Q/34,
+        // T-7526).
+        const timedOut = error instanceof Error && error.name === 'AbortError'
         Sentry.captureException(error, {
+            level: timedOut ? 'warning' : 'error',
             tags: { surface: 'coupon-box-pick', operation: 'model_call' },
-            extra: { domain: request.domain, model },
+            fingerprint: [
+                'coupon-box-pick',
+                'model_call',
+                timedOut ? 'timeout' : 'error',
+            ],
+            extra: { domain: request.domain, model, timeoutMs: TIMEOUT_MS },
         })
         return { outcome: 'no_pick', reason: 'model_error' }
     }
