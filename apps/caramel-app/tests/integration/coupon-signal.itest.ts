@@ -1,15 +1,18 @@
+import { FAILING_WINDOW_MS } from '@/lib/coupons'
 import {
     attachSignals,
     recordFailed,
     recordUsage,
     recordWorked,
     reporterHash,
+    resetReporterSweepForTests,
+    sweepExpiredReporters,
 } from '@/lib/couponSignals'
 import prisma from '@/lib/prisma'
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 // W1 integration — recordWorked / recordFailed / attachSignals exercised
-// against the REAL prisma client + a live local Postgres (:58005). Assumes the
+// against the REAL prisma client + a live local Postgres (:28005). Assumes the
 // DB is migrated (the harness/CI runs `prisma migrate deploy` first). Uses
 // synthetic coupon ids in a private 999000xxx range so they never collide with
 // real catalog ids, and deletes them after each test so the suite is
@@ -67,7 +70,7 @@ const ESTABLISHED = {
     established: true,
 } as const
 
-describe('couponSignals (real prisma, live pg :58005)', () => {
+describe('couponSignals (real prisma, live pg :28005)', () => {
     it('LOW-TRUST worked reports NEVER stamp lastWorkedAt, however many distinct reporters, and store nothing about them (real pg)', async () => {
         const anon = (n: number) =>
             ({ kind: 'ip', ip: `203.0.113.${n}` }) as const
@@ -239,5 +242,46 @@ describe('couponSignals (real prisma, live pg :58005)', () => {
         // Sanity: the seeded id really resolved to a non-null ISO string, not
         // a vacuous null-equals-null match.
         expect(out[0]!.lastWorkedAt).toEqual(expect.any(String))
+    })
+
+    // T-8983: the retention sweep's keyed, LIMIT-ed DELETE against real
+    // Postgres. 5200 expired rows is more than one 5000-row chunk, so this
+    // crosses a chunk boundary; the fresh rows (and the expired rows' siblings
+    // under other keys) must survive.
+    it('retention sweep deletes every expired reporter across chunk boundaries and keeps fresh ones (real pg)', async () => {
+        const PREFIX = '999100'
+        const EXPIRED_ROWS = 5200
+        const FRESH_ROWS = 3
+        const expiredAt = new Date(Date.now() - FAILING_WINDOW_MS - 60_000)
+        const freshAt = new Date()
+        const mine = { couponId: { startsWith: PREFIX } }
+        try {
+            await prisma.$executeRaw`
+                INSERT INTO coupon_signal_reporters
+                    (coupon_id, outcome, reporter_hash, weight, last_at)
+                SELECT ${PREFIX}::text || g::text, 'failed', 'itest-sweep-expired', 1, ${expiredAt}::timestamp
+                FROM generate_series(1, ${EXPIRED_ROWS}::int) g`
+            await prisma.$executeRaw`
+                INSERT INTO coupon_signal_reporters
+                    (coupon_id, outcome, reporter_hash, weight, last_at)
+                SELECT ${PREFIX}::text || (${EXPIRED_ROWS}::int + g)::text, 'failed', 'itest-sweep-fresh', 1, ${freshAt}::timestamp
+                FROM generate_series(1, ${FRESH_ROWS}::int) g`
+            expect(
+                await prisma.couponSignalReporter.count({ where: mine }),
+            ).toBe(EXPIRED_ROWS + FRESH_ROWS)
+
+            resetReporterSweepForTests()
+            await sweepExpiredReporters({ force: true })
+
+            const left = await prisma.couponSignalReporter.findMany({
+                where: mine,
+            })
+            expect(left).toHaveLength(FRESH_ROWS)
+            expect(
+                left.every(r => r.reporterHash === 'itest-sweep-fresh'),
+            ).toBe(true)
+        } finally {
+            await prisma.couponSignalReporter.deleteMany({ where: mine })
+        }
     })
 })

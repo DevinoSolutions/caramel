@@ -29,7 +29,7 @@ tunnel to test locally.
 4. Start tunnel to local app:
 
     ```bash
-    ngrok http 58000
+    ngrok http 28000
     ```
 
 5. Copy the HTTPS URL (e.g., `https://abc123.ngrok-free.app`)
@@ -46,7 +46,7 @@ If you need a persistent domain:
 
 - Upgrade to ngrok paid plan ($8/month)
 - Configure a static domain in ngrok dashboard
-- Use: `ngrok http 58000 --domain=your-static-domain.ngrok-free.app`
+- Use: `ngrok http 28000 --domain=your-static-domain.ngrok-free.app`
 
 ---
 
@@ -83,7 +83,7 @@ If you need a persistent domain:
 
     ingress:
         - hostname: caramel-local.yourdomain.com
-          service: http://localhost:58000
+          service: http://localhost:28000
         - service: http_status:404
     ```
 
@@ -173,7 +173,7 @@ APPLE_PRIVATE_KEY=-----BEGIN PRIVATE KEY-----\nMIGT...\n-----END PRIVATE KEY----
 
 Apple OAuth must reach your machine through the tunnel, so run the host-side dev
 server (the `dev:next` escape hatch) rather than the container — a tunnel to
-`localhost:58000` needs the app bound on the host:
+`localhost:28000` needs the app bound on the host:
 
 ```bash
 docker compose up postgres -d

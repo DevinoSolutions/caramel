@@ -63,7 +63,10 @@ export function App() {
         setAfterLoginRerender(() => refreshRef.current())
 
         const seq = ++runSeq.current
-        const minDisplay = new Promise(r => setTimeout(r, 400))
+        let bootTimer: ReturnType<typeof setTimeout> | undefined
+        const minDisplay = new Promise(r => {
+            bootTimer = setTimeout(r, 400)
+        })
         const first = resolveState(() => refreshRef.current()).then(next => {
             if (runSeq.current === seq) setResolved(next)
         })
@@ -72,6 +75,16 @@ export function App() {
         // Safari and Firefox finish OAuth on the website, which hands the
         // session back through the content-script relay (it lands in storage
         // directly); there is no popup-side result to resume at boot.
+
+        // Unmounted: nothing in flight may set state any more. The cleared
+        // timer leaves `minDisplay` pending, so the boot flag is never set,
+        // and the bumped sequence drops any resolve still on its way (the
+        // test runner tears its document down right after the last unmount,
+        // and a late setState there threw "window is not defined").
+        return () => {
+            clearTimeout(bootTimer)
+            runSeq.current++
+        }
     }, [])
 
     const api: AppApi = {

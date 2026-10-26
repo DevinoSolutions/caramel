@@ -6,7 +6,7 @@ import { configDefaults, defineConfig } from 'vitest/config'
 
 // W1 (trust loop) — integration harness for the app-owned coupon_signals
 // table. Unlike the unit suite (which mocks prisma), these run the REAL prisma
-// client against a live local Postgres (compose's :58005 locally, or CI's
+// client against a live local Postgres (compose's :28005 locally, or CI's
 // postgres service). Separate config + a `tests/integration/**/*.itest.ts`
 // glob for the same reason vitest.drift.config.ts is separate: `pnpm test`
 // (the unit runner, F-004) includes ONLY tests/unit/** and CI's unit job has

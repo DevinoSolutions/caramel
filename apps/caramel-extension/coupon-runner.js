@@ -7,9 +7,9 @@
 // runtime.onMessage listener — moved verbatim into initCouponRunner(), which
 // the content entrypoint calls in manifest order. Nothing else about the flow
 // changed.
+
 import {
     CARAMEL_ALLOWED_ORIGINS,
-    caramelGetSession,
     caramelRecordSaving,
     caramelSetSession,
     currentBrowser,
@@ -18,7 +18,6 @@ import {
     sleep,
 } from './caramel-base.js'
 import {
-    _caramelClearCartDiscounts,
     _getTriedCodes,
     _markTriedCode,
     _unmarkTriedCode,
@@ -37,6 +36,13 @@ import {
     caramelLoadedFinder,
     caramelLoadFinder,
 } from './coupon-box-finder-loader.js'
+import {
+    _caramelCartMoney,
+    _caramelOwnCodeRow,
+    _caramelPutCodeOnCart,
+    _caramelRestoreArrivedDiscount,
+    _existingCartDiscount,
+} from './coupon-cart-discount.js'
 import {
     _caramelCleanCodes,
     caramelRankByValue,
@@ -61,7 +67,6 @@ import {
     waitForVisible,
     waitUntilReady,
 } from './dom-utils.js'
-import { recordWelcomeFirstTouch } from './install-attribution.js'
 import {
     caramelStoreListKnown,
     getDomainRecord,
@@ -74,7 +79,27 @@ import {
     showTestingModal,
     updateTestingModal,
 } from './UI-helpers.js'
+import {
+    caramelAnnounceToWebsite,
+    caramelCaptureInstallFirstTouch,
+    caramelStampPresence,
+} from './website-handshake.js'
 
+// Moved verbatim to coupon-cart-discount.js (T-5446); re-exported so every
+// importer and every vi.mock of this module keeps its path.
+export {
+    _caramelLiveDiscountFor,
+    _existingCartDiscount,
+} from './coupon-cart-discount.js'
+
+// Moved verbatim to website-handshake.js (T-5446); re-exported so every
+// importer and every vi.mock of this module keeps its path.
+export {
+    CARAMEL_PRESENCE_ATTRIBUTE,
+    caramelAnnounceToWebsite,
+    caramelCaptureInstallFirstTouch,
+    caramelStampPresence,
+} from './website-handshake.js'
 /* --------------------------------------------------  main runner */
 /* Set true when the user dismisses the testing overlay, so the loop stops
  * instead of trapping them.
@@ -120,194 +145,6 @@ export function reportOutcome(id, outcome, storeReason) {
     } catch (e) {
         log('REPORT_OUTCOME_SEND_FAILED', { error: String(e) })
     }
-}
-
-/* The discount already sitting on the cart when we arrived, if any.
- *
- * Reads the platform cart payload probeCartJson() already returns — the data
- * was always there, just never consulted, which is why a run could report
- * "nothing worked" over the top of a live discount. Returns
- * { code, amountText } or null.
- *
- * `discount_codes` entries carry `applicable` on newer carts; treat a missing
- * flag as applicable (older payloads omit it) but require a real amount, so a
- * code that is attached-but-worthless never gets announced as a saving.
- */
-/* An amount in the cart payload's own money, formatted for a human.
- *
- * The cart carries its currency, so amounts measured off it are formatted from
- * that rather than from the DOM price parser's last reading (which may never
- * have run on the link path) or a hardcoded dollar sign.
- */
-function _caramelCartMoney(cart, minor) {
-    const value = Number(minor) / 100
-    const currency = cart?.currency || 'USD'
-    try {
-        return new Intl.NumberFormat(undefined, {
-            style: 'currency',
-            currency,
-        }).format(value)
-    } catch {
-        // An unknown/garbage currency code makes Intl throw rather than guess.
-        return `${value.toFixed(2)} ${currency}`
-    }
-}
-
-/* What a discount is worth, when the code entry doesn't say.
- *
- * `discount_codes` entries are NOT always `{code, amount, applicable}`. On the
- * live carts measured 2026-08-06 — 100percentpure.com, goodr.com, tog24.com —
- * every entry was `{code, applicable}` with no `amount` at all, and the money
- * sat in `cart_level_discount_applications` keyed by `title`. Every fixture in
- * this repo's tests carried an `amount`, so the shape mismatch was invisible
- * here and total on a real store.
- *
- * Falls back to the cart's own `total_discount` only when this is the single
- * applicable code, because then the whole discount is unambiguously its. */
-function _caramelDiscountAmountFor(cart, code, applicableCount) {
-    const apps = Array.isArray(cart?.cart_level_discount_applications)
-        ? cart.cart_level_discount_applications
-        : []
-    const wanted = String(code).toUpperCase()
-    for (const app of apps) {
-        const title = String(app?.title ?? '').toUpperCase()
-        const allocated = Number(app?.total_allocated_amount)
-        if (title === wanted && allocated > 0) return allocated
-    }
-    const total = Number(cart?.total_discount)
-    if (applicableCount === 1 && total > 0) return total
-    return 0
-}
-
-/* What ONE named code is worth on this cart right now, in the cart's own minor
- * units. Zero = nothing off it: never there, demoted, or attached and worthless.
- *
- * Same shape logic as _existingCartDiscount, asked about a code we NAME rather
- * than whatever the cart leads with — "is there a discount" and "does THEIRS
- * still exist" are different questions, and the flow answered the first while
- * reporting on the second. */
-export function _caramelLiveDiscountFor(cart, code) {
-    if (!cart) return 0
-    const wanted = String(code).toUpperCase()
-    const codes = Array.isArray(cart.discount_codes) ? cart.discount_codes : []
-    const live = codes.filter(e => e?.code && e.applicable !== false)
-    const entry = live.find(e => String(e.code).toUpperCase() === wanted)
-    if (!entry) return 0
-    const stated = Number(entry.amount)
-    if (stated > 0) return stated
-    return _caramelDiscountAmountFor(cart, entry.code, live.length)
-}
-
-/* Get `code` onto the cart; hand back what the cart says afterwards.
- *
- * Not a synonym for applyViaDiscountLink — it asks what is already there first,
- * because re-sending a code the cart already honours is how you DELETE it, and
- * a re-send that is needed lands dead unless the stale list is cleared. Both
- * measured; see _caramelClearCartDiscounts.
- *
- * The clear is a LAST resort, not the first move: it empties the cart outright,
- * and doing it up front left goodr.com reading `discount:0, codes:[]` for 1.2s
- * (live). Nobody checks out inside a second, but "never worse off than before
- * we ran" doesn't hold a stopwatch.
- *
- * `known` saves a second read for a caller that just read the cart.
- */
-async function _caramelPutCodeOnCart(code, known) {
-    const current = known === undefined ? await probeCartJson() : known
-    if (_caramelLiveDiscountFor(current, code) > 0) return current
-    const sent = await applyViaDiscountLink(code)
-    if (_caramelLiveDiscountFor(sent, code) > 0) return sent
-    await _caramelClearCartDiscounts()
-    return await applyViaDiscountLink(code)
-}
-
-/* Hand the shopper back the discount they arrived with — and say we did only
- * when the cart agrees.
- *
- * This step used to do neither. Live on harney.com (2026-08-06): their HARNEY10
- * survived all eight probes untouched, this re-applied it anyway, and THAT
- * killed it (mechanism: _caramelClearCartDiscounts). It then logged
- *   AUTO_INSERT_RESTORED_EXISTING {code: HARNEY10, restored: true, total: 11100}
- * — 11100 being the UNDISCOUNTED total, where the same run had recorded 10100
- * with the discount on. `restored: true` came from the REQUEST succeeding, so
- * the number disproving the claim sat in the same log line as the claim. The
- * shopper then read "HARNEY10 is already applied and saving you $10.00" over a
- * cart showing nothing off.
- *
- * Returns { code, amountText, restored } only when they demonstrably still have
- * their money off; null means they do not, and the caller must say so plainly
- * rather than reach for the friendlier sentence.
- */
-async function _caramelRestoreArrivedDiscount(arrivedWith) {
-    const before = await probeCartJson()
-    const survived = _caramelLiveDiscountFor(before, arrivedWith.code)
-    if (survived > 0) {
-        log('AUTO_INSERT_RESTORE_UNNEEDED', {
-            code: arrivedWith.code,
-            amount: survived,
-            reason: 'their code came through every probe untouched — re-applying a live code is what knocks it off',
-        })
-        return {
-            code: arrivedWith.code,
-            amountText: _caramelCartMoney(before, survived),
-            restored: false,
-        }
-    }
-    const after = await _caramelPutCodeOnCart(arrivedWith.code, before)
-    const back = _caramelLiveDiscountFor(after, arrivedWith.code)
-    log('AUTO_INSERT_RESTORED_EXISTING', {
-        code: arrivedWith.code,
-        restored: back > 0,
-        total: after ? after.total_price : null,
-        amount: back,
-        ...(back > 0
-            ? {}
-            : {
-                  reason: 'the request went through but the cart shows nothing off for their code — reporting it lost, not restored',
-              }),
-    })
-    if (!(back > 0)) return null
-    return {
-        code: arrivedWith.code,
-        amountText: _caramelCartMoney(after, back),
-        restored: true,
-    }
-}
-
-/* The shopper's own code, as a row they can copy. It is whatever they brought,
- * so it is usually not in our catalogue — without this, the one code we know
- * worked on this cart is the one code the list can't offer. */
-function _caramelOwnCodeRow(code) {
-    return { code, title: 'Your code — paste it in at checkout' }
-}
-
-// Exported for tests/existing-cart-discount.test.mjs; inside the extension it
-// is called only from startApplyingCoupons below.
-export function _existingCartDiscount(cart) {
-    if (!cart) return null
-    const money = minor => _caramelCartMoney(cart, minor)
-    const codes = Array.isArray(cart.discount_codes) ? cart.discount_codes : []
-    const live = codes.filter(e => e?.code && e.applicable !== false)
-    for (const entry of live) {
-        // The entry's own amount when it has one; otherwise ask the cart. A
-        // code the store is honouring must not read as "worth nothing" just
-        // because this payload records the money somewhere else — that is what
-        // silently deleted a shopper's live -$9.00 BARGAINBUDDY and then
-        // offered them $0.00 codes to paste over it (QA, 100percentpure.com).
-        const stated = Number(entry.amount)
-        const amount =
-            stated > 0
-                ? stated
-                : _caramelDiscountAmountFor(cart, entry.code, live.length)
-        if (!(amount > 0)) continue
-        return {
-            code: String(entry.code).toUpperCase(),
-            amountText: money(amount),
-        }
-    }
-    // Cart-level discount with no code we can name (automatic discount): worth
-    // nothing to say "code X is applied", so stay quiet rather than guess.
-    return null
 }
 
 export async function startApplyingCoupons(rec, options) {
@@ -955,12 +792,23 @@ export async function startApplyingCoupons(rec, options) {
     // remaining codes over to copy. A VALID code still wins instantly (success
     // breaks the loop below), so this only ever trims trailing *failing* tries.
     // Time-based, never store-specific.
+    //
+    // The first FLOW_MIN_TRIES codes are always tried, however long they take
+    // (T-9105): on a slow machine one refusal alone can outrun the budget, and
+    // bumbleandbumble.com (2026-10-26) then never tried TEXT15, the second of
+    // two codes and the one that took $5.40 off. The budget trims a long tail
+    // of failures; it must not decide a short list.
     const FLOW_BUDGET_MS = 35000
+    const FLOW_MIN_TRIES = 3
     const loopStart = performance.now()
 
     for (let i = 0; i < coupons.length; i++) {
         if (globalThis._caramelCancelled) break
-        if (!bestCode && performance.now() - loopStart > FLOW_BUDGET_MS) {
+        if (
+            !bestCode &&
+            i >= FLOW_MIN_TRIES &&
+            performance.now() - loopStart > FLOW_BUDGET_MS
+        ) {
             log('AUTO_INSERT_TIME_BUDGET', {
                 tried: i,
                 elapsed: performance.now() - loopStart,
@@ -1342,112 +1190,6 @@ export async function startApplyingCoupons(rec, options) {
             ),
         )
     }
-}
-
-/* Announce ourselves to grabcaramel.com so a visitor already signed in there
- * doesn't have to sign in again in the extension.
- *
- * It used to be one hello, sent the moment storage answered "no token". That
- * loses a race it cannot see: the page's side of the handshake is a React
- * component (ExtensionSessionRelay), and its `message` listener only exists once
- * React has hydrated. A content script at document_idle regularly beats
- * hydration — on a cold load, a slow connection, or simply a heavy page — and a
- * hello sent before anyone is listening is a hello nobody answers. The page
- * already covers the OTHER half of this race (it replays a hello it heard before
- * the session query resolved), so the gap is exactly the case where we spoke
- * first: the user signs in on the website, comes back to a store, and the
- * extension still believes it is signed out.
- *
- * So say it a few times, and stop the instant it works. We are the side that can
- * tell: the listener above writes the token as soon as the page answers, so a
- * token in storage IS the acknowledgement. Bounded tightly — this is a courtesy
- * handshake on our own origin, not a retry loop worth spending a page's life on.
- */
-// Presence stamp for the website (fleet growth-prompts spec §A). On our own
-// origins the site must never tell a visitor to "get the extension" when it
-// is already running in their browser, so the content script marks <html>
-// with `data-caramel-extension="<version>"` — readable by CSS before the
-// page's JavaScript has even hydrated — and posts a `caramel-ext-present`
-// message for the SurfaceProvider. Unlike the sign-in hello below this is
-// NOT session-gated: a signed-in extension user is exactly who the site
-// used to advertise to. Exported for the suite; called from initCouponRunner.
-export const CARAMEL_PRESENCE_ATTRIBUTE = 'data-caramel-extension'
-export function caramelStampPresence() {
-    let version = ''
-    try {
-        version = currentBrowser?.runtime?.getManifest?.()?.version || ''
-    } catch (err) {
-        // The stamp still lands — the site only needs to know we are here.
-        logError('PRESENCE_STAMP_VERSION_FAILED', err)
-    }
-    document.documentElement.setAttribute(CARAMEL_PRESENCE_ATTRIBUTE, version)
-    window.postMessage(
-        { type: 'caramel-ext-present', version },
-        location.origin,
-    )
-}
-
-/* Install attribution (see install-attribution.js): on the /welcome page the
- * extension opened after install, copy the site's first-touch record
- * (`cm_ft`, first-party and readable here) next to the stored install id, so
- * the sign-in can hand it to the server. The site writes that cookie from its
- * own client code, which can run after this content script does, so ask a few
- * times and stop at the first definite answer. Anything but 'no-cookie' is
- * definite; after the last try 'no-cookie' is logged, not silently dropped.
- * Exported for the suite; called from initCouponRunner. */
-const CARAMEL_FIRST_TOUCH_TRIES = 6
-const CARAMEL_FIRST_TOUCH_GAP_MS = 1500
-export async function caramelCaptureInstallFirstTouch() {
-    for (let i = 0; i < CARAMEL_FIRST_TOUCH_TRIES; i++) {
-        const { status, invalid } = await recordWelcomeFirstTouch(
-            currentBrowser,
-            {
-                href: location.href,
-                cookie: document.cookie,
-                trustedOrigins: CARAMEL_ALLOWED_ORIGINS,
-            },
-        )
-        if (invalid.length)
-            logError(
-                'INSTALL_FIRST_TOUCH_COOKIE_INVALID',
-                new Error(invalid.join('; ')),
-            )
-        if (status !== 'no-cookie') {
-            if (status === 'saved')
-                log('INSTALL_FIRST_TOUCH_SAVED', { tries: i + 1 })
-            return status
-        }
-        if (i + 1 < CARAMEL_FIRST_TOUCH_TRIES)
-            await sleep(CARAMEL_FIRST_TOUCH_GAP_MS)
-    }
-    log('INSTALL_FIRST_TOUCH_ABSENT', { tries: CARAMEL_FIRST_TOUCH_TRIES })
-    return 'no-cookie'
-}
-
-const CARAMEL_HELLO_TRIES = 5
-const CARAMEL_HELLO_GAP_MS = 600
-// Called from initCouponRunner() below; exported for the suite.
-export async function caramelAnnounceToWebsite() {
-    for (let i = 0; i < CARAMEL_HELLO_TRIES; i++) {
-        let token = null
-        try {
-            token = (await caramelGetSession())?.token || null
-        } catch {
-            // Storage unavailable — we could never tell whether it worked, so
-            // stop rather than shout into the page on a loop.
-            return
-        }
-        if (token) {
-            if (i > 0) log('EXT_HELLO_ANSWERED', { attempt: i })
-            return
-        }
-        window.postMessage({ type: 'caramel-ext-hello' }, location.origin)
-        if (i + 1 < CARAMEL_HELLO_TRIES) await sleep(CARAMEL_HELLO_GAP_MS)
-    }
-    log('EXT_HELLO_UNANSWERED', {
-        tries: CARAMEL_HELLO_TRIES,
-        reason: 'nobody on the page answered — the visitor is most likely signed out there',
-    })
 }
 
 /* URLs detection has already been answered for, seeded by initCouponRunner()

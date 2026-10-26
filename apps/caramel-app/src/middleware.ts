@@ -25,9 +25,14 @@
 //    (DNS wildcard + a Dokploy domain). EVERY path on the docs host goes to
 //    /docs and the query string is dropped; other subdomains are untouched.
 //
+// 5. A write (POST, PUT, DELETE...) to a page -> 405 (T-7839). There are no
+//    server actions, so only crawlers send these; the API, the PostHog prefix
+//    and the Sentry tunnel keep every method (src/lib/pageMethods.ts).
+//
 // Any combination redirects ONCE, straight to the final URL. The target origin
 // is the visitor's public Host on https (see redirectOrigin), never the
 // container's internal http origin.
+import { PAGE_METHODS, refusesPageMethod } from '@/lib/pageMethods'
 import { trailingSlashRedirectPath } from '@/lib/trailingSlash'
 import { NextResponse, type NextRequest } from 'next/server'
 
@@ -111,6 +116,14 @@ function docsRedirectTarget(
 }
 
 export function middleware(request: NextRequest) {
+    // 5. A write to a page (no page takes one) is a 405, before Next renders
+    //    anything (T-7839, CARAMEL-2S). See src/lib/pageMethods.ts.
+    if (refusesPageMethod(request.method, request.nextUrl.pathname)) {
+        return new NextResponse(null, {
+            status: 405,
+            headers: { Allow: PAGE_METHODS },
+        })
+    }
     const rawHost = request.headers.get('host') ?? ''
     const hostHeader = HOST_HEADER.test(rawHost) ? rawHost : ''
     const docsTarget = docsRedirectTarget(request, hostHeader)

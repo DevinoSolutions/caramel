@@ -122,7 +122,7 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: caramel
-        ports: ['58005:5432']
+        ports: ['28005:5432']
         options: >-
           --health-cmd "pg_isready -U postgres -d caramel"
           --health-interval 10s
@@ -162,7 +162,7 @@ jobs:
         run: pnpm --filter caramel-extension exec playwright install --with-deps chromium
 
       # Writes apps/caramel-app/.env (DATABASE_URL -> the postgres service on
-      # :58005, BETTER_AUTH secrets, NEXT_PUBLIC_BASE_URL=localhost:58000) —
+      # :28005, BETTER_AUTH secrets, NEXT_PUBLIC_BASE_URL=localhost:28000) —
       # what both `prisma migrate deploy` and the dev server below read.
       - name: Write minimal CI env
         run: pnpm --filter caramel-app run setup:ci-env
@@ -176,18 +176,18 @@ jobs:
         working-directory: ./apps/caramel-app
         run: pnpm exec prisma migrate deploy
 
-      - name: Boot the app on :58000
+      - name: Boot the app on :28000
         working-directory: ./apps/caramel-app
         run: |
-          nohup pnpm exec next dev -p 58000 > /tmp/next-dev.log 2>&1 &
+          nohup pnpm exec next dev -p 28000 > /tmp/next-dev.log 2>&1 &
           for i in $(seq 1 60); do
-            if curl -fsS -o /dev/null http://localhost:58000/; then
+            if curl -fsS -o /dev/null http://localhost:28000/; then
               echo "app ready after attempt $i"
               exit 0
             fi
             sleep 5
           done
-          echo '::error::app never became ready on :58000'
+          echo '::error::app never became ready on :28000'
           tail -50 /tmp/next-dev.log
           exit 1
 

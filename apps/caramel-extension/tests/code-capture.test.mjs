@@ -18,7 +18,7 @@ import {
 import { implOf, trustedClick, trustedKey } from './_trusted-events.mjs'
 
 // The runner's apply overlay as the runner makes it: marked as ours
-// (UI-helpers.js createCaramelShadowHost), which the page cannot do.
+// (ui-shell.js createCaramelShadowHost), which the page cannot do.
 async function ourOverlay() {
     const { caramelMarkOwnHost } = await import('../caramel-base.js')
     const overlay = caramelMarkOwnHost(document.createElement('div'))
@@ -597,11 +597,18 @@ describe('what must never leave the page', () => {
 
 describe('gift-card and card numbers', () => {
     const FIELD_MARKUP = {
-        'its name': el => (el.name = 'giftCardNumber'),
+        // The fixture's id is "promo": a name and id that disagree make a
+        // combined box (see 'a box that takes a discount code or a gift card').
+        'its name': el => {
+            el.name = 'giftCardNumber'
+            el.id = 'field'
+        },
         'its id': el => (el.id = 'gift-card-input'),
         'its placeholder': el => (el.placeholder = 'Gift card or voucher'),
         'its aria-label': el => el.setAttribute('aria-label', 'Loyalty points'),
         'its autocomplete': el => el.setAttribute('autocomplete', 'email'),
+        'its card autocomplete': el =>
+            el.setAttribute('autocomplete', 'cc-number'),
         'its label': _el => {
             const label = document.createElement('label')
             label.htmlFor = 'promo'
@@ -654,6 +661,385 @@ describe('gift-card and card numbers', () => {
         await settle(1800)
 
         expect(sent).toEqual([])
+    })
+})
+
+describe('a box that takes a discount code or a gift card', () => {
+    const waitForStep = step =>
+        vi.waitFor(() => expect(funnel.map(m => m.step)).toContain(step), LONG)
+    /** The store's answer on a combined box: an applied row with `text`, and
+     *  the total dropping (a redeemed gift card drops it too). */
+    function storeShowsRow(text) {
+        document.getElementById('apply').addEventListener('click', () => {
+            setTimeout(() => {
+                const row = document.createElement('div')
+                row.id = 'applied-row'
+                setText(row, text)
+                document.body.appendChild(row)
+                setText(document.getElementById('total'), '$90.00')
+            }, 100)
+        })
+    }
+
+    it.each([
+        ['Shopify', { placeholder: 'Discount code or gift card' }],
+        ['Shopify by its name alone', { name: 'reductions' }],
+        ['a UK voucher box', { placeholder: 'Enter voucher code' }],
+        ['a German Gutschein box', { placeholder: 'Gutscheincode' }],
+        [
+            'Shopify in French',
+            { placeholder: 'Code de réduction ou carte-cadeau' },
+        ],
+        ['Shopify in German', { placeholder: 'Rabattcode oder Geschenkkarte' }],
+        [
+            'Shopify in Japanese',
+            { placeholder: '割引コードまたはギフトカード' },
+        ],
+    ])('%s: a code the store lists by name is shared', async (_l, attrs) => {
+        Object.assign(promo(), attrs)
+        await armed()
+        storeShowsRow('Discount SAVE10 −$10.00')
+        shopperTypes('SAVE10')
+        shopperClicksApply()
+
+        await vi.waitFor(() => expect(sent).toHaveLength(1), LONG)
+        expect(sent[0].code).toBe('SAVE10')
+    })
+
+    it.each([
+        ['Shopify', 'Discount code or gift card'],
+        ['Shopify in French', 'Code de réduction ou carte-cadeau'],
+        ['a UK voucher box', 'Enter voucher code'],
+    ])(
+        '%s: a redeemed gift card (masked row, total down) is never shared',
+        async (_l, placeholder) => {
+            promo().placeholder = placeholder
+            await armed()
+            storeShowsRow('Gift card •••• 7Q2K −$10.00')
+            shopperTypes('X7K29PQMA4C87Q2K')
+            shopperClicksApply()
+            await waitForStep('store_not_accepted')
+
+            expect(sent).toEqual([])
+            expect(funnel.at(-1)).toMatchObject({
+                step: 'store_not_accepted',
+                reason: 'not-tied-to-code',
+            })
+            expect(JSON.stringify(funnel)).not.toMatch(/X7K29PQMA4C87Q2K/i)
+        },
+    )
+
+    it('a row that names the full code but reads as a gift card is never shared', async () => {
+        promo().placeholder = 'Discount code or gift card'
+        await armed()
+        storeShowsRow('Gift card X7K29PQMA4C87Q2K −$10.00')
+        shopperTypes('X7K29PQMA4C87Q2K')
+        shopperClicksApply()
+        await waitForStep('store_not_accepted')
+
+        expect(sent).toEqual([])
+    })
+
+    it('a bare price drop under a generic row is not enough on a combined box', async () => {
+        promo().placeholder = 'Discount code or gift card'
+        await armed()
+        storeShowsRow('Discount applied −$10.00')
+        shopperTypes('SAVE10')
+        shopperClicksApply()
+        await waitForStep('store_not_accepted')
+
+        expect(sent).toEqual([])
+    })
+
+    it('the same generic row and drop on a plain promo box is still shared', async () => {
+        promo().placeholder = 'Discount code'
+        await armed()
+        storeShowsRow('Discount applied −$10.00')
+        shopperTypes('SAVE10')
+        shopperClicksApply()
+
+        await vi.waitFor(() => expect(sent).toHaveLength(1), LONG)
+    })
+
+    it.each([
+        [
+            'a UK voucher box',
+            'Enter voucher code',
+            'Voucher AB12CD34EF −£25.00',
+        ],
+        [
+            'a German Gutschein box',
+            'Gutscheincode',
+            'Gutschein AB12CD34EF −25,00 €',
+        ],
+        [
+            'Shopify in Hungarian',
+            'Kedvezménykód vagy ajándékkártya',
+            'Ajándékkártya AB12CD34EF',
+        ],
+        [
+            'Shopify in Turkish',
+            'İndirim kodu veya hediye kartı',
+            'HEDİYE KARTI AB12CD34EF',
+        ],
+    ])(
+        '%s: a row naming the code as a voucher / gift card is never shared',
+        async (_l, placeholder, rowText) => {
+            promo().placeholder = placeholder
+            await armed()
+            storeShowsRow(rowText)
+            shopperTypes('AB12CD34EF')
+            shopperClicksApply()
+            await waitForStep('store_not_accepted')
+
+            expect(sent).toEqual([])
+        },
+    )
+
+    it('a row holding only the code, on a line that says Gift Certificate, is never shared', async () => {
+        promo().placeholder = 'Coupon / Gift Certificate'
+        await armed()
+        document.getElementById('apply').addEventListener('click', () => {
+            setTimeout(() => {
+                const line = document.createElement('li')
+                const label = document.createElement('span')
+                label.textContent = 'Gift Certificate '
+                const row = document.createElement('span')
+                row.id = 'applied-row'
+                setText(row, 'GC8X2K9QW')
+                line.append(label, row)
+                setText(line, 'Gift Certificate GC8X2K9QW −$25.00')
+                line.replaceChildren(label, row)
+                document.body.appendChild(line)
+                setText(document.getElementById('total'), '$75.00')
+            }, 100)
+        })
+        shopperTypes('GC8X2K9QW')
+        shopperClicksApply()
+        await waitForStep('store_not_accepted')
+
+        expect(sent).toEqual([])
+    })
+
+    it('a row that was already on the page does not speak for this attempt', async () => {
+        promo().placeholder = 'Discount code or gift card'
+        const earlier = document.createElement('div')
+        earlier.id = 'applied-row'
+        setText(earlier, 'Discount SAVE10 −$5.00')
+        document.body.appendChild(earlier)
+        await armed()
+        // The shopper retypes SAVE10; the store's only new row is a gift card.
+        storeShowsRow('Gift card •••• 9QW1 −$20.00')
+        shopperTypes('SAVE10')
+        shopperClicksApply()
+        await waitForStep('store_not_accepted')
+
+        expect(sent).toEqual([])
+    })
+
+    it('a voucher row in a totals block that also has a Discount line is never shared', async () => {
+        promo().placeholder = 'Enter voucher code'
+        await armed()
+        document.getElementById('apply').addEventListener('click', () => {
+            setTimeout(() => {
+                const totals = document.createElement('section')
+                const discount = document.createElement('p')
+                discount.textContent = 'Discount −£5.00'
+                const line = document.createElement('p')
+                const row = document.createElement('span')
+                row.id = 'applied-row'
+                setText(row, 'Voucher AB12CD34EF −£25.00')
+                line.append(row)
+                totals.append(discount, line)
+                document.body.appendChild(totals)
+                setText(document.getElementById('total'), '$70.00')
+            }, 100)
+        })
+        shopperTypes('AB12CD34EF')
+        shopperClicksApply()
+        await waitForStep('store_not_accepted')
+
+        expect(sent).toEqual([])
+    })
+
+    it('an earlier row the store re-draws as a new node does not speak for this attempt', async () => {
+        promo().placeholder = 'Discount code or gift card'
+        const tags = document.createElement('ul')
+        const earlier = document.createElement('li')
+        earlier.id = 'applied-row'
+        setText(earlier, 'Discount SAVE10')
+        tags.append(earlier)
+        document.body.appendChild(tags)
+        await armed()
+        document.getElementById('apply').addEventListener('click', () => {
+            setTimeout(() => {
+                // A re-render: every row is a fresh node, the old one included.
+                const again = document.createElement('li')
+                again.id = 'applied-row'
+                setText(again, 'Discount SAVE10')
+                const gift = document.createElement('li')
+                gift.id = 'applied-row'
+                setText(gift, 'Gift card •••• 9QW1')
+                tags.replaceChildren(again, gift)
+                setText(document.getElementById('total'), '$80.00')
+            }, 100)
+        })
+        shopperTypes('SAVE10')
+        shopperClicksApply()
+        await waitForStep('store_not_accepted')
+
+        expect(sent).toEqual([])
+    })
+
+    it('a short code is not named by a row holding a longer one', async () => {
+        promo().placeholder = 'Discount code or gift card'
+        await armed()
+        storeShowsRow('Discount SAVE10 −$10.00')
+        shopperTypes('SAV')
+        shopperClicksApply()
+        await waitForStep('store_not_accepted')
+
+        expect(sent).toEqual([])
+    })
+
+    it('a gift-card name with a "promo" id is a combined box: a masked gift-card row is never shared', async () => {
+        promo().name = 'giftCardNumber'
+        await armed()
+        storeShowsRow('Gift card •••• 7Q2K −$10.00')
+        shopperTypes('X7K29PQMA4C87Q2K')
+        shopperClicksApply()
+        await waitForStep('store_not_accepted')
+
+        expect(sent).toEqual([])
+    })
+
+    it.each([
+        ['a gift-card-only box', 'Gift card number'],
+        ['a French gift-card-only box', 'Numéro de carte-cadeau'],
+        ['a gift voucher box', 'Gift voucher'],
+    ])('%s is still never watched', async (_l, placeholder) => {
+        promo().placeholder = placeholder
+        await armed()
+        storeShowsRow('Discount SAVE10 −$10.00')
+        shopperTypes('SAVE10')
+        shopperClicksApply()
+
+        await waitForStep('apply_ignored')
+        expect(funnel.at(-1)).toMatchObject({
+            step: 'apply_ignored',
+            reason: 'not-promo-field',
+        })
+        expect(sent).toEqual([])
+    })
+})
+
+describe('caramelCaptureAccepted on a combined box', () => {
+    const base = {
+        success: true,
+        committed: true,
+        priceDropped: true,
+        errorMsg: '',
+        errorIsNew: false,
+    }
+    // A row read with the line around it (coupon-apply.js appliedRows).
+    const row = (text, context = text, levels = 1) => ({
+        text,
+        context,
+        levels,
+    })
+    it('takes only a row that names the code and is not a stored-value row', () => {
+        const ok = {
+            ...base,
+            appliedRows: [row('Gift card •••• 1234'), row('SAVE10')],
+        }
+        expect(accepted(ok, 'save10', { combined: true })).toBe(true)
+        const gift = { ...base, appliedRows: [row('Gift certificate SAVE10')] }
+        expect(accepted(gift, 'SAVE10', { combined: true })).toBe(false)
+        const none = { ...base, appliedRows: [] }
+        expect(accepted(none, 'SAVE10', { combined: true })).toBe(false)
+        expect(accepted(none, 'SAVE10')).toBe(true)
+    })
+    it('judges the code by its own row and stored value by the line around it', () => {
+        const narrow = {
+            ...base,
+            appliedRows: [row('GC8X2K9QW', 'GC8X2K9QW Gift Certificate −$25')],
+        }
+        expect(accepted(narrow, 'GC8X2K9QW', { combined: true })).toBe(false)
+        const line = {
+            ...base,
+            appliedRows: [row('SAVE10', 'SAVE10 Discount −$5')],
+        }
+        expect(accepted(line, 'SAVE10', { combined: true })).toBe(true)
+    })
+    it('a voucher row is stored value unless its OWN text names a discount', () => {
+        const voucher = { ...base, appliedRows: [row('Voucher AB12 −£25')] }
+        expect(accepted(voucher, 'AB12', { combined: true })).toBe(false)
+        // The totals block always has a Discount line beside a gift voucher.
+        const besideDiscount = {
+            ...base,
+            appliedRows: [
+                row(
+                    'Voucher AB12 −£25',
+                    'Voucher AB12 −£25 Subtotal £80 Discount −£5',
+                    2,
+                ),
+            ],
+        }
+        expect(accepted(besideDiscount, 'AB12', { combined: true })).toBe(false)
+        const narrowUnderHeading = {
+            ...base,
+            appliedRows: [row('AB12', 'AB12 Rabatte & Gutscheine', 2)],
+        }
+        expect(accepted(narrowUnderHeading, 'AB12', { combined: true })).toBe(
+            false,
+        )
+        const discountVoucher = {
+            ...base,
+            appliedRows: [row('Discount voucher AB12')],
+        }
+        expect(accepted(discountVoucher, 'AB12', { combined: true })).toBe(true)
+    })
+    it('a row read with no line around it must name a discount itself', () => {
+        const bare = { ...base, appliedRows: [row('SAVE10', 'SAVE10', 0)] }
+        expect(accepted(bare, 'SAVE10', { combined: true })).toBe(false)
+        const says = {
+            ...base,
+            appliedRows: [row('Discount SAVE10', 'Discount SAVE10', 0)],
+        }
+        expect(accepted(says, 'SAVE10', { combined: true })).toBe(true)
+    })
+    it('matches decomposed (NFD) page text like composed text', () => {
+        const nfd = {
+            ...base,
+            appliedRows: [row('Ajándékkártya AB12'.normalize('NFD'))],
+        }
+        expect(accepted(nfd, 'AB12', { combined: true })).toBe(false)
+    })
+    it('names the code only as a whole token, on either kind of box', () => {
+        const plain = {
+            ...base,
+            priceDropped: false,
+            appliedRowsText: 'SAVE10 applied',
+        }
+        expect(accepted(plain, 'SAV')).toBe(false)
+        expect(accepted(plain, 'save10')).toBe(true)
+        const rows = { ...base, appliedRows: [row('Code: SAVE10-EXTRA')] }
+        expect(accepted(rows, 'SAVE10', { combined: true })).toBe(false)
+    })
+    it('the plain rule reads only the rows drawn for this attempt', () => {
+        const stale = {
+            ...base,
+            priceDropped: false,
+            appliedRows: [],
+            appliedRowsText: 'SAVE10 applied',
+        }
+        expect(accepted(stale, 'SAVE10')).toBe(false)
+    })
+    it('an old-shape verdict (joined text only) fails closed on a combined box', () => {
+        const old = { ...base, appliedRowsText: 'SAVE10 applied' }
+        expect(accepted(old, 'SAVE10', { combined: true })).toBe(false)
+        const says = { ...base, appliedRowsText: 'Discount SAVE10 applied' }
+        expect(accepted(says, 'SAVE10', { combined: true })).toBe(true)
     })
 })
 

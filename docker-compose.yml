@@ -26,9 +26,9 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-caramel}
     ports:
       # Loopback-only by default. Host port matches .env.example's
-      # localhost:58005 so the `pnpm dev:next` escape hatch + host-side prisma /
+      # localhost:28005 so the `pnpm dev:next` escape hatch + host-side prisma /
       # drift commands reach the same database.
-      - '${BIND_HOST:-127.0.0.1}:${PG_PORT:-58005}:5432'
+      - '${BIND_HOST:-127.0.0.1}:${PG_PORT:-28005}:5432'
     volumes:
       # Postgres 18+ stores data in a versioned subdir and declares its VOLUME
       # at /var/lib/postgresql — mounting the classic /var/lib/postgresql/data
@@ -53,7 +53,7 @@ services:
         # trip env.client.ts's min(1) at build time, so the local default
         # lives here too (platforms override via their env tab beside this
         # file). The other three are optional strings — "" passes harmlessly.
-        NEXT_PUBLIC_BASE_URL: ${NEXT_PUBLIC_BASE_URL:-http://localhost:58000}
+        NEXT_PUBLIC_BASE_URL: ${NEXT_PUBLIC_BASE_URL:-http://localhost:28000}
         NEXT_PUBLIC_SENTRY_DSN: ${NEXT_PUBLIC_SENTRY_DSN:-}
         NEXT_PUBLIC_GOOGLE_ANALYTICS_ID: ${NEXT_PUBLIC_GOOGLE_ANALYTICS_ID:-}
         NEXT_PUBLIC_API_ENCRYPTION_ENABLED: ${NEXT_PUBLIC_API_ENCRYPTION_ENABLED:-}
@@ -114,7 +114,7 @@ services:
       # NEXT_PUBLIC_POSTHOG_DATASET build arg (env.ts fail-fasts on a mismatch).
       POSTHOG_DATASET: ${POSTHOG_DATASET:-disabled}
     ports:
-      - '${BIND_HOST:-127.0.0.1}:${WEB_PORT:-58000}:3000'
+      - '${BIND_HOST:-127.0.0.1}:${WEB_PORT:-28000}:3000'
     depends_on:
       postgres:
         condition: service_healthy

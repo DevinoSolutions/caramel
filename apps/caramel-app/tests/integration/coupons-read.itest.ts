@@ -15,7 +15,7 @@ import prisma from '@/lib/prisma'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 // W4 integration — the flipped coupon READS exercised against the REAL prisma
-// client + live local Postgres (:58005), catalog tables migrated + seeded (the
+// client + live local Postgres (:28005), catalog tables migrated + seeded (the
 // harness/CI runs `prisma migrate deploy` first, which applies the synthetic
 // catalog seed: 30 coupons in the 900000xxx id range across ebay/amazon/
 // codecademy/walmart/target, 3 store_configs, 3 sources). This is the real
@@ -79,7 +79,7 @@ afterAll(async () => {
     await prisma.$disconnect()
 })
 
-describe('listCoupons — visible seed, ranking, exact row shape (real pg :58005)', () => {
+describe('listCoupons — visible seed, ranking, exact row shape (real pg :28005)', () => {
     it('returns every visible seeded coupon (and no non-visible one) in rating-DESC order with the coerced row shape', async () => {
         // Large limit so a concurrent ebay insert can never push a seeded row
         // off the page; then filter to the seed's own id range.
@@ -135,7 +135,7 @@ describe('listCoupons — visible seed, ranking, exact row shape (real pg :58005
     })
 })
 
-describe('getCouponStats — verified census (real pg :58005)', () => {
+describe('getCouponStats — verified census (real pg :28005)', () => {
     it("counts status='valid' coupons as plain numbers (the ::int cast, not BigInt) with the 7 seeded valid rows present", async () => {
         const stats = await getCouponStats()
         // ::int-cast aggregates come back as JS numbers; a dropped cast would
@@ -150,7 +150,7 @@ describe('getCouponStats — verified census (real pg :58005)', () => {
     })
 })
 
-describe('listSupportedStoreConfigs — flattened store_configs (real pg :58005)', () => {
+describe('listSupportedStoreConfigs — flattened store_configs (real pg :28005)', () => {
     it('returns the 3 seeded stores in store_name order, with nullable xpaths preserved', async () => {
         const configs = await listSupportedStoreConfigs()
         expect(configs.map(c => c.store_name)).toEqual([
@@ -177,7 +177,7 @@ describe('listSupportedStoreConfigs — flattened store_configs (real pg :58005)
     })
 })
 
-describe('listActiveSources — sources ⋈ coupons aggregates (real pg :58005)', () => {
+describe('listActiveSources — sources ⋈ coupons aggregates (real pg :28005)', () => {
     it('returns only ACTIVE sources with their JOIN aggregates as numbers', async () => {
         const sources = await listActiveSources()
         const byId = new Map(sources.map(s => [s.id, s]))
@@ -212,7 +212,7 @@ describe('listActiveSources — sources ⋈ coupons aggregates (real pg :58005)'
     })
 })
 
-describe('listStoreSitemapEntries — per-site visible aggregates for the sitemap (real pg :58005)', () => {
+describe('listStoreSitemapEntries — per-site visible aggregates for the sitemap (real pg :28005)', () => {
     it('returns one row per visible site, sorted by site, with an ::int count that matches listCoupons and a real Date last_updated', async () => {
         const rows = await listStoreSitemapEntries(5000)
 
@@ -251,7 +251,7 @@ describe('listStoreSitemapEntries — per-site visible aggregates for the sitema
     })
 })
 
-describe('listStoreCoupons — the store page count and its FAQ facts in one aggregate (real pg :58005)', () => {
+describe('listStoreCoupons — the store page count and its FAQ facts in one aggregate (real pg :28005)', () => {
     it('counts percent-off and fixed-amount codes by the coupon-card badge rule, and agrees with listCoupons and the sitemap', async () => {
         // codecademy.com is written by no other suite. Its visible seed rows
         // mix upper-case 'PERCENTAGE' rows with a lower-case 'fixed' row
@@ -312,7 +312,7 @@ describe('listStoreCoupons — the store page count and its FAQ facts in one agg
     })
 })
 
-describe('listNeighbourStoreRows — alphabetical windows around a store (real pg :58005)', () => {
+describe('listNeighbourStoreRows — alphabetical windows around a store (real pg :28005)', () => {
     it('returns the visible sites strictly before (nearest first) and after (nearest first) the base, each bounded by limit, as parsed aggregate rows', async () => {
         // The seed's visible sites, in order: amazon.com, codecademy.com,
         // ebay.com, target.com, walmart.com. Around ebay.com with limit 2 the
@@ -347,7 +347,7 @@ describe('listNeighbourStoreRows — alphabetical windows around a store (real p
     })
 })
 
-describe('searchSupportedSites — ranked store search (real pg :58005)', () => {
+describe('searchSupportedSites — ranked store search (real pg :28005)', () => {
     const SEEDED_SITES = new Set([
         'amazon.com',
         'codecademy.com',
@@ -383,7 +383,7 @@ describe('searchSupportedSites — ranked store search (real pg :58005)', () => 
 // straight into an ILIKE pattern, so `%` and `_` were wildcards and `\`
 // escaped the next character: a search for `%` listed every code, and `e_ay`
 // found ebay.com (2026-09-27, fleet ILIKE sweep).
-describe('search terms are matched literally, never as an ILIKE pattern (real pg :58005)', () => {
+describe('search terms are matched literally, never as an ILIKE pattern (real pg :28005)', () => {
     const SEEDED_SITES = new Set([
         'amazon.com',
         'codecademy.com',
@@ -450,7 +450,7 @@ describe('search terms are matched literally, never as an ILIKE pattern (real pg
 // because no seeded site holds an `_`. The rows are this describe's own, in a
 // private 700072xxx range, inserted when it starts and deleted when it ends,
 // so the describes above never see them.
-describe('prefix ranking and store matching read `_` literally (real pg :58005)', () => {
+describe('prefix ranking and store matching read `_` literally (real pg :28005)', () => {
     const ROWS = [
         { id: '700072001', site: 'a_shopping.com' },
         { id: '700072002', site: 'ab_a_x.com' },

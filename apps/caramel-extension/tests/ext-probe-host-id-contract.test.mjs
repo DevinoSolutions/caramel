@@ -8,7 +8,7 @@ import { CARAMEL_HOST_CSS } from '../UI-helpers.js'
 // was holding the two ends together.
 //
 // The extension owns the ids: it creates each shadow host as a bare <div> whose
-// id is a key of `CARAMEL_HOST_CSS` (UI-helpers.js). The ext-probe, which lives
+// id is a key of `CARAMEL_HOST_CSS` (ui-shell.js). The ext-probe, which lives
 // in `tools/ext-probe` and is driven from the caramel-coupons repo, hardcodes
 // its own copy of one of them:
 //

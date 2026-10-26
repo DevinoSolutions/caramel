@@ -26,7 +26,7 @@ const seedBaseURL =
     process.env.PLAYWRIGHT_BASE_URL ||
     process.env.BASE_URL ||
     process.env.NEXT_PUBLIC_BASE_URL ||
-    'http://localhost:58000'
+    'http://localhost:28000'
 
 test.describe('Add a code — signed out', () => {
     test('a signed-out visitor is asked to sign in to share a code', async ({

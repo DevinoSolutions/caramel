@@ -4,7 +4,7 @@
  *
  * Launches Chromium with the unpacked extension loaded, checks:
  *   1. Background service worker boots; the PATCHED base URL (see below)
- *      is in effect → localhost:58000
+ *      is in effect → localhost:28000
  *   2. Extension login via /api/extension/login succeeds
  *   3. /api/extension/supported-stores returns XPath-configured stores
  *   4. Supported store sample has valid selectors
@@ -17,15 +17,15 @@
  *      code, and clicks apply.
  *
  * Prereqs:
- *   - caramel-app dev server running on localhost:58000 (pnpm dev)
+ *   - caramel-app dev server running on localhost:28000 (pnpm dev)
  *   - Test user test@caramel.dev / test1234 exists (email_verified flipped)
  *
  * ⚠️ PATCHED TEST COPY (E-02, reworked for the WXT build in P1): the suite
  * builds `.output/chrome-mv3-dev` (`wxt build --mode development` — the DEV
  * stamp, bundled into the js by the __CARAMEL_ENV__ define), stages a TEMP
  * COPY of that output, and string-replaces the dev deployment URL with
- * localhost:58000 across the copy's bundles. The dev stamp's trustedOrigins
- * already include localhost:58000, so only the baseUrl needs rewriting. A
+ * localhost:28000 across the copy's bundles. The dev stamp's trustedOrigins
+ * already include localhost:28000, so only the baseUrl needs rewriting. A
  * remote target this suite must NOT test against (non-hermetic: races the
  * autodeploy, can't seed users); the replacement count is asserted loudly so
  * an environment-wiring refactor breaks this suite visibly instead of
@@ -57,7 +57,7 @@ import { stampFor } from './environments.mjs'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const EXT_PATH = path.resolve(__dirname, '..')
 const DEV_OUT = path.join(EXT_PATH, '.output', 'chrome-mv3-dev')
-const API_BASE = 'http://localhost:58000'
+const API_BASE = 'http://localhost:28000'
 const DEV_URL = stampFor('development').baseUrl
 const TEST_EMAIL = 'test@caramel.dev'
 const TEST_PASSWORD = 'test1234'
@@ -112,7 +112,7 @@ function stagePatchedExtensionCopy() {
             `[test] no occurrence of ${DEV_URL} found in the staged dev build — the environment wiring changed; update this patcher deliberately`,
         )
     }
-    // The dev stamp already trusts localhost:58000 (scripts/environments.mjs),
+    // The dev stamp already trusts localhost:28000 (scripts/environments.mjs),
     // so only the baseUrl needed rewriting.
 
     // The shipped manifest grants ONLY https://*/* — a packed extension has no

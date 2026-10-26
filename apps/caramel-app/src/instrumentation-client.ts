@@ -100,6 +100,9 @@ if (process.env.NODE_ENV === 'production' && dsn) {
         // browser.
         dataCollection: SENTRY_DATA_COLLECTION,
         traceLifecycle: 'static',
+        // Off, as on the server (see sentry.common.config.ts): SDK v11's
+        // default groups every captureMessage by a minified frame per build.
+        attachStacktrace: false,
         beforeSend: scrubSentryEvent,
         beforeSendTransaction: scrubSentryEvent,
         beforeBreadcrumb: scrubSentryBreadcrumb,

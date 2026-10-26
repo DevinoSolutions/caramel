@@ -145,6 +145,23 @@ describe("a row that says 'Not Applied' is not a success", () => {
         expect(caramelRowReadsRejected(addRow('Code is invalid'))).toBe(true)
         expect(caramelRowReadsRejected(addRow('WELCOME25 −$8.75'))).toBe(false)
     })
+
+    // gap.com, live 2026-10-26: the Gap Inc. checkout lists any code under
+    // "Applied Promos", with this line when it saves nothing.
+    it('a Gap "Applied Promos" row whose code no item qualifies for is not a success', () => {
+        addRow('CARAMELTEST1 $0.00 No items in your bag qualify.')
+        addRow('SPRING20 $0.00 No item in your cart qualifies for this promo.')
+        addRow('EXTRA15 No products qualify')
+
+        expect(caramelAcceptedRowCount('.promo-row')).toBe(0)
+    })
+
+    it('a code that applied to some items, or a row naming qualifying items, still counts', () => {
+        addRow("SAVE30 −$12.00 Some items in your bag don't qualify.")
+        addRow('GAPCASH −$20.00 Applies to qualifying items')
+
+        expect(caramelAcceptedRowCount('.promo-row')).toBe(2)
+    })
 })
 
 describe('an unchanged total is never headlined as applied', () => {

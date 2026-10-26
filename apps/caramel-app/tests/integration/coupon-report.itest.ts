@@ -24,7 +24,7 @@ import {
 // window really is a Postgres timestamp comparison, that a real row lands with a
 // real user attached. Those are exactly the facts that would make the route 500
 // in production while every unit test stayed green, so they are proven here
-// against the REAL prisma client + live local Postgres (:58005), catalog
+// against the REAL prisma client + live local Postgres (:28005), catalog
 // migrated (the harness/CI runs `prisma migrate deploy` first).
 //
 // Private id/email ranges (700071xxx coupons, a reports-itest.example site and
@@ -144,7 +144,7 @@ afterAll(async () => {
     await prisma.$disconnect()
 })
 
-describe('POST /api/coupons/[id]/report — attribution against real pg :58005', () => {
+describe('POST /api/coupons/[id]/report — attribution against real pg :28005', () => {
     it('a signed-in report lands one coupon_reports row carrying the real user id, alongside the aggregate signal', async () => {
         const res = await POST(reportRequest(KNOWN_ID, { outcome: 'worked' }))
         expect(res.status).toBe(200)

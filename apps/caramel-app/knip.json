@@ -7,23 +7,14 @@
         "scripts/*.ts"
     ],
     "project": ["src/**/*.{ts,tsx}", "e2e/**/*.ts", "evals/**/*.ts"],
-    "ignore": [
-        "postcss.config.mjs",
-        "src/components/StoreButtons.tsx",
-        "src/lib/capitalizeFirst.ts"
-    ],
+    "ignore": ["postcss.config.mjs"],
     "ignoreDependencies": [
         "@argos-ci/cli",
         "@types/gtag.js",
         "@typescript-eslint/parser",
         "eslint-config-next",
         "prettier-plugin-organize-imports",
-        "prettier-plugin-tailwindcss",
-        "@use-gesture/react",
-        "gsap",
-        "react-fast-marquee",
-        "react-lottie-player",
-        "react-type-animation"
+        "prettier-plugin-tailwindcss"
     ],
     "ignoreBinaries": ["eslint"],
     "ignoreExportsUsedInFile": true

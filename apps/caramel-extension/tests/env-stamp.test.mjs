@@ -60,7 +60,7 @@ describe('the environment table', () => {
     it('a dev build trusts dev origins and NOT production ones', () => {
         const dev = stampFor('development')
         expect(dev.trustedOrigins).toContain('https://dev.grabcaramel.com')
-        expect(dev.trustedOrigins).toContain('http://localhost:58000')
+        expect(dev.trustedOrigins).toContain('http://localhost:28000')
         expect(dev.trustedOrigins).not.toContain(PROD_URL)
     })
 

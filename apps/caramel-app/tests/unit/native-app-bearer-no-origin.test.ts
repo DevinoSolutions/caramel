@@ -61,6 +61,8 @@ vi.mock('@/lib/auth/auth', () => ({
                     : null,
             ),
         },
+        // account/delete expires the session cookies by better-auth's names.
+        options: {},
     },
 }))
 vi.mock('@/lib/rateLimit', async importOriginal => {
