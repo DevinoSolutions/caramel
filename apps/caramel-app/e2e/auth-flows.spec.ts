@@ -417,6 +417,31 @@ test.describe('Auth Flows — Protected Routes', () => {
         await expect(page).toHaveURL(/\/login/, { timeout: 10000 })
     })
 
+    // CARAMEL-2Y / CARAMEL-30: the redirect used to push /login on top of
+    // /profile, so Back landed on /profile and bounced straight to /login
+    // again (in the app shells, a loop until WebKit refused pushState).
+    test('Back from the sign-in redirect does not bounce into /profile again', async ({
+        page,
+    }) => {
+        await page.route('**/api/auth/get-session', route =>
+            route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify(null),
+            }),
+        )
+
+        await page.goto('/privacy')
+        await page.goto('/profile#favorites')
+        // The page it came from rides along, fragment included.
+        await expect(page).toHaveURL(/\/login\?next=%2Fprofile%23favorites$/, {
+            timeout: 10000,
+        })
+
+        await page.goBack()
+        await expect(page).toHaveURL(/\/privacy$/)
+    })
+
     test('profile page shows user data when authenticated', async ({
         page,
     }) => {
