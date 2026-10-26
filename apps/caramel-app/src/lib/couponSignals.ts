@@ -379,16 +379,45 @@ const REPORTER_SWEEP_BACKOFF_MS = 5 * 60 * 1000
 /** A sweep that has not settled by now is reported and abandoned. */
 const REPORTER_SWEEP_TIMEOUT_MS = 60 * 1000
 /**
- * Server-side cap on the sweep's DELETE (Postgres `statement_timeout`, set per
- * transaction with SET LOCAL). Below the Prisma transaction timeout below, which
- * is below REPORTER_SWEEP_TIMEOUT_MS: a slow DELETE is cancelled by Postgres
- * first, so it rejects with the real "canceling statement due to statement
- * timeout" error instead of Prisma's generic transaction-expired one, and
- * instead of hanging until the process restarts.
+ * The sweep deletes in bounded chunks, each chunk its OWN transaction, so a
+ * chunk that commits stays committed even if a later one fails or is cancelled
+ * (one big transaction would roll the whole backlog back on every retry and
+ * never progress). Postgres has no DELETE ... LIMIT, so a chunk is a keyed
+ * DELETE from a LIMIT-ed sub-select (reporterSweepChunk below).
  */
-const REPORTER_SWEEP_STATEMENT_TIMEOUT_MS = 50 * 1000
-/** Prisma's interactive-transaction `timeout` (its 5 s default would cut a big sweep short). */
-const REPORTER_SWEEP_TRANSACTION_TIMEOUT_MS = 55 * 1000
+const REPORTER_SWEEP_CHUNK_ROWS = 5000
+/** Hard cap on chunks per run, so a pathological backlog cannot loop forever. */
+const REPORTER_SWEEP_MAX_CHUNKS = 100
+/**
+ * No new chunk starts once a run has been going this long. With the per-chunk
+ * wait + run limits below the worst case is budget + maxWait + timeout =
+ * 55 s, still inside REPORTER_SWEEP_TIMEOUT_MS: a healthy-but-large backlog
+ * ends its run cleanly instead of tripping the abandon-and-report path.
+ */
+const REPORTER_SWEEP_LOOP_BUDGET_MS = 30 * 1000
+/** A run that stopped on a cap with rows left over comes back this soon (not in an hour). */
+const REPORTER_SWEEP_BACKLOG_RETRY_MS = 60 * 1000
+/**
+ * Server-side cap on ONE chunk's DELETE (Postgres `statement_timeout`, set per
+ * transaction with SET LOCAL). Below the Prisma transaction timeout below: a
+ * slow chunk is cancelled by Postgres first, so it rejects with the real
+ * "canceling statement due to statement timeout" error instead of Prisma's
+ * generic transaction-expired one, and instead of hanging until the process
+ * restarts. A 5000-row indexed chunk finishes in well under a second, so 10 s
+ * means something is wrong (a lock, a bloated table).
+ */
+const REPORTER_SWEEP_STATEMENT_TIMEOUT_MS = 10 * 1000
+/**
+ * Prisma's interactive-transaction options for one chunk. `maxWait` is how long
+ * Prisma waits to be handed a pooled connection (its default is 2 s, which under
+ * load rejects with P2028 where a plain query would simply queue); `timeout` is
+ * how long the transaction may run (default 5 s). maxWait + timeout must stay
+ * under REPORTER_SWEEP_TIMEOUT_MS (pinned in coupon-failure-quorum.test.ts).
+ */
+const REPORTER_SWEEP_TRANSACTION_OPTIONS = {
+    maxWait: 10 * 1000,
+    timeout: 15 * 1000,
+} as const
 const REPORTER_SWEEP_AREA = 'couponSignals.sweepExpiredReporters'
 let nextReporterSweepAt = 0
 let reporterSweepInFlight: Promise<void> | null = null
@@ -406,19 +435,22 @@ let abandonedDeletion: Promise<void> | null = null
  * would keep its rows, so two callers run this global sweep: the report route
  * after its write has committed (not awaited: the response never waits for
  * retention), and the hourly timer in couponReporterRetention.ts, which keeps
- * the promise true in quiet periods. One DELETE, at most hourly per process,
- * and at most ONE in flight: while a sweep is running, every other caller gets
+ * the promise true in quiet periods. One run, at most hourly per process, and
+ * at most ONE in flight: while a sweep is running, every other caller gets
  * the running sweep's promise instead of starting its own DELETE
  * (single-flight is per module instance, so per bundle that loads this file).
  * It is deliberately outside the report's transaction (a retention failure
  * must not roll back a report that was valid) and it never rejects. A failure
  * is captured to Sentry and logged loudly and the next unforced try waits 5
  * minutes, so a persistent failure costs one attempt per 5 minutes, not one
- * per report. The DELETE runs in its own short transaction that first sets a
- * Postgres `statement_timeout` (50 s, via SET LOCAL, so it dies with the
- * transaction and never leaks onto the pooled connection): a DELETE stuck on a
- * lock or a bloated table is cancelled by Postgres, rejects, and takes the
- * normal failure path above, so retention cannot stay off until a restart.
+ * per report. A run deletes in bounded chunks (deleteExpiredReporters), each in
+ * its own short transaction that first sets a Postgres `statement_timeout`
+ * (10 s, via SET LOCAL, so it dies with the transaction and never leaks onto
+ * the pooled connection): a chunk stuck on a lock or a bloated table is
+ * cancelled by Postgres, rejects, and takes the normal failure path above, so
+ * retention cannot stay off until a restart, and the chunks committed before
+ * it stay deleted, so a backlog still shrinks across retries. A run that hits
+ * its chunk or time cap with rows left retries in a minute, not an hour.
  * Defense in depth for a DELETE the server cannot cancel (a dead socket): one
  * that has not settled after 60 s is reported to Sentry (tagged timeout),
  * abandoned and backed off the same way, but until it settles NO caller (force
@@ -442,26 +474,68 @@ export function sweepExpiredReporters(
     return sweep
 }
 
+type ReporterSweepResult = {
+    deleted: number
+    chunks: number
+    /** True when the run stopped on a cap while full chunks were still coming. */
+    backlog: boolean
+}
+
+/**
+ * ONE chunk, in its own transaction: SET LOCAL statement_timeout (dies with the
+ * transaction, never leaks onto the pooled connection), then a keyed DELETE of
+ * at most REPORTER_SWEEP_CHUNK_ROWS expired rows. The outer `last_at < cutoff`
+ * is re-checked against the row's current version, so a reporter that
+ * re-reported between the sub-select and the DELETE is kept. SET LOCAL takes no
+ * bind parameter; the value is a module constant, never input, so Prisma.raw is
+ * safe. Returns the rows deleted; a failure (statement timeout included)
+ * rejects and rolls back only this chunk.
+ */
+function deleteExpiredReporterChunk(cutoff: Date): Promise<number> {
+    return prisma.$transaction(async tx => {
+        await tx.$executeRaw(
+            Prisma.sql`SET LOCAL statement_timeout = ${Prisma.raw(String(REPORTER_SWEEP_STATEMENT_TIMEOUT_MS))}`,
+        )
+        return tx.$executeRaw(
+            Prisma.sql`DELETE FROM coupon_signal_reporters
+                WHERE last_at < ${cutoff}
+                AND (coupon_id, outcome, reporter_hash) IN (
+                    SELECT coupon_id, outcome, reporter_hash
+                    FROM coupon_signal_reporters
+                    WHERE last_at < ${cutoff}
+                    LIMIT ${REPORTER_SWEEP_CHUNK_ROWS}
+                )`,
+        )
+    }, REPORTER_SWEEP_TRANSACTION_OPTIONS)
+}
+
+/**
+ * Chunk until one deletes fewer than a full chunk (the backlog is clear), the
+ * chunk cap is hit, or the loop budget is spent. The cutoff is fixed once per
+ * run so the target set cannot grow under the loop. A chunk that fails
+ * propagates (the caller reports it); chunks already committed stay committed.
+ */
+async function deleteExpiredReporters(now: Date): Promise<ReporterSweepResult> {
+    const cutoff = new Date(now.getTime() - FAILING_WINDOW_MS)
+    const startedAt = Date.now()
+    let deleted = 0
+    let chunks = 0
+    while (chunks < REPORTER_SWEEP_MAX_CHUNKS) {
+        const count = await deleteExpiredReporterChunk(cutoff)
+        chunks++
+        deleted += count
+        if (count < REPORTER_SWEEP_CHUNK_ROWS) {
+            return { deleted, chunks, backlog: false }
+        }
+        if (Date.now() - startedAt >= REPORTER_SWEEP_LOOP_BUDGET_MS) break
+    }
+    return { deleted, chunks, backlog: true }
+}
+
 async function runReporterSweep(now: Date): Promise<void> {
     let timeoutHandle: ReturnType<typeof setTimeout> | undefined
     try {
-        const deletion = prisma.$transaction(
-            async tx => {
-                // SET LOCAL takes no bind parameter; the value is a module
-                // constant, never input, so Prisma.raw is safe here.
-                await tx.$executeRaw(
-                    Prisma.sql`SET LOCAL statement_timeout = ${Prisma.raw(String(REPORTER_SWEEP_STATEMENT_TIMEOUT_MS))}`,
-                )
-                await tx.couponSignalReporter.deleteMany({
-                    where: {
-                        lastAt: {
-                            lt: new Date(now.getTime() - FAILING_WINDOW_MS),
-                        },
-                    },
-                })
-            },
-            { timeout: REPORTER_SWEEP_TRANSACTION_TIMEOUT_MS },
-        )
+        const deletion = deleteExpiredReporters(now)
         const timedOut = new Promise<'timeout'>(resolve => {
             timeoutHandle = setTimeout(
                 () => resolve('timeout'),
@@ -492,7 +566,21 @@ async function runReporterSweep(now: Date): Promise<void> {
             nextReporterSweepAt = now.getTime() + REPORTER_SWEEP_BACKOFF_MS
             return
         }
-        nextReporterSweepAt = now.getTime() + REPORTER_SWEEP_INTERVAL_MS
+        if (outcome.deleted > 0) {
+            console.info(
+                `[couponSignals] reporter retention sweep deleted ${outcome.deleted} expired rows in ${outcome.chunks} chunks`,
+            )
+        }
+        if (outcome.backlog) {
+            console.warn(
+                `[couponSignals] reporter retention sweep stopped at its cap with expired rows left (retrying in ${REPORTER_SWEEP_BACKLOG_RETRY_MS / 1000} s)`,
+            )
+        }
+        nextReporterSweepAt =
+            now.getTime() +
+            (outcome.backlog
+                ? REPORTER_SWEEP_BACKLOG_RETRY_MS
+                : REPORTER_SWEEP_INTERVAL_MS)
     } catch (error) {
         Sentry.captureException(error, {
             tags: { area: REPORTER_SWEEP_AREA },
