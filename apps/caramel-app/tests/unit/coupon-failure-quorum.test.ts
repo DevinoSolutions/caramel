@@ -1046,7 +1046,7 @@ describe('failure quorum: forged anonymous reports cannot sink a code', () => {
             settleHung(0)
             await vi.advanceTimersByTimeAsync(0)
             expect(infoSpy).toHaveBeenCalledWith(
-                '[couponSignals] abandoned reporter retention sweep settled late deleted=0 chunks=0',
+                '[couponSignals] abandoned reporter retention sweep settled late deleted=0 chunks=1',
             )
             infoSpy.mockRestore()
 
