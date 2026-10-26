@@ -52,8 +52,10 @@ export default function ConfirmDialog({
     typeToConfirm?: string
     tone?: 'default' | 'danger'
     busy?: boolean
-    /** Marks the whole dialog `ph-no-capture` so posthog-js never autocaptures
-     * clicks or input inside it. */
+    /** Adds `ph-no-capture`: posthog-js autocapture (click, change, submit,
+     * $rageclick, dead clicks) skips this dialog and the session recorder
+     * blocks it. It does NOT stop heatmaps ($$heatmap), which are off today
+     * (capture_heatmaps unset). */
     excludeFromAutocapture?: boolean
 }) {
     const dialogRef = useRef<HTMLDialogElement>(null)
@@ -86,7 +88,12 @@ export default function ConfirmDialog({
                 if (e.target === dialogRef.current) onClose()
             }}
             aria-labelledby={headingId}
-            className={`motion-dialog w-[92vw] max-w-md bg-transparent p-0 backdrop:bg-black/60 backdrop:backdrop-blur-sm ${excludeFromAutocapture ? 'ph-no-capture' : ''}`}
+            className={[
+                'motion-dialog w-[92vw] max-w-md bg-transparent p-0 backdrop:bg-black/60 backdrop:backdrop-blur-sm',
+                excludeFromAutocapture ? 'ph-no-capture' : null,
+            ]
+                .filter(Boolean)
+                .join(' ')}
         >
             {open ? (
                 <div className={cardClasses}>

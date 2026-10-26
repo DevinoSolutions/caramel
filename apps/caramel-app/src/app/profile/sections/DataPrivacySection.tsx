@@ -81,10 +81,6 @@ export default function DataPrivacySection({
         }
     }
 
-    // The account-delete opener and its confirm dialog carry `ph-no-capture`
-    // (T-8946): posthog-js would autocapture the confirm click under the
-    // user's distinct id and queue it, and that batch flushes AFTER the server
-    // purge, re-creating a property-less PostHog person for the deleted user.
     async function deleteAccount() {
         setBusy(true)
         try {
@@ -202,6 +198,7 @@ export default function DataPrivacySection({
                         <button
                             type="button"
                             onClick={() => setAccountDialogOpen(true)}
+                            // T-8946: ph-no-capture so posthog-js never autocaptures this click under the old distinct id (its batch would flush after the server PostHog purge and re-create the person).
                             className={`${DANGER_ACTION_BUTTON_CLASS} ph-no-capture`}
                         >
                             Delete my account
@@ -275,6 +272,7 @@ export default function DataPrivacySection({
                 typeToConfirm={CONFIRM_WORD}
                 tone="danger"
                 busy={busy}
+                // T-8946: ph-no-capture so posthog-js never autocaptures the confirm click under the old distinct id (its batch would flush after the server PostHog purge and re-create the person).
                 excludeFromAutocapture
                 body={
                     <>

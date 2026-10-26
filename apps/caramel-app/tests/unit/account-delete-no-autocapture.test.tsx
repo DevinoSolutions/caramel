@@ -45,6 +45,7 @@ function dialogWithTitle(title: string): HTMLDialogElement {
 }
 
 beforeEach(() => {
+    // jsdom stubs: jsdom lacks HTMLDialogElement.showModal/close.
     HTMLDialogElement.prototype.showModal = function showModal(this: {
         open: boolean
     }) {
