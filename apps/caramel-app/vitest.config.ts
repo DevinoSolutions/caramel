@@ -1,6 +1,14 @@
 import tsconfigPaths from 'vite-tsconfig-paths'
 import { configDefaults, defineConfig } from 'vitest/config'
 
+// T-8622: pin the runner's timezone before any worker starts, so a test can
+// never pass on a UTC CI box and fail on a developer laptop (or the reverse).
+// Set HERE, in the main process, on purpose: vitest ignores `test.env` / a
+// setup-file assignment of TZ under `pool: 'threads'` (Node only applies TZ
+// from the main thread), while a main-process assignment reaches every pool.
+// Overrides a TZ exported by the shell. tests/unit/timezone-pin.test.ts proves it.
+process.env.TZ = 'UTC'
+
 // Unit baseline (F-004). Playwright owns `e2e/**` (playwright.config.ts
 // testDir: './e2e') — excluded here so vitest never tries to collect it.
 // `**/*.eval.*` is reserved for F-012's separate eval harness.
