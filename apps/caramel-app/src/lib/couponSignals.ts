@@ -28,7 +28,7 @@
 // point of the trust loop is to own this signal ourselves rather than mirror
 // (or mutate) the externally-owned catalog. Signals are keyed by the catalog
 // coupon id as a string, matching the app's Coupon.id: string.
-import type { Prisma, PrismaClient } from '@/generated/prisma/client'
+import { Prisma, type PrismaClient } from '@/generated/prisma/client'
 import type { ReportReporter } from '@/lib/couponReportDedupe'
 import {
     FAILING_WINDOW_MS,
@@ -378,12 +378,25 @@ const REPORTER_SWEEP_INTERVAL_MS = 60 * 60 * 1000
 const REPORTER_SWEEP_BACKOFF_MS = 5 * 60 * 1000
 /** A sweep that has not settled by now is reported and abandoned. */
 const REPORTER_SWEEP_TIMEOUT_MS = 60 * 1000
+/**
+ * Server-side cap on the sweep's DELETE (Postgres `statement_timeout`, set per
+ * transaction with SET LOCAL). Below the Prisma transaction timeout below, which
+ * is below REPORTER_SWEEP_TIMEOUT_MS: a slow DELETE is cancelled by Postgres
+ * first, so it rejects with the real "canceling statement due to statement
+ * timeout" error instead of Prisma's generic transaction-expired one, and
+ * instead of hanging until the process restarts.
+ */
+const REPORTER_SWEEP_STATEMENT_TIMEOUT_MS = 50 * 1000
+/** Prisma's interactive-transaction `timeout` (its 5 s default would cut a big sweep short). */
+const REPORTER_SWEEP_TRANSACTION_TIMEOUT_MS = 55 * 1000
 const REPORTER_SWEEP_AREA = 'couponSignals.sweepExpiredReporters'
 let nextReporterSweepAt = 0
 let reporterSweepInFlight: Promise<void> | null = null
-// The DELETE of a timed-out sweep, still running in Postgres. While it is set
-// NO caller (force included) starts another one, so at most one DELETE is ever
-// alive per module instance and the pool cannot fill with abandoned ones.
+// The sweep transaction of a timed-out sweep, still unsettled. The statement
+// timeout makes this rare (Postgres cancels the DELETE), but a dead socket
+// never answers, so this stays as defense in depth. While it is set NO caller
+// (force included) starts another one, so at most one DELETE is ever alive per
+// module instance and the pool cannot fill with abandoned ones.
 let abandonedDeletion: Promise<void> | null = null
 
 /**
@@ -401,12 +414,17 @@ let abandonedDeletion: Promise<void> | null = null
  * must not roll back a report that was valid) and it never rejects. A failure
  * is captured to Sentry and logged loudly and the next unforced try waits 5
  * minutes, so a persistent failure costs one attempt per 5 minutes, not one
- * per report. A DELETE that has not settled after 60 s is reported to Sentry
- * (tagged timeout), abandoned and backed off the same way, but it keeps running
- * in Postgres, so until it settles NO caller (force included) starts another
- * DELETE; a late rejection is reported too (tagged late). `force` skips the
- * throttle and the backoff (the timer's own hourly cadence is the throttle
- * there).
+ * per report. The DELETE runs in its own short transaction that first sets a
+ * Postgres `statement_timeout` (50 s, via SET LOCAL, so it dies with the
+ * transaction and never leaks onto the pooled connection): a DELETE stuck on a
+ * lock or a bloated table is cancelled by Postgres, rejects, and takes the
+ * normal failure path above, so retention cannot stay off until a restart.
+ * Defense in depth for a DELETE the server cannot cancel (a dead socket): one
+ * that has not settled after 60 s is reported to Sentry (tagged timeout),
+ * abandoned and backed off the same way, but until it settles NO caller (force
+ * included) starts another DELETE; a late rejection is reported too (tagged
+ * late). `force` skips the throttle and the backoff (the timer's own hourly
+ * cadence is the throttle there).
  */
 export function sweepExpiredReporters(
     options: { force?: boolean } = {},
@@ -427,11 +445,23 @@ export function sweepExpiredReporters(
 async function runReporterSweep(now: Date): Promise<void> {
     let timeoutHandle: ReturnType<typeof setTimeout> | undefined
     try {
-        const deletion = prisma.couponSignalReporter.deleteMany({
-            where: {
-                lastAt: { lt: new Date(now.getTime() - FAILING_WINDOW_MS) },
+        const deletion = prisma.$transaction(
+            async tx => {
+                // SET LOCAL takes no bind parameter; the value is a module
+                // constant, never input, so Prisma.raw is safe here.
+                await tx.$executeRaw(
+                    Prisma.sql`SET LOCAL statement_timeout = ${Prisma.raw(String(REPORTER_SWEEP_STATEMENT_TIMEOUT_MS))}`,
+                )
+                await tx.couponSignalReporter.deleteMany({
+                    where: {
+                        lastAt: {
+                            lt: new Date(now.getTime() - FAILING_WINDOW_MS),
+                        },
+                    },
+                })
             },
-        })
+            { timeout: REPORTER_SWEEP_TRANSACTION_TIMEOUT_MS },
+        )
         const timedOut = new Promise<'timeout'>(resolve => {
             timeoutHandle = setTimeout(
                 () => resolve('timeout'),
