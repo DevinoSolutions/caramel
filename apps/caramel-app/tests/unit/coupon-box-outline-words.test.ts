@@ -2,7 +2,6 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { couponBoxCases } from '../../evals/fixtures/coupon-box-cases'
 import {
-    EXTENSION_WORDS_PENDING,
     OUTLINE_WORDS,
     outlineWordsOnly,
 } from '../../evals/fixtures/extension-outline-words'
@@ -39,17 +38,10 @@ describe('the app copy of the extension word list', () => {
         expect(missing).toEqual([])
     })
 
-    it('holds no word the extension list lacks, bar the pending ones', () => {
+    it('holds no word the extension list lacks', () => {
         const ext = extensionWords()
-        const extra = Array.from(OUTLINE_WORDS).filter(
-            w => !ext.has(w) && !EXTENSION_WORDS_PENDING.has(w),
-        )
+        const extra = Array.from(OUTLINE_WORDS).filter(w => !ext.has(w))
         expect(extra).toEqual([])
-        expect(
-            Array.from(EXTENSION_WORDS_PENDING).filter(
-                w => !OUTLINE_WORDS.has(w),
-            ),
-        ).toEqual([])
     })
 
     it('filters names the way the extension does', () => {
