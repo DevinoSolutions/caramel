@@ -1,0 +1,48 @@
+== HEAD 85b51c86171cb5d28014160b59976dac69ce8d8c
+== compose up 06:28:09Z
+#32 exporting to image
+#32 exporting layers
+#32 exporting layers 1.2s done
+#32 writing image sha256:12be364c00c3719d0303b32e8bbd8145e5f408474d919de374fd00ae36b644db
+#32 writing image sha256:12be364c00c3719d0303b32e8bbd8145e5f408474d919de374fd00ae36b644db done
+#32 naming to docker.io/library/caramel75p527-web 0.0s done
+#32 DONE 1.3s
+
+#33 resolving provenance for metadata file
+#33 DONE 0.0s
+ Image caramel75p527-web Built 
+ Network caramel75p527_default Creating 
+ Network caramel75p527_default Created 
+ Volume caramel75p527_caramel-auth-db-data Creating 
+ Volume caramel75p527_caramel-auth-db-data Created 
+ Container caramel75p527-postgres-1 Creating 
+ Container caramel75p527-postgres-1 Created 
+ Container caramel75p527-web-1 Creating 
+ Container caramel75p527-web-1 Created 
+ Container caramel75p527-postgres-1 Starting 
+ Container caramel75p527-postgres-1 Started 
+ Container caramel75p527-postgres-1 Waiting 
+ Container caramel75p527-postgres-1 Healthy 
+ Container caramel75p527-web-1 Starting 
+ Container caramel75p527-web-1 Started 
+== up rc=0 06:30:00Z
+== curl -sI http://127.0.0.1:28000
+HTTP/1.1 200 OK
+X-Content-Type-Options: nosniff
+X-Frame-Options: DENY
+Referrer-Policy: strict-origin-when-cross-origin
+Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()
+== pg_isready
+127.0.0.1:28005 - accepting connections
+== ss -ltn | grep 2800[05]
+LISTEN 0      4096                     127.0.0.1:28000      0.0.0.0:*          
+LISTEN 0      4096                     127.0.0.1:28005      0.0.0.0:*          
+== docker compose ps
+SERVICE    STATE     PORTS
+postgres   running   127.0.0.1:28005->5432/tcp
+web        running   127.0.0.1:28000->3000/tcp
+== down
+ Image caramel75p527-web:latest Removed 
+ Volume caramel75p527_caramel-auth-db-data Removed 
+ Network caramel75p527_default Removed 
+== DONE 06:30:08Z
