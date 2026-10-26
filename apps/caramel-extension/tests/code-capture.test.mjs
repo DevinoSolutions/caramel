@@ -837,6 +837,60 @@ describe('a box that takes a discount code or a gift card', () => {
         expect(sent).toEqual([])
     })
 
+    it('a voucher row in a totals block that also has a Discount line is never shared', async () => {
+        promo().placeholder = 'Enter voucher code'
+        await armed()
+        document.getElementById('apply').addEventListener('click', () => {
+            setTimeout(() => {
+                const totals = document.createElement('section')
+                const discount = document.createElement('p')
+                discount.textContent = 'Discount −£5.00'
+                const line = document.createElement('p')
+                const row = document.createElement('span')
+                row.id = 'applied-row'
+                setText(row, 'Voucher AB12CD34EF −£25.00')
+                line.append(row)
+                totals.append(discount, line)
+                document.body.appendChild(totals)
+                setText(document.getElementById('total'), '$70.00')
+            }, 100)
+        })
+        shopperTypes('AB12CD34EF')
+        shopperClicksApply()
+        await waitForStep('store_not_accepted')
+
+        expect(sent).toEqual([])
+    })
+
+    it('an earlier row the store re-draws as a new node does not speak for this attempt', async () => {
+        promo().placeholder = 'Discount code or gift card'
+        const tags = document.createElement('ul')
+        const earlier = document.createElement('li')
+        earlier.id = 'applied-row'
+        setText(earlier, 'Discount SAVE10')
+        tags.append(earlier)
+        document.body.appendChild(tags)
+        await armed()
+        document.getElementById('apply').addEventListener('click', () => {
+            setTimeout(() => {
+                // A re-render: every row is a fresh node, the old one included.
+                const again = document.createElement('li')
+                again.id = 'applied-row'
+                setText(again, 'Discount SAVE10')
+                const gift = document.createElement('li')
+                gift.id = 'applied-row'
+                setText(gift, 'Gift card •••• 9QW1')
+                tags.replaceChildren(again, gift)
+                setText(document.getElementById('total'), '$80.00')
+            }, 100)
+        })
+        shopperTypes('SAVE10')
+        shopperClicksApply()
+        await waitForStep('store_not_accepted')
+
+        expect(sent).toEqual([])
+    })
+
     it('a short code is not named by a row holding a longer one', async () => {
         promo().placeholder = 'Discount code or gift card'
         await armed()
@@ -887,10 +941,19 @@ describe('caramelCaptureAccepted on a combined box', () => {
         errorMsg: '',
         errorIsNew: false,
     }
+    // A row read with the line around it (coupon-apply.js appliedRows).
+    const row = (text, context = text, levels = 1) => ({
+        text,
+        context,
+        levels,
+    })
     it('takes only a row that names the code and is not a stored-value row', () => {
-        const ok = { ...base, appliedRows: ['Gift card •••• 1234', 'SAVE10'] }
+        const ok = {
+            ...base,
+            appliedRows: [row('Gift card •••• 1234'), row('SAVE10')],
+        }
         expect(accepted(ok, 'save10', { combined: true })).toBe(true)
-        const gift = { ...base, appliedRows: ['Gift certificate SAVE10'] }
+        const gift = { ...base, appliedRows: [row('Gift certificate SAVE10')] }
         expect(accepted(gift, 'SAVE10', { combined: true })).toBe(false)
         const none = { ...base, appliedRows: [] }
         expect(accepted(none, 'SAVE10', { combined: true })).toBe(false)
@@ -899,44 +962,84 @@ describe('caramelCaptureAccepted on a combined box', () => {
     it('judges the code by its own row and stored value by the line around it', () => {
         const narrow = {
             ...base,
-            appliedRows: [
-                {
-                    text: 'GC8X2K9QW',
-                    context: 'GC8X2K9QW Gift Certificate −$25',
-                },
-            ],
+            appliedRows: [row('GC8X2K9QW', 'GC8X2K9QW Gift Certificate −$25')],
         }
         expect(accepted(narrow, 'GC8X2K9QW', { combined: true })).toBe(false)
         const line = {
             ...base,
-            appliedRows: [{ text: 'SAVE10', context: 'SAVE10 Discount −$5' }],
+            appliedRows: [row('SAVE10', 'SAVE10 Discount −$5')],
         }
         expect(accepted(line, 'SAVE10', { combined: true })).toBe(true)
-        const voucher = {
-            ...base,
-            appliedRows: [{ text: 'AB12', context: 'Voucher AB12 −£25' }],
-        }
+    })
+    it('a voucher row is stored value unless its OWN text names a discount', () => {
+        const voucher = { ...base, appliedRows: [row('Voucher AB12 −£25')] }
         expect(accepted(voucher, 'AB12', { combined: true })).toBe(false)
+        // The totals block always has a Discount line beside a gift voucher.
+        const besideDiscount = {
+            ...base,
+            appliedRows: [
+                row(
+                    'Voucher AB12 −£25',
+                    'Voucher AB12 −£25 Subtotal £80 Discount −£5',
+                    2,
+                ),
+            ],
+        }
+        expect(accepted(besideDiscount, 'AB12', { combined: true })).toBe(false)
+        const narrowUnderHeading = {
+            ...base,
+            appliedRows: [row('AB12', 'AB12 Rabatte & Gutscheine', 2)],
+        }
+        expect(accepted(narrowUnderHeading, 'AB12', { combined: true })).toBe(
+            false,
+        )
         const discountVoucher = {
             ...base,
-            appliedRows: [{ text: 'AB12', context: 'Discount voucher AB12' }],
+            appliedRows: [row('Discount voucher AB12')],
         }
         expect(accepted(discountVoucher, 'AB12', { combined: true })).toBe(true)
     })
+    it('a row read with no line around it must name a discount itself', () => {
+        const bare = { ...base, appliedRows: [row('SAVE10', 'SAVE10', 0)] }
+        expect(accepted(bare, 'SAVE10', { combined: true })).toBe(false)
+        const says = {
+            ...base,
+            appliedRows: [row('Discount SAVE10', 'Discount SAVE10', 0)],
+        }
+        expect(accepted(says, 'SAVE10', { combined: true })).toBe(true)
+    })
+    it('matches decomposed (NFD) page text like composed text', () => {
+        const nfd = {
+            ...base,
+            appliedRows: [row('Ajándékkártya AB12'.normalize('NFD'))],
+        }
+        expect(accepted(nfd, 'AB12', { combined: true })).toBe(false)
+    })
     it('names the code only as a whole token, on either kind of box', () => {
-        const row = {
+        const plain = {
             ...base,
             priceDropped: false,
             appliedRowsText: 'SAVE10 applied',
         }
-        expect(accepted(row, 'SAV')).toBe(false)
-        expect(accepted(row, 'save10')).toBe(true)
-        const rows = { ...base, appliedRows: ['Code: SAVE10-EXTRA'] }
+        expect(accepted(plain, 'SAV')).toBe(false)
+        expect(accepted(plain, 'save10')).toBe(true)
+        const rows = { ...base, appliedRows: [row('Code: SAVE10-EXTRA')] }
         expect(accepted(rows, 'SAVE10', { combined: true })).toBe(false)
     })
-    it('an old-shape verdict (joined text only) is judged as one row', () => {
+    it('the plain rule reads only the rows drawn for this attempt', () => {
+        const stale = {
+            ...base,
+            priceDropped: false,
+            appliedRows: [],
+            appliedRowsText: 'SAVE10 applied',
+        }
+        expect(accepted(stale, 'SAVE10')).toBe(false)
+    })
+    it('an old-shape verdict (joined text only) fails closed on a combined box', () => {
         const old = { ...base, appliedRowsText: 'SAVE10 applied' }
-        expect(accepted(old, 'SAVE10', { combined: true })).toBe(true)
+        expect(accepted(old, 'SAVE10', { combined: true })).toBe(false)
+        const says = { ...base, appliedRowsText: 'Discount SAVE10 applied' }
+        expect(accepted(says, 'SAVE10', { combined: true })).toBe(true)
     })
 })
 

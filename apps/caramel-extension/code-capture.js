@@ -193,22 +193,38 @@ export function caramelCaptureAccepted(verdict, code, { combined } = {}) {
     if (!verdict || verdict.success !== true || verdict.committed !== true)
         return false
     if (verdict.errorMsg && verdict.errorIsNew) return false
-    if (combined) {
-        const rows = Array.isArray(verdict.appliedRows)
-            ? verdict.appliedRows
-            : [String(verdict.appliedRowsText ?? '')]
-        return rows.some(row => {
-            const text = String(typeof row === 'string' ? row : row?.text)
-            const context = String(
-                typeof row === 'string' ? row : (row?.context ?? text),
-            )
-            return _namesCode(text, code) && !_readsAsStoredValue(context)
-        })
-    }
+    // The rows drawn for this attempt (coupon-apply.js appliedRows); an older
+    // verdict shape carries only the joined text of every row.
+    const rows = Array.isArray(verdict.appliedRows)
+        ? verdict.appliedRows.map(_rowParts)
+        : [_rowParts(verdict.appliedRowsText)]
+    // A combined box also skips a row whose text was already on the page (a
+    // re-render redraws every node): only what the store said for THIS code.
+    if (combined)
+        return rows.some(
+            row =>
+                !row.textSeenBefore &&
+                _namesCode(row.text, code) &&
+                !_readsAsStoredValue(row),
+        )
     return (
         verdict.priceDropped === true ||
-        _namesCode(String(verdict.appliedRowsText ?? ''), code)
+        rows.some(row => _namesCode(row.text, code))
     )
+}
+
+function _rowParts(row) {
+    if (typeof row !== 'object' || row === null) {
+        const text = String(row ?? '').normalize('NFC')
+        return { text, context: text, levels: 0 }
+    }
+    const text = String(row.text ?? '').normalize('NFC')
+    return {
+        text,
+        context: String(row.context ?? text).normalize('NFC'),
+        levels: Number(row.levels) || 0,
+        textSeenBefore: row.textSeenBefore === true,
+    }
 }
 
 // The code as a whole token: SAV is not named by a row reading SAVE10.
@@ -220,11 +236,15 @@ function _namesCode(text, code) {
     )
 }
 
-function _readsAsStoredValue(text) {
-    return (
-        STORED_VALUE_WORDS.test(text) ||
-        (EITHER_WORDS.test(text) && !PROMO_WORDS.test(text))
-    )
+// A gift-card word anywhere on the row's line is enough. "Voucher" is excused
+// only by a discount word in the row's OWN text: a totals block always has a
+// "Discount" line beside a gift voucher's. A row with no line read around it
+// (the promo box's own container held it) must name a discount itself.
+function _readsAsStoredValue(row) {
+    if (STORED_VALUE_WORDS.test(row.context)) return true
+    const saysDiscount = PROMO_WORDS.test(row.text)
+    if (EITHER_WORDS.test(row.context) && !saysDiscount) return true
+    return row.levels === 0 && !saysDiscount
 }
 
 // Why the store's answer did not count as an acceptance. Telemetry vocabulary

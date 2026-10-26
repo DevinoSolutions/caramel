@@ -144,14 +144,14 @@ module.exports = [
         // reader reads Indian lakh grouping (₹1,23,456 was read as 1.23) and
         // the 円 Rs. Fr. R S$ د.إ ر.س marks, and a saving is banked under its
         // ISO code (zł, Kč, kr, 円... were banked as USD). Measured 102.02 kB.
-        // 2026-10-26 (T-8654 round 4), raised 102.4 -> 103.7 kB: a code typed
+        // 2026-10-26 (T-8654 round 4), raised 102.4 -> 104.2 kB: a code typed
         // into a "Discount code or gift card" box (Shopify, in its checkout
         // languages) is watched under the combined-box rule instead of being
         // dropped as a gift-card field; that rule reads only the rows drawn
         // for this attempt, each with the line around it, and knows the
         // gift-card and discount words of ~30 checkout languages (most of the
-        // growth is those non-Latin words). Measured 103.56 kB.
-        limit: '103.7 KB',
+        // growth is those non-Latin words). Measured 104.02 kB.
+        limit: '104.2 KB',
         brotli: false,
     },
     {
