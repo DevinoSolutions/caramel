@@ -34,7 +34,7 @@ jobs:
             ref: main
             expect: no-loop
           - variant: prefix-1.6.0-697d229
-            ref: 697d229
+            ref: 697d2298277aff2316178d7561f5249924680b15
             expect: loop
     env:
       APPLE_DIR: app/apps/caramel-apple

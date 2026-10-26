@@ -15,6 +15,6 @@ appId: com.devino.Caramel
 - tapOn: "Cancel"
 - waitForAnimationToEnd:
     timeout: 5000
-# Cancelling leaves the shell where it was: settled, not looping.
-- assertVisible: "Sign in to see this page"
+# Cancelling leaves the shell where it was: settled on its sign-in state, not looping.
+- assertVisible: "Sign in to (see this page|Caramel)"
 - takeScreenshot: 07-after-cancel

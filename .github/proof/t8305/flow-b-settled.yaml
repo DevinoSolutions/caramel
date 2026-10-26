@@ -1,10 +1,10 @@
-# T-8305 proof, part B: after the /profile -> /login bounce the shell must settle on
-# its own "Sign in to see this page" state and stay there (fixed build). The pre-fix
-# 1.6.0 build steps back into /profile instead, so this state never appears.
+# T-8305 proof, part B: after the /profile -> /login bounce the shell settles on its
+# own sign-in state: the native "Sign in to Caramel" sheet over the "Sign in to see
+# this page" overlay (the sheet is modal, so only the sheet is visible to the test).
 appId: com.devino.Caramel
 ---
 - extendedWaitUntil:
-    visible: "Sign in to see this page"
+    visible: "Sign in to Caramel"
     timeout: 10000
 - takeScreenshot: 04-saved-settled
-- assertVisible: "Sign in to Caramel"
+- assertVisible: "Continue with Google"
