@@ -84,6 +84,17 @@ export { showCodeSharingPrompt } from './code-sharing-prompt.js'
 // inserts both pass the getElementById check before either host appends.
 let _caramelPromptInFlight = false
 
+// A run's own surfaces are up (testing overlay or result card): "Try Caramel
+// Coupons" is the wrong thing to offer on top of a run, or behind its result.
+// Read at entry and again just before the pill mounts, because the awaits in
+// between are where a run can start or finish (live: the pill behind the
+// savings card on bumbleandbumble.com, Edge 1.4.19, 2026-10-26).
+const _caramelRunSurfaceUp = () =>
+    !!(
+        caramelOwnHost('caramel-testing-overlay') ||
+        caramelOwnHost('caramel-final-overlay')
+    )
+
 /* "Not now" — remembered for this tab and origin.
  *
  * Dismissing used to remove the host and record nothing, which failed the user
@@ -123,6 +134,7 @@ export function caramelMarkPromptDismissed() {
 // Called from store-detect.js.
 export async function insertCaramelPrompt(domainRecord) {
     if (caramelOwnHost('caramel-small-prompt') || _caramelPromptInFlight) return
+    if (_caramelRunSurfaceUp()) return
     // The user already said "not now" on this tab. Honour it.
     if (caramelPromptDismissedHere()) return
     // User preference gate (popup settings): auto-apply off, or this site
@@ -219,6 +231,7 @@ export async function insertCaramelPrompt(domainRecord) {
         }),
     )
 
+    if (_caramelRunSurfaceUp()) return
     document.body.appendChild(host)
 }
 

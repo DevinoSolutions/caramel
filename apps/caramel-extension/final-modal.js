@@ -103,20 +103,35 @@ export function _caramelUsableTitle(title, code) {
     return t
 }
 
-// Called from coupon-runner.js + store-detect.js.
-export async function showFinalModal(
+/* The testing overlay comes down in the same task that mounts the card, never
+ * before the awaits that build it. Taking it down first left the page with
+ * none of our overlays for as long as those awaits took, and a store that
+ * re-draws its cart once a code lands (bumbleandbumble.com, Edge 1.4.19 live
+ * run 2026-10-26) let the checkout observer put the "Try Caramel Coupons" pill
+ * back up behind the savings card. The finally is the other half: a card that
+ * fails to build must still never leave the overlay trapping the page, and the
+ * runner does not await this.
+ *
+ * Called from coupon-runner.js + store-detect.js. */
+export async function showFinalModal(...args) {
+    try {
+        await _caramelMountFinalModal(...args)
+    } finally {
+        hideTestingModal()
+    }
+}
+
+async function _caramelMountFinalModal(
     savingsAmount,
     code,
     message,
     isSignIn = false,
     couponList = [],
 ) {
-    hideTestingModal()
     // Login state drives the manual-list teaser cap below — same gate as the
     // popup's coupon list. Signed-out ⇒ 6-code teaser + sign-in nudge.
     const _session = await caramelGetSession()
     const loggedIn = !!_session?.token
-    const prevFocus = document.activeElement
     const { host, root } = await createCaramelShadowHost(
         'caramel-final-overlay',
     )
@@ -315,7 +330,10 @@ ${showPrimary ? `<button id="caramel-final-ok-btn">${primaryLabel}</button>` : '
 
     scrim.appendChild(modal)
     root.appendChild(scrim)
-    host.__caramelPrevFocus = prevFocus
+    // Down only now (see showFinalModal), and before focus is read: taking the
+    // overlay down hands focus back to where the shopper was.
+    hideTestingModal()
+    host.__caramelPrevFocus = document.activeElement
     document.body.appendChild(host)
 
     // Single close path — detaches the Esc listener (no leaked handler).
