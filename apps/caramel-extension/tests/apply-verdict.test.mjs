@@ -650,9 +650,8 @@ describe('a finder-picked box on a page whose finder is not loaded', () => {
     // that has not loaded it (or could not) has no way to read that total, so
     // nothing can be measured: whatever the store prints, it is not a saving.
     beforeEach(async () => {
-        const { _caramelResetFinderLoad } = await import(
-            '../coupon-box-finder-loader.js'
-        )
+        const { _caramelResetFinderLoad } =
+            await import('../coupon-box-finder-loader.js')
         _caramelResetFinderLoad()
     })
 
@@ -715,9 +714,8 @@ describe('a finder-picked box the store re-draws to answer', () => {
             else delete proto.innerText
             Element.prototype.getBoundingClientRect = rect
         }
-        ;({ caramelDiscoveredRecord: finderRecord } = await import(
-            '../coupon-box-discovery.js'
-        ))
+        ;({ caramelDiscoveredRecord: finderRecord } =
+            await import('../coupon-box-discovery.js'))
         document.body.innerHTML =
             `<aside class="sec">${SECTION('')}</aside>` +
             '<div class="row"><span>Order total</span> <span>$100.00</span></div>'
@@ -1000,9 +998,8 @@ describe('a finder-picked box the store re-draws to answer', () => {
                 document.body.innerHTML =
                     `<aside class="sec">${SECTION('')}</aside>` +
                     SUMMARY(LINE('Coupon', '-$20.00'))
-                const { caramelFinderReadTotal } = await import(
-                    '../coupon-box-discovery.js'
-                )
+                const { caramelFinderReadTotal } =
+                    await import('../coupon-box-discovery.js')
 
                 expect(caramelFinderReadTotal(document, 'subtotal')).toBe(99.99)
             } finally {
@@ -1602,4 +1599,62 @@ describe('applyCoupon with no apply button (couponSubmit is the input)', () => {
         expect(res.success).toBe(true)
         expect(res.newTotal).toBe(90)
     })
+})
+
+/* T-9176: a store that answers every bad code with the SAME sentence. The
+ * previous code's refusal is on the page when the next code is submitted, so
+ * a text comparison alone never sees the new answer and each code after the
+ * first waited out the whole 10s window (comfrt.com, Shopify checkout,
+ * 2026-10-26: 4 of 8 codes fit the budget). */
+describe('applyCoupon wait — the same refusal sentence again', () => {
+    const SENTENCE = 'Enter a valid discount code or gift card'
+
+    it('ends early when the store removes its sentence and draws it again', async () => {
+        showError(SENTENCE) // the previous code's answer, still on the page
+        const rec = { ...BASE, errorIndicator: '#err' }
+        respond(() => {
+            const old = document.getElementById('err')
+            old.remove()
+            setTimeout(() => {
+                const again = document.createElement('div')
+                again.id = 'err'
+                setText(again, SENTENCE)
+                document.body.appendChild(again)
+            }, 300)
+        })
+
+        const started = performance.now()
+        const res = await applyCoupon('NOPE2', rec)
+
+        expect(res.success).toBe(false)
+        expect(performance.now() - started).toBeLessThan(4000)
+    })
+
+    it('ends early when the same node goes blank and then says it again', async () => {
+        showError(SENTENCE)
+        const rec = { ...BASE, errorIndicator: '#err' }
+        respond(() => {
+            showError('')
+            setTimeout(() => showError(SENTENCE), 500)
+        })
+
+        const started = performance.now()
+        const res = await applyCoupon('NOPE2', rec)
+
+        expect(res.success).toBe(false)
+        expect(performance.now() - started).toBeLessThan(4000)
+    })
+
+    it('a sentence that simply stays put is still not an answer', async () => {
+        showError(SENTENCE)
+        const rec = { ...BASE, errorIndicator: '#err' }
+        respond(() => {})
+
+        const started = performance.now()
+        const res = await applyCoupon('SILENT', rec)
+
+        expect(res.success).toBe(false)
+        // The whole answer window: the stale sentence did not end it.
+        expect(performance.now() - started).toBeGreaterThanOrEqual(9500)
+    }, 20_000)
 })

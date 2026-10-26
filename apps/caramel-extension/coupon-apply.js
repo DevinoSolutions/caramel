@@ -863,15 +863,26 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
         // permanently latched to the empty placeholder's "" baseline.
         const baseErrEl = _firstVisibleErrorEl(rec)
         const baseErr = baseErrEl ? (baseErrEl.innerText || '').trim() : ''
+        // A store that answers every bad code with the same sentence (Shopify:
+        // "Enter a valid discount code or gift card") takes the previous code's
+        // sentence down and draws it again, so its text never differs from
+        // baseErr and each code after the first waited out the whole window
+        // (comfrt.com 2026-10-26: 10s a code, 4 of 8 codes in the budget,
+        // T-9176). Once that sentence has gone (blank or hidden at a read, or
+        // its node removed from the page), the error that comes back is the
+        // store's answer to this code. Only ends the wait; the verdict below
+        // still reads the error the way it always has.
+        let baseErrGone = false
         const startedAt = performance.now()
         while (performance.now() - startedAt < maxMs) {
             const nowSuccess = qAll(appliedSel).length
             if (nowSuccess > baseSuccess) return 'committed'
             const errEl = _firstVisibleErrorEl(rec)
-            if (errEl && _isVisible(errEl)) {
-                const t = (errEl.innerText || '').trim()
-                if (t.length && t !== baseErr) return 'errored'
-            }
+            const t =
+                errEl && _isVisible(errEl) ? (errEl.innerText || '').trim() : ''
+            if (baseErr && (!t || (baseErrEl && !baseErrEl.isConnected)))
+                baseErrGone = true
+            if (t.length && (t !== baseErr || baseErrGone)) return 'errored'
             await sleep(200)
         }
         return 'timeout-' + maxMs + 'ms'
