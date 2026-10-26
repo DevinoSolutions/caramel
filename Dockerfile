@@ -7,7 +7,7 @@
 # ──────────────────────────────────────────────────────────────────────────
 
 # ---- base: pinned node + the EXACT pnpm from package.json packageManager ----
-FROM node:24-alpine AS base
+FROM node:26-alpine AS base
 RUN apk add --no-cache libc6-compat
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
@@ -109,7 +109,7 @@ RUN PRISMA_VERSION=$(node -p "require('./apps/caramel-app/package.json').depende
   && npm install --prefix /prisma-cli "prisma@${PRISMA_VERSION}" --no-save --no-audit --no-fund
 
 # ---- runner: minimal standalone server; migrate then serve ----
-FROM node:24-alpine AS runner
+FROM node:26-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
