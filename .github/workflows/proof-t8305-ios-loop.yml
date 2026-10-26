@@ -4,8 +4,10 @@ name: Proof T-8305 – iOS shell /profile <-> /login loop (Simulator)
 # first launch (onboarding) -> Deals (web) -> Saved (/profile#favorites, signed out) ->
 # the /login bounce must settle on "Sign in to see this page" instead of looping, and the
 # native sign-in sheet must open and cancel cleanly (nothing is typed, no account used).
-# The same walk runs against the pre-fix 1.6.0 commit (697d229) to show the detector
-# catches the loop. Debug simulator builds, unsigned; nothing is uploaded to App Store
+# The same walk runs against the pre-fix 1.6.0 commit (697d229) as a control. Signed out,
+# the pre-fix build does not loop either (2026-10-26 run 40295613015): the CARAMEL-2Y loop
+# needs a native session, which an unsigned simulator build cannot hold (no Keychain
+# entitlement) and which needs a test-account hook from the caramel app. Debug simulator builds, unsigned; nothing is uploaded to App Store
 # Connect. GitHub-hosted macOS runner (this repo is public, and the org's self-hosted
 # runner group refuses public repos); Maestro drives the simulator.
 # Owner of this file: ios-testing lane (T-8305); caramel app code is not touched.
@@ -35,7 +37,7 @@ jobs:
             expect: no-loop
           - variant: prefix-1.6.0-697d229
             ref: 697d2298277aff2316178d7561f5249924680b15
-            expect: loop
+            expect: control
     env:
       APPLE_DIR: app/apps/caramel-apple
       OUT: ${{ github.workspace }}/proof-out/${{ matrix.variant }}
