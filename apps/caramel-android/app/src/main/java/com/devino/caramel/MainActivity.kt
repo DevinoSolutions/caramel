@@ -12,6 +12,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.lifecycleScope
+import com.devino.nativeauthtab.SignInBrowser
 import com.devino.caramel.core.AppConfig
 import com.devino.caramel.core.OAuthProvider
 import com.devino.caramel.ui.CaramelApp
@@ -37,6 +38,10 @@ class MainActivity : ComponentActivity() {
 
     // A message for the shopper that is not a sign-in error (a refused or unopenable link).
     private var notice by mutableStateOf<String?>(null)
+
+    // The sign-in browser (fleet NativeAuthTab contract). A field so its Auth Tab result launcher is
+    // registered before the activity starts; an Auth Tab result lands here, a Custom Tab's in onNewIntent.
+    private val signInBrowser = SignInBrowser(this) { handleCallback(it) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -90,7 +95,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleCallback(intent: Intent?) {
-        val data = intent?.data ?: return
+        handleCallback(intent?.data ?: return)
+    }
+
+    private fun handleCallback(data: Uri) {
         if (data.scheme != AppConfig.SIGN_IN_SCHEME) return
         lifecycleScope.launch {
             // Only a callback that answers the pending sign-in ends the wait; a stray VIEW intent must
@@ -165,7 +173,10 @@ class MainActivity : ComponentActivity() {
     private fun openSignInTab(url: String) {
         try {
             awaitingBrowser = true
-            CustomTabsIntent.Builder().build().launchUrl(this, Uri.parse(url))
+            if (!signInBrowser.open(Uri.parse(url), AppConfig.SIGN_IN_SCHEME)) {
+                awaitingBrowser = false
+                container.session.reportError("No web browser is installed to complete the sign-in.")
+            }
         } catch (e: ActivityNotFoundException) {
             awaitingBrowser = false
             container.session.reportError("No web browser is installed to complete the sign-in: ${e.message}")
