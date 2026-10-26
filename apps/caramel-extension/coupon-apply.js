@@ -93,9 +93,14 @@ export function findAppliedSelector(rec) {
  *
  * So read the row before believing it. This only ever REMOVES a success
  * signal, never invents one: a row that says nothing is still counted, exactly
- * as before. */
+ * as before.
+ *
+ * The Gap Inc. checkout (gap, gapfactory, oldnavy, bananarepublic, athleta)
+ * lists ANY code it was given under "Applied Promos", including one that saves
+ * nothing: "CARAMELTEST1 $0.00 No items in your bag qualify." (gap.com, live
+ * 2026-10-26). "Some items don't qualify" is left alone: that code did apply. */
 const CARAMEL_REJECTED_ROW_RE = new RegExp(
-    String.raw`\bnot\s+applied\b|\bnicht\s+angewendet\b|\bnon\s+appliqué`,
+    String.raw`\bnot\s+applied\b|\bnicht\s+angewendet\b|\bnon\s+appliqué|\bno\s+(?:items?|products?)\b[^.]{0,40}?\bqualif(?:y|ies)\b`,
     'i',
 )
 export function caramelRowReadsRejected(el) {
