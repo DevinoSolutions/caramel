@@ -52,7 +52,10 @@ const communityLinks = [
     },
 ]
 
-const legalLinks = [{ name: 'Privacy Policy', url: '/privacy' }]
+const legalLinks = [
+    { name: 'Privacy Policy', url: '/privacy' },
+    { name: 'Terms of Service', url: '/terms' },
+]
 
 const headingClasses =
     'text-sm font-semibold uppercase tracking-wider text-white dark:text-caramel'
@@ -73,19 +76,19 @@ export default function Footer() {
         // only). gray-300 here would FAIL: 3.26:1 / 4.27:1 — never use it on
         // this gradient. Dark mode swaps the surface to darkSurface #1E1916,
         // where gray-300 links hit 11.8:1 (hover white 17.4:1) — both pass.
-        <footer className="dark:border-caramel/40 dark:bg-darkSurface border-t-2 border-dashed border-white/40 bg-gradient-to-br from-[#c14e14] to-[#a63f10] text-white dark:bg-none">
+        <footer className="border-t-2 border-dashed border-white/40 bg-gradient-to-br from-[#c14e14] to-[#a63f10] text-white dark:border-caramel/40 dark:bg-darkSurface dark:bg-none">
             <div className="container mx-auto px-6 pt-12">
                 <m.div
                     initial={{ opacity: 0, y: 20 }}
                     whileInView={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.3 }}
                     viewport={{ once: true }}
-                    className="grid grid-cols-[1.6fr_1fr_1fr_1fr] gap-10 sm:grid-cols-1 sm:text-center md:grid-cols-2"
+                    className="grid grid-cols-[1.6fr_1fr_1fr_1fr] gap-10 md:grid-cols-2 sm:grid-cols-1 sm:text-center"
                 >
                     <div className="flex flex-col items-start gap-4 sm:items-center">
                         <Link
                             href="/"
-                            className="dark:focus-visible:ring-caramel/70 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
+                            className="rounded-lg focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none dark:focus-visible:ring-caramel/70"
                         >
                             <Image
                                 src="/full-logo.png"
@@ -183,7 +186,7 @@ export default function Footer() {
                     whileInView={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.3 }}
                     viewport={{ once: true }}
-                    className="mt-6 flex items-center justify-between gap-4 border-t border-white/25 pt-6 sm:flex-col sm:text-center dark:border-white/10"
+                    className="mt-6 flex items-center justify-between gap-4 border-t border-white/25 pt-6 dark:border-white/10 sm:flex-col sm:text-center"
                 >
                     <p className="text-sm text-white dark:text-gray-300">
                         © {currentYear} Caramel. All Rights Reserved.
