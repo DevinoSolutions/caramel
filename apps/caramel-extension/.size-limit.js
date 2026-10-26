@@ -151,7 +151,10 @@ module.exports = [
         // for this attempt, each with the line around it, and knows the
         // gift-card and discount words of ~30 checkout languages (most of the
         // growth is those non-Latin words). Measured 104.02 kB.
-        limit: '104.2 KB',
+        // 2026-10-26 (T-8654), raised 104.2 -> 104.5 kB: #539 (the store's
+        // refusal quoted in whole words, on its own line) landed beside it;
+        // each fit alone, together they measure 104.37 kB.
+        limit: '104.5 KB',
         brotli: false,
     },
     {
