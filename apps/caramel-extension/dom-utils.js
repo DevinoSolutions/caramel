@@ -356,17 +356,27 @@ const CARAMEL_CURRENCY_WORDS = [
     'Rp',
     '원',
     '元',
+    '円',
 ]
 const _caramelMarkerAlt = [
     `[${CARAMEL_CURRENCY_SYMBOLS}]`,
-    String.raw`\b[A-Z]{2,4}\$?`, // USD, AED, CHF, DT, RM, CA$, R$
+    // Marks with a letter shape the patterns below would miss or misread:
+    // R$ S$ A$ C$ (Brazil, Singapore, Australia, Canada: one letter before
+    // the $, where the code pattern needs two), Rs. (India, Pakistan), Fr.
+    // (Swiss francs), R (South Africa, only as a word of its own), and the
+    // dirham and riyal written in Arabic script.
+    String.raw`\b[RACS]\$|\bRs\.?(?![a-z])|\bFr\.(?![a-z])|د\.إ|ر\.س`,
+    String.raw`\b[A-Z]{2,4}\$?`, // USD, AED, CHF, DT, RM, CA$
+    String.raw`\bR\b`,
     CARAMEL_CURRENCY_WORDS.map(w =>
         w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
     ).join('|'),
 ].join('|')
 // Digits with either grouping convention: 1,234.56 / 1.234,56 / 1 234,56,
-// and the Swiss apostrophe grouping: CHF 1'249.90 / 1’249.90.
-const _caramelNumberPart = String.raw`\d{1,3}(?:['’.,   ]\d{3})*(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?`
+// the Swiss apostrophe grouping: CHF 1'249.90 / 1’249.90, and the Indian lakh
+// grouping: ₹1,23,456.00 (tried first: the others stop at "1,23" and read it
+// as 1.23, a hundred-thousandth of the price).
+const _caramelNumberPart = String.raw`\d{1,2}(?:,\d{2})+,\d{3}(?:\.\d{1,2})?|\d{1,3}(?:['’.,   ]\d{3})*(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?`
 const _caramelMoneyRe = new RegExp(
     `(?:(${_caramelMarkerAlt})\\s?(${_caramelNumberPart}))|(?:(${_caramelNumberPart})\\s?(${_caramelMarkerAlt}))`,
     'g',
@@ -407,7 +417,11 @@ export function caramelFindMoney(text) {
     if (typeof text !== 'string' || !text) return []
     // A label and a code-marked amount in adjacent inline elements read as one
     // word ("TotalCHF 89.90"): no \b before the code, so no money at all.
-    text = text.replace(/([a-z])(?=[A-Z]{2,4}\$?\s?\d)/g, '$1 ')
+    // Same for the one-letter marks ("TotalRs. 1,23,456", "TotalS$ 129.00").
+    text = text.replace(
+        /([a-z])(?=(?:[A-Z]{2,4}\$?|[RACS]\$|Rs\.?|Fr\.|R)\s?\d)/g,
+        '$1 ',
+    )
     const out = []
     _caramelMoneyRe.lastIndex = 0
     let m
@@ -510,14 +524,71 @@ export function caramelCurrencySymbol() {
 // Consumed by coupon-runner.js (cross-file content-script call).
 export function caramelCurrencyCode() {
     const marker = _caramelLastCurrency
-    const mapped = { '£': 'GBP', '€': 'EUR', '¥': 'JPY', '₹': 'INR' }[marker]
+    if (!marker || marker === '$' || marker === 'US$') return 'USD'
+    const mapped = CARAMEL_MARKER_CODES[marker]
     if (mapped) return mapped
-    // A marker the page wrote as letters IS the code the store uses (AED, CHF,
-    // DT). Pass it through rather than banking it as dollars: the popup totals
-    // per currency and falls back to "89.00 DT" for anything Intl can't format,
-    // which is honest, where calling it USD would not be.
-    if (typeof marker === 'string' && /^[A-Z]{2,4}$/.test(marker)) return marker
-    return 'USD'
+    // Kronor are Swedish, Norwegian, Danish or Icelandic: the store's own
+    // domain says which.
+    if (marker === 'kr' || marker === 'kr.') {
+        const tld = /\.([a-z]+)$/.exec(globalThis.location?.hostname || '')?.[1]
+        return { no: 'NOK', dk: 'DKK', is: 'ISK' }[tld] || 'SEK'
+    }
+    // A marker the page wrote as a three-letter code IS the code the store
+    // uses (AED, CHF). Anything else is passed as XXX, the ISO code for "no
+    // currency named": the account takes only ISO codes, and banking an
+    // unknown mark as dollars would add it to the shopper's dollar total.
+    if (/^[A-Z]{3}$/.test(marker)) return marker
+    return 'XXX'
+}
+
+// Every currency mark caramelFindMoney reads, as the ISO 4217 code the
+// savings history and the account are kept in. '¥' stays JPY (yuan pages
+// mostly write 元 or CNY); a bare '$' is USD (see caramelCurrencyCode).
+const CARAMEL_MARKER_CODES = {
+    '£': 'GBP',
+    '€': 'EUR',
+    '¥': 'JPY',
+    円: 'JPY',
+    '₹': 'INR',
+    Rs: 'INR',
+    'Rs.': 'INR',
+    '₩': 'KRW',
+    원: 'KRW',
+    元: 'CNY',
+    '₽': 'RUB',
+    руб: 'RUB',
+    '₺': 'TRY',
+    TL: 'TRY',
+    zł: 'PLN',
+    zt: 'PLN',
+    Kč: 'CZK',
+    Ft: 'HUF',
+    lei: 'RON',
+    '₪': 'ILS',
+    '₫': 'VND',
+    '฿': 'THB',
+    '₱': 'PHP',
+    '₦': 'NGN',
+    '₴': 'UAH',
+    грн: 'UAH',
+    Rp: 'IDR',
+    R$: 'BRL',
+    R: 'ZAR',
+    'Fr.': 'CHF',
+    DT: 'TND',
+    RM: 'MYR',
+    CA$: 'CAD',
+    C$: 'CAD',
+    AU$: 'AUD',
+    A$: 'AUD',
+    NZ$: 'NZD',
+    HK$: 'HKD',
+    S$: 'SGD',
+    NT$: 'TWD',
+    MX$: 'MXN',
+    'د.إ': 'AED',
+    'ر.س': 'SAR',
+    '﷼': 'SAR',
 }
 
 /* Set the symbol explicitly when the currency is known from data rather than

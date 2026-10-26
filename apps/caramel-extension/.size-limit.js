@@ -140,7 +140,11 @@ module.exports = [
         // knows localised cart and checkout slugs (/warenkorb, /panier,
         // /carrito, /koszyk...), and the price reader reads Swiss apostrophe
         // grouping and a label glued to a currency code. Measured 101.13 kB.
-        limit: '102 KB',
+        // 2026-10-26 (T-8654 round 3), raised 102 -> 102.4 kB: the price
+        // reader reads Indian lakh grouping (₹1,23,456 was read as 1.23) and
+        // the 円 Rs. Fr. R S$ د.إ ر.س marks, and a saving is banked under its
+        // ISO code (zł, Kč, kr, 円... were banked as USD). Measured 102.02 kB.
+        limit: '102.4 KB',
         brotli: false,
     },
     {

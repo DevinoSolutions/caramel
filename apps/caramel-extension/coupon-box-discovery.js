@@ -1373,13 +1373,14 @@ const CODES =
     'USD|CAD|AUD|NZD|EUR|GBP|CHF|SEK|NOK|DKK|PLN|AED|SAR|INR|JPY|HKD|SGD|MXN|ZAR|CZK|HUF|RON|TRY|KRW|CNY|IDR|kr|Rp'
 // Written after the amount. The non-Latin ones end in a letter \b does not
 // see as one, so they go without it.
-const AFTER = '\\b(?:USD|EUR|GBP|CHF|kr|TL|Ft|lei)\\b|zł|Kč|руб|грн|원|元'
+const AFTER =
+    '\\b(?:USD|EUR|GBP|CHF|kr|TL|Ft|lei)\\b|zł|Kč|руб|грн|원|元|円|د\\.إ|ر\\.س'
 // An amount: a currency mark beside digits, or digits with cents. A run of
 // digits is read at most 25 characters long, longer than any price: an
 // open-ended run is tried again from every digit of a long number, and a
 // 40 KiB one took seconds.
 const MONEY_RE = new RegExp(
-    `(?:${SIGN}|R\\$|\\b(?:${CODES})\\b)\\s?-?\\d[\\d.,'’]{0,24}|\\d[\\d.,'’]{0,24}\\s?(?:${SIGN}|${AFTER})|\\d[\\d,'’]{0,24}[.,]\\d{2}\\b`,
+    `(?:${SIGN}|R\\$|\\bRs\\.|\\b(?:${CODES})\\b)\\s?-?\\d[\\d.,'’]{0,24}|\\d[\\d.,'’]{0,24}\\s?(?:${SIGN}|${AFTER})|\\d[\\d,'’]{0,24}[.,]\\d{2}\\b`,
     'i',
 )
 const AMOUNT_ONLY = new RegExp(

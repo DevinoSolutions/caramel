@@ -280,6 +280,42 @@ const TOTALS = [
         ],
         '214.00 AED',
     ],
+    // Round 3: amounts written with marks the finder's row reader first missed.
+    [
+        'Japanese (円)',
+        [
+            ['小計', '4,280円'],
+            ['送料', '200円'],
+            ['合計', '4,480円'],
+        ],
+        '4,480円',
+    ],
+    [
+        'Saudi (ر.س)',
+        [
+            ['المجموع الفرعي', '184 ر.س'],
+            ['الشحن', '15 ر.س'],
+            ['الإجمالي', '199 ر.س'],
+        ],
+        '199 ر.س',
+    ],
+    [
+        'Indian (lakh grouping)',
+        [
+            ['Subtotal', '₹1,20,000'],
+            ['Delivery', '₹3,456'],
+            ['Total', '₹1,23,456'],
+        ],
+        '₹1,23,456',
+    ],
+    [
+        'Indian (Rs.)',
+        [
+            ['Subtotal', 'Rs. 1,20,000'],
+            ['Total', 'Rs. 1,23,456'],
+        ],
+        'Rs. 1,23,456',
+    ],
 ]
 
 describe.each(TOTALS)('%s cart', (_locale, rows, total) => {
