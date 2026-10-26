@@ -27,6 +27,13 @@ describe('test runner timezone pin', () => {
 // T-9177: the in-process test above only proves the unit config. This guard
 // makes the pin a rule for every vitest config in the package, so a new or
 // edited config (eval, integration, drift, ...) cannot silently drop it.
+const TZ_PIN = "process.env.TZ = 'UTC'"
+
+// Comments are stripped first so a commented-out pin does not count.
+function stripComments(source: string): string {
+    return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')
+}
+
 describe('vitest configs pin the timezone', () => {
     const packageRoot = path.resolve(
         path.dirname(fileURLToPath(import.meta.url)),
@@ -34,15 +41,30 @@ describe('vitest configs pin the timezone', () => {
     )
     const configFiles = fs
         .readdirSync(packageRoot)
-        .filter(name => /^vitest.*\.config\.ts$/.test(name))
+        .filter(name => /^vitest.*\.config\.[cm]?[jt]s$/.test(name))
 
     it('finds the vitest configs', () => {
         expect(configFiles).toContain('vitest.config.ts')
     })
 
-    it.each(configFiles)("%s contains process.env.TZ = 'UTC'", name => {
-        const source = fs.readFileSync(path.join(packageRoot, name), 'utf8')
+    it.each(configFiles)('%s pins TZ=UTC in code', name => {
+        const code = stripComments(
+            fs.readFileSync(path.join(packageRoot, name), 'utf8'),
+        )
 
-        expect(source).toContain("process.env.TZ = 'UTC'")
+        expect(code).toContain(TZ_PIN)
+    })
+
+    // loadEnvFile never overrides a var already set, so the pin only beats a
+    // TZ in .env when it runs first.
+    it.each(configFiles)('%s pins TZ before loadEnvFile', name => {
+        const code = stripComments(
+            fs.readFileSync(path.join(packageRoot, name), 'utf8'),
+        )
+        const loadIndex = code.indexOf('loadEnvFile(')
+
+        if (loadIndex === -1) return
+        expect(code.indexOf(TZ_PIN)).toBeGreaterThanOrEqual(0)
+        expect(code.indexOf(TZ_PIN)).toBeLessThan(loadIndex)
     })
 })
