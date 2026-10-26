@@ -424,7 +424,7 @@ const REPORTER_SWEEP_TRANSACTION_OPTIONS = {
 } as const
 const REPORTER_SWEEP_AREA = 'couponSignals.sweepExpiredReporters'
 let nextReporterSweepAt = 0
-let reporterSweepInFlight: Promise<void> | null = null
+let reporterSweepInFlight: Promise<ReporterSweepRun> | null = null
 // The sweep transaction of a timed-out sweep, still unsettled. The statement
 // timeout makes this rare (Postgres cancels the DELETE), but a dead socket
 // never answers, so this stays as defense in depth. While it is set NO caller
@@ -462,21 +462,49 @@ let abandonedDeletion: Promise<void> | null = null
  * included) starts another DELETE; a late rejection is reported too (tagged
  * late). `force` skips the throttle and the backoff (the timer's own hourly
  * cadence is the throttle there).
+ *
+ * Every run that actually executes emits exactly ONE summary line when it
+ * settles (0-row runs included), so "did the hourly sweep run?" is answerable
+ * from the container logs; a caller that joins an in-flight run gets the same
+ * result object and logs nothing. The promise resolves to that run's result
+ * (so the timer can check in to its Sentry cron monitor), or to null when no
+ * run was started (throttled, or an abandoned DELETE still unsettled). `trigger`
+ * only labels the summary line.
  */
 export function sweepExpiredReporters(
-    options: { force?: boolean } = {},
-): Promise<void> {
-    if (abandonedDeletion) return Promise.resolve()
+    options: { force?: boolean; trigger?: ReporterSweepTrigger } = {},
+): Promise<ReporterSweepRun | null> {
+    if (abandonedDeletion) return Promise.resolve(null)
     if (reporterSweepInFlight) return reporterSweepInFlight
     const now = new Date()
     if (!options.force && now.getTime() < nextReporterSweepAt) {
-        return Promise.resolve()
+        return Promise.resolve(null)
     }
-    const sweep = runReporterSweep(now).finally(() => {
-        reporterSweepInFlight = null
-    })
+    const sweep = runReporterSweep(now, options.trigger ?? 'report').finally(
+        () => {
+            reporterSweepInFlight = null
+        },
+    )
     reporterSweepInFlight = sweep
     return sweep
+}
+
+/** Who started a sweep run; only labels the summary line. */
+export type ReporterSweepTrigger = 'timer' | 'report'
+
+/**
+ * How a run ended: ok (backlog clear), backlog (stopped at its cap with expired
+ * rows left), failed (a chunk threw), timeout (did not settle in time).
+ */
+export type ReporterSweepOutcome = 'ok' | 'backlog' | 'failed' | 'timeout'
+
+/** What one settled run reports to its caller. */
+export type ReporterSweepRun = {
+    outcome: ReporterSweepOutcome
+    deleted: number
+    /** Chunks committed: the closest counter we have to "scanned". */
+    chunks: number
+    durationMs: number
 }
 
 /** What one run has committed so far; survives a later chunk throwing. */
@@ -534,9 +562,29 @@ async function deleteExpiredReporters(
     return { backlog: true }
 }
 
-async function runReporterSweep(now: Date): Promise<void> {
+async function runReporterSweep(
+    now: Date,
+    trigger: ReporterSweepTrigger,
+): Promise<ReporterSweepRun> {
     let timeoutHandle: ReturnType<typeof setTimeout> | undefined
     const progress: ReporterSweepProgress = { deleted: 0, chunks: 0 }
+    const startedAt = Date.now()
+    let outcomeLabel: ReporterSweepOutcome = 'failed'
+    // The ONE summary line per run (T-6398 / T-8983): logged when the run
+    // settles, 0-row runs included, so prod can prove the hourly sweep ran.
+    // `chunks` is the closest counter to "scanned" (rows are deleted, not read).
+    const summarize = (): ReporterSweepRun => {
+        const run: ReporterSweepRun = {
+            outcome: outcomeLabel,
+            deleted: progress.deleted,
+            chunks: progress.chunks,
+            durationMs: Date.now() - startedAt,
+        }
+        console.info(
+            `[couponSignals] reporter retention sweep run ran_at=${now.toISOString()} trigger=${trigger} deleted=${run.deleted} chunks=${run.chunks} duration_ms=${run.durationMs} outcome=${run.outcome}`,
+        )
+        return run
+    }
     try {
         const deletion = deleteExpiredReporters(now, progress)
         const timedOut = new Promise<'timeout'>(resolve => {
@@ -567,8 +615,10 @@ async function runReporterSweep(now: Date): Promise<void> {
                     abandonedDeletion = null
                 })
             nextReporterSweepAt = Date.now() + REPORTER_SWEEP_BACKOFF_MS
-            return
+            outcomeLabel = 'timeout'
+            return summarize()
         }
+        outcomeLabel = outcome.backlog ? 'backlog' : 'ok'
         if (progress.deleted > 0) {
             console.info(
                 `[couponSignals] reporter retention sweep deleted ${progress.deleted} expired rows in ${progress.chunks} chunks`,
@@ -599,6 +649,7 @@ async function runReporterSweep(now: Date): Promise<void> {
     } finally {
         clearTimeout(timeoutHandle)
     }
+    return summarize()
 }
 
 /** Test-only: make the next sweepExpiredReporters call run. */

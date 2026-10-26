@@ -612,11 +612,80 @@ describe('failure quorum: forged anonymous reports cannot sink a code', () => {
             throw new Error('client not ready')
         })
 
-        await expect(sweepExpiredReporters()).resolves.toBeUndefined()
+        await expect(sweepExpiredReporters()).resolves.toBeDefined()
         expect(Sentry.captureException).toHaveBeenCalledTimes(1)
         await sweepExpiredReporters()
         expect(sweepChunkDelete).toHaveBeenCalledTimes(1)
         errorSpy.mockRestore()
+    })
+
+    describe('every sweep run logs ONE provable summary line (T-6398)', () => {
+        let infoSpy: ReturnType<typeof vi.spyOn>
+        let errorSpy: ReturnType<typeof vi.spyOn>
+        const summaryLines = () =>
+            infoSpy.mock.calls
+                .map((call: unknown[]) => String(call[0]))
+                .filter((line: string) =>
+                    line.includes('reporter retention sweep run '),
+                )
+        beforeEach(() => {
+            infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {})
+            errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+            sweepChunkDelete.mockReset()
+            sweepChunkDelete.mockResolvedValue(0)
+        })
+        afterEach(() => {
+            infoSpy.mockRestore()
+            errorSpy.mockRestore()
+        })
+
+        it('a 0-row run still logs the summary with deleted=0 outcome=ok, and returns the run', async () => {
+            const run = await sweepExpiredReporters({ trigger: 'timer' })
+
+            expect(run).toMatchObject({ outcome: 'ok', deleted: 0, chunks: 1 })
+            expect(summaryLines()).toHaveLength(1)
+            expect(summaryLines()[0]).toMatch(
+                /^\[couponSignals\] reporter retention sweep run ran_at=\d{4}-\d{2}-\d{2}T[\d:.]+Z trigger=timer deleted=0 chunks=1 duration_ms=\d+ outcome=ok$/,
+            )
+        })
+
+        it('the trigger defaults to report', async () => {
+            await sweepExpiredReporters()
+            expect(summaryLines()[0]).toContain('trigger=report ')
+        })
+
+        it('a failing run logs outcome=failed', async () => {
+            sweepChunkDelete.mockRejectedValueOnce(new Error('db down'))
+
+            const run = await sweepExpiredReporters()
+
+            expect(run).toMatchObject({ outcome: 'failed', deleted: 0 })
+            expect(summaryLines()).toHaveLength(1)
+            expect(summaryLines()[0]).toContain('outcome=failed')
+        })
+
+        it('a caller that joins the in-flight sweep gets the same run and no second line', async () => {
+            let release!: (rows: number) => void
+            sweepChunkDelete.mockImplementationOnce(
+                () => new Promise<number>(resolve => (release = resolve)),
+            )
+
+            const first = sweepExpiredReporters({ trigger: 'timer' })
+            const joined = sweepExpiredReporters({ force: true })
+            await Promise.resolve()
+            release(0)
+
+            expect(await joined).toBe(await first)
+            expect(summaryLines()).toHaveLength(1)
+        })
+
+        it('a throttled call starts no run and logs nothing', async () => {
+            await sweepExpiredReporters()
+            infoSpy.mockClear()
+
+            await expect(sweepExpiredReporters()).resolves.toBeNull()
+            expect(summaryLines()).toHaveLength(0)
+        })
     })
 
     describe('the sweep DELETE runs under a Postgres statement timeout (T-6398)', () => {
@@ -667,7 +736,7 @@ describe('failure quorum: forged anonymous reports cannot sink a code', () => {
             )
             sweepChunkDelete.mockRejectedValueOnce(cancelled)
 
-            await expect(sweepExpiredReporters()).resolves.toBeUndefined()
+            await expect(sweepExpiredReporters()).resolves.toBeDefined()
 
             expect(Sentry.captureException).toHaveBeenCalledTimes(1)
             expect(Sentry.captureException).toHaveBeenCalledWith(cancelled, {
@@ -687,7 +756,7 @@ describe('failure quorum: forged anonymous reports cannot sink a code', () => {
             const failed = new Error('connection terminated')
             sweepExecuteRaw.mockRejectedValueOnce(failed)
 
-            await expect(sweepExpiredReporters()).resolves.toBeUndefined()
+            await expect(sweepExpiredReporters()).resolves.toBeDefined()
 
             expect(sweepChunkDelete).not.toHaveBeenCalled()
             expect(Sentry.captureException).toHaveBeenCalledWith(failed, {
@@ -798,7 +867,7 @@ describe('failure quorum: forged anonymous reports cannot sink a code', () => {
                 .mockImplementationOnce(realChunk)
                 .mockRejectedValueOnce(cancelled)
 
-            await expect(sweepExpiredReporters()).resolves.toBeUndefined()
+            await expect(sweepExpiredReporters()).resolves.toBeDefined()
 
             expect(Sentry.captureException).toHaveBeenCalledTimes(1)
             // The failure carries the running total (Sentry extra + the log).
@@ -879,11 +948,12 @@ describe('failure quorum: forged anonymous reports cannot sink a code', () => {
             expect(sweepChunkDelete).toHaveBeenCalledTimes(2)
         })
 
-        it('nothing expired is one short chunk: one transaction, no log, no warning', async () => {
+        it('nothing expired is one short chunk: one transaction, only the run summary line, no warning', async () => {
             await sweepExpiredReporters()
 
             expect(sweepTransaction).toHaveBeenCalledTimes(1)
-            expect(infoSpy).not.toHaveBeenCalled()
+            expect(infoSpy).toHaveBeenCalledTimes(1)
+            expect(infoSpy.mock.calls[0]![0]).toContain('deleted=0 chunks=1')
             expect(warnSpy).not.toHaveBeenCalled()
         })
     })
