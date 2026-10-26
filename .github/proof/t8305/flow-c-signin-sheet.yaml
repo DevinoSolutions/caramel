@@ -1,0 +1,20 @@
+# T-8305 proof, part C: the native sign-in sheet opens from the bounce and closes
+# cleanly. Nothing is typed into it; no account is signed in.
+appId: com.devino.Caramel
+---
+- tapOn: "Continue with Google"
+# ASWebAuthenticationSession asks first: "Caramel" Wants to Use "grabcaramel.com" to Sign In.
+- extendedWaitUntil:
+    visible: ".*Wants to Use.*"
+    timeout: 10000
+- takeScreenshot: 05-auth-consent
+- tapOn: "Continue"
+- waitForAnimationToEnd:
+    timeout: 10000
+- takeScreenshot: 06-signin-sheet
+- tapOn: "Cancel"
+- waitForAnimationToEnd:
+    timeout: 5000
+# Cancelling leaves the shell where it was: settled, not looping.
+- assertVisible: "Sign in to see this page"
+- takeScreenshot: 07-after-cancel

@@ -1,0 +1,24 @@
+# T-8305 proof, part A: the real first-launch path to the Saved tab.
+# Onboarding (first launch) -> Deals (web) -> Saved (web /profile#favorites, signed out).
+appId: com.devino.Caramel
+---
+- launchApp:
+    clearState: true
+- waitForAnimationToEnd:
+    timeout: 8000
+- takeScreenshot: 01-onboarding
+- tapOn:
+    text: "Deals"
+    index: -1
+- waitForAnimationToEnd:
+    timeout: 10000
+- extendedWaitUntil:
+    notVisible:
+      text: "Get started"
+      index: 0
+    timeout: 3000
+    optional: true
+- takeScreenshot: 02-deals
+- tapOn:
+    text: "Saved"
+    index: -1

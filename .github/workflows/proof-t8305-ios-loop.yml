@@ -1,0 +1,107 @@
+name: Proof T-8305 – iOS shell /profile <-> /login loop (Simulator)
+
+# Proves the CARAMEL-2Y fix (#503) on the real app path, on an iOS simulator:
+# first launch (onboarding) -> Deals (web) -> Saved (/profile#favorites, signed out) ->
+# the /login bounce must settle on "Sign in to see this page" instead of looping, and the
+# native sign-in sheet must open and cancel cleanly (nothing is typed, no account used).
+# The same walk runs against the pre-fix 1.6.0 commit (697d229) to show the detector
+# catches the loop. Debug simulator builds, unsigned; nothing is uploaded to App Store
+# Connect. Runs on the self-hosted aladdin-mac runner (Maestro + simulators installed).
+# Owner of this file: ios-testing lane (T-8305); caramel app code is not touched.
+
+on:
+  push:
+    branches: [proof/t8305-ios-loop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  proof:
+    name: ${{ matrix.variant }} (expect ${{ matrix.expect }})
+    runs-on: [self-hosted, macos-devino]
+    timeout-minutes: 50
+    permissions:
+      id-token: write   # DevinoSolutions/artifact (T-7021: GitHub artifacts blocked org-wide)
+      contents: read
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - variant: fixed-main
+            ref: main
+            expect: no-loop
+          - variant: prefix-1.6.0-697d229
+            ref: 697d229
+            expect: loop
+    env:
+      APPLE_DIR: app/apps/caramel-apple
+      OUT: ${{ github.workspace }}/proof-out/${{ matrix.variant }}
+    steps:
+      - name: Checkout proof scripts
+        uses: actions/checkout@v4
+        with:
+          path: proof-src
+          sparse-checkout: .github/proof
+
+      - name: Checkout app at ${{ matrix.ref }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.ref }}
+          path: app
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          package_json_file: app/package.json
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Build the Safari extension (the Xcode project embeds it)
+        working-directory: app
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile --filter "caramel-extension..."
+          pnpm --filter caramel-extension run build
+          apps/caramel-apple/scripts/derive-safari-build.sh
+
+      - name: Build the app for the iOS Simulator (Debug, unsigned)
+        run: |
+          set -euo pipefail
+          xcodebuild build -quiet \
+            -project "${APPLE_DIR}/Caramel.xcodeproj" -scheme Caramel -configuration Debug \
+            -sdk iphonesimulator -destination "generic/platform=iOS Simulator" \
+            -derivedDataPath "${RUNNER_TEMP}/DD-${{ matrix.variant }}" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
+          app="${RUNNER_TEMP}/DD-${{ matrix.variant }}/Build/Products/Debug-iphonesimulator/Caramel.app"
+          [ -d "$app" ] || { echo "::error::no Caramel.app at $app"; exit 1; }
+          echo "APP_PATH=$app" >> "$GITHUB_ENV"
+
+      - name: Walk the shell and measure the loop
+        run: |
+          chmod +x proof-src/.github/proof/t8305/run.sh
+          proof-src/.github/proof/t8305/run.sh "$APP_PATH" "$OUT" "${{ matrix.expect }}"
+
+      - name: Summary
+        if: ${{ !cancelled() }}
+        run: |
+          { echo "### ${{ matrix.variant }} (expect ${{ matrix.expect }})"; echo '```'; cat "$OUT/summary.txt" 2>/dev/null; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload screenshots + logs
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: DevinoSolutions/artifact/upload@v1
+        with:
+          name: t8305-proof-${{ matrix.variant }}
+          path: ${{ env.OUT }}
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Remove the derived data
+        if: always()
+        run: rm -rf "${RUNNER_TEMP}/DD-${{ matrix.variant }}"
