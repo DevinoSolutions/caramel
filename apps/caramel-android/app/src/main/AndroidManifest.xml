@@ -5,6 +5,22 @@
          location, no ad id. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- The sign-in names an explicit browser (com.devino.nativeauthtab.BrowserChoice): it must see the
+         Custom Tabs providers and the browsers to choose one. -->
+    <queries>
+        <intent><action android:name="android.support.customtabs.action.CustomTabsService" /></intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="https" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="http" />
+        </intent>
+    </queries>
+
     <application
         android:name=".CaramelApplication"
         android:allowBackup="false"
