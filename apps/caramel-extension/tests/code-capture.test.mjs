@@ -597,11 +597,18 @@ describe('what must never leave the page', () => {
 
 describe('gift-card and card numbers', () => {
     const FIELD_MARKUP = {
-        'its name': el => (el.name = 'giftCardNumber'),
+        // The fixture's id is "promo": a name and id that disagree make a
+        // combined box (see 'a box that takes a discount code or a gift card').
+        'its name': el => {
+            el.name = 'giftCardNumber'
+            el.id = 'field'
+        },
         'its id': el => (el.id = 'gift-card-input'),
         'its placeholder': el => (el.placeholder = 'Gift card or voucher'),
         'its aria-label': el => el.setAttribute('aria-label', 'Loyalty points'),
         'its autocomplete': el => el.setAttribute('autocomplete', 'email'),
+        'its card autocomplete': el =>
+            el.setAttribute('autocomplete', 'cc-number'),
         'its label': _el => {
             const label = document.createElement('label')
             label.htmlFor = 'promo'
@@ -654,6 +661,146 @@ describe('gift-card and card numbers', () => {
         await settle(1800)
 
         expect(sent).toEqual([])
+    })
+})
+
+describe('a box that takes a discount code or a gift card', () => {
+    const waitForStep = step =>
+        vi.waitFor(() => expect(funnel.map(m => m.step)).toContain(step), LONG)
+    /** The store's answer on a combined box: an applied row with `text`, and
+     *  the total dropping (a redeemed gift card drops it too). */
+    function storeShowsRow(text) {
+        document.getElementById('apply').addEventListener('click', () => {
+            setTimeout(() => {
+                const row = document.createElement('div')
+                row.id = 'applied-row'
+                setText(row, text)
+                document.body.appendChild(row)
+                setText(document.getElementById('total'), '$90.00')
+            }, 100)
+        })
+    }
+
+    it.each([
+        ['Shopify', { placeholder: 'Discount code or gift card' }],
+        ['Shopify by its name alone', { name: 'reductions' }],
+        ['a UK voucher box', { placeholder: 'Enter voucher code' }],
+        ['a German Gutschein box', { placeholder: 'Gutscheincode' }],
+        [
+            'Shopify in French',
+            { placeholder: 'Code de réduction ou carte-cadeau' },
+        ],
+        ['Shopify in German', { placeholder: 'Rabattcode oder Geschenkkarte' }],
+        [
+            'Shopify in Japanese',
+            { placeholder: '割引コードまたはギフトカード' },
+        ],
+    ])('%s: a code the store lists by name is shared', async (_l, attrs) => {
+        Object.assign(promo(), attrs)
+        await armed()
+        storeShowsRow('Discount SAVE10 −$10.00')
+        shopperTypes('SAVE10')
+        shopperClicksApply()
+
+        await vi.waitFor(() => expect(sent).toHaveLength(1), LONG)
+        expect(sent[0].code).toBe('SAVE10')
+    })
+
+    it.each([
+        ['Shopify', 'Discount code or gift card'],
+        ['Shopify in French', 'Code de réduction ou carte-cadeau'],
+        ['a UK voucher box', 'Enter voucher code'],
+    ])(
+        '%s: a redeemed gift card (masked row, total down) is never shared',
+        async (_l, placeholder) => {
+            promo().placeholder = placeholder
+            await armed()
+            storeShowsRow('Gift card •••• 7Q2K −$10.00')
+            shopperTypes('X7K29PQMA4C87Q2K')
+            shopperClicksApply()
+            await waitForStep('store_not_accepted')
+
+            expect(sent).toEqual([])
+            expect(funnel.at(-1)).toMatchObject({
+                step: 'store_not_accepted',
+                reason: 'not-tied-to-code',
+            })
+            expect(JSON.stringify(funnel)).not.toMatch(/X7K29PQMA4C87Q2K/i)
+        },
+    )
+
+    it('a row that names the full code but reads as a gift card is never shared', async () => {
+        promo().placeholder = 'Discount code or gift card'
+        await armed()
+        storeShowsRow('Gift card X7K29PQMA4C87Q2K −$10.00')
+        shopperTypes('X7K29PQMA4C87Q2K')
+        shopperClicksApply()
+        await settle(1800)
+
+        expect(sent).toEqual([])
+    })
+
+    it('a bare price drop under a generic row is not enough on a combined box', async () => {
+        promo().placeholder = 'Discount code or gift card'
+        await armed()
+        storeShowsRow('Discount applied −$10.00')
+        shopperTypes('SAVE10')
+        shopperClicksApply()
+        await settle(1800)
+
+        expect(sent).toEqual([])
+    })
+
+    it('the same generic row and drop on a plain promo box is still shared', async () => {
+        promo().placeholder = 'Discount code'
+        await armed()
+        storeShowsRow('Discount applied −$10.00')
+        shopperTypes('SAVE10')
+        shopperClicksApply()
+
+        await vi.waitFor(() => expect(sent).toHaveLength(1), LONG)
+    })
+
+    it.each([
+        ['a gift-card-only box', 'Gift card number'],
+        ['a French gift-card-only box', 'Numéro de carte-cadeau'],
+        ['a gift voucher box', 'Gift voucher'],
+    ])('%s is still never watched', async (_l, placeholder) => {
+        promo().placeholder = placeholder
+        await armed()
+        storeShowsRow('Discount SAVE10 −$10.00')
+        shopperTypes('SAVE10')
+        shopperClicksApply()
+
+        await waitForStep('apply_ignored')
+        expect(funnel.at(-1)).toMatchObject({
+            step: 'apply_ignored',
+            reason: 'not-promo-field',
+        })
+        expect(sent).toEqual([])
+    })
+})
+
+describe('caramelCaptureAccepted on a combined box', () => {
+    const base = {
+        success: true,
+        committed: true,
+        priceDropped: true,
+        errorMsg: '',
+        errorIsNew: false,
+    }
+    it('takes only a row that names the code and is not a stored-value row', () => {
+        const ok = { ...base, appliedRows: ['Gift card •••• 1234', 'SAVE10'] }
+        expect(accepted(ok, 'save10', { combined: true })).toBe(true)
+        const gift = { ...base, appliedRows: ['Gift certificate SAVE10'] }
+        expect(accepted(gift, 'SAVE10', { combined: true })).toBe(false)
+        const none = { ...base, appliedRows: [] }
+        expect(accepted(none, 'SAVE10', { combined: true })).toBe(false)
+        expect(accepted(none, 'SAVE10')).toBe(true)
+    })
+    it('an old-shape verdict (joined text only) is judged as one row', () => {
+        const old = { ...base, appliedRowsText: 'SAVE10 applied' }
+        expect(accepted(old, 'SAVE10', { combined: true })).toBe(true)
     })
 })
 
