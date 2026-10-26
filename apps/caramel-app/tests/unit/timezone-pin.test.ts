@@ -1,3 +1,6 @@
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 // T-8622: vitest.config.ts pins TZ=UTC in the main process. This is the proof
@@ -18,5 +21,28 @@ describe('test runner timezone pin', () => {
         expect(date.getHours()).toBe(23)
         expect(date.getDate()).toBe(24)
         expect(date.toString()).toContain('GMT+0000')
+    })
+})
+
+// T-9177: the in-process test above only proves the unit config. This guard
+// makes the pin a rule for every vitest config in the package, so a new or
+// edited config (eval, integration, drift, ...) cannot silently drop it.
+describe('vitest configs pin the timezone', () => {
+    const packageRoot = path.resolve(
+        path.dirname(fileURLToPath(import.meta.url)),
+        '../..',
+    )
+    const configFiles = fs
+        .readdirSync(packageRoot)
+        .filter(name => /^vitest.*\.config\.ts$/.test(name))
+
+    it('finds the vitest configs', () => {
+        expect(configFiles).toContain('vitest.config.ts')
+    })
+
+    it.each(configFiles)("%s contains process.env.TZ = 'UTC'", name => {
+        const source = fs.readFileSync(path.join(packageRoot, name), 'utf8')
+
+        expect(source).toContain("process.env.TZ = 'UTC'")
     })
 })

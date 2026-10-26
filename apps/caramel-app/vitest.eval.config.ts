@@ -4,6 +4,12 @@ import { fileURLToPath } from 'node:url'
 import tsconfigPaths from 'vite-tsconfig-paths'
 import { configDefaults, defineConfig } from 'vitest/config'
 
+// T-9177: pin the runner's timezone like vitest.config.ts does (the why and the
+// main-process-assignment requirement are in its T-8622 comment). Kept ahead of
+// process.loadEnvFile below: loadEnvFile never overrides a var already in
+// process.env, so pinning first makes UTC win over a TZ in .env.
+process.env.TZ = 'UTC'
+
 // F-012 — separate config so live-cost eval suites (evals/**/*.eval.ts)
 // never run as part of the regular `pnpm test` / CI "unit" task: F-004's
 // vitest.config.ts excludes `**/*.eval.*`, and only THIS config's
