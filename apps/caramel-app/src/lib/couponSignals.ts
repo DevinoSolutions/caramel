@@ -383,7 +383,7 @@ const REPORTER_SWEEP_TIMEOUT_MS = 60 * 1000
  * chunk that commits stays committed even if a later one fails or is cancelled
  * (one big transaction would roll the whole backlog back on every retry and
  * never progress). Postgres has no DELETE ... LIMIT, so a chunk is a keyed
- * DELETE from a LIMIT-ed sub-select (reporterSweepChunk below).
+ * DELETE from a LIMIT-ed sub-select (deleteExpiredReporterChunk below).
  */
 const REPORTER_SWEEP_CHUNK_ROWS = 5000
 /** Hard cap on chunks per run, so a pathological backlog cannot loop forever. */
@@ -394,8 +394,12 @@ const REPORTER_SWEEP_MAX_CHUNKS = 100
  * 55 s, still inside REPORTER_SWEEP_TIMEOUT_MS: a healthy-but-large backlog
  * ends its run cleanly instead of tripping the abandon-and-report path.
  */
-const REPORTER_SWEEP_LOOP_BUDGET_MS = 30 * 1000
-/** A run that stopped on a cap with rows left over comes back this soon (not in an hour). */
+export const REPORTER_SWEEP_LOOP_BUDGET_MS = 30 * 1000
+/**
+ * A run that stopped on a cap with rows left over is eligible again this soon
+ * (not in an hour). Nothing reschedules it: the next run still comes from the
+ * next report or the hourly forced timer.
+ */
 const REPORTER_SWEEP_BACKLOG_RETRY_MS = 60 * 1000
 /**
  * Server-side cap on ONE chunk's DELETE (Postgres `statement_timeout`, set per
@@ -450,7 +454,8 @@ let abandonedDeletion: Promise<void> | null = null
  * cancelled by Postgres, rejects, and takes the normal failure path above, so
  * retention cannot stay off until a restart, and the chunks committed before
  * it stay deleted, so a backlog still shrinks across retries. A run that hits
- * its chunk or time cap with rows left retries in a minute, not an hour.
+ * its chunk or time cap with rows left is eligible again after a minute, not
+ * an hour (the next report or the hourly timer then picks it up).
  * Defense in depth for a DELETE the server cannot cancel (a dead socket): one
  * that has not settled after 60 s is reported to Sentry (tagged timeout),
  * abandoned and backed off the same way, but until it settles NO caller (force
@@ -474,12 +479,8 @@ export function sweepExpiredReporters(
     return sweep
 }
 
-type ReporterSweepResult = {
-    deleted: number
-    chunks: number
-    /** True when the run stopped on a cap while full chunks were still coming. */
-    backlog: boolean
-}
+/** What one run has committed so far; survives a later chunk throwing. */
+type ReporterSweepProgress = { deleted: number; chunks: number }
 
 /**
  * ONE chunk, in its own transaction: SET LOCAL statement_timeout (dies with the
@@ -512,30 +513,32 @@ function deleteExpiredReporterChunk(cutoff: Date): Promise<number> {
 /**
  * Chunk until one deletes fewer than a full chunk (the backlog is clear), the
  * chunk cap is hit, or the loop budget is spent. The cutoff is fixed once per
- * run so the target set cannot grow under the loop. A chunk that fails
- * propagates (the caller reports it); chunks already committed stay committed.
+ * run so the target set cannot grow under the loop. `progress` is updated
+ * after every committed chunk, so when a later chunk throws (the error
+ * propagates; the caller reports it) the caller still knows how much this run
+ * deleted. Chunks already committed stay committed.
  */
-async function deleteExpiredReporters(now: Date): Promise<ReporterSweepResult> {
+async function deleteExpiredReporters(
+    now: Date,
+    progress: ReporterSweepProgress,
+): Promise<{ backlog: boolean }> {
     const cutoff = new Date(now.getTime() - FAILING_WINDOW_MS)
     const startedAt = Date.now()
-    let deleted = 0
-    let chunks = 0
-    while (chunks < REPORTER_SWEEP_MAX_CHUNKS) {
+    while (progress.chunks < REPORTER_SWEEP_MAX_CHUNKS) {
         const count = await deleteExpiredReporterChunk(cutoff)
-        chunks++
-        deleted += count
-        if (count < REPORTER_SWEEP_CHUNK_ROWS) {
-            return { deleted, chunks, backlog: false }
-        }
+        progress.chunks++
+        progress.deleted += count
+        if (count < REPORTER_SWEEP_CHUNK_ROWS) return { backlog: false }
         if (Date.now() - startedAt >= REPORTER_SWEEP_LOOP_BUDGET_MS) break
     }
-    return { deleted, chunks, backlog: true }
+    return { backlog: true }
 }
 
 async function runReporterSweep(now: Date): Promise<void> {
     let timeoutHandle: ReturnType<typeof setTimeout> | undefined
+    const progress: ReporterSweepProgress = { deleted: 0, chunks: 0 }
     try {
-        const deletion = deleteExpiredReporters(now)
+        const deletion = deleteExpiredReporters(now, progress)
         const timedOut = new Promise<'timeout'>(resolve => {
             timeoutHandle = setTimeout(
                 () => resolve('timeout'),
@@ -563,33 +566,36 @@ async function runReporterSweep(now: Date): Promise<void> {
                 .finally(() => {
                     abandonedDeletion = null
                 })
-            nextReporterSweepAt = now.getTime() + REPORTER_SWEEP_BACKOFF_MS
+            nextReporterSweepAt = Date.now() + REPORTER_SWEEP_BACKOFF_MS
             return
         }
-        if (outcome.deleted > 0) {
+        if (progress.deleted > 0) {
             console.info(
-                `[couponSignals] reporter retention sweep deleted ${outcome.deleted} expired rows in ${outcome.chunks} chunks`,
+                `[couponSignals] reporter retention sweep deleted ${progress.deleted} expired rows in ${progress.chunks} chunks`,
             )
         }
         if (outcome.backlog) {
             console.warn(
-                `[couponSignals] reporter retention sweep stopped at its cap with expired rows left (retrying in ${REPORTER_SWEEP_BACKLOG_RETRY_MS / 1000} s)`,
+                `[couponSignals] reporter retention sweep stopped at its cap with expired rows left (eligible again after ${REPORTER_SWEEP_BACKLOG_RETRY_MS / 1000} s)`,
             )
         }
+        // Measured from the END of the run, not its start: a long run must not
+        // eat its own throttle/backoff window.
         nextReporterSweepAt =
-            now.getTime() +
+            Date.now() +
             (outcome.backlog
                 ? REPORTER_SWEEP_BACKLOG_RETRY_MS
                 : REPORTER_SWEEP_INTERVAL_MS)
     } catch (error) {
         Sentry.captureException(error, {
             tags: { area: REPORTER_SWEEP_AREA },
+            extra: { ...progress },
         })
         console.error(
-            '[couponSignals] reporter retention sweep failed (retrying in 5 minutes):',
+            `[couponSignals] reporter retention sweep failed after deleting ${progress.deleted} expired rows in ${progress.chunks} chunks (retrying in 5 minutes):`,
             error,
         )
-        nextReporterSweepAt = now.getTime() + REPORTER_SWEEP_BACKOFF_MS
+        nextReporterSweepAt = Date.now() + REPORTER_SWEEP_BACKOFF_MS
     } finally {
         clearTimeout(timeoutHandle)
     }

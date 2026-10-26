@@ -15,6 +15,7 @@ import {
 import {
     CLEARING_WORKED_WEIGHT,
     MAX_LOW_TRUST_CLEARING_WEIGHT,
+    REPORTER_SWEEP_LOOP_BUDGET_MS,
     REPORTER_WEIGHT,
     recordFailed,
     recordWorked,
@@ -671,6 +672,7 @@ describe('failure quorum: forged anonymous reports cannot sink a code', () => {
             expect(Sentry.captureException).toHaveBeenCalledTimes(1)
             expect(Sentry.captureException).toHaveBeenCalledWith(cancelled, {
                 tags: { area: 'couponSignals.sweepExpiredReporters' },
+                extra: { deleted: 0, chunks: 0 },
             })
             expect(errorSpy).toHaveBeenCalled()
             // Backoff: an unforced call inside 5 minutes starts nothing.
@@ -690,6 +692,7 @@ describe('failure quorum: forged anonymous reports cannot sink a code', () => {
             expect(sweepChunkDelete).not.toHaveBeenCalled()
             expect(Sentry.captureException).toHaveBeenCalledWith(failed, {
                 tags: { area: 'couponSignals.sweepExpiredReporters' },
+                extra: { deleted: 0, chunks: 0 },
             })
         })
     })
@@ -777,6 +780,10 @@ describe('failure quorum: forged anonymous reports cannot sink a code', () => {
                 expect(query.sql).toContain(
                     '(coupon_id, outcome, reporter_hash) IN',
                 )
+                // Both the outer DELETE and the sub-select filter on last_at:
+                // the outer re-check keeps a reporter that re-reported between
+                // the sub-select and the DELETE.
+                expect(query.sql.match(/last_at </g)).toHaveLength(2)
                 expect(query.values).toEqual([cutoff, cutoff, CHUNK])
             }
         })
@@ -794,10 +801,17 @@ describe('failure quorum: forged anonymous reports cannot sink a code', () => {
             await expect(sweepExpiredReporters()).resolves.toBeUndefined()
 
             expect(Sentry.captureException).toHaveBeenCalledTimes(1)
+            // The failure carries the running total (Sentry extra + the log).
             expect(Sentry.captureException).toHaveBeenCalledWith(cancelled, {
                 tags: { area: 'couponSignals.sweepExpiredReporters' },
+                extra: { deleted: CHUNK, chunks: 1 },
             })
-            expect(errorSpy).toHaveBeenCalled()
+            expect(errorSpy).toHaveBeenCalledWith(
+                expect.stringContaining(
+                    `after deleting ${CHUNK} expired rows in 1 chunks`,
+                ),
+                cancelled,
+            )
             expect(db.reporters.size).toBe(12_000 - CHUNK)
 
             // Backoff applies; once it is over the retry makes progress instead
@@ -832,9 +846,9 @@ describe('failure quorum: forged anonymous reports cannot sink a code', () => {
             expect(sweepChunkDelete).toHaveBeenCalledTimes(200)
         })
 
-        it('starts no new chunk once the 30 s loop budget is spent, so budget + maxWait + timeout stays inside the 60 s sweep timeout', async () => {
+        it('starts no new chunk once the loop budget is spent, so budget + maxWait + timeout stays inside the 60 s sweep timeout', async () => {
             sweepChunkDelete.mockImplementation(async () => {
-                vi.setSystemTime(Date.now() + 10 * 1000)
+                vi.setSystemTime(Date.now() + REPORTER_SWEEP_LOOP_BUDGET_MS / 3)
                 return CHUNK
             })
 
@@ -843,7 +857,26 @@ describe('failure quorum: forged anonymous reports cannot sink a code', () => {
             expect(sweepChunkDelete).toHaveBeenCalledTimes(3)
             expect(warnSpy).toHaveBeenCalled()
             const { maxWait, timeout } = sweepTransaction.mock.calls[0]![1]
-            expect(30_000 + maxWait + timeout).toBeLessThan(60_000)
+            expect(
+                REPORTER_SWEEP_LOOP_BUDGET_MS + maxWait + timeout,
+            ).toBeLessThan(60_000)
+        })
+
+        it('the hourly throttle is measured from the END of a run, not its start', async () => {
+            sweepChunkDelete.mockImplementationOnce(async () => {
+                vi.setSystemTime(Date.now() + 30 * 60 * 1000)
+                return 0
+            })
+            await sweepExpiredReporters()
+            expect(sweepChunkDelete).toHaveBeenCalledTimes(1)
+
+            // 61 min after the start, but only 31 min after the end.
+            vi.setSystemTime(Date.now() + 31 * 60 * 1000)
+            await sweepExpiredReporters()
+            expect(sweepChunkDelete).toHaveBeenCalledTimes(1)
+            vi.setSystemTime(Date.now() + 30 * 60 * 1000)
+            await sweepExpiredReporters()
+            expect(sweepChunkDelete).toHaveBeenCalledTimes(2)
         })
 
         it('nothing expired is one short chunk: one transaction, no log, no warning', async () => {
