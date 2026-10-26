@@ -61,7 +61,15 @@ export const POST = withRoute(
             : null
         // The browser's own id when it has one, so this event and the browser's
         // (same uuid) are the SAME event to PostHog; the install id otherwise.
-        const distinctId = body.distinct_id ?? cookieDistinctId ?? body.iid
+        // "The browser's own id" is the one its PostHog cookie carries on THIS
+        // request. A body id is taken only when it matches that cookie: on its
+        // own it says nothing about who sent the request, so it cannot pick the
+        // person an install is filed under (T-6231). posthog-js keeps its id in that
+        // first-party cookie, so the real /welcome page always sends both.
+        const bodyIdIgnored =
+            body.distinct_id !== undefined &&
+            body.distinct_id !== cookieDistinctId
+        const distinctId = cookieDistinctId ?? body.iid
 
         const captured = await captureServerEvent({
             event: 'extension_installed',
@@ -75,6 +83,11 @@ export const POST = withRoute(
                     deriveFirstTouchSource(firstTouch) ??
                     organicInstallSource(body.store),
                 capture_path: 'server',
+                // False when no browser PostHog id came with the request: a
+                // visitor who blocks PostHog, or a client that is not a browser. Install counts and
+                // the paid/organic split can be read with or without them.
+                browser_verified: cookieDistinctId !== null,
+                ...(bodyIdIgnored ? { body_distinct_id_ignored: true } : {}),
                 ...buildFirstTouchProperties(firstTouch),
                 // An install is not a person: do not mint a profile for an
                 // anonymous id (or, worse, one per install id). The event still
