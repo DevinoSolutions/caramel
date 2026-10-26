@@ -29,9 +29,11 @@ describe('test runner timezone pin', () => {
 // edited config (eval, integration, drift, ...) cannot silently drop it.
 const TZ_PIN = "process.env.TZ = 'UTC'"
 
-// Comments are stripped first so a commented-out pin does not count.
+// Comments are stripped first so a commented-out pin does not count. One pass
+// on purpose: a `//` comment mentioning a glob like `**/*.ts` must not open a
+// block comment that swallows real code.
 function stripComments(source: string): string {
-    return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')
+    return source.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '')
 }
 
 describe('vitest configs pin the timezone', () => {
