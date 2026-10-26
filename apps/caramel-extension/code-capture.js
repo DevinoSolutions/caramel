@@ -111,15 +111,17 @@ function looksLikeCardNumber(code) {
 // coupon selector would otherwise leak a card number.
 // Never a promotion, whatever else the field says.
 const NON_PROMO_FIELD = /loyalty|reward|points|referral|e-?mail|\bcc-/i
-// Stored value (gift cards, certificates): money, never shareable. Words in the
-// languages Shopify localizes its "Discount code or gift card" box into.
+// Stored value (gift cards, certificates, store credit): money, never
+// shareable. Words in the languages Shopify localizes its "Discount code or
+// gift card" box into.
 const STORED_VALUE_WORDS =
-    /gift|card|certificate|cadeau|geschenk|regalo|presente|presentkort|gavekort|lahja|podarunk|dárkov|hediye|ギフト|기프트|礼品|禮品/i
+    /gift|card|certificate|store credit|guthaben|cadeau|geschenk|regalo|regal|presente|presentkort|gavekort|lahja|podarunk|dárkov|darček|ajándék|poklon|daril|dovan|kinke|gjafa|hadiah|quà|cart[aã]o[- ]oferta|hed[iİı]ye|подар|δώρ|ของขวัญ|ギフト|기프트|礼品|禮品/i
 // "Voucher" / "Gutschein" is the promo box on many UK and German stores and a
-// gift voucher on others: watched, but only under the combined-box rule.
+// gift voucher on others: watched, but only under the combined-box rule, where
+// a row that says it without a discount word counts as stored value.
 const EITHER_WORDS = /voucher|gutschein/i
 const PROMO_WORDS =
-    /discount|promo|coupon|offer|r[ée]duction|rabat|descuento|sconto|desconto|korting|alennus|indirim|slev|割引|할인|折扣|优惠/i
+    /discount|promo|coupon|offer|r[ée]duction|rabat|descuento|descompte|sconto|desconto|korting|alennus|[iİı]ndirim|slev|zľav|kedvezm|popust|nuolaid|allahindl|sooduskood|afsl|diskon|giảm giá|скид|έκπτωσ|ส่วนลด|割引|할인|折扣|优惠/i
 
 // A click can only be on the Apply control if the target sits in something
 // interactive. Cheap `closest` check run BEFORE any selector query.
@@ -191,19 +193,37 @@ export function caramelCaptureAccepted(verdict, code, { combined } = {}) {
     if (!verdict || verdict.success !== true || verdict.committed !== true)
         return false
     if (verdict.errorMsg && verdict.errorIsNew) return false
-    const needle = String(code ?? '').toLowerCase()
-    const names = text => !!needle && text.toLowerCase().includes(needle)
     if (combined) {
         const rows = Array.isArray(verdict.appliedRows)
             ? verdict.appliedRows
             : [String(verdict.appliedRowsText ?? '')]
-        return rows.some(
-            row => names(String(row)) && !STORED_VALUE_WORDS.test(String(row)),
-        )
+        return rows.some(row => {
+            const text = String(typeof row === 'string' ? row : row?.text)
+            const context = String(
+                typeof row === 'string' ? row : (row?.context ?? text),
+            )
+            return _namesCode(text, code) && !_readsAsStoredValue(context)
+        })
     }
     return (
         verdict.priceDropped === true ||
-        names(String(verdict.appliedRowsText ?? ''))
+        _namesCode(String(verdict.appliedRowsText ?? ''), code)
+    )
+}
+
+// The code as a whole token: SAV is not named by a row reading SAVE10.
+function _namesCode(text, code) {
+    if (!code) return false
+    const escaped = String(code).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    return new RegExp(`(^|[^a-z0-9_-])${escaped}($|[^a-z0-9_-])`, 'i').test(
+        text,
+    )
+}
+
+function _readsAsStoredValue(text) {
+    return (
+        STORED_VALUE_WORDS.test(text) ||
+        (EITHER_WORDS.test(text) && !PROMO_WORDS.test(text))
     )
 }
 
