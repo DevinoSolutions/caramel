@@ -621,17 +621,40 @@ function detectCouponError(rec, baseline, code, priorText, alertsBefore) {
                 scope = scope.parentElement
                 continue
             }
-            const idx = Math.max(0, text.search(GENERIC_ERROR_TEXT_RE))
-            return text
-                .slice(Math.max(0, idx - 40), idx + 120)
-                .replace(/\s+/g, ' ')
-                .trim()
+            return caramelQuoteAround(
+                text,
+                Math.max(0, text.search(GENERIC_ERROR_TEXT_RE)),
+            )
         }
         scope = scope.parentElement
     }
     return readsLikeFound
         ? (_caramelPageAlertSaying(alertsBefore) ?? standing)
         : null
+}
+
+// The quote around the refusal words at `idx`: up to 40 characters before and
+// 120 after, cut at whole words and kept to the refusal's own line, so the
+// field's label and button on the lines above ("Promo code / Apply") stay out
+// of it. A fixed slice started mid-word: shoppers were shown, and reports
+// saved, "ly The promotional code you entered is not valid." (the tail of
+// "Apply"). Exported for tests.
+export function caramelQuoteAround(text, idx) {
+    let start = Math.max(0, idx - 40)
+    let end = Math.min(text.length, idx + 120)
+    const lineStart = text.lastIndexOf('\n', idx - 1) + 1
+    const lineEnd = text.indexOf('\n', idx)
+    if (lineStart > start) start = lineStart
+    else if (start > 0 && /\S/.test(text[start - 1])) {
+        const gap = text.slice(start, idx).search(/\s/)
+        start = gap === -1 ? idx : start + gap + 1
+    }
+    if (lineEnd !== -1 && lineEnd < end) end = lineEnd
+    else if (end < text.length && /\S/.test(text[end])) {
+        const lastGap = text.slice(idx, end).search(/\s\S*$/)
+        if (lastGap > 0) end = idx + lastGap
+    }
+    return text.slice(start, end).replace(/\s+/g, ' ').trim()
 }
 
 // A page's alert regions: where a cart that answers far from the box puts its
