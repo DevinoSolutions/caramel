@@ -41,6 +41,13 @@ export function initSentry(
         // beforeSendTransaction never runs, so span urls would skip the scrub
         // below. 'static' keeps the v10 transaction model the scrub is built on.
         traceLifecycle: 'static',
+        // SDK v11 turned this on by default (v10 left it off). On, every
+        // captureMessage carries a synthetic stack, and Sentry then groups and
+        // titles the warning by its minified in-app frame: each deploy's new
+        // chunk hashes opened a fresh issue named "x" or "Z" (CARAMEL-31/32
+        // split off CARAMEL-1A, T-9161). Off, messages group by their text
+        // again; captured errors keep their own stacks.
+        attachStacktrace: false,
         // Defence in depth on top of the baseline: sentryPiiScrub strips
         // credential-shaped headers, params, bearer tokens, e-mails and IPs
         // from errors, transactions (incl. span urls) and breadcrumbs, whatever

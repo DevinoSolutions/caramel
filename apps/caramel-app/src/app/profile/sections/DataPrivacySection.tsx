@@ -198,7 +198,8 @@ export default function DataPrivacySection({
                         <button
                             type="button"
                             onClick={() => setAccountDialogOpen(true)}
-                            className={DANGER_ACTION_BUTTON_CLASS}
+                            // T-8946: ph-no-capture so posthog-js never autocaptures this click under the old distinct id (its batch would flush after the server PostHog purge and re-create the person).
+                            className={`${DANGER_ACTION_BUTTON_CLASS} ph-no-capture`}
                         >
                             Delete my account
                         </button>
@@ -271,6 +272,8 @@ export default function DataPrivacySection({
                 typeToConfirm={CONFIRM_WORD}
                 tone="danger"
                 busy={busy}
+                // T-8946: ph-no-capture so posthog-js never autocaptures the confirm click under the old distinct id (its batch would flush after the server PostHog purge and re-create the person).
+                excludeFromAutocapture
                 body={
                     <>
                         <p className={bodyTextClasses}>

@@ -9,7 +9,7 @@ import { afterAll, describe, expect, it } from 'vitest'
 
 // E-01 integration — the extension OAuth session mint (F-007,
 // src/lib/auth/extensionOAuthSession.ts) exercised against the REAL prisma
-// client + live local Postgres (:58005; the harness/CI runs `prisma migrate
+// client + live local Postgres (:28005; the harness/CI runs `prisma migrate
 // deploy` first, so users/accounts/sessions from the better_auth migration
 // exist). The unit tests can only mock prisma, so they can't prove the part
 // that actually matters here: on a SECOND sign-in with the same provider +

@@ -15,14 +15,14 @@ export const repoRoot = path.resolve(scriptDir, '../../..')
 // DATABASE_URL, and instrumentation.ts only logs its (now DISABLED) posture. So
 // the old fossil value pointing at a nonexistent caramel_coupons DB is dropped.
 export const ciEnvFileContents = `NODE_ENV=development
-PORT=58000
-PG_PORT=58005
-DATABASE_URL="postgresql://postgres:postgres@localhost:58005/caramel?schema=public"
-BETTER_AUTH_URL="http://localhost:58000"
+PORT=28000
+PG_PORT=28005
+DATABASE_URL="postgresql://postgres:postgres@localhost:28005/caramel?schema=public"
+BETTER_AUTH_URL="http://localhost:28000"
 BETTER_AUTH_SECRET=ci_better_auth_secret
 JWT_SECRET=ci_jwt_secret
 BCRYPT_SALT_ROUNDS=10
-NEXT_PUBLIC_BASE_URL="http://localhost:58000"
+NEXT_PUBLIC_BASE_URL="http://localhost:28000"
 SMTP_HOST=smtp.example.com
 SMTP_PORT=587
 SMTP_USER=ci@example.com

@@ -6,6 +6,7 @@ import {
     revokeAppleGrants,
     type AppleRevocationOutcome,
 } from '@/lib/auth/appleTokenRevocation'
+import { expireSessionCookies } from '@/lib/auth/expireSessionCookies'
 import prisma from '@/lib/prisma'
 import {
     foldRequesterEmail,
@@ -119,7 +120,7 @@ export const POST = withRoute(
         auth: 'session',
         body: DeleteAccountBodySchema,
     },
-    async ({ session }) => {
+    async ({ req, session }) => {
         if (!session?.user) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
@@ -152,11 +153,16 @@ export const POST = withRoute(
             ? await deletePosthogPerson(userId)
             : 'not_applicable'
 
-        return NextResponse.json({
+        const res = NextResponse.json({
             deleted,
             scrubbed: { siteSuggestions: siteSuggestions.count },
             appleRevocation,
             analyticsDeletion,
         })
+        // The sessions rows are gone, but the session cookie cache would keep
+        // this browser signed in as the deleted account for up to 5 minutes
+        // (and re-identify it to PostHog). See expireSessionCookies.ts (T-8946).
+        expireSessionCookies(req, res)
+        return res
     },
 )

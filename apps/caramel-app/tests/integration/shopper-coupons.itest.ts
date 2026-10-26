@@ -15,7 +15,7 @@ import {
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 // Shopper-submitted codes against the REAL prisma client + the LOCAL compose
-// Postgres (:58005) with migrations applied, including
+// Postgres (:28005) with migrations applied, including
 // 20261002120000_shopper_coupon_submissions (the reserved id sequence + the
 // attribution columns). NEVER point this at a remote DATABASE_URL: it writes.
 //
@@ -71,7 +71,7 @@ afterAll(async () => {
     await prisma.$disconnect()
 })
 
-describe('known-store gate (real pg :58005)', () => {
+describe('known-store gate (real pg :28005)', () => {
     it('an unknown domain throws UnknownStoreError and inserts NO row', async () => {
         await expect(
             submitShopperCoupon({
@@ -228,7 +228,7 @@ describe('known-store gate (real pg :58005)', () => {
     })
 })
 
-describe('submitShopperCoupon (real pg :58005)', () => {
+describe('submitShopperCoupon (real pg :28005)', () => {
     it('creates a pending row with an id from the reserved range, attributed to the shopper, shown on the store page with a derived title', async () => {
         const result = await submitShopperCoupon({
             base: BASE,

@@ -16,7 +16,6 @@ const srcDir = path.resolve(
 const CLEARED_FILES = [
     'components/support/support-form.tsx',
     'components/HeroSection.tsx',
-    'components/StoreButtons.tsx',
     'components/growth/AgentSetupPill.tsx',
     'layouts/Header/Header.tsx',
     'components/FaqSection.tsx',

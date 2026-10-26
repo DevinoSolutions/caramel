@@ -43,7 +43,14 @@ export default function ProfilePageClient() {
 
     useEffect(() => {
         if (mounted && !isPending && !session?.user) {
-            router.push('/login')
+            // replace, not push: a pushed /login leaves this page behind it in
+            // history, so Back lands here and bounces to /login again (a
+            // back-button trap in a browser, and a ~150 ms /profile <-> /login
+            // loop in the app shells, which step back from /login: CARAMEL-2Y,
+            // CARAMEL-30). `next` brings the shopper back here, fragment
+            // included, once signed in.
+            const here = window.location.pathname + window.location.hash
+            router.replace(`/login?next=${encodeURIComponent(here)}`)
         }
     }, [mounted, session, isPending, router])
 

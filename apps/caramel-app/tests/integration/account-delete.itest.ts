@@ -28,7 +28,8 @@ const { getSessionMock } = vi.hoisted(() => ({
     ),
 }))
 vi.mock('@/lib/auth/auth', () => ({
-    auth: { api: { getSession: getSessionMock } },
+    // `options`: account/delete expires the session cookies by better-auth's names.
+    auth: { api: { getSession: getSessionMock }, options: {} },
 }))
 vi.mock('@/lib/rateLimit', async importOriginal => {
     const actual = await importOriginal<typeof import('@/lib/rateLimit')>()

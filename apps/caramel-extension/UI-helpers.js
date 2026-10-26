@@ -16,357 +16,84 @@
 // <style> per shadow root, awaited before append (no unstyled flash).
 // Embedding the CSS as a JS string was rejected: the summed content-script
 // size budget (.size-limit.js) counts JS bytes, not fetched CSS.
+//
+// Split 2026-10-26 (T-5446), code moved verbatim: the shared shadow-host
+// plumbing is ui-shell.js, the top-bar measurement prompt-placement.js, the
+// result card final-modal.js and the consent card code-sharing-prompt.js. This
+// file keeps the prompt pill and the testing overlay, and re-exports the rest
+// so importers and vi.mock('../UI-helpers.js') keep working unchanged.
 
 import {
-    caramelGetSession,
-    caramelMarkOwnHost,
     caramelOwnHost,
     caramelPromptAllowed,
     currentBrowser,
     log,
     logError,
 } from './caramel-base.js'
-import { CARAMEL_ENV } from './caramel-env.js'
 // coupon-runner.js imports showTestingModal/updateTestingModal/hideTestingModal/
 // showFinalModal back from here. The cycle is fine: neither side READS the
 // other's binding during module evaluation, only inside functions.
 import { startApplyingCoupons } from './coupon-runner.js'
-import { caramelCancelRun, caramelCurrencySymbol } from './dom-utils.js'
+import { caramelCancelRun } from './dom-utils.js'
+import {
+    CARAMEL_PROMPT_BASE_TOP,
+    caramelPromptTopFor,
+    caramelTopBarBottom,
+} from './prompt-placement.js'
+import {
+    _caramelInstallFocusTrap,
+    _caramelRestoreFocus,
+    CARAMEL_X_ICON,
+    caramelShopperOnly,
+    createCaramelShadowHost,
+} from './ui-shell.js'
 
-// Inline SVG close glyph (stroke follows the button's currentColor).
-const CARAMEL_X_ICON =
-    '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>'
+// Moved verbatim to ui-shell.js (T-5446); re-exported so every
+// importer and every vi.mock of this module keeps its path.
+export {
+    _caramelGetShadowCss,
+    _caramelShadowCssPromise,
+    CARAMEL_HOST_CSS,
+    caramelShopperOnly,
+} from './ui-shell.js'
 
-// Upper bound on the manual copy list. 20 = the per-store limit background.js
-// asks the API for, so in practice this shows everything we fetched.
-const CARAMEL_MANUAL_LIST_MAX = 20
+// Moved verbatim to prompt-placement.js (T-5446); re-exported so every
+// importer and every vi.mock of this module keeps its path.
+export {
+    _caramelBarQualifies,
+    _caramelPageBanner,
+    caramelPromptTopFor,
+    caramelTopBarBottom,
+} from './prompt-placement.js'
 
-// Guests get the SAME teaser cap here as the popup's coupon list
-// (popup-core.js GUEST_COUPON_LIMIT). Without it the manual fallback quietly
-// hands a signed-out shopper up to 20 codes while the popup shows them 6 —
-// leaking the gated value and skipping the sign-in nudge. Kept as a LITERAL
-// twin on purpose: importing popup-core here would pull the popup's logic
-// module into the content bundle (size + console-silence closure both pin
-// that boundary). Keep in sync with popup-core.js.
-const CARAMEL_MANUAL_GUEST_LIMIT = 6
+// Moved verbatim to final-modal.js (T-5446); re-exported so every
+// importer and every vi.mock of this module keeps its path.
+export {
+    _caramelUsableTitle,
+    caramelCopyText,
+    showFinalModal,
+} from './final-modal.js'
 
-// Functional-minimum styles used ONLY when the stylesheet fetch fails.
-const CARAMEL_UI_FALLBACK_CSS =
-    '.cm-scrim{width:100%;height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(15,12,10,.5)}' +
-    '#caramel-testing-modal,.caramel-final-modal{background:#fff;color:#111;padding:24px;border-radius:16px;font-family:sans-serif;text-align:center}' +
-    '.cm-prompt{background:#ea6925;color:#fff;padding:14px;border-radius:16px;font-family:sans-serif}'
-
-// Host positioning, applied INLINE — the authoritative cross-browser source
-// (Firefox's manifest ships no content css; caramel-content.css repeats
-// these as Chrome's light-DOM backup — keep in sync).
-//
-// `direction:ltr` is load-bearing, not cosmetic. `direction` is an INHERITED
-// property and inheritance crosses into shadow DOM, so on an RTL storefront our
-// surfaces silently flipped: measured on mango.com/ae (QA sweep 2026-08-06), the
-// coupon descriptions ellipsised at their visual LEFT — which is the logical
-// end under RTL — so "20% off orders over $50" rendered as "…orders over $50"
-// and the discount rate, the only thing a shopper is scanning for, was the part
-// that got cut. Our copy is English; it is LTR text regardless of the page it
-// lands on. Set on the HOST so every surface inherits it before any rule runs.
-// `display:block !important` is the one declaration here that is not layout.
-// A shadow host has no light-DOM children, so it matches `:empty`, and themes
-// that hide empty containers hide US: 1thrive.com rendered the prompt 0x0 with
-// display:none while every log said it worked (measured 2026-08-06 with the
-// extension loaded). Full account and the pins: tests/host-survives-page-css.
-
-const CARAMEL_OVERLAY_HOST_CSS =
-    'display:block !important;position:fixed;top:0;left:0;width:100vw;height:100vh;height:100dvh;z-index:2147483647;direction:ltr;'
-export const CARAMEL_HOST_CSS = {
-    'caramel-small-prompt':
-        'display:block !important;position:fixed;top:max(20px,env(safe-area-inset-top));right:max(20px,env(safe-area-inset-right));z-index:2147483646;width:min(88vw,300px);cursor:pointer;outline:none;direction:ltr;',
-    'caramel-testing-overlay': CARAMEL_OVERLAY_HOST_CSS,
-    'caramel-final-overlay': CARAMEL_OVERLAY_HOST_CSS,
-    // The consent card: a small, NON-modal card in the bottom-right corner, so
-    // the shopper's checkout stays usable while they decide.
-    'caramel-share-prompt':
-        'display:block !important;position:fixed;bottom:max(20px,env(safe-area-inset-bottom));right:max(20px,env(safe-area-inset-right));z-index:2147483646;width:min(92vw,360px);direction:ltr;',
-}
-
-// Cached across all three surfaces. Exported because whether this cache is
-// still held after a race is exactly what tests/content-css-timer.test.mjs
-// pins — it read the pre-ESM script global of the same name.
-export let _caramelShadowCssPromise = null
-/* Every injected surface AWAITS this before appending itself, so a fetch that
- * never settles isn't a missing stylesheet — it's an extension that silently
- * never appears at all. A rejection already falls back loudly; a hang couldn't
- * reach that path. Bounded, and the cached promise is dropped on timeout so a
- * later surface can still get the real CSS. */
-const CARAMEL_UI_CSS_TIMEOUT_MS = 4000
-export function _caramelGetShadowCss() {
-    if (!_caramelShadowCssPromise) {
-        const grab = async file => {
-            const res = await fetch(currentBrowser.runtime.getURL(file))
-            if (!res.ok) throw new Error(`${file}: HTTP ${res.status}`)
-            return res.text()
-        }
-        // The budget timer MUST be cancelled once the real CSS settles.
-        // Racing without cancelling still fires the callback 4s later on
-        // every surface: it logged a TIMEOUT that never happened (masking a
-        // real CSS failure behind routine noise) and dropped a healthy cached
-        // promise, forcing every later surface to refetch. The packaged
-        // assets are local, so the race is won in single-digit ms even on
-        // Slow 3G — every one of those logs was false.
-        let timer
-        const real = Promise.all([
-            grab('assets/tokens.css'),
-            grab('assets/content-ui.css'),
-        ]).then(
-            ([tokens, ui]) =>
-                tokens.replace(/:root/g, ':host, :root') + '\n' + ui,
-        )
-        const mine = Promise.race([
-            // .finally, not .then: a genuine rejection must still reach the
-            // .catch below (and still log LOAD_FAILED) with the timer cleared.
-            real.finally(() => clearTimeout(timer)),
-            new Promise(resolve => {
-                timer = setTimeout(() => {
-                    log('CONTENT_UI_CSS_TIMEOUT')
-                    if (_caramelShadowCssPromise === mine)
-                        _caramelShadowCssPromise = null
-                    resolve(CARAMEL_UI_FALLBACK_CSS)
-                }, CARAMEL_UI_CSS_TIMEOUT_MS)
-            }),
-        ]).catch(err => {
-            log('CONTENT_UI_CSS_LOAD_FAILED', { error: String(err) })
-            return CARAMEL_UI_FALLBACK_CSS
-        })
-        _caramelShadowCssPromise = mine
-    }
-    return _caramelShadowCssPromise
-}
-
-/* How far down the pill has to start to clear the store's own top bar.
- *
- * It is fixed 20px from the top-right and up to 300px wide — on a phone, most
- * of the header — and QA kept finding it on the store's logo, its nav, or a
- * hand's width from the store's OWN ×. Reading as "part of this website, in the
- * way" is the worst first impression an injected surface can make.
- *
- * Measured, and only ever downward: start below what is up there, and with
- * nothing up there stay exactly where we always were. Split from the DOM probe
- * so the decision is testable without layout, which jsdom has none of.
- */
-const CARAMEL_PROMPT_BASE_TOP = 20
-const CARAMEL_PROMPT_MAX_DODGE = 200
-export function caramelPromptTopFor(barBottom) {
-    const bottom = Number(barBottom)
-    if (!Number.isFinite(bottom) || bottom <= CARAMEL_PROMPT_BASE_TOP)
-        return CARAMEL_PROMPT_BASE_TOP
-    if (bottom > CARAMEL_PROMPT_MAX_DODGE) return CARAMEL_PROMPT_BASE_TOP
-    return Math.round(bottom) + 12
-}
-/* Is this element something we would land on top of?
- *
- * Every clause has a live counterexample (2026-08-06, carts at 1440 and 390);
- * none should go without a fresh one. hidden — allbirds and toms park drawers
- * up here. on-screen — 100percentpure holds panels at top:-300px. width —
- * toms' cookie banner is pinned 90→266 at 45% wide, and reading THAT as a bar
- * blows the budget and drops the pill back onto the header. dodgeable — a bar
- * we cannot clear must not mask one we can; goodr's full-viewport OneTrust
- * scrim fails here, which is why no separate scrim clause exists. The old bug
- * was never that the scrim counted as a bar — it was that the scrim HID one.
- *
- * overlap makes this a collision rule rather than a how-tall-is-the-chrome
- * rule, and it cuts both ways: cultbeauty at 390 pins its header at 120→185,
- * wholly below the pill, and an earlier version of this moved 177px to dodge
- * something it never touched.
- *
- * isBanner admits ONE unpinned element (see _caramelPageBanner) because an
- * unpinned header still collides on arrival, the moment a shopper decides what
- * we are: 100percentpure's static header reaches 121 and the pill sat across
- * its logo and search. Scrolled past, it has a negative rect and drops out.
- *
- * Takes a style and a rect, not an element, so the rule is testable where jsdom
- * has no layout to produce either.
- */
-const CARAMEL_BAR_MIN_WIDTH_RATIO = 0.5
-// Measured with the real stylesheets: 81px at 1440, 390 and 360 alike — the
-// copy is fixed English and does not wrap even on the narrowest phone.
-const CARAMEL_PROMPT_HEIGHT = 81
-export function _caramelBarQualifies(style, rect, vw, isBanner) {
-    if (!style || !rect) return false
-    const pinned = style.position === 'fixed' || style.position === 'sticky'
-    if (!pinned && !isBanner) return false
-    if (style.visibility === 'hidden' || style.display === 'none') return false
-    if (Number(style.opacity) === 0) return false
-    if (!(rect.height > 0)) return false
-    if (!(rect.bottom > CARAMEL_PROMPT_BASE_TOP)) return false
-    if (!(rect.top < CARAMEL_PROMPT_BASE_TOP + CARAMEL_PROMPT_HEIGHT))
-        return false
-    if (rect.bottom > CARAMEL_PROMPT_MAX_DODGE) return false
-    if (vw && rect.width < vw * CARAMEL_BAR_MIN_WIDTH_RATIO) return false
-    return true
-}
-
-/* The one element allowed to count as an UNPINNED top bar.
- *
- * "Any visible <header> near the top" is too generous, and tog24 is why: its
- * cart carries FIVE, one per component (a mini-cart's at 84→160), and honouring
- * the lowest pushed the pill 57px below a header it had already cleared. The
- * spec's rule for when <header> means role="banner" — not inside
- * article/aside/main/nav/section — discards three of the five, but not the
- * mini-cart, which sits in a custom element matching no sectioning selector.
- *
- * Document order separates them: on both stores the page's header is FIRST and
- * every component header follows. So take one candidate and apply the spec rule
- * to it; a store hiding a decorative <header> above its real one yields nothing
- * and falls back to the pinned sweep, which is the conservative direction.
- */
-export function _caramelPageBanner() {
-    const el = document.querySelector('header, [role="banner"]')
-    if (!el) return null
-    if (el.parentElement?.closest('article, aside, main, nav, section'))
-        return null
-    return el
-}
-
-/* The bottom edge of the lowest thing we would collide with, or NaN.
- *
- * This hit-tested three points at y=6 until eight live carts (2026-08-06)
- * showed no hit test can work. goodr's cookie scrim is the topmost element, so
- * the probe read ITS 900px bottom and gave up on a header ending at 90 — and
- * reading the whole stack would not have helped, because at y=6 the only bar is
- * a 25px strip and the header we hit is below it. Worse, elementsFromPoint
- * skips `pointer-events:none`, which is how allbirds mounts its nav (0→152).
- *
- * So it enumerates: storefront bars sit near the top of the tree (deepest
- * measured: 3), and a bounded sweep of body's first levels found every one in
- * 0.4–4.6ms. Lowest qualifying bar wins — no contiguity chain, because
- * _caramelBarQualifies rejects strays by shape and the chained version broke
- * toms.
- *
- * Measured through THIS file, not a copy of its logic: goodr 20→102, allbirds
- * 20→164, 1thrive 20→140, 100percentpure 20→133 — four stores where the pill
- * sat on the store's own header. tog24 188, toms 127, cultbeauty 20 unchanged.
- */
-const CARAMEL_BAR_SCAN_DEPTH = 4
-const CARAMEL_BAR_SCAN_NODES = 400
-export function caramelTopBarBottom() {
-    try {
-        if (!document.body) return NaN
-        const vw = window.innerWidth || 0
-        let lowest = NaN
-        let budget = CARAMEL_BAR_SCAN_NODES
-        let level = [document.body]
-        for (
-            let depth = 0;
-            depth <= CARAMEL_BAR_SCAN_DEPTH && budget > 0;
-            depth++
-        ) {
-            const next = []
-            for (const parent of level) {
-                for (const el of parent.children) {
-                    if (budget <= 0) break
-                    budget -= 1
-                    next.push(el)
-                    const rect = el.getBoundingClientRect()
-                    const style = getComputedStyle(el)
-                    if (!_caramelBarQualifies(style, rect, vw, false)) continue
-                    if (!(lowest >= rect.bottom)) lowest = rect.bottom
-                }
-                if (budget <= 0) break
-            }
-            level = next
-        }
-        const banner = _caramelPageBanner()
-        if (banner) {
-            const rect = banner.getBoundingClientRect()
-            if (
-                _caramelBarQualifies(
-                    getComputedStyle(banner),
-                    rect,
-                    vw,
-                    true,
-                ) &&
-                !(lowest >= rect.bottom)
-            )
-                lowest = rect.bottom
-        }
-        return lowest
-    } catch {
-        // No layout engine, or a page that blocks the sweep — keep the default.
-        return NaN
-    }
-}
-
-/* Light-DOM host <div id=id> (inline positioning, no visuals) + OPEN shadow
- * root carrying the shared stylesheet. NOT appended — callers build into
- * `root`, wire listeners, then append the host, fully styled. */
-async function createCaramelShadowHost(id) {
-    const host = caramelMarkOwnHost(document.createElement('div'))
-    host.id = id
-    host.style.cssText = CARAMEL_HOST_CSS[id] || ''
-    const root = host.attachShadow({ mode: 'open' })
-    const style = document.createElement('style')
-    style.textContent = await _caramelGetShadowCss()
-    root.appendChild(style)
-    return { host, root }
-}
-
-/* Every control in our UI acts only on the shopper's own input. Our UI sits
- * in the store's page, which can reach it (and click it, or press its keys)
- * from a script; an event a script makes is never trusted, so it does
- * nothing here: it cannot start a run, stop one, share a code, open the
- * popup or close a card. Logged, so a page that tries is visible. */
-// Exported for tests/injected-ui-trusted-input.test.mjs.
-export function caramelShopperOnly(handler) {
-    return event => {
-        if (!event?.isTrusted) {
-            log('UI_EVENT_NOT_TRUSTED', { type: event?.type || null })
-            return
-        }
-        return handler(event)
-    }
-}
-
-/* Focus trap: Tab/Shift+Tab cycle within the shadow root's focusables,
- * never the host page. On the modal container — no document listener. */
-function _caramelInstallFocusTrap(root, modal) {
-    modal.addEventListener('keydown', e => {
-        if (e.key !== 'Tab') return
-        const focusables = Array.from(
-            root.querySelectorAll(
-                'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-            ),
-        ).filter(el => !el.disabled)
-        if (!focusables.length) return
-        const first = focusables[0]
-        const last = focusables[focusables.length - 1]
-        const active = root.activeElement
-        if (e.shiftKey) {
-            if (!active || active === first || active === modal) {
-                e.preventDefault()
-                last.focus()
-            }
-        } else if (!active || active === last || active === modal) {
-            e.preventDefault()
-            first.focus()
-        }
-    })
-}
-
-/* Restore focus to the pre-dialog element (stored on the host). */
-function _caramelRestoreFocus(host) {
-    const prev = host.__caramelPrevFocus
-    if (prev && prev.isConnected && typeof prev.focus === 'function') {
-        try {
-            prev.focus()
-        } catch {
-            /* focus is best-effort */
-        }
-    }
-}
+// Moved verbatim to code-sharing-prompt.js (T-5446); re-exported so every
+// importer and every vi.mock of this module keeps its path.
+export { showCodeSharingPrompt } from './code-sharing-prompt.js'
 
 /* -------------------------------------------------- UI prompt   */
 
 // Concurrency guard: the shadow-host await lets two near-simultaneous
 // inserts both pass the getElementById check before either host appends.
 let _caramelPromptInFlight = false
+
+// A run's own surfaces are up (testing overlay or result card): "Try Caramel
+// Coupons" is the wrong thing to offer on top of a run, or behind its result.
+// Read at entry and again just before the pill mounts, because the awaits in
+// between are where a run can start or finish (live: the pill behind the
+// savings card on bumbleandbumble.com, Edge 1.4.19, 2026-10-26).
+const _caramelRunSurfaceUp = () =>
+    !!(
+        caramelOwnHost('caramel-testing-overlay') ||
+        caramelOwnHost('caramel-final-overlay')
+    )
 
 /* "Not now" — remembered for this tab and origin.
  *
@@ -407,6 +134,7 @@ export function caramelMarkPromptDismissed() {
 // Called from store-detect.js.
 export async function insertCaramelPrompt(domainRecord) {
     if (caramelOwnHost('caramel-small-prompt') || _caramelPromptInFlight) return
+    if (_caramelRunSurfaceUp()) return
     // The user already said "not now" on this tab. Honour it.
     if (caramelPromptDismissedHere()) return
     // User preference gate (popup settings): auto-apply off, or this site
@@ -503,6 +231,7 @@ export async function insertCaramelPrompt(domainRecord) {
         }),
     )
 
+    if (_caramelRunSurfaceUp()) return
     document.body.appendChild(host)
 }
 
@@ -608,468 +337,4 @@ export function hideTestingModal() {
         document.body.removeChild(host)
         _caramelRestoreFocus(host)
     }
-}
-
-/* Copies an exact coupon code: async clipboard API first, hidden
- * textarea + execCommand fallback for pages that block it. */
-// Also used by the popup realm's coupon list (React CouponsView).
-export async function caramelCopyText(text) {
-    try {
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-            await navigator.clipboard.writeText(text)
-            return true
-        }
-    } catch {
-        // page may block the async clipboard API — fall through to execCommand
-    }
-    try {
-        const ta = document.createElement('textarea')
-        ta.value = text
-        ta.setAttribute('readonly', '')
-        ta.style.position = 'fixed'
-        ta.style.top = '-1000px'
-        ta.style.opacity = '0'
-        document.body.appendChild(ta)
-        ta.focus()
-        ta.select()
-        const ok = document.execCommand('copy')
-        document.body.removeChild(ta)
-        return ok
-    } catch {
-        return false
-    }
-}
-
-// Currency of the cart the saving was measured against (dom-utils records it
-// when it reads the price). Tolerates the helper being absent — this file is
-// loaded standalone in unit tests.
-function caramelSavingsCurrency() {
-    try {
-        return typeof caramelCurrencySymbol === 'function'
-            ? caramelCurrencySymbol()
-            : '$'
-    } catch {
-        return '$'
-    }
-}
-
-/* A scraped coupon title is UNTRUSTED copy. Titles advertising a zero
- * discount ("Score 0% off with coupon code") are worse than no title: the
- * user reads the offer as worthless and skips a code that may well work.
- * Drop those rather than invent a replacement claim — the code alone is
- * honest. The extension must stay presentable on bad data; fixing the row
- * upstream is a separate, slower job. */
-export function _caramelUsableTitle(title, code) {
-    if (typeof title !== 'string') return ''
-    const t = title.trim()
-    if (!t) return ''
-    // "0% off", "0.00% off", "$0 off", "£0.00 off" — any zero-value claim.
-    if (/(^|[^\d.])0+(\.0+)?\s*%/.test(t)) return ''
-    if (/[$£€]\s?0+(\.0+)?([^\d]|$)/.test(t)) return ''
-    /* Scrapers pick up the column HEADING as often as the offer. cottonon.com
-     * (QA sweep 2026-08-06) shipped a whole list whose every title was the
-     * literal word "CODE"; other rows repeat the code back at you, or say
-     * "Coupon Code" under a row already headed by the code in bold. None of
-     * that is an offer — it is a second copy of the label the row already has,
-     * taking up the line where the discount should be. Dropping it leaves the
-     * code standing alone, which is honest and reads better than a placeholder.
-     * Fixing the rows upstream is a separate, slower job. */
-    const bare = t
-        .toUpperCase()
-        .replace(/[^A-Z0-9%]+/g, ' ')
-        .trim()
-    if (/^(COUPON|PROMO|DISCOUNT|VOUCHER)? ?(CODE|CODES)$/.test(bare)) return ''
-    if (code && bare === String(code).toUpperCase().trim()) return ''
-    /* A claim whose amount fell out of the scrape: 100percentpure ships
-     * `LASHES — "Get off with code"` (live, 2026-08-06). The verb sits directly
-     * against "off", which is the shape a dropped number leaves; a title that
-     * kept its quantity, or never had one, does not match. */
-    if (/\b(get|take|save|receive|enjoy|score|grab|snag)\s+off\b/i.test(t))
-        return ''
-    return t
-}
-
-// Called from coupon-runner.js + store-detect.js.
-export async function showFinalModal(
-    savingsAmount,
-    code,
-    message,
-    isSignIn = false,
-    couponList = [],
-) {
-    hideTestingModal()
-    // Login state drives the manual-list teaser cap below — same gate as the
-    // popup's coupon list. Signed-out ⇒ 6-code teaser + sign-in nudge.
-    const _session = await caramelGetSession()
-    const loggedIn = !!_session?.token
-    const prevFocus = document.activeElement
-    const { host, root } = await createCaramelShadowHost(
-        'caramel-final-overlay',
-    )
-
-    const scrim = document.createElement('div')
-    scrim.className = 'cm-scrim'
-
-    const modal = document.createElement('div')
-    modal.className = 'caramel-final-modal'
-    modal.setAttribute('role', 'dialog')
-    modal.setAttribute('aria-modal', 'true')
-    modal.setAttribute('aria-label', 'Caramel coupons')
-
-    // Terminal states: savedMoney = real measured price drop; appliedCode =
-    // code applied but savings unmeasurable (no priceContainer config —
-    // still a win); noLuck = nothing applied (or signed-out/network error).
-    const savedMoney = savingsAmount > 0
-    const appliedCode = !savedMoney && !!code
-    const isSuccess = savedMoney || appliedCode
-
-    // Manual fallback: auto-apply found nothing but codes exist — checkouts
-    // that ignore synthetic clicks (isTrusted) still take a hand-pasted
-    // code, so offer a copy list.
-    //
-    // Codes the store REJECTED IN ITS OWN WORDS (runner sets `rejected`) sink
-    // to the bottom and say so. They stay listed — a store's "invalid" is
-    // sometimes just our synthetic input not registering, so hiding them could
-    // bury a code that works when pasted by hand — but leading with the codes
-    // the user just watched fail reads as if we learned nothing.
-    const _manualAll = (
-        !isSuccess && Array.isArray(couponList) ? couponList : []
-    )
-        .filter(c => c && c.code)
-        .map((c, i) => ({ c, i })) // index keeps the sort stable
-        .sort(
-            (a, b) =>
-                (a.c.rejected ? 1 : 0) - (b.c.rejected ? 1 : 0) || a.i - b.i,
-        )
-        .map(x => x.c)
-    // The catalog count for this store — the number the sign-in nudge promises,
-    // matching the popup's "of N codes" gate.
-    const manualTotal = _manualAll.length
-    // Members see the full list (API's own per-store fetch limit); guests see
-    // the same teaser the popup shows. The gate only bites when it actually
-    // hides something (a store with ≤ the guest cap looks identical to both).
-    const manualGuestGated =
-        !loggedIn && manualTotal > CARAMEL_MANUAL_GUEST_LIMIT
-    const manualCodes = _manualAll.slice(
-        0,
-        manualGuestGated ? CARAMEL_MANUAL_GUEST_LIMIT : CARAMEL_MANUAL_LIST_MAX,
-    )
-    const hasManual = manualCodes.length > 0
-
-    const esc = s =>
-        String(s == null ? '' : s).replace(
-            /[&<>"']/g,
-            ch =>
-                ({
-                    '&': '&amp;',
-                    '<': '&lt;',
-                    '>': '&gt;',
-                    '"': '&quot;',
-                    "'": '&#39;',
-                })[ch],
-        )
-
-    // Build the secondary message based on which state we landed in.
-    // PLAIN TEXT ONLY — this string is escaped once at render, so nothing
-    // here may pre-escape or embed markup (it would double-encode). A
-    // caller's `message` can quote the store's own words, which the host page
-    // writes, so it is untrusted by definition.
-    let finalMessage
-    if (savedMoney) {
-        // The amount is the modal's headline now — repeating it here read as
-        // the same sentence twice.
-        //
-        // NOT "we tried every code and applied the best one": the apply loop
-        // STOPS at the first code that moves the total (coupon-runner.js) and
-        // caps at MAX_ATTEMPTS anyway, so on a store with 20 codes that
-        // sentence was false twice over — it neither tried them all nor
-        // compared them to pick a best. Claim only what actually happened.
-        finalMessage = 'We found a code that works and applied it for you.'
-    } else if (appliedCode) {
-        // Caller message (threshold hints, non-USD) beats the generic line.
-        finalMessage =
-            message ||
-            `Code ${code} is applied to your cart — review the discount before you check out.`
-    } else if (hasManual) {
-        // Caller message = the REAL reason, not a generic "didn't stick".
-        finalMessage =
-            message ||
-            "Auto-apply didn't stick this time. Copy a code and paste it in the store's promo box."
-    } else if (isSignIn) {
-        finalMessage =
-            message || 'Sign in to unlock member-only coupons for this store.'
-    } else {
-        finalMessage =
-            message || "Looks like you're already getting the best deal."
-    }
-
-    const logoUrl = currentBrowser.runtime.getURL('assets/logo.png') // Adjust if needed
-
-    const heading = savedMoney
-        ? 'Savings Found'
-        : appliedCode
-          ? '✓ Coupon Applied'
-          : isSignIn
-            ? 'Sign in to continue'
-            : hasManual
-              ? 'Grab a code'
-              : 'Heads up'
-
-    const manualBlock = hasManual
-        ? `<div class="caramel-manual-list">${manualCodes
-              .map(
-                  c => `<div class="caramel-manual-row${c.rejected ? ' caramel-manual-row-rejected' : ''}">
-<div class="caramel-manual-info">
-<div class="caramel-manual-code">${esc(c.code)}</div>
-${
-    c.rejected
-        ? '<div class="caramel-manual-title caramel-manual-rejected">Store rejected this one</div>'
-        : _caramelUsableTitle(c.title, c.code)
-          ? `<div class="caramel-manual-title">${esc(_caramelUsableTitle(c.title, c.code))}</div>`
-          : ''
-}
-</div>
-<button class="caramel-manual-copy" data-code="${esc(c.code)}">Copy</button>
-</div>`,
-              )
-              .join('')}</div>`
-        : ''
-
-    // Guest teaser gate — same shape as the popup's couponGuestGateHtml: name
-    // what's hidden, offer the one action that reveals it (opens the popup to
-    // sign in, mirroring the isSignIn primary button below).
-    const manualGateHtml = manualGuestGated
-        ? `<div class="caramel-manual-gate">
-<button type="button" id="caramel-manual-login" class="caramel-manual-gate-btn">Sign in for all ${manualTotal} codes</button>
-</div>`
-        : ''
-
-    // Graceful escape hatch when auto-apply didn't land: a quiet link to the
-    // prod support/feedback form so a shopper can report a broken store or code.
-    const feedbackHtml = hasManual
-        ? `<a id="caramel-manual-feedback" class="caramel-manual-feedback" href="${esc(CARAMEL_ENV.baseUrl)}/support" target="_blank" rel="noopener noreferrer">Report a problem</a>`
-        : ''
-
-    // Success states group the outcome into ONE panel so the amount reads as
-    // the headline and the code sits under it as a ticket. `.caramel-final-code`
-    // keeps the code as its FIRST <span> — the label is a sibling, never a span
-    // inside it (tests resolve the code via `.caramel-final-code span`).
-    const winBlock = isSuccess
-        ? `<div class="caramel-final-win">
-${
-    savedMoney
-        ? `<div class="caramel-final-eyebrow">You saved</div>
-<p class="caramel-final-savings">${esc(caramelSavingsCurrency())}${/[A-Za-z]$/.test(caramelSavingsCurrency()) ? ' ' : ''}${savingsAmount.toFixed(2)}</p>`
-        : ''
-}
-<div class="caramel-final-codewrap">
-<div class="caramel-final-eyebrow caramel-final-eyebrow-sm">Code</div>
-<p class="caramel-final-code"><span>${esc(code)}</span></p>
-</div>
-${savedMoney ? '' : `<p class="caramel-final-hint">Discount visible in your cart.</p>`}
-</div>`
-        : ''
-
-    /* "Proceed to Checkout" is a promise, and it was the ONLY control on this
-     * card. On an empty cart (eddiebauer.com, QA sweep 2026-08-05) the modal
-     * read "Heads up / Your cart is empty" above a button telling the shopper
-     * to go and check out, while covering the store's own "Continue shopping"
-     * link. Offer the checkout only when something is actually on the cart to
-     * check out with; otherwise the button is just the way out. */
-    const primaryLabel = isSignIn
-        ? 'Sign In'
-        : isSuccess
-          ? 'Proceed to Checkout'
-          : 'Got it'
-    // The manual "Grab a code" card carries its own actions (copy buttons, the
-    // unlock nudge, the report link) and three ways out (×, scrim, Esc) — a
-    // generic "Done" button under all that is just clutter, so drop it. Sign-in
-    // and success states still need their promise-button.
-    const showPrimary = isSignIn || isSuccess || !hasManual
-
-    modal.innerHTML = `
-<button id="caramel-final-close" class="cm-close-fab" title="Close" aria-label="Close">${CARAMEL_X_ICON}</button>
-<div class="caramel-final-logo"><img src="${logoUrl}" alt="Caramel Logo" /></div>
-<h2>${heading}</h2>
-<p class="caramel-final-msg">${esc(finalMessage)}</p>
-${manualBlock}
-${manualGateHtml}
-${feedbackHtml}
-${winBlock}
-${showPrimary ? `<button id="caramel-final-ok-btn">${primaryLabel}</button>` : ''}
-`
-
-    scrim.appendChild(modal)
-    root.appendChild(scrim)
-    host.__caramelPrevFocus = prevFocus
-    document.body.appendChild(host)
-
-    // Single close path — detaches the Esc listener (no leaked handler).
-    const closeFinal = () => {
-        if (host.__caramelOnKey)
-            document.removeEventListener('keydown', host.__caramelOnKey)
-        if (host.parentNode) document.body.removeChild(host)
-        _caramelRestoreFocus(host)
-    }
-
-    // Manual-copy buttons: copies the EXACT code shown (data-code); copied
-    // feedback = class toggle (tokened green pair, dark-safe).
-    modal.querySelectorAll('.caramel-manual-copy').forEach(btn => {
-        const copy = caramelShopperOnly(async () => {
-            const cc = btn.getAttribute('data-code')
-            const ok = await caramelCopyText(cc)
-            const prev = btn.textContent
-            btn.textContent = ok ? 'Copied!' : 'Press Ctrl+C'
-            if (ok) btn.classList.add('is-copied')
-            setTimeout(() => {
-                btn.textContent = prev
-                btn.classList.remove('is-copied')
-            }, 1600)
-        })
-        btn.addEventListener('click', ev => {
-            ev.stopPropagation()
-            return copy(ev)
-        })
-    })
-
-    /* Three ways out, because there used to be one.
-     *
-     * This card is full-viewport and sits over whatever the shopper was doing.
-     * Esc worked; nothing else did. A phone has no Esc key, so on eddiebauer's
-     * empty cart the only reachable control was a button labelled "Proceed to
-     * Checkout" — the shopper's way out of an empty-cart notice was to be sent
-     * to checkout. Tapping the dimmed area is the gesture everyone already
-     * tries, and the × matches the one on the prompt and the testing modal.
-     *
-     * Only the scrim itself closes: a click that lands on the card (copying a
-     * code, hitting the button) has the card as its target and must not. */
-    const closeX = modal.querySelector('#caramel-final-close')
-    if (closeX) closeX.addEventListener('click', caramelShopperOnly(closeFinal))
-    scrim.addEventListener(
-        'click',
-        caramelShopperOnly(ev => {
-            if (ev.target === scrim) closeFinal()
-        }),
-    )
-
-    // Guest teaser gate: same destination as the isSignIn button — open the
-    // popup so the shopper signs in, then the full list is theirs.
-    const manualLoginBtn = modal.querySelector('#caramel-manual-login')
-    if (manualLoginBtn)
-        manualLoginBtn.addEventListener(
-            'click',
-            caramelShopperOnly(() => {
-                closeFinal()
-                currentBrowser.runtime.sendMessage({ action: 'openPopup' })
-            }),
-        )
-
-    // Close on the primary button; Esc closes too (keyboard).
-    const okBtn = modal.querySelector('#caramel-final-ok-btn')
-    if (okBtn)
-        okBtn.addEventListener(
-            'click',
-            caramelShopperOnly(() => {
-                closeFinal()
-                if (isSignIn) {
-                    //show popup.html
-                    currentBrowser.runtime.sendMessage({ action: 'openPopup' })
-                }
-            }),
-        )
-    const onKey = caramelShopperOnly(e => {
-        if (e.key === 'Escape') closeFinal()
-    })
-    host.__caramelOnKey = onKey
-    document.addEventListener('keydown', onKey)
-    _caramelInstallFocusTrap(root, modal)
-    // Focus the modal container, not the primary button — no focus ring
-    // flash on open; keyboard users Tab to the button (focus-visible ring).
-    try {
-        modal.tabIndex = -1
-        modal.focus()
-    } catch {
-        /* focus is best-effort */
-    }
-}
-
-/* -------------------------------------------------- code-sharing consent card
- *
- * The in-extension ask behind checkout code sharing (code-capture.js shows it
- * the first time a code the shopper typed was accepted by the store, sharing
- * could actually happen, and no consent record exists). Owner rule 2026-10-06:
- * explicit opt-in, a clear prompt, off until the shopper accepts.
- *
- * Resolves 'accepted' | 'declined' | 'dismissed'. It RECORDS NOTHING itself —
- * the caller persists the choice, and 'dismissed' (the ×, Esc, or a newer code
- * replacing this card) is deliberately not a choice: it asks again next time.
- * A page navigation destroys the content script, which is the same thing.
- *
- * "Share codes" and "No thanks" share one class and one rule: same size, same
- * weight, same look, neither focused or pre-selected, so declining is exactly
- * as easy as accepting. The code and store come from the page, so they are
- * written with textContent, never into markup. */
-const CARAMEL_SHARE_PROMPT_ID = 'caramel-share-prompt'
-export async function showCodeSharingPrompt({ site, code }) {
-    const { host, root } = await createCaramelShadowHost(
-        CARAMEL_SHARE_PROMPT_ID,
-    )
-    // One card at a time: a newer code replaces an unanswered one (the old
-    // caller gets 'dismissed'). Done AFTER the await so two near-simultaneous
-    // calls cannot both slip past a check made before it.
-    document
-        .getElementById(CARAMEL_SHARE_PROMPT_ID)
-        ?.__caramelSettle?.('dismissed')
-
-    const card = document.createElement('div')
-    card.className = 'caramel-share-card'
-    card.setAttribute('role', 'dialog')
-    card.setAttribute('aria-modal', 'false')
-    card.setAttribute('aria-labelledby', 'caramel-share-title')
-    card.innerHTML = `
-<button id="caramel-share-close" class="cm-close-fab" type="button" aria-label="Dismiss" title="Ask me later">${CARAMEL_X_ICON}</button>
-<h2 id="caramel-share-title" class="caramel-share-title">Share this code with other Caramel shoppers?</h2>
-<p class="caramel-share-code"><span id="caramel-share-code-text"></span> <span class="caramel-share-at">at <span id="caramel-share-site-text"></span></span></p>
-<p class="caramel-share-body">Caramel would send only the code and the store, linked to your account to prevent abuse — never your cart, order or payment details. Shared codes are shown publicly without your name. Choosing Share codes also turns this on for codes you enter at checkout later. You can change this anytime in Caramel’s settings.</p>
-<a id="caramel-share-privacy" class="caramel-share-privacy" target="_blank" rel="noopener noreferrer">Privacy policy</a>
-<div class="caramel-share-actions">
-<button id="caramel-share-yes" class="caramel-share-btn" type="button">Share codes</button>
-<button id="caramel-share-no" class="caramel-share-btn" type="button">No thanks</button>
-</div>`
-    card.querySelector('#caramel-share-code-text').textContent = code
-    card.querySelector('#caramel-share-site-text').textContent = site
-    card.querySelector('#caramel-share-privacy').href =
-        `${CARAMEL_ENV.baseUrl}/privacy`
-    root.appendChild(card)
-
-    return new Promise(resolve => {
-        let settled = false
-        const onKey = caramelShopperOnly(e => {
-            if (e.key === 'Escape') settle('dismissed')
-        })
-        const settle = choice => {
-            if (settled) return
-            settled = true
-            document.removeEventListener('keydown', onKey, true)
-            host.remove()
-            resolve(choice)
-        }
-        host.__caramelSettle = settle
-        card.querySelector('#caramel-share-yes').addEventListener(
-            'click',
-            caramelShopperOnly(() => settle('accepted')),
-        )
-        card.querySelector('#caramel-share-no').addEventListener(
-            'click',
-            caramelShopperOnly(() => settle('declined')),
-        )
-        card.querySelector('#caramel-share-close').addEventListener(
-            'click',
-            caramelShopperOnly(() => settle('dismissed')),
-        )
-        // Capture phase and never stopped: Esc must still reach the store's own
-        // handlers, we only listen.
-        document.addEventListener('keydown', onKey, true)
-        document.body.appendChild(host)
-    })
 }

@@ -1,4 +1,5 @@
-/* Bundle-size budgets — measured over MINIFIED bytes (re-baselined 2026-08-10).
+/* Bundle-size budgets — measured over MINIFIED bytes (re-baselined 2026-08-10; realms bundled
+ * from their entrypoints since 2026-10-26).
  *
  * `pnpm size` runs scripts/measure-size.mjs first, which minifies every shipped
  * script into .size-cache/ and is where the file lists live. These paths point
@@ -23,18 +24,18 @@
  * sitting a few bytes above the measurement turns the next honest edit into a
  * red build, and one sitting far above it stops being a gate at all.
  *
- * NOTE — this does not bound the DOWNLOAD. The WXT build ships these modules
- * with comments intact, so the shipped package is unminified and a store
- * download really does carry them. That is a once-per-install cost; this gate
- * exists for the per-page-load one. A ceiling on the shipped artifact would be
- * a separate budget over .output/.
+ * NOTE — the realm budgets (content scripts, background, porkbun alert) weigh
+ * the bundle of each WXT entrypoint, so they track the shipped file: the
+ * production build is minified too (checked 2026-10-26: content.js 94.48 kB
+ * against 91.9 kB measured, the rest is WXT's runtime wrapper). Splitting a
+ * module therefore costs nothing here, as it costs nothing in the store build.
  *
  * JS rather than JSON purely so this paragraph can sit next to the numbers it
  * explains; size-limit rejects unknown keys in a JSON config.
  */
 module.exports = [
     {
-        name: 'content-scripts (injected, minified)',
+        name: 'content-scripts (injected bundle, minified)',
         path: '.size-cache/content-scripts.min.js',
         // 2026-08-10 — measured 70.68 kB minified, from 268.33 kB of source
         // (73.7% of the old budget was formatting and prose).
@@ -136,7 +137,35 @@ module.exports = [
         // store enables a tick after typing, holds a moved total before
         // calling it a saving, and refuses a drop beside the store's fresh
         // refusal of the code. Measured 99.77 kB.
-        limit: '101 KB',
+        // 2026-10-25 (T-8655/T-8656), raised 101 -> 102 kB: the cart gate
+        // knows localised cart and checkout slugs (/warenkorb, /panier,
+        // /carrito, /koszyk...), and the price reader reads Swiss apostrophe
+        // grouping and a label glued to a currency code. Measured 101.13 kB.
+        // 2026-10-26 (T-8654 round 3), raised 102 -> 102.4 kB: the price
+        // reader reads Indian lakh grouping (₹1,23,456 was read as 1.23) and
+        // the 円 Rs. Fr. R S$ د.إ ر.س marks, and a saving is banked under its
+        // ISO code (zł, Kč, kr, 円... were banked as USD). Measured 102.02 kB.
+        // 2026-10-26 (T-8654 round 4), raised 102.4 -> 104.2 kB: a code typed
+        // into a "Discount code or gift card" box (Shopify, in its checkout
+        // languages) is watched under the combined-box rule instead of being
+        // dropped as a gift-card field; that rule reads only the rows drawn
+        // for this attempt, each with the line around it, and knows the
+        // gift-card and discount words of ~30 checkout languages (most of the
+        // growth is those non-Latin words). Measured 104.02 kB.
+        // 2026-10-26 (T-8654), raised 104.2 -> 104.5 kB: #539 (the store's
+        // refusal quoted in whole words, on its own line) landed beside it;
+        // each fit alone, together they measure 104.37 kB.
+        // 2026-10-26 (T-5446), lowered 104.5 -> 95 kB: no code changed, the
+        // ruler did. This is now the bundle of entrypoints/content.ts, the
+        // closure the build ships (scripts/measure-size.mjs), instead of each
+        // listed file minified alone. Per-file minifying kept every exported
+        // name full length and every import line, so splitting a module cost
+        // bytes the shipped bundle never pays, and modules the realm imports
+        // but the list missed (code-sharing-consent.js, code-share-funnel.js)
+        // were never weighed. 104.43 kB per file is 91.9 kB bundled; the
+        // production build's content.js is 94.48 kB, the difference being
+        // WXT's own runtime wrapper. The limit is measured + ~3.1 kB.
+        limit: '95 KB',
         brotli: false,
     },
     {
@@ -191,7 +220,7 @@ module.exports = [
         brotli: false,
     },
     {
-        name: 'background.js (sw, minified)',
+        name: 'background (sw bundle, minified)',
         path: '.size-cache/background.min.js',
         // 2026-08-10 — measured 7.04 kB minified, from 21.96 kB of source.
         // 2026-08-10, raised 7.5 -> 7.8 kB: the fetchCoupons branch forwards a
@@ -264,7 +293,15 @@ module.exports = [
         // 2026-10-20, merging main (through #348) again: the learned-box
         // memory and pick mode above plus the toolbar badge from #384.
         // Measured 16.91 kB, so the limit is measured + ~0.3 kB.
-        limit: '17.2 KB',
+        // 2026-10-26 (T-5446), 17.2 -> 21.5 kB with no code changed: this is
+        // now the bundle of entrypoints/background.ts. The old list held
+        // background.js alone, so the modules it imports (tab-handoff.js,
+        // code-share-funnel.js, usage-diagnostics-consent.js, the consent and
+        // permissions modules) shipped in the worker without being weighed.
+        // Measured 20.44 kB bundled (16.91 kB was background.js by itself);
+        // the production build's background.js is 21.1 kB with WXT's
+        // wrapper. The limit is measured + ~1.06 kB.
+        limit: '21.5 KB',
         brotli: false,
     },
     {
@@ -297,19 +334,26 @@ module.exports = [
         // 2026-10-19, raised 32 -> 37.5 kB: the server pick mode, the
         // remembered coupon box and the checks on a learned apply ship in the
         // finder now that it loads on demand. Measured 36.73 kB.
+        // 2026-10-26 (T-8654 round 2), raised 37.5 -> 38.8 kB: the total and
+        // subtotal rows in 17 more languages (Danish to Arabic), partial
+        // totals refused ("Totale parziale"), and the won, yuan, rupiah,
+        // hryvnia and koruna amounts. Measured 38.31 kB.
         // It is written only here: tests/finder-module-build.test.mjs reads
         // it.
-        limit: '37.5 KB',
+        limit: '38.8 KB',
         brotli: false,
     },
     {
-        name: 'porkbun-alert-shim.js (porkbun.com checkout only, minified)',
+        name: 'porkbun-alert (porkbun.com checkout only, bundle, minified)',
         path: '.size-cache/porkbun-alert.min.js',
         // 2026-10-15 (T-2480) — own MAIN-world content script for porkbun.com's
         // native coupon-failure alert(). 2026-10-16: the page-world capability
         // marker (extension-capabilities.js, bundled into it) took it from 1.18
         // to 1.86 kB minified; the same module adds ~0.8 kB to the per-page
         // content-scripts group above (116.69 -> 117.49 kB, inside its limit).
+        // 2026-10-26 (T-5446), unchanged at 2 kB: now the bundle of
+        // entrypoints/porkbun-alert.content.ts, which keeps only the marker
+        // the shim uses. Measured 1.56 kB.
         limit: '2 KB',
         brotli: false,
     },

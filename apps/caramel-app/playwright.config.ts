@@ -20,7 +20,7 @@ const baseURL =
     process.env.PLAYWRIGHT_BASE_URL ||
     process.env.BASE_URL ||
     process.env.NEXT_PUBLIC_BASE_URL ||
-    'http://localhost:58000'
+    'http://localhost:28000'
 const startServer = process.env.PLAYWRIGHT_START_SERVER !== 'false'
 const webServerTimeout = Number(process.env.PLAYWRIGHT_WEB_TIMEOUT ?? '180000')
 

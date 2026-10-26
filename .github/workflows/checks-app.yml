@@ -177,7 +177,7 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: caramel
-        ports: ['58005:5432']
+        ports: ['28005:5432']
         options: >-
           --health-cmd "pg_isready -U postgres -d caramel"
           --health-interval 10s
@@ -200,7 +200,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       # Writes apps/caramel-app/.env with a DATABASE_URL pointing at the
-      # postgres service (postgres:postgres@localhost:58005/caramel) — the same
+      # postgres service (postgres:postgres@localhost:28005/caramel) — the same
       # value vitest.integration.config.ts's loadEnvFile('.env') reads.
       - name: Write minimal CI env
         run: pnpm --filter caramel-app run setup:ci-env
@@ -382,7 +382,7 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: caramel
-        ports: ['58005:5432']
+        ports: ['28005:5432']
         options: >-
           --health-cmd "pg_isready -U postgres -d caramel"
           --health-interval 10s
@@ -419,8 +419,8 @@ jobs:
       - name: Run E2E tests
         working-directory: ./apps/caramel-app
         env:
-          PLAYWRIGHT_BASE_URL: http://localhost:58000
-          NEXT_PUBLIC_BASE_URL: http://localhost:58000
+          PLAYWRIGHT_BASE_URL: http://localhost:28000
+          NEXT_PUBLIC_BASE_URL: http://localhost:28000
           PLAYWRIGHT_WEB_COMMAND: pnpm dev
           PLAYWRIGHT_START_SERVER: 'true'
           PLAYWRIGHT_WEB_TIMEOUT: '300000'
@@ -576,7 +576,7 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: caramel
-        ports: ['58005:5432']
+        ports: ['28005:5432']
         options: >-
           --health-cmd "pg_isready -U postgres -d caramel"
           --health-interval 10s
@@ -715,7 +715,7 @@ jobs:
 
       - name: Assert the homepage serves 200
         if: steps.filter.outputs.run == 'true'
-        run: curl -fsS -o /dev/null -w 'homepage HTTP %{http_code}\n' http://127.0.0.1:58000/
+        run: curl -fsS -o /dev/null -w 'homepage HTTP %{http_code}\n' http://127.0.0.1:28000/
 
       # next.config.mjs experimental.inlineCss: the production build must ship
       # its CSS in a <style> in the HTML, not a render-blocking <link> (a
@@ -727,7 +727,7 @@ jobs:
         if: steps.filter.outputs.run == 'true'
         run: |
           page="$RUNNER_TEMP/supported-stores.html"
-          curl -fsS -o "$page" http://127.0.0.1:58000/supported-stores
+          curl -fsS -o "$page" http://127.0.0.1:28000/supported-stores
           if grep -Eq '<link[^>]*rel="stylesheet"' "$page"; then
             echo '::error::/supported-stores still links a stylesheet; experimental.inlineCss is not in effect'
             exit 1

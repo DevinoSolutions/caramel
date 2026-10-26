@@ -21,16 +21,20 @@
 // explicitly accepted. The first time a typed code would be shared and there is
 // no consent record, the worker answers `no-consent` (only after it has
 // established signed-in + flag on, so the prompt is never shown when sharing
-// could not happen) and we show the consent card (UI-helpers.js
+// could not happen) and we show the consent card (code-sharing-prompt.js
 // showCodeSharingPrompt). "Share codes" records `accepted` and then sends the
 // code the card named; "No thanks" records `declined` and never asks again;
 // dismissing records nothing, so the next qualifying capture asks again.
 //
 // What must never be shared, and how each is stopped:
 //   · A gift-card / card / email / loyalty number typed into a look-alike box:
-//     the field's own name/label text is checked (_fieldLooksLikeAPromoBox),
-//     and the code's SHAPE is refused (looksLikeCardNumber, mirrored with the
-//     server, which refuses it too).
+//     the field's own name/label text is checked (_fieldKind), and the code's
+//     SHAPE is refused (looksLikeCardNumber, mirrored with the server, which
+//     refuses it too). A box that takes a discount code OR a gift card
+//     (Shopify's "Discount code or gift card", UK "voucher" boxes) is watched,
+//     but a code typed there is shared only when the store's applied row names
+//     it and that row is not a gift-card row: a redeemed gift card drops the
+//     total too, and its row shows only the last digits.
 //   · A value the shopper did not type (store prefill, browser autofill, a
 //     script): only a trusted `input` event with an insert* inputType counts,
 //     and the field must still hold exactly that value at gesture time.
@@ -74,7 +78,7 @@ import {
     pickBestMatch,
 } from './dom-utils.js'
 
-// The consent card (UI-helpers.js showCodeSharingPrompt) is INJECTED by
+// The consent card (showCodeSharingPrompt, re-exported by UI-helpers.js) is INJECTED by
 // entrypoints/content.ts through initCodeCapture, not imported: UI-helpers.js
 // -> coupon-runner.js -> store-detect.js -> code-capture.js would make an import
 // cycle. Until it is injected there is no way to ask, so nothing is sent: the
@@ -102,11 +106,22 @@ function looksLikeCardNumber(code) {
     return code.length >= 16 && digits >= 12
 }
 
-// The input's own words (name, id, placeholder, aria-label, autocomplete, its
-// <label>) say it is not a promo box. A gift-card box that also matched the
-// store's coupon selector would otherwise leak a card number.
-const NON_PROMO_FIELD =
-    /gift|card|voucher|loyalty|reward|points|referral|e-?mail/i
+// What the input's own words (name, id, placeholder, aria-label, autocomplete,
+// its <label>) say it takes. A gift-card box that also matched the store's
+// coupon selector would otherwise leak a card number.
+// Never a promotion, whatever else the field says.
+const NON_PROMO_FIELD = /loyalty|reward|points|referral|e-?mail|\bcc-/i
+// Stored value (gift cards, certificates, store credit): money, never
+// shareable. Words in the languages Shopify localizes its "Discount code or
+// gift card" box into.
+const STORED_VALUE_WORDS =
+    /gift|card|certificate|store credit|guthaben|cadeau|geschenk|regalo|regal|presente|presentkort|gavekort|lahja|podarunk|dárkov|darček|ajándék|poklon|daril|dovan|kinke|gjafa|hadiah|quà|cart[aã]o[- ]oferta|hed[iİı]ye|подар|δώρ|ของขวัญ|ギフト|기프트|礼品|禮品/i
+// "Voucher" / "Gutschein" is the promo box on many UK and German stores and a
+// gift voucher on others: watched, but only under the combined-box rule, where
+// a row that says it without a discount word counts as stored value.
+const EITHER_WORDS = /voucher|gutschein/i
+const PROMO_WORDS =
+    /discount|promo|coupon|offer|r[ée]duction|rabat|descuento|descompte|sconto|desconto|korting|alennus|[iİı]ndirim|slev|zľav|kedvezm|popust|nuolaid|allahindl|sooduskood|afsl|diskon|giảm giá|скид|έκπτωσ|ส่วนลด|割引|할인|折扣|优惠/i
 
 // A click can only be on the Apply control if the target sits in something
 // interactive. Cheap `closest` check run BEFORE any selector query.
@@ -170,17 +185,69 @@ export function caramelShopperCodeValid(raw) {
 // a capture needs ALL of: the store visibly applied a row (`committed`); that
 // row is tied to THIS code, either by the total dropping or by the row's own
 // text naming the code (case-insensitive); and no NEW error text beside it.
+// `combined`: the box also takes gift cards (_fieldKind), and a redeemed gift
+// card drops the total too, so there only a row that names the code and does
+// not read as a stored-value row counts, never a bare price drop.
 // Exported for tests.
-export function caramelCaptureAccepted(verdict, code) {
+export function caramelCaptureAccepted(verdict, code, { combined } = {}) {
     if (!verdict || verdict.success !== true || verdict.committed !== true)
         return false
     if (verdict.errorMsg && verdict.errorIsNew) return false
-    const rowNamesCode =
-        !!code &&
-        String(verdict.appliedRowsText ?? '')
-            .toLowerCase()
-            .includes(String(code).toLowerCase())
-    return verdict.priceDropped === true || rowNamesCode
+    // The rows drawn for this attempt (coupon-apply.js appliedRows); an older
+    // verdict shape carries only the joined text of every row.
+    const rows = Array.isArray(verdict.appliedRows)
+        ? verdict.appliedRows.map(_rowParts)
+        : [_rowParts(verdict.appliedRowsText)]
+    // A combined box also skips a row whose text was already on the page (a
+    // re-render redraws every node): only what the store said for THIS code.
+    if (combined)
+        return rows.some(
+            row =>
+                !row.textSeenBefore &&
+                _namesCode(row.text, code) &&
+                !_readsAsStoredValue(row),
+        )
+    // A plain box counts row NODES only, textSeenBefore included: retrying a
+    // code after signing in makes the store re-draw that code's row, and a
+    // box that never mentions a gift card has no gift-card row to mistake.
+    return (
+        verdict.priceDropped === true ||
+        rows.some(row => _namesCode(row.text, code))
+    )
+}
+
+function _rowParts(row) {
+    if (typeof row !== 'object' || row === null) {
+        const text = String(row ?? '').normalize('NFC')
+        return { text, context: text, levels: 0 }
+    }
+    const text = String(row.text ?? '').normalize('NFC')
+    return {
+        text,
+        context: String(row.context ?? text).normalize('NFC'),
+        levels: Number(row.levels) || 0,
+        textSeenBefore: row.textSeenBefore === true,
+    }
+}
+
+// The code as a whole token: SAV is not named by a row reading SAVE10.
+function _namesCode(text, code) {
+    if (!code) return false
+    const escaped = String(code).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    return new RegExp(`(^|[^a-z0-9_-])${escaped}($|[^a-z0-9_-])`, 'i').test(
+        text,
+    )
+}
+
+// A gift-card word anywhere on the row's line is enough. "Voucher" is excused
+// only by a discount word in the row's OWN text: a totals block always has a
+// "Discount" line beside a gift voucher's. A row with no line read around it
+// (the promo box's own container held it) must name a discount itself.
+function _readsAsStoredValue(row) {
+    if (STORED_VALUE_WORDS.test(row.context)) return true
+    const saysDiscount = PROMO_WORDS.test(row.text)
+    if (EITHER_WORDS.test(row.context) && !saysDiscount) return true
+    return row.levels === 0 && !saysDiscount
 }
 
 // Why the store's answer did not count as an acceptance. Telemetry vocabulary
@@ -337,22 +404,37 @@ function _runnerIsApplying() {
     return !!caramelOwnHost('caramel-testing-overlay')
 }
 
-function _fieldLooksLikeAPromoBox(input) {
-    const parts = [
-        input.name,
-        input.id,
-        input.placeholder,
-        input.getAttribute('aria-label'),
-        input.getAttribute('autocomplete'),
-    ]
+// 'other': never shared (a loyalty/referral/email field, or a box that names
+// only stored value). 'combined': a discount code OR stored value, shared only
+// under caramelCaptureAccepted's combined rule. 'promo': everything else.
+function _fieldKind(input) {
+    // What the shopper is shown (placeholder, aria-label, labels) is the
+    // store's own description of the box; name/id/autocomplete are developer
+    // naming, often a generic "promo" on whatever box the coupon selector hit.
+    const shown = [input.placeholder, input.getAttribute('aria-label')]
     for (const label of Array.from(input.labels ?? []))
-        parts.push(label.textContent)
+        shown.push(label.textContent)
     const labelledBy = input.getAttribute('aria-labelledby')
     if (labelledBy) {
         for (const id of labelledBy.split(/\s+/))
-            parts.push(document.getElementById(id)?.textContent)
+            shown.push(document.getElementById(id)?.textContent)
     }
-    return !NON_PROMO_FIELD.test(parts.filter(Boolean).join(' '))
+    const shownWords = shown.filter(Boolean).join(' ')
+    const words = [
+        shownWords,
+        input.name,
+        input.id,
+        input.getAttribute('autocomplete'),
+    ]
+        .filter(Boolean)
+        .join(' ')
+    if (NON_PROMO_FIELD.test(words)) return 'other'
+    // Told it is a gift-card box, and nothing shown says discount.
+    if (STORED_VALUE_WORDS.test(shownWords) && !PROMO_WORDS.test(shownWords))
+        return 'other'
+    if (STORED_VALUE_WORDS.test(words))
+        return PROMO_WORDS.test(words) ? 'combined' : 'other'
+    return EITHER_WORDS.test(words) ? 'combined' : 'promo'
 }
 
 // The field now holds the judged code, or nothing: some stores clear the box
@@ -372,7 +454,7 @@ function _stillCurrent(rec, code, generation) {
     )
 }
 
-async function _judgeAndShare(rec, code, snapshot, generation) {
+async function _judgeAndShare(rec, code, snapshot, generation, combined) {
     // Started synchronously by the caller, so its baselines predate the store's
     // own handler. `redact`: the shopper's code never reaches a log line.
     const verdict = await caramelAwaitCouponVerdict(rec, snapshot, {
@@ -384,7 +466,7 @@ async function _judgeAndShare(rec, code, snapshot, generation) {
     // another code, our runner may have started, or sharing may have been
     // switched off.
     if (!_stillCurrent(rec, code, generation)) return
-    if (!caramelCaptureAccepted(verdict, code)) {
+    if (!caramelCaptureAccepted(verdict, code, { combined })) {
         _report('store_not_accepted', _captureRefusalReason(verdict))
         return
     }
@@ -420,11 +502,11 @@ async function _judgeAndShare(rec, code, snapshot, generation) {
     _report('submit_sent')
 }
 
-function _start(rec, code) {
+function _start(rec, code, combined) {
     const snapshot = caramelSnapshotCart(rec, code)
     const generation = _generation
     _current = { generation, code }
-    _judgeAndShare(rec, code, snapshot, generation)
+    _judgeAndShare(rec, code, snapshot, generation, combined)
         .catch(err => logError('codeCapture', err))
         .finally(() => {
             if (_current?.generation === generation) _current = null
@@ -509,7 +591,8 @@ function _consider(rec, input, control) {
         _report('apply_ignored', 'bad-code-shape')
         return
     }
-    if (!_fieldLooksLikeAPromoBox(input)) {
+    const kind = _fieldKind(input)
+    if (kind === 'other') {
         _report('apply_ignored', 'not-promo-field')
         return
     }
@@ -523,7 +606,7 @@ function _consider(rec, input, control) {
         return
     }
     _report('apply_observed')
-    _start(rec, code)
+    _start(rec, code, kind === 'combined')
 }
 
 /* Attach the observers for this document. Idempotent: store-detect calls it on

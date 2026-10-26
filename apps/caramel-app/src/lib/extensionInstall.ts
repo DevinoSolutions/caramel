@@ -31,7 +31,9 @@ export interface ExtInstalledRequest {
     extension_version: string
     /** Install id: also the PostHog event uuid, so a retry cannot double-count. */
     iid: string
-    /** The browser's PostHog distinct id when posthog-js had loaded. */
+    /** The browser's PostHog distinct id when posthog-js had loaded. The server
+     * uses it only when it matches the PostHog cookie on the same request
+     * (T-6231); otherwise the event is filed under the cookie id or `iid`. */
     distinct_id?: string
 }
 

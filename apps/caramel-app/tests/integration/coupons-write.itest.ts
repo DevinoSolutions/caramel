@@ -4,7 +4,7 @@ import prisma from '@/lib/prisma'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
 
 // W4-D2 integration — the sanctioned WRITES exercised against the REAL prisma
-// client + live local Postgres (:58005), catalog migrated (the harness/CI runs
+// client + live local Postgres (:28005), catalog migrated (the harness/CI runs
 // `prisma migrate deploy` first). This is the real proof the flipped writes hit
 // the app's OWN tables (DATABASE_URL), not the external caramel_coupons DB.
 //
@@ -65,7 +65,7 @@ afterAll(async () => {
     await prisma.$disconnect()
 })
 
-describe('recordUsage (real pg :58005) — app-owned counter, catalog untouched', () => {
+describe('recordUsage (real pg :28005) — app-owned counter, catalog untouched', () => {
     it('bumps coupon_signal.workCount (no timestamp) and never touches coupons.times_used / updated_at', async () => {
         await insertCoupon(USAGE_ID, { timesUsed: 5 })
         const before = await prisma.coupon.findUnique({
@@ -100,7 +100,7 @@ describe('recordUsage (real pg :58005) — app-owned counter, catalog untouched'
     })
 })
 
-describe('expireCoupons (real pg :58005) — app-catalog UPDATE', () => {
+describe('expireCoupons (real pg :28005) — app-catalog UPDATE', () => {
     it('expires only currently-live rows (count = FALSE→TRUE), stamps expiry + updated_at, skips already-expired', async () => {
         await insertCoupon(EXPIRE_LIVE_A)
         await insertCoupon(EXPIRE_LIVE_B)
@@ -145,7 +145,7 @@ describe('expireCoupons (real pg :58005) — app-catalog UPDATE', () => {
     })
 })
 
-describe('requestSource (real pg :58005) — app sources INSERT', () => {
+describe('requestSource (real pg :28005) — app sources INSERT', () => {
     it('creates a REQUESTED sources row with the website, an empty websites[], and a minted id', async () => {
         await requestSource(REQUEST_WEBSITE)
 

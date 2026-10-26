@@ -379,8 +379,17 @@ function _hostIsUnderDomain(host, domain) {
  *
  * The older platforms' spellings (/cart.php, /mycart) are a separate rule,
  * _caramelCartFilePath below, because they are only safe at the top of a path. */
-const CARAMEL_CART_PATH_RE =
-    /(?:^|[/\-_])(cart|carts|basket|checkout|checkouts)(?:[/?#]|$)|(?:^|\/)(?:cart|carts|basket|checkout|checkouts)-\d\d?(?:[/?#]|$)/i
+// Localised stores (WooCommerce and PrestaShop translate the page slugs) name
+// the same pages in their own language: /warenkorb/ + /kasse/, /winkelmand/ +
+// /afrekenen/, /carrito/ + /finalizar-compra/, /koszyk/, /varukorg/, /kassa/.
+// Only words that are never a product's name are here; a cart word that is
+// also something a store sells (panier, cesta, kurv) is CARAMEL_CART_FILE_RE's.
+const CARAMEL_CART_WORDS =
+    'cart|carts|basket|checkout|checkouts|warenkorb|kasse|winkelwagen|winkelmand|afrekenen|carrito|carrello|carrinho|finalizar-compra|koszyk|varukorg|kassa|ostoskori|handlekurv'
+const CARAMEL_CART_PATH_RE = new RegExp(
+    `(?:^|[/\\-_])(${CARAMEL_CART_WORDS})(?:[/?#]|$)|(?:^|\\/)(?:${CARAMEL_CART_WORDS})-\\d\\d?(?:[/?#]|$)`,
+    'i',
+)
 
 /* The cart page in an older platform's spelling: a file extension (/cart.php is
  * every BigCommerce cart) or the word joined to my/view/show/shop(ping)
@@ -394,8 +403,13 @@ const CARAMEL_CART_PATH_RE =
  * /products/shopping-cart.html and /garden/cart.html are products (Magento names
  * its product pages .html), /help/checkout.html is a help page, and a query
  * string (?redirect=/cart.php) is not where the shopper is. */
+// The localised cart and checkout words that are also things a store sells
+// (a panier, a cesta and a kurv are baskets; a caisse is a crate) count only
+// here, as the whole last segment under a locale or the shop's own name:
+// /fr/panier and /commande are PrestaShop's cart and checkout, while
+// /products/panier-osier and /collections/panier stay product pages.
 const CARAMEL_CART_FILE_RE =
-    /^(?:(?:my|view|show|shop|shopping)[-_]?)?(?:cart|carts|basket|checkout|checkouts)(?:\.(?:php|aspx?|html?|jsp|cfm|do))?$/i
+    /^(?:(?:my|view|show|shop|shopping)[-_]?)?(?:cart|carts|basket|checkout|checkouts|panier|cesta|kurv|caisse|commande|pagamento|kassan|zamowienie)(?:\.(?:php|aspx?|html?|jsp|cfm|do))?$/i
 /* A parent may also be the shop's own name for itself: store or shop, with no
  * prefix or a generic one (/webshop/, /eshop/, /onlinestore/), or after the
  * start of the store's OWN name (/acestore/ on acefitness.org and on
