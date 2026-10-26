@@ -7,35 +7,40 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 // FAKES (sweepMock / checkInMock): they prove the timer's wiring and the
 // check-in statuses, never the sweep itself (coupon-failure-quorum.test.ts).
 
-type SweepRun = {
-    outcome: 'ok' | 'backlog' | 'failed' | 'timeout'
-    deleted: number
-    chunks: number
-    durationMs: number
-} | null
+type SweepRun =
+    | {
+          outcome: 'ok' | 'backlog' | 'failed' | 'timeout'
+          deleted: number
+          chunks: number
+          durationMs: number
+      }
+    | { outcome: 'skipped'; reason: 'throttled' | 'abandoned' }
 
-const { sweepMock, checkInMock, captureExceptionMock } = vi.hoisted(() => ({
-    sweepMock: vi.fn(
-        async (_options?: {
-            force?: boolean
-            trigger?: string
-        }): Promise<SweepRun> => ({
-            outcome: 'ok',
-            deleted: 0,
-            chunks: 1,
-            durationMs: 3,
-        }),
-    ),
-    checkInMock: vi.fn(
-        (_checkIn: Record<string, unknown>, _config?: unknown): string =>
-            'check-in-id',
-    ),
-    captureExceptionMock: vi.fn(),
-}))
+const { sweepMock, checkInMock, captureExceptionMock, getClientMock } =
+    vi.hoisted(() => ({
+        sweepMock: vi.fn(
+            async (_options?: {
+                force?: boolean
+                trigger?: string
+            }): Promise<SweepRun> => ({
+                outcome: 'ok',
+                deleted: 0,
+                chunks: 1,
+                durationMs: 3,
+            }),
+        ),
+        checkInMock: vi.fn(
+            (_checkIn: Record<string, unknown>, _config?: unknown): string =>
+                'check-in-id',
+        ),
+        captureExceptionMock: vi.fn(),
+        getClientMock: vi.fn((): object | undefined => ({})),
+    }))
 vi.mock('@/lib/couponSignals', () => ({ sweepExpiredReporters: sweepMock }))
 vi.mock('@sentry/nextjs', () => ({
     captureCheckIn: checkInMock,
     captureException: captureExceptionMock,
+    getClient: getClientMock,
 }))
 vi.mock('server-only', () => ({}))
 
@@ -51,6 +56,8 @@ beforeEach(() => {
     checkInMock.mockReset()
     checkInMock.mockImplementation(() => 'check-in-id')
     captureExceptionMock.mockClear()
+    getClientMock.mockReset()
+    getClientMock.mockImplementation(() => ({}))
     vi.useFakeTimers()
 })
 
@@ -119,9 +126,6 @@ describe('the hourly timer checks in to the Sentry cron monitor', () => {
             monitorSlug: 'caramel-coupon-reporter-retention',
             checkInId: 'check-in-id',
         })
-        expect(checkInMock.mock.calls[0]![1]).toMatchObject({
-            schedule: { type: 'interval', value: 1, unit: 'hour' },
-        })
     })
 
     it.each(['failed', 'timeout'] as const)(
@@ -138,10 +142,73 @@ describe('the hourly timer checks in to the Sentry cron monitor', () => {
         },
     )
 
-    it('checks in as error when no run started (an abandoned DELETE is still unsettled)', async () => {
-        sweepMock.mockResolvedValueOnce(null)
+    it('maps backlog to ok on purpose: a saturated sweep is visible in the logs, not a paging alert', async () => {
+        sweepMock.mockResolvedValueOnce({
+            outcome: 'backlog',
+            deleted: 500000,
+            chunks: 100,
+            durationMs: 1,
+        })
         await tickOnce()
+        expect(statuses()).toEqual(['in_progress', 'ok'])
+    })
+
+    it('a skipped tick (abandoned DELETE still unsettled) is logged loudly and checks in as error', async () => {
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+        sweepMock.mockResolvedValueOnce({
+            outcome: 'skipped',
+            reason: 'abandoned',
+        })
+        await tickOnce()
+
         expect(statuses()).toEqual(['in_progress', 'error'])
+        expect(errorSpy).toHaveBeenCalledWith(
+            '[couponReporterRetention] tick skipped: previous DELETE still unsettled',
+        )
+        errorSpy.mockRestore()
+    })
+
+    it('a sweep that throws checks in as error and is captured', async () => {
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+        sweepMock.mockRejectedValueOnce(new Error('boom'))
+        await tickOnce()
+
+        expect(statuses()).toEqual(['in_progress', 'error'])
+        expect(captureExceptionMock).toHaveBeenCalled()
+        errorSpy.mockRestore()
+    })
+
+    it('carries the monitor config (thresholds included) on the closing check-in too', async () => {
+        await tickOnce()
+
+        for (const call of checkInMock.mock.calls) {
+            expect(call[1]).toMatchObject({
+                schedule: { type: 'interval', value: 1, unit: 'hour' },
+                checkinMargin: 30,
+                maxRuntime: 3,
+                failureIssueThreshold: 2,
+                recoveryThreshold: 1,
+            })
+        }
+    })
+
+    it('without a Sentry client: boot reason says DISABLED, each tick logs it, the sweep still runs and no check-in is sent', async () => {
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+        getClientMock.mockImplementation(() => undefined)
+        vi.stubEnv('NODE_ENV', 'production')
+        const { startCouponReporterRetentionSweep } = await loadModule()
+
+        expect(startCouponReporterRetentionSweep().reason).toContain(
+            'DISABLED (no Sentry client)',
+        )
+        await vi.advanceTimersByTimeAsync(HOUR)
+
+        expect(sweepMock).toHaveBeenCalledTimes(1)
+        expect(checkInMock).not.toHaveBeenCalled()
+        expect(errorSpy).toHaveBeenCalledWith(
+            expect.stringContaining('cron check-ins DISABLED'),
+        )
+        errorSpy.mockRestore()
     })
 
     it('a check-in that throws is captured and logged loudly, and the sweep still runs', async () => {

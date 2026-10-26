@@ -467,18 +467,23 @@ let abandonedDeletion: Promise<void> | null = null
  * settles (0-row runs included), so "did the hourly sweep run?" is answerable
  * from the container logs; a caller that joins an in-flight run gets the same
  * result object and logs nothing. The promise resolves to that run's result
- * (so the timer can check in to its Sentry cron monitor), or to null when no
- * run was started (throttled, or an abandoned DELETE still unsettled). `trigger`
- * only labels the summary line.
+ * (so the timer can check in to its Sentry cron monitor), or to an explicit
+ * `skipped` result when no run was started ('throttled', or 'abandoned' = a
+ * timed-out DELETE is still unsettled). A skipped call logs nothing here: it
+ * is not a run (the timer logs its own skipped tick). `trigger` only labels the
+ * summary line. A timer tick that joins an in-flight report-triggered run gets
+ * that run's result, so that hour's line can say trigger=report.
  */
 export function sweepExpiredReporters(
     options: { force?: boolean; trigger?: ReporterSweepTrigger } = {},
-): Promise<ReporterSweepRun | null> {
-    if (abandonedDeletion) return Promise.resolve(null)
+): Promise<ReporterSweepRun | ReporterSweepSkipped> {
+    if (abandonedDeletion) {
+        return Promise.resolve({ outcome: 'skipped', reason: 'abandoned' })
+    }
     if (reporterSweepInFlight) return reporterSweepInFlight
     const now = new Date()
     if (!options.force && now.getTime() < nextReporterSweepAt) {
-        return Promise.resolve(null)
+        return Promise.resolve({ outcome: 'skipped', reason: 'throttled' })
     }
     const sweep = runReporterSweep(now, options.trigger ?? 'report').finally(
         () => {
@@ -505,6 +510,12 @@ export type ReporterSweepRun = {
     /** Chunks committed: the closest counter we have to "scanned". */
     chunks: number
     durationMs: number
+}
+
+/** No run was started: throttled, or a timed-out DELETE is still unsettled. */
+export type ReporterSweepSkipped = {
+    outcome: 'skipped'
+    reason: 'throttled' | 'abandoned'
 }
 
 /** What one run has committed so far; survives a later chunk throwing. */
@@ -573,6 +584,7 @@ async function runReporterSweep(
     // The ONE summary line per run (T-6398 / T-8983): logged when the run
     // settles, 0-row runs included, so prod can prove the hourly sweep ran.
     // `chunks` is the closest counter to "scanned" (rows are deleted, not read).
+    // `ran_at` is the run START time, emitted when the run settles.
     const summarize = (): ReporterSweepRun => {
         const run: ReporterSweepRun = {
             outcome: outcomeLabel,
@@ -593,8 +605,8 @@ async function runReporterSweep(
                 REPORTER_SWEEP_TIMEOUT_MS,
             )
         })
-        const outcome = await Promise.race([deletion, timedOut])
-        if (outcome === 'timeout') {
+        const raceResult = await Promise.race([deletion, timedOut])
+        if (raceResult === 'timeout') {
             const error = new Error(
                 `reporter retention sweep did not settle within ${REPORTER_SWEEP_TIMEOUT_MS} ms`,
             )
@@ -604,11 +616,19 @@ async function runReporterSweep(
             console.error('[couponSignals]', error.message)
             abandonedDeletion = deletion
                 .then(
-                    () => undefined,
+                    () => {
+                        console.info(
+                            `[couponSignals] abandoned reporter retention sweep settled late deleted=${progress.deleted} chunks=${progress.chunks}`,
+                        )
+                    },
                     (late: unknown) => {
                         Sentry.captureException(late, {
                             tags: { area: REPORTER_SWEEP_AREA, late: 'true' },
                         })
+                        console.error(
+                            '[couponSignals] abandoned reporter retention sweep failed late:',
+                            late,
+                        )
                     },
                 )
                 .finally(() => {
@@ -618,13 +638,8 @@ async function runReporterSweep(
             outcomeLabel = 'timeout'
             return summarize()
         }
-        outcomeLabel = outcome.backlog ? 'backlog' : 'ok'
-        if (progress.deleted > 0) {
-            console.info(
-                `[couponSignals] reporter retention sweep deleted ${progress.deleted} expired rows in ${progress.chunks} chunks`,
-            )
-        }
-        if (outcome.backlog) {
+        outcomeLabel = raceResult.backlog ? 'backlog' : 'ok'
+        if (raceResult.backlog) {
             console.warn(
                 `[couponSignals] reporter retention sweep stopped at its cap with expired rows left (eligible again after ${REPORTER_SWEEP_BACKLOG_RETRY_MS / 1000} s)`,
             )
@@ -633,7 +648,7 @@ async function runReporterSweep(
         // eat its own throttle/backoff window.
         nextReporterSweepAt =
             Date.now() +
-            (outcome.backlog
+            (raceResult.backlog
                 ? REPORTER_SWEEP_BACKLOG_RETRY_MS
                 : REPORTER_SWEEP_INTERVAL_MS)
     } catch (error) {
