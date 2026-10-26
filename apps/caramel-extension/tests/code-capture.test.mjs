@@ -18,7 +18,7 @@ import {
 import { implOf, trustedClick, trustedKey } from './_trusted-events.mjs'
 
 // The runner's apply overlay as the runner makes it: marked as ours
-// (UI-helpers.js createCaramelShadowHost), which the page cannot do.
+// (ui-shell.js createCaramelShadowHost), which the page cannot do.
 async function ourOverlay() {
     const { caramelMarkOwnHost } = await import('../caramel-base.js')
     const overlay = caramelMarkOwnHost(document.createElement('div'))

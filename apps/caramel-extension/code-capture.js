@@ -21,7 +21,7 @@
 // explicitly accepted. The first time a typed code would be shared and there is
 // no consent record, the worker answers `no-consent` (only after it has
 // established signed-in + flag on, so the prompt is never shown when sharing
-// could not happen) and we show the consent card (UI-helpers.js
+// could not happen) and we show the consent card (code-sharing-prompt.js
 // showCodeSharingPrompt). "Share codes" records `accepted` and then sends the
 // code the card named; "No thanks" records `declined` and never asks again;
 // dismissing records nothing, so the next qualifying capture asks again.
@@ -78,7 +78,7 @@ import {
     pickBestMatch,
 } from './dom-utils.js'
 
-// The consent card (UI-helpers.js showCodeSharingPrompt) is INJECTED by
+// The consent card (showCodeSharingPrompt, re-exported by UI-helpers.js) is INJECTED by
 // entrypoints/content.ts through initCodeCapture, not imported: UI-helpers.js
 // -> coupon-runner.js -> store-detect.js -> code-capture.js would make an import
 // cycle. Until it is injected there is no way to ask, so nothing is sent: the

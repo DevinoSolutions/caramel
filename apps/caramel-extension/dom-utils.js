@@ -507,7 +507,7 @@ export function caramelBaselineFor(newTotal, prices = _caramelLastPrices) {
     const candidates = (prices || []).filter(p => !isNaN(p) && p >= newTotal)
     return candidates.length ? Math.min(...candidates) : NaN
 }
-// Consumed by UI-helpers.js when rendering a measured saving.
+// Consumed by final-modal.js when rendering a measured saving.
 export function caramelCurrencySymbol() {
     return _caramelLastCurrency || '$'
 }

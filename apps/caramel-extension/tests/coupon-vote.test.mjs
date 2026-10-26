@@ -325,6 +325,7 @@ describe('display-only: the apply path never sees any of it', () => {
     const root = join(dirname(fileURLToPath(import.meta.url)), '..')
     const applyFiles = [
         'coupon-runner.js',
+        'coupon-cart-discount.js',
         'coupon-apply.js',
         'coupon-fetch.js',
         'code-capture.js',
