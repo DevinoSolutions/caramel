@@ -1,5 +1,6 @@
 import { argosScreenshot } from '@argos-ci/playwright'
-import { Page, test } from '@playwright/test'
+import { test } from './support/test'
+import { Page } from '@playwright/test'
 
 test.describe.configure({ timeout: 60000 })
 

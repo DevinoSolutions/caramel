@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './support/test'
 // The app's own slug→registrable-domain rule (tldts / Public Suffix List).
 // Relative import on purpose: e2e collection runs in BOTH contexts (hermetic
 // and deployed, no generated prisma client) and this module is pure — no

@@ -365,11 +365,12 @@ jobs:
     name: E2E & Visual Regression (PR)
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04 # Playwright does not support ubuntu 26.04 (T-5003)
-    # DevinoSolutions/artifact/upload@v1 authenticates to the self-hosted store with a
-    # GitHub OIDC token, so this job needs `id-token: write`. A job-level block
-    # REPLACES the workflow-level one, hence `contents: read` is restated here.
+    # No artifact upload: Playwright traces and test-results hold test-account
+    # cookies and request bodies, and this repo is PUBLIC (T-9427). Failure
+    # evidence is a sanitized request list printed to the job log instead
+    # (e2e/support/test.ts). A job-level block REPLACES the workflow-level one,
+    # hence `contents: read` is restated here.
     permissions:
-      id-token: write
       contents: read
     # Raised from 15: support-flow.spec.ts verifies REAL PostHog ingestion, and
     # the shared self-hosted PostHog's ingestion lag can spike to ~340s per
@@ -442,16 +443,6 @@ jobs:
           POSTHOG_E2E_TEST_PROJECT_QUERY_READ_ONLY_PERSONAL_API_KEY: ${{ secrets.POSTHOG_E2E_TEST_PROJECT_QUERY_READ_ONLY_PERSONAL_API_KEY }}
         run: pnpm test:e2e
 
-      - name: Upload test report
-        uses: DevinoSolutions/artifact/upload@v1
-        if: failure()
-        # T-7021: HTML report + traces only when the job failed; a flaky-but-green
-        # run (trace: on-first-retry) must not fill the artifact store.
-        with:
-          name: playwright-report-pr
-          path: apps/caramel-app/playwright-report/
-          retention-days: 3
-
   # ─────────────────────────────────────────────────────────────
   # E2E & Visual Regression (push – deployed site baseline)
   # ─────────────────────────────────────────────────────────────
@@ -459,11 +450,12 @@ jobs:
     name: E2E & Visual Regression (push)
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04 # Playwright does not support ubuntu 26.04 (T-5003)
-    # DevinoSolutions/artifact/upload@v1 authenticates to the self-hosted store with a
-    # GitHub OIDC token, so this job needs `id-token: write`. A job-level block
-    # REPLACES the workflow-level one, hence `contents: read` is restated here.
+    # No artifact upload: Playwright traces and test-results hold test-account
+    # cookies and request bodies, and this repo is PUBLIC (T-9427). Failure
+    # evidence is a sanitized request list printed to the job log instead
+    # (e2e/support/test.ts). A job-level block REPLACES the workflow-level one,
+    # hence `contents: read` is restated here.
     permissions:
-      id-token: write
       contents: read
     # 20 of these belong to the deploy gate below, which waits out a full
     # Dokploy Docker build before a single test runs; the rest is the old
@@ -539,25 +531,19 @@ jobs:
 
       # run-e2e-push.sh wraps `pnpm test:e2e`: when the suite fails while the
       # served sha CHANGED during the run (a manual prod deploy swapped the
-      # containers mid-suite, T-9427) it reruns the suite once against the
-      # settled deployment. A failure with an unchanged sha stays red.
+      # containers mid-suite, T-9427) it reruns the suite once, provided the
+      # settled deployment still carries this commit (it may be a newer
+      # descendant). A failure with an unchanged sha stays red. The failed
+      # attempt's sanitized request list is already in this log by then.
       - name: Run E2E tests
         working-directory: ./apps/caramel-app
         env:
           PLAYWRIGHT_BASE_URL: ${{ github.ref == 'refs/heads/dev' && 'https://dev.grabcaramel.com' || 'https://grabcaramel.com' }}
           PLAYWRIGHT_START_SERVER: 'false'
           VERSION_URL: "${{ github.ref == 'refs/heads/dev' && 'https://dev.grabcaramel.com/api/version' || 'https://grabcaramel.com/api/version' }}"
+          EXPECTED_SHA: '${{ github.sha }}'
+          GH_TOKEN: '${{ github.token }}'
         run: bash ../../.github/workflows/scripts/run-e2e-push.sh
-
-      - name: Upload test report
-        uses: DevinoSolutions/artifact/upload@v1
-        if: failure()
-        # T-7021: HTML report + traces only when the job failed; a flaky-but-green
-        # run (trace: on-first-retry) must not fill the artifact store.
-        with:
-          name: playwright-report-push
-          path: apps/caramel-app/playwright-report/
-          retention-days: 3
 
   # ─────────────────────────────────────────────────────────────
   # Lighthouse (PR – prod build, SEO/a11y budgets)

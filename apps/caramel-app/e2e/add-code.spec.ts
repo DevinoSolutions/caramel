@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './support/test'
 import { normalizeShopperCode } from '../src/lib/shopperCoupons'
 import { seedVerifiedUser } from './support/seed-user'
 import { firstLinkedStoreDomain } from './support/stores'

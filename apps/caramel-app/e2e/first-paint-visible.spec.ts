@@ -1,4 +1,5 @@
-import { expect, test, type Locator } from '@playwright/test'
+import { expect, test } from './support/test'
+import { type Locator } from '@playwright/test'
 import { firstLinkedStoreDomain } from './support/stores'
 
 // The text a visitor lands on must be visible in the server HTML itself.

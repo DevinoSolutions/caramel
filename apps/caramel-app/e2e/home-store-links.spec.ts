@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './support/test'
 import { openTestPrisma } from './support/test-prisma'
 
 // The home page's crawlable links into the store pages, checked in the SERVER

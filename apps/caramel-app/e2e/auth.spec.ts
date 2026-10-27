@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './support/test'
 
 /* Copy updated with the 2026-08-09 auth redesign. The assertions are the same
  * ones as before — fields render, providers are offered, the cross-links

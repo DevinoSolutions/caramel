@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './support/test'
 import { firstLinkedStoreDomain } from './support/stores'
 import { openTestPrisma } from './support/test-prisma'
 

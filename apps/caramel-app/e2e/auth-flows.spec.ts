@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './support/test'
 import { seedVerifiedUser } from './support/seed-user'
 
 // E-05 — the login SUCCESS path against a REAL better-auth session (every other

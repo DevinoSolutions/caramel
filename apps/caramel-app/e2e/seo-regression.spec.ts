@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './support/test'
 import { INDEXNOW_KEY, INDEXNOW_KEY_PATH } from '../src/lib/seo/indexnow'
 
 // SEO regression gate — everything here reads the RAW server HTML via

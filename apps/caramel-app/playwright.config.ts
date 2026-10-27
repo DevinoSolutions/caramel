@@ -50,11 +50,15 @@ export default defineConfig({
     ],
     use: {
         baseURL,
-        // Deployed runs (e2e-push, PLAYWRIGHT_START_SERVER=false) keep the trace
-        // of the FAILED attempt: 'on-first-retry' records only the retry, which
-        // is the one that passes, so a flaky test left no evidence of why it
-        // failed (T-9427). Local/PR runs keep the cheaper on-first-retry.
-        trace: startServer ? 'on-first-retry' : 'retain-on-failure',
+        // Traces hold the test account's cookies and request bodies. CI never
+        // uploads them (the repo is public); what a failed CI test leaves
+        // behind is the sanitized request list e2e/support/test.ts prints to
+        // the log (T-9427). On a developer machine, a deployed-site run
+        // (PLAYWRIGHT_START_SERVER=false) keeps the trace of the FAILED attempt,
+        // because 'on-first-retry' records only the retry, which is the one
+        // that passes.
+        trace:
+            startServer || process.env.CI ? 'on-first-retry' : 'retain-on-failure',
         screenshot: 'only-on-failure',
         // The app has first-class prefers-reduced-motion support: the 3D
         // hero/vault scenes render their static CSS posters instead of
