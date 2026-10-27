@@ -426,7 +426,7 @@ describe('startEmailDeliveryHealthMonitor', () => {
         ).toHaveLength(1)
     })
 
-    it('a timed-out check (error report) releases the overlap guard, so the next tick runs instead of being skipped (T-9447)', async () => {
+    it('a timed-out check (error report) releases the overlap guard, so the next tick runs instead of being skipped (T-9447 guard regression)', async () => {
         const { startEmailDeliveryHealthMonitor } = await startedMonitor()
         checkMock.mockResolvedValueOnce(
             report({

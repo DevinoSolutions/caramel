@@ -319,6 +319,35 @@ describe('checkEmailDeliveryHealth', () => {
         expect(aborts).toBe(1)
     })
 
+    it('a response whose body stalls after the headers also ends as the timeout error report', async () => {
+        // MOCK: headers arrive, the body stream never ends but errors on abort.
+        const stalledBody = ((
+            _input: string | URL | Request,
+            init?: RequestInit,
+        ) =>
+            Promise.resolve(
+                new Response(
+                    new ReadableStream({
+                        start(controller) {
+                            init?.signal?.addEventListener('abort', () =>
+                                controller.error(init.signal?.reason),
+                            )
+                        },
+                    }),
+                    { headers: { 'content-type': 'application/json' } },
+                ),
+            )) as unknown as typeof fetch
+        const report = await checkEmailDeliveryHealth({
+            apiKey: KEY,
+            fromEmail: FROM,
+            fetchImpl: stalledBody,
+            requestTimeoutMs: 25,
+            now,
+        })
+        expect(report.status).toBe('error')
+        expect(report.reason).toBe('Sendly request timed out after 25 ms')
+    })
+
     it('a fast response still passes through the per-request timeout untouched', async () => {
         const { impl } = fakeSendlyFetch({
             pages: [

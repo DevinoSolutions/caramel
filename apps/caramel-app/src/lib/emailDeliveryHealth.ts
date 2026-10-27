@@ -342,6 +342,7 @@ export async function checkEmailDeliveryHealth(
     const windowMinutes = config.windowMinutes ?? DEFAULT_WINDOW_MINUTES
     const stuckAfterMs =
         (config.stuckAfterMinutes ?? DEFAULT_STUCK_AFTER_MINUTES) * 60_000
+    const timeoutMs = config.requestTimeoutMs ?? SENDLY_REQUEST_TIMEOUT_MS
     const windowEnd = now
     const windowStart = new Date(now.getTime() - windowMinutes * 60_000)
     // The Sendly project is shared with other Devino apps, so the check is
@@ -392,12 +393,15 @@ export async function checkEmailDeliveryHealth(
     }
 
     try {
-        const collected = await collectEmailLogWindow(config, {
-            windowStart,
-            windowEnd,
-            senderAddress: sender.address,
-            senderDomain: sender.domain,
-        })
+        const collected = await collectEmailLogWindow(
+            { ...config, requestTimeoutMs: timeoutMs },
+            {
+                windowStart,
+                windowEnd,
+                senderAddress: sender.address,
+                senderDomain: sender.domain,
+            },
+        )
         const summary = summariseEmailDeliveryWindow(collected.entries, {
             now,
             stuckAfterMs,
@@ -431,25 +435,21 @@ export async function checkEmailDeliveryHealth(
             status: 'error',
             // Status/code only (SendlyError.message is the API's own text and
             // never echoes our request body); no credential is ever in it.
-            reason: describeCheckFailure(
-                error,
-                config.requestTimeoutMs ?? SENDLY_REQUEST_TIMEOUT_MS,
-            ),
+            reason: describeCheckFailure(error, timeoutMs),
         }
     }
 }
 
 /**
- * The SDK wraps a fetch rejection as SendlyConnectionError (original error in
- * `body`). An aborted request (AbortSignal.timeout -> TimeoutError) is named
- * as a timeout so the Sentry reason says what happened and how long we waited.
+ * An aborted request (AbortSignal.timeout -> TimeoutError) is named as a
+ * timeout so the Sentry reason says what happened and how long we waited. It
+ * arrives two ways: wrapped as SendlyConnectionError (original error in
+ * `body`) when fetch itself rejects, or raw when the body read stalls after
+ * the headers (the SDK's `response.text()` sits outside its try/catch).
  */
 function describeCheckFailure(error: unknown, timeoutMs: number): string {
-    if (
-        error instanceof SendlyConnectionError &&
-        error.body instanceof Error &&
-        error.body.name === 'TimeoutError'
-    ) {
+    const aborted = error instanceof SendlyConnectionError ? error.body : error
+    if (aborted instanceof Error && aborted.name === 'TimeoutError') {
         return `Sendly request timed out after ${timeoutMs} ms`
     }
     return error instanceof Error ? error.message : String(error)
