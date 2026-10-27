@@ -937,6 +937,62 @@ export async function startApplyingCoupons(rec, options) {
         // (coupon-box-discovery.js; a no-op for any other box).
         if (res.success) caramelLoadedFinder()?.caramelFinderConfirmed(rec)
 
+        /* A code the store ACCEPTED that took nothing off a total we can read
+         * is not the win that ends the run (T-9443).
+         *
+         * cbd.co (WooCommerce, 1.4.21, 2026-10-27): the store applied 15MORE
+         * ("Coupon: 15more -US$0.00") and showed its success message, the run
+         * stopped at the first success, and seven codes were never tried. So
+         * while codes remain: give the total a moment to re-render (a late total
+         * must never cost a working code), and if it still reads the same as a
+         * price the cart showed before, take the code back off and try the next
+         * one. On the last code it stays, and the end card says what we saw. */
+        if (
+            res.success &&
+            hasPriceCfg &&
+            i < coupons.length - 1 &&
+            Number.isFinite(res.newTotal)
+        ) {
+            const movedNothing = () => {
+                const baseline = caramelBaselineFor(
+                    res.newTotal,
+                    originalPrices,
+                )
+                return !isNaN(baseline) && !(baseline - res.newTotal > 0)
+            }
+            for (let t = 0; t < 4 && movedNothing(); t++) {
+                await sleep(400)
+                // Read like applyCoupon does: the number that MOVED, so a
+                // static MSRP or fee in the price box can't hide a drop.
+                const largest = getPrice(rec.priceContainer, {
+                    returnLargest: true,
+                })
+                const moved = _caramelLastPrices.filter(
+                    p =>
+                        !isNaN(p) &&
+                        p < original &&
+                        !originalPrices.includes(p),
+                )
+                const cur = moved.length ? Math.max(...moved) : largest
+                if (Number.isFinite(cur)) res.newTotal = cur
+            }
+            if (movedNothing()) {
+                log('AUTO_INSERT_ZERO_EFFECT', {
+                    code,
+                    total: res.newTotal,
+                    reason: 'the store accepted the code but the total did not change — trying the next code',
+                })
+                await removeAppliedCoupon(rec, {
+                    code,
+                    hadPreExisting: preExistingDiscount,
+                })
+                sawSignal = true
+                await waitUntilReady(rec)
+                await sleep(160)
+                continue
+            }
+        }
+
         if (res.success) {
             // Real success — keep this code applied, stop here.
             // Measure against the most conservative baseline the page supports
