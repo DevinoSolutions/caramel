@@ -11,7 +11,7 @@ val releaseKeystorePath: String? = System.getenv("CARAMEL_KEYSTORE_PATH")
 
 android {
     namespace = "com.devino.caramel"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.devino.caramel"
