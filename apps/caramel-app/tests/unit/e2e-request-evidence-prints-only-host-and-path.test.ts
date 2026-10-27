@@ -49,7 +49,10 @@ describe('sanitizedUrl', () => {
 
 describe('sanitizedUrl leak hardening', () => {
     it.each([
-        ['blob:', 'blob:https://grabcaramel.com/6f1c0e1e-9a4f-4f4e-8a55-3c1d6f3b2a10'],
+        [
+            'blob:',
+            'blob:https://grabcaramel.com/6f1c0e1e-9a4f-4f4e-8a55-3c1d6f3b2a10',
+        ],
         ['data:', 'data:text/plain;base64,U0VDUkVU'],
         ['javascript:', 'javascript:alert("SECRET")'],
     ])('prints only the scheme for %s URLs', (scheme, raw) => {
@@ -77,9 +80,9 @@ describe('sanitizedUrl leak hardening', () => {
         expect(
             sanitizedUrl('https://grabcaramel.com/reset-password/abc/def?x=1'),
         ).toBe('grabcaramel.com/reset-password/<redacted>/<redacted>')
-        expect(
-            sanitizedUrl('https://grabcaramel.com/verify-email/short'),
-        ).toBe('grabcaramel.com/verify-email/<redacted>')
+        expect(sanitizedUrl('https://grabcaramel.com/verify-email/short')).toBe(
+            'grabcaramel.com/verify-email/<redacted>',
+        )
         // The bare route (what a page load of /reset-password looks like) stays visible.
         expect(sanitizedUrl('https://grabcaramel.com/reset-password')).toBe(
             'grabcaramel.com/reset-password',
