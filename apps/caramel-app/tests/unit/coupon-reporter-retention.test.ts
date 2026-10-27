@@ -1,3 +1,7 @@
+import {
+    msUntilNextWallClockSlot,
+    wallClockCrontab,
+} from '@/lib/wallClockSchedule'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // The hourly timer that keeps the privacy policy's "deleted after 30 days"
@@ -199,27 +203,6 @@ describe('startCouponReporterRetentionSweep', () => {
     })
 })
 
-describe('msUntilNextRetentionSlot', () => {
-    it.each([
-        ['10:00:00', '10:07:00'],
-        ['10:04:59.999', '10:07:00'],
-        ['10:05:00', '10:07:00'],
-        ['10:05:00.001', '11:07:00'],
-        ['10:06:59.999', '11:07:00'],
-        // A timer firing a few ms early or late must not run the same slot twice.
-        ['10:07:00', '11:07:00'],
-        ['10:07:00.005', '11:07:00'],
-        ['10:59:59.999', '11:07:00'],
-    ])('at %s the next slot is %s', async (now, slot) => {
-        const { msUntilNextRetentionSlot } = await loadModule()
-        const nowMs = Date.parse(`2026-10-27T${now}Z`)
-
-        expect(nowMs + msUntilNextRetentionSlot(nowMs)).toBe(
-            Date.parse(`2026-10-27T${slot}Z`),
-        )
-    })
-})
-
 describe('the hourly timer checks in to the Sentry cron monitor', () => {
     async function tickOnce() {
         vi.stubEnv('NODE_ENV', 'production')
@@ -305,15 +288,23 @@ describe('the hourly timer checks in to the Sentry cron monitor', () => {
         }
     })
 
-    it('the crontab minute is the minute the timer fires at', async () => {
+    it('the monitor crontab is built from the timer schedule and names the minute the timer fires at', async () => {
         const mod = await loadModule()
-        const crontabMinute = Number(
-            mod.REPORTER_RETENTION_MONITOR_CONFIG.schedule.value.split(' ')[0],
-        )
-        const hourStart = Date.parse('2026-10-27T10:00:00.000Z')
-        const slotMs = hourStart + mod.msUntilNextRetentionSlot(hourStart)
 
-        expect(new Date(slotMs).getUTCMinutes()).toBe(crontabMinute)
+        expect(mod.REPORTER_RETENTION_MONITOR_CONFIG.schedule.value).toBe(
+            wallClockCrontab(mod.REPORTER_RETENTION_SCHEDULE),
+        )
+        expect(mod.REPORTER_RETENTION_MONITOR_CONFIG.schedule.value).toBe(
+            '7 * * * *',
+        )
+        // The timer's first slot from a :50 boot is :07.
+        expect(
+            Date.now() +
+                msUntilNextWallClockSlot(
+                    mod.REPORTER_RETENTION_SCHEDULE,
+                    Date.now(),
+                ),
+        ).toBe(SLOT_11_07_MS)
     })
 
     it('without a Sentry client: boot reason says DISABLED, each tick logs it, the sweep still runs and no check-in is sent', async () => {

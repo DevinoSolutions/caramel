@@ -515,16 +515,27 @@ recipient, subject or body. The list rows' PII fields are dropped at the parse
 boundary (`toEmailLogEntry`).
 
 **Schedule.** Caramel has no cron and no worker, so this is an `unref`'d
-interval started from `instrumentation.ts`'s `register()` — one process, one
-schedule. The first run happens one interval AFTER boot (a crash-looping
-container must not be able to machine-gun Sentry), and the Sentry throttle is
-one event per clock hour per process. If the web service ever scales past one
-replica, move this to a real scheduler rather than adding a lock.
+wall-clock timer (`src/lib/wallClockSchedule.ts`, shared with the two retention
+sweeps) started from `instrumentation.ts`'s `register()` — one process, one
+schedule. Runs sit at minute 23 UTC of every hour (for the default period), never
+at boot and never boot + interval: a boot-relative interval was starved whenever
+deploys landed closer together than the interval (T-9436, the same bug as
+CARAMEL-39), and a boot within 2 minutes before a slot waits for the next one so
+a crash-looping container cannot machine-gun Sentry. Every run checks in to the
+Sentry cron monitor `caramel-email-delivery-health` (crontab built from the same
+schedule): `ok` means the check RAN, even when it found delivery problems (that
+is the separate Sentry event above); `error` means it could not run (provider
+unreachable or refused, unusable sender, Sendly unconfigured, an overlapping
+cycle), and two consecutive misses or errors raise a monitor issue. The Sentry
+event throttle is one per clock hour per process. If the web service ever scales
+past one replica, move this to a real scheduler rather than adding a lock.
 
 **Config.** `EMAIL_DELIVERY_HEALTH_ENABLED` is unset by default, which means ON
 in production whenever `SENDLY_API_KEY` is set and OFF everywhere else; `false`
 opts a prod deploy out, `true` forces it on locally. The window length equals
-`EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES` (default 60). Boot logs the decision
+`EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES` (default 60; it must tile the UTC day, a
+divisor of 60 that is at least 5 below an hour, otherwise whole hours dividing 24,
+or the boot fails). Boot logs the decision
 either way:
 
 ```

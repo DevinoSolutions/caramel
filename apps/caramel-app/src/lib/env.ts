@@ -17,6 +17,7 @@ import {
     isValidFallbackKey,
     isValidFallbackModel,
 } from '@/lib/proxy-fallback-headers'
+import { isValidWallClockPeriodMinutes } from '@/lib/wallClockSchedule'
 import 'server-only'
 import { z } from 'zod'
 
@@ -118,11 +119,18 @@ const serverObjectSchema = z.object({
     EMAIL_DELIVERY_HEALTH_ENABLED: z.enum(['true', 'false']).optional(),
     // How often the monitor runs AND how far back each run looks (one window
     // per interval, no gaps, no overlap). Minutes, because an ops knob should
-    // be set in the unit a human reaches for.
+    // be set in the unit a human reaches for. Runs sit on the UTC wall clock
+    // (wallClockSchedule.ts), so the period must tile the day: a divisor of 60
+    // below an hour (5 minutes at the least), otherwise a whole number of hours
+    // dividing 24 (60, 120, 180, 240, 360, 480, 720, 1440). A bad value fails
+    // the boot.
     EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES: z.coerce
         .number()
         .int()
         .positive()
+        .refine(isValidWallClockPeriodMinutes, {
+            error: 'EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES must tile the UTC day: at least 5, a divisor of 60 below an hour, otherwise a whole number of hours dividing 24',
+        })
         .default(60),
     // Destination inbox(es) for the user support/feedback flow (POST
     // /api/support). Accepts a COMMA-SEPARATED list ("a@x.com,b@y.com" — split

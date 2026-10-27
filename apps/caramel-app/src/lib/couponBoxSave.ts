@@ -380,25 +380,29 @@ export async function recordBoxProposal(args: {
     return inserted ? { kind: 'published' } : { kind: 'has_config' }
 }
 
+type ProposalSweepResult =
+    { outcome: 'ok'; deleted: number } | { outcome: 'failed' }
+
 /**
  * Delete proposals older than the promotion window. Rows past this age can
- * never count toward a quorum, so they are dead weight. Never rejects — a
- * failure is logged and captured to Sentry. Returns the count deleted (0 on
- * error) so callers can log at boot without try/catch.
+ * never count toward a quorum, so they are dead weight. Never rejects: a
+ * failure is logged and captured to Sentry AND returned as `failed`, so the
+ * caller (the cron-monitored timer in couponProposalRetention.ts) can check in
+ * as an error instead of mistaking it for "0 rows deleted".
  */
-export async function sweepExpiredProposals(): Promise<number> {
+export async function sweepExpiredProposals(): Promise<ProposalSweepResult> {
     try {
         const cutoff = new Date(Date.now() - PROPOSAL_WINDOW_MS)
         const { count } = await prisma.couponBoxProposal.deleteMany({
             where: { createdAt: { lt: cutoff } },
         })
-        return count
+        return { outcome: 'ok', deleted: count }
     } catch (error) {
         const { captureException } = await import('@sentry/nextjs')
         captureException(error, {
             tags: { area: 'couponBoxSave.sweepExpiredProposals' },
         })
         console.error('[couponBoxSave] proposal retention sweep failed', error)
-        return 0
+        return { outcome: 'failed' }
     }
 }
