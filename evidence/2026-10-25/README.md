@@ -62,3 +62,4 @@
 - 2026-10-27 T-9213 #575 (bf7ee15b): t9213-integration-job-handoff-itest.png (run 40464227802 job Integration (DB) on real postgres:18.4: tests/integration/web-session-handoff.itest.ts 4 tests passed; 18 files / 174 tests passed).
 - 2026-10-27 07:44Z `t9213-t9269-version-6ca69b67.png`: headed https://grabcaramel.com/api/version = 6ca69b67 (descends from bf7ee15b #575 T-9213 and #577 T-9269).
 - 2026-10-27 07:44Z `t9269-welcome-signin-installed-200.png`: headed /welcome?src=ext&store=chrome&v=1.4.17&iid=9269d7ba-…, Sign in clicked ~2 s after load → /login; POST /api/ext/installed 200, server guard set; PostHog extension_installed (posthog-node) uuid 9269d7ba-… recorded (T-9269).
+- 2026-10-27 07:49Z `t9213-main-ci-itest-bf7ee15b.png`: headed main CI run 40465776606 job 122071609432 (Integration (DB), bf7ee15b): `tests/integration/web-session-handoff.itest.ts (4 tests)` passed on real Postgres, 18 files / 174 tests passed (T-9213 test-only proof).
