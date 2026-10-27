@@ -631,7 +631,9 @@ export function caramelSetCurrencySymbol(sym) {
  * visible, must not already be expanded, and must pass the order-button guard.
  * When nothing matches it returns null and behaviour is exactly as before.
  */
-const CARAMEL_MAX_DISCLOSURE_DEPTH = 6
+// Eight, as pickBestMatch: lindtusa.com's collapsed panel is the seventh
+// ancestor of its input.
+const CARAMEL_MAX_DISCLOSURE_DEPTH = 8
 // Consumed by store-detect.js and coupon-runner.js (cross-file calls).
 export function caramelDisclosureFor(el) {
     // Only ever for a box the shopper CAN'T see. A visible box needs no reveal.
@@ -669,8 +671,56 @@ export function caramelDisclosureFor(el) {
             const toggle = controllers.find(usable)
             if (toggle) return toggle
         }
+        // Magento's collapsible widget (mage/collapsible: the Luma cart's
+        // "Apply Discount Code", and themes that wrap the whole discount
+        // block in one): the closed panel is a [data-role="content"] whose
+        // header, the element just before it, is the [data-role="title"]
+        // the widget gives role="tab" and aria-expanded, but no
+        // aria-controls. lindtusa.com (2026-10-27): the box sits in such a
+        // panel, seven levels above the input, and the config's toggle
+        // selectors no longer match it.
+        if (
+            node.getAttribute('data-role') === 'content' ||
+            node.getAttribute('role') === 'tabpanel'
+        ) {
+            const header = node.previousElementSibling
+            if (
+                header &&
+                (header.getAttribute('data-role') === 'title' ||
+                    header.getAttribute('role') === 'tab') &&
+                usable(header)
+            )
+                return header
+        }
     }
     return null
+}
+
+/* The apply button of the box a config names, when the config's own apply
+ * selector matches nothing on the page. lindtusa.com (2026-10-27): its Amasty
+ * multi-coupon form ships Luma's box with the button renamed from
+ * `button.action.apply` to `button.amcoupons-apply`, so the config found the
+ * input and no button, and every code failed before it was typed.
+ *
+ * Found from the input itself and deliberately narrow: the input's own form,
+ * only when that form is the coupon box (the input is its one field a shopper
+ * types into) and has exactly one visible submit control. A form with a choice
+ * is not ours to guess in. The caller still runs every order-button guard. */
+const CARAMEL_TYPED_FIELD_SEL =
+    'input:not([type]), input[type="text"], input[type="email"], input[type="tel"], input[type="number"], input[type="search"], textarea'
+export function caramelSubmitBesideInput(input) {
+    const form = input?.form
+    if (!form) return null
+    const fields = Array.from(
+        form.querySelectorAll(CARAMEL_TYPED_FIELD_SEL),
+    ).filter(_isVisible)
+    if (fields.length !== 1 || fields[0] !== input) return null
+    const submits = Array.from(
+        form.querySelectorAll(
+            'button:not([type]), button[type="submit"], input[type="submit"]',
+        ),
+    ).filter(_isVisible)
+    return submits.length === 1 ? submits[0] : null
 }
 
 /* --------------------------------------------------  navigation handoff

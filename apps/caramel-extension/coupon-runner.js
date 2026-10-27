@@ -622,9 +622,9 @@ export async function startApplyingCoupons(rec, options) {
         // itself declares around the box (see caramelDisclosureFor — most
         // configs never got a showInput, which is why phone checkouts went
         // dark). Same click, same guards, either way.
-        const _toggle = rec.showInput
-            ? pickBestMatch(rec.showInput, _box)
-            : caramelDisclosureFor(_box)
+        const _toggle =
+            (rec.showInput && pickBestMatch(rec.showInput, _box)) ||
+            caramelDisclosureFor(_box)
         if (caramelIsForbiddenControl(_toggle)) {
             // Same refusal as the apply path: a reveal-toggle selector that
             // resolved to the checkout's own order button must never be driven.

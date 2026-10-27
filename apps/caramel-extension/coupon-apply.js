@@ -12,8 +12,10 @@ import { caramelLoadedFinder } from './coupon-box-finder-loader.js'
 import {
     _caramelLastPrices,
     _isVisible,
+    caramelDisclosureFor,
     caramelFormSubmitIsUnsafe,
     caramelIsForbiddenControl,
+    caramelSubmitBesideInput,
     getPrice,
     pickBestMatch,
     qAll,
@@ -1250,8 +1252,12 @@ export async function applyCoupon(code, rec) {
              the input to become VISIBLE, not merely attached. */
         if (rec.caramelFound) caramelRemarkFoundBox(!!rec.caramelAnswer, rec)
         let input = pickBestMatch(rec.couponInput)
-        if ((!input || !_isVisible(input)) && rec.showInput) {
-            const showBtn = pickBestMatch(rec.showInput, input)
+        if (!input || !_isVisible(input)) {
+            // The config's toggle, else the disclosure the box itself declares
+            // (a config with no toggle, or one whose toggle no longer matches).
+            const showBtn =
+                (rec.showInput && pickBestMatch(rec.showInput, input)) ||
+                caramelDisclosureFor(input)
             if (caramelIsForbiddenControl(showBtn)) {
                 log('AUTO_INSERT_REFUSED_CONTROL', {
                     reason: 'showInput selector resolved to an order-completing control',
@@ -1274,7 +1280,16 @@ export async function applyCoupon(code, rec) {
                 input = pickBestMatch(rec.couponInput)
             }
         }
-        const applyBtn = pickBestMatch(rec.couponSubmit, input)
+        let applyBtn = pickBestMatch(rec.couponSubmit, input)
+        if (!applyBtn && input) {
+            // The config's apply selector matches nothing: the box's own
+            // form may still hold its one button (caramelSubmitBesideInput).
+            applyBtn = caramelSubmitBesideInput(input)
+            if (applyBtn)
+                log('APPLY_BUTTON_FROM_INPUT_FORM', {
+                    reason: "the config's apply selector matches nothing",
+                })
+        }
         // Refuse to drive a control that completes the order. A config whose
         // apply selector resolved here is wrong, and clicking it would spend
         // the user's money instead of saving it — treat it as no button at all.
