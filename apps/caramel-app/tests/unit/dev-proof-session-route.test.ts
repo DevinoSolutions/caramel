@@ -7,6 +7,7 @@ import {
     requestTouchesProductionHost,
 } from '@/lib/devProof'
 import { NextRequest } from 'next/server'
+import { createHash, createHmac } from 'node:crypto'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 // T-9413 — POST /api/dev-proof/session, the dev-only throwaway-session mint.
@@ -29,8 +30,11 @@ const {
     captureMessageMock,
     captureExceptionMock,
     addBreadcrumbMock,
+    baseUrlMock,
 } = vi.hoisted(() => ({
     envMock: {} as Record<string, unknown>,
+    // NEXT_PUBLIC_BASE_URL as baked into the build; reset to the dev deployment's per test.
+    baseUrlMock: { value: 'https://dev.grabcaramel.com' },
     mintMock: vi.fn(
         async (_args: {
             provider: string
@@ -68,7 +72,10 @@ vi.mock('@/lib/env', async importOriginal => {
 // every call below look like a production host; this is the dev deployment's.
 vi.mock('@/lib/env.client', async importOriginal => ({
     ...(await importOriginal<typeof import('@/lib/env.client')>()),
-    BASE_URL: 'https://dev.grabcaramel.com',
+    // A getter, so a test can change what the route sees (it reads BASE_URL per request).
+    get BASE_URL() {
+        return baseUrlMock.value
+    },
 }))
 vi.mock('@/lib/auth/extensionOAuthSession', () => ({
     mintExtensionSession: mintMock,
@@ -130,6 +137,7 @@ beforeEach(() => {
     vi.clearAllMocks()
     envMock.DEV_PROOF_SESSION_SECRET = SECRET
     envMock.BETTER_AUTH_URL = 'https://dev.grabcaramel.com'
+    baseUrlMock.value = 'https://dev.grabcaramel.com'
     mintMock.mockResolvedValue({
         token: MINTED_TOKEN,
         username: 'Devproof tester',
@@ -192,6 +200,28 @@ describe('gate 2: a production host is refused even with the secret set', () => 
             },
         ],
         [
+            'a production entry LAST in a forwarded host list',
+            {
+                headers: {
+                    'x-forwarded-host':
+                        'dev.grabcaramel.com, www.grabcaramel.com',
+                },
+            },
+        ],
+        [
+            'a production entry in the MIDDLE of a forwarded host list',
+            {
+                headers: {
+                    'x-forwarded-host':
+                        'dev.grabcaramel.com,grabcaramel.com:443,localhost',
+                },
+            },
+        ],
+        [
+            'an empty entry in a forwarded host list (fail closed)',
+            { headers: { 'x-forwarded-host': 'dev.grabcaramel.com,' } },
+        ],
+        [
             'any other grabcaramel.com subdomain',
             { headers: { 'x-forwarded-host': 'docs.grabcaramel.com' } },
         ],
@@ -212,6 +242,28 @@ describe('gate 2: a production host is refused even with the secret set', () => 
 
         expect(res.status).toBe(404)
         expect(mintMock).not.toHaveBeenCalled()
+    })
+
+    it('404s when the baked NEXT_PUBLIC_BASE_URL is production, even though BETTER_AUTH_URL says dev', async () => {
+        baseUrlMock.value = 'https://grabcaramel.com'
+        envMock.BETTER_AUTH_URL = 'https://dev.grabcaramel.com'
+
+        const res = await call()
+
+        expect(res.status).toBe(404)
+        expect(mintMock).not.toHaveBeenCalled()
+        expect(auditOutcomes()).toEqual(['refused_production_host'])
+    })
+
+    it('404s when BETTER_AUTH_URL is production, even though the baked NEXT_PUBLIC_BASE_URL says dev', async () => {
+        baseUrlMock.value = 'https://dev.grabcaramel.com'
+        envMock.BETTER_AUTH_URL = 'https://grabcaramel.com'
+
+        const res = await call()
+
+        expect(res.status).toBe(404)
+        expect(mintMock).not.toHaveBeenCalled()
+        expect(auditOutcomes()).toEqual(['refused_production_host'])
     })
 
     it('serves the dev deployment, localhost and an emulator host', async () => {
@@ -397,8 +449,19 @@ describe('audit: every call past the 404 gate leaves a record that holds no secr
             outcome: 'minted',
             email: EMAIL,
         })
-        // A hash, not the address.
-        expect(data.requesterHash).toMatch(/^[0-9a-f]{16}$/)
+        // A keyed hash, not the address and not a bare SHA-256 of it.
+        expect(data.requesterHash).toBe(
+            createHmac('sha256', SECRET)
+                .update('198.51.100.7')
+                .digest('hex')
+                .slice(0, 16),
+        )
+        expect(data.requesterHash).not.toBe(
+            createHash('sha256')
+                .update('198.51.100.7')
+                .digest('hex')
+                .slice(0, 16),
+        )
         expect(JSON.stringify(data)).not.toContain('198.51.100.7')
         expect(vi.mocked(console.info).mock.calls[0]?.[0]).toContain(
             '"event":"dev_proof_session"',

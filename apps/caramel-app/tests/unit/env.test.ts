@@ -51,6 +51,35 @@ describe('parseServerEnv', () => {
         expect(() => parseServerEnv(rest)).toThrow(/JWT_SECRET/)
     })
 
+    it('(p) DEV_PROOF_SESSION_SECRET (T-9413): unset is fine, a short or whitespace-only value fails boot, a 32+ character value parses trimmed', () => {
+        expect(
+            parseServerEnv(validServerFixture).DEV_PROOF_SESSION_SECRET,
+        ).toBeUndefined()
+        for (const bad of [
+            '',
+            'x'.repeat(31),
+            ' '.repeat(40),
+            `  ${'x'.repeat(31)}  `,
+        ]) {
+            expect(
+                () =>
+                    parseServerEnv({
+                        ...validServerFixture,
+                        DEV_PROOF_SESSION_SECRET: bad,
+                    }),
+                JSON.stringify(bad),
+            ).toThrow(/DEV_PROOF_SESSION_SECRET/)
+        }
+        const valid = 'k'.repeat(32)
+        expect(
+            parseServerEnv({
+                ...validServerFixture,
+                DEV_PROOF_SESSION_SECRET: `  ${valid}
+`,
+            }).DEV_PROOF_SESSION_SECRET,
+        ).toBe(valid)
+    })
+
     it('(o) OPENROUTER_API_URL unset or blank defaults to https://openrouter.ai/api/v1; a set value loses its trailing slash; a non-URL fails boot', () => {
         expect(parseServerEnv(validServerFixture).OPENROUTER_API_URL).toBe(
             'https://openrouter.ai/api/v1',

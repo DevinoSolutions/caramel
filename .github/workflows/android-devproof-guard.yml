@@ -20,6 +20,7 @@ on:
       - 'apps/caramel-android/**'
       - '.github/workflows/android-devproof-guard.yml'
       - '.github/workflows/scripts/android-devproof-guard.sh'
+      - '.github/workflows/scripts/android-release-dex-clean.sh'
       - '.github/workflows/release-android-app.yml'
 
 concurrency:

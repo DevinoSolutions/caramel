@@ -88,8 +88,9 @@ const serverObjectSchema = z.object({
     // user so a social-only-sign-in app can be walked on an emulator without a real
     // Google/Apple account. Set it ONLY in the DEV deployment's env, NEVER in
     // production: unset, the route answers 404 like a route that does not exist
-    // (src/lib/devProof.ts). min(32) so a short guessable value fails the boot.
-    DEV_PROOF_SESSION_SECRET: z.string().min(32).optional(),
+    // (src/lib/devProof.ts). Trimmed, then min(32): a short or whitespace-only
+    // value fails the boot instead of becoming a guessable secret.
+    DEV_PROOF_SESSION_SECRET: z.string().trim().min(32).optional(),
     UPKUMA_HEALTH_SECRET: z.string().optional(),
     // Sendly is the ONLY email transport (src/lib/email.ts); useSend and Resend
     // are retired. The key is optional so a dev/CI boot without email still

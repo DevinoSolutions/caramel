@@ -67,7 +67,6 @@ android {
             initWith(getByName("release"))
             applicationIdSuffix = ".devproof"
             signingConfig = signingConfigs.getByName("debug")
-            matchingFallbacks += listOf("release")
             buildConfigField("String", "API_BASE_URL", "\"https://dev.grabcaramel.com\"")
             buildConfigField("boolean", "DEV_PROOF", "true")
         }

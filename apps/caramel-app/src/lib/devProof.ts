@@ -21,7 +21,7 @@
 // secret or a minted token.
 import { readClientIp } from '@/lib/clientIp'
 import * as Sentry from '@sentry/nextjs'
-import { createHash, timingSafeEqual } from 'node:crypto'
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 import { RateLimiterMemory, RateLimiterRes } from 'rate-limiter-flexible'
 
 /**
@@ -52,14 +52,14 @@ const hourlyLimiter = new RateLimiterMemory({
 const PRODUCTION_APEX = 'grabcaramel.com'
 const DEV_HOST = 'dev.grabcaramel.com'
 
-/** The hostname of a Host / X-Forwarded-Host / URL value, or null when it has none. */
+/** The hostname of ONE Host / X-Forwarded-Host entry or URL, or null when it has none. */
 function hostnameOf(value: string): string | null {
-    const first = value.split(',')[0]?.trim().toLowerCase()
-    if (!first) return null
+    const entry = value.trim().toLowerCase()
+    if (!entry) return null
     // `new URL` needs a scheme; a bare `host:port` has none.
     try {
         const hostname = new URL(
-            first.includes('://') ? first : `http://${first}`,
+            entry.includes('://') ? entry : `http://${entry}`,
         ).hostname
         // A trailing dot is the same DNS name (`grabcaramel.com.`).
         return hostname.replace(/\.$/, '') || null
@@ -80,8 +80,11 @@ export function isProductionHost(hostname: string): boolean {
  * header, X-Forwarded-Host (set by the proxy chain), the request URL, or the
  * app's own configured public origin (`publicOrigins`: BETTER_AUTH_URL and the
  * baked NEXT_PUBLIC_BASE_URL). The last one is the backstop: an app that
- * believes it IS grabcaramel.com refuses even if a proxy rewrote the Host. A
- * value that cannot be parsed counts as production (fail closed).
+ * believes it IS grabcaramel.com refuses even if a proxy rewrote the Host.
+ * Host and X-Forwarded-Host may be comma lists (each proxy hop appends): EVERY
+ * entry is checked, so a production name anywhere in the chain refuses. A value
+ * that cannot be parsed, an empty list entry included, counts as production
+ * (fail closed).
  */
 export function requestTouchesProductionHost(args: {
     host: string | null
@@ -90,11 +93,11 @@ export function requestTouchesProductionHost(args: {
     publicOrigins: readonly (string | undefined)[]
 }): boolean {
     const signals = [
-        args.host,
-        args.forwardedHost,
+        ...(args.host?.split(',') ?? []),
+        ...(args.forwardedHost?.split(',') ?? []),
         args.url,
         ...args.publicOrigins,
-    ].filter((value): value is string => Boolean(value))
+    ].filter((value): value is string => value !== undefined)
     return signals.some(value => {
         const hostname = hostnameOf(value)
         return hostname === null || isProductionHost(hostname)
@@ -119,10 +122,14 @@ export function bearerMatches(
     return timingSafeEqual(provided, expected)
 }
 
-/** A short, stable, non-reversible tag for the requester, for the audit line. */
-export function hashRequesterIp(headers: Headers): string {
+/**
+ * A short, stable tag for the requester, for the audit line: HMAC-SHA-256 of
+ * the client IP keyed with the dev-proof secret, so the tag cannot be reversed
+ * to an address by hashing the IPv4 space, and means nothing without the secret.
+ */
+export function hashRequesterIp(headers: Headers, secret: string): string {
     const ip = readClientIp(headers) ?? 'unknown'
-    return createHash('sha256').update(ip).digest('hex').slice(0, 16)
+    return createHmac('sha256', secret).update(ip).digest('hex').slice(0, 16)
 }
 
 /**
@@ -131,9 +138,12 @@ export function hashRequesterIp(headers: Headers): string {
  * Unlike checkRateLimit this does not fail open: an unexpected limiter fault
  * throws, because this route mints sessions.
  */
-export async function consumeHourlyBudget(headers: Headers): Promise<boolean> {
+export async function consumeHourlyBudget(
+    headers: Headers,
+    secret: string,
+): Promise<boolean> {
     try {
-        await hourlyLimiter.consume(hashRequesterIp(headers), 1)
+        await hourlyLimiter.consume(hashRequesterIp(headers, secret), 1)
         return true
     } catch (error) {
         if (error instanceof RateLimiterRes) return false

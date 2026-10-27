@@ -4,7 +4,8 @@
 # root. Fails (non-zero, with ::error:: lines) when any of these is not true:
 #   1. release-android-app.yml never mentions the variant (it must not build, sign or upload it);
 #   2. the store build keeps the bare applicationId and its shrunk code holds no trace of the dev-proof path
-#      (the `devproof_session` extra name, the dev origin);
+#      (the `devproof_session` extra name, the dev origin): delegated to android-release-dex-clean.sh, which the
+#      release workflow also runs before every Play upload;
 #   3. the devproof build has the suffixed applicationId, DOES hold those strings (so check 2 is proven able to see
 #      them), and is signed with the Android debug key, never an upload key.
 # Needs python3 and the Android build-tools (apksigner, so java) on the runner; ANDROID_HOME must be set.
@@ -48,22 +49,12 @@ with zipfile.ZipFile(apk) as z:
 ' "$1" "$2"
 }
 
-release_apk="$(ls "$OUT"/apk/release/*.apk | head -1)"
 devproof_apk="$(ls "$OUT"/apk/devproof/*.apk | head -1)"
-echo "release APK:  $release_apk"
 echo "devproof APK: $devproof_apk"
 
-# 2. The store build.
-release_id="$(application_id "$OUT/apk/release")"
-if [ "$release_id" != "$STORE_ID" ]; then
-  fail "release applicationId is '$release_id', expected '$STORE_ID' (no suffix)."
-fi
-for needle in "$EXTRA_NAME" "$DEV_ORIGIN"; do
-  found="$(dex_has "$release_apk" "$needle")"
-  if [ "$found" = yes ]; then
-    fail "the shrunk release APK still contains '$needle': the dev-proof path was not stripped by R8."
-  fi
-done
+# 2. The store build: the same script release-android-app.yml runs before any Play upload (applicationId without a
+#    suffix, no dev-only string in the shrunk dex).
+bash .github/workflows/scripts/android-release-dex-clean.sh || failed=1
 
 # 3. The devproof build.
 devproof_id="$(application_id "$OUT/apk/devproof")"

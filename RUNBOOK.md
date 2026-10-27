@@ -425,7 +425,7 @@ And it cannot be pointed at a real person: the body may only name an address mat
 `timingSafeEqual` over SHA-256 digests. Each client IP gets 10 calls an hour, refused ones
 included. Every call that gets past the 404 gate leaves an audit record (log line `[dev-proof]
 {...}`, a Sentry breadcrumb and an info-level Sentry message): outcome, the test email (only if it
-matched the pattern) and a hash of the requester IP; never the secret or the token. The route
+matched the pattern) and a keyed hash (HMAC with the secret) of the requester IP; never the secret or the token. The route
 creates the user the way a Google sign-in does (`mintExtensionSession`, a synthetic `google`
 account `devproof:<email>`, `emailVerified`), so a second call for the same address reuses the
 user and mints a fresh 7-day session.
@@ -468,8 +468,13 @@ ignored.
   fails the build if it does), so no `android-v*` tag, dispatch or Play upload can build, sign or
   upload it. The variant is built only by `android-devproof-guard.yml`, which triggers on pull
   requests alone, holds no secrets and uploads nothing.
+- `release-android-app.yml` runs `.github/workflows/scripts/android-release-dex-clean.sh` on the
+  built store artifacts: on the unsigned APK in the verify job (every PR and tag run), and on the
+  signed APK and AAB in the release job BEFORE the Play upload. It fails unless the applicationId
+  is exactly `com.devino.caramel` and no dex holds the dev-only strings. The script (and the
+  workflow) never spell the variant's name; its needles are assembled from halves.
 - `.github/workflows/scripts/android-devproof-guard.sh` checks the BUILT artifacts on every PR
-  that touches the app: the store APK keeps `com.devino.caramel` (no suffix) and its shrunk dex
+  that touches the app (running the same dex-clean script for the store build): the store APK keeps `com.devino.caramel` (no suffix) and its shrunk dex
   holds neither the `devproof_session` extra name nor the dev origin; the devproof APK has the
   suffix, holds both (so the check is proven able to see them) and is signed `CN=Android Debug`.
 - Every app code path is behind the constant `BuildConfig.DEV_PROOF` (false outside the devproof

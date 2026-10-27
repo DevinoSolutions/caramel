@@ -41,6 +41,20 @@ function kotlinFiles(dir: string): string[] {
     })
 }
 
+function mentioning(dir: string, pattern: RegExp): string[] {
+    return fs
+        .readdirSync(path.join(REPO_ROOT, dir), {
+            withFileTypes: true,
+        })
+        .filter(entry => entry.isFile() && pattern.test(entry.name))
+        .filter(entry => /devproof/i.test(read(dir, entry.name)))
+        .map(entry => entry.name)
+}
+/** The `on:` section of a workflow file (top-level key to the next top-level key). */
+function triggersOf(source: string): string {
+    return source.match(/^on:\n([\s\S]*?)\n\S/m)?.[1] ?? ''
+}
+
 describe('the release workflow never touches the devproof variant', () => {
     it('release-android-app.yml does not mention devproof anywhere (build, sign, upload or otherwise)', () => {
         expect(read('.github/workflows/release-android-app.yml')).not.toMatch(
@@ -60,15 +74,55 @@ describe('the release workflow never touches the devproof variant', () => {
         )
     })
 
-    it('only the guard workflow and its script mention devproof, and no workflow with an android-v tag trigger does', () => {
-        const mentioning = fs
-            .readdirSync(WORKFLOWS, { withFileTypes: true })
-            .filter(entry => entry.isFile() && /\.ya?ml$/.test(entry.name))
-            .filter(entry =>
-                /devproof/i.test(read('.github/workflows', entry.name)),
-            )
-            .map(entry => entry.name)
-        expect(mentioning).toEqual(['android-devproof-guard.yml'])
+    it('only the guard workflow and its guard script mention devproof, across workflows and workflow scripts', () => {
+        expect(mentioning('.github/workflows', /\.ya?ml$/)).toEqual([
+            'android-devproof-guard.yml',
+        ])
+        expect(mentioning('.github/workflows/scripts', /.*/)).toEqual([
+            'android-devproof-guard.sh',
+        ])
+    })
+})
+
+describe('the android-v* tag path re-checks the built store artifact before any Play upload', () => {
+    const DEX_CLEAN = 'android-release-dex-clean.sh'
+
+    const workflowNames = fs
+        .readdirSync(WORKFLOWS, { withFileTypes: true })
+        .filter(entry => entry.isFile() && /\.ya?ml$/.test(entry.name))
+        .map(entry => entry.name)
+
+    it('exactly one workflow triggers on android-v* tags: release-android-app.yml', () => {
+        const tagTriggered = workflowNames.filter(name =>
+            /android-v/.test(triggersOf(read('.github/workflows', name))),
+        )
+        expect(tagTriggered).toEqual(['release-android-app.yml'])
+    })
+
+    it('that workflow runs the dex-clean script in the release job, after the build and before the Play upload', () => {
+        const workflow = read('.github/workflows/release-android-app.yml')
+        const release = workflow.slice(workflow.indexOf('\n  release:'))
+        const call = `bash .github/workflows/scripts/${DEX_CLEAN}`
+        const buildAt = release.indexOf('bundleRelease assembleRelease')
+        const checkAt = release.indexOf(call)
+        const uploadAt = release.indexOf('r0adkll/upload-google-play')
+        expect(buildAt).toBeGreaterThan(-1)
+        expect(checkAt).toBeGreaterThan(buildAt)
+        expect(uploadAt).toBeGreaterThan(checkAt)
+        // The verify job (every PR and tag run) checks the unsigned build too.
+        expect(workflow.indexOf(call)).toBeLessThan(
+            workflow.indexOf('\n  release:'),
+        )
+    })
+
+    it('the dex-clean script exists, checks both the extra name and the dev origin, and never spells devproof', () => {
+        const script = read('.github/workflows/scripts', DEX_CLEAN)
+        expect(script).not.toMatch(/devproof/i)
+        // The needles are built from halves so the file does not contain them.
+        expect(script).toContain('EXTRA_NAME="dev""proof_session"')
+        expect(script).toContain('DEV_ORIGIN="dev.grab""caramel.com"')
+        expect(script).toContain('STORE_ID="com.devino.caramel"')
+        expect(script).toContain('bundle/release/*.aab')
     })
 })
 

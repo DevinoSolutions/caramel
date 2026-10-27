@@ -112,6 +112,11 @@ jobs:
         working-directory: ${{ env.ANDROID_DIR }}
         run: ./gradlew --no-daemon assembleRelease lintVitalRelease
 
+      # T-9413: the unsigned store build must carry no dev-only proof path (the same check runs again on the signed
+      # APK + AAB in the release job, before the Play upload).
+      - name: Verify the store build holds no dev-only code
+        run: bash .github/workflows/scripts/android-release-dex-clean.sh
+
       # Evidence, not a gate: the build and test steps above are what fail the job, and `release`
       # needs it. A store blip must not red a run that passed them, so this is continue-on-error;
       # the summary below keeps the outcome reachable regardless.
@@ -268,6 +273,11 @@ jobs:
           grep -q '^jar verified' <<<"$verify_output" || { echo "::error::jarsigner did not report 'jar verified' for the AAB."; exit 1; }
           apksigner="$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)"
           "$apksigner" verify --print-certs apk/release/app-release.apk
+
+      # T-9413: the store build must carry no dev-only proof path. Reads the BUILT signed APK and AAB (not the source) and
+      # fails before the upload step below if the applicationId has a suffix or a dev-only string survived R8.
+      - name: Verify the store build holds no dev-only code
+        run: bash .github/workflows/scripts/android-release-dex-clean.sh
 
       - name: Upload to Play internal track
         if: env.UPLOAD_TO_PLAY == 'true'

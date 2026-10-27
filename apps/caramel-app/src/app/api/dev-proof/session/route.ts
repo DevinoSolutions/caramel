@@ -37,8 +37,11 @@ import { z } from 'zod'
 const NO_STORE = { 'Cache-Control': 'no-store' } as const
 
 // The pattern is enforced in the handler, AFTER the bearer, so an unauthenticated
-// caller cannot probe it; withRoute's schema only rejects a body with no string
-// email. 254 is the longest valid address: anything longer is refused unread.
+// caller cannot probe it. withRoute's schema runs BEFORE the handler, so a body
+// with no string email (or one over 254 characters, the longest valid address)
+// is a 422 from withRoute even before the bearer is checked; that reveals only
+// that an email is required. Such a call is not audited (it never reaches the
+// handler), but it still spends withRoute's burst limit.
 const DevProofBody = z.object({ email: z.string().max(254) })
 
 /** The answer for a disabled route and for a production host: a bare 404, as for a route that does not exist. */
@@ -66,9 +69,9 @@ function sessionRoute(secret: string) {
             body: DevProofBody,
         },
         async ({ req, body }) => {
-            const requesterHash = hashRequesterIp(req.headers)
+            const requesterHash = hashRequesterIp(req.headers, secret)
 
-            if (!(await consumeHourlyBudget(req.headers))) {
+            if (!(await consumeHourlyBudget(req.headers, secret))) {
                 return refuse(
                     429,
                     'Too many requests',
@@ -159,7 +162,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         auditDevProofCall({
             outcome: 'refused_production_host',
             email: null,
-            requesterHash: hashRequesterIp(req.headers),
+            requesterHash: hashRequesterIp(req.headers, secret),
         })
         return notFound()
     }
