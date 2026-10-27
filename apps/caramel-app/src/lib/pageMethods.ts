@@ -10,7 +10,8 @@
 // into Sentry (CARAMEL-2S). The middleware answers 405 before Next renders.
 //
 // Every method stays open on the paths that take writes:
-//  - /api/*: the API (including Apple's form_post sign-in callback);
+//  - /api/*: the API (including Apple's form_post sign-in callback), but not
+//    the bare /api, which is no route;
 //  - the PostHog telemetry prefix (posthog-js POSTs its events there);
 //  - the Sentry tunnel (`tunnelRoute` in next.config.mjs): the browser SDK
 //    POSTs its error reports there, and refusing them would silence the
@@ -32,7 +33,9 @@ function startsSegment(pathname: string, prefix: string): boolean {
 /** True when `method` on `pathname` is a write to a page, which no page takes. */
 export function refusesPageMethod(method: string, pathname: string): boolean {
     if (READ_METHODS.has(method.toUpperCase())) return false
-    if (startsSegment(pathname, '/api')) return false
+    // Under /api only: the bare /api is no route, and a POST to it reached
+    // /_not-found and the same invariant (CARAMEL-2S, 2026-10-27).
+    if (pathname.startsWith('/api/')) return false
     if (startsSegment(pathname, SENTRY_TUNNEL_PATH)) return false
     if (isTelemetryPath(pathname)) return false
     return true

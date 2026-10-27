@@ -32,6 +32,9 @@ describe('middleware — a write to a page is a 405', () => {
         ['PATCH', '/stores'],
         ['POST', '/llms.txt'],
         ['POST', '/apiary'],
+        // No route answers the bare /api: a POST there reached /_not-found
+        // (CARAMEL-2S again, 2026-10-27, after the first guard shipped).
+        ['POST', '/api'],
         ['POST', '/monitoringx'],
     ])('%s %s -> 405 with Allow', (method, path) => {
         const res = middleware(request(method, path))
