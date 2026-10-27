@@ -1,0 +1,8 @@
+# t9413 logcat excerpt: shrunk release com.devino.caramel (pid 6123), AGP 9.4.1 @152f4e81, emulator Android 14 google_apis x86_64 (KVM)
+# section 1: E/F lines of the app pid
+10-27 06:55:43.156  6123  6123 E .devino.caramel: Not starting debugger since process cannot load the jdwp agent.
+10-27 06:55:43.811  6123  6174 E chromium: [ERROR:simple_version_upgrade.cc(152)] Failed to write a new fake index.
+10-27 06:55:43.812  6123  6181 E chromium: [ERROR:simple_backend_impl.cc(749)] Simple Cache Backend: cache directory inaccessible right after creation; path: /data/user/0/com.devino.caramel/cache/WebView/Default/HTTP Cache/Code Cache/wasm
+10-27 06:55:43.819  6123  6185 E chromium: [ERROR:disk_cache.cc(205)] Unable to create cache
+# section 2: crash / R8 / resource / serialization patterns across all pids
+# (end; empty section 2 = none found)
