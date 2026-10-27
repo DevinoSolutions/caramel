@@ -25,6 +25,12 @@ android {
         // T-7852 (web-session handoff) is wired: the Saved and Account tabs get a web session through
         // POST /api/app/web-session/handoff. It has had no device sign-in run yet; do that before tagging android-v1.6.0.
         versionName = "1.6.0"
+
+        // The origin every call and the WebView go to (AppConfig.API_BASE_URL / WEBSITE_URL, AppLinkGuard.APP_ORIGIN).
+        // debug and release are production; ONLY the devproof build type below overrides it.
+        buildConfigField("String", "API_BASE_URL", "\"https://grabcaramel.com\"")
+        // True ONLY in the devproof build type. Every dev-proof code path is guarded by it so R8 strips it from release.
+        buildConfigField("boolean", "DEV_PROOF", "false")
     }
 
     signingConfigs {
@@ -47,6 +53,24 @@ android {
                 signingConfig = signingConfigs.getByName("release")
             }
         }
+
+        // T-9413: DEV-ONLY proof build, never shipped. It is `release` (same R8 and resource shrinking, so a walk on it
+        // proves the SHRUNK build) except that it: installs beside the store app (applicationIdSuffix), is signed with the
+        // debug key and NEVER the upload key, talks to dev.grabcaramel.com, and accepts a session bearer through the
+        // `devproof_session` intent extra (core/DevProofSession.kt) because the app signs in with Google/Apple only and
+        // no throwaway external accounts are allowed. A build TYPE, not a flavor, on purpose: a flavor dimension would
+        // rename the release tasks and outputs (assembleXxxRelease, outputs/bundle/xxxRelease) that release-android-app.yml
+        // calls by name. Nothing in .github/workflows/release-android-app.yml may mention it (the vitest
+        // tests/unit/android-devproof-never-ships.test.ts and the android-devproof-guard workflow enforce that).
+        // Written after `release` so initWith copies the finished release config.
+        create("devproof") {
+            initWith(getByName("release"))
+            applicationIdSuffix = ".devproof"
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += listOf("release")
+            buildConfigField("String", "API_BASE_URL", "\"https://dev.grabcaramel.com\"")
+            buildConfigField("boolean", "DEV_PROOF", "true")
+        }
     }
 
     compileOptions {
@@ -66,6 +90,13 @@ android {
 
     testOptions {
         unitTests.isReturnDefaultValues = false
+    }
+}
+
+// The devproof build type is built and shrunk, not unit-tested: the unit tests pin the production origin literally.
+androidComponents {
+    beforeVariants(selector().withBuildType("devproof")) { variant ->
+        variant.enableUnitTest = false
     }
 }
 

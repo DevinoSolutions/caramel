@@ -387,6 +387,94 @@ automatic gate. TODO(human): wire this into the actual Dokploy post-deploy
 hook once the deploy trigger itself (see "Deploys & rollback" above) is
 documented.
 
+## Android app (`apps/caramel-android`, com.devino.caramel)
+
+Native shell: grabcaramel.com in a WebView plus a native Google/Apple sign-in sheet. The workflow
+is `.github/workflows/release-android-app.yml` (PRs: debug build, unit tests, lint, unsigned
+release + `lintVitalRelease`; `android-v*` tags: signed AAB to the Play internal track). The
+owner pushes the tags; agents never do.
+
+**Gate: android-v\* tag requires: shrunk release smoke + signed-in/deletion walk on a Play image.**
+The walk is done on the SHRUNK build (R8 + resource shrinking, which is where a signed-in
+regression such as a stripped serializer shows up), signed in, through account deletion, on an
+emulator image that has Play services. Because the app signs in with Google or Apple only, the
+signed-in part uses the dev-only proof path below.
+
+## Dev-only proof path (social-only sign-in apps)
+
+**What it is.** A social-only app cannot be walked signed in without a real Google/Apple account,
+and no new external accounts are allowed. So `dev.grabcaramel.com` can mint a session for a
+throwaway `devproof+<slug>@devino.ca` user, and a dev-only Android build type accepts it. It is
+for proof walks only; it is never shipped and never exists in production. This is the pattern
+other apps in the fleet should copy.
+
+**The two server gates** (`src/lib/devProof.ts`, `src/app/api/dev-proof/session/route.ts`):
+
+1. `DEV_PROOF_SESSION_SECRET` (zod `min(32)`, optional) is set ONLY in the DEV deployment's env.
+   Unset, which is every production and default deploy, `POST /api/dev-proof/session` answers a
+   bare 404 (no body), as for a route that does not exist. (A route handler's 404 has no body;
+   an unknown path renders Next's not-found page, so the two differ in body, not status.)
+2. Even with the secret set, the route answers the same 404 when ANY of the Host header,
+   `X-Forwarded-Host`, the request URL, `BETTER_AUTH_URL` or the baked `NEXT_PUBLIC_BASE_URL`
+   names a production host. The check is a denylist: every `*.grabcaramel.com` name (apex, `www`,
+   `docs`, anything new) except `dev.grabcaramel.com` is production; an unparseable value counts
+   as production. Localhost, the compose service name and the emulator's `10.0.2.2` pass.
+
+And it cannot be pointed at a real person: the body may only name an address matching
+`^devproof\+[a-z0-9-]{1,40}@devino\.ca$`. Auth is `Authorization: Bearer <secret>`, compared with
+`timingSafeEqual` over SHA-256 digests. Each client IP gets 10 calls an hour, refused ones
+included. Every call that gets past the 404 gate leaves an audit record (log line `[dev-proof]
+{...}`, a Sentry breadcrumb and an info-level Sentry message): outcome, the test email (only if it
+matched the pattern) and a hash of the requester IP; never the secret or the token. The route
+creates the user the way a Google sign-in does (`mintExtensionSession`, a synthetic `google`
+account `devproof:<email>`, `emailVerified`), so a second call for the same address reuses the
+user and mints a fresh 7-day session.
+
+**Mint a session** (secret from the DEV compose env; do not echo it into logs or tickets):
+
+```bash
+curl -sS -X POST https://dev.grabcaramel.com/api/dev-proof/session \
+  -H "Authorization: Bearer $DEV_PROOF_SESSION_SECRET" \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"devproof+walk-1@devino.ca"}'
+# 200 {"token":"<43-char bearer>","expiresAt":"2026-11-03T12:00:00.000Z"}
+```
+
+`404` = not enabled here (or a production host), `401` = wrong bearer, `422` = email outside the
+pattern, `429` = over the hourly budget.
+
+**Install the devproof build and hand it the token.** `devproof` is a Gradle BUILD TYPE (a clone of
+`release`: same R8 and resource shrinking; `applicationId com.devino.caramel.devproof`, so it
+installs beside the store app; signed with the DEBUG key, never the upload key; origin
+`dev.grabcaramel.com`; label "Caramel DEVPROOF"). It is a build type, not a flavor, so the release
+task names and outputs that `release-android-app.yml` calls by name do not change.
+
+```bash
+cd apps/caramel-android && ./gradlew assembleDevproof
+adb install -r app/build/outputs/apk/devproof/app-devproof.apk
+adb shell am start -n com.devino.caramel.devproof/com.devino.caramel.MainActivity \
+  --es devproof_session "$TOKEN"
+```
+
+The app stores the bearer as if the sign-in had happened (`SessionStore.adoptDevProofBearer`),
+confirms it with `/api/extension/me`, and links the web tabs. Then walk it: Saved and Account
+tabs signed in, the Account and privacy dialog, delete account (`POST /api/account/delete` on dev),
+and confirm the app returns to signed out. A malformed extra shows a notice instead of being
+ignored.
+
+**It must never ship.** Enforced by:
+
+- `release-android-app.yml` may not mention devproof at all (`tests/unit/android-devproof-never-ships.test.ts`
+  fails the build if it does), so no `android-v*` tag, dispatch or Play upload can build, sign or
+  upload it. The variant is built only by `android-devproof-guard.yml`, which triggers on pull
+  requests alone, holds no secrets and uploads nothing.
+- `.github/workflows/scripts/android-devproof-guard.sh` checks the BUILT artifacts on every PR
+  that touches the app: the store APK keeps `com.devino.caramel` (no suffix) and its shrunk dex
+  holds neither the `devproof_session` extra name nor the dev origin; the devproof APK has the
+  suffix, holds both (so the check is proven able to see them) and is signed `CN=Android Debug`.
+- Every app code path is behind the constant `BuildConfig.DEV_PROOF` (false outside the devproof
+  build), so R8 strips it from release.
+
 ## Email delivery health (async provider failures)
 
 Two different failures lose transactional mail, and until 2026-09-16 the app

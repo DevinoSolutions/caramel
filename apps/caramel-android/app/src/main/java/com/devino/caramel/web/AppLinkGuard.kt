@@ -1,5 +1,7 @@
 package com.devino.caramel.web
 
+import com.devino.caramel.core.AppConfig
+
 /**
  * Decides which URL may enter the shell's WebView (T-7817; mirrors snapvisor-pwa-android PR #15).
  *
@@ -17,8 +19,8 @@ package com.devino.caramel.web
  * Pure Kotlin on purpose, so AppLinkGuardTest covers it on the JVM without a device.
  */
 object AppLinkGuard {
-    /** The only origin the shell loads. Must equal [com.devino.caramel.core.AppConfig.WEBSITE_URL]. */
-    const val APP_ORIGIN = "https://grabcaramel.com"
+    /** The only origin the shell loads: [AppConfig.WEBSITE_URL] (https://grabcaramel.com except in the dev-only devproof build). */
+    const val APP_ORIGIN = AppConfig.WEBSITE_URL
 
     /** Returns [url] when the shell may load it, otherwise null. */
     fun allowedTarget(url: String?): String? {

@@ -1,9 +1,14 @@
 package com.devino.caramel.core
 
+import com.devino.caramel.BuildConfig
+
 /** Constants mirrored from apps/caramel-apple/App/AppConfig.swift. */
 object AppConfig {
-    /** The production Caramel API. Every network call in the app goes here. */
-    const val API_BASE_URL = "https://grabcaramel.com"
+    /**
+     * The Caramel API. Every network call in the app goes here. https://grabcaramel.com in debug and release;
+     * ONLY the dev-only `devproof` build type points it at dev.grabcaramel.com (app/build.gradle.kts).
+     */
+    const val API_BASE_URL = BuildConfig.API_BASE_URL
 
     /** Scheme of the sign-in callback; also declared as the intent filter in AndroidManifest.xml. */
     const val SIGN_IN_SCHEME = "com.devino.caramel"
@@ -26,5 +31,5 @@ object AppConfig {
     const val GOOGLE_SERVER_CLIENT_ID = "907782110658-v939qn59qc27bbngbvrp0kfko79gdidi.apps.googleusercontent.com"
 
     /** The site the WebView shell shows; AppLinkGuard.APP_ORIGIN is the same string (AppLinkGuardTest pins it). */
-    const val WEBSITE_URL = "https://grabcaramel.com"
+    const val WEBSITE_URL = API_BASE_URL
 }

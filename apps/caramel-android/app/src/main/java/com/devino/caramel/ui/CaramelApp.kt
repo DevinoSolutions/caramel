@@ -45,6 +45,7 @@ import android.webkit.WebView
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.devino.caramel.AppContainer
+import com.devino.caramel.BuildConfig
 import com.devino.caramel.core.OAuthProvider
 import com.devino.caramel.web.AccountAction
 import com.devino.caramel.web.AccountPanel
@@ -78,7 +79,8 @@ private fun ShellTab.icon(): ImageVector = when (this) {
  *
  * [requestedUrl] is an AppLinkGuard-approved URL from an intent (or null); the shell loads it and
  * calls [onRequestedUrlConsumed]. [notice] is a message for the shopper owned by the activity,
- * which also owns opening links outside ([onOpenOutside]).
+ * which also owns opening links outside ([onOpenOutside]). [devProofBearer] is the dev-only `devproof` build's session
+ * bearer from the launch intent (core/DevProofSession.kt); it is always null, and never read, in release.
  */
 @Composable
 fun CaramelApp(
@@ -90,6 +92,7 @@ fun CaramelApp(
     onStartSignIn: (String) -> Unit,
     onStartGoogleSignIn: (keepError: Boolean) -> Unit,
     onOpenOutside: (String) -> Unit,
+    devProofBearer: String?,
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -173,10 +176,18 @@ fun CaramelApp(
         }
     }
 
-    // Launch: read the stored bearer, then confirm it is still alive (a 401 clears it).
-    LaunchedEffect(Unit) {
+    // Launch: read the stored bearer, then confirm it is still alive (a 401 clears it). In the dev-only devproof build a
+    // bearer from the launch intent replaces the stored one in between and is linked to the web tabs like a fresh sign-in.
+    // The adoption lives in this one effect, after load(), so the store's own read can never land after it.
+    LaunchedEffect(devProofBearer) {
         container.session.load()
+        if (BuildConfig.DEV_PROOF && devProofBearer != null) {
+            container.session.adoptDevProofBearer(devProofBearer)
+        }
         container.session.validate()
+        if (BuildConfig.DEV_PROOF && devProofBearer != null && container.session.token != null) {
+            startHandoff(ShellTab.DEALS.startPath)
+        }
     }
 
     val host = remember(webViewGeneration) {

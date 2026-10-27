@@ -182,6 +182,22 @@ class SessionStore(
     }
 
     /**
+     * DEV-ONLY (T-9413, see [DevProofSession]): stores a bearer minted by POST /api/dev-proof/session as if a sign-in had
+     * completed. Reached only behind `BuildConfig.DEV_PROOF`, so R8 removes it from release. Call [validate] after it (the
+     * bearer is confirmed against the server there, like a stored one); a refused write is shown, never swallowed.
+     */
+    suspend fun adoptDevProofBearer(bearer: String) {
+        try {
+            withContext(io) { tokens.write(bearer) }
+            mutableState.update {
+                it.copy(token = bearer, username = null, isSigningIn = false, errorMessage = null)
+            }
+        } catch (e: TokenStoreException) {
+            mutableState.update { it.copy(isSigningIn = false, errorMessage = e.message) }
+        }
+    }
+
+    /**
      * Signs out: clears the on-device session and revokes the bearer on the server
      * (DELETE /api/extension/session). The local session is cleared even when the revoke fails, so
      * the shopper is never stuck signed in, and the failure is shown rather than swallowed.

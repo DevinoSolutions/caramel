@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- T-9413: the dev-only proof build must be unmistakable next to the store app on a device. -->
+    <string name="app_name">Caramel DEVPROOF</string>
+</resources>

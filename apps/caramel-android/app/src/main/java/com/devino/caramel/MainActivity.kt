@@ -14,6 +14,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.lifecycleScope
 import com.devino.nativeauthtab.SignInBrowser
 import com.devino.caramel.core.AppConfig
+import com.devino.caramel.core.DevProofSession
 import com.devino.caramel.core.OAuthProvider
 import com.devino.caramel.ui.CaramelApp
 import com.devino.caramel.ui.CaramelTheme
@@ -36,6 +37,9 @@ class MainActivity : ComponentActivity() {
     // An AppLinkGuard-approved URL from an intent, waiting for the shell to load it.
     private var requestedUrl by mutableStateOf<String?>(null)
 
+    // DEV-ONLY (T-9413): the devproof build's session bearer from the launch intent. Never set outside that build.
+    private var devProofBearer by mutableStateOf<String?>(null)
+
     // A message for the shopper that is not a sign-in error (a refused or unopenable link).
     private var notice by mutableStateOf<String?>(null)
 
@@ -55,6 +59,7 @@ class MainActivity : ComponentActivity() {
         if (savedInstanceState == null && !fromHistory) {
             handleCallback(intent)
             navigateFromIntent(intent)
+            readDevProofBearer(intent)
         }
         setContent {
             CaramelTheme {
@@ -67,6 +72,7 @@ class MainActivity : ComponentActivity() {
                     onStartSignIn = ::openSignInTab,
                     onStartGoogleSignIn = ::startGoogleSignIn,
                     onOpenOutside = ::openOutside,
+                    devProofBearer = devProofBearer,
                 )
             }
         }
@@ -77,6 +83,7 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         handleCallback(intent)
         navigateFromIntent(intent)
+        readDevProofBearer(intent)
     }
 
     override fun onStop() {
@@ -167,6 +174,19 @@ class MainActivity : ComponentActivity() {
             IntentTarget.None -> Unit
             is IntentTarget.Load -> requestedUrl = target.url
             is IntentTarget.Refused -> notice = "Caramel did not open ${target.what} because it is not on grabcaramel.com."
+        }
+    }
+
+    /**
+     * DEV-ONLY (T-9413, see [DevProofSession]): takes the session bearer from the `devproof_session` extra. Dead code
+     * unless `BuildConfig.DEV_PROOF`, so R8 strips it from release; a malformed extra is reported, not ignored.
+     */
+    private fun readDevProofBearer(intent: Intent?) {
+        if (!BuildConfig.DEV_PROOF) return
+        when (val extra = DevProofSession.parse(intent?.getStringExtra(DevProofSession.EXTRA_NAME))) {
+            DevProofSession.Extra.Absent -> Unit
+            DevProofSession.Extra.Malformed -> notice = "The ${DevProofSession.EXTRA_NAME} extra is not a session bearer."
+            is DevProofSession.Extra.Bearer -> devProofBearer = extra.token
         }
     }
 
