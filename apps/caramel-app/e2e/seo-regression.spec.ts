@@ -1,5 +1,5 @@
-import { expect, test } from './support/test'
 import { INDEXNOW_KEY, INDEXNOW_KEY_PATH } from '../src/lib/seo/indexnow'
+import { expect, test } from './support/test'
 
 // SEO regression gate — everything here reads the RAW server HTML via
 // page.request.get (no JS execution), so it asserts exactly what a crawler

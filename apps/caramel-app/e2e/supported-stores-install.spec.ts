@@ -1,5 +1,5 @@
-import { expect, test } from './support/test'
 import { devices, type Page } from '@playwright/test'
+import { expect, test } from './support/test'
 
 // /supported-stores was the second-biggest landing page and had no
 // browser-store link: 5 of 175 landing sessions ever reached a browser store, against

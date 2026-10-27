@@ -1,5 +1,5 @@
-import { expect, test } from './support/test'
 import { seedVerifiedUser } from './support/seed-user'
+import { expect, test } from './support/test'
 
 // E-05 — the login SUCCESS path against a REAL better-auth session (every other
 // auth spec here mocks /api/auth/** via page.route; this one does not). A

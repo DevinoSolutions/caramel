@@ -1,5 +1,5 @@
-import { expect, test } from './support/test'
 import { type Locator, type Page } from '@playwright/test'
+import { expect, test } from './support/test'
 
 // /agent-setup and /agent-setup/<agent> — the "Onboard your agent" flow a
 // human walks: read the page on a phone, copy the sentence, check the guide

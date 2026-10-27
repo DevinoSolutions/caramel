@@ -1,7 +1,7 @@
-import { expect, test } from './support/test'
 import { normalizeShopperCode } from '../src/lib/shopperCoupons'
 import { seedVerifiedUser } from './support/seed-user'
 import { firstLinkedStoreDomain } from './support/stores'
+import { expect, test } from './support/test'
 import { openTestPrisma } from './support/test-prisma'
 
 // The "Add a code" form on /coupons/[store] (shopper-submitted codes, owner

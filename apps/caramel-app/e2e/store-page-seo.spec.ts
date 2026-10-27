@@ -1,5 +1,5 @@
-import { expect, test } from './support/test'
 import { firstLinkedStoreDomain } from './support/stores'
+import { expect, test } from './support/test'
 import { openTestPrisma } from './support/test-prisma'
 
 // Store pages (/coupons/<store>) carry nearly all of the site's search

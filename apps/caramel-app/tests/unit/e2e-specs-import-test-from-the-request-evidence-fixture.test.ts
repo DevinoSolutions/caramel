@@ -16,9 +16,7 @@ const E2E_DIR = path.resolve(
 const PLAYWRIGHT_IMPORT = /import\s*\{([^}]*)\}\s*from\s*'@playwright\/test'/g
 
 /** Specs (by name) that import a runtime `test` from '@playwright/test'. */
-function specsBypassingTheFixture(
-    sources: Record<string, string>,
-): string[] {
+function specsBypassingTheFixture(sources: Record<string, string>): string[] {
     return Object.entries(sources)
         .filter(([, source]) =>
             [...source.matchAll(PLAYWRIGHT_IMPORT)].some(match =>
@@ -50,7 +48,8 @@ describe('e2e specs use the request-evidence fixture', () => {
     it('the detector flags a bypass and accepts the fixture and type-only imports (red-proof)', () => {
         expect(
             specsBypassingTheFixture({
-                'bad.spec.ts': "import { expect, test } from '@playwright/test'",
+                'bad.spec.ts':
+                    "import { expect, test } from '@playwright/test'",
                 'bad-multi.spec.ts':
                     "import { devices, test, type Page } from '@playwright/test'",
                 'good.spec.ts':

@@ -35,9 +35,7 @@ describe('sanitizedUrl', () => {
     })
 
     it('prints a fixed marker, never the raw string, for a URL that does not parse', () => {
-        expect(sanitizedUrl('not a url?token=SECRET')).toBe(
-            '(unparseable url)',
-        )
+        expect(sanitizedUrl('not a url?token=SECRET')).toBe('(unparseable url)')
     })
 
     it('cuts a very long path', () => {

@@ -58,7 +58,9 @@ export default defineConfig({
         // because 'on-first-retry' records only the retry, which is the one
         // that passes.
         trace:
-            startServer || process.env.CI ? 'on-first-retry' : 'retain-on-failure',
+            startServer || process.env.CI
+                ? 'on-first-retry'
+                : 'retain-on-failure',
         screenshot: 'only-on-failure',
         // The app has first-class prefers-reduced-motion support: the 3D
         // hero/vault scenes render their static CSS posters instead of

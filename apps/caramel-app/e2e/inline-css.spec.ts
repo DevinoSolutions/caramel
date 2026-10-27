@@ -1,6 +1,6 @@
-import { expect, test } from './support/test'
 import { type Page } from '@playwright/test'
 import { firstLinkedStoreDomain } from './support/stores'
+import { expect, test } from './support/test'
 
 // The stylesheet ships inside the HTML, so a first visit paints without
 // waiting on a second round trip.

@@ -1,9 +1,9 @@
-import { expect, test } from './support/test'
 import { type Page } from '@playwright/test'
 import {
     isPosthogVerificationConfigured,
     queryEventsByTestRun,
 } from './support/posthog'
+import { expect, test } from './support/test'
 
 // Support flow e2e with REAL PostHog ingestion verification.
 //
