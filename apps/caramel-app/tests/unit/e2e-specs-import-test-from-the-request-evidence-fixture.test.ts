@@ -19,7 +19,7 @@ const PLAYWRIGHT_IMPORT = /import\s*\{([^}]*)\}\s*from\s*'@playwright\/test'/g
 function specsBypassingTheFixture(sources: Record<string, string>): string[] {
     return Object.entries(sources)
         .filter(([, source]) =>
-            [...source.matchAll(PLAYWRIGHT_IMPORT)].some(match =>
+            Array.from(source.matchAll(PLAYWRIGHT_IMPORT)).some(match =>
                 (match[1] ?? '')
                     .split(',')
                     .map(name => name.trim())

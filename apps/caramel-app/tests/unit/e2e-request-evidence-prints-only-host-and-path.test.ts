@@ -93,6 +93,6 @@ describe('formatRequestEvidence', () => {
         )
 
         expect(lines).toHaveLength(MAX_EVIDENCE_LINES + 2)
-        expect(lines.at(-1)).toContain('and 5 more')
+        expect(lines[lines.length - 1]).toContain('and 5 more')
     })
 })

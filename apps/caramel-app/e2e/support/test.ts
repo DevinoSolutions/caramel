@@ -65,7 +65,9 @@ export const test = base.extend<{ requestEvidence: undefined }>({
 
             if (testInfo.status === testInfo.expectedStatus) return
 
-            const pending = [...inFlight.values()].filter(isHydrationCritical)
+            const pending = Array.from(inFlight.values()).filter(
+                isHydrationCritical,
+            )
             const lines = formatRequestEvidence(
                 `${testInfo.titlePath.filter(Boolean).join(' > ')} (attempt ${testInfo.retry + 1}, ${testInfo.status ?? 'unknown'})`,
                 [...seen, ...pending],
