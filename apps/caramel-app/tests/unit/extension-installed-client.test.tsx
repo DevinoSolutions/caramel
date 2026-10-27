@@ -190,7 +190,10 @@ describe('recordExtensionInstalled', () => {
             expect.objectContaining({ message: 'Load failed' }),
             expect.objectContaining({
                 level: 'error',
-                tags: { operation: 'extension_installed', step: 'server_report' },
+                tags: {
+                    operation: 'extension_installed',
+                    step: 'server_report',
+                },
                 extra: expect.objectContaining({
                     iid: IID,
                     pageVisibility: 'visible',
