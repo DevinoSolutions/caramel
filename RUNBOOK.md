@@ -26,12 +26,9 @@ with `ls` or a repo search without knowing the doc structure first.
 ## Where to look
 
 - **Dokploy** (deploy dashboard, logs, container status, rollback): the
-  team's Dokploy instance is `https://devino.basa-ulmer.ts.net/`.
-  TODO(human): confirm this is the instance hosting caramel-app, and record
-  the exact project/application name within it (this repo has zero tracked
-  Dokploy config — `git grep -i dokploy` across the whole tree turns up one
-  code comment and nothing else, so the app/project name cannot be derived
-  from source).
+  team's internal Dokploy instance (reachable only on the team network).
+  Prod is the "Caramel Prod Compose (LIVE)" compose service in the Caramel
+  project; see [Deploys & rollback](#deploys--rollback) for how it deploys.
 - **Sentry**: `https://sentry.devino.ca`, org `devino`, project `caramel`.
   Errors from caught route failures (`handleRouteError`, F-002) are tagged
   `route`/`method`/`requestId`; uncaught render errors reach it via
@@ -171,14 +168,17 @@ Merge-to-main checklist (whoever merges does all of it):
 
 1. Right after the merge, take a backup of the prod compose's Postgres (the
    compose backup in Dokploy), then queue ONE prod deploy of the compose.
-   Never queue in the 23:55-00:05Z window. Keep at most one queued deploy per
+   Never queue in the 23:55-00:05Z window (a team-wide no-deploy rule for
+   the shared Dokploy host around 00:00Z). Keep at most one queued deploy per
    service: if one is already waiting, leave it alone (it builds `main`'s HEAD
    when it runs) and never re-queue.
 2. When the deploy is done, check that `https://grabcaramel.com/api/version`
    reports the merged sha (or a descendant) and capture it.
-3. Re-run the failed job of the merge commit's `main` CI run once (the
-   push-mode E2E job waits for the deployment to carry the commit and times
-   out if the deploy was queued late).
+3. Re-run the failed job of the merge commit's `main` CI run once. On `main`
+   the push-mode E2E job checks once that prod already serves the commit
+   (`DEPLOY_WAIT_TIMEOUT_SECONDS` is `0` there) and fails immediately when it
+   does not, which is every merge, because no deploy has run yet. Re-run it
+   after step 2 passes.
 
 Since F-016 the root `docker-compose.yml` (`Dockerfile` +
 `docker-entrypoint.sh`) is the INTENDED deployment unit — local and CI build

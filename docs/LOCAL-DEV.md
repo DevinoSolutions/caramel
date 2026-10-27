@@ -2,8 +2,8 @@
 
 Caramel runs on **one root Docker Compose** (F-016). `pnpm dev` builds the app
 image and boots the real service graph in prod-mode builds. This same
-`docker-compose.yml` is the deployment unit production migrates onto (cutover
-gated, human-run) — so what you run locally is what ships. Hot reload is
+`docker-compose.yml` is the deployment unit production runs (cut over
+2026-08-08) — so what you run locally is what ships. Hot reload is
 deliberately traded away for that parity (ratified 2026-07-09); use the
 `pnpm dev:next` escape hatch below when you want framework hot reload.
 
