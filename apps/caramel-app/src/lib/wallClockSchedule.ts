@@ -118,6 +118,8 @@ export function wallClockCrontab(schedule: WallClockSchedule): string {
     const minute = offset % MINUTES_PER_HOUR
     const startHour = Math.floor(offset / MINUTES_PER_HOUR)
     if (hourStep === 1) return `${minute} * * * *`
+    // A daily period is one fixed hour; a "/24" step is not a portable cron form.
+    if (hourStep === 24) return `${minute} ${startHour} * * *`
     const hours =
         startHour === 0 ? `*/${hourStep}` : `${startHour}-23/${hourStep}`
     return `${minute} ${hours} * * *`
@@ -166,7 +168,8 @@ export interface WallClockTimerOptions {
     schedule: WallClockSchedule
     /**
      * Runs at each slot. It must report its own failures (the callers check in
-     * to a Sentry cron monitor); a rejection here is logged as the last resort.
+     * to a Sentry cron monitor); a rejection or a synchronous throw here is
+     * logged as the last resort and never ends the schedule.
      */
     onSlot: () => Promise<void>
 }
@@ -185,7 +188,11 @@ export function startWallClockTimer(options: WallClockTimerOptions): {
         const timer = setTimeout(
             () => {
                 arm()
-                options.onSlot().catch((error: unknown) => {
+                // new Promise runs its executor synchronously, so onSlot starts
+                // right now, and a synchronous throw becomes a rejection too.
+                new Promise<void>(resolve => {
+                    resolve(options.onSlot())
+                }).catch((error: unknown) => {
                     console.error(
                         `[${options.name}] scheduled run rejected (it must report its own failures)`,
                         error,

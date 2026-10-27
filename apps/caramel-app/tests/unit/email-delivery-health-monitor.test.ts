@@ -471,7 +471,13 @@ describe('the scheduled run checks in to the Sentry cron monitor', () => {
         await tickOnce()
 
         expect(statuses()).toEqual(['in_progress', 'error'])
-        expect(captureExceptionMock).toHaveBeenCalled()
+        // The pre-cron-monitor tag stays so alert rules keyed on it still match.
+        expect(captureExceptionMock).toHaveBeenCalledWith(expect.any(Error), {
+            tags: {
+                surface: 'email-delivery-health',
+                area: 'email-health.timer',
+            },
+        })
     })
 
     it('carries the :23 hourly crontab monitor config on every check-in, closing one too', async () => {

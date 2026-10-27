@@ -51,6 +51,44 @@ describe('parseServerEnv', () => {
         expect(() => parseServerEnv(rest)).toThrow(/JWT_SECRET/)
     })
 
+    it('(q) EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES (T-9436): unset is 60, a period that tiles the UTC day parses, any other fails boot naming the variable, the value and the allowed set', () => {
+        expect(
+            parseServerEnv(validServerFixture)
+                .EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES,
+        ).toBe(60)
+        for (const good of ['5', '15', '60', '360', '1440']) {
+            expect(
+                parseServerEnv({
+                    ...validServerFixture,
+                    EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES: good,
+                }).EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES,
+                good,
+            ).toBe(Number(good))
+        }
+        for (const bad of ['45', '90', '4', '1', '7']) {
+            const attempt = () =>
+                parseServerEnv({
+                    ...validServerFixture,
+                    EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES: bad,
+                })
+            expect(attempt, bad).toThrow(
+                /EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES: got \d+; allowed: a divisor of 60/,
+            )
+            expect(attempt, bad).toThrow(`got ${bad};`)
+            // The name appears once: parseServerEnv adds it, the message does not.
+            let message = ''
+            try {
+                attempt()
+            } catch (error) {
+                message = (error as Error).message
+            }
+            expect(
+                message.split('EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES').length,
+                bad,
+            ).toBe(2)
+        }
+    })
+
     it('(p) DEV_PROOF_SESSION_SECRET (T-9413): unset is fine, a short or whitespace-only value fails boot, a 32+ character value parses trimmed', () => {
         expect(
             parseServerEnv(validServerFixture).DEV_PROOF_SESSION_SECRET,

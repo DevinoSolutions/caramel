@@ -19,6 +19,8 @@ export interface CronJobOptions {
     label: string
     monitorSlug: string
     monitorConfig: WallClockMonitorConfig
+    /** Extra Sentry tags on the exception captured when `run` throws (alongside `area`). */
+    errorTags?: Record<string, string>
     /**
      * The job. Resolves to the check-in status it earned; it logs its own
      * detail. A throw is captured to Sentry and checks in as 'error'.
@@ -44,7 +46,9 @@ export async function runCronJobWithCheckIn(
     try {
         status = await options.run()
     } catch (error) {
-        Sentry.captureException(error, { tags: { area: `${label}.timer` } })
+        Sentry.captureException(error, {
+            tags: { ...options.errorTags, area: `${label}.timer` },
+        })
         console.error(`[${label}] scheduled run threw`, error)
     }
     if (!hasClient) return

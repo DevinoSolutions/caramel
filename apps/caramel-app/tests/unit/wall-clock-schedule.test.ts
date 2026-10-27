@@ -108,6 +108,9 @@ describe('wallClockCrontab', () => {
         [{ periodMinutes: 360, offsetMinutes: 37 }, '37 */6 * * *'],
         [{ periodMinutes: 360, offsetMinutes: 97 }, '37 1-23/6 * * *'],
         [{ periodMinutes: 120, offsetMinutes: 5 }, '5 */2 * * *'],
+        [{ periodMinutes: 1440, offsetMinutes: 90 }, '30 1 * * *'],
+        [{ periodMinutes: 1440, offsetMinutes: 0 }, '0 0 * * *'],
+        [{ periodMinutes: 1440, offsetMinutes: 1439 }, '59 23 * * *'],
         [{ periodMinutes: 15, offsetMinutes: 23 }, '8-59/15 * * * *'],
         [{ periodMinutes: 15, offsetMinutes: 30 }, '*/15 * * * *'],
     ])('%j is %s', (schedule, crontab) => {
@@ -272,6 +275,22 @@ describe('startWallClockTimer', () => {
         expect(errorSpy).toHaveBeenCalledWith(
             expect.stringContaining('[test] scheduled run rejected'),
             expect.any(Error),
+        )
+        expect(onSlot).toHaveBeenCalledTimes(2)
+    })
+
+    it('a job that throws synchronously is logged loudly and the schedule keeps going', async () => {
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+        onSlot.mockImplementationOnce(() => {
+            throw new Error('sync boom')
+        })
+        startWallClockTimer({ name: 'test', schedule: HOURLY_AT_07, onSlot })
+
+        await vi.advanceTimersByTimeAsync(17 * MINUTE + HOUR)
+
+        expect(errorSpy).toHaveBeenCalledWith(
+            expect.stringContaining('[test] scheduled run rejected'),
+            expect.objectContaining({ message: 'sync boom' }),
         )
         expect(onSlot).toHaveBeenCalledTimes(2)
     })

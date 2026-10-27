@@ -60,7 +60,12 @@ const HOUR_MS = 60 * MINUTE_MS
 const EMAIL_HEALTH_SLOT_OFFSET_MINUTES = 23
 export const EMAIL_HEALTH_MONITOR_SLUG = 'caramel-email-delivery-health'
 
-/** The run schedule: every EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES (the window length too: one window per slot, no gaps, no overlap). */
+/**
+ * The run schedule: every EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES, which is also
+ * the window each run reads. Consecutive slots read consecutive windows, but a
+ * missed slot (a restart across it, or the boot guard) leaves its window unread,
+ * and timer lag shifts a window by milliseconds.
+ */
 export function emailDeliveryHealthSchedule(
     periodMinutes: number,
 ): WallClockSchedule {
@@ -77,7 +82,7 @@ export function emailDeliveryHealthMonitorConfig(
     periodMinutes: number,
 ): WallClockMonitorConfig {
     return wallClockMonitorConfig(emailDeliveryHealthSchedule(periodMinutes), {
-        checkinMargin: Math.min(30, Math.max(1, Math.floor(periodMinutes / 2))),
+        checkinMargin: Math.min(30, Math.floor(periodMinutes / 2)),
         maxRuntime: 5,
     })
 }
@@ -221,6 +226,8 @@ function runMonitoredEmailHealthCycle(): Promise<void> {
         monitorConfig: emailDeliveryHealthMonitorConfig(
             env.EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES,
         ),
+        // Kept from before the cron monitor so alert rules keyed on it still match.
+        errorTags: { surface: 'email-delivery-health' },
         run: async () => {
             // Overlap guard: a slow provider must not stack cycles.
             if (running) {
