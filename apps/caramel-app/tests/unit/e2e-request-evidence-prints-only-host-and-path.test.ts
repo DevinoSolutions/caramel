@@ -181,7 +181,6 @@ describe('formatRequestEvidence', () => {
         expect(lines[2]).toContain('chunks/stalled.js -> pending')
         expect(lines[3]).toContain('grabcaramel.com/profile -> pending')
         expect(lines).toHaveLength(MAX_EVIDENCE_LINES + 2)
-        expect(lines.join('
-')).toContain('more')
+        expect(lines.join('\n')).toContain('more')
     })
 })
