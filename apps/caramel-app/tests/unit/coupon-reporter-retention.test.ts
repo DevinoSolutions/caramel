@@ -170,17 +170,18 @@ describe('startCouponReporterRetentionSweep', () => {
         ])
     })
 
-    it('keeps ticking after a tick whose sweep throws (the schedule is re-armed before the sweep)', async () => {
-        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    it('keeps ticking after a tick whose sweep never settles (the schedule is re-armed BEFORE the sweep is awaited)', async () => {
         vi.stubEnv('NODE_ENV', 'production')
         const { startCouponReporterRetentionSweep } = await loadModule()
-        sweepMock.mockRejectedValueOnce(new Error('boom'))
+        // A hung DELETE: the first tick's sweep never resolves or rejects.
+        sweepMock.mockImplementationOnce(() => new Promise<SweepRun>(() => {}))
 
         startCouponReporterRetentionSweep()
-        await vi.advanceTimersByTimeAsync(BOOT_TO_SLOT_MS + HOUR)
+        await vi.advanceTimersByTimeAsync(BOOT_TO_SLOT_MS)
+        expect(sweepMock).toHaveBeenCalledTimes(1)
+        await vi.advanceTimersByTimeAsync(HOUR)
 
         expect(sweepMock).toHaveBeenCalledTimes(2)
-        errorSpy.mockRestore()
     })
 
     it('is idempotent: a second start is a no-op and does not add a second timer', async () => {
