@@ -268,7 +268,16 @@ export function caramelSendMessage(message, timeoutMs) {
 
 // How long a per-tab handoff may wait for the background. A worker that does
 // not answer costs only the handoff, never the attempt.
-const CARAMEL_HANDOFF_WAIT_MS = 3000
+//
+// It was 3 s, which a busy browser outruns: while a heavy store page loads,
+// every extension storage call waits on the browser process. Measured
+// 2026-10-27 on 4inkjets.com, a bare test extension's storage.session.set
+// took p90 2-3 s and up to 4.6 s, and the background runs handoffs one after
+// another, so a read on the next page waits behind the writes before it. The
+// read then came back unanswered, the next page saw no run and no submitted
+// code, and the run stopped after one code (T-9245). A healthy browser answers
+// in milliseconds, so the longer wait only costs time when storage is slow.
+const CARAMEL_HANDOFF_WAIT_MS = 10000
 
 /* One operation on what this tab leaves for its next document (tab-handoff.js,
  * held by the background where the store's page cannot write it): 'set',

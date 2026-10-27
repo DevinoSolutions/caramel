@@ -926,7 +926,11 @@ export async function caramelClaimRunHop() {
         await caramelEndRun()
         return null
     }
-    const run = (await caramelTabHandoff('get', CARAMEL_RUN_KEY))?.value
+    // An unanswered read (null) is not "no run": ask once more, as a take does.
+    let answer = await caramelTabHandoff('get', CARAMEL_RUN_KEY)
+    if (answer === null)
+        answer = await caramelTabHandoff('get', CARAMEL_RUN_KEY)
+    const run = answer?.value
     if (!run) return null
     if (typeof run !== 'object' || run.cancelled) {
         await caramelEndRun()
