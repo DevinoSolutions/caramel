@@ -88,3 +88,13 @@
   - Backup `caramel-prod-compose/2026-10-27T17-06-58-618Z.sql.gz` was taken first.
   - One deploy was queued at 17:07Z and was live at 17:15Z. It also carries #589 (extension 1.4.23 bump).
 - `t9447-7b602134-deploy-wait-rerun-e2e-push.png`: headed stealth capture of the merge commit's DEPLOY_WAIT rerun (MASTER 10-27 checklist step 4). https://github.com/DevinoSolutions/caramel/actions/runs/40547423108/job/122347193080 shows "E2E & Visual Regression (push)" on attempt #2 succeeded in 3m 16s, with "Wait for the deployment to carry this commit" passing in 1s against the live 7b602134.
+- `t9427-pr591-ci-unit-run-e2e-push-tests.png`: headed stealth capture of PR #591's CI unit job at head 7bb2ec2c, which exercises the change (MASTER 10-26: a CI-only change is proven by the run that exercises it). https://github.com/DevinoSolutions/caramel/actions/runs/40561802870/job/122393036595 succeeded in 1m 28s. Line 685 shows `tests/unit/run-e2e-push.test.ts (18 tests)` passing, including "fails with the rerun exit code when the rerun is red too" and "survives a transient 502 on the post-suite read and still reruns". The same job also passed `e2e-request-evidence-prints-only-host-and-path.test.ts` (15 tests) and `e2e-specs-import-test-from-the-request-evidence-fixture.test.ts` (3 tests); 262 test files passed.
+- `t9427-pr591-prod-api-version-d1c5c16e.png`: headed stealth capture of https://grabcaramel.com/api/version serving `{"sha":"d1c5c16e491fe1dfd487234c13cb88aa22661110"}`, the #591 merge commit (T-9427).
+  - Backup `caramel-prod-compose/2026-10-27T19-00-35-775Z.sql.gz` (14 MB) was taken first.
+  - One deploy was queued at 19:01Z and was live at 19:04:42Z.
+- `t9427-d1c5c16e-main-e2e-push-via-run-e2e-push.png`: headed stealth capture of the #591 merge commit's main CI push job, the run that exercises the change (MASTER 10-26 rule). https://github.com/DevinoSolutions/caramel/actions/runs/40565189841/job/122404465674 shows:
+  - "E2E & Visual Regression (push)" succeeded on attempt #1 in 12m 9s.
+  - "Wait for the deployment to carry this commit" passed in 1s.
+  - "Run E2E tests" ran `bash ../../.github/workflows/scripts/run-e2e-push.sh`, which logged "E2E starts against d1c5c16e… (testing commit d1c5c16e…)". 166 passed and 10 skipped.
+  - There are no "Upload test report" steps.
+  - No DEPLOY_WAIT rerun was needed: the deploy was live at 19:04:42Z, before the wait step ran at 19:10Z.
