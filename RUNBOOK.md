@@ -174,15 +174,16 @@ Merge-to-main checklist (whoever merges does all of it):
    when it runs) and never re-queue.
 2. When the deploy is done, check that `https://grabcaramel.com/api/version`
    reports the merged sha (or a descendant) and capture it.
-3. Re-run the failed job of the NEWEST merge commit's `main` CI run that the
-   deploy carries, once, and never several at once: the workflow's concurrency
-   group cancels the earlier re-run. On `main` the push-mode E2E job checks
-   once that prod already serves the commit or a descendant of it
-   (`DEPLOY_WAIT_TIMEOUT_SECONDS` is `0` there; ancestry is decided by GitHub's
-   compare API) and fails immediately when it does not, which is every merge,
-   because no deploy has run yet. Re-run it after step 2 passes. One deploy
-   usually carries several merges; the older commits' runs would pass on
-   re-run too (prod serves a descendant of them), but the newest one is enough.
+3. Re-run the failed E2E job of the newest merge commit on `main` that the
+   deploy carries, once. Never re-run several at once: a re-run in the same
+   concurrency group cancels any other in-flight one. On `main` the push-mode
+   E2E job checks once that prod already serves the commit or a descendant of
+   it (`DEPLOY_WAIT_TIMEOUT_SECONDS` is `0` there; ancestry is decided by
+   GitHub's compare API) and fails immediately when it does not, which is
+   every merge, because no deploy has run yet. Re-run it after step 2 passes.
+   One deploy usually carries several merges: older merge commits' E2E runs
+   stay red on the commit list by design (they would pass on a re-run, since
+   prod serves a descendant of them, but the newest one is enough).
 
 Since F-016 the root `docker-compose.yml` (`Dockerfile` +
 `docker-entrypoint.sh`) is the INTENDED deployment unit — local and CI build

@@ -16,6 +16,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 //                  scripted status string or a scripted failure; logs every call.
 // MOCK sleep is a no-op so a multi-poll case does not wait out the interval.
 // Nothing here talks to GitHub or to grabcaramel.com.
+// Needs a POSIX bash on PATH: CI is ubuntu; on Windows run it from Git Bash with
+// Git's bash resolving first, NOT the WSL launcher in System32.
 const REPO_ROOT = path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),
     '../../../..',
@@ -52,6 +54,7 @@ const PASSTHROUGH_TOOLS = [
     'grep',
     'cut',
     'cat',
+    'tr',
 ]
 
 interface VersionResponse {
@@ -90,11 +93,14 @@ function servesSha(sha: string): VersionResponse {
 }
 
 function installGh(behavior: { status: string } | { failure: string }): void {
+    if ('failure' in behavior) {
+        fs.writeFileSync(path.join(mockDir, 'gh.stderr'), behavior.failure)
+    }
     writeExecutable('gh', [
         '# MOCK gh for wait-for-deploy.test.ts: never contacts GitHub.',
         'echo "$*" >> "$MOCK_DIR/gh.log"',
         ...('failure' in behavior
-            ? [`echo ${JSON.stringify(behavior.failure)} >&2`, 'exit 1']
+            ? ['cat "$MOCK_DIR/gh.stderr" >&2', 'exit 1']
             : [`echo ${JSON.stringify(behavior.status)}`]),
     ])
 }
@@ -226,38 +232,75 @@ describe('wait-for-deploy.sh', () => {
 
         expect(run.status).toBe(1)
         expect(run.output).toContain(
-            `Last observed: serving ${NEWER} (ancestry check failed: gh exit 1)`,
+            `Last observed: serving ${NEWER} (ancestry check failed: gh exit 1: gh: connection refused)`,
         )
     })
 
-    it('does not send a non-sha value to the compare API', () => {
-        scriptVersionResponses([servesSha('unknown')])
+    it('keeps only the first stderr line of a gh failure, capped at 150 characters', () => {
+        scriptVersionResponses([servesSha(NEWER)])
+        installGh({ failure: `${'x'.repeat(400)}\nsecond line` })
+
+        const run = runScript({ timeoutSeconds: 0 })
+
+        expect(run.status).toBe(1)
+        expect(run.output).toContain(
+            `(ancestry check failed: gh exit 1: ${'x'.repeat(150)})`,
+        )
+        expect(run.output).not.toContain('second line')
+    })
+
+    it.each([
+        ['a non-hex value', 'unknown'],
+        ['a 4-character hex string', 'beef'],
+        ['an 8-character hex prefix', NEWER.slice(0, 8)],
+        ['a 39-character hex string', NEWER.slice(0, 39)],
+    ])('does not send %s to the compare API', (_label, served) => {
+        scriptVersionResponses([servesSha(served)])
         installGh({ status: 'ahead' })
 
         const run = runScript({ timeoutSeconds: 0 })
 
         expect(run.status).toBe(1)
         expect(run.output).toContain(
-            'Last observed: serving unknown (not a commit sha)',
+            `Last observed: serving ${served} (not a full commit sha)`,
         )
         expect(ghCalls()).toEqual([])
     })
 
-    it('treats a 404 as not deployed yet and passes once a later poll matches', () => {
-        scriptVersionResponses([
-            { code: '404', body: 'not found' },
-            servesSha(EXPECTED),
-        ])
-        installGh({ status: 'behind' })
+    it('accepts a 64-character (sha256) descendant', () => {
+        const served = 'd'.repeat(64)
+        scriptVersionResponses([servesSha(served)])
+        installGh({ status: 'ahead' })
 
-        const run = runScript({ timeoutSeconds: 5 })
+        const run = runScript({ timeoutSeconds: 0 })
 
         expect(run.status).toBe(0)
-        expect(run.output).toContain('poll 1: HTTP 404 (endpoint not deployed)')
-        expect(run.output).toContain(
-            `Deployment is serving ${EXPECTED} after 2 poll(s)`,
-        )
+        expect(ghCalls()).toEqual([
+            `api repos/${REPOSITORY}/compare/${EXPECTED}...${served} --jq .status`,
+        ])
     })
+
+    it(
+        'treats a 404 as not deployed yet and passes once a later poll matches',
+        { timeout: 20_000 },
+        () => {
+            scriptVersionResponses([
+                { code: '404', body: 'not found' },
+                servesSha(EXPECTED),
+            ])
+            installGh({ status: 'behind' })
+
+            const run = runScript({ timeoutSeconds: 5 })
+
+            expect(run.status).toBe(0)
+            expect(run.output).toContain(
+                'poll 1: HTTP 404 (endpoint not deployed)',
+            )
+            expect(run.output).toContain(
+                `Deployment is serving ${EXPECTED} after 2 poll(s)`,
+            )
+        },
+    )
 
     it('with a zero timeout and an unrelated sha polls once and fails', () => {
         scriptVersionResponses([servesSha('c'.repeat(40))])

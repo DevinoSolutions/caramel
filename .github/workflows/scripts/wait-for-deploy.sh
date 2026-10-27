@@ -15,7 +15,12 @@
 # 2026-10-27 prod went from 0bbad60f straight to 6ca69b67; the main runs for
 # bf7ee15b and 01a4097c could then never see their own sha served, however
 # often they were re-run. A deployment whose sha has the expected commit as an
-# ancestor contains that commit's code, so E2E against it still tests it.
+# ancestor was built from history that includes that commit.
+#
+# What a descendant pass does NOT prove: that the commit's code is still
+# present (a later revert would still pass). E2E tests the SERVED build, which
+# is the point of this gate; ancestry only says the deploy is not older than
+# the commit.
 #
 # Inputs (environment):
 #   VERSION_URL   - the deployment's /api/version endpoint
@@ -36,9 +41,9 @@
 # commit or its descendant. The ancestry check fails CLOSED: `behind`,
 # `diverged`, an unknown sha, an API error or an unreachable API all mean "not
 # carried yet" and are named in the failure text; none of them ever passes.
-# A 404 counts as "not deployed yet", never as a pass: the deploy that carries this commit is also
-# the deploy that carries the endpoint, so the endpoint appearing IS part of
-# the signal. Treating 404 as a pass would silently restore the race on every
+# A 404 counts as "not deployed yet", never as a pass: the deploy that carries
+# this commit is also the deploy that carries the endpoint, so the endpoint
+# appearing IS part of the signal. Treating 404 as a pass would silently restore the race on every
 # deployment that failed before serving.
 
 set -euo pipefail
@@ -63,10 +68,19 @@ compare_status() {
     err_file="$(mktemp)"
     out="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${EXPECTED_SHA}...${served}" --jq .status 2>"$err_file")" || rc=$?
     if [ "$rc" -ne 0 ]; then
-        local http
+        local http first_line
         http="$(grep -o 'HTTP [0-9]*' "$err_file" | head -n 1 | cut -d' ' -f2)"
+        # First stderr line only, newlines stripped, capped: an unauthenticated
+        # gh (exit 4) must read differently from a network error.
+        first_line="$(head -n 1 "$err_file" | tr -d '\r' | cut -c1-150)"
         rm -f "$err_file"
-        if [ -n "$http" ]; then echo "error: HTTP $http"; else echo "error: gh exit $rc"; fi
+        if [ -n "$http" ]; then
+            echo "error: HTTP $http"
+        elif [ -n "$first_line" ]; then
+            echo "error: gh exit $rc: $first_line"
+        else
+            echo "error: gh exit $rc"
+        fi
         return 0
     fi
     rm -f "$err_file"
@@ -109,24 +123,34 @@ while :; do
         elif [ "$ancestry_available" = "0" ]; then
             last_status="serving $deployed_sha (exact match only: ancestry check unavailable)"
         else
+            # Full 40- (sha1) or 64-hex (sha256) object names only, like
+            # build-sha.mjs SHA_PATTERN: a short prefix or a hex-named branch
+            # could resolve in the compare API and pass on the wrong commit.
             case "$deployed_sha" in
             *[!0-9a-fA-F]*)
-                last_status="serving $deployed_sha (not a commit sha)"
+                verdict="not-a-sha"
                 ;;
             *)
-                verdict="$(compare_status "$deployed_sha")"
-                case "$verdict" in
-                ahead | identical)
-                    echo "Deployment is serving $deployed_sha, a descendant of $EXPECTED_SHA; E2E runs against that newer build (after ${attempt} poll(s))."
-                    exit 0
-                    ;;
-                error:*)
-                    last_status="serving $deployed_sha (ancestry check failed: ${verdict#error: })"
-                    ;;
-                *)
-                    last_status="serving $deployed_sha (not a descendant: ${verdict:-empty compare status})"
-                    ;;
-                esac
+                if [ "${#deployed_sha}" -eq 40 ] || [ "${#deployed_sha}" -eq 64 ]; then
+                    verdict="$(compare_status "$deployed_sha")"
+                else
+                    verdict="not-a-sha"
+                fi
+                ;;
+            esac
+            case "$verdict" in
+            ahead | identical)
+                echo "Deployment is serving $deployed_sha, a descendant of $EXPECTED_SHA; E2E runs against that newer build (after ${attempt} poll(s))."
+                exit 0
+                ;;
+            not-a-sha)
+                last_status="serving $deployed_sha (not a full commit sha)"
+                ;;
+            error:*)
+                last_status="serving $deployed_sha (ancestry check failed: ${verdict#error: })"
+                ;;
+            *)
+                last_status="serving $deployed_sha (not a descendant: ${verdict:-empty compare status})"
                 ;;
             esac
         fi
