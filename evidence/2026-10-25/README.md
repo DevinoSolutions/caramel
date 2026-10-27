@@ -80,3 +80,11 @@
   - Email health logged ok at 10:23, 11:23 and 12:23Z.
   - Sentry MCP search_issues for both monitor slugs and for `is:unresolved firstSeen:-1h` returned no issues.
   - Monitor config is not readable via the MCP.
+- `t9447-pr590-ci-unit-email-health.png`: T-9447 PR #590 (merged 7b602134). Headed capture of the PR head 0619674c `unit` CI job (https://github.com/DevinoSolutions/caramel/actions/runs/40543641255/job/122328931631), "Run unit" step.
+  - Line 519 `email-delivery-health.test.ts (34 tests)` passed. This file holds the never-answering-request and stalled-body timeout tests.
+  - Line 530 `email-delivery-health-monitor.test.ts (32 tests)` passed. This file holds the guard-regression test.
+  - Job totals: 259 files and 4009 tests passed, 1 skipped.
+- `t9447-pr590-prod-api-version-7b602134.png`: headed stealth capture of https://grabcaramel.com/api/version after the PR #590 deploy, showing `{"sha":"7b6021347cb15f833011ea0c7f19a80d4ccc20b8"}`.
+  - Backup `caramel-prod-compose/2026-10-27T17-06-58-618Z.sql.gz` was taken first.
+  - One deploy was queued at 17:07Z and was live at 17:15Z. It also carries #589 (extension 1.4.23 bump).
+- `t9447-7b602134-deploy-wait-rerun-e2e-push.png`: headed stealth capture of the merge commit's DEPLOY_WAIT rerun (MASTER 10-27 checklist step 4). https://github.com/DevinoSolutions/caramel/actions/runs/40547423108/job/122347193080 shows "E2E & Visual Regression (push)" on attempt #2 succeeded in 3m 16s, with "Wait for the deployment to carry this commit" passing in 1s against the live 7b602134.
