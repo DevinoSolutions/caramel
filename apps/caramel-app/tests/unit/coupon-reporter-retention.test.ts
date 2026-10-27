@@ -6,6 +6,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 // re-imported through vi.resetModules(). The sweep and Sentry are ANNOUNCED
 // FAKES (sweepMock / checkInMock): they prove the timer's wiring and the
 // check-in statuses, never the sweep itself (coupon-failure-quorum.test.ts).
+// The tick is pinned to the WALL CLOCK (:07 UTC), so every test fixes the
+// system time (vi.setSystemTime) before starting the module (T-9433 /
+// CARAMEL-39: a boot-relative interval never fired when deploys were under an
+// hour apart).
 
 type SweepRun =
     | {
@@ -44,7 +48,13 @@ vi.mock('@sentry/nextjs', () => ({
 }))
 vi.mock('server-only', () => ({}))
 
-const HOUR = 60 * 60 * 1000
+const MINUTE = 60 * 1000
+const HOUR = 60 * MINUTE
+// Wall-clock fixtures (UTC). The slot is minute 7 of every hour.
+const BOOT_AT_10_50 = '2026-10-27T10:50:00.000Z'
+const SLOT_11_07_MS = Date.parse('2026-10-27T11:07:00.000Z')
+/** Time from the 10:50 boot to the 11:07 slot. */
+const BOOT_TO_SLOT_MS = 17 * MINUTE
 
 async function loadModule() {
     vi.resetModules()
@@ -52,13 +62,20 @@ async function loadModule() {
 }
 
 beforeEach(() => {
-    sweepMock.mockClear()
+    sweepMock.mockReset()
+    sweepMock.mockImplementation(async () => ({
+        outcome: 'ok',
+        deleted: 0,
+        chunks: 1,
+        durationMs: 3,
+    }))
     checkInMock.mockReset()
     checkInMock.mockImplementation(() => 'check-in-id')
     captureExceptionMock.mockClear()
     getClientMock.mockReset()
     getClientMock.mockImplementation(() => ({}))
     vi.useFakeTimers()
+    vi.setSystemTime(new Date(BOOT_AT_10_50))
 })
 
 afterEach(() => {
@@ -76,36 +93,129 @@ describe('startCouponReporterRetentionSweep', () => {
 
         expect(decision.enabled).toBe(false)
         expect(decision.reason).not.toBe('')
+        expect(vi.getTimerCount()).toBe(0)
         expect(sweepMock).not.toHaveBeenCalled()
         expect(checkInMock).not.toHaveBeenCalled()
     })
 
-    it('in production runs a FORCED timer-triggered sweep every hour, never at boot', async () => {
+    it('in production runs a FORCED timer-triggered sweep at :07 of the next hour, never at boot and not 60 minutes after boot', async () => {
         vi.stubEnv('NODE_ENV', 'production')
         const { startCouponReporterRetentionSweep } = await loadModule()
 
-        expect(startCouponReporterRetentionSweep().enabled).toBe(true)
+        const decision = startCouponReporterRetentionSweep()
+        expect(decision.enabled).toBe(true)
+        expect(decision.reason).toContain('2026-10-27T11:07:00.000Z')
         expect(sweepMock).not.toHaveBeenCalled()
 
-        vi.advanceTimersByTime(HOUR)
+        // 16 minutes after a :50 boot it is :06: not yet.
+        vi.advanceTimersByTime(BOOT_TO_SLOT_MS - MINUTE)
+        expect(sweepMock).not.toHaveBeenCalled()
+        // :07 is 17 minutes after boot, not 60.
+        vi.advanceTimersByTime(MINUTE)
+        expect(Date.now()).toBe(SLOT_11_07_MS)
         expect(sweepMock).toHaveBeenCalledTimes(1)
         expect(sweepMock).toHaveBeenLastCalledWith({
             force: true,
             trigger: 'timer',
         })
-        vi.advanceTimersByTime(2 * HOUR)
-        expect(sweepMock).toHaveBeenCalledTimes(3)
     })
 
-    it('is idempotent: a second start does not add a second timer', async () => {
+    it('a boot at :06 (inside the 2 minute guard before the slot) skips to :07 of the NEXT hour', async () => {
+        vi.setSystemTime(new Date('2026-10-27T10:06:00.000Z'))
+        vi.stubEnv('NODE_ENV', 'production')
+        const { startCouponReporterRetentionSweep } = await loadModule()
+
+        expect(startCouponReporterRetentionSweep().reason).toContain(
+            '2026-10-27T11:07:00.000Z',
+        )
+        // 10:07 passes without a sweep: it is inside the guard window.
+        vi.advanceTimersByTime(MINUTE)
+        expect(Date.now()).toBe(Date.parse('2026-10-27T10:07:00.000Z'))
+        expect(sweepMock).not.toHaveBeenCalled()
+        // 11:07 sweeps.
+        vi.advanceTimersByTime(HOUR)
+        expect(sweepMock).toHaveBeenCalledTimes(1)
+        expect(Date.now()).toBe(SLOT_11_07_MS)
+    })
+
+    it('a boot at :05 (exactly the guard away) still takes the :07 slot of the same hour', async () => {
+        vi.setSystemTime(new Date('2026-10-27T10:05:00.000Z'))
         vi.stubEnv('NODE_ENV', 'production')
         const { startCouponReporterRetentionSweep } = await loadModule()
 
         startCouponReporterRetentionSweep()
-        startCouponReporterRetentionSweep()
-        vi.advanceTimersByTime(HOUR)
+        vi.advanceTimersByTime(2 * MINUTE)
 
         expect(sweepMock).toHaveBeenCalledTimes(1)
+        expect(Date.now()).toBe(Date.parse('2026-10-27T10:07:00.000Z'))
+    })
+
+    it('consecutive ticks are exactly one hour apart on the wall clock', async () => {
+        vi.stubEnv('NODE_ENV', 'production')
+        const { startCouponReporterRetentionSweep } = await loadModule()
+        const tickTimes: number[] = []
+        sweepMock.mockImplementation(async () => {
+            tickTimes.push(Date.now())
+            return { outcome: 'ok', deleted: 0, chunks: 1, durationMs: 1 }
+        })
+
+        startCouponReporterRetentionSweep()
+        await vi.advanceTimersByTimeAsync(BOOT_TO_SLOT_MS + 3 * HOUR)
+
+        expect(tickTimes).toEqual([
+            SLOT_11_07_MS,
+            SLOT_11_07_MS + HOUR,
+            SLOT_11_07_MS + 2 * HOUR,
+            SLOT_11_07_MS + 3 * HOUR,
+        ])
+    })
+
+    it('keeps ticking after a tick whose sweep throws (the schedule is re-armed before the sweep)', async () => {
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+        vi.stubEnv('NODE_ENV', 'production')
+        const { startCouponReporterRetentionSweep } = await loadModule()
+        sweepMock.mockRejectedValueOnce(new Error('boom'))
+
+        startCouponReporterRetentionSweep()
+        await vi.advanceTimersByTimeAsync(BOOT_TO_SLOT_MS + HOUR)
+
+        expect(sweepMock).toHaveBeenCalledTimes(2)
+        errorSpy.mockRestore()
+    })
+
+    it('is idempotent: a second start is a no-op and does not add a second timer', async () => {
+        vi.stubEnv('NODE_ENV', 'production')
+        const { startCouponReporterRetentionSweep } = await loadModule()
+
+        startCouponReporterRetentionSweep()
+        expect(startCouponReporterRetentionSweep().reason).toBe(
+            'already started',
+        )
+        expect(vi.getTimerCount()).toBe(1)
+        vi.advanceTimersByTime(BOOT_TO_SLOT_MS)
+
+        expect(sweepMock).toHaveBeenCalledTimes(1)
+    })
+})
+
+describe('msUntilNextRetentionSlot', () => {
+    it.each([
+        ['10:00:00', '10:07:00'],
+        ['10:04:59.999', '10:07:00'],
+        ['10:05:00', '10:07:00'],
+        ['10:05:00.001', '11:07:00'],
+        ['10:06:59.999', '11:07:00'],
+        // A timer firing a few ms early or late must not run the same slot twice.
+        ['10:07:00', '11:07:00'],
+        ['10:07:00.005', '11:07:00'],
+        ['10:59:59.999', '11:07:00'],
+    ])('at %s the next slot is %s', async (now, slot) => {
+        const { msUntilNextRetentionSlot } = await loadModule()
+        const nowMs = Date.parse(`2026-10-27T${now}Z`)
+
+        expect(nowMs + msUntilNextRetentionSlot(nowMs)).toBe(
+            Date.parse(`2026-10-27T${slot}Z`),
+        )
     })
 })
 
@@ -114,11 +224,11 @@ describe('the hourly timer checks in to the Sentry cron monitor', () => {
         vi.stubEnv('NODE_ENV', 'production')
         const { startCouponReporterRetentionSweep } = await loadModule()
         startCouponReporterRetentionSweep()
-        await vi.advanceTimersByTimeAsync(HOUR)
+        await vi.advanceTimersByTimeAsync(BOOT_TO_SLOT_MS)
     }
     const statuses = () => checkInMock.mock.calls.map(call => call[0].status)
 
-    it('sends in_progress then ok on success, with the interval monitor config', async () => {
+    it('sends in_progress then ok on success', async () => {
         await tickOnce()
 
         expect(statuses()).toEqual(['in_progress', 'ok'])
@@ -178,18 +288,31 @@ describe('the hourly timer checks in to the Sentry cron monitor', () => {
         errorSpy.mockRestore()
     })
 
-    it('carries the monitor config (thresholds included) on the closing check-in too', async () => {
+    it('carries the :07 crontab monitor config (thresholds included) on every check-in, closing one too', async () => {
         await tickOnce()
 
+        expect(checkInMock).toHaveBeenCalledTimes(2)
         for (const call of checkInMock.mock.calls) {
-            expect(call[1]).toMatchObject({
-                schedule: { type: 'interval', value: 1, unit: 'hour' },
+            expect(call[1]).toEqual({
+                schedule: { type: 'crontab', value: '7 * * * *' },
+                timezone: 'UTC',
                 checkinMargin: 30,
                 maxRuntime: 3,
                 failureIssueThreshold: 2,
                 recoveryThreshold: 1,
             })
         }
+    })
+
+    it('the crontab minute is the minute the timer fires at', async () => {
+        const mod = await loadModule()
+        const crontabMinute = Number(
+            mod.REPORTER_RETENTION_MONITOR_CONFIG.schedule.value.split(' ')[0],
+        )
+        const hourStart = Date.parse('2026-10-27T10:00:00.000Z')
+        const slotMs = hourStart + mod.msUntilNextRetentionSlot(hourStart)
+
+        expect(new Date(slotMs).getUTCMinutes()).toBe(crontabMinute)
     })
 
     it('without a Sentry client: boot reason says DISABLED, each tick logs it, the sweep still runs and no check-in is sent', async () => {
@@ -201,7 +324,7 @@ describe('the hourly timer checks in to the Sentry cron monitor', () => {
         expect(startCouponReporterRetentionSweep().reason).toContain(
             'DISABLED (no Sentry client)',
         )
-        await vi.advanceTimersByTimeAsync(HOUR)
+        await vi.advanceTimersByTimeAsync(BOOT_TO_SLOT_MS)
 
         expect(sweepMock).toHaveBeenCalledTimes(1)
         expect(checkInMock).not.toHaveBeenCalled()
