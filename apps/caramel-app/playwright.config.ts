@@ -50,7 +50,11 @@ export default defineConfig({
     ],
     use: {
         baseURL,
-        trace: 'on-first-retry',
+        // Deployed runs (e2e-push, PLAYWRIGHT_START_SERVER=false) keep the trace
+        // of the FAILED attempt: 'on-first-retry' records only the retry, which
+        // is the one that passes, so a flaky test left no evidence of why it
+        // failed (T-9427). Local/PR runs keep the cheaper on-first-retry.
+        trace: startServer ? 'on-first-retry' : 'retain-on-failure',
         screenshot: 'only-on-failure',
         // The app has first-class prefers-reduced-motion support: the 3D
         // hero/vault scenes render their static CSS posters instead of

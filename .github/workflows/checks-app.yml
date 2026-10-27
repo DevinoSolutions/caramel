@@ -537,12 +537,17 @@ jobs:
           DEPLOY_WAIT_HINT: "${{ github.ref == 'refs/heads/dev' && '' || 'Prod deploys are MANUAL: the Dokploy prod compose has autoDeploy OFF by design, so merging to main never reaches grabcaramel.com. This is not a failed deploy and not a broken build — the E2E suite runs against the LIVE site, so it cannot verify a commit prod is not carrying (prod serving this commit or a descendant of it passes). Deploy the prod compose, then re-run this job once, for the newest merge commit only.' }}"
         run: bash .github/workflows/scripts/wait-for-deploy.sh
 
+      # run-e2e-push.sh wraps `pnpm test:e2e`: when the suite fails while the
+      # served sha CHANGED during the run (a manual prod deploy swapped the
+      # containers mid-suite, T-9427) it reruns the suite once against the
+      # settled deployment. A failure with an unchanged sha stays red.
       - name: Run E2E tests
         working-directory: ./apps/caramel-app
         env:
           PLAYWRIGHT_BASE_URL: ${{ github.ref == 'refs/heads/dev' && 'https://dev.grabcaramel.com' || 'https://grabcaramel.com' }}
           PLAYWRIGHT_START_SERVER: 'false'
-        run: pnpm test:e2e
+          VERSION_URL: "${{ github.ref == 'refs/heads/dev' && 'https://dev.grabcaramel.com/api/version' || 'https://grabcaramel.com/api/version' }}"
+        run: bash ../../.github/workflows/scripts/run-e2e-push.sh
 
       - name: Upload test report
         uses: DevinoSolutions/artifact/upload@v1

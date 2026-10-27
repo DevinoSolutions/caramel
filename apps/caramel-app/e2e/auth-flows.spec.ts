@@ -499,7 +499,11 @@ test.describe('Auth Flows — Protected Routes', () => {
         // rather than collapsing to an error or redirecting.
         // 15s headroom: in deployed mode the first client render right after a
         // deploy pays for cold chunks plus the stubbed get-session hydration
-        // (T-7525); the same 15000 used by the other deployed-mode specs.
+        // (T-7525); the same 15000 used by the other deployed-mode specs. More
+        // headroom would not help the one failure that still happened (T-9427):
+        // a prod deploy swapped containers mid-run, so the page's HTML and JS
+        // chunks came from different builds and it never hydrated. e2e-push
+        // handles that at the job level (run-e2e-push.sh), not here.
         await expect(
             page.getByRole('heading', { name: 'carameluser', level: 1 }),
         ).toBeVisible({ timeout: 15000 })
