@@ -81,16 +81,17 @@ function servesSha(sha: string): VersionResponse {
 
 function scriptSuiteExitCodes(codes: number[]): void {
     codes.forEach((code, index) => {
-        fs.writeFileSync(path.join(mockDir, `e2e.${index + 1}.status`), `${code}`)
+        fs.writeFileSync(
+            path.join(mockDir, `e2e.${index + 1}.status`),
+            `${code}`,
+        )
     })
     fs.writeFileSync(path.join(mockDir, 'e2e.last'), String(codes.length))
 }
 
 function suiteRuns(): number {
     const log = path.join(mockDir, 'e2e.count')
-    return fs.existsSync(log)
-        ? Number(fs.readFileSync(log, 'utf8').trim())
-        : 0
+    return fs.existsSync(log) ? Number(fs.readFileSync(log, 'utf8').trim()) : 0
 }
 
 function runScript(): RunResult {
@@ -156,7 +157,9 @@ describe('run-e2e-push.sh', () => {
 
         expect(run.status).toBe(0)
         expect(suiteRuns()).toBe(1)
-        expect(run.output).not.toContain('::warning title=Production redeployed')
+        expect(run.output).not.toContain(
+            '::warning title=Production redeployed',
+        )
     })
 
     it('keeps the suite exit code and does not rerun when production stayed on one sha', () => {
