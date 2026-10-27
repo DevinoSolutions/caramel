@@ -183,6 +183,83 @@ function _caramelInCartLine(btn, candidates, couponInput) {
     return false
 }
 
+/* The "are you sure?" step some carts put between the remove button and the
+ * removal. Salesforce Commerce Cloud (SFRA) carts open #removeCouponModal
+ * ("Remove Coupon? ... Yes / No") and remove the code only on its Yes
+ * (aquasana.com 2026-10-27): our click stopped at the dialog, the refused code
+ * stayed on the cart, and the next code was refused as "cannot be combined
+ * with other coupons already in your cart" (T-9569).
+ *
+ * Only the dialog the remove button itself names (data-target,
+ * data-bs-target, aria-controls), only while it is visible, only when it talks
+ * about a coupon, and only its confirm button. Returns whether it clicked. */
+const CARAMEL_REMOVE_DIALOG_TOPIC_RE = /coupon|promo|code|discount|voucher/i
+const CARAMEL_REMOVE_CONFIRM_TEXT_RE = /^(?:yes|remove|confirm|delete|ok)\b/i
+async function _caramelConfirmRemoveDialog(removeBtn) {
+    const named =
+        removeBtn.getAttribute('data-target') ||
+        removeBtn.getAttribute('data-bs-target') ||
+        (removeBtn.getAttribute('aria-controls')
+            ? '#' + removeBtn.getAttribute('aria-controls')
+            : '')
+    if (!named || !named.startsWith('#')) return false
+    const dialog = document.getElementById(named.slice(1))
+    if (!dialog) return false
+    // Bootstrap fades its backdrop in first and only then shows the dialog.
+    const openedBy = performance.now() + 2000
+    while (!_isVisible(dialog) && performance.now() < openedBy) await sleep(100)
+    if (!_isVisible(dialog)) {
+        log('REMOVE_DIALOG_NEVER_OPENED', { dialog: named })
+        return false
+    }
+    // Bootstrap ignores a hide asked for while the dialog is still fading in:
+    // a Yes clicked mid-fade removed the code but left the dialog open over
+    // the cart, and the next code's × then toggled it shut instead of opening
+    // it, so every other refused code stayed on the cart (aquasana.com,
+    // 2026-10-27). Let the fade finish first.
+    const settledBy = performance.now() + 1500
+    while (_caramelIsAnimating(dialog) && performance.now() < settledBy)
+        await sleep(50)
+    if (
+        !CARAMEL_REMOVE_DIALOG_TOPIC_RE.test(
+            dialog.innerText || dialog.textContent || '',
+        )
+    )
+        return false
+    const buttons = Array.from(dialog.querySelectorAll('button')).filter(
+        b => _isVisible(b) && !b.disabled && !caramelIsForbiddenControl(b),
+    )
+    const confirm =
+        buttons.find(b =>
+            b.classList.contains('delete-coupon-confirmation-btn'),
+        ) ||
+        buttons.find(b =>
+            CARAMEL_REMOVE_CONFIRM_TEXT_RE.test(
+                (b.innerText || b.textContent || '').trim(),
+            ),
+        )
+    if (!confirm) return false
+    confirm.click()
+    const closedBy = performance.now() + 3000
+    do await sleep(100)
+    while (_isVisible(dialog) && performance.now() < closedBy)
+    log(
+        _isVisible(dialog)
+            ? 'REMOVE_DIALOG_LEFT_OPEN'
+            : 'REMOVE_CONFIRMED_IN_DIALOG',
+        { dialog: named },
+    )
+    return true
+}
+
+// A running CSS transition or animation on the element or inside it.
+function _caramelIsAnimating(el) {
+    return (
+        typeof el.getAnimations === 'function' &&
+        el.getAnimations({ subtree: true }).some(a => a.playState === 'running')
+    )
+}
+
 /* Try to remove the coupon WE just applied. Returns true if a remove button was
  * clicked. Caller should wait for the cart to update.
  *
@@ -246,6 +323,7 @@ export async function removeAppliedCoupon(rec, options) {
         if (!btn) btn = candidates[candidates.length - 1]
         btn.click()
         await sleep(600)
+        await _caramelConfirmRemoveDialog(btn)
         log('Removed applied coupon via', sel)
         return true
     }
