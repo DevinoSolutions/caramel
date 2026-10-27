@@ -1,0 +1,20 @@
+# t9413-p2 logcat excerpt: SHRUNK release com.devino.caramel (pid 5025), Android 14 google_apis_playstore x86_64, no Google account on device
+# section 1: E/F lines of the app pid
+10-27 07:10:23.001  5025  5025 E .devino.caramel: Not starting debugger since process cannot load the jdwp agent.
+# section 2: crash/R8/resource/serialization patterns, all pids, filtered to com.devino or app-relevant
+# section 3: Credential Manager request from the app (gms/system side)
+10-27 07:10:49.722   525  2078 I CredManSysService: starting executeGetCredential with callingPackage: com.devino.caramel
+10-27 07:10:49.729   525  2078 I ProviderGetSession: Option of type: com.google.android.libraries.identity.googleid.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL meets all filteringconditions
+10-27 07:10:49.730   525  2078 I GetRequestSession: Provider session created and being added for: ComponentInfo{com.google.android.gms/com.google.android.gms.auth.api.credentials.credman.service.GoogleIdService}
+10-27 07:10:50.027  1490  1490 W Auth.Api.Credentials: [BaseGetCredentialOperation] Failed to parse BeginGetCustomCredentialOption into BeginGetGoogleIdOption. [CONTEXT service_id=68 ]
+10-27 07:10:50.027  1490  1490 W Auth.Api.Credentials: codq: java.lang.NullPointerException
+10-27 07:10:50.134   525   525 I GetRequestSession: Status changed for: ComponentInfo{com.google.android.gms/com.google.android.gms.auth.api.credentials.credman.service.GoogleIdService}, with status: CANCELED, and source: REMOTE_PROVIDER
+# section 4: WARM run (SHRUNK release reinstalled; Google tap after GMS warm-up), pid 11144
+## app-pid E/F lines
+10-27 07:14:37.497 11144 11144 E .devino.caramel: Not starting debugger since process cannot load the jdwp agent.
+## crash/R8/resource/serialization patterns, all pids
+## credential manager
+10-27 07:14:52.416   525  2336 I CredManSysService: starting executeGetCredential with callingPackage: com.devino.caramel
+10-27 07:14:52.424   525   525 I GetRequestSession: Status changed for: ComponentInfo{com.google.android.gms/com.google.android.gms.auth.api.credentials.credman.service.GoogleIdService}, with status: CREDENTIALS_RECEIVED, and sour
+## top activity at the time of the screenshot: com.google.android.gms/.auth.uiflows.minutemaid.MinuteMaidActivity
+# NOTE: section 3 (cold GMS first call) shows a GMS-side NPE parsing the option; the same shrunk APK does not reproduce it warm, and the unshrunk debug control ran clean. GMS cold start, not R8.
