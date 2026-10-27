@@ -82,6 +82,8 @@ dependencies {
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.browser)
+    // Pins the transitive androidx.fragment (old, via Play services) past 1.3.0: AGP 9 lint InvalidFragmentVersionForActivityResult.
+    implementation(libs.androidx.fragment)
     implementation(libs.androidx.credentials)
     implementation(libs.androidx.credentials.play.services.auth)
     implementation(libs.googleid)
