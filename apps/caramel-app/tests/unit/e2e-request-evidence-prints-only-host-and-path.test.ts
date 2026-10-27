@@ -39,7 +39,9 @@ describe('sanitizedUrl', () => {
     })
 
     it('cuts a very long path', () => {
-        const shown = sanitizedUrl(`https://grabcaramel.com/${'a'.repeat(500)}`)
+        const shown = sanitizedUrl(
+            `https://grabcaramel.com${'/page'.repeat(100)}`,
+        )
         expect(shown.length).toBeLessThan(130)
         expect(shown.endsWith('...')).toBe(true)
     })
