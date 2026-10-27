@@ -1,0 +1,127 @@
+# t9413-p4 logcat: com.devino.caramel.devproof, all pids (11329 11969 ), whole buffer from 08:49:56Z, no logcat -c during walk
+10-27 08:49:57.320 11329 11329 I aramel.devproof: Using CollectorTypeCC GC.
+10-27 08:49:57.321 11329 11329 W aramel.devproof: Known variants: atom, sandybridge, silvermont, goldmont, goldmont-plus, tremont, kabylake, default
+10-27 08:49:57.321 11329 11329 W aramel.devproof: Unexpected CPU variant for x86: x86_64.
+10-27 08:49:57.323 11329 11329 E aramel.devproof: Not starting debugger since process cannot load the jdwp agent.
+10-27 08:49:57.332 11329 11329 D CompatibilityChangeReporter: Compat change id reported: 171979766; UID 10190; state: ENABLED
+10-27 08:49:57.332 11329 11329 D CompatibilityChangeReporter: Compat change id reported: 242716250; UID 10190; state: ENABLED
+10-27 08:49:57.342 11329 11329 D ApplicationLoaders: Returning zygote-cached class loader: /system_ext/framework/androidx.window.extensions.jar
+10-27 08:49:57.343 11329 11329 D ApplicationLoaders: Returning zygote-cached class loader: /system_ext/framework/androidx.window.sidecar.jar
+10-27 08:49:57.347 11329 11329 D nativeloader: Configuring clns-6 for other apk /data/app/~~81UjR25kVk5CSFYDT2tX0Q==/com.devino.caramel.devproof-B3qrcVdAD5cjzehwDQbr7g==/base.apk. target_sdk_version=36, uses_libraries=, library_path=/data/app/~~81UjR25kVk5CSFYDT2tX0Q==/com.devino.caramel.devproof-B3qrcVdAD5cjzehwDQbr7g==/lib/x86_64:/data/app/~~81UjR25kVk5CSFYDT2tX0Q==/com.devino.caramel.devproof-B3qrcVdAD5cjzehwDQbr7g==/base.apk!/lib/x86_64, permitted_path=/data:/mnt/expand:/data/user/0/com.devino.caramel.devproof
+10-27 08:49:57.378 11329 11329 V GraphicsEnvironment:   angle_gl_driver_selection_pkgs=[]
+10-27 08:49:57.378 11329 11329 V GraphicsEnvironment:   angle_gl_driver_selection_values=[]
+10-27 08:49:57.378 11329 11329 V GraphicsEnvironment: Currently set values for:
+10-27 08:49:57.379 11329 11329 V GraphicsEnvironment: ANGLE GameManagerService for com.devino.caramel.devproof: false
+10-27 08:49:57.379 11329 11329 V GraphicsEnvironment: com.devino.caramel.devproof is not listed in per-application setting
+10-27 08:49:57.379 11329 11329 V GraphicsEnvironment: Neither updatable production driver nor prerelease driver is supported.
+10-27 08:49:57.401 11329 11350 D libEGL  : loaded /vendor/lib64/egl/libEGL_emulation.so
+10-27 08:49:57.407 11329 11350 D libEGL  : loaded /vendor/lib64/egl/libGLESv1_CM_emulation.so
+10-27 08:49:57.408 11329 11350 D libEGL  : loaded /vendor/lib64/egl/libGLESv2_emulation.so
+10-27 08:49:57.440 11329 11329 D CompatibilityChangeReporter: Compat change id reported: 237531167; UID 10190; state: DISABLED
+10-27 08:49:57.441 11329 11329 W OpenGLRenderer: Unknown dataspace 0
+10-27 08:49:57.446 11329 11329 D CompatibilityChangeReporter: Compat change id reported: 193247900; UID 10190; state: ENABLED
+10-27 08:49:57.452 11329 11329 I WebViewFactory: Loading com.google.android.webview version 113.0.5672.136 (code 567263637)
+10-27 08:49:57.453 11329 11329 W aramel.devproof: Entry not found
+10-27 08:49:57.453 11329 11329 W ziparchive: Unable to open '/data/app/~~vfSctoLGTE_9Ns_bsCRuKQ==/com.google.android.trichromelibrary_567263637-vlN7oJxPtYUTOFctaXULjg==/TrichromeLibrary.dm': No such file or directory
+10-27 08:49:57.453 11329 11329 W ziparchive: Unable to open '/data/app/~~vfSctoLGTE_9Ns_bsCRuKQ==/com.google.android.trichromelibrary_567263637-vlN7oJxPtYUTOFctaXULjg==/TrichromeLibrary.dm': No such file or directory
+10-27 08:49:57.454 11329 11329 D nativeloader: Configuring clns-7 for other apk /data/app/~~vfSctoLGTE_9Ns_bsCRuKQ==/com.google.android.trichromelibrary_567263637-vlN7oJxPtYUTOFctaXULjg==/TrichromeLibrary.apk. target_sdk_version=34, uses_libraries=ALL, library_path=/data/app/~~G-xl4Dh-HOsX93kPmr2PaA==/com.google.android.webview-_1cgpeNOIGmqHApDF4HV3A==/lib/x86_64:/data/app/~~G-xl4Dh-HOsX93kPmr2PaA==/com.google.android.webview-_1cgpeNOIGmqHApDF4HV3A==/WebViewGoogle.apk!/lib/x86_64:/data/app/~~vfSctoLGTE_9Ns_bsCRuKQ==/com.google.android.trichromelibrary_567263637-vlN7oJxPtYUTOFctaXULjg==/TrichromeLibrary.apk!/lib/x86_64, permitted_path=/data:/mnt/expand
+10-27 08:49:57.455 11329 11329 D nativeloader: Configuring clns-8 for other apk /data/app/~~G-xl4Dh-HOsX93kPmr2PaA==/com.google.android.webview-_1cgpeNOIGmqHApDF4HV3A==/WebViewGoogle.apk. target_sdk_version=34, uses_libraries=, library_path=/data/app/~~G-xl4Dh-HOsX93kPmr2PaA==/com.google.android.webview-_1cgpeNOIGmqHApDF4HV3A==/lib/x86_64:/data/app/~~G-xl4Dh-HOsX93kPmr2PaA==/com.google.android.webview-_1cgpeNOIGmqHApDF4HV3A==/WebViewGoogle.apk!/lib/x86_64:/data/app/~~vfSctoLGTE_9Ns_bsCRuKQ==/com.google.android.trichromelibrary_567263637-vlN7oJxPtYUTOFctaXULjg==/TrichromeLibrary.apk!/lib/x86_64, permitted_path=/data:/mnt/expand
+10-27 08:49:57.473 11329 11329 I cr_WVCFactoryProvider: Loaded version=113.0.5672.136 minSdkVersion=29 isBundle=false multiprocess=true packageId=2
+10-27 08:49:57.479 11329 11329 I cr_CachingUmaRecorder: Flushed 8 samples from 8 histograms.
+10-27 08:49:57.479 11329 11329 I cr_LibraryLoader: Successfully loaded native library
+10-27 08:49:57.485 11329 11329 D CompatibilityChangeReporter: Compat change id reported: 183155436; UID 10190; state: ENABLED
+10-27 08:49:57.509 11329 11372 W chromium: [WARNING:dns_config_service_android.cc(115)] Failed to read DnsConfig.
+10-27 08:49:57.569 11329 11329 D CompatibilityChangeReporter: Compat change id reported: 214741472; UID 10190; state: ENABLED
+10-27 08:49:57.572 11329 11329 D CompatibilityChangeReporter: Compat change id reported: 171228096; UID 10190; state: ENABLED
+10-27 08:49:57.633 11329 11348 W OpenGLRenderer: Failed to initialize 101010-2 format, error = EGL_SUCCESS
+10-27 08:49:57.648 11329 11348 I Gralloc4: mapper 4.x is not supported
+10-27 08:49:57.970 11329 11384 W cr_media: BLUETOOTH_CONNECT permission is missing.
+10-27 08:49:57.970 11329 11384 W cr_media: registerBluetoothIntentsIfNeeded: Requires BLUETOOTH permission
+10-27 08:49:57.976 11329 11329 I Choreographer: Skipped 31 frames!  The application may be doing too much work on its main thread.
+10-27 08:49:58.035 11329 11456 D TrafficStats: tagSocket(186) with statsTag=0xffffffff, statsUid=-1
+10-27 08:49:59.621 11329 11348 D EGL_emulation: app_time_stats: avg=331.52ms min=15.73ms max=1532.29ms count=5
+10-27 08:49:59.626 11329 11329 I Choreographer: Skipped 75 frames!  The application may be doing too much work on its main thread.
+10-27 08:49:59.680 11329 11493 I OpenGLRenderer: Davey! duration=1300ms; Flags=0, FrameTimelineVsyncId=70142, IntendedVsync=1638924698501, Vsync=1638924698501, InputEventId=0, HandleInputStart=1638924941164, AnimationStart=1638924941384, PerformTraversalsStart=1638928342618, DrawStart=1638928365020, FrameDeadline=1638941365167, FrameInterval=1638924938038, FrameStartTime=16666666, SyncQueued=1638936366047, SyncStart=1638936407665, IssueDrawCommandsStart=1638936450356, SwapBuffers=1640183777610, FrameCompleted=1640224786248, DequeueBufferDuration=3466, QueueBufferDuration=122180, GpuCompleted=1640224786248, SwapBuffersCompleted=1640217646308, DisplayPresentTime=0, CommandSubmissionCompleted=1640183777610, 
+10-27 08:49:59.688 11329 11329 W WindowOnBackDispatcher: OnBackInvokedCallback is not enabled for the application.
+10-27 08:49:59.688 11329 11329 W WindowOnBackDispatcher: Set 'android:enableOnBackInvokedCallback="true"' in the application manifest.
+10-27 08:50:03.367 11329 11501 D ProfileInstaller: Skipping profile installation for com.devino.caramel.devproof
+10-27 08:50:22.367 11329 11329 W WindowOnBackDispatcher: OnBackInvokedCallback is not enabled for the application.
+10-27 08:50:22.367 11329 11329 W WindowOnBackDispatcher: Set 'android:enableOnBackInvokedCallback="true"' in the application manifest.
+10-27 08:50:22.495 11329 11348 D EGL_emulation: app_time_stats: avg=563.58ms min=4.70ms max=22105.52ms count=40
+10-27 08:50:27.713 11329 11329 W WindowOnBackDispatcher: sendCancelIfRunning: isInProgress=falsecallback=android.view.ViewRootImpl$$ExternalSyntheticLambda17@39f6631
+10-27 08:50:31.326 11329 11348 D EGL_emulation: app_time_stats: avg=240.70ms min=5.90ms max=8048.99ms count=36
+10-27 08:50:41.575 11329 11348 D EGL_emulation: app_time_stats: avg=376.73ms min=6.55ms max=9471.82ms count=27
+10-27 08:50:42.606 11329 11348 D EGL_emulation: app_time_stats: avg=29.53ms min=5.74ms max=177.87ms count=31
+10-27 08:50:52.007 11329 11348 D EGL_emulation: app_time_stats: avg=273.67ms min=7.25ms max=8432.94ms count=34
+10-27 08:50:53.022 11329 11348 D EGL_emulation: app_time_stats: avg=12.76ms min=4.73ms max=37.47ms count=55
+10-27 08:51:00.140 11329 11348 D EGL_emulation: app_time_stats: avg=647.07ms min=12.30ms max=6951.46ms count=11
+10-27 08:51:01.156 11329 11348 D EGL_emulation: app_time_stats: avg=19.27ms min=10.82ms max=30.42ms count=48
+10-27 08:51:05.972 11329 11348 D EGL_emulation: app_time_stats: avg=114.16ms min=5.46ms max=3887.71ms count=41
+10-27 08:51:06.996 11329 11348 D EGL_emulation: app_time_stats: avg=13.06ms min=5.01ms max=31.51ms count=57
+10-27 08:51:07.996 11329 11348 D EGL_emulation: app_time_stats: avg=14.31ms min=5.55ms max=51.94ms count=51
+10-27 08:51:22.015 11329 11329 W WindowOnBackDispatcher: OnBackInvokedCallback is not enabled for the application.
+10-27 08:51:22.015 11329 11329 W WindowOnBackDispatcher: Set 'android:enableOnBackInvokedCallback="true"' in the application manifest.
+10-27 08:51:22.028 11329 11348 D EGL_emulation: app_time_stats: avg=535.76ms min=6.01ms max=13562.52ms count=26
+10-27 08:51:25.031 11329 11329 W WindowOnBackDispatcher: sendCancelIfRunning: isInProgress=falsecallback=android.view.ViewRootImpl$$ExternalSyntheticLambda17@30010b7
+10-27 08:51:25.035 11329 11329 W WindowOnBackDispatcher: OnBackInvokedCallback is not enabled for the application.
+10-27 08:51:25.035 11329 11329 W WindowOnBackDispatcher: Set 'android:enableOnBackInvokedCallback="true"' in the application manifest.
+10-27 08:51:30.296 11329 11329 W WindowOnBackDispatcher: sendCancelIfRunning: isInProgress=falsecallback=android.view.ViewRootImpl$$ExternalSyntheticLambda17@39548e3
+10-27 08:51:30.375 11329 11348 D EGL_emulation: app_time_stats: avg=157.46ms min=5.08ms max=7485.59ms count=52
+10-27 08:51:31.993 11329 11348 D EGL_emulation: app_time_stats: avg=51.05ms min=7.19ms max=756.14ms count=29
+10-27 08:51:40.582 11329 11329 W WindowOnBackDispatcher: OnBackInvokedCallback is not enabled for the application.
+10-27 08:51:40.582 11329 11329 W WindowOnBackDispatcher: Set 'android:enableOnBackInvokedCallback="true"' in the application manifest.
+10-27 08:51:40.595 11329 11348 D EGL_emulation: app_time_stats: avg=506.03ms min=13.48ms max=8342.09ms count=17
+10-27 08:51:45.879 11329 11329 W WindowOnBackDispatcher: sendCancelIfRunning: isInProgress=falsecallback=android.view.ViewRootImpl$$ExternalSyntheticLambda17@8fcbe62
+10-27 08:51:49.013 11969 11969 I aramel.devproof: Using CollectorTypeCC GC.
+10-27 08:51:49.014 11969 11969 W aramel.devproof: Known variants: atom, sandybridge, silvermont, goldmont, goldmont-plus, tremont, kabylake, default
+10-27 08:51:49.014 11969 11969 W aramel.devproof: Unexpected CPU variant for x86: x86_64.
+10-27 08:51:49.017 11969 11969 E aramel.devproof: Not starting debugger since process cannot load the jdwp agent.
+10-27 08:51:49.028 11969 11969 D CompatibilityChangeReporter: Compat change id reported: 171979766; UID 10190; state: ENABLED
+10-27 08:51:49.028 11969 11969 D CompatibilityChangeReporter: Compat change id reported: 242716250; UID 10190; state: ENABLED
+10-27 08:51:49.041 11969 11969 D ApplicationLoaders: Returning zygote-cached class loader: /system_ext/framework/androidx.window.extensions.jar
+10-27 08:51:49.041 11969 11969 D ApplicationLoaders: Returning zygote-cached class loader: /system_ext/framework/androidx.window.sidecar.jar
+10-27 08:51:49.044 11969 11969 D nativeloader: Configuring clns-6 for other apk /data/app/~~81UjR25kVk5CSFYDT2tX0Q==/com.devino.caramel.devproof-B3qrcVdAD5cjzehwDQbr7g==/base.apk. target_sdk_version=36, uses_libraries=, library_path=/data/app/~~81UjR25kVk5CSFYDT2tX0Q==/com.devino.caramel.devproof-B3qrcVdAD5cjzehwDQbr7g==/lib/x86_64:/data/app/~~81UjR25kVk5CSFYDT2tX0Q==/com.devino.caramel.devproof-B3qrcVdAD5cjzehwDQbr7g==/base.apk!/lib/x86_64, permitted_path=/data:/mnt/expand:/data/user/0/com.devino.caramel.devproof
+10-27 08:51:49.073 11969 11969 V GraphicsEnvironment: ANGLE GameManagerService for com.devino.caramel.devproof: false
+10-27 08:51:49.073 11969 11969 V GraphicsEnvironment:   angle_gl_driver_selection_pkgs=[]
+10-27 08:51:49.073 11969 11969 V GraphicsEnvironment:   angle_gl_driver_selection_values=[]
+10-27 08:51:49.073 11969 11969 V GraphicsEnvironment: Currently set values for:
+10-27 08:51:49.074 11969 11969 V GraphicsEnvironment: com.devino.caramel.devproof is not listed in per-application setting
+10-27 08:51:49.074 11969 11969 V GraphicsEnvironment: Neither updatable production driver nor prerelease driver is supported.
+10-27 08:51:49.116 11969 11990 D libEGL  : loaded /vendor/lib64/egl/libEGL_emulation.so
+10-27 08:51:49.117 11969 11990 D libEGL  : loaded /vendor/lib64/egl/libGLESv1_CM_emulation.so
+10-27 08:51:49.118 11969 11990 D libEGL  : loaded /vendor/lib64/egl/libGLESv2_emulation.so
+10-27 08:51:49.124 11969 11969 D CompatibilityChangeReporter: Compat change id reported: 237531167; UID 10190; state: DISABLED
+10-27 08:51:49.128 11969 11969 W OpenGLRenderer: Unknown dataspace 0
+10-27 08:51:49.142 11969 11969 D CompatibilityChangeReporter: Compat change id reported: 193247900; UID 10190; state: ENABLED
+10-27 08:51:49.149 11969 11969 I WebViewFactory: Loading com.google.android.webview version 113.0.5672.136 (code 567263637)
+10-27 08:51:49.160 11969 11969 W aramel.devproof: Entry not found
+10-27 08:51:49.160 11969 11969 W ziparchive: Unable to open '/data/app/~~vfSctoLGTE_9Ns_bsCRuKQ==/com.google.android.trichromelibrary_567263637-vlN7oJxPtYUTOFctaXULjg==/TrichromeLibrary.dm': No such file or directory
+10-27 08:51:49.160 11969 11969 W ziparchive: Unable to open '/data/app/~~vfSctoLGTE_9Ns_bsCRuKQ==/com.google.android.trichromelibrary_567263637-vlN7oJxPtYUTOFctaXULjg==/TrichromeLibrary.dm': No such file or directory
+10-27 08:51:49.161 11969 11969 D nativeloader: Configuring clns-7 for other apk /data/app/~~vfSctoLGTE_9Ns_bsCRuKQ==/com.google.android.trichromelibrary_567263637-vlN7oJxPtYUTOFctaXULjg==/TrichromeLibrary.apk. target_sdk_version=34, uses_libraries=ALL, library_path=/data/app/~~G-xl4Dh-HOsX93kPmr2PaA==/com.google.android.webview-_1cgpeNOIGmqHApDF4HV3A==/lib/x86_64:/data/app/~~G-xl4Dh-HOsX93kPmr2PaA==/com.google.android.webview-_1cgpeNOIGmqHApDF4HV3A==/WebViewGoogle.apk!/lib/x86_64:/data/app/~~vfSctoLGTE_9Ns_bsCRuKQ==/com.google.android.trichromelibrary_567263637-vlN7oJxPtYUTOFctaXULjg==/TrichromeLibrary.apk!/lib/x86_64, permitted_path=/data:/mnt/expand
+10-27 08:51:49.162 11969 11969 D nativeloader: Configuring clns-8 for other apk /data/app/~~G-xl4Dh-HOsX93kPmr2PaA==/com.google.android.webview-_1cgpeNOIGmqHApDF4HV3A==/WebViewGoogle.apk. target_sdk_version=34, uses_libraries=, library_path=/data/app/~~G-xl4Dh-HOsX93kPmr2PaA==/com.google.android.webview-_1cgpeNOIGmqHApDF4HV3A==/lib/x86_64:/data/app/~~G-xl4Dh-HOsX93kPmr2PaA==/com.google.android.webview-_1cgpeNOIGmqHApDF4HV3A==/WebViewGoogle.apk!/lib/x86_64:/data/app/~~vfSctoLGTE_9Ns_bsCRuKQ==/com.google.android.trichromelibrary_567263637-vlN7oJxPtYUTOFctaXULjg==/TrichromeLibrary.apk!/lib/x86_64, permitted_path=/data:/mnt/expand
+10-27 08:51:49.191 11969 11969 I cr_WVCFactoryProvider: Loaded version=113.0.5672.136 minSdkVersion=29 isBundle=false multiprocess=true packageId=2
+10-27 08:51:49.197 11969 11969 I cr_CachingUmaRecorder: Flushed 8 samples from 8 histograms.
+10-27 08:51:49.197 11969 11969 I cr_LibraryLoader: Successfully loaded native library
+10-27 08:51:49.210 11969 11969 D CompatibilityChangeReporter: Compat change id reported: 183155436; UID 10190; state: ENABLED
+10-27 08:51:49.237 11969 12011 W chromium: [WARNING:dns_config_service_android.cc(115)] Failed to read DnsConfig.
+10-27 08:51:49.280 11969 11969 D CompatibilityChangeReporter: Compat change id reported: 214741472; UID 10190; state: ENABLED
+10-27 08:51:49.283 11969 11969 D CompatibilityChangeReporter: Compat change id reported: 171228096; UID 10190; state: ENABLED
+10-27 08:51:49.351 11969 11988 W OpenGLRenderer: Failed to initialize 101010-2 format, error = EGL_SUCCESS
+10-27 08:51:49.358 11969 11988 I Gralloc4: mapper 4.x is not supported
+10-27 08:51:49.675 11969 12019 W cr_media: BLUETOOTH_CONNECT permission is missing.
+10-27 08:51:49.676 11969 12019 W cr_media: registerBluetoothIntentsIfNeeded: Requires BLUETOOTH permission
+10-27 08:51:49.683 11969 11969 I Choreographer: Skipped 32 frames!  The application may be doing too much work on its main thread.
+10-27 08:51:51.979 11969 11988 D EGL_emulation: app_time_stats: avg=582.32ms min=29.49ms max=2156.58ms count=4
+10-27 08:51:51.982 11969 11969 I Choreographer: Skipped 84 frames!  The application may be doing too much work on its main thread.
+10-27 08:51:52.043 11969 12069 I OpenGLRenderer: Davey! duration=1449ms; Flags=0, FrameTimelineVsyncId=95467, IntendedVsync=1751141360679, Vsync=1751141360679, InputEventId=0, HandleInputStart=1751141550026, AnimationStart=1751141550358, PerformTraversalsStart=1751142142048, DrawStart=1751142169560, FrameDeadline=1751158027345, FrameInterval=1751141545228, FrameStartTime=16666666, SyncQueued=1751143938690, SyncStart=1751144166428, IssueDrawCommandsStart=1751144216311, SwapBuffers=1752545784719, FrameCompleted=1752591492507, DequeueBufferDuration=2435, QueueBufferDuration=128111, GpuCompleted=1752591492507, SwapBuffersCompleted=1752575161215, DisplayPresentTime=72904454231359540, CommandSubmissionCompleted=1752545784719, 
+10-27 08:51:54.656 11969 12078 D ProfileInstaller: Skipping profile installation for com.devino.caramel.devproof
+10-27 08:52:02.081 11969 11988 D EGL_emulation: app_time_stats: avg=1006.34ms min=7.62ms max=9692.13ms count=10
+10-27 08:52:02.269 11969 11969 W WindowOnBackDispatcher: OnBackInvokedCallback is not enabled for the application.
+10-27 08:52:02.269 11969 11969 W WindowOnBackDispatcher: Set 'android:enableOnBackInvokedCallback="true"' in the application manifest.
+10-27 08:52:02.788 11969 11969 W WindowOnBackDispatcher: OnBackInvokedCallback is not enabled for the application.
+10-27 08:52:02.788 11969 11969 W WindowOnBackDispatcher: Set 'android:enableOnBackInvokedCallback="true"' in the application manifest.
+10-27 08:52:03.087 11969 11988 D EGL_emulation: app_time_stats: avg=23.52ms min=4.82ms max=137.50ms count=35
+10-27 08:52:03.666 11969 12069 I OpenGLRenderer: Davey! duration=849ms; Flags=0, FrameTimelineVsyncId=100481, IntendedVsync=1763391360189, Vsync=1763674693511, InputEventId=0, HandleInputStart=1763690449664, AnimationStart=1763690450416, PerformTraversalsStart=1763694383097, DrawStart=1763695430673, FrameDeadline=1763724693509, FrameInterval=1763690355919, FrameStartTime=16666666, SyncQueued=1763695837437, SyncStart=1763701578752, IssueDrawCommandsStart=1763704294680, SwapBuffers=1764215361856, FrameCompleted=1764246267072, DequeueBufferDuration=2405, QueueBufferDuration=138920, GpuCompleted=1764246267072, SwapBuffersCompleted=1764228347900, DisplayPresentTime=0, CommandSubmissionCompleted=1764215361856, 
+10-27 08:52:03.671 11969 11969 I Choreographer: Skipped 31 frames!  The application may be doing too much work on its main thread.
+10-27 08:52:04.113 11969 11988 D EGL_emulation: app_time_stats: avg=146.42ms min=30.08ms max=545.07ms count=7
+10-27 08:52:10.463 11969 11969 W WindowOnBackDispatcher: sendCancelIfRunning: isInProgress=falsecallback=android.view.ViewRootImpl$$ExternalSyntheticLambda17@b953a5f

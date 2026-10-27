@@ -1,0 +1,34 @@
+# t9413-p3 logcat, devproof shrunk build, API 34 Play image. NOTE: logcat -c ran before the post-delete relaunch, so the walk/delete window (08:42-08:47) was cleared; it is NOT in this file. Part A = pid 9712 from 08:41:50 to 08:42:10 (read before the clear). Part B = pid 11097 after the signed-out relaunch.
+## A (pid 9712, E/W only)
+10-27 08:41:56.360  9712  9712 W aramel.devproof: Unexpected CPU variant for x86: x86_64.
+10-27 08:41:56.360  9712  9712 W aramel.devproof: Known variants: atom, sandybridge, silvermont, goldmont, goldmont-plus, tremont, kabylake, default
+10-27 08:41:56.371  9712  9712 E aramel.devproof: Not starting debugger since process cannot load the jdwp agent.
+10-27 08:41:56.422  9712  9712 W OpenGLRenderer: Unknown dataspace 0
+10-27 08:41:56.458  9712  9712 W ziparchive: Unable to open '/data/app/~~vfSctoLGTE_9Ns_bsCRuKQ==/com.google.android.trichromelibrary_567263637-vlN7oJxPtYUTOFctaXULjg==/TrichromeLibrary.dm': No such file or directory
+10-27 08:41:56.458  9712  9712 W ziparchive: Unable to open '/data/app/~~vfSctoLGTE_9Ns_bsCRuKQ==/com.google.android.trichromelibrary_567263637-vlN7oJxPtYUTOFctaXULjg==/TrichromeLibrary.dm': No such file or directory
+10-27 08:41:56.458  9712  9712 W aramel.devproof: Entry not found
+10-27 08:41:56.614  9712  9756 W chromium: [WARNING:dns_config_service_android.cc(115)] Failed to read DnsConfig.
+10-27 08:41:56.853  9712  9731 W OpenGLRenderer: Failed to initialize 101010-2 format, error = EGL_SUCCESS
+10-27 08:41:57.375  9712  9761 W cr_media: BLUETOOTH_CONNECT permission is missing.
+10-27 08:41:57.375  9712  9761 W cr_media: registerBluetoothIntentsIfNeeded: Requires BLUETOOTH permission
+10-27 08:41:59.822  9712  9712 W WindowOnBackDispatcher: OnBackInvokedCallback is not enabled for the application.
+10-27 08:41:59.822  9712  9712 W WindowOnBackDispatcher: Set 'android:enableOnBackInvokedCallback="true"' in the application manifest.
+## B (pid 11097, E/W/F)
+10-27 08:47:26.719 11097 11097 W aramel.devproof: Unexpected CPU variant for x86: x86_64.
+10-27 08:47:26.719 11097 11097 W aramel.devproof: Known variants: atom, sandybridge, silvermont, goldmont, goldmont-plus, tremont, kabylake, default
+10-27 08:47:26.720 11097 11097 E aramel.devproof: Not starting debugger since process cannot load the jdwp agent.
+10-27 08:47:26.791 11097 11097 W OpenGLRenderer: Unknown dataspace 0
+10-27 08:47:26.810 11097 11097 W ziparchive: Unable to open '/data/app/~~vfSctoLGTE_9Ns_bsCRuKQ==/com.google.android.trichromelibrary_567263637-vlN7oJxPtYUTOFctaXULjg==/TrichromeLibrary.dm': No such file or directory
+10-27 08:47:26.810 11097 11097 W ziparchive: Unable to open '/data/app/~~vfSctoLGTE_9Ns_bsCRuKQ==/com.google.android.trichromelibrary_567263637-vlN7oJxPtYUTOFctaXULjg==/TrichromeLibrary.dm': No such file or directory
+10-27 08:47:26.810 11097 11097 W aramel.devproof: Entry not found
+10-27 08:47:26.875 11097 11146 W chromium: [WARNING:dns_config_service_android.cc(115)] Failed to read DnsConfig.
+10-27 08:47:26.891 11097 11146 E chromium: [ERROR:simple_version_upgrade.cc(152)] Failed to write a new fake index.
+10-27 08:47:26.892 11097 11142 E chromium: [ERROR:simple_version_upgrade.cc(152)] Failed to write a new fake index.
+10-27 08:47:26.943 11097 11116 W OpenGLRenderer: Failed to initialize 101010-2 format, error = EGL_SUCCESS
+10-27 08:47:27.236 11097 11147 W cr_media: BLUETOOTH_CONNECT permission is missing.
+10-27 08:47:27.237 11097 11147 W cr_media: registerBluetoothIntentsIfNeeded: Requires BLUETOOTH permission
+10-27 08:47:39.736 11097 11097 W WindowOnBackDispatcher: OnBackInvokedCallback is not enabled for the application.
+10-27 08:47:39.736 11097 11097 W WindowOnBackDispatcher: Set 'android:enableOnBackInvokedCallback="true"' in the application manifest.
+10-27 08:47:40.226 11097 11097 W WindowOnBackDispatcher: OnBackInvokedCallback is not enabled for the application.
+10-27 08:47:40.226 11097 11097 W WindowOnBackDispatcher: Set 'android:enableOnBackInvokedCallback="true"' in the application manifest.
+## B crash scan all pids
