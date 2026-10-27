@@ -952,6 +952,48 @@ export async function caramelClaimRunHop() {
     if (saved?.saved !== 'saved') return null
     return { hops: hops + 1, remaining: CARAMEL_RUN_MAX_HOPS - (hops + 1) }
 }
+/* Whether the document a run is applying on has started to navigate away.
+ *
+ * A form-POST cart answers a code on the page its submit loads, and the store
+ * can be slower to send that POST than an attempt waits. 4inkjets.com
+ * (Magento, 2026-10-27, T-9245): the POST left 9 s after the click, one second
+ * before the 10 s wait ran out. The runner judged the code on the old page,
+ * cleared the pending submit the next page reads, ended the run, and drew its
+ * end card; the reload then wiped the card and loaded a page with nothing to
+ * resume. The shopper saw the run vanish.
+ *
+ * beforeunload fires when a cross-document navigation starts, before the
+ * request goes out, in every browser we ship to. The Navigation API's navigate
+ * event says the same thing a beat earlier where it exists; a same-document
+ * navigation (a SPA cart moving its address bar) is not leaving. Either can be
+ * cancelled after the fact, which is why the caller only ever WAITS on this
+ * and then carries on if the page is still here. */
+// Consumed by coupon-runner.js (cross-file content-script call).
+export function caramelWatchPageLeaving() {
+    let leaving = false
+    const onBeforeUnload = () => {
+        leaving = true
+    }
+    const onNavigate = e => {
+        if (e?.destination?.sameDocument === false) leaving = true
+    }
+    const nav = globalThis.navigation
+    window.addEventListener('beforeunload', onBeforeUnload)
+    nav?.addEventListener?.('navigate', onNavigate)
+    return {
+        isLeaving: () => leaving,
+        // A navigation that was cancelled (the page vetoed it, or a
+        // beforeunload prompt was answered "stay") leaves this document live.
+        reset: () => {
+            leaving = false
+        },
+        stop: () => {
+            window.removeEventListener('beforeunload', onBeforeUnload)
+            nav?.removeEventListener?.('navigate', onNavigate)
+        },
+    }
+}
+
 /* The × and Esc set _caramelCancelled, which dies with the document. A chain
  * spans documents, so "stop" has to be written down, and before the store's
  * form POST can take this document away: the stop mark is written at once,

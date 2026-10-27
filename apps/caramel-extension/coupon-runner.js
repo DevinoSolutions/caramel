@@ -61,6 +61,7 @@ import {
     caramelHoldAppliedWin,
     caramelIsForbiddenControl,
     caramelMarkPendingSubmit,
+    caramelWatchPageLeaving,
     getPrice,
     pickBestMatch,
     qAll,
@@ -800,10 +801,42 @@ export async function startApplyingCoupons(rec, options) {
     // of failures; it must not decide a short list.
     const FLOW_BUDGET_MS = 35000
     const FLOW_MIN_TRIES = 3
+    // How long a page that has started to leave is given to actually go.
+    // 4inkjets.com took 4 s from its coupon POST to the reloaded page; a store
+    // that has not gone after this long cancelled the navigation.
+    const PAGE_LEAVE_GRACE_MS = 20000
     const loopStart = performance.now()
+
+    // A store whose submit navigates may send it late (T-9245, see
+    // caramelWatchPageLeaving): once this page is leaving, the code in flight
+    // and the rest of the run belong to the page it loads.
+    const leaving = caramelWatchPageLeaving()
+    // The last attempt made on this page. Its pending-submit record is cleared
+    // once the attempt returns, so a navigation that starts AFTER that (the
+    // store's POST arriving late) writes it again for the page it loads.
+    let lastAttempt = null
+    const holdForNavigation = async ({ recordHeld }) => {
+        log('AUTO_INSERT_PAGE_LEAVING', {
+            code: lastAttempt?.code ?? null,
+            t: performance.now(),
+        })
+        if (lastAttempt && !recordHeld)
+            await caramelMarkPendingSubmit(
+                lastAttempt.code,
+                lastAttempt.id,
+                originalPrices,
+                lastAttempt.finder,
+            )
+        await sleep(PAGE_LEAVE_GRACE_MS)
+        // Still here: the navigation was cancelled. Carry on as before.
+        log('AUTO_INSERT_PAGE_STAYED', { code: lastAttempt?.code ?? null })
+        leaving.reset()
+        await caramelClearPendingSubmit()
+    }
 
     for (let i = 0; i < coupons.length; i++) {
         if (globalThis._caramelCancelled) break
+        if (leaving.isLeaving()) await holdForNavigation({ recordHeld: false })
         if (
             !bestCode &&
             i >= FLOW_MIN_TRIES &&
@@ -823,19 +856,28 @@ export async function startApplyingCoupons(rec, options) {
         // Written BEFORE the submit, because a submit that navigates never
         // comes back here (see caramelMarkPendingSubmit). Cleared immediately
         // after, so a normal attempt leaves nothing for the next page to read.
+        lastAttempt = {
+            code,
+            id: coupons[i].id,
+            finder:
+                rec.caramelFound === true
+                    ? {
+                          kind: rec.caramelTotalKind || 'total',
+                          label: rec.caramelTotalLabel,
+                          rows: rec.caramelTotalRows,
+                      }
+                    : false,
+        }
         await caramelMarkPendingSubmit(
             code,
-            coupons[i].id,
+            lastAttempt.id,
             originalPrices,
-            rec.caramelFound === true
-                ? {
-                      kind: rec.caramelTotalKind || 'total',
-                      label: rec.caramelTotalLabel,
-                      rows: rec.caramelTotalRows,
-                  }
-                : false,
+            lastAttempt.finder,
         )
         const res = await applyCoupon(code, rec)
+        // The store's submit is taking this page away: this code's answer is on
+        // the page it loads, which reads the record we are still holding.
+        if (leaving.isLeaving()) await holdForNavigation({ recordHeld: true })
         await caramelClearPendingSubmit()
 
         // Did this attempt prove ANYTHING about this code? An applied row, the
@@ -1011,6 +1053,11 @@ export async function startApplyingCoupons(rec, options) {
     // so whatever happens next is a result, not a hop. Close the run before any
     // of the terminal branches below: a record left open would let an unrelated
     // later navigation resume a chain that already had its answer.
+    //
+    // Unless the page is leaving after all: the last submit's POST landed after
+    // its attempt returned, and the page it loads is where the run goes on.
+    if (leaving.isLeaving()) await holdForNavigation({ recordHeld: false })
+    leaving.stop()
     await caramelEndRun()
 
     if (globalThis._caramelCancelled) {
