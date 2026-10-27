@@ -64,18 +64,48 @@ function token(keyPath, keyId, issuerId) {
     return `${unsigned}.${signature.toString('base64url')}`
 }
 
+// App Store Connect sometimes holds a request open without answering: v1.4.22's
+// run (2026-10-27) waited out undici's 5-minute headers timeout on one call and
+// failed the release job after both uploads had landed. Each call gets its own
+// 30 s budget and up to three tries on a network error or a 5xx; a 4xx is an
+// answer and fails at once. A DELETE that timed out may have landed, so a retry
+// answering 404 for it counts as revoked.
+const ATTEMPTS = 3
+const CALL_TIMEOUT_MS = 30_000
+
 async function api(path, jwt, init = {}) {
     const url = path.startsWith('http') ? path : `${API}${path}`
-    const response = await fetch(url, {
-        ...init,
-        headers: { Authorization: `Bearer ${jwt}` },
-    })
-    if (!response.ok) {
-        throw new Error(
-            `${init.method ?? 'GET'} ${url} -> ${response.status}: ${await response.text()}`,
-        )
+    const method = init.method ?? 'GET'
+    for (let attempt = 1; ; attempt++) {
+        let response
+        try {
+            response = await fetch(url, {
+                ...init,
+                headers: { Authorization: `Bearer ${jwt}` },
+                signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
+            })
+        } catch (err) {
+            if (attempt >= ATTEMPTS) throw err
+            console.log(
+                `${method} ${url} attempt ${attempt} failed (${err?.cause?.code ?? err?.name ?? err}); retrying.`,
+            )
+            continue
+        }
+        if (response.status >= 500 && attempt < ATTEMPTS) {
+            console.log(
+                `${method} ${url} attempt ${attempt} -> ${response.status}; retrying.`,
+            )
+            continue
+        }
+        if (method === 'DELETE' && response.status === 404 && attempt > 1)
+            return null
+        if (!response.ok) {
+            throw new Error(
+                `${method} ${url} -> ${response.status}: ${await response.text()}`,
+            )
+        }
+        return response.status === 204 ? null : response.json()
     }
-    return response.status === 204 ? null : response.json()
 }
 
 async function main() {
