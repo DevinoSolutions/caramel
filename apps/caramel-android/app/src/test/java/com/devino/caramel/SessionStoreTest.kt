@@ -43,7 +43,7 @@ class SessionStoreTest {
         assertNull(store.state.value.errorMessage)
         val exchange = transport.requests.last()
         assertTrue(exchange.body!!.contains("\"codeVerifier\":\"verifier-for-tests\""))
-        assertTrue(exchange.body!!.contains("\"code\":\"code1\""))
+        assertTrue(exchange.body.contains("\"code\":\"code1\""))
     }
 
     @Test
