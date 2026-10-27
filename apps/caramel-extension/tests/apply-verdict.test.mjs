@@ -632,6 +632,7 @@ describe('applyCoupon verdict — success rule', () => {
         const res = await applyCoupon('SAVE10', rec)
 
         expect(Object.keys(res).sort()).toEqual([
+            'answeredByRow',
             'committed',
             'errorIsNew',
             'errorMsg',

@@ -804,6 +804,24 @@ function _caramelRowOwnText(row) {
         .trim()
 }
 
+/* The store's answer when it gives it as a row: a row the store drew for this
+ * submission, among its applied coupons, that says the code was not applied.
+ * Salesforce Commerce Cloud carts answer a code that exists but does not fit
+ * the cart this way, with no error text anywhere (aquasana.com 2026-10-27:
+ * "JULY50 NOT APPLIED ×" under .coupon-price-adjustment). The row was already
+ * refused as a success (caramelAcceptedRowCount), but nothing took it as an
+ * answer, so every such code read as silence and two of them ended the run as
+ * a checkout "not accepting injection", eight codes untried (T-9569). New by
+ * text, as the verdict's appliedRows: a re-render replaces every node. */
+function _caramelRejectedRowAnswer(appliedSel, beforeAppliedTexts) {
+    const row = qAll(appliedSel).find(
+        el =>
+            !beforeAppliedTexts.has(_caramelRowOwnText(el)) &&
+            caramelRowReadsRejected(el),
+    )
+    return row ? _caramelRowOwnText(row) || null : null
+}
+
 // An applied row's own text, and that text with up to two enclosing levels
 // (stopping below the one that holds the promo box, whose label would speak
 // for every row): a config can point at an element holding only the code,
@@ -825,6 +843,7 @@ function _caramelRowWithContext(row, input) {
 
 /* Waits for the store's answer to `opts.code`, then applies the success rules.
  * Resolves { success, priceDropped, newTotal, committed, errorMsg, errorIsNew,
+ * answeredByRow (the store's answer was a "not applied" row: take it off),
  * appliedRows (each row node drawn for THIS submission: { text, context,
  * levels, textSeenBefore }),
  * appliedRowsText (every applied row's text, joined) }.
@@ -1083,13 +1102,21 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
     }
     // The store's answer is read around the box: the one it drew, if it did.
     if (rec.caramelFound) caramelRemarkFoundBox(false, rec)
-    const errorMsg = detectCouponError(
+    const errorText = detectCouponError(
         rec,
         errorBaseline,
         code,
         priorAreaText,
         alertsBefore,
     )
+    const rowAnswer = errorText
+        ? null
+        : _caramelRejectedRowAnswer(appliedSel, beforeAppliedTexts)
+    const errorMsg = errorText || rowAnswer
+    // The refused code stays on the cart as that row, and the next code is
+    // then refused for it ("Coupon cannot be combined with other coupons
+    // already in your cart", aquasana.com 2026-10-27): the runner takes it off.
+    const answeredByRow = !!rowAnswer
     // Quotable only if the store said it BECAUSE of us (see
     // _caramelCouponAreaText). Detection above is deliberately untouched.
     const errorIsNew = caramelQuoteIsAttributable(errorMsg, priorAreaText)
@@ -1213,6 +1240,7 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
         committed,
         errorMsg,
         errorIsNew,
+        answeredByRow,
         appliedRows,
         appliedRowsText,
     }
@@ -1414,8 +1442,14 @@ export async function applyCoupon(code, rec) {
 
         /* 4] wait for result and read the verdict — see
              caramelAwaitCouponVerdict for the race and the success rules. */
-        const { success, newTotal, committed, errorMsg, errorIsNew } =
-            await caramelAwaitCouponVerdict(rec, snapshot, { code })
+        const {
+            success,
+            newTotal,
+            committed,
+            errorMsg,
+            errorIsNew,
+            answeredByRow,
+        } = await caramelAwaitCouponVerdict(rec, snapshot, { code })
         const elapsed = performance.now() - attemptStart
         log('AUTO_INSERT_ATTEMPT_END', code, {
             success,
@@ -1432,7 +1466,14 @@ export async function applyCoupon(code, rec) {
             errorMsg,
             elapsed,
         })
-        return { success, newTotal, committed, errorMsg, errorIsNew }
+        return {
+            success,
+            newTotal,
+            committed,
+            errorMsg,
+            errorIsNew,
+            answeredByRow,
+        }
     } catch (err) {
         logError('applyCoupon error', err)
         log('AUTO_INSERT_ATTEMPT_END', code, {

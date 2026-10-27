@@ -1071,7 +1071,9 @@ export async function startApplyingCoupons(rec, options) {
             lastFailId = coupons[i].id // pair the reason with its coupon
             rejectedCodes.add(code)
         }
-        if (res.committed) {
+        // A code the store refused by listing it "NOT APPLIED" stays on the
+        // cart, and blocks the next one (caramelAwaitCouponVerdict).
+        if (res.committed || res.answeredByRow) {
             await removeAppliedCoupon(rec, {
                 code,
                 hadPreExisting: preExistingDiscount,
