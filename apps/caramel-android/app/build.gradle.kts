@@ -94,11 +94,7 @@ android {
 }
 
 // The devproof build type is built and shrunk, not unit-tested: the unit tests pin the production origin literally.
-androidComponents {
-    beforeVariants(selector().withBuildType("devproof")) { variant ->
-        variant.enableUnitTest = false
-    }
-}
+tasks.matching { it.name == "testDevproofUnitTest" }.configureEach { enabled = false }
 
 kotlin {
     compilerOptions {
