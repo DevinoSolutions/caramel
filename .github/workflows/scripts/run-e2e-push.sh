@@ -22,8 +22,9 @@
 # No wait or timeout inside the tests can fix that (the page is waiting for a
 # chunk that does not exist on the server it asks), so the fix is at the one
 # place that can see the cause: the served sha. It is read before and after the
-# run, and ONLY when it CHANGED is a failure attributed to the redeploy:
-#   - the failure is announced as a ::warning AND a $GITHUB_STEP_SUMMARY entry,
+# run, and ONLY when it CHANGED does a failure earn a rerun (the redeploy is a
+# possible cause, not a proven one; the request evidence below says which):
+#   - the change is announced as a ::warning AND a $GITHUB_STEP_SUMMARY entry,
 #     both naming the two shas, the summary also the failed first-attempt tests;
 #   - the served sha is awaited until it is stable again;
 #   - that settled deployment must still carry EXPECTED_SHA (wait-for-deploy.sh,
@@ -65,6 +66,9 @@
 #   E2E_READ_POLLS               - optional, default 3 (reads for the before and
 #                                  after sha; a swap can 502 for several seconds)
 #   E2E_READ_INTERVAL_SECONDS    - optional, default 10
+#
+# The suite never sees GH_TOKEN (`env -u`): only the wait-for-deploy.sh
+# ancestry check needs it.
 #
 # Run it from apps/caramel-app (the suite's working directory).
 
@@ -158,7 +162,7 @@ else
 fi
 
 run_status=0
-bash -c "$e2e_command" 2>&1 | tee "$run_log"
+env -u GH_TOKEN bash -c "$e2e_command" 2>&1 | tee "$run_log"
 run_status="${PIPESTATUS[0]}"
 
 if [ "$run_status" -eq 0 ]; then
@@ -179,11 +183,11 @@ fi
 
 first_attempt_titles="$(failed_test_titles)"
 
-echo "::warning title=Production redeployed during the E2E run::The suite failed (exit ${run_status}) while ${VERSION_URL} went from ${before_sha} to ${after_sha}. A page that straddles the container swap gets HTML and JS chunks from different builds and never hydrates, so the failure is attributed to the deploy. Waiting for the new deployment to settle, checking it still carries ${EXPECTED_SHA}, and rerunning the suite once (T-9427). The rerun may test a newer descendant of that commit."
+echo "::warning title=Production redeployed during the E2E run::The suite failed (exit ${run_status}) while ${VERSION_URL} went from ${before_sha} to ${after_sha}. A page that straddles the container swap can get HTML and JS chunks from different builds and never hydrate; the failed attempt's request list above shows whether that happened. Waiting for the new deployment to settle, checking it still carries ${EXPECTED_SHA}, and rerunning the suite once (T-9427). The rerun may test a newer descendant of that commit."
 summary \
     "### E2E failed across a production redeploy (T-9427)" \
     "" \
-    "- Served sha during the run: \`${before_sha}\` -> \`${after_sha}\` (suite exit ${run_status}); commit under test \`${EXPECTED_SHA}\`." \
+    "- Production changed from \`${before_sha}\` to \`${after_sha}\` during the run (suite exit ${run_status}; commit under test \`${EXPECTED_SHA}\`); the suite is rerun once." \
     "- Failed tests of the first attempt (their sanitized request lists are above in this log):" \
     "$(printf '%s\n' "${first_attempt_titles:-(no failure titles found in the output)}" | sed 's/^/  - /')"
 
@@ -207,11 +211,11 @@ fi
 echo "Production settled on ${settled}; rerunning E2E once."
 summary "- Production settled on \`${settled}\` (the commit under test or a newer descendant); rerunning the suite once."
 rerun_status=0
-bash -c "$e2e_command" || rerun_status=$?
+env -u GH_TOKEN bash -c "$e2e_command" || rerun_status=$?
 
 if [ "$rerun_status" -eq 0 ]; then
     echo "::warning title=E2E passed on the post-redeploy rerun::The first run failed across a production redeploy (${before_sha} to ${after_sha}); the rerun against ${settled} is green."
-    summary "- Rerun against \`${settled}\`: **passed**. The first attempt's failures above are attributed to the redeploy."
+    summary "- Rerun against \`${settled}\`: **passed**. The first attempt's failures are listed above; their request lists are in the log."
 else
     summary "- Rerun against \`${settled}\`: **failed** (exit ${rerun_status}); the job fails."
 fi

@@ -61,6 +61,7 @@ const PASSTHROUGH_TOOLS = [
     'cut',
     'tr',
     'cat',
+    'env',
 ]
 
 interface VersionResponse {
@@ -115,6 +116,13 @@ function suiteRuns(): number {
 
 function ghCalls(): string[] {
     const log = path.join(mockDir, 'gh.log')
+    return fs.existsSync(log)
+        ? fs.readFileSync(log, 'utf8').trim().split('\n')
+        : []
+}
+
+function tokenSeenBy(tool: 'e2e' | 'gh'): string[] {
+    const log = path.join(mockDir, `${tool}.token.log`)
     return fs.existsSync(log)
         ? fs.readFileSync(log, 'utf8').trim().split('\n')
         : []
@@ -182,6 +190,7 @@ beforeEach(() => {
     writeExecutable('gh', [
         '# MOCK gh for run-e2e-push.test.ts: never contacts GitHub.',
         'echo "$*" >> "$MOCK_DIR/gh.log"',
+        'echo "${GH_TOKEN:-unset}" >> "$MOCK_DIR/gh.token.log"',
         'echo "$MOCK_GH_STATUS"',
     ])
     writeExecutable('e2e-suite', [
@@ -190,6 +199,7 @@ beforeEach(() => {
         '[ -f "$MOCK_DIR/e2e.count" ] && n=$(<"$MOCK_DIR/e2e.count")',
         'n=$((n + 1))',
         'echo "$n" > "$MOCK_DIR/e2e.count"',
+        'echo "${GH_TOKEN:-unset}" >> "$MOCK_DIR/e2e.token.log"',
         'last=$(<"$MOCK_DIR/e2e.last")',
         'i=$((n > last ? last : n))',
         'code="$(<"$MOCK_DIR/e2e.$i.status")"',
@@ -252,6 +262,7 @@ describe('run-e2e-push.sh', () => {
         expect(run.output).toContain(
             `::warning title=Production redeployed during the E2E run::The suite failed (exit 1) while http://mock.invalid/api/version went from ${BEFORE} to ${AFTER}`,
         )
+        expect(run.output).not.toContain('is attributed to the deploy')
         expect(run.output).toContain('may test a newer descendant')
         expect(run.output).toContain(
             '::warning title=E2E passed on the post-redeploy rerun',
@@ -262,6 +273,16 @@ describe('run-e2e-push.sh', () => {
         ])
     })
 
+    it('keeps GH_TOKEN away from the suite (both runs) while the ancestry check still gets it', () => {
+        scriptVersionResponses(REDEPLOYED)
+        scriptSuiteExitCodes([1, 0])
+
+        runScript()
+
+        expect(tokenSeenBy('e2e')).toEqual(['unset', 'unset'])
+        expect(tokenSeenBy('gh')).toEqual(['mock-token'])
+    })
+
     it('writes both shas, the failed first-attempt test and the rerun verdict to the step summary', () => {
         scriptVersionResponses(REDEPLOYED)
         scriptSuiteExitCodes([1, 0])
@@ -269,7 +290,11 @@ describe('run-e2e-push.sh', () => {
         runScript()
 
         const summary = stepSummary()
-        expect(summary).toContain(`\`${BEFORE}\` -> \`${AFTER}\``)
+        expect(summary).toContain(
+            `Production changed from \`${BEFORE}\` to \`${AFTER}\` during the run`,
+        )
+        expect(summary).toContain('the suite is rerun once')
+        expect(summary).not.toContain('attributed')
         expect(summary).toContain(`commit under test \`${EXPECTED}\``)
         expect(summary).toContain(
             '[chromium] › e2e/mock.spec.ts:1:1 › mock failing test',

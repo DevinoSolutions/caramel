@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
@@ -15,6 +16,18 @@ const E2E_DIR = path.resolve(
 )
 const PLAYWRIGHT_IMPORT = /import\s*\{([^}]*)\}\s*from\s*'@playwright\/test'/g
 
+function findSpecFiles(dir: string): string[] {
+    return fs
+        .readdirSync(dir, { withFileTypes: true })
+        .flatMap(entry =>
+            entry.isDirectory()
+                ? findSpecFiles(path.join(dir, entry.name))
+                : entry.name.endsWith('.spec.ts')
+                  ? [path.join(dir, entry.name)]
+                  : [],
+        )
+}
+
 /** Specs (by name) that import a runtime `test` from '@playwright/test'. */
 function specsBypassingTheFixture(sources: Record<string, string>): string[] {
     return Object.entries(sources)
@@ -30,19 +43,45 @@ function specsBypassingTheFixture(sources: Record<string, string>): string[] {
 }
 
 describe('e2e specs use the request-evidence fixture', () => {
-    it('no spec imports `test` from @playwright/test', () => {
+    it('no spec, at any depth under e2e/, imports `test` from @playwright/test', () => {
+        const specFiles = findSpecFiles(E2E_DIR)
         const sources = Object.fromEntries(
-            fs
-                .readdirSync(E2E_DIR)
-                .filter(name => name.endsWith('.spec.ts'))
-                .map(name => [
-                    name,
-                    fs.readFileSync(path.join(E2E_DIR, name), 'utf8'),
-                ]),
+            specFiles.map(file => [
+                path.relative(E2E_DIR, file),
+                fs.readFileSync(file, 'utf8'),
+            ]),
         )
 
-        expect(Object.keys(sources).length).toBeGreaterThan(0)
+        expect(specFiles.length).toBeGreaterThan(0)
         expect(specsBypassingTheFixture(sources)).toEqual([])
+    })
+
+    it('finds *.spec.ts files in nested directories (red-proof for the walk)', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'e2e-specs-'))
+        try {
+            fs.mkdirSync(path.join(root, 'nested', 'deeper'), {
+                recursive: true,
+            })
+            fs.writeFileSync(path.join(root, 'top.spec.ts'), '')
+            fs.writeFileSync(
+                path.join(root, 'nested', 'deeper', 'inner.spec.ts'),
+                '',
+            )
+            fs.writeFileSync(path.join(root, 'nested', 'helper.ts'), '')
+
+            expect(
+                findSpecFiles(root)
+                    .map(file => path.relative(root, file))
+                    .sort(),
+            ).toEqual(
+                [
+                    'top.spec.ts',
+                    path.join('nested', 'deeper', 'inner.spec.ts'),
+                ].sort(),
+            )
+        } finally {
+            fs.rmSync(root, { recursive: true, force: true })
+        }
     })
 
     it('the detector flags a bypass and accepts the fixture and type-only imports (red-proof)', () => {
