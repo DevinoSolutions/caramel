@@ -321,7 +321,7 @@ model Source {
 // reporter_hash 'legacy' marks the one synthetic row per coupon seeded by migration
 // 20261021213000 to grandfather codes already sunk under the old raw-count rule;
 // it ages out and is cleared by a success like any other reporter row.
-// TODO(T-4372): the "Verified needs 2 distinct reporters" rule is not built yet;
+// TODO(T-9212): the "Verified needs 2 distinct reporters" rule (decided in T-4372) is not built yet;
 // it can reuse this table's 'worked' rows, but today those exist only while a
 // coupon has a failure quorum.
 model CouponSignalReporter {

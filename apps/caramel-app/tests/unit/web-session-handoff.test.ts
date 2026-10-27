@@ -3,7 +3,7 @@
 // Validates the next-path allowlist. The routes themselves (the shell-only
 // redeem, the handoff body cap, 401 without a bearer) are tested in
 // tests/unit/web-session-routes.test.ts.
-// TODO(T-7852): no integration test runs the full round trip (checks 1–4,
+// TODO(T-9213): no integration test runs the full round trip (checks 1–4,
 // 7–8) on real Postgres yet; the device runs are the only end-to-end proof.
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
