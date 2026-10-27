@@ -116,8 +116,7 @@ function suiteRuns(): number {
 function ghCalls(): string[] {
     const log = path.join(mockDir, 'gh.log')
     return fs.existsSync(log)
-        ? fs.readFileSync(log, 'utf8').trim().split('
-')
+        ? fs.readFileSync(log, 'utf8').trim().split('\n')
         : []
 }
 
