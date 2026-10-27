@@ -1001,13 +1001,21 @@ jobs:
           export APPSTORE_CONNECT_ISSUER_ID="$ASC_ISSUER_ID"
           export APPSTORE_CONNECT_API_KEY="$(cat private_keys/AuthKey_${ASC_KEY_ID}.p8)"
 
-          # --limit 50 is the max the ASC API allows for sub-resources
-          asc testflight builds list \
-            --filter-bundle-ids "$SAFARI_BUNDLE_ID" \
-            --include-expired --limit 50 \
-            --api-key-id "$ASC_KEY_ID" \
-            --api-issuer "$ASC_ISSUER_ID" \
-            --json > builds.json || true
+          # --limit 50 is the max the ASC API allows for sub-resources.
+          # App Store Connect answers this with a 500 now and then (v1.4.24
+          # run 40584019100): the error body is not a list, so ask again, up
+          # to 4 times, until it is one.
+          for attempt in 1 2 3 4; do
+            asc testflight builds list \
+              --filter-bundle-ids "$SAFARI_BUNDLE_ID" \
+              --include-expired --limit 50 \
+              --api-key-id "$ASC_KEY_ID" \
+              --api-issuer "$ASC_ISSUER_ID" \
+              --json > builds.json || true
+            if jq -e 'type == "array"' builds.json > /dev/null 2>&1; then break; fi
+            echo "TestFlight build list attempt $attempt did not return a list; retrying in 20s"
+            sleep 20
+          done
 
           echo "=== RAW builds.json ==="
           cat builds.json
@@ -1033,6 +1041,18 @@ jobs:
 
           echo "macOS current build: $MACOS_CURRENT_BUILD"
           echo "iOS   current build: $IOS_CURRENT_BUILD"
+
+          # The null check above passes on an EMPTY entry (jq prints nothing
+          # for an unreadable builds.json), and $((""+1)) is 1: v1.4.24 went
+          # out stamped CFBundleVersion 1 and Apple refused it. Only digits pass.
+          case "$MACOS_CURRENT_BUILD" in ''|*[!0-9]*)
+            echo "ERROR: macOS build number '$MACOS_CURRENT_BUILD' is not a number. Aborting."
+            exit 1 ;;
+          esac
+          case "$IOS_CURRENT_BUILD" in ''|*[!0-9]*)
+            echo "ERROR: iOS build number '$IOS_CURRENT_BUILD' is not a number. Aborting."
+            exit 1 ;;
+          esac
 
           echo "IOS_BUILD_NUM=$((IOS_CURRENT_BUILD+1))"     >> $GITHUB_ENV
           echo "MACOS_BUILD_NUM=$((MACOS_CURRENT_BUILD+1))" >> $GITHUB_ENV
