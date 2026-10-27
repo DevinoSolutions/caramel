@@ -165,7 +165,11 @@ module.exports = [
         // were never weighed. 104.43 kB per file is 91.9 kB bundled; the
         // production build's content.js is 94.48 kB, the difference being
         // WXT's own runtime wrapper. The limit is measured + ~3.1 kB.
-        limit: '95 KB',
+        // 2026-10-28 (T-9569), raised 95 -> 96 kB: #592 (a store's "NOT
+        // APPLIED" row is its answer) and #595 (the cart's "remove this
+        // coupon?" dialog is confirmed after its fade-in, so a refused code
+        // really comes off) used up the headroom. Measured 95.56 kB.
+        limit: '96 KB',
         brotli: false,
     },
     {
