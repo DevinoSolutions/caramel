@@ -240,6 +240,10 @@ export async function startApplyingCoupons(rec, options) {
         )
         return
     }
+    // On a resumed run the codes skipped here were tried on the pages before
+    // this one, so the counter carries on from them ("2 of 8", not "1 of 7"
+    // again after every reload).
+    const priorTries = resumed ? coupons.length - _untried.length : 0
     coupons = _untried
 
     // Discount-link strategy first when the platform capability is present
@@ -850,7 +854,11 @@ export async function startApplyingCoupons(rec, options) {
         }
         const { code } = coupons[i]
         triedCodes.push(code)
-        await updateTestingModal(i + 1, coupons.length, code)
+        await updateTestingModal(
+            priorTries + i + 1,
+            priorTries + coupons.length,
+            code,
+        )
 
         _markTriedCode(code)
         // Written BEFORE the submit, because a submit that navigates never
