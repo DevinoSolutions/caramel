@@ -157,28 +157,42 @@ broken. Check Dokploy's Postgres container/managed DB status first.
 
 ## Deploys & rollback
 
-Deploys run through Dokploy. TODO(human): record the exact deploy trigger
-(push to `main`? manual redeploy button?) and the precise rollback
-procedure (Dokploy has a rollback-to-previous-deployment action in its UI —
-confirm the button location for this specific application) — this repo
-carries a DB-migration step (`prisma migrate deploy`, see
-`package.json`'s `db:migrate:deploy`) but **no app-deploy workflow, and no
-rollback automation or documentation existed anywhere in the tracked files
-before this doc** (confirmed: `git grep -i dokploy` across the repo,
-excluding `audit/`, returns a single code comment).
+Deploys run through Dokploy. Prod (grabcaramel.com, www and docs) is the
+**"Caramel Prod Compose (LIVE)"** compose service in the Caramel Dokploy
+project. It builds the root `docker-compose.yml` from `main`.
+
+**Prod deploys are manual by design: auto-deploy is OFF on the prod
+compose.** A push to `main` still reaches Dokploy through the GitHub App
+webhook, and Dokploy answers `200 {"message":"No apps to deploy"}`. Merging to
+`main` therefore never deploys by itself. Verified on 2026-10-27: #569 and #571
+sat undeployed until a deploy was queued by hand.
+
+Merge-to-main checklist (whoever merges does all of it):
+
+1. Right after the merge, take a backup of the prod compose's Postgres (the
+   compose backup in Dokploy), then queue ONE prod deploy of the compose.
+   Never queue in the 23:55-00:05Z window. Keep at most one queued deploy per
+   service: if one is already waiting, leave it alone (it builds `main`'s HEAD
+   when it runs) and never re-queue.
+2. When the deploy is done, check that `https://grabcaramel.com/api/version`
+   reports the merged sha (or a descendant) and capture it.
+3. Re-run the failed job of the merge commit's `main` CI run once (the
+   push-mode E2E job waits for the deployment to carry the commit and times
+   out if the deploy was queued late).
 
 Since F-016 the root `docker-compose.yml` (`Dockerfile` +
 `docker-entrypoint.sh`) is the INTENDED deployment unit — local and CI build
-and run this exact graph, and prod is meant to run the same file as one
-platform compose service. The prod cutover onto it is still gated and
-human-run (never move prod traffic without explicit in-session confirmation);
-until it lands, prod stays on the current Dokploy/Nixpacks deploy.
+and run this exact graph, and prod runs the same file as one platform
+compose service. The prod cutover onto it was gated and human-run, and it
+happened on 2026-08-08 (moving prod traffic still needs explicit in-session
+confirmation).
 
-Until the TODO above is filled in, the safe manual sequence is:
+Rollback sequence:
 
 1. Confirm the outage via `/api/health/db` and Sentry.
-2. Open the Dokploy dashboard, find the caramel-app application, and use
-   its deployment history to redeploy the last known-good build.
+2. Open the Dokploy dashboard, find the prod compose (above), and use its
+   deployment history to redeploy the last known-good build. TODO(human):
+   confirm the exact rollback button for the compose service.
 3. Re-run the [post-deploy smoke check](#post-deploy-smoke-check) against
    the rolled-back deployment before declaring it resolved.
 4. If the regression was a DB migration, `prisma migrate deploy` is
