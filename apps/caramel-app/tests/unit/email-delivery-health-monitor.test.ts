@@ -425,6 +425,25 @@ describe('startEmailDeliveryHealthMonitor', () => {
                 .filter(status => status === 'error'),
         ).toHaveLength(1)
     })
+
+    it('a timed-out check (error report) releases the overlap guard, so the next tick runs instead of being skipped (T-9447)', async () => {
+        const { startEmailDeliveryHealthMonitor } = await startedMonitor()
+        checkMock.mockResolvedValueOnce(
+            report({
+                status: 'error',
+                reason: 'Sendly request timed out after 15000 ms',
+            }),
+        )
+
+        startEmailDeliveryHealthMonitor()
+        await vi.advanceTimersByTimeAsync(BOOT_TO_SLOT_MS)
+        await vi.advanceTimersByTimeAsync(HOUR)
+
+        expect(checkMock).toHaveBeenCalledTimes(2)
+        expect(console.warn).not.toHaveBeenCalledWith(
+            '[email-health] previous cycle still running, skipped',
+        )
+    })
 })
 
 describe('the scheduled run checks in to the Sentry cron monitor', () => {

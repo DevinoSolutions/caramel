@@ -296,6 +296,46 @@ describe('checkEmailDeliveryHealth', () => {
         expect(formatEmailDeliveryHealthLine(report)).not.toContain('shopper@')
     })
 
+    it('a Sendly request that never answers ends as an error report naming the timeout (T-9447)', async () => {
+        // MOCK: a fetch that never resolves but honours the abort signal, like
+        // the real one. The SDK's per-request timeout aborts it.
+        let aborts = 0
+        const hanging = ((_input: string | URL | Request, init?: RequestInit) =>
+            new Promise<Response>((_resolve, reject) => {
+                init?.signal?.addEventListener('abort', () => {
+                    aborts++
+                    reject(init.signal?.reason)
+                })
+            })) as unknown as typeof fetch
+        const report = await checkEmailDeliveryHealth({
+            apiKey: KEY,
+            fromEmail: FROM,
+            fetchImpl: hanging,
+            requestTimeoutMs: 25,
+            now,
+        })
+        expect(report.status).toBe('error')
+        expect(report.reason).toBe('Sendly request timed out after 25 ms')
+        expect(aborts).toBe(1)
+    })
+
+    it('a fast response still passes through the per-request timeout untouched', async () => {
+        const { impl } = fakeSendlyFetch({
+            pages: [
+                [rawRow({ id: '1', createdAt: '2026-09-16T12:40:00.000Z' })],
+            ],
+        })
+        const report = await checkEmailDeliveryHealth({
+            apiKey: KEY,
+            fromEmail: FROM,
+            fetchImpl: impl,
+            requestTimeoutMs: 5_000,
+            now,
+        })
+        expect(report.status).toBe('ok')
+        expect(report.scanned).toBe(1)
+    })
+
     it('reports degraded when the window contains a bounce', async () => {
         const { impl } = fakeSendlyFetch({
             pages: [
