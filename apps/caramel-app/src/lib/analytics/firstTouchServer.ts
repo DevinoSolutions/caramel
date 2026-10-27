@@ -12,7 +12,6 @@
 // tampering, and both deserve a Sentry warning rather than a silent shrug.
 import * as Sentry from '@sentry/nextjs'
 import 'server-only'
-import { z } from 'zod'
 import { readCookieValues } from './cookieHeader'
 import {
     FIRST_TOUCH_COOKIE_NAME,
@@ -61,9 +60,8 @@ export function readFirstTouchFromHeaders(
 // and identified visitors share the shape; only `distinct_id` and
 // `$user_state` differ. A sibling `ph_<token>_posthog_cpm` sidecar cookie
 // exists but never matches this exact name.
-const posthogCookieSchema = z.object({
-    distinct_id: z.string().min(1).max(200),
-})
+/** Longest distinct id accepted; our ids are UUIDs, so anything longer is not ours. */
+const MAX_POSTHOG_DISTINCT_ID_LENGTH = 200
 
 // posthog-js's in-memory-only id in cookieless mode: one shared value for every
 // visitor, so it is never an identity to alias.
@@ -152,11 +150,10 @@ function readPosthogCookieValue(raw: string): PosthogCookieRead {
     if (distinctId.length === 0) {
         return { ok: false, reason: 'distinct_id_empty', keys }
     }
-    const checked = posthogCookieSchema.safeParse(cookie)
-    if (!checked.success) {
+    if (distinctId.length > MAX_POSTHOG_DISTINCT_ID_LENGTH) {
         return { ok: false, reason: 'distinct_id_too_long', keys }
     }
-    return { ok: true, distinctId: checked.data.distinct_id }
+    return { ok: true, distinctId }
 }
 
 /**
@@ -177,7 +174,16 @@ export function readPosthogDistinctId(
     for (const raw of values) {
         const read = readPosthogCookieValue(raw)
         if (read.ok) return read.distinctId
-        if (read.reason.startsWith('absent_')) continue
+        if (read.reason.startsWith('absent_')) {
+            // Documented no-id state: no warning, but leave a trail so it is
+            // visible in context if it ever becomes common.
+            Sentry.addBreadcrumb({
+                category: 'analytics',
+                level: 'info',
+                message: `posthog persistence cookie has no usable distinct id (${read.reason})`,
+            })
+            continue
+        }
         Sentry.captureMessage(
             'posthog persistence cookie present but unreadable; no alias made',
             {

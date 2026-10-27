@@ -16,6 +16,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const sentry = vi.hoisted(() => ({
     captureMessage: vi.fn(),
     captureException: vi.fn(),
+    addBreadcrumb: vi.fn(),
 }))
 vi.mock('@sentry/nextjs', () => sentry)
 
@@ -37,6 +38,7 @@ function headersWithCookie(cookie: string | null): Headers {
 beforeEach(() => {
     sentry.captureMessage.mockClear()
     sentry.captureException.mockClear()
+    sentry.addBreadcrumb.mockClear()
 })
 
 describe('readFirstTouchFromHeaders', () => {
@@ -154,6 +156,16 @@ describe('readPosthogDistinctId', () => {
             expect(sentry.captureMessage).not.toHaveBeenCalled()
         })
 
+        it('accepts a distinct id of exactly the 200-character cap', () => {
+            const id = 'x'.repeat(200)
+            expect(
+                readPosthogDistinctId(
+                    headersWithCookie(phCookie({ distinct_id: id })),
+                    token,
+                ),
+            ).toBe(id)
+        })
+
         it('reads the minimal legacy shape with only distinct_id', () => {
             expect(
                 readPosthogDistinctId(
@@ -212,6 +224,11 @@ describe('readPosthogDistinctId', () => {
                 readPosthogDistinctId(headersWithCookie(phCookie({})), token),
             ).toBeNull()
             expect(sentry.captureMessage).not.toHaveBeenCalled()
+            expect(sentry.addBreadcrumb).toHaveBeenCalledTimes(1)
+            expect(sentry.addBreadcrumb.mock.calls[0]![0]).toMatchObject({
+                category: 'analytics',
+                message: expect.stringContaining('absent_empty_object'),
+            })
         })
 
         it('treats the cookieless-mode sentinel as absent (it is shared by every visitor)', () => {
@@ -224,6 +241,11 @@ describe('readPosthogDistinctId', () => {
                 ),
             ).toBeNull()
             expect(sentry.captureMessage).not.toHaveBeenCalled()
+            expect(sentry.addBreadcrumb).toHaveBeenCalledTimes(1)
+            expect(sentry.addBreadcrumb.mock.calls[0]![0]).toMatchObject({
+                category: 'analytics',
+                message: expect.stringContaining('absent_cookieless_sentinel'),
+            })
         })
     })
 
