@@ -119,7 +119,7 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      # busybox wget (node:24-alpine) against the dedicated LIVENESS route
+      # busybox wget (node:26-alpine) against the dedicated LIVENESS route
       # (src/app/api/health/route.ts: no DB, no rate limit, no-store).
       #
       # This used to be a 5s-timeout GET on the homepage, 10 retries at 15s.
