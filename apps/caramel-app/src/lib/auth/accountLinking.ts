@@ -25,6 +25,7 @@
 // Better Auth then marks the address verified (oauth2/link-account.mjs).
 //
 // It does nothing when the row being written IS the password login, when the
+//   - the row is the user's FIRST identity (a sign-up: nothing was squatted);
 // address is already verified, or when the request is signed in AS that user
 // (an explicit Connect from Settings: the session holder is the one linking).
 // A failure throws: a take-back that did not happen must not end in a link.
@@ -71,10 +72,12 @@ export type UnverifiedAccountTakenBack = {
 export function takesUnverifiedAccountBack(input: {
     providerId: string
     userEmailVerified: boolean
+    /** The user already holds other identities: this row links into an existing account. */
+    userHasOtherIdentities: boolean
     requestSignedInAsUser: boolean
 }): boolean {
     if (input.providerId === CREDENTIAL_PROVIDER_ID) return false
-    if (input.userEmailVerified) return false
+    if (input.userEmailVerified || !input.userHasOtherIdentities) return false
     return !input.requestSignedInAsUser
 }
 
@@ -100,18 +103,25 @@ export function unverifiedAccountTakeBack(
         const adapter = context.context.internalAdapter
         const user = await adapter.findUserById(account.userId)
         if (!user) return
+        // Only an unverified user can be taken back, so only then are its identities read.
+        const existing = user.emailVerified
+            ? []
+            : await adapter.findAccounts(user.id)
+        const userHasOtherIdentities = existing.length > 0
         const takeBack = takesUnverifiedAccountBack({
             providerId: account.providerId,
             userEmailVerified: user.emailVerified,
-            requestSignedInAsUser: user.emailVerified
-                ? false
-                : await requestSignedInAs(context, user.id),
+            userHasOtherIdentities,
+            requestSignedInAsUser:
+                !user.emailVerified && userHasOtherIdentities
+                    ? await requestSignedInAs(context, user.id)
+                    : false,
         })
         if (!takeBack) return
 
         const sessions = await adapter.listSessions(user.id)
         await adapter.deleteUserSessions(user.id)
-        const passwordLogins = (await adapter.findAccounts(user.id)).filter(
+        const passwordLogins = existing.filter(
             row => row.providerId === CREDENTIAL_PROVIDER_ID && row.password,
         )
         // Kept, not deleted (orchestrator decision 2026-10-27): no account data is removed, and a

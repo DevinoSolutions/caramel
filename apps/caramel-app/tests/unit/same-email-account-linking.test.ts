@@ -125,6 +125,7 @@ describe('takesUnverifiedAccountBack', () => {
         const base = {
             providerId: 'google',
             userEmailVerified: false,
+            userHasOtherIdentities: true,
             requestSignedInAsUser: false,
         }
         expect(takesUnverifiedAccountBack(base)).toBe(true)
@@ -140,6 +141,12 @@ describe('takesUnverifiedAccountBack', () => {
         expect(
             takesUnverifiedAccountBack({ ...base, providerId: 'credential' }),
         ).toBe(false)
+        expect(
+            takesUnverifiedAccountBack({
+                ...base,
+                userHasOtherIdentities: false,
+            }),
+        ).toBe(false)
     })
 })
 
@@ -153,6 +160,18 @@ describe('same email, any sign-in method, one account (real Better Auth)', () =>
         expect(db.user).toHaveLength(1)
         expect(rowsOf(db, 'apple')).toHaveLength(1)
         expect(rowsOf(db, 'google')).toHaveLength(1)
+    })
+
+    it('a first sign-in whose provider does not vouch for the address is a sign-up, not a take-back', async () => {
+        const db = emptyDb()
+        const { auth, identities, takenBack } = buildAuth(db)
+        identities.google = { email: EMAIL, emailVerified: false }
+
+        await providerSignIn(auth, 'google')
+
+        expect(db.user).toHaveLength(1)
+        expect(rowsOf(db, 'google')).toHaveLength(1)
+        expect(takenBack).toEqual([])
     })
 
     it('Google then Apple at the same address is one user with both identities', async () => {
