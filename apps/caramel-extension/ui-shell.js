@@ -5,7 +5,13 @@ import { caramelMarkOwnHost, currentBrowser, log } from './caramel-base.js'
 export const CARAMEL_X_ICON =
     '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>'
 // Functional-minimum styles used ONLY when the stylesheet fetch fails.
-const CARAMEL_UI_FALLBACK_CSS =
+// The `img` cap is load-bearing: every surface draws the logo PNG at its natural
+// size without content-ui.css. Measured 2026-10-28 with 1.4.25 on scosche.com:
+// the stylesheet lost its 4s race while the checkout re-rendered after a code
+// applied, and the final modal's logo filled the whole window, pushing "You
+// saved $15.98" out of view. Sizes match content-ui.css (prompt 32, modals 40-44).
+export const CARAMEL_UI_FALLBACK_CSS =
+    'img{width:40px;height:40px;object-fit:contain}' +
     '.cm-scrim{width:100%;height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(15,12,10,.5)}' +
     '#caramel-testing-modal,.caramel-final-modal{background:#fff;color:#111;padding:24px;border-radius:16px;font-family:sans-serif;text-align:center}' +
     '.cm-prompt{background:#ea6925;color:#fff;padding:14px;border-radius:16px;font-family:sans-serif}'
