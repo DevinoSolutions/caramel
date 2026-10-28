@@ -60,7 +60,7 @@ const { prismaMock, prismaState } = vi.hoisted(() => {
                     data: Record<string, unknown>
                 }) => ({ id: where.id, ...data }),
             ),
-            deleteMany: vi.fn(async () => ({ count: 1 })),
+            updateMany: vi.fn(async () => ({ count: 1 })),
         },
         session: {
             deleteMany: vi.fn(async () => ({ count: 1 })),
@@ -100,7 +100,7 @@ beforeEach(() => {
         prismaMock.account.findUnique,
         prismaMock.account.create,
         prismaMock.account.update,
-        prismaMock.account.deleteMany,
+        prismaMock.account.updateMany,
         prismaMock.session.create,
         prismaMock.session.deleteMany,
     ]) {
@@ -544,7 +544,7 @@ describe('mintExtensionSession — which account a provider sign-in lands on', (
         })
     })
 
-    it('H3: claiming an UNVERIFIED account by email drops its password login and sessions first', async () => {
+    it('H3: claiming an UNVERIFIED account by email clears its password and drops its sessions first, keeping the row', async () => {
         const squatted = {
             id: 'squatted-user',
             email: 'owner@example.com',
@@ -559,8 +559,13 @@ describe('mintExtensionSession — which account a provider sign-in lands on', (
 
         await mintExtensionSession(google)
 
-        expect(prismaMock.account.deleteMany).toHaveBeenCalledWith({
-            where: { userId: 'squatted-user', providerId: 'credential' },
+        expect(prismaMock.account.updateMany).toHaveBeenCalledWith({
+            where: {
+                userId: 'squatted-user',
+                providerId: 'credential',
+                password: { not: null },
+            },
+            data: { password: null },
         })
         expect(prismaMock.session.deleteMany).toHaveBeenCalledWith({
             where: { userId: 'squatted-user' },
@@ -593,7 +598,7 @@ describe('mintExtensionSession — which account a provider sign-in lands on', (
 
         await mintExtensionSession(google)
 
-        expect(prismaMock.account.deleteMany).not.toHaveBeenCalled()
+        expect(prismaMock.account.updateMany).not.toHaveBeenCalled()
         expect(prismaMock.session.deleteMany).not.toHaveBeenCalled()
     })
 
@@ -612,7 +617,7 @@ describe('mintExtensionSession — which account a provider sign-in lands on', (
 
         await mintExtensionSession(google)
 
-        expect(prismaMock.account.deleteMany).not.toHaveBeenCalled()
+        expect(prismaMock.account.updateMany).not.toHaveBeenCalled()
         expect(prismaMock.session.deleteMany).not.toHaveBeenCalled()
     })
 })
