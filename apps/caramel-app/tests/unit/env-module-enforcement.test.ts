@@ -113,4 +113,24 @@ describe('env-module enforcement', () => {
             )
         }
     })
+
+    it('the auth secret is read only through authSecret() (T-9424)', () => {
+        // Re-deriving BETTER_AUTH_SECRET ?? JWT_SECRET at a call site is how
+        // the web-session redeem route came to sign with `?? ''`.
+        const hits: string[] = []
+        for (const file of walk(APP_SRC_DIR)) {
+            if (['env.ts', 'authSecret.ts'].includes(path.basename(file)))
+                continue
+            const lines = fs.readFileSync(file, 'utf8').split('\n')
+            lines.forEach((line, i) => {
+                if (line.trimStart().startsWith('//')) return
+                if (/\b(?:BETTER_AUTH_SECRET|JWT_SECRET)\b/.test(line))
+                    hits.push(`  ${path.relative(REPO_ROOT, file)}:${i + 1}`)
+            })
+        }
+        expect(
+            hits,
+            `Read the auth secret with authSecret() from @/lib/authSecret:\n${hits.join('\n')}`,
+        ).toEqual([])
+    })
 })

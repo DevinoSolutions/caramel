@@ -29,6 +29,7 @@
 // (or mutate) the externally-owned catalog. Signals are keyed by the catalog
 // coupon id as a string, matching the app's Coupon.id: string.
 import { Prisma, type PrismaClient } from '@/generated/prisma/client'
+import { authSecret } from '@/lib/authSecret'
 import type { ReportReporter } from '@/lib/couponReportDedupe'
 import {
     FAILING_WINDOW_MS,
@@ -40,7 +41,6 @@ import {
     writeUsageSignal,
     writeWorkedSignal,
 } from '@/lib/couponsRepo'
-import { env } from '@/lib/env'
 import prisma from '@/lib/prisma'
 import * as Sentry from '@sentry/nextjs'
 import { createHmac } from 'node:crypto'
@@ -87,12 +87,7 @@ const REPORTER_KEY_DOMAIN = 'caramel:coupon-reporter:v1'
  * acceptable.
  */
 export function reporterHash(reporter: ReportReporter): string {
-    const secret = env.BETTER_AUTH_SECRET ?? env.JWT_SECRET
-    if (!secret) {
-        // env.ts's refine() makes this unreachable; a loud throw beats hashing
-        // under an empty key if that ever changes.
-        throw new Error('reporterHash: no BETTER_AUTH_SECRET or JWT_SECRET')
-    }
+    const secret = authSecret()
     const identity =
         reporter.kind === 'user' ? `u:${reporter.userId}` : `i:${reporter.ip}`
     const key = createHmac('sha256', secret)

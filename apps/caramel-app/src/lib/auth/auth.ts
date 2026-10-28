@@ -2,6 +2,7 @@ import ResetPasswordTemplate from '@/emails/ResetPasswordTemplate'
 import VerificationRequestTemplate from '@/emails/VerificationRequestTemplate'
 import { createAppleSocialProviderConfig } from '@/lib/auth/appleClientSecret'
 import { handleUserCreated } from '@/lib/auth/signupHook'
+import { authSecret } from '@/lib/authSecret'
 import { CLIENT_IP_HEADERS } from '@/lib/clientIp'
 import { sendEmail } from '@/lib/email'
 import { env } from '@/lib/env'
@@ -188,10 +189,7 @@ export const auth = betterAuth({
             maxAge: 5 * 60,
         },
     },
-    // env.ts's schema already refines that at least one of these is set
-    // (throws at boot otherwise) — this fallback exists only to satisfy
-    // TypeScript's `string` type and is unreachable in practice.
-    secret: env.BETTER_AUTH_SECRET ?? env.JWT_SECRET ?? '',
+    secret: authSecret(),
     baseURL,
     trustedOrigins,
     // Where better-auth sends a failed Google/Apple sign-in (and its own

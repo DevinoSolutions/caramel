@@ -18,18 +18,11 @@ import 'server-only'
 
 import { symmetricDecrypt, symmetricEncrypt } from 'better-auth/crypto'
 
-import { env } from '@/lib/env'
+import { authSecret } from '@/lib/authSecret'
 
-/** The key better-auth was configured with (auth.ts `secret:`). env.ts
- * guarantees one of the two is set; the throw is for a caller that outran it. */
+/** The key better-auth was configured with (auth.ts `secret:`). */
 function tokenEncryptionKey(): string {
-    const key = env.BETTER_AUTH_SECRET ?? env.JWT_SECRET
-    if (!key) {
-        throw new Error(
-            'Cannot encrypt or decrypt stored OAuth tokens: neither BETTER_AUTH_SECRET nor JWT_SECRET is set',
-        )
-    }
-    return key
+    return authSecret()
 }
 
 /** Same test better-auth's decryptOAuthToken applies (oauth2/utils.mjs, 1.6.23):

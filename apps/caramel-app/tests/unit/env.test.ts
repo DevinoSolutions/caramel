@@ -1,3 +1,4 @@
+import { authSecret } from '@/lib/authSecret'
 import { SERVER_ENV_KEYS, parseServerEnv } from '@/lib/env'
 import { BASE_URL, CLIENT_ENV_KEYS, parseClientEnv } from '@/lib/env.client'
 import fs from 'node:fs'
@@ -532,5 +533,27 @@ describe('.env.example drift', () => {
                 ),
             ),
         ).not.toThrow()
+    })
+})
+
+describe('authSecret (T-9424)', () => {
+    it('is BETTER_AUTH_SECRET when it is set', () => {
+        expect(
+            authSecret({ BETTER_AUTH_SECRET: 'better', JWT_SECRET: 'jwt' }),
+        ).toBe('better')
+    })
+
+    it('falls back to JWT_SECRET', () => {
+        expect(authSecret({ JWT_SECRET: 'jwt' })).toBe('jwt')
+    })
+
+    it('throws instead of signing with an empty key', () => {
+        expect(() => authSecret({})).toThrow(/no auth secret/i)
+    })
+
+    it('matches the env the server booted with', () => {
+        expect(authSecret()).toBe(
+            parseServerEnv().BETTER_AUTH_SECRET ?? parseServerEnv().JWT_SECRET,
+        )
     })
 })

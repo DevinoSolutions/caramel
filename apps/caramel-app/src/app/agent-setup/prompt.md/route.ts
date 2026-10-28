@@ -1,7 +1,7 @@
 import { renderPromptMd } from '@/lib/agentSetup/agentSetup.config'
 import { captureServerEvent } from '@/lib/analytics/posthogServer'
+import { authSecret } from '@/lib/authSecret'
 import { readClientIp } from '@/lib/clientIp'
-import { env } from '@/lib/env'
 import { after } from 'next/server'
 import { createHmac } from 'node:crypto'
 
@@ -28,8 +28,7 @@ export const dynamic = 'force-dynamic'
 function fetcherId(req: Request): string {
     const ua = req.headers.get('user-agent') ?? ''
     const ip = readClientIp(req.headers) ?? ''
-    const key = env.BETTER_AUTH_SECRET ?? env.JWT_SECRET ?? ''
-    const digest = createHmac('sha256', key)
+    const digest = createHmac('sha256', authSecret())
         .update(`agent-setup|${ua}|${ip}`)
         .digest('hex')
         .slice(0, 32)

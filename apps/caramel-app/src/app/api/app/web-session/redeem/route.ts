@@ -14,6 +14,7 @@
 // "CaramelApp/<version> (<platform>)" user agent and no cross-site initiator;
 // anything else is refused before the code is touched, so a link preview or a
 // stray browser tab cannot burn the shell's code either.
+import { authSecret } from '@/lib/authSecret'
 import { env } from '@/lib/env'
 import { BASE_URL } from '@/lib/env.client'
 import prisma from '@/lib/prisma'
@@ -98,9 +99,8 @@ export async function GET(req: NextRequest) {
     }
 
     // Mint the signed session cookie exactly as better-auth does.
-    const secret = env.BETTER_AUTH_SECRET ?? env.JWT_SECRET ?? ''
     const cookieName = sessionCookieName()
-    const signedValue = signCookieValue(session.token, secret)
+    const signedValue = signCookieValue(session.token, authSecret())
     const remainingLifeSec = Math.max(
         0,
         Math.floor((new Date(session.expiresAt).getTime() - Date.now()) / 1000),
