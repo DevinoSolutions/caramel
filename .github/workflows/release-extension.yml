@@ -1057,23 +1057,6 @@ jobs:
           echo "IOS_BUILD_NUM=$((IOS_CURRENT_BUILD+1))"     >> $GITHUB_ENV
           echo "MACOS_BUILD_NUM=$((MACOS_CURRENT_BUILD+1))" >> $GITHUB_ENV
 
-      - name: Import distribution cert
-        uses: apple-actions/import-codesign-certs@v7
-        with:
-          p12-file-base64: ${{ secrets.APPLE_CERT_P12 }}
-          p12-password: ${{ secrets.APPLE_CERT_PASSWORD }}
-          keychain: signing_temp
-          keychain-password: ${{ secrets.KEYCHAIN_PASSWORD }}
-
-      - name: Import development cert
-        uses: apple-actions/import-codesign-certs@v7
-        with:
-          create-keychain: false
-          keychain: signing_temp
-          p12-file-base64: ${{ secrets.APPLE_DEV_CERT_P12 }}
-          p12-password: ${{ secrets.APPLE_DEV_CERT_PASSWORD }}
-          keychain-password: ${{ secrets.KEYCHAIN_PASSWORD }}
-
       - name: Convert to Safari app (macOS & iOS)
         run: |
           xcrun safari-web-extension-converter .output/safari-mv3 \
@@ -1341,7 +1324,7 @@ jobs:
 
       # The archive steps' -allowProvisioningUpdates mints a fresh "Apple
       # Development: Created via API" certificate whenever the keychain holds
-      # no valid one (the imported APPLE_DEV_CERT_P12 dates from 2025-05), and
+      # no valid one (none is imported), and
       # its private key dies with this runner. Ten of them piled up (v1.2.0 to
       # v1.4.12, one per run) until Apple's development-certificate cap made
       # every Safari release from v1.4.13 fail at archive with "Your account has
