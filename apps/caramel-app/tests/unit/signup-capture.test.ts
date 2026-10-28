@@ -7,6 +7,7 @@ import {
 import {
     buildAcquisition,
     recordSignup,
+    SIGNUP_ANALYTICS_OBSERVE_CAP_MS,
     SIGNUP_ANALYTICS_TIMEOUT_MS,
 } from '@/lib/auth/signupCapture'
 import {
@@ -329,25 +330,169 @@ describe('recordSignup', () => {
         expect(outcome.acquisitionSaved).toBe(true)
     })
 
-    it('a hung PostHog is cut off after the shared timeout so signup is not held up', async () => {
+    describe('a capture that outlives the shared timeout', () => {
+        const LATE_MS = SIGNUP_ANALYTICS_TIMEOUT_MS + 5000
+
+        // Starts a signup whose PostHog capture settles only when the test says
+        // so, and returns the outcome as it stood at the timeout mark.
+        async function startWithControlledCapture() {
+            vi.useFakeTimers()
+            let resolveCapture!: (captured: boolean) => void
+            let rejectCapture!: (error: Error) => void
+            posthogServerMock.captureServerEvent.mockReturnValue(
+                new Promise<boolean>((resolve, reject) => {
+                    resolveCapture = resolve
+                    rejectCapture = reject
+                }),
+            )
+            const pending = recordSignup({
+                user: USER,
+                headers: cookieHeaders({ firstTouch }),
+                method: 'email',
+                surface: 'web',
+            })
+            await vi.advanceTimersByTimeAsync(SIGNUP_ANALYTICS_TIMEOUT_MS + 1)
+            const outcome = await pending
+            return { outcome, resolveCapture, rejectCapture }
+        }
+
+        it('is cut off at the timeout so signup is not held up, and reports nothing yet', async () => {
+            const { outcome } = await startWithControlledCapture()
+
+            expect(outcome.eventCaptured).toBe(false)
+            expect(sentryMock.captureMessage).not.toHaveBeenCalled()
+            expect(sentryMock.captureException).not.toHaveBeenCalled()
+        })
+
+        it('that finishes late OK is reported once as finished late, not as lost', async () => {
+            const { outcome, resolveCapture } =
+                await startWithControlledCapture()
+            expect(outcome.eventCaptured).toBe(false)
+
+            await vi.advanceTimersByTimeAsync(
+                LATE_MS - SIGNUP_ANALYTICS_TIMEOUT_MS - 1,
+            )
+            resolveCapture(true)
+            await vi.advanceTimersByTimeAsync(0)
+
+            expect(sentryMock.captureMessage).toHaveBeenCalledTimes(1)
+            expect(sentryMock.captureMessage).toHaveBeenCalledWith(
+                'signup analytics step "capture" finished late',
+                {
+                    level: 'warning',
+                    tags: { operation: 'signup_capture', step: 'capture' },
+                    extra: {
+                        userId: 'user_1',
+                        timeoutMs: SIGNUP_ANALYTICS_TIMEOUT_MS,
+                        elapsedMs: LATE_MS,
+                    },
+                },
+            )
+            // The observer is done: nothing more arrives at the cap.
+            await vi.advanceTimersByTimeAsync(SIGNUP_ANALYTICS_OBSERVE_CAP_MS)
+            expect(sentryMock.captureMessage).toHaveBeenCalledTimes(1)
+            expect(sentryMock.captureException).not.toHaveBeenCalled()
+        })
+
+        it('that resolves false late is reported once as finished late without success', async () => {
+            const { resolveCapture } = await startWithControlledCapture()
+
+            resolveCapture(false)
+            await vi.advanceTimersByTimeAsync(0)
+
+            expect(sentryMock.captureMessage).toHaveBeenCalledTimes(1)
+            expect(sentryMock.captureMessage).toHaveBeenCalledWith(
+                'signup analytics step "capture" finished late without success',
+                expect.objectContaining({
+                    level: 'warning',
+                    tags: { operation: 'signup_capture', step: 'capture' },
+                }),
+            )
+        })
+
+        it('that rejects late is reported once as a warning carrying the error, with no unhandled rejection', async () => {
+            const unhandled = vi.fn()
+            process.on('unhandledRejection', unhandled)
+            try {
+                const { rejectCapture } = await startWithControlledCapture()
+                const boom = new Error('posthog down')
+
+                rejectCapture(boom)
+                await vi.advanceTimersByTimeAsync(0)
+
+                expect(sentryMock.captureException).toHaveBeenCalledTimes(1)
+                expect(sentryMock.captureException).toHaveBeenCalledWith(
+                    boom,
+                    expect.objectContaining({
+                        level: 'warning',
+                        tags: { operation: 'signup_capture', step: 'capture' },
+                    }),
+                )
+                expect(sentryMock.captureMessage).not.toHaveBeenCalled()
+                await vi.advanceTimersByTimeAsync(
+                    SIGNUP_ANALYTICS_OBSERVE_CAP_MS,
+                )
+                expect(unhandled).not.toHaveBeenCalled()
+            } finally {
+                process.off('unhandledRejection', unhandled)
+            }
+        })
+
+        it('that never settles is reported once as still pending at the observe cap', async () => {
+            await startWithControlledCapture()
+
+            await vi.advanceTimersByTimeAsync(
+                SIGNUP_ANALYTICS_OBSERVE_CAP_MS -
+                    SIGNUP_ANALYTICS_TIMEOUT_MS -
+                    2,
+            )
+            expect(sentryMock.captureMessage).not.toHaveBeenCalled()
+
+            await vi.advanceTimersByTimeAsync(2)
+            expect(sentryMock.captureMessage).toHaveBeenCalledTimes(1)
+            expect(sentryMock.captureMessage).toHaveBeenCalledWith(
+                `signup analytics step "capture" still pending after ${SIGNUP_ANALYTICS_OBSERVE_CAP_MS} ms`,
+                {
+                    level: 'warning',
+                    tags: { operation: 'signup_capture', step: 'capture' },
+                    extra: {
+                        userId: 'user_1',
+                        timeoutMs: SIGNUP_ANALYTICS_TIMEOUT_MS,
+                        elapsedMs: SIGNUP_ANALYTICS_OBSERVE_CAP_MS,
+                    },
+                },
+            )
+        })
+    })
+
+    it('a timed-out alias step is observed the same way, tagged with its own step', async () => {
         vi.useFakeTimers()
-        posthogServerMock.captureServerEvent.mockReturnValue(
-            new Promise<boolean>(() => {}),
+        let resolveAlias!: (aliased: boolean) => void
+        posthogServerMock.aliasServerDistinctId.mockReturnValue(
+            new Promise<boolean>(resolve => {
+                resolveAlias = resolve
+            }),
         )
 
         const pending = recordSignup({
             user: USER,
-            headers: cookieHeaders({ firstTouch }),
+            headers: cookieHeaders({ phDistinctId: 'anon-9' }),
             method: 'email',
             surface: 'web',
         })
         await vi.advanceTimersByTimeAsync(SIGNUP_ANALYTICS_TIMEOUT_MS + 1)
         const outcome = await pending
+        expect(outcome).toMatchObject({ eventCaptured: true, aliased: false })
 
-        expect(outcome.eventCaptured).toBe(false)
+        resolveAlias(true)
+        await vi.advanceTimersByTimeAsync(0)
+
+        expect(sentryMock.captureMessage).toHaveBeenCalledTimes(1)
         expect(sentryMock.captureMessage).toHaveBeenCalledWith(
-            expect.stringMatching(/"capture" timed out/),
-            expect.objectContaining({ level: 'warning' }),
+            'signup analytics step "alias" finished late',
+            expect.objectContaining({
+                tags: { operation: 'signup_capture', step: 'alias' },
+            }),
         )
     })
 
