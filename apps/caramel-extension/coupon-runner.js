@@ -148,6 +148,16 @@ export function reportOutcome(id, outcome, storeReason) {
     }
 }
 
+/* The store's refusal as the final card quotes it. A refusal read from a
+ * coupon row carries the row's remove button: SFRA (aquasana.com, 1.4.26 store
+ * build) printed “CHEERS25 NOT APPLIED ×”. A close glyph at the end is that
+ * button, never the store's words. */
+export function caramelStoreWords(text) {
+    return String(text)
+        .replace(/[\s×✕✖✗⨯]+$/u, '')
+        .trim()
+}
+
 export async function startApplyingCoupons(rec, options) {
     log('=== Starting coupon flow ===')
     // A resumed run is the SAME click continuing on a new page, so the overlay
@@ -1067,7 +1077,7 @@ export async function startApplyingCoupons(rec, options) {
             res.errorIsNew &&
             !/timeout/i.test(res.errorMsg)
         ) {
-            lastStoreReason = res.errorMsg
+            lastStoreReason = caramelStoreWords(res.errorMsg)
             lastFailId = coupons[i].id // pair the reason with its coupon
             rejectedCodes.add(code)
         }
