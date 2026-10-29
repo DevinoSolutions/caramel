@@ -73,6 +73,37 @@ describe('classify-cart scrubs cart_items before the model sees them', () => {
         expect(JSON.stringify(forwarded)).not.toMatch(/SAVE10|FALL20|XPS13/)
     })
 
+    // Each row is the ONLY cart item, sent through the production route.
+    // You-saved lines hold no code; the rule drops them anyway (uniform rule).
+    it.each([
+        ['Discount: SAVE10', []],
+        ['Discount -$5.00', []],
+        ['Promo code SAVE10 applied', []],
+        ['Promo code WELCOME applied', []],
+        ['Coupon: WELCOME!', []],
+        ['Coupon: WELCOME.', []],
+        ['Voucher - FALL20', []],
+        ['  • Coupon code: FALL20', []],
+        ['Savings ($5.00)', []],
+        ['Discount −5%', []],
+        ['-$5.00', []],
+        ['($5.00)', []],
+        ['Code applied: X', []],
+        ['Promo applied FALL20', []],
+        ['You saved $5', []],
+        ['Savings planner $12.99', ['Savings planner $12.99']],
+        ['Coupon organizer - $8', ['Coupon organizer - $8']],
+        ['Savings planner Qty: 2 $12.99', ['Savings planner Qty: 2 $12.99']],
+        ['Promontory hiking boots $89', ['Promontory hiking boots $89']],
+        ['Promo-pack bundle', ['Promo-pack bundle']],
+        ['Quantity: 2', ['Quantity: 2']],
+        ['Gift voucher holder', ['Gift voucher holder']],
+    ])('cart row %j -> %j', async (row, expected) => {
+        await POST(request({ domain: 'shop.example.com', cart_items: [row] }))
+
+        expect(classifyMock.mock.calls[0]![0].cart_items).toEqual(expected)
+    })
+
     it('still forwards a cart with no discount rows unchanged', async () => {
         await POST(
             request({
@@ -117,7 +148,7 @@ describe('classify-cart scrubs cart_items before the model sees them', () => {
                 cart_items: [
                     'Discount: SAVE10',
                     'Coupon FALL20 applied',
-                    'Savings 10%',
+                    'Savings: 10%',
                     'p1',
                     'p2',
                     'p3',

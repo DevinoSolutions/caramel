@@ -5,13 +5,18 @@
 // be a product title, but a page can render an applied-discount line ("Discount:
 // SAVE10") as a row, and that carries a shopper's code (T-9959). Two steps, both
 // server-side so old extension builds are covered:
-//   1. a row that READS like a discount line is dropped whole: a label word
-//      (discount, coupon, promo, voucher, savings; whole words, so "Promontory"
-//      stays) together with an amount ("$5", "10%"), a minus sign ("-5") or a
-//      code token (a letters+digits token, or "Label: SHOUTED"); or the phrase
-//      "code applied". "Coupon organizer" and "Savings planner" are products.
-//      A product row that also prints its price next to such a word is dropped
-//      too: losing one cart row costs the classifier nothing, a leaked code does;
+//   1. a row that is a discount line BY STRUCTURE is dropped whole. It starts
+//      (after optional bullets) with a discount label (discount, coupon, promo,
+//      voucher, savings, code, "coupon code", "promo code", "you saved") that is
+//      immediately followed by ':' or a spaced dash, by a NEGATIVE or
+//      parenthesised amount ("-$5.00", "($5.00)", "-5%"), or by a code-like token
+//      and applied / removed / redeemed. Also dropped: a row that is only a
+//      negative amount, one that says "applied" next to a code / coupon / promo /
+//      voucher / discount word, and "You saved <amount>" (it holds no code, so
+//      dropping it costs nothing and keeps the rule uniform).
+//      A label word elsewhere or with a price ("Savings planner $12.99",
+//      "Coupon organizer - $8", "Promontory hiking boots $89") is a product and
+//      stays;
 //   2. in the remaining titles, any token mixing letters and digits becomes
 //      "[code]" (codeShapedTokens.ts; shouted words stay, product titles are
 //      full of them).
@@ -20,31 +25,43 @@ import {
     stripFormatChars,
 } from '@/lib/codeShapedTokens'
 
-const LABEL = /\b(?:discounts?|coupons?|promo(?:tion)?s?|vouchers?|savings?)\b/i
-const CODE_APPLIED = /\bcode\s+applied\b/i
-const AMOUNT = new RegExp(
-    '[$€£¥]\\s?\\d|\\d[\\d.,]*\\s?(?:%|[$€£¥])|(?:^|\\s)[-−–]\\s?[$€£¥]?\\d',
+const LABEL =
+    '(?:coupon\\s+code|promo\\s+code|discount\\s+code|discounts?|coupons?|promotions?|promo|vouchers?|savings?|you\\s+saved|code)'
+const BULLETS = '[\\s•·▪●*]*'
+const AMOUNT_START = '[$€£¥]?\\s?\\d'
+// ':' right after the label, or a dash set off by whitespace ("Promo-pack" is a
+// product); a negative / parenthesised amount; a code-like token then a verb.
+const STARTS_WITH_LABEL = new RegExp(
+    `^${BULLETS}${LABEL}\\b(?:\\s*:|\\s+[-–−]|\\s*[-–−]\\s?${AMOUNT_START}|\\s*\\(\\s?${AMOUNT_START})`,
+    'iu',
+)
+const LABEL_TOKEN_VERB = new RegExp(
+    `^${BULLETS}${LABEL}\\b\\s+(\\S+)\\s+(?:applied|removed|redeemed)\\b`,
+    'iu',
+)
+const YOU_SAVED_AMOUNT = new RegExp(
+    `^${BULLETS}you\\s+saved\\s*${AMOUNT_START}`,
+    'iu',
+)
+const ONLY_NEGATIVE_AMOUNT = new RegExp(
+    '^\\s*(?:[-–−]\\s?[$€£¥]?\\s?\\d[\\d.,]*\\s?[%$€£¥]?|\\(\\s?[$€£¥]?\\s?\\d[\\d.,]*\\s?[%$€£¥]?\\s?\\))\\s*$',
     'u',
 )
-const MIXED_TOKEN = new RegExp(
-    '(?=[\\p{L}\\p{N}#_-]*\\p{L})(?=[\\p{L}\\p{N}#_-]*[\\p{N}#])[\\p{L}\\p{N}#][\\p{L}\\p{N}#_-]{2,}',
-    'u',
-)
-const LABEL_COLON_TOKEN =
-    /\b(?:discounts?|coupons?|promo(?:tion)?s?|vouchers?|savings?)\s*[:#]\s*(\S{3,})/i
-const SHOUTED = new RegExp('^\\p{Lu}[\\p{Lu}\\p{N}_-]{2,}$', 'u')
+const APPLIED = /\bapplied\b/i
+const DISCOUNT_WORD = /\b(?:code|coupon|promo|voucher|discount)\b/i
 
-function labelsAShoutedToken(item: string): boolean {
-    const token = LABEL_COLON_TOKEN.exec(item)?.[1]
-    return token !== undefined && SHOUTED.test(token)
-}
+const CODE_LIKE = new RegExp(
+    '^(?=[\\p{L}\\p{N}#_-]*\\p{L})(?=[\\p{L}\\p{N}#_-]*[\\p{N}#])[\\p{L}\\p{N}#_-]{3,}[!.,;]?$|^\\p{Lu}[\\p{Lu}_-]{2,}[!.,;]?$',
+    'u',
+)
 
 function isDiscountLine(item: string): boolean {
-    if (CODE_APPLIED.test(item)) return true
-    if (!LABEL.test(item)) return false
-    return (
-        AMOUNT.test(item) || MIXED_TOKEN.test(item) || labelsAShoutedToken(item)
-    )
+    if (STARTS_WITH_LABEL.test(item)) return true
+    if (YOU_SAVED_AMOUNT.test(item)) return true
+    if (ONLY_NEGATIVE_AMOUNT.test(item)) return true
+    if (APPLIED.test(item) && DISCOUNT_WORD.test(item)) return true
+    const token = LABEL_TOKEN_VERB.exec(item)?.[1]
+    return token !== undefined && CODE_LIKE.test(token)
 }
 
 /** Cart rows safe to forward: discount lines dropped, code-shaped tokens redacted. */

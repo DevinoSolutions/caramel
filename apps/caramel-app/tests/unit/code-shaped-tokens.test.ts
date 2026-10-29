@@ -140,6 +140,15 @@ describe('redactStoreReason', () => {
         expect(redactStoreReason(reason, null)).toBe(reason)
     })
 
+    it('matches the context word in any case but still checks the candidate shape', () => {
+        expect(redactStoreReason('cOUPON MYCODE is invalid', null)).toBe(
+            'cOUPON [code] is invalid',
+        )
+        expect(redactStoreReason('PROMO mycode is invalid', null)).toBe(
+            'PROMO mycode is invalid',
+        )
+    })
+
     it('keeps the catalog code when it follows the context word', () => {
         expect(redactStoreReason('code FALL20 is invalid', 'FALL20')).toBe(
             'code FALL20 is invalid',
@@ -245,9 +254,7 @@ describe('scrubCartItems', () => {
                 'COUPON FALL20 applied',
                 'Promo applied FALL20',
                 'Discount -$5.00',
-                'Savings 10%',
                 'Code applied: X',
-                'Total savings $5',
                 'Voucher: WELCOME',
             ]),
         ).toEqual(['Blue Widget'])
@@ -261,6 +268,9 @@ describe('scrubCartItems', () => {
             'Gift voucher holder',
             'Discounted Widget',
             'Promotional mug',
+            'Savings planner $12.99',
+            'Coupon organizer - $8',
+            'Total savings $5',
         ]
         expect(scrubCartItems(items)).toEqual(items)
     })

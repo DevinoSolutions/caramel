@@ -64,10 +64,16 @@ const NON_LETTERS = new RegExp('[^\\p{L}]', 'gu')
 const CAPS_TOKEN = '\\p{Lu}(?:[\\p{Lu}_-]*\\p{Lu})?'
 const NOT_TOKEN_BEFORE = '(?<![\\p{L}\\p{N}_#-])'
 const NOT_TOKEN_AFTER = '(?![\\p{L}\\p{N}_#-])'
-// Case spellings of the context words, spelled out because the `i` flag would
-// make \p{Lu} match lowercase too.
+// The context words match in ANY case ("cOUPON MYCODE"), spelled as per-letter
+// classes because the `i` flag would make \p{Lu} match lowercase too, and the
+// candidate's own all-caps shape must still be checked.
 const CONTEXT_WORDS = ['code', 'coupon', 'promo', 'voucher']
-    .flatMap(w => [w, w.toUpperCase(), w[0]!.toUpperCase() + w.slice(1)])
+    .map(w =>
+        w
+            .split('')
+            .map(c => `[${c}${c.toUpperCase()}]`)
+            .join(''),
+    )
     .join('|')
 const OPEN_QUOTES = '"“‘«\'`'
 const CLOSE_QUOTES = '"”’»\'`'
