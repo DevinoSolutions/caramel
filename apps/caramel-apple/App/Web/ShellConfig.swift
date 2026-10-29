@@ -470,188 +470,344 @@ struct BounceGuard: Equatable {
     }
 }
 
-/// The hard cap on sign-in requests that survives `WebShellModel.resetToHome` (T-10055).
-/// BounceGuard is recreated on every reset, so a lap that ends in a session change (signed-out
-/// /profile, /login, native sheet, session change, reset, reload) handed it a clean slate each
-/// time. This one lives inside SignInRecovery (owned by the WebShellModel, never recreated) and counts sign-in requests per tab over a
-/// sliding `window`; past `maxRequests` it reports "tripped" and the shell stops asking.
-/// 4 because a shopper needs at most one or two (tap a tab, cancel the sheet, tap again) and
-/// every real request waits on a human through an OAuth sheet, so a fifth within a minute is a
-/// machine; the loop this exists for ran about once a second, so it trips within ~5 s instead of
-/// running for days (19.6k pageviews 10-24..10-26). Pure; WebShellModel feeds it the clock.
-struct SignInBounceLimiter: Equatable {
-    static let window: TimeInterval = 60
-    static let maxRequests = 4
+/// How the web-session redeem navigation (T-7852) ended, reported by the shell that loaded it.
+enum RedeemOutcome: Equatable {
+    /// The redeem 303 landed on an allowlisted page: the session cookie is set.
+    case landed
+    /// The server redirected to `/login?error=handoff_expired` (expired, used or revoked code).
+    case expired
+    /// The navigation failed or ended somewhere unexpected; the message is safe to show.
+    case failed(String)
+}
 
-    enum Verdict: Equatable {
-        case allowed
-        /// This request crossed the cap: the one to report.
-        case tripped
-        /// Over the cap and already reported for this run of requests.
-        case stillTripped
-    }
+/// What ShellRouter knows about the web session when a tab asks (WebShellModel.webSessionContext).
+enum WebSessionContext: Equatable {
+    /// Not signed in natively: there is nothing to hand off.
+    case signedOut
+    /// The web views already hold the web session.
+    case active
+    /// A handoff, or the web-data wipe that must finish before one, is in flight: a load waits for it.
+    case pending
+    /// Signed in natively, no web session and nothing in flight: a handoff has to start.
+    case needed
 
-    private var requestTimes: [Date] = []
-
-    /// Records one sign-in request at `now`. Requests older than `window` no longer count, so a
-    /// shopper who is left alone for a minute starts fresh.
-    mutating func record(at now: Date) -> Verdict {
-        requestTimes.removeAll { now.timeIntervalSince($0) >= Self.window }
-        requestTimes.append(now)
-        if requestTimes.count <= Self.maxRequests { return .allowed }
-        return requestTimes.count == Self.maxRequests + 1 ? .tripped : .stillTripped
-    }
-
-    /// Whether the cap is currently exceeded, without counting a request.
-    func isTripped(at now: Date) -> Bool {
-        requestTimes.filter { now.timeIntervalSince($0) < Self.window }.count > Self.maxRequests
-    }
-
-    /// A shopper tapped "Sign in" or "Try again": that is a person, not a loop.
-    mutating func clear() {
-        requestTimes.removeAll()
+    static func of(isSignedIn: Bool, wipesInFlight: Int, phase: WebSessionMachine.Phase) -> WebSessionContext {
+        guard isSignedIn else { return .signedOut }
+        if wipesInFlight > 0 { return .pending }
+        switch phase {
+        case .active: return .active
+        case .handingOff: return .pending
+        case .inactive, .failed: return .needed
+        }
     }
 }
 
-/// What the router answers a page load or a recovery step (WebShellModel.webSessionGate and
-/// .webSessionRecovery). Three answers because "false" used to mean both "load it yourself" and
-/// "the loop cap stopped this", and the second must never load anything.
-enum WebSessionGate: Equatable {
-    /// Nothing to hand off (not signed in natively, or the web session is active): load the page now.
-    case allow
-    /// The router took over: it holds the load until the handoff has made a web session.
-    case held
-    /// The tab's sign-in loop cap forbids it. Load nothing, start nothing; the tab stays on "sign in".
-    case blocked
+/// One step SignInLoopCoordinator tells its tab's adapter (WebShellModel, and through it ShellRouter) to carry out.
+enum SignInLoopEffect: Equatable {
+    /// Load `url` in the tab's web view.
+    case load(URL)
+    /// Reload the page the web view shows.
+    case reload
+    /// Step the web view back one page.
+    case stepBack
+    /// Stop whatever the web view is loading.
+    case stopLoading
+    /// Show loading while ShellRouter queues `url` until the handoff in flight ends.
+    case holdForWebSession(URL)
+    /// Show loading while ShellRouter starts a web-session handoff hosted by this tab, ending on `url`.
+    case startHandoff(URL)
+    /// Pop the native "Apple or Google?" sign-in prompt.
+    case showNativeSignIn
+    case showLoading
+    case showLoaded
+    /// The "Sign in to see this page" screen.
+    case showSignInScreen
+    case showFailure(String)
+    /// Read the web view's cookies for redeem `attempt`, then report `cookieReadFinished`.
+    case readSessionCookie(attempt: Int)
+    /// Tell ShellRouter how redeem `attempt` ended.
+    case settleRedeem(attempt: Int, RedeemOutcome)
+    /// The tab just parked on "sign in": report it once, and ShellRouter drops every handoff and held load it has for the tab.
+    case parked
+    /// Log this fixed message (it never carries a URL) as an error.
+    case logError(String)
 }
 
-/// The one admission gate for every AUTOMATIC sign-in or recovery step of a tab (T-10055):
-/// the native sign-in pop-up, stepping the page back, and starting or continuing a web-session
-/// handoff/redeem. WebShellModel asks it before each such step and does nothing the answer
-/// forbids; ShellRouter asks the model before it starts, queues, replays or refreshes anything for
-/// the tab. A shopper's own tap is never gated: `userTapped` clears the cap.
+/// What decidePolicyFor does with a navigation before AppLinkGuard sees it.
+enum SignInLoopNavigation: Equatable {
+    /// AppLinkGuard decides, as for any navigation.
+    case guardDecides
+    /// Cancel: the tab is parked on "sign in", so no main-frame navigation runs under that screen.
+    case cancelWhileParked
+    /// Cancel: a redeem URL that is not the one issued for the redeem in flight (or was already used).
+    case refuseUnissuedRedeemURL
+    /// Cancel: this navigation ends the redeem in flight; then carry out `effects`.
+    case endRedeem([SignInLoopEffect])
+}
+
+/// Every automatic sign-in decision of ONE tab, in one pure type (T-10055, CARAMEL-2Y): whether a load
+/// runs, waits for or starts a web-session handoff; what a page asking for /login gets (native prompt,
+/// step back, handoff); which redeem attempt a navigation outcome belongs to; and the loop cap.
+/// WebShellModel feeds it events and carries out the returned effects, nothing else.
 ///
-/// It owns the SignInBounceLimiter, a `generation` (the token of "recovery work that is still
-/// wanted") and `isStopped` (the tab is parked on its "sign in" screen). Work admitted by
-/// `.proceed(token:)` may complete only while `isCurrent(token)`: a trip and a reset to home both
-/// advance the generation, so a handoff or redeem already in flight when the cap tripped (or when
-/// the web view was replaced) is dropped instead of finishing and presenting sign-in again.
-/// `isStopped` latches on a stop and stays until the shopper taps (or the web view is replaced), so a
-/// late navigation callback or another tab's handoff cannot pull the tab off "sign in".
-/// `resetToHome` advances the generation but, on purpose, never touches the limiter: resetting the
-/// web view every lap is how the loop outran BounceGuard.
-struct SignInRecovery: Equatable {
-    enum Decision: Equatable {
-        /// Run the automatic step; carry `token` on any work that completes later.
-        case proceed(token: Int)
-        /// Do nothing automatic: no pop-up, no step back, no handoff. `firstTime` is true for the
-        /// one request that tripped the cap (report that one).
-        case stop(firstTime: Bool)
+/// The loop cap: more than `maxAutomaticRequests` automatic sign-in requests (a page asking for
+/// /login, or a load that has to start a handoff) inside a sliding `window` PARKS the tab. A parked
+/// tab shows "sign in" and does nothing on its own: no load, no handoff, no native prompt, no step
+/// back, every main-frame navigation cancelled, no late callback replacing the sign-in screen. Only
+/// the shopper's tap on Sign in / Try again unparks it, and the tap unparks BEFORE its own load is
+/// issued, so that load (and its navigation) is admitted. Time does not unpark it, and neither does
+/// `resetToHome` (a session change): resetting the web view every lap is how the loop outran
+/// BounceGuard, which is recreated on every reset. 4 because a shopper needs at most one or two
+/// (tap a tab, cancel the sheet, tap again) and every real request waits on a person through an OAuth
+/// sheet; the loop this exists for ran about once a second for days (19.6k pageviews 10-24..10-26).
+///
+/// Redeem attempts: the id comes from ShellRouter (unique for the app run) and the attempt is bound
+/// to the WKNavigation `load` returned for it (an ObjectIdentifier; WebShellModel keeps that object
+/// alive so the identifier cannot be reused). A finish, failure or cookie read of any other navigation
+/// or attempt is dropped instead of settling the redeem in flight.
+struct SignInLoopCoordinator {
+    static let window: TimeInterval = 60
+    static let maxAutomaticRequests = 4
+
+    private struct RedeemAttempt {
+        let id: Int
+        /// The one redeem URL issued for this attempt; it may load once.
+        var issuedURL: URL?
+        /// ObjectIdentifier of the WKNavigation the redeem load returned.
+        var navigation: ObjectIdentifier?
+        /// The navigation finished on a landing page and the cookie read is running.
+        var readingCookie = false
     }
 
-    private var limiter = SignInBounceLimiter()
-    private var generation = 0
-    /// The tab is parked on "sign in" because the cap stopped it; only a tap (or a reset) unparks it.
-    private(set) var isStopped = false
+    /// Parked on "sign in" by the loop cap until the shopper taps.
+    private(set) var isParked = false
+    private var requestTimes: [Date] = []
+    /// Recreated by resetToHome, like the web view it guards.
+    private var bounceGuard = BounceGuard()
+    private var redeem: RedeemAttempt?
 
-    /// A sign-in request from the page or the start of an automatic handoff. Counts toward the cap.
-    mutating func automaticRequest(at now: Date) -> Decision {
-        switch limiter.record(at: now) {
-        case .allowed:
-            isStopped = false
-            return .proceed(token: generation)
-        case .tripped:
-            generation += 1
-            isStopped = true
-            return .stop(firstTime: true)
-        case .stillTripped:
-            isStopped = true
-            return .stop(firstTime: false)
+    // MARK: Loads
+
+    /// An ordinary page load (first appearance, an incoming link, window.open, the router's sign-in relink).
+    mutating func pageLoadRequested(_ url: URL, webSession: WebSessionContext, at now: Date) -> [SignInLoopEffect] {
+        guard !isParked else {
+            return [.logError("Did not load a page: this tab is parked on sign-in until the shopper taps."), .showSignInScreen]
+        }
+        switch webSession {
+        case .signedOut, .active:
+            return [.load(url)]
+        case .pending:
+            return [.holdForWebSession(url)]
+        case .needed:
+            guard admitAutomaticRequest(at: now) else { return park() }
+            return [.startHandoff(url)]
         }
     }
 
-    /// A further automatic step of a recovery that was already admitted (the handoff a bounce
-    /// started, the native prompt after a failed handoff). Checks the cap, counts nothing.
-    mutating func continueRecovery(at now: Date) -> Decision {
-        guard limiter.isTripped(at: now) else { return .proceed(token: generation) }
-        isStopped = true
-        return .stop(firstTime: false)
+    /// ShellRouter's own load once the web session exists (a held load, the host's final page).
+    func webSessionLoad(_ url: URL) -> [SignInLoopEffect] {
+        guard !isParked else { return [.logError("Dropped a load the web session released: this tab is parked on sign-in.")] }
+        return [.load(url)]
     }
 
-    /// Whether the router may queue, replay or refresh a load for this tab on its own (nothing
-    /// counted): not parked on "sign in" and the cap not tripped.
-    func allowsAutomaticWork(at now: Date) -> Bool {
-        !isStopped && !limiter.isTripped(at: now)
+    /// Another tab's redeem made the web session: show this tab's page signed in.
+    func webSessionEstablishedElsewhere(target: URL, hasStartedLoading: Bool, hasPage: Bool, showsSignInScreen: Bool) -> [SignInLoopEffect] {
+        guard hasStartedLoading, !isParked else { return [] }
+        return !hasPage || showsSignInScreen ? [.load(target)] : [.reload]
     }
 
-    /// False for work admitted before a trip or a reset: it must be dropped, not finished.
-    func isCurrent(_ token: Int) -> Bool {
-        token == generation
+    /// The web session could not be made; a parked tab keeps its sign-in screen.
+    func webSessionFailed(_ message: String) -> [SignInLoopEffect] {
+        isParked ? [] : [.showFailure(message)]
     }
 
-    /// The web view was replaced. Pending recovery work is stale and the tab is no longer parked
-    /// (its page state is reset too); the cap keeps counting.
+    // MARK: Sign-in requests
+
+    /// The page asked for /login or /signup (the web app routed itself there, a navigation was
+    /// refused as sign-in, or window.open asked for it). The web login page itself is never left on screen.
+    ///
+    /// Stepping back into a page that bounces signed-out visitors to /login makes it bounce again at
+    /// once (CARAMEL-2Y: /profile#favorites to /login in a ~150 ms loop until Safari refused pushState). So:
+    ///  - a page that needs a web session (/profile*) is never stepped back into: with a native session a
+    ///    handoff runs for it (or waits for the one in flight), without one the tab shows "sign in";
+    ///  - any other page is stepped back to only once per back URL and not twice within
+    ///    BounceGuard.window, else the tab shows "sign in".
+    /// `bouncedFrom` is the page the request came from, `backURL` the back-forward list's back item,
+    /// `hasPage` whether the web view shows any page.
+    mutating func automaticSignInRequest(
+        stepBack: Bool,
+        bouncedFrom: URL?,
+        backURL: URL?,
+        hasPage: Bool,
+        webSession: WebSessionContext,
+        at now: Date
+    ) -> [SignInLoopEffect] {
+        guard !isParked else { return [] }
+        guard admitAutomaticRequest(at: now) else { return park() }
+        if let page = bouncedFrom, WebSessionHandoff.pageNeedsSession(page) {
+            switch webSession {
+            case .needed: return [.startHandoff(page)]
+            case .pending: return [.holdForWebSession(page)]
+            case .signedOut, .active: return [.showNativeSignIn, .showSignInScreen]
+            }
+        }
+        guard stepBack else { return hasPage ? [.showNativeSignIn] : [.showNativeSignIn, .showSignInScreen] }
+        if bounceGuard.allowsStepBack(at: now, backURL: backURL) { return [.showNativeSignIn, .stepBack] }
+        return [.showNativeSignIn, .logError("A page bounced to sign-in again; not stepping back into it."), .showSignInScreen]
+    }
+
+    // MARK: The shopper's taps (never capped)
+
+    /// "Sign in" on the sign-in screen: unparks, starts the count over and pops the native prompt.
+    mutating func userTappedSignIn() -> [SignInLoopEffect] {
+        unpark()
+        return [.showNativeSignIn]
+    }
+
+    /// "Try again" (or pull to refresh on an empty tab): unparks and starts the count over FIRST, then
+    /// loads `url` like any load, so the load and its navigation are admitted.
+    mutating func userTappedTryAgain(_ url: URL, webSession: WebSessionContext, at now: Date) -> [SignInLoopEffect] {
+        unpark()
+        return pageLoadRequested(url, webSession: webSession, at: now)
+    }
+
+    // MARK: Lifecycle
+
+    /// ShellRouter stops the tab (a wipe is coming): a redeem in flight may not report any more.
+    mutating func stopLoading() -> [SignInLoopEffect] {
+        redeem = nil
+        return [.stopLoading]
+    }
+
+    /// The web view was replaced. Its BounceGuard and redeem go with it; the count and the parked
+    /// latch stay, on purpose (see the type's documentation).
     mutating func resetToHome() {
-        generation += 1
-        isStopped = false
+        bounceGuard = BounceGuard()
+        redeem = nil
     }
 
-    /// The shopper tapped "Sign in" or "Try again". Admission is restored. The generation is kept:
-    /// work that went stale at the trip stays stale.
-    mutating func userTapped() {
-        limiter.clear()
-        isStopped = false
-    }
-}
+    // MARK: Redeem (T-7852)
 
-/// Which redeem attempt (T-7852) an event belongs to. Every `openRedeem` begins an attempt with a
-/// new id, and each stop, reset, replacement of the web view or later attempt invalidates the
-/// earlier ones, so an outcome that arrives late (a cookie read that finishes after a trip, a retry
-/// and a new handoff on the same web view) is recognised by its id and dropped instead of settling
-/// the NEW handoff. The ids never repeat for the life of the model, resets included. Pure.
-struct RedeemAttempts: Equatable {
-    private var lastIssued = 0
-    private var navigatingID: Int?
-    private var readingID: Int?
-
-    /// True from `begin` until the redeem navigation ends: the shell is mid-redeem.
-    var isNavigating: Bool { navigatingID != nil }
-
-    /// A new redeem attempt; invalidates any earlier one.
-    mutating func begin() -> Int {
-        lastIssued += 1
-        navigatingID = lastIssued
-        readingID = nil
-        return lastIssued
-    }
-
-    /// The redeem navigation ended without a page (expired, bounced, failed, the web process died):
-    /// the id to report once, nil when there is no live attempt.
-    mutating func endNavigation() -> Int? {
-        let id = navigatingID
-        navigatingID = nil
-        return id
-    }
-
-    /// The redeem navigation finished on a page: the session cookie read starts. nil when stale.
-    mutating func startCookieRead() -> Int? {
-        guard let id = navigatingID else { return nil }
-        navigatingID = nil
-        readingID = id
-        return id
-    }
-
-    /// The cookie read for `id` finished. False when that attempt was invalidated meanwhile.
-    mutating func finishCookieRead(_ id: Int) -> Bool {
-        guard readingID == id else { return false }
-        readingID = nil
+    /// ShellRouter's handoff got its redeem URL: begin `attempt`. False when the tab is parked (load nothing).
+    mutating func beginRedeem(_ redeemURL: URL, attempt: Int) -> Bool {
+        guard !isParked else { return false }
+        redeem = RedeemAttempt(id: attempt, issuedURL: redeemURL)
         return true
     }
 
-    /// Stop, reset or replacement of the web view: nothing in flight may report any more.
-    mutating func invalidate() {
-        navigatingID = nil
-        readingID = nil
+    /// The redeem load for `attempt` was issued and returned `navigation` (nil when WebKit started none).
+    mutating func redeemLoadIssued(attempt: Int, navigation: ObjectIdentifier?) -> [SignInLoopEffect] {
+        guard redeem?.id == attempt else { return [.logError("A redeem load was issued for an attempt that is no longer current.")] }
+        guard let navigation = navigation else {
+            redeem = nil
+            return [.logError("WebKit started no navigation for the web-session redeem."), .settleRedeem(attempt: attempt, .failed("Could not open your account page. Please try again."))]
+        }
+        redeem?.navigation = navigation
+        return []
+    }
+
+    /// Before AppLinkGuard: the parked tab's cancel, the one-time redeem URL, and the main-frame
+    /// navigations that end our redeem (the redeem route answers a dead code with a redirect to /login;
+    /// while the redeem is in flight that is the handoff failing, not a page asking to sign in).
+    mutating func navigationPolicy(for url: URL, isMainFrame: Bool) -> SignInLoopNavigation {
+        if isParked && isMainFrame { return .cancelWhileParked }
+        if WebSessionHandoff.isRedeemURL(url) {
+            guard let issued = redeem?.issuedURL, issued == url else { return .refuseUnissuedRedeemURL }
+            redeem?.issuedURL = nil
+        }
+        guard let attempt = redeem, !attempt.readingCookie else { return .guardDecides }
+        switch RedeemNavigation.classify(url, redeemInFlight: true, isMainFrame: isMainFrame) {
+        case .proceed:
+            return .guardDecides
+        case .expired:
+            redeem = nil
+            return .endRedeem([.settleRedeem(attempt: attempt.id, .expired)])
+        case .signInBounce:
+            // Without ending the redeem here the cancel is swallowed as NSURLErrorCancelled and the
+            // shell would wait on the handoff forever.
+            redeem = nil
+            return .endRedeem([.settleRedeem(attempt: attempt.id, .failed("Your account page asked you to sign in again. Please try again."))])
+        }
+    }
+
+    func navigationStarted() -> [SignInLoopEffect] {
+        isParked ? [] : [.showLoading]
+    }
+
+    /// `navigation` finished at `url`. The redeem's own navigation worked when it ended on a page the
+    /// handoff `next` allowlist covers (the 303 sets the cookie before it redirects); the cookie read
+    /// then confirms the signed session cookie is really there.
+    mutating func navigationFinished(_ navigation: ObjectIdentifier?, at url: URL?) -> [SignInLoopEffect] {
+        guard !isParked else { return [] }
+        guard let attempt = redeem, !attempt.readingCookie else { return [.showLoaded] }
+        guard let navigation = navigation, navigation == attempt.navigation else {
+            return [.logError("Ignored a page that finished loading while a different navigation is the redeem in flight.")]
+        }
+        guard let url = url, WebSessionHandoff.isSessionPage(url) else {
+            redeem = nil
+            return [.showLoaded, .logError("The web-session redeem ended on an unexpected page."), .settleRedeem(attempt: attempt.id, .failed("Your account page did not open as expected. Please try again."))]
+        }
+        redeem?.readingCookie = true
+        redeem?.issuedURL = nil
+        return [.showLoaded, .readSessionCookie(attempt: attempt.id)]
+    }
+
+    /// The cookie read for `attempt` finished.
+    mutating func cookieReadFinished(attempt: Int, hasSessionCookie: Bool) -> [SignInLoopEffect] {
+        guard let current = redeem, current.id == attempt, current.readingCookie else {
+            return [.logError("Dropped the cookie read of a redeem attempt that is no longer current.")]
+        }
+        redeem = nil
+        guard hasSessionCookie else {
+            return [.logError("The web-session redeem landed without a session cookie."), .settleRedeem(attempt: attempt, .failed("Your account page opened without signing in. Please try again."))]
+        }
+        return [.settleRedeem(attempt: attempt, .landed)]
+    }
+
+    /// `navigation` failed (never a cancellation; the adapter drops those).
+    mutating func navigationFailed(_ navigation: ObjectIdentifier?, domain: String, code: Int, description: String) -> [SignInLoopEffect] {
+        if let attempt = redeem, !attempt.readingCookie {
+            guard let navigation = navigation, navigation == attempt.navigation else {
+                return [.logError("Ignored a failed page load while a different navigation is the redeem in flight.")]
+            }
+            redeem = nil
+            // Fixed text: the error's own description could quote the one-time redeem URL.
+            return [.settleRedeem(attempt: attempt.id, .failed("Could not open your account page (\(domain) \(code)). Check your connection and try again."))]
+        }
+        return isParked ? [] : [.showFailure("\(description) (\(domain) \(code))")]
+    }
+
+    /// The web view's content process died: a redeem in flight ends with it.
+    mutating func webContentTerminated() -> [SignInLoopEffect] {
+        if let attempt = redeem, !attempt.readingCookie {
+            redeem = nil
+            return [.settleRedeem(attempt: attempt.id, .failed("The page stopped unexpectedly. Please try again."))]
+        }
+        return isParked ? [] : [.showFailure("The page stopped unexpectedly.")]
+    }
+
+    // MARK: The cap
+
+    /// Records one automatic request at `now`; false when it is past the cap. Requests older than
+    /// `window` no longer count.
+    private mutating func admitAutomaticRequest(at now: Date) -> Bool {
+        requestTimes.removeAll { now.timeIntervalSince($0) >= Self.window }
+        requestTimes.append(now)
+        return requestTimes.count <= Self.maxAutomaticRequests
+    }
+
+    /// The request that crossed the cap: park. Also ends a redeem in flight, so it cannot set a
+    /// cookie and land on a page that asks again.
+    private mutating func park() -> [SignInLoopEffect] {
+        isParked = true
+        requestTimes.removeAll()
+        redeem = nil
+        return [.stopLoading, .showSignInScreen, .parked]
+    }
+
+    private mutating func unpark() {
+        isParked = false
+        requestTimes.removeAll()
     }
 }
 

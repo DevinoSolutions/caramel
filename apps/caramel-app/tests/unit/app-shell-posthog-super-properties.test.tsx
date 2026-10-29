@@ -116,7 +116,7 @@ describe('app-shell PostHog super properties', () => {
         }
     })
 
-    it('keeps the build on events captured after a logout reset (init -> reset -> capture)', async () => {
+    it('keeps the base and app-shell super properties on events captured after a logout reset (init -> reset -> capture)', async () => {
         setUserAgent(
             'Mozilla/5.0 (iPhone) Mobile/15E148 CaramelApp/1.6.0 (ios) CaramelBuild/42',
         )
@@ -128,12 +128,39 @@ describe('app-shell PostHog super properties', () => {
         posthog.capture('after_logout')
         expect(posthog.reset).toHaveBeenCalledTimes(1)
         const [before, after] = posthog.captured
-        expect(before).toMatchObject({ app_build: '42', surface: 'app-shell' })
+        const base = {
+            app_id: 'caramel',
+            app_version: '1.0.0-test',
+            environment: 'production',
+            platform: 'web',
+        }
+        expect(before).toMatchObject({
+            ...base,
+            app_build: '42',
+            surface: 'app-shell',
+        })
         expect(after).toMatchObject({
+            ...base,
             app_build: '42',
             app_shell_version: '1.6.0',
             app_platform: 'ios',
             surface: 'app-shell',
+        })
+    })
+
+    it('keeps the base super properties after a reset outside the app shell', async () => {
+        setUserAgent('Mozilla/5.0 (iPhone) Mobile/15E148 Safari/604.1')
+        const identity = await freshIdentity()
+        identity.initPosthogBrowser()
+        await settle()
+        identity.resetPosthogIdentity()
+        posthog.capture('after_logout')
+        const [after] = posthog.captured
+        expect(after).toEqual({
+            app_id: 'caramel',
+            app_version: '1.0.0-test',
+            environment: 'production',
+            platform: 'web',
         })
     })
 })

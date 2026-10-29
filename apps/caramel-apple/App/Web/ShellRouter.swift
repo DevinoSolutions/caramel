@@ -31,10 +31,8 @@ final class ShellRouter: ObservableObject {
     private struct Handoff {
         let host: WebShellModel
         let target: URL
-        /// The redeem attempt (WebShellModel.openRedeem) this handoff started; outcomes of any other attempt are stale.
+        /// The redeem attempt this handoff started on its host; an outcome of any other attempt is stale.
         var redeemAttempt: Int?
-        /// The host's SignInRecovery token when the handoff was admitted; stale after a loop-cap trip or a reset.
-        let token: Int
     }
 
     private let session: SessionStore
@@ -50,6 +48,8 @@ final class ShellRouter: ObservableObject {
     /// starts and no handoff can run while the web data is being wiped.
     private var lifecycleTask: Task<Void, Never>?
     private var wipesInFlight = 0
+    /// The last redeem attempt id handed out; ids never repeat for the app run (T-10055).
+    private var lastRedeemAttempt = 0
 
     private var allModels: [WebShellModel] { [deals, stores, saved, profile] }
 
@@ -60,12 +60,12 @@ final class ShellRouter: ObservableObject {
         selection = ScreenshotLaunch.initialTab ?? .onboarding
         for model in allModels {
             model.onSignInRequested = { [weak self] in self?.isChoosingSignInProvider = true }
-            model.webSessionGate = { [weak self] model, url in self?.holdForWebSession(model, url, countsAsRequest: true) ?? .allow }
-            // A page that needs a web session bounced to /login: same rules as a load (handoff when signed in
-            // natively and no web session yet; false when there is nothing to hand off or the session is active).
-            // The page bounce that got here was already counted by the model, so this does not count again.
-            model.webSessionRecovery = { [weak self] model, page in self?.holdForWebSession(model, page, countsAsRequest: false) ?? .allow }
-            model.onSignInLoopTripped = { [weak self] model in self?.signInLoopTripped(on: model) }
+            // Each tab's SignInLoopCoordinator decides against this context; the router carries out its
+            // hold / handoff effects and drops a parked tab's work.
+            model.webSessionContext = { [weak self] in self?.webSessionContext() ?? .signedOut }
+            model.onHoldForWebSession = { [weak self] model, url in self?.holdLoad(model, url) }
+            model.onStartHandoff = { [weak self] model, url in self?.startHandoff(host: model, target: url) }
+            model.onParked = { [weak self] model in self?.tabParked(model) }
             model.onRedeemOutcome = { [weak self] model, attempt, outcome in self?.redeemFinished(on: model, attempt: attempt, outcome) }
         }
         // App Store screenshot capture only: `-screenshotTab store:DOMAIN` opens that store's page.
@@ -190,36 +190,33 @@ final class ShellRouter: ObservableObject {
         host.open(host.targetURL)
     }
 
-    /// WebShellModel.webSessionGate: `.held` when this load must wait for the handoff, `.blocked` when
-    /// the tab's sign-in loop cap forbids touching it, `.allow` when the model may load it itself.
-    /// `countsAsRequest`: a page load that starts a handoff spends one request of the tab's cap
-    /// (SignInRecovery); the recovery of a bounce the model already counted does not.
-    /// Every path that queues, starts or replays work for a tab asks that tab first: a tab parked on
-    /// "sign in" gets nothing until its shopper taps.
-    private func holdForWebSession(_ model: WebShellModel, _ url: URL, countsAsRequest: Bool) -> WebSessionGate {
-        guard session.isSignedIn else { return .allow }
-        guard model.allowsAutomaticWork else { return .blocked }
-        // A wipe is in flight: hold every load until it has finished, so a handoff never races it.
-        if wipesInFlight > 0 {
-            heldLoads[ObjectIdentifier(model)] = (model, url)
-            return .held
-        }
-        switch webSession.phase {
-        case .active:
-            return .allow
-        case .handingOff:
-            heldLoads[ObjectIdentifier(model)] = (model, url)
-            return .held
-        case .inactive, .failed:
-            guard let token = model.admitAutomaticRecovery(countsAsRequest: countsAsRequest) else { return .blocked }
-            startHandoff(host: model, target: url, token: token)
-            return .held
+    /// WebShellModel.webSessionContext. A wipe in flight counts as pending: every load waits for it, so a
+    /// handoff never races it.
+    private func webSessionContext() -> WebSessionContext {
+        WebSessionContext.of(isSignedIn: session.isSignedIn, wipesInFlight: wipesInFlight, phase: webSession.phase)
+    }
+
+    /// WebShellModel.onHoldForWebSession: replayed through `openNow` once the web session exists.
+    private func holdLoad(_ model: WebShellModel, _ url: URL) {
+        heldLoads[ObjectIdentifier(model)] = (model, url)
+    }
+
+    /// WebShellModel.onParked: the tab's loop cap parked it on "sign in". Its held load, and a handoff it
+    /// hosts with every load held behind it, are automatic work the cap forbids: drop them, and leave the
+    /// tabs that were waiting on that handoff on "sign in".
+    private func tabParked(_ parked: WebShellModel) {
+        heldLoads[ObjectIdentifier(parked)] = nil
+        guard handoff?.host === parked else { return }
+        let waiting = heldLoads.values.map { $0.model }
+        abandonWebSession()
+        for model in waiting {
+            model.showSignInNeeded()
         }
     }
 
-    private func startHandoff(host: WebShellModel, target: URL, token: Int) {
+    private func startHandoff(host: WebShellModel, target: URL) {
         guard webSession.begin() else { return }
-        handoff = Handoff(host: host, target: target, token: token)
+        handoff = Handoff(host: host, target: target)
         requestHandoff()
     }
 
@@ -249,22 +246,29 @@ final class ShellRouter: ObservableObject {
     }
 
     private func handoffGranted(_ redeemURL: URL, generation: Int) {
-        guard generation == webSession.generation, let handoff = currentHandoff() else { return }
-        let attempt = handoff.host.openRedeem(redeemURL, target: handoff.target)
+        guard generation == webSession.generation, let handoff = handoff else { return }
+        // The id is recorded BEFORE the load: the redeem can settle synchronously (WebKit starting no navigation).
+        lastRedeemAttempt += 1
+        let attempt = lastRedeemAttempt
         self.handoff?.redeemAttempt = attempt
+        guard handoff.host.openRedeem(redeemURL, target: handoff.target, attempt: attempt) else {
+            // Its park already ended the handoff (tabParked), so this is a missed notification: end it now.
+            Self.log.error("The handoff's host tab is parked on sign-in; ending the handoff.")
+            tabParked(handoff.host)
+            return
+        }
     }
 
     private func handoffFailed(_ error: WebSessionHandoffError, generation: Int) {
         guard generation == webSession.generation else { return }
-        if handoff != nil, currentHandoff() == nil { return }
         Self.log.error("Web-session handoff failed: \(error.errorDescription ?? "unknown", privacy: .public)")
         apply(webSession.handoffRequestFailed(error))
     }
 
-    /// WebShellModel.onRedeemOutcome: the redeem navigation ended in `model`.
+    /// WebShellModel.onRedeemOutcome: redeem `attempt` ended in `model`.
     private func redeemFinished(on model: WebShellModel, attempt: Int, _ outcome: RedeemOutcome) {
-        guard let handoff = currentHandoff(), handoff.host === model else { return }
-        // An outcome of an earlier attempt (before a trip, a retry or a new handoff on this web view) is not this handoff's.
+        guard let handoff = handoff, handoff.host === model else { return }
+        // An attempt of an abandoned handoff on the same tab is not this handoff's.
         guard handoff.redeemAttempt == attempt else {
             Self.log.error("Dropped the outcome of a stale web-session redeem attempt.")
             return
@@ -293,8 +297,6 @@ final class ShellRouter: ObservableObject {
         let held = heldLoads
         heldLoads = [:]
         for entry in held.values {
-            // A tab the loop cap parked on "sign in" while its load was held stays there until its shopper taps.
-            guard entry.model.allowsAutomaticWork else { continue }
             entry.model.openNow(entry.url)
         }
         for model in allModels where model !== finished.host && held[ObjectIdentifier(model)] == nil {
@@ -311,42 +313,14 @@ final class ShellRouter: ObservableObject {
         case .endNativeSession:
             // A 401: the bearer is dead. Clearing it fires CaramelApp's session-change reset
             // (web data wiped, fresh web views); then the shopper signs in again.
-            let host = handoff?.host
             abandonWebSession()
             session.endSessionRejectedByServer()
-            if host?.allowsAutomaticWork ?? true { isChoosingSignInProvider = true }
+            isChoosingSignInProvider = true
         case .showNativeSignIn:
-            // An automatic pop-up: not when the host tab's sign-in loop cap has tripped (the tab shows "sign in" and waits for a tap).
-            let host = handoff?.host
             failPendingLoads { $0.showSignInNeeded() }
-            if host?.allowsAutomaticWork ?? true { isChoosingSignInProvider = true }
+            isChoosingSignInProvider = true
         case .showError(let message):
             failPendingLoads { $0.showFailure(message) }
-        }
-    }
-
-    /// The handoff in flight, only while its host still holds the recovery token it was admitted under.
-    /// A stale one (the cap tripped, or the host's web view was replaced) is abandoned and its result dropped.
-    private func currentHandoff() -> Handoff? {
-        guard let handoff = handoff else { return nil }
-        guard handoff.host.isRecoveryCurrent(handoff.token) else {
-            Self.log.error("Dropped a web-session handoff whose recovery was invalidated (sign-in loop cap or web view reset).")
-            abandonWebSession()
-            handoff.host.showSignInNeeded()
-            return nil
-        }
-        return handoff
-    }
-
-    /// WebShellModel.onSignInLoopTripped: `tripped`'s cap just tripped. A handoff it hosts, and every load
-    /// held behind that handoff, is recovery work the cap invalidates: drop it and leave those tabs on "sign in".
-    private func signInLoopTripped(on tripped: WebShellModel) {
-        heldLoads[ObjectIdentifier(tripped)] = nil
-        guard handoff?.host === tripped else { return }
-        let waiting = heldLoads.values.map { $0.model }
-        abandonWebSession()
-        for model in waiting {
-            model.showSignInNeeded()
         }
     }
 

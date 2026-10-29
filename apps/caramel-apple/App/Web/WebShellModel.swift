@@ -4,19 +4,13 @@ import SwiftUI
 import UIKit
 import WebKit
 
-/// How the web-session redeem navigation (T-7852) ended, reported by the shell that loaded it.
-enum RedeemOutcome: Equatable {
-    /// The redeem 303 landed on an allowlisted page: the session cookie is set.
-    case landed
-    /// The server redirected to `/login?error=handoff_expired` (expired, used or revoked code).
-    case expired
-    /// The navigation failed or ended somewhere unexpected; the message is safe to show.
-    case failed(String)
-}
-
 /// One framed grabcaramel.com page: owns the WKWebView, its navigation policy and
 /// its load state. Every navigation, new-window request and incoming URL is
 /// decided by AppLinkGuard; nothing is loaded that it refused.
+///
+/// Every sign-in, web-session and redeem decision is SignInLoopCoordinator's (ShellConfig.swift,
+/// unit tested): this class feeds it the web view's events and carries out the effects it returns
+/// (`run`), and decides nothing about them itself.
 ///
 /// What the web view is NOT given, on purpose:
 ///  - no WKScriptMessageHandler / user script: there is no JS-to-native bridge;
@@ -52,25 +46,25 @@ final class WebShellModel: NSObject, ObservableObject {
     /// Replaced (not reused) by resetToHome so no back-forward list or page cache survives a sign-out.
     @Published private(set) var webView: WKWebView
 
-    /// Set by ShellRouter: a /login or /signup navigation asks the app to run the native sign-in.
+    /// Set by ShellRouter: pop the native "Apple or Google?" sign-in prompt.
     var onSignInRequested: () -> Void = {}
 
-    /// Set by ShellRouter: asked before every ordinary page load. `.held` means the router took
-    /// over (it runs the web-session handoff, then loads the page through `openNow`); `.blocked`
-    /// means the sign-in loop cap stopped this tab: load nothing and keep the "sign in" screen.
-    var webSessionGate: (WebShellModel, URL) -> WebSessionGate = { _, _ in .allow }
+    /// Set by ShellRouter: the web-session state this tab's loads and sign-in requests are decided against.
+    var webSessionContext: () -> WebSessionContext = { .signedOut }
 
-    /// Set by ShellRouter: how the redeem attempt `attempt` (the id `openRedeem` returned) ended.
-    /// The router drops an outcome whose attempt is not the one its current handoff started.
+    /// Set by ShellRouter: queue this load until the handoff in flight has made the web session
+    /// (it then loads through `openNow`).
+    var onHoldForWebSession: (WebShellModel, URL) -> Void = { _, _ in }
+
+    /// Set by ShellRouter: start a web-session handoff hosted by this shell, ending on the URL.
+    var onStartHandoff: (WebShellModel, URL) -> Void = { _, _ in }
+
+    /// Set by ShellRouter: how redeem `attempt` (the id passed to `openRedeem`) ended.
     var onRedeemOutcome: (WebShellModel, Int, RedeemOutcome) -> Void = { _, _, _ in }
 
-    /// Set by ShellRouter: a page that needs a web session bounced to /login. `.held` means the
-    /// router is running the handoff for it (native session, no web session yet).
-    var webSessionRecovery: (WebShellModel, URL) -> WebSessionGate = { _, _ in .allow }
-
-    /// Set by ShellRouter: this tab's sign-in loop cap just tripped, so the handoff/redeem it
-    /// hosts (and any load held behind it) is recovery work that must be dropped (T-10055).
-    var onSignInLoopTripped: (WebShellModel) -> Void = { _ in }
+    /// Set by ShellRouter: the loop cap just parked this tab on "sign in" (T-10055); a handoff it
+    /// hosts and any load held for it must be dropped.
+    var onParked: (WebShellModel) -> Void = { _ in }
 
     /// The page this shell shows or is about to show (what a handoff should land on).
     var targetURL: URL { lastRequestedURL ?? home }
@@ -82,16 +76,11 @@ final class WebShellModel: NSObject, ObservableObject {
     private var lastObservedURL: URL?
     private var lastRequestedURL: URL?
     private var didStartLoading = false
-    /// Which redeem attempt is in flight (ids never repeat, resets included; T-10055).
-    private var redeemAttempts = RedeemAttempts()
-    /// True from `openRedeem` until the redeem navigation lands, expires or fails.
-    private var redeemInFlight: Bool { redeemAttempts.isNavigating }
-    private var bounceGuard = BounceGuard()
-    /// The admission gate for every automatic sign-in/recovery step of this tab. resetToHome keeps its
-    /// count on purpose: that is the point (T-10055).
-    private var signInRecovery = SignInRecovery()
-    /// The one redeem URL the router issued: it may load once, and no other redeem URL may load at all.
-    private var issuedRedeemURL: URL?
+    /// Never recreated: its loop cap and parked latch must outlive resetToHome (T-10055).
+    private var coordinator = SignInLoopCoordinator()
+    /// The redeem's WKNavigation, kept alive so its ObjectIdentifier (what the coordinator matches
+    /// navigation outcomes against) cannot be reused by a later navigation.
+    private var redeemNavigation: WKNavigation?
 
     init(home: URL) {
         self.home = home
@@ -155,59 +144,42 @@ final class WebShellModel: NSObject, ObservableObject {
     /// While the shopper is signed in natively but the web view has no web session, the
     /// router holds the load until the handoff (T-7852) has made one.
     func open(_ url: URL) {
-        didStartLoading = true
-        lastRequestedURL = url
-        switch webSessionGate(self, url) {
-        case .allow:
-            webView.load(URLRequest(url: url))
-        case .held:
-            pageState = .loading
-        case .blocked:
-            // The loop cap parked this tab on "sign in" (stopForSignInLoop): no load, and no
-            // .loading over the sign-in screen (and never a blank tab after a reset: the count survives it).
-            // A tap on Sign in / Try again lifts it.
-            Self.log.error("Did not load a page: this tab is stopped by the sign-in loop cap until the shopper taps.")
-            pageState = .needsSignIn
-        }
+        noteRequested(url)
+        run(coordinator.pageLoadRequested(url, webSession: webSessionContext(), at: Date()))
     }
 
-    /// `open` without asking the router: for the router's own loads once the web session exists.
+    /// `open` once the web session exists: for the router's own loads.
     func openNow(_ url: URL) {
-        didStartLoading = true
-        lastRequestedURL = url
-        webView.load(URLRequest(url: url))
+        noteRequested(url)
+        run(coordinator.webSessionLoad(url))
     }
 
-    /// Loads the one-time redeem URL (vetted by WebSessionHandoffClient) through the same
-    /// guarded path as every other navigation; its 303 sets the session cookie in this
+    /// Loads the one-time redeem URL (vetted by WebSessionHandoffClient) for redeem `attempt` through
+    /// the same guarded path as every other navigation; its 303 sets the session cookie in this
     /// web view's data store and lands on `target`. The redeem URL is never remembered as
-    /// the page to retry: it is single use.
-    /// Returns the id of this redeem attempt; `onRedeemOutcome` reports it back with the result.
-    func openRedeem(_ redeemURL: URL, target: URL) -> Int {
-        didStartLoading = true
-        lastRequestedURL = target
-        let attempt = redeemAttempts.begin()
-        issuedRedeemURL = redeemURL
+    /// the page to retry: it is single use. False when the tab is parked on "sign in" (nothing loads).
+    func openRedeem(_ redeemURL: URL, target: URL, attempt: Int) -> Bool {
+        guard coordinator.beginRedeem(redeemURL, attempt: attempt) else { return false }
+        noteRequested(target)
         pageState = .loading
-        webView.load(URLRequest(url: redeemURL))
-        return attempt
+        redeemNavigation = webView.load(URLRequest(url: redeemURL))
+        run(coordinator.redeemLoadIssued(attempt: attempt, navigation: Self.identity(of: redeemNavigation)))
+        return true
     }
 
     /// A web session now exists (another shell's redeem set the cookie): show this shell's page signed in.
-    /// Not for a tab the loop cap parked on "sign in": it stays there until the shopper taps.
     func reloadForWebSession() {
-        guard didStartLoading, signInRecovery.allowsAutomaticWork(at: Date()) else { return }
-        if webView.url == nil || pageState == .needsSignIn {
-            openNow(targetURL)
-        } else {
-            webView.reload()
-        }
+        run(coordinator.webSessionEstablishedElsewhere(
+            target: targetURL,
+            hasStartedLoading: didStartLoading,
+            hasPage: webView.url != nil,
+            showsSignInScreen: pageState == .needsSignIn
+        ))
     }
 
     /// The web session could not be made; the page shows `message` with a retry.
     func showFailure(_ message: String) {
-        guard !signInRecovery.isStopped else { return }
-        pageState = .failed(message)
+        run(coordinator.webSessionFailed(message))
     }
 
     /// The page needs a web session the app could not make; the shopper is offered native sign-in.
@@ -217,9 +189,7 @@ final class WebShellModel: NSObject, ObservableObject {
 
     /// Stops whatever this shell is loading, a redeem included, so it cannot set a cookie after a wipe.
     func stopLoading() {
-        webView.stopLoading()
-        redeemAttempts.invalidate()
-        issuedRedeemURL = nil
+        run(coordinator.stopLoading())
     }
 
     /// Back to the guarded home page (after sign-out or account deletion, once the web data is cleared).
@@ -238,12 +208,10 @@ final class WebShellModel: NSObject, ObservableObject {
         urlObservation = nil
         lastObservedURL = nil
         lastRequestedURL = nil
-        redeemAttempts.invalidate()
-        issuedRedeemURL = nil
-        bounceGuard = BounceGuard()
-        // Pending recovery work goes stale; the sign-in loop cap keeps its count (T-10055).
-        signInRecovery.resetToHome()
-        pageState = .idle
+        redeemNavigation = nil
+        coordinator.resetToHome()
+        // A parked tab stays on "sign in" across the reset (T-10055).
+        pageState = coordinator.isParked ? .needsSignIn : .idle
         // Not started: the visible tab's .task (loadHomeIfNeeded) loads home. Loading all four
         // shells eagerly would let a signed-out /profile redirect to /login and pop the native sign-in.
         didStartLoading = false
@@ -251,15 +219,16 @@ final class WebShellModel: NSObject, ObservableObject {
         attach(webView)
     }
 
+    /// The shopper tapped "Try again" (or pulled to refresh an empty tab).
     func retry() {
-        signInRecovery.userTapped()
-        open(lastRequestedURL ?? home)
+        let url = lastRequestedURL ?? home
+        noteRequested(url)
+        run(coordinator.userTappedTryAgain(url, webSession: webSessionContext(), at: Date()))
     }
 
-    /// The shopper tapped "Sign in" on the sign-in overlay: a person is asking, so the loop cap starts over.
+    /// The shopper tapped "Sign in" on the sign-in screen.
     func signInTapped() {
-        signInRecovery.userTapped()
-        onSignInRequested()
+        run(coordinator.userTappedSignIn())
     }
 
     @objc private func pullToRefresh() {
@@ -268,6 +237,78 @@ final class WebShellModel: NSObject, ObservableObject {
         } else {
             webView.reload()
         }
+    }
+
+    private func noteRequested(_ url: URL) {
+        didStartLoading = true
+        lastRequestedURL = url
+    }
+
+    // MARK: Effects
+
+    /// Carries out what SignInLoopCoordinator decided, in order.
+    private func run(_ effects: [SignInLoopEffect]) {
+        for effect in effects {
+            switch effect {
+            case .load(let url):
+                webView.load(URLRequest(url: url))
+            case .reload:
+                webView.reload()
+            case .stepBack:
+                webView.goBack()
+            case .stopLoading:
+                webView.stopLoading()
+            case .holdForWebSession(let url):
+                pageState = .loading
+                onHoldForWebSession(self, url)
+            case .startHandoff(let url):
+                pageState = .loading
+                onStartHandoff(self, url)
+            case .showNativeSignIn:
+                onSignInRequested()
+            case .showLoading:
+                pageState = .loading
+            case .showLoaded:
+                pageState = .loaded
+            case .showSignInScreen:
+                pageState = .needsSignIn
+            case .showFailure(let message):
+                pageState = .failed(message)
+            case .readSessionCookie(let attempt):
+                readSessionCookie(for: attempt)
+            case .settleRedeem(let attempt, let outcome):
+                onRedeemOutcome(self, attempt, outcome)
+            case .parked:
+                reportParked()
+                onParked(self)
+            case .logError(let message):
+                Self.log.error("\(message, privacy: .public)")
+            }
+        }
+    }
+
+    /// The cookie is read from this web view's own data store (the one the router wipes on a token
+    /// change), so a landing on an allowlisted page only counts when the signed session cookie is
+    /// really there. The coordinator drops a read whose attempt is no longer current.
+    private func readSessionCookie(for attempt: Int) {
+        webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { [weak self] cookies in
+            Task { @MainActor in
+                guard let self = self else { return }
+                self.run(self.coordinator.cookieReadFinished(attempt: attempt, hasSessionCookie: WebSessionHandoff.hasSessionCookie(cookies)))
+            }
+        }
+    }
+
+    /// TODO(T-10055): sentry-cocoa is not linked into the app target (AlertsEngine carries the same
+    /// TODO(T-4905)), so a park reaches only the unified log. Once Sentry is linked, add ONE breadcrumb
+    /// and ONE captureMessage here (this runs once per park), tagged with the page and CFBundleVersion.
+    private func reportParked() {
+        let page = (webView.url ?? lastRequestedURL)?.path ?? "unknown"
+        Self.log.fault("Sign-in loop stopped: more than \(SignInLoopCoordinator.maxAutomaticRequests) automatic sign-in requests in \(Int(SignInLoopCoordinator.window)) s on this tab (page \(page, privacy: .public)); parked on sign-in until the shopper taps.")
+    }
+
+    private static func identity(of navigation: WKNavigation?) -> ObjectIdentifier? {
+        navigation.map { ObjectIdentifier($0) }
     }
 
     // MARK: Decisions
@@ -289,91 +330,18 @@ final class WebShellModel: NSObject, ObservableObject {
         }
     }
 
-    /// A page asked for /login or /signup. The web login page itself is never left on screen.
-    ///
-    /// Stepping back into a page that bounces signed-out visitors to /login makes it bounce
-    /// again at once (CARAMEL-2Y: /profile#favorites to /login in a ~150 ms loop until Safari
-    /// refused pushState). So:
-    ///  - a page that needs a web session (/profile*) is never stepped back into: with a native
-    ///    session the router runs the handoff for it, without one the shell shows "sign in" and stops;
-    ///  - any other page is stepped back to only once per back URL and not twice within
-    ///    BounceGuard.window, else the shell shows "sign in" and stops.
-    ///
-    /// All of that sits behind SignInRecovery, which resetToHome does not reset: past
-    /// SignInBounceLimiter.maxRequests requests in a minute the shell does nothing but show "sign
-    /// in" (no step back, no handoff, no native sign-in pop-up) until the shopper taps.
+    /// A page asked for /login or /signup; SignInLoopCoordinator.automaticSignInRequest decides what that gets.
     private func pageAskedForSignIn(stepBack: Bool) {
-        guard admitAutomaticRecovery(countsAsRequest: true) != nil else { return }
-        let bouncedFrom = stepBack ? (webView.backForwardList.backItem?.url ?? lastRequestedURL) : (webView.url ?? lastRequestedURL)
-        if let page = bouncedFrom, WebSessionHandoff.pageNeedsSession(page) {
-            switch webSessionRecovery(self, page) {
-            case .held:
-                // A handoff for that page is under way; it ends on the page itself.
-                pageState = .loading
-            case .blocked:
-                // The cap stopped the tab (stopForSignInLoop): no pop-up, and the sign-in screen stays.
-                break
-            case .allow:
-                onSignInRequested()
-                pageState = .needsSignIn
-            }
-            return
-        }
-        onSignInRequested()
-        guard stepBack else {
-            if webView.url == nil { pageState = .needsSignIn }
-            return
-        }
-        if bounceGuard.allowsStepBack(at: Date(), backURL: webView.backForwardList.backItem?.url) {
-            webView.goBack()
-        } else {
-            Self.log.error("A page bounced to sign-in again; not stepping back into it.")
-            pageState = .needsSignIn
-        }
-    }
-
-    /// Admission for one AUTOMATIC sign-in or recovery step: a page asking for sign-in (counts as a
-    /// request), or the router starting a handoff for a page load (counts), or the router continuing a
-    /// recovery that was already admitted (`countsAsRequest: false`: checks the cap only). Returns the
-    /// token to carry on work that completes later (see isRecoveryCurrent), or nil when the cap forbids
-    /// the step: the tab then shows "sign in" and stops. A shopper tap never comes through here.
-    func admitAutomaticRecovery(countsAsRequest: Bool) -> Int? {
-        let now = Date()
-        let decision = countsAsRequest ? signInRecovery.automaticRequest(at: now) : signInRecovery.continueRecovery(at: now)
-        switch decision {
-        case .proceed(let token):
-            return token
-        case .stop(let firstTime):
-            stopForSignInLoop(firstTime: firstTime)
-            return nil
-        }
-    }
-
-    /// False for recovery work admitted before the cap tripped or before the web view was replaced.
-    func isRecoveryCurrent(_ token: Int) -> Bool {
-        signInRecovery.isCurrent(token)
-    }
-
-    /// True while the router may queue, replay, refresh or present sign-in for this tab on its own:
-    /// the tab is not parked on "sign in" and the cap is not tripped. Counts nothing.
-    var allowsAutomaticWork: Bool {
-        signInRecovery.allowsAutomaticWork(at: Date())
-    }
-
-    private func stopForSignInLoop(firstTime: Bool) {
-        if firstTime { reportSignInLoopTripped() }
-        // Also ends a redeem this tab was loading, so it cannot set a cookie and land on a page that asks again.
-        stopLoading()
-        pageState = .needsSignIn
-        if firstTime { onSignInLoopTripped(self) }
-    }
-
-    /// TODO(T-10055): sentry-cocoa is not linked into the app target (AlertsEngine carries the same
-    /// TODO(T-4905)), so a trip reaches only the unified log. Once Sentry is linked, add ONE breadcrumb
-    /// and ONE captureMessage here (this runs once per trip), tagged with the page and CFBundleVersion.
-    private func reportSignInLoopTripped() {
-        let page = (webView.url ?? lastRequestedURL)?.path ?? "unknown"
-        Self.log.fault("Sign-in loop stopped: more than \(SignInBounceLimiter.maxRequests) sign-in requests in \(Int(SignInBounceLimiter.window)) s on this tab (page \(page, privacy: .public)).")
+        let backURL = webView.backForwardList.backItem?.url
+        let bouncedFrom = stepBack ? (backURL ?? lastRequestedURL) : (webView.url ?? lastRequestedURL)
+        run(coordinator.automaticSignInRequest(
+            stepBack: stepBack,
+            bouncedFrom: bouncedFrom,
+            backURL: backURL,
+            hasPage: webView.url != nil,
+            webSession: webSessionContext(),
+            at: Date()
+        ))
     }
 
     private static func kind(of type: WKNavigationType) -> AppLinkGuard.NavigationKind {
@@ -415,57 +383,23 @@ final class WebShellModel: NSObject, ObservableObject {
         }
     }
 
-    private func finish(with error: Error) {
+    /// False (logged) for a callback from a web view resetToHome already replaced: its outcomes are not this tab's.
+    private func isCurrent(_ view: WKWebView) -> Bool {
+        guard view === webView else {
+            Self.log.error("Dropped a navigation callback from a replaced web view.")
+            return false
+        }
+        return true
+    }
+
+    private func finish(_ navigation: WKNavigation?, with error: Error) {
         webView.scrollView.refreshControl?.endRefreshing()
         let nsError = error as NSError
         // A navigation the policy methods cancelled (or one superseded by a newer
         // request) reports NSURLErrorCancelled; it is not a failure to show.
         if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled { return }
         Self.log.error("Page load failed: \(nsError.domain, privacy: .public) \(nsError.code)")
-        if let attempt = redeemAttempts.endNavigation() {
-            // Fixed text: the error's own description could quote the one-time redeem URL.
-            onRedeemOutcome(self, attempt, .failed("Could not open your account page (\(nsError.domain) \(nsError.code)). Check your connection and try again."))
-            return
-        }
-        // A tab the loop cap parked on "sign in" keeps that screen over a late failure.
-        guard !signInRecovery.isStopped else { return }
-        pageState = .failed("\(nsError.localizedDescription) (\(nsError.domain) \(nsError.code))")
-    }
-
-    /// The redeem navigation finished: it worked when it ended on a page the handoff `next`
-    /// allowlist covers (the 303 sets the cookie before it redirects).
-    /// The cookie is read from this web view's own data store (the one the router wipes on a token change), so a
-    /// landing on an allowlisted page only counts when the signed session cookie is really there.
-    ///
-    /// The cookie read is asynchronous, so it carries the attempt id: a read that finishes after the
-    /// attempt was invalidated (stop, reset, a trip, a newer attempt on the same web view) is dropped
-    /// here instead of settling whatever handoff is current by then (T-10055).
-    private func settleRedeem(finishedAt url: URL?) {
-        issuedRedeemURL = nil
-        guard let attempt = redeemAttempts.startCookieRead() else { return }
-        guard let url = url, WebSessionHandoff.isSessionPage(url) else {
-            Self.log.error("The web-session redeem ended on an unexpected page.")
-            if redeemAttempts.finishCookieRead(attempt) {
-                onRedeemOutcome(self, attempt, .failed("Your account page did not open as expected. Please try again."))
-            }
-            return
-        }
-        let view = webView
-        view.configuration.websiteDataStore.httpCookieStore.getAllCookies { [weak self] cookies in
-            Task { @MainActor in
-                guard let self = self, self.webView === view else { return }
-                guard self.redeemAttempts.finishCookieRead(attempt) else {
-                    Self.log.error("Dropped the cookie read of a redeem attempt that was invalidated meanwhile.")
-                    return
-                }
-                if WebSessionHandoff.hasSessionCookie(cookies) {
-                    self.onRedeemOutcome(self, attempt, .landed)
-                } else {
-                    Self.log.error("The web-session redeem landed without a session cookie.")
-                    self.onRedeemOutcome(self, attempt, .failed("Your account page opened without signing in. Please try again."))
-                }
-            }
-        }
+        run(coordinator.navigationFailed(Self.identity(of: navigation), domain: nsError.domain, code: nsError.code, description: nsError.localizedDescription))
     }
 }
 
@@ -480,35 +414,23 @@ extension WebShellModel: WKNavigationDelegate {
             decisionHandler(.cancel)
             return
         }
-        // Only the URL the router issued loads, and only once; any other redeem URL is refused.
-        if WebSessionHandoff.isRedeemURL(url) {
-            guard url == issuedRedeemURL else {
-                Self.log.error("Refused a redeem URL that was not issued by the handoff.")
-                decisionHandler(.cancel)
-                return
-            }
-            issuedRedeemURL = nil
-        }
-        // The redeem route answers a dead code with a redirect to /login. While our own redeem is
-        // in flight that is the handoff failing, not a page asking the shopper to sign in.
         // A navigation with no target frame is treated as main-frame (the stricter policy).
         let isMainFrame = navigationAction.targetFrame?.isMainFrame ?? true
-        switch RedeemNavigation.classify(url, redeemInFlight: redeemInFlight, isMainFrame: isMainFrame) {
-        case .expired:
-            let attempt = redeemAttempts.endNavigation()
-            decisionHandler(.cancel)
-            if let attempt = attempt { onRedeemOutcome(self, attempt, .expired) }
-            return
-        case .signInBounce:
-            // Any other /login or /signup ends the redeem too; without this the cancel below is
-            // swallowed as NSURLErrorCancelled and the shell would wait on the handoff forever.
-            let attempt = redeemAttempts.endNavigation()
-            issuedRedeemURL = nil
-            decisionHandler(.cancel)
-            if let attempt = attempt { onRedeemOutcome(self, attempt, .failed("Your account page asked you to sign in again. Please try again.")) }
-            return
-        case .proceed:
+        switch coordinator.navigationPolicy(for: url, isMainFrame: isMainFrame) {
+        case .guardDecides:
             break
+        case .cancelWhileParked:
+            Self.log.error("Cancelled a main-frame navigation: this tab is parked on sign-in until the shopper taps.")
+            decisionHandler(.cancel)
+            return
+        case .refuseUnissuedRedeemURL:
+            Self.log.error("Refused a redeem URL that was not issued by the handoff.")
+            decisionHandler(.cancel)
+            return
+        case .endRedeem(let effects):
+            decisionHandler(.cancel)
+            run(effects)
+            return
         }
         let kind = Self.kind(of: navigationAction.navigationType)
         switch AppLinkGuard.gate(AppLinkGuard.decision(for: url, isMainFrame: isMainFrame), kind: kind) {
@@ -535,37 +457,31 @@ extension WebShellModel: WKNavigationDelegate {
         }
     }
 
-    // A tab the loop cap parked on "sign in" keeps that screen: late navigation callbacks must not
-    // turn it back into a spinner or a loaded page (signInRecovery.isStopped; lifted by a tap or a reset).
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-        guard !signInRecovery.isStopped else { return }
-        pageState = .loading
+        guard isCurrent(webView) else { return }
+        run(coordinator.navigationStarted())
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard isCurrent(webView) else { return }
         webView.scrollView.refreshControl?.endRefreshing()
-        if !signInRecovery.isStopped { pageState = .loaded }
-        if redeemInFlight {
-            settleRedeem(finishedAt: webView.url)
-        }
+        run(coordinator.navigationFinished(Self.identity(of: navigation), at: webView.url))
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        finish(with: error)
+        guard isCurrent(webView) else { return }
+        finish(navigation, with: error)
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        finish(with: error)
+        guard isCurrent(webView) else { return }
+        finish(navigation, with: error)
     }
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        guard isCurrent(webView) else { return }
         Self.log.error("The web content process terminated.")
-        if let attempt = redeemAttempts.endNavigation() {
-            onRedeemOutcome(self, attempt, .failed("The page stopped unexpectedly. Please try again."))
-            return
-        }
-        guard !signInRecovery.isStopped else { return }
-        pageState = .failed("The page stopped unexpectedly.")
+        run(coordinator.webContentTerminated())
     }
 }
 

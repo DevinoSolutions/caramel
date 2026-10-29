@@ -906,281 +906,415 @@ final class BounceGuardTests: XCTestCase {
     }
 }
 
-/// SignInBounceLimiter: the cap that outlives resetToHome (T-10055).
-final class SignInBounceLimiterTests: XCTestCase {
+/// SignInLoopCoordinator: every automatic sign-in decision of one tab (T-10055). WebShellModel and
+/// ShellRouter only carry out the effects it returns, so these sequences are the behaviour.
+final class SignInLoopCoordinatorTests: XCTestCase {
     private let start = Date(timeIntervalSince1970: 1_000_000)
+    private let deals = URL(string: "https://grabcaramel.com/coupons")!
+    private let stores = URL(string: "https://grabcaramel.com/coupons/stores")!
+    private let profile = URL(string: "https://grabcaramel.com/profile#favorites")!
+    private let login = URL(string: "https://grabcaramel.com/login")!
+    private let redeemURL = URL(string: "https://grabcaramel.com/api/app/web-session/redeem?code=\(String(repeating: "a", count: 43))")!
+    private let parkEffects: [SignInLoopEffect] = [.stopLoading, .showSignInScreen, .parked]
 
-    private func fill(_ limiter: inout SignInBounceLimiter, count: Int) {
-        for lap in 0..<count {
-            _ = limiter.record(at: start.addingTimeInterval(Double(lap)))
+    /// Stands in for a WKNavigation: the coordinator only compares ObjectIdentifiers. Each one is kept
+    /// alive by its test, as WebShellModel keeps the redeem's navigation alive.
+    private final class FakeNavigation {}
+
+    private func at(_ seconds: TimeInterval) -> Date { start.addingTimeInterval(seconds) }
+
+    /// The effects without their log lines.
+    private func acts(_ effects: [SignInLoopEffect]) -> [SignInLoopEffect] {
+        effects.filter { effect in
+            if case .logError = effect { return false }
+            return true
         }
     }
 
-    func testTheFirstFourRequestsInAMinuteAreAllowed() {
-        var limiter = SignInBounceLimiter()
-        for lap in 0..<SignInBounceLimiter.maxRequests {
-            XCTAssertEqual(limiter.record(at: start.addingTimeInterval(Double(lap))), .allowed, "request \(lap + 1)")
+    /// True when the effects log something: a dropped event is never silent.
+    private func logs(_ effects: [SignInLoopEffect]) -> Bool {
+        effects.contains { effect in
+            if case .logError = effect { return true }
+            return false
         }
     }
 
-    func testARequestEverySecondTripsOnTheFifthAndStaysTripped() {
-        var limiter = SignInBounceLimiter()
-        var verdicts: [SignInBounceLimiter.Verdict] = []
-        for lap in 0..<8 {
-            verdicts.append(limiter.record(at: start.addingTimeInterval(Double(lap))))
-        }
-        XCTAssertEqual(verdicts, [.allowed, .allowed, .allowed, .allowed, .tripped, .stillTripped, .stillTripped, .stillTripped])
+    /// One lap of the T-10055 loop: signed-out /profile bounced to /login.
+    @discardableResult
+    private func profileBounce(_ coordinator: inout SignInLoopCoordinator, at seconds: TimeInterval, webSession: WebSessionContext = .signedOut) -> [SignInLoopEffect] {
+        coordinator.automaticSignInRequest(stepBack: true, bouncedFrom: profile, backURL: profile, hasPage: true, webSession: webSession, at: at(seconds))
     }
 
-    func testSlowRequestsNeverTrip() {
-        var limiter = SignInBounceLimiter()
+    /// A tab the loop parked: five laps in five seconds.
+    private func parkedCoordinator() -> SignInLoopCoordinator {
+        var coordinator = SignInLoopCoordinator()
+        for lap in 0..<SignInLoopCoordinator.maxAutomaticRequests {
+            profileBounce(&coordinator, at: Double(lap))
+        }
+        XCTAssertEqual(profileBounce(&coordinator, at: 4), parkEffects)
+        return coordinator
+    }
+
+    /// Begins redeem `attempt` the way WebShellModel.openRedeem does: begin, load (bound to `navigation`), then WebKit's policy check.
+    private func beginRedeem(_ coordinator: inout SignInLoopCoordinator, attempt: Int, navigation: FakeNavigation) {
+        XCTAssertTrue(coordinator.beginRedeem(redeemURL, attempt: attempt))
+        XCTAssertEqual(coordinator.redeemLoadIssued(attempt: attempt, navigation: ObjectIdentifier(navigation)), [])
+        XCTAssertEqual(coordinator.navigationPolicy(for: redeemURL, isMainFrame: true), .guardDecides, "the issued redeem URL loads")
+    }
+
+    // MARK: The cap and the parked latch
+
+    func testFourBouncesInAMinuteGetTheNormalSignedOutAnswer() {
+        var coordinator = SignInLoopCoordinator()
+        for lap in 0..<SignInLoopCoordinator.maxAutomaticRequests {
+            XCTAssertEqual(profileBounce(&coordinator, at: Double(lap)), [.showNativeSignIn, .showSignInScreen], "lap \(lap + 1)")
+        }
+        XCTAssertFalse(coordinator.isParked)
+    }
+
+    func testTheFifthAutomaticRequestInAMinuteParksTheTabAndReportsItOnce() {
+        var coordinator = parkedCoordinator()
+        XCTAssertTrue(coordinator.isParked)
+        for lap in 5..<30 {
+            XCTAssertEqual(profileBounce(&coordinator, at: Double(lap)), [], "no prompt, no step back, no handoff, no second report")
+        }
+    }
+
+    func testSlowRequestsNeverPark() {
+        var coordinator = SignInLoopCoordinator()
         for lap in 0..<20 {
-            XCTAssertEqual(limiter.record(at: start.addingTimeInterval(Double(lap) * 20)), .allowed, "a request every 20 s is a person")
+            XCTAssertEqual(profileBounce(&coordinator, at: Double(lap) * 20), [.showNativeSignIn, .showSignInScreen], "a request every 20 s is a person")
         }
+        XCTAssertFalse(coordinator.isParked)
     }
 
     func testTheWindowSlides() {
-        var limiter = SignInBounceLimiter()
-        fill(&limiter, count: SignInBounceLimiter.maxRequests)
-        XCTAssertEqual(limiter.record(at: start.addingTimeInterval(SignInBounceLimiter.window + 3.5)), .allowed, "all four earlier requests are older than the window")
-    }
-
-    func testAQuietMinuteEndsATrip() {
-        var limiter = SignInBounceLimiter()
-        fill(&limiter, count: SignInBounceLimiter.maxRequests + 1)
-        XCTAssertEqual(limiter.record(at: start.addingTimeInterval(SignInBounceLimiter.window + 10)), .allowed)
-    }
-
-    func testAShopperTapClearsTheCount() {
-        var limiter = SignInBounceLimiter()
-        fill(&limiter, count: SignInBounceLimiter.maxRequests + 1)
-        limiter.clear()
-        XCTAssertEqual(limiter.record(at: start.addingTimeInterval(6)), .allowed)
-    }
-
-    func testIsTrippedCountsNothingAndFollowsTheWindow() {
-        var limiter = SignInBounceLimiter()
-        fill(&limiter, count: SignInBounceLimiter.maxRequests)
-        XCTAssertFalse(limiter.isTripped(at: start.addingTimeInterval(5)))
-        _ = limiter.record(at: start.addingTimeInterval(4))
-        XCTAssertTrue(limiter.isTripped(at: start.addingTimeInterval(5)))
-        XCTAssertTrue(limiter.isTripped(at: start.addingTimeInterval(5)), "asking twice changes nothing")
-        XCTAssertFalse(limiter.isTripped(at: start.addingTimeInterval(SignInBounceLimiter.window + 10)))
-    }
-}
-
-/// SignInRecovery: the admission gate WebShellModel and ShellRouter delegate every automatic
-/// sign-in step to (T-10055). The model acts only on `.proceed`; `.stop` means no native pop-up,
-/// no step back and no handoff.
-final class SignInRecoveryTests: XCTestCase {
-    private let start = Date(timeIntervalSince1970: 1_000_000)
-
-    private func token(_ decision: SignInRecovery.Decision) -> Int? {
-        if case .proceed(let token) = decision { return token }
-        return nil
-    }
-
-    func testTheFifthRequestStopsEvenWithAResetToHomeBetweenEveryLap() {
-        var recovery = SignInRecovery()
-        var decisions: [SignInRecovery.Decision] = []
-        for lap in 0..<5 {
-            decisions.append(recovery.automaticRequest(at: start.addingTimeInterval(Double(lap))))
-            recovery.resetToHome()
+        var coordinator = SignInLoopCoordinator()
+        for lap in 0..<SignInLoopCoordinator.maxAutomaticRequests {
+            profileBounce(&coordinator, at: Double(lap))
         }
-        XCTAssertTrue(decisions[0..<4].allSatisfy { token($0) != nil }, "the first four laps are admitted")
-        XCTAssertEqual(decisions[4], .stop(firstTime: true), "lap 5 gets no pop-up, no step back and no handoff")
-        XCTAssertEqual(recovery.automaticRequest(at: start.addingTimeInterval(5)), .stop(firstTime: false))
+        XCTAssertEqual(profileBounce(&coordinator, at: SignInLoopCoordinator.window + 3.5), [.showNativeSignIn, .showSignInScreen], "the four earlier requests are older than the window")
+        XCTAssertFalse(coordinator.isParked)
     }
 
-    func testAContinuedStepIsRefusedOnceTheCapIsTrippedAndCountsNothing() {
-        var recovery = SignInRecovery()
-        for lap in 0..<4 {
-            XCTAssertNotNil(token(recovery.automaticRequest(at: start.addingTimeInterval(Double(lap)))))
+    func testAParkedTabStaysParkedLongAfterTheWindow() {
+        // Review round 3, finding 1: requests at 0..4 s park the tab; an automatic /login at 65 s must not unpark it.
+        var coordinator = parkedCoordinator()
+        for seconds in [SignInLoopCoordinator.window + 5, 3_600, 86_400] {
+            XCTAssertEqual(profileBounce(&coordinator, at: seconds), [], "no native prompt at \(seconds) s")
+            XCTAssertEqual(profileBounce(&coordinator, at: seconds, webSession: .needed), [], "no handoff at \(seconds) s")
+            XCTAssertEqual(acts(coordinator.pageLoadRequested(profile, webSession: .needed, at: at(seconds))), [.showSignInScreen])
+            XCTAssertTrue(coordinator.isParked)
         }
-        XCTAssertNotNil(token(recovery.continueRecovery(at: start.addingTimeInterval(4))), "four requests: still allowed")
-        XCTAssertNotNil(token(recovery.continueRecovery(at: start.addingTimeInterval(4))), "checking does not spend the budget")
-        _ = recovery.automaticRequest(at: start.addingTimeInterval(4))
-        XCTAssertEqual(recovery.continueRecovery(at: start.addingTimeInterval(5)), .stop(firstTime: false))
     }
 
-    func testAHandoffAdmittedBeforeTheTripIsStaleAfterIt() {
-        var recovery = SignInRecovery()
-        var admitted: [Int] = []
-        for lap in 0..<4 {
-            if let issued = token(recovery.automaticRequest(at: start.addingTimeInterval(Double(lap)))) { admitted.append(issued) }
+    func testResetsAndSessionChangesNeitherUnparkNorClearTheCount() {
+        var coordinator = SignInLoopCoordinator()
+        for lap in 0..<SignInLoopCoordinator.maxAutomaticRequests {
+            profileBounce(&coordinator, at: Double(lap))
+            coordinator.resetToHome()
         }
-        let inFlight = admitted[3]
-        XCTAssertTrue(recovery.isCurrent(inFlight), "still current before the trip")
-        XCTAssertEqual(recovery.automaticRequest(at: start.addingTimeInterval(4)), .stop(firstTime: true))
-        XCTAssertFalse(recovery.isCurrent(inFlight), "its completion must be ignored")
+        XCTAssertEqual(profileBounce(&coordinator, at: 4), parkEffects, "a reset between every lap did not clear the count")
+        coordinator.resetToHome()
+        XCTAssertTrue(coordinator.isParked, "a session change (wipe and reset) does not unpark")
+        XCTAssertEqual(profileBounce(&coordinator, at: 5), [])
     }
 
-    func testAResetToHomeMakesPendingWorkStaleButKeepsTheCount() {
-        var recovery = SignInRecovery()
-        let pending = token(recovery.automaticRequest(at: start))!
-        recovery.resetToHome()
-        XCTAssertFalse(recovery.isCurrent(pending))
-        for lap in 1..<4 {
-            _ = recovery.automaticRequest(at: start.addingTimeInterval(Double(lap)))
+    // MARK: A parked tab does nothing on its own
+
+    func testTheCapIsCheckedBeforeTheWebSessionState() {
+        // Review round 3, finding 2: a parked signed-out tab used to load because "signed out" answered first.
+        let coordinator = parkedCoordinator()
+        for context in [WebSessionContext.signedOut, .active, .pending, .needed] {
+            var copy = coordinator
+            let effects = copy.pageLoadRequested(deals, webSession: context, at: at(5))
+            XCTAssertEqual(acts(effects), [.showSignInScreen], "\(context): load nothing, hold nothing, start nothing")
+            XCTAssertTrue(logs(effects))
         }
-        XCTAssertEqual(recovery.automaticRequest(at: start.addingTimeInterval(4)), .stop(firstTime: true), "the reset did not clear the count")
     }
 
-    func testAShopperTapRestoresAdmissionButNotStaleWork() {
-        var recovery = SignInRecovery()
-        var staleToken = 0
-        for lap in 0..<4 {
-            staleToken = token(recovery.automaticRequest(at: start.addingTimeInterval(Double(lap)))) ?? staleToken
+    func testAParkedTabCancelsEveryMainFrameNavigation() {
+        var coordinator = parkedCoordinator()
+        for url in [deals, stores, profile, login, redeemURL] {
+            XCTAssertEqual(coordinator.navigationPolicy(for: url, isMainFrame: true), .cancelWhileParked, url.absoluteString)
         }
-        XCTAssertEqual(recovery.automaticRequest(at: start.addingTimeInterval(4)), .stop(firstTime: true))
-        recovery.userTapped()
-        let fresh = token(recovery.automaticRequest(at: start.addingTimeInterval(5)))
-        XCTAssertNotNil(fresh, "after a tap the next request is admitted")
-        XCTAssertTrue(recovery.isCurrent(fresh!))
-        XCTAssertFalse(recovery.isCurrent(staleToken), "work admitted before the trip stays stale")
-        XCTAssertNotNil(token(recovery.continueRecovery(at: start.addingTimeInterval(5))))
+        XCTAssertEqual(coordinator.navigationPolicy(for: deals, isMainFrame: false), .guardDecides, "a frame of the page under the screen stays AppLinkGuard's")
+        XCTAssertEqual(coordinator.navigationPolicy(for: redeemURL, isMainFrame: false), .refuseUnissuedRedeemURL)
     }
 
-    func testRepeatedTripsReportOnlyTheRequestThatCrossedTheCap() {
-        var recovery = SignInRecovery()
-        var firstTimes = 0
-        for lap in 0..<30 {
-            if recovery.automaticRequest(at: start.addingTimeInterval(Double(lap) * 0.5)) == .stop(firstTime: true) { firstTimes += 1 }
-        }
-        XCTAssertEqual(firstTimes, 1)
+    func testAParkedTabIgnoresTheRoutersReplayAndAnotherTabsHandoff() {
+        let coordinator = parkedCoordinator()
+        let replay = coordinator.webSessionLoad(deals)
+        XCTAssertEqual(acts(replay), [], "a held load released by the web session does not load")
+        XCTAssertTrue(logs(replay))
+        XCTAssertEqual(coordinator.webSessionEstablishedElsewhere(target: deals, hasStartedLoading: true, hasPage: true, showsSignInScreen: true), [])
+        XCTAssertEqual(coordinator.webSessionEstablishedElsewhere(target: deals, hasStartedLoading: true, hasPage: false, showsSignInScreen: false), [])
     }
 
-    func testAStopParksTheTabUntilATapOrAReset() {
-        var recovery = SignInRecovery()
-        for lap in 0..<5 {
-            _ = recovery.automaticRequest(at: start.addingTimeInterval(Double(lap)))
+    func testLateCallbacksAndAHandoffTimeoutNeverReplaceTheSignInScreen() {
+        var coordinator = parkedCoordinator()
+        let late = FakeNavigation()
+        XCTAssertEqual(coordinator.navigationStarted(), [])
+        XCTAssertEqual(coordinator.navigationFinished(ObjectIdentifier(late), at: deals), [])
+        XCTAssertEqual(coordinator.navigationFailed(ObjectIdentifier(late), domain: "NSURLErrorDomain", code: -1009, description: "offline"), [])
+        XCTAssertEqual(coordinator.webContentTerminated(), [])
+        XCTAssertEqual(coordinator.webSessionFailed("Could not reach Caramel (timed out)."), [], "a handoff that times out while parked")
+        XCTAssertTrue(coordinator.isParked)
+    }
+
+    func testAParkedTabStartsNoRedeem() {
+        var coordinator = parkedCoordinator()
+        XCTAssertFalse(coordinator.beginRedeem(redeemURL, attempt: 1))
+    }
+
+    func testLoadsThatStartAHandoffCountAndCanPark() {
+        var coordinator = SignInLoopCoordinator()
+        for lap in 0..<SignInLoopCoordinator.maxAutomaticRequests {
+            XCTAssertEqual(coordinator.pageLoadRequested(profile, webSession: .needed, at: at(Double(lap))), [.startHandoff(profile)])
         }
-        XCTAssertTrue(recovery.isStopped)
-        XCTAssertFalse(recovery.allowsAutomaticWork(at: start.addingTimeInterval(5)))
-        // A quiet minute lifts the cap but not the parked tab: another tab's handoff must not reopen it.
-        XCTAssertFalse(recovery.allowsAutomaticWork(at: start.addingTimeInterval(SignInBounceLimiter.window + 30)))
-        var tapped = recovery
-        tapped.userTapped()
-        XCTAssertFalse(tapped.isStopped)
-        XCTAssertTrue(tapped.allowsAutomaticWork(at: start.addingTimeInterval(6)))
-        var reset = recovery
+        XCTAssertEqual(coordinator.pageLoadRequested(profile, webSession: .needed, at: at(4)), parkEffects)
+    }
+
+    func testLoadsThatNeedNoHandoffNeverCount() {
+        var coordinator = SignInLoopCoordinator()
+        for lap in 0..<50 {
+            let now = at(Double(lap) * 0.1)
+            XCTAssertEqual(coordinator.pageLoadRequested(deals, webSession: .signedOut, at: now), [.load(deals)])
+            XCTAssertEqual(coordinator.pageLoadRequested(deals, webSession: .active, at: now), [.load(deals)])
+            XCTAssertEqual(coordinator.pageLoadRequested(deals, webSession: .pending, at: now), [.holdForWebSession(deals)])
+        }
+        XCTAssertFalse(coordinator.isParked)
+    }
+
+    // MARK: The shopper's taps
+
+    func testTryAgainUnparksBeforeItsLoadSoTheLoadAndItsNavigationRun() {
+        var coordinator = parkedCoordinator()
+        XCTAssertEqual(coordinator.userTappedTryAgain(deals, webSession: .signedOut, at: at(5)), [.load(deals)])
+        XCTAssertFalse(coordinator.isParked)
+        XCTAssertEqual(coordinator.navigationPolicy(for: deals, isMainFrame: true), .guardDecides, "the tap's own navigation is admitted")
+        XCTAssertEqual(coordinator.navigationStarted(), [.showLoading])
+    }
+
+    func testTryAgainOnASignedInTabStartsAFreshHandoff() {
+        var coordinator = SignInLoopCoordinator()
+        for lap in 0...SignInLoopCoordinator.maxAutomaticRequests {
+            _ = coordinator.pageLoadRequested(profile, webSession: .needed, at: at(Double(lap)))
+        }
+        XCTAssertTrue(coordinator.isParked)
+        XCTAssertEqual(coordinator.userTappedTryAgain(profile, webSession: .needed, at: at(5)), [.startHandoff(profile)])
+    }
+
+    func testSignInTapUnparksPromptsAndStartsTheCountOver() {
+        var coordinator = parkedCoordinator()
+        XCTAssertEqual(coordinator.userTappedSignIn(), [.showNativeSignIn])
+        XCTAssertFalse(coordinator.isParked)
+        for lap in 0..<SignInLoopCoordinator.maxAutomaticRequests {
+            XCTAssertEqual(profileBounce(&coordinator, at: 6 + Double(lap)), [.showNativeSignIn, .showSignInScreen], "the count started over at the tap")
+        }
+        XCTAssertEqual(profileBounce(&coordinator, at: 10), parkEffects, "a loop that resumes after the tap parks again")
+    }
+
+    // MARK: The shopper's normal path (as before T-10055)
+
+    func testASignedInProfileBounceStartsAHandoffOrWaitsAndIsNeverSteppedBackInto() {
+        var coordinator = SignInLoopCoordinator()
+        XCTAssertEqual(profileBounce(&coordinator, at: 0, webSession: .needed), [.startHandoff(profile)])
+        XCTAssertEqual(profileBounce(&coordinator, at: 1, webSession: .pending), [.holdForWebSession(profile)])
+        XCTAssertEqual(profileBounce(&coordinator, at: 2, webSession: .active), [.showNativeSignIn, .showSignInScreen])
+    }
+
+    func testAnOrdinaryPageIsSteppedBackToOnceThenTheTabShowsSignIn() {
+        var coordinator = SignInLoopCoordinator()
+        XCTAssertEqual(
+            coordinator.automaticSignInRequest(stepBack: true, bouncedFrom: deals, backURL: deals, hasPage: true, webSession: .signedOut, at: at(0)),
+            [.showNativeSignIn, .stepBack]
+        )
+        let again = coordinator.automaticSignInRequest(stepBack: true, bouncedFrom: stores, backURL: stores, hasPage: true, webSession: .signedOut, at: at(0.15))
+        XCTAssertEqual(acts(again), [.showNativeSignIn, .showSignInScreen], "150 ms later is a loop (BounceGuard)")
+        XCTAssertTrue(logs(again))
+    }
+
+    func testAResetGivesBounceGuardAFreshStart() {
+        var coordinator = SignInLoopCoordinator()
+        _ = coordinator.automaticSignInRequest(stepBack: true, bouncedFrom: deals, backURL: deals, hasPage: true, webSession: .signedOut, at: at(0))
+        coordinator.resetToHome()
+        XCTAssertEqual(
+            coordinator.automaticSignInRequest(stepBack: true, bouncedFrom: deals, backURL: deals, hasPage: true, webSession: .signedOut, at: at(0.5)),
+            [.showNativeSignIn, .stepBack]
+        )
+    }
+
+    func testARefusedSignInNavigationKeepsAPageThatIsShown() {
+        var coordinator = SignInLoopCoordinator()
+        XCTAssertEqual(coordinator.automaticSignInRequest(stepBack: false, bouncedFrom: deals, backURL: nil, hasPage: true, webSession: .signedOut, at: at(0)), [.showNativeSignIn])
+        XCTAssertEqual(coordinator.automaticSignInRequest(stepBack: false, bouncedFrom: nil, backURL: nil, hasPage: false, webSession: .signedOut, at: at(30)), [.showNativeSignIn, .showSignInScreen])
+    }
+
+    func testAnotherTabsHandoffRefreshesATabThatIsNotParked() {
+        let coordinator = SignInLoopCoordinator()
+        XCTAssertEqual(coordinator.webSessionEstablishedElsewhere(target: deals, hasStartedLoading: true, hasPage: true, showsSignInScreen: false), [.reload])
+        XCTAssertEqual(coordinator.webSessionEstablishedElsewhere(target: deals, hasStartedLoading: true, hasPage: true, showsSignInScreen: true), [.load(deals)])
+        XCTAssertEqual(coordinator.webSessionEstablishedElsewhere(target: deals, hasStartedLoading: true, hasPage: false, showsSignInScreen: false), [.load(deals)])
+        XCTAssertEqual(coordinator.webSessionEstablishedElsewhere(target: deals, hasStartedLoading: false, hasPage: false, showsSignInScreen: false), [], "a tab never shown stays unloaded")
+        XCTAssertEqual(coordinator.webSessionLoad(deals), [.load(deals)])
+        XCTAssertEqual(coordinator.webSessionFailed("x"), [.showFailure("x")])
+    }
+
+    // MARK: Redeem attempts (T-7852)
+
+    func testARedeemLandsThroughItsOwnNavigationAndCookieRead() {
+        var coordinator = SignInLoopCoordinator()
+        let navigation = FakeNavigation()
+        beginRedeem(&coordinator, attempt: 7, navigation: navigation)
+        XCTAssertEqual(coordinator.navigationFinished(ObjectIdentifier(navigation), at: profile), [.showLoaded, .readSessionCookie(attempt: 7)])
+        XCTAssertEqual(coordinator.cookieReadFinished(attempt: 7, hasSessionCookie: true), [.settleRedeem(attempt: 7, .landed)])
+        XCTAssertEqual(acts(coordinator.cookieReadFinished(attempt: 7, hasSessionCookie: true)), [], "a result is delivered once")
+    }
+
+    func testTheIssuedRedeemURLLoadsOnceAndNoOtherRedeemURLLoadsAtAll() {
+        var coordinator = SignInLoopCoordinator()
+        XCTAssertEqual(coordinator.navigationPolicy(for: redeemURL, isMainFrame: true), .refuseUnissuedRedeemURL, "none issued")
+        let navigation = FakeNavigation()
+        beginRedeem(&coordinator, attempt: 1, navigation: navigation)
+        XCTAssertEqual(coordinator.navigationPolicy(for: redeemURL, isMainFrame: true), .refuseUnissuedRedeemURL, "already used")
+        let other = URL(string: "https://grabcaramel.com/api/app/web-session/redeem?code=\(String(repeating: "b", count: 43))")!
+        XCTAssertEqual(coordinator.navigationPolicy(for: other, isMainFrame: true), .refuseUnissuedRedeemURL)
+    }
+
+    func testALateFinishOrFailureOfAnEarlierNavigationIsNotCreditedToTheNewAttempt() {
+        // Review round 3, finding 3: navigation A's outcome after attempt B began used to settle B.
+        var coordinator = SignInLoopCoordinator()
+        let first = FakeNavigation()
+        let second = FakeNavigation()
+        beginRedeem(&coordinator, attempt: 1, navigation: first)
+        beginRedeem(&coordinator, attempt: 2, navigation: second) // a new handoff on the same web view
+        let lateFinish = coordinator.navigationFinished(ObjectIdentifier(first), at: profile)
+        XCTAssertEqual(acts(lateFinish), [])
+        XCTAssertTrue(logs(lateFinish))
+        XCTAssertEqual(acts(coordinator.navigationFailed(ObjectIdentifier(first), domain: "NSURLErrorDomain", code: -1001, description: "timed out")), [])
+        XCTAssertEqual(acts(coordinator.navigationFinished(nil, at: profile)), [], "an unidentified navigation is not the redeem either")
+        XCTAssertEqual(coordinator.navigationFinished(ObjectIdentifier(second), at: profile), [.showLoaded, .readSessionCookie(attempt: 2)])
+        XCTAssertEqual(acts(coordinator.cookieReadFinished(attempt: 1, hasSessionCookie: true)), [], "attempt 1's read cannot settle attempt 2")
+        XCTAssertEqual(coordinator.cookieReadFinished(attempt: 2, hasSessionCookie: true), [.settleRedeem(attempt: 2, .landed)])
+    }
+
+    func testACookieReadThatOutlivesAStopOrAResetIsDropped() {
+        let navigation = FakeNavigation()
+        var stopped = SignInLoopCoordinator()
+        beginRedeem(&stopped, attempt: 1, navigation: navigation)
+        _ = stopped.navigationFinished(ObjectIdentifier(navigation), at: profile)
+        XCTAssertEqual(stopped.stopLoading(), [.stopLoading])
+        XCTAssertEqual(acts(stopped.cookieReadFinished(attempt: 1, hasSessionCookie: true)), [])
+
+        var reset = SignInLoopCoordinator()
+        beginRedeem(&reset, attempt: 2, navigation: navigation)
+        _ = reset.navigationFinished(ObjectIdentifier(navigation), at: profile)
         reset.resetToHome()
-        XCTAssertFalse(reset.isStopped, "a replaced web view shows its own fresh page state")
-        XCTAssertFalse(reset.allowsAutomaticWork(at: start.addingTimeInterval(6)), "but the count survives the reset while the cap is still tripped")
+        XCTAssertEqual(acts(reset.cookieReadFinished(attempt: 2, hasSessionCookie: true)), [])
     }
 
-    func testAContinuedStepThatIsRefusedParksTheTabToo() {
-        var recovery = SignInRecovery()
-        for lap in 0...SignInBounceLimiter.maxRequests {
-            _ = recovery.automaticRequest(at: start.addingTimeInterval(Double(lap)))
+    func testParkingMidRedeemEndsTheRedeem() {
+        var coordinator = SignInLoopCoordinator()
+        let navigation = FakeNavigation()
+        beginRedeem(&coordinator, attempt: 1, navigation: navigation)
+        for lap in 0..<SignInLoopCoordinator.maxAutomaticRequests {
+            profileBounce(&coordinator, at: Double(lap))
         }
-        recovery.userTapped()
-        for lap in 0...SignInBounceLimiter.maxRequests {
-            _ = recovery.automaticRequest(at: start.addingTimeInterval(10 + Double(lap)))
-        }
-        recovery.resetToHome()
-        XCTAssertFalse(recovery.isStopped)
-        XCTAssertEqual(recovery.continueRecovery(at: start.addingTimeInterval(16)), .stop(firstTime: false))
-        XCTAssertTrue(recovery.isStopped)
+        XCTAssertEqual(profileBounce(&coordinator, at: 4), parkEffects)
+        XCTAssertEqual(coordinator.navigationFinished(ObjectIdentifier(navigation), at: profile), [])
+        XCTAssertEqual(acts(coordinator.cookieReadFinished(attempt: 1, hasSessionCookie: true)), [])
     }
 
-    func testAnAdmittedRequestUnparksTheTabOnceTheWindowHasPassed() {
-        var recovery = SignInRecovery()
-        for lap in 0...SignInBounceLimiter.maxRequests {
-            _ = recovery.automaticRequest(at: start.addingTimeInterval(Double(lap)))
-        }
-        XCTAssertTrue(recovery.isStopped)
-        XCTAssertNotNil(token(recovery.automaticRequest(at: start.addingTimeInterval(SignInBounceLimiter.window + 30))))
-        XCTAssertFalse(recovery.isStopped)
+    func testAnExpiredRedirectOrASignInPageEndsTheRedeemInFlight() {
+        let navigation = FakeNavigation()
+        var expired = SignInLoopCoordinator()
+        beginRedeem(&expired, attempt: 3, navigation: navigation)
+        XCTAssertEqual(
+            expired.navigationPolicy(for: URL(string: "https://grabcaramel.com/login?error=handoff_expired")!, isMainFrame: true),
+            .endRedeem([.settleRedeem(attempt: 3, .expired)])
+        )
+        XCTAssertEqual(expired.navigationPolicy(for: login, isMainFrame: true), .guardDecides, "with the redeem over, /login is AppLinkGuard's sign-in again")
+
+        var bounced = SignInLoopCoordinator()
+        beginRedeem(&bounced, attempt: 4, navigation: navigation)
+        XCTAssertEqual(bounced.navigationPolicy(for: login, isMainFrame: false), .guardDecides, "a frame never ends the redeem")
+        XCTAssertEqual(
+            bounced.navigationPolicy(for: login, isMainFrame: true),
+            .endRedeem([.settleRedeem(attempt: 4, .failed("Your account page asked you to sign in again. Please try again."))])
+        )
+    }
+
+    func testARedeemEndingOnAnUnexpectedPageOrWithoutTheCookieFails() {
+        let navigation = FakeNavigation()
+        var unexpected = SignInLoopCoordinator()
+        beginRedeem(&unexpected, attempt: 1, navigation: navigation)
+        XCTAssertEqual(
+            acts(unexpected.navigationFinished(ObjectIdentifier(navigation), at: URL(string: "https://grabcaramel.com/support")!)),
+            [.showLoaded, .settleRedeem(attempt: 1, .failed("Your account page did not open as expected. Please try again."))]
+        )
+
+        var noCookie = SignInLoopCoordinator()
+        beginRedeem(&noCookie, attempt: 2, navigation: navigation)
+        _ = noCookie.navigationFinished(ObjectIdentifier(navigation), at: profile)
+        XCTAssertEqual(
+            acts(noCookie.cookieReadFinished(attempt: 2, hasSessionCookie: false)),
+            [.settleRedeem(attempt: 2, .failed("Your account page opened without signing in. Please try again."))]
+        )
+    }
+
+    func testAFailedRedeemNavigationNeverQuotesTheErrorText() {
+        var coordinator = SignInLoopCoordinator()
+        let navigation = FakeNavigation()
+        beginRedeem(&coordinator, attempt: 1, navigation: navigation)
+        XCTAssertEqual(
+            coordinator.navigationFailed(ObjectIdentifier(navigation), domain: "NSURLErrorDomain", code: -1009, description: "failed at \(redeemURL.absoluteString)"),
+            [.settleRedeem(attempt: 1, .failed("Could not open your account page (NSURLErrorDomain -1009). Check your connection and try again."))]
+        )
+        XCTAssertEqual(
+            coordinator.navigationFailed(ObjectIdentifier(navigation), domain: "NSURLErrorDomain", code: -1009, description: "offline"),
+            [.showFailure("offline (NSURLErrorDomain -1009)")],
+            "with no redeem in flight a failure is the page's own"
+        )
+    }
+
+    func testWebKitStartingNoNavigationFailsTheRedeemAtOnce() {
+        var coordinator = SignInLoopCoordinator()
+        XCTAssertTrue(coordinator.beginRedeem(redeemURL, attempt: 5))
+        XCTAssertEqual(acts(coordinator.redeemLoadIssued(attempt: 5, navigation: nil)), [.settleRedeem(attempt: 5, .failed("Could not open your account page. Please try again."))])
+    }
+
+    func testTheWebProcessDyingFailsOnlyARedeemInFlight() {
+        var coordinator = SignInLoopCoordinator()
+        XCTAssertEqual(coordinator.webContentTerminated(), [.showFailure("The page stopped unexpectedly.")])
+        let navigation = FakeNavigation()
+        beginRedeem(&coordinator, attempt: 6, navigation: navigation)
+        XCTAssertEqual(coordinator.webContentTerminated(), [.settleRedeem(attempt: 6, .failed("The page stopped unexpectedly. Please try again."))])
+        XCTAssertEqual(coordinator.webContentTerminated(), [.showFailure("The page stopped unexpectedly.")])
     }
 }
 
-/// RedeemAttempts: a redeem outcome belongs to the attempt that produced it (T-10055).
-final class RedeemAttemptsTests: XCTestCase {
-    func testAnEndedNavigationReportsItsAttemptOnce() {
-        var attempts = RedeemAttempts()
-        let first = attempts.begin()
-        XCTAssertTrue(attempts.isNavigating)
-        XCTAssertEqual(attempts.endNavigation(), first)
-        XCTAssertFalse(attempts.isNavigating)
-        XCTAssertNil(attempts.endNavigation(), "a second report of the same navigation is dropped")
+/// WebSessionContext.of: what ShellRouter tells a tab about the web session.
+final class WebSessionContextTests: XCTestCase {
+    private let phases: [WebSessionMachine.Phase] = [.inactive, .handingOff(freshHandoffUsed: false), .active, .failed("x")]
+
+    func testSignedOutComesFirst() {
+        for phase in phases {
+            XCTAssertEqual(WebSessionContext.of(isSignedIn: false, wipesInFlight: 1, phase: phase), .signedOut, "\(phase)")
+        }
     }
 
-    func testAStaleCookieReadIsRejectedAfterAStopAndANewAttempt() {
-        var attempts = RedeemAttempts()
-        let old = attempts.begin()
-        XCTAssertEqual(attempts.startCookieRead(), old)
-        attempts.invalidate() // the loop cap tripped, or the tab was stopped or reset
-        let current = attempts.begin() // the retry's new handoff on the same web view
-        XCTAssertNotEqual(old, current, "ids never repeat")
-        XCTAssertFalse(attempts.finishCookieRead(old), "the old read must not settle the new handoff")
-        XCTAssertEqual(attempts.startCookieRead(), current)
-        XCTAssertTrue(attempts.finishCookieRead(current))
-        XCTAssertFalse(attempts.finishCookieRead(current), "and a result is delivered once")
+    func testAWipeInFlightHoldsEveryLoad() {
+        for phase in phases {
+            XCTAssertEqual(WebSessionContext.of(isSignedIn: true, wipesInFlight: 1, phase: phase), .pending, "\(phase)")
+        }
     }
 
-    func testANewAttemptInvalidatesTheOneBeforeIt() {
-        var attempts = RedeemAttempts()
-        let old = attempts.begin()
-        XCTAssertEqual(attempts.startCookieRead(), old)
-        let current = attempts.begin()
-        XCTAssertFalse(attempts.finishCookieRead(old))
-        XCTAssertEqual(attempts.endNavigation(), current)
-    }
-
-    func testInvalidateStopsEveryPhaseAndKeepsTheIdsCounting() {
-        var attempts = RedeemAttempts()
-        let first = attempts.begin()
-        attempts.invalidate()
-        XCTAssertFalse(attempts.isNavigating)
-        XCTAssertNil(attempts.endNavigation())
-        XCTAssertNil(attempts.startCookieRead())
-        XCTAssertGreaterThan(attempts.begin(), first)
-    }
-}
-
-/// The web view classes cannot be built in CaramelTests: the bundle is host-less and compiles only
-/// AppLinkGuard.swift and ShellConfig.swift, while WebShellModel.swift and ShellRouter.swift pull in
-/// SwiftUI views, AlertsEngine, SessionStore, the Keychain and the app's Info.plist. Pulling them in
-/// means a new CaramelTests source list in project.yml, and with it a regenerated, committed
-/// Caramel.xcodeproj (CI fails on drift) that has to be produced by XcodeGen on macOS. Until that
-/// lands, every decision they take lives in the pure types above, and this pin keeps the production
-/// files wired to them: it fails if the model recreates the recovery gate on reset, stops honouring a
-/// `.blocked` answer, or if the router stops asking each tab before it queues, replays or settles.
-/// TODO(T-10055): replace with @MainActor tests on the real WebShellModel/ShellRouter once the test
-/// target can compile them.
-final class SignInCapWiringPinTests: XCTestCase {
-    private func source(_ name: String) throws -> String {
-        let appleRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-        return try String(contentsOf: appleRoot.appendingPathComponent("App/Web/\(name)"), encoding: .utf8)
-    }
-
-    private func count(of needle: String, in text: String) -> Int {
-        text.components(separatedBy: needle).count - 1
-    }
-
-    func testTheModelNeverRecreatesTheRecoveryGateAndResetsItThroughTheProductionMethod() throws {
-        let model = try source("WebShellModel.swift")
-        XCTAssertEqual(count(of: "SignInRecovery()", in: model), 1, "only the stored property's initial value")
-        XCTAssertEqual(count(of: "signInRecovery.resetToHome()", in: model), 1)
-        XCTAssertEqual(count(of: "RedeemAttempts()", in: model), 1, "attempt ids must keep counting across resets")
-    }
-
-    func testTheModelHonoursABlockedAnswerAndNeverOverwritesTheSignInScreen() throws {
-        let model = try source("WebShellModel.swift")
-        XCTAssertEqual(count(of: "case .blocked:", in: model), 2, "open() and the page-bounce recovery")
-        XCTAssertFalse(model.contains("webSessionGate(self, url) {"), "the gate answers with WebSessionGate, not a Bool")
-        XCTAssertEqual(count(of: "guard !signInRecovery.isStopped else { return }", in: model), 4)
-        XCTAssertEqual(count(of: "if !signInRecovery.isStopped { pageState = .loaded }", in: model), 1)
-    }
-
-    func testTheRouterAsksEachTabBeforeItQueuesReplaysOrRefreshesAndMatchesRedeemAttempts() throws {
-        let router = try source("ShellRouter.swift")
-        XCTAssertEqual(count(of: "guard model.allowsAutomaticWork else { return .blocked }", in: router), 1)
-        XCTAssertEqual(count(of: "guard entry.model.allowsAutomaticWork else { continue }", in: router), 1)
-        XCTAssertEqual(count(of: "guard handoff.redeemAttempt == attempt else {", in: router), 1)
-        let model = try source("WebShellModel.swift")
-        XCTAssertTrue(model.contains("guard didStartLoading, signInRecovery.allowsAutomaticWork(at: Date()) else { return }"), "reloadForWebSession() skips a parked tab")
+    func testOtherwiseThePhaseDecides() {
+        XCTAssertEqual(WebSessionContext.of(isSignedIn: true, wipesInFlight: 0, phase: .active), .active)
+        XCTAssertEqual(WebSessionContext.of(isSignedIn: true, wipesInFlight: 0, phase: .handingOff(freshHandoffUsed: true)), .pending)
+        XCTAssertEqual(WebSessionContext.of(isSignedIn: true, wipesInFlight: 0, phase: .inactive), .needed)
+        XCTAssertEqual(WebSessionContext.of(isSignedIn: true, wipesInFlight: 0, phase: .failed("x")), .needed)
     }
 }
 
