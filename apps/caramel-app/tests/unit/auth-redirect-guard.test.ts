@@ -2,6 +2,7 @@
 import {
     AUTH_REDIRECT_LIMIT,
     AUTH_REDIRECT_WINDOW_MS,
+    clearAuthRedirectCount,
     decideAuthRedirect,
     guardAuthRedirect,
     resetAuthRedirectGuardForTests,
@@ -96,7 +97,7 @@ describe('guardAuthRedirect', () => {
             app_shell_platform: 'ios',
         })
         expect(context.extra).toMatchObject({
-            from: '/profile#favorites',
+            from: '/profile',
             to: '/login',
             hasSession: false,
             sessionPending: false,
@@ -113,6 +114,32 @@ describe('guardAuthRedirect', () => {
         // A reload drops module memory but keeps the tab's sessionStorage.
         resetAuthRedirectGuardForTests()
         expect(guardAuthRedirect(attempt, 2_000)).toBe(false)
+    })
+
+    it('reports pathnames only: no fragment or query reaches Sentry', () => {
+        const sensitive = {
+            ...attempt,
+            from: '/profile?x=1#Jane%20Doe%20-%20555-123-4567',
+            to: '/login?next=%2Fprofile%23Jane%20Doe',
+        }
+        for (let i = 0; i <= AUTH_REDIRECT_LIMIT; i++) {
+            guardAuthRedirect(sensitive, 1_000 + i)
+        }
+        expect(JSON.stringify(captureMessage.mock.calls[0])).not.toMatch(
+            /Jane|555|next|x=1/,
+        )
+    })
+
+    it('clearAuthRedirectCount forgets the window but keeps the report flag', () => {
+        for (let i = 0; i <= AUTH_REDIRECT_LIMIT; i++) {
+            guardAuthRedirect(attempt, 1_000 + i)
+        }
+        clearAuthRedirectCount()
+        expect(guardAuthRedirect(attempt, 2_000)).toBe(true)
+        for (let i = 0; i <= AUTH_REDIRECT_LIMIT; i++) {
+            guardAuthRedirect(attempt, 2_001 + i)
+        }
+        expect(captureMessage).toHaveBeenCalledTimes(1)
     })
 
     it('reports a browser loop as surface web', () => {

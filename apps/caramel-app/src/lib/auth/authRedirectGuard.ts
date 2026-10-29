@@ -35,9 +35,9 @@ const COUNT_KEY = 'caramel:auth-redirects'
 const REPORTED_KEY = 'caramel:auth-redirect-loop-reported'
 
 export interface AuthRedirectAttempt {
-    /** Path being left (pathname and fragment only, never the query). */
+    /** Path being left; only its pathname is reported. */
     from: string
-    /** Path the caller wants to send the shopper to. */
+    /** Path the caller wants to send the shopper to; pathname reported. */
     to: string
     /** The client session store holds a user. */
     hasSession: boolean
@@ -105,12 +105,24 @@ function claimReport(): boolean {
     return true
 }
 
-function stripQuery(path: string): string {
-    const hashAt = path.indexOf('#')
-    const hash = hashAt >= 0 ? path.slice(hashAt) : ''
-    const beforeHash = hashAt >= 0 ? path.slice(0, hashAt) : path
-    const queryAt = beforeHash.indexOf('?')
-    return (queryAt >= 0 ? beforeHash.slice(0, queryAt) : beforeHash) + hash
+/**
+ * The path as reported: pathname only. A fragment or query is whatever the
+ * visitor's URL carried (`/profile#<anything>`), so neither reaches Sentry;
+ * callers keep the full path for the navigation itself.
+ */
+function reportedPath(path: string): string {
+    const end = path.search(/[?#]/)
+    return end >= 0 ? path.slice(0, end) : path
+}
+
+/**
+ * Forget the redirect count once the server has confirmed a session (the
+ * account overview answered 200). Without this, redirects before a sign-in
+ * would still count against a signed-out visit soon after it. The
+ * once-per-session report flag is kept.
+ */
+export function clearAuthRedirectCount(): void {
+    writeTimestamps([])
 }
 
 /**
@@ -138,9 +150,8 @@ export function guardAuthRedirect(
                     app_shell_platform: shell?.platform ?? 'none',
                 },
                 extra: {
-                    from: stripQuery(attempt.from),
-                    // The query is dropped: it is only ever our own `next`.
-                    to: stripQuery(attempt.to),
+                    from: reportedPath(attempt.from),
+                    to: reportedPath(attempt.to),
                     hasSession: attempt.hasSession,
                     sessionPending: attempt.sessionPending,
                     serverRejectedSession: attempt.serverRejectedSession,
