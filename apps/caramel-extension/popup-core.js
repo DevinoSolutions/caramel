@@ -637,9 +637,20 @@ export async function runSocialSignIn(provider, ui = {}) {
 // ships without (the generated Firefox manifest has no `identity` permission
 // — see the per-browser branch in wxt.config.ts). Capability check, not UA
 // sniffing.
+//
+// It also needs the redirect URI to be a `https://<id>.chromiumapp.org/` host:
+// that is the only form Google has registered and the server allowlist
+// (src/lib/auth/extensionOAuthRedirect.ts) accepts. ungoogled-chromium's domain
+// substitution rewrites chromiumapp.org to `ch40m1umapp.qjz9zk`, so there the
+// authorize call was refused with a 400 and the user could not sign in
+// (Sentry CARAMEL-1A, 2026-10-17). Such a browser takes the website sign-in
+// instead, which needs no redirect URI of its own.
+const CHROMIUM_APP_REDIRECT = /^https:\/\/[^./]+\.chromiumapp\.org\//
+
 export function popupOAuthSupported() {
     const identity = currentBrowser.identity || currentBrowser.chrome?.identity
-    return !!(identity && identity.launchWebAuthFlow)
+    if (!identity?.launchWebAuthFlow || !identity.getRedirectURL) return false
+    return CHROMIUM_APP_REDIRECT.test(identity.getRedirectURL())
 }
 
 // OAuth fallback for browsers that cannot capture an in-popup OAuth redirect
