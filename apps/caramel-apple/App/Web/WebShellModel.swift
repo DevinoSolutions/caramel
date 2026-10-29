@@ -78,9 +78,11 @@ final class WebShellModel: NSObject, ObservableObject {
     private var didStartLoading = false
     /// Never recreated: its loop cap and parked latch must outlive resetToHome (T-10055).
     private var coordinator = SignInLoopCoordinator()
-    /// The redeem's WKNavigation, kept alive so its ObjectIdentifier (what the coordinator matches
-    /// navigation outcomes against) cannot be reused by a later navigation.
+    /// The redeem's WKNavigation and the tab's current main-frame one, kept alive so their
+    /// ObjectIdentifiers (what the coordinator matches navigation outcomes against) cannot be reused
+    /// by a later navigation.
     private var redeemNavigation: WKNavigation?
+    private var currentNavigation: WKNavigation?
 
     init(home: URL) {
         self.home = home
@@ -209,6 +211,7 @@ final class WebShellModel: NSObject, ObservableObject {
         lastObservedURL = nil
         lastRequestedURL = nil
         redeemNavigation = nil
+        currentNavigation = nil
         coordinator.resetToHome()
         // A parked tab stays on "sign in" across the reset (T-10055).
         pageState = coordinator.isParked ? .needsSignIn : .idle
@@ -395,11 +398,11 @@ final class WebShellModel: NSObject, ObservableObject {
     private func finish(_ navigation: WKNavigation?, with error: Error) {
         webView.scrollView.refreshControl?.endRefreshing()
         let nsError = error as NSError
-        // A navigation the policy methods cancelled (or one superseded by a newer
-        // request) reports NSURLErrorCancelled; it is not a failure to show.
-        if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled { return }
-        Self.log.error("Page load failed: \(nsError.domain, privacy: .public) \(nsError.code)")
-        run(coordinator.navigationFailed(Self.identity(of: navigation), domain: nsError.domain, code: nsError.code, description: nsError.localizedDescription))
+        // A navigation the policy methods cancelled (or one superseded by a newer request) reports
+        // NSURLErrorCancelled: never a failure to show, but it is how a refused redeem redirect ends.
+        let cancelled = nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled
+        if !cancelled { Self.log.error("Page load failed: \(nsError.domain, privacy: .public) \(nsError.code)") }
+        run(coordinator.navigationFailed(Self.identity(of: navigation), domain: nsError.domain, code: nsError.code, description: nsError.localizedDescription, cancelled: cancelled))
     }
 }
 
@@ -427,9 +430,9 @@ extension WebShellModel: WKNavigationDelegate {
             Self.log.error("Refused a redeem URL that was not issued by the handoff.")
             decisionHandler(.cancel)
             return
-        case .endRedeem(let effects):
+        case .cancelSignInDuringRedeem:
+            Self.log.error("Refused a sign-in page while the web-session redeem is in flight.")
             decisionHandler(.cancel)
-            run(effects)
             return
         }
         let kind = Self.kind(of: navigationAction.navigationType)
@@ -459,7 +462,8 @@ extension WebShellModel: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         guard isCurrent(webView) else { return }
-        run(coordinator.navigationStarted())
+        currentNavigation = navigation
+        run(coordinator.navigationStarted(Self.identity(of: navigation)))
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {

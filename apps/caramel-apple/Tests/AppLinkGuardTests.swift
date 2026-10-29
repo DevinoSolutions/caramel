@@ -955,11 +955,23 @@ final class SignInLoopCoordinatorTests: XCTestCase {
         return coordinator
     }
 
-    /// Begins redeem `attempt` the way WebShellModel.openRedeem does: begin, load (bound to `navigation`), then WebKit's policy check.
+    /// Begins redeem `attempt` the way WebShellModel.openRedeem does: begin, load (bound to `navigation`),
+    /// WebKit's policy check, then didStartProvisionalNavigation.
     private func beginRedeem(_ coordinator: inout SignInLoopCoordinator, attempt: Int, navigation: FakeNavigation) {
         XCTAssertTrue(coordinator.beginRedeem(redeemURL, attempt: attempt))
         XCTAssertEqual(coordinator.redeemLoadIssued(attempt: attempt, navigation: ObjectIdentifier(navigation)), [])
         XCTAssertEqual(coordinator.navigationPolicy(for: redeemURL, isMainFrame: true), .guardDecides, "the issued redeem URL loads")
+        XCTAssertEqual(coordinator.navigationStarted(ObjectIdentifier(navigation)), [.showLoading])
+    }
+
+    /// A navigation failure that is not a cancellation.
+    private func fail(_ coordinator: inout SignInLoopCoordinator, _ navigation: FakeNavigation?, code: Int = -1009, description: String = "offline") -> [SignInLoopEffect] {
+        coordinator.navigationFailed(navigation.map { ObjectIdentifier($0) }, domain: "NSURLErrorDomain", code: code, description: description, cancelled: false)
+    }
+
+    /// NSURLErrorCancelled: what WebKit reports for a navigation the policy refused or a newer request superseded.
+    private func cancel(_ coordinator: inout SignInLoopCoordinator, _ navigation: FakeNavigation) -> [SignInLoopEffect] {
+        coordinator.navigationFailed(ObjectIdentifier(navigation), domain: "NSURLErrorDomain", code: -999, description: "cancelled", cancelled: true)
     }
 
     // MARK: The cap and the parked latch
@@ -1054,9 +1066,9 @@ final class SignInLoopCoordinatorTests: XCTestCase {
     func testLateCallbacksAndAHandoffTimeoutNeverReplaceTheSignInScreen() {
         var coordinator = parkedCoordinator()
         let late = FakeNavigation()
-        XCTAssertEqual(coordinator.navigationStarted(), [])
+        XCTAssertEqual(coordinator.navigationStarted(ObjectIdentifier(late)), [])
         XCTAssertEqual(coordinator.navigationFinished(ObjectIdentifier(late), at: deals), [])
-        XCTAssertEqual(coordinator.navigationFailed(ObjectIdentifier(late), domain: "NSURLErrorDomain", code: -1009, description: "offline"), [])
+        XCTAssertEqual(fail(&coordinator, late), [])
         XCTAssertEqual(coordinator.webContentTerminated(), [])
         XCTAssertEqual(coordinator.webSessionFailed("Could not reach Caramel (timed out)."), [], "a handoff that times out while parked")
         XCTAssertTrue(coordinator.isParked)
@@ -1075,6 +1087,8 @@ final class SignInLoopCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.pageLoadRequested(profile, webSession: .needed, at: at(4)), parkEffects)
     }
 
+    // Not counted on purpose (review round 4): counting every signed-out load would count ordinary taps; a real loop
+    // always comes through automaticSignInRequest (counted), and a parked tab is refused before the session state.
     func testLoadsThatNeedNoHandoffNeverCount() {
         var coordinator = SignInLoopCoordinator()
         for lap in 0..<50 {
@@ -1093,7 +1107,7 @@ final class SignInLoopCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.userTappedTryAgain(deals, webSession: .signedOut, at: at(5)), [.load(deals)])
         XCTAssertFalse(coordinator.isParked)
         XCTAssertEqual(coordinator.navigationPolicy(for: deals, isMainFrame: true), .guardDecides, "the tap's own navigation is admitted")
-        XCTAssertEqual(coordinator.navigationStarted(), [.showLoading])
+        XCTAssertEqual(coordinator.navigationStarted(ObjectIdentifier(FakeNavigation())), [.showLoading])
     }
 
     func testTryAgainOnASignedInTabStartsAFreshHandoff() {
@@ -1192,7 +1206,7 @@ final class SignInLoopCoordinatorTests: XCTestCase {
         let lateFinish = coordinator.navigationFinished(ObjectIdentifier(first), at: profile)
         XCTAssertEqual(acts(lateFinish), [])
         XCTAssertTrue(logs(lateFinish))
-        XCTAssertEqual(acts(coordinator.navigationFailed(ObjectIdentifier(first), domain: "NSURLErrorDomain", code: -1001, description: "timed out")), [])
+        XCTAssertEqual(acts(fail(&coordinator, first, code: -1001, description: "timed out")), [])
         XCTAssertEqual(acts(coordinator.navigationFinished(nil, at: profile)), [], "an unidentified navigation is not the redeem either")
         XCTAssertEqual(coordinator.navigationFinished(ObjectIdentifier(second), at: profile), [.showLoaded, .readSessionCookie(attempt: 2)])
         XCTAssertEqual(acts(coordinator.cookieReadFinished(attempt: 1, hasSessionCookie: true)), [], "attempt 1's read cannot settle attempt 2")
@@ -1226,23 +1240,89 @@ final class SignInLoopCoordinatorTests: XCTestCase {
         XCTAssertEqual(acts(coordinator.cookieReadFinished(attempt: 1, hasSessionCookie: true)), [])
     }
 
-    func testAnExpiredRedirectOrASignInPageEndsTheRedeemInFlight() {
+    func testARefusedRedirectSettlesTheRedeemOnlyThroughTheBoundNavigationsFailure() {
+        let expiredLogin = URL(string: "https://grabcaramel.com/login?error=handoff_expired")!
         let navigation = FakeNavigation()
         var expired = SignInLoopCoordinator()
         beginRedeem(&expired, attempt: 3, navigation: navigation)
-        XCTAssertEqual(
-            expired.navigationPolicy(for: URL(string: "https://grabcaramel.com/login?error=handoff_expired")!, isMainFrame: true),
-            .endRedeem([.settleRedeem(attempt: 3, .expired)])
-        )
+        XCTAssertEqual(expired.navigationPolicy(for: expiredLogin, isMainFrame: true), .cancelSignInDuringRedeem, "refused, and nothing settled yet")
+        XCTAssertEqual(cancel(&expired, navigation), [.settleRedeem(attempt: 3, .expired)], "the refused redirect ends the bound navigation")
         XCTAssertEqual(expired.navigationPolicy(for: login, isMainFrame: true), .guardDecides, "with the redeem over, /login is AppLinkGuard's sign-in again")
 
         var bounced = SignInLoopCoordinator()
         beginRedeem(&bounced, attempt: 4, navigation: navigation)
-        XCTAssertEqual(bounced.navigationPolicy(for: login, isMainFrame: false), .guardDecides, "a frame never ends the redeem")
-        XCTAssertEqual(
-            bounced.navigationPolicy(for: login, isMainFrame: true),
-            .endRedeem([.settleRedeem(attempt: 4, .failed("Your account page asked you to sign in again. Please try again."))])
-        )
+        XCTAssertEqual(bounced.navigationPolicy(for: login, isMainFrame: false), .guardDecides, "a frame never touches the redeem")
+        XCTAssertEqual(bounced.navigationPolicy(for: login, isMainFrame: true), .cancelSignInDuringRedeem)
+        XCTAssertEqual(bounced.navigationPolicy(for: expiredLogin, isMainFrame: true), .cancelSignInDuringRedeem)
+        XCTAssertEqual(bounced.navigationPolicy(for: login, isMainFrame: true), .cancelSignInDuringRedeem)
+        XCTAssertEqual(fail(&bounced, navigation, code: 102, description: "Frame load interrupted"), [.settleRedeem(attempt: 4, .expired)], "handoff_expired is kept over a later /login")
+
+        var plain = SignInLoopCoordinator()
+        beginRedeem(&plain, attempt: 5, navigation: navigation)
+        _ = plain.navigationPolicy(for: login, isMainFrame: true)
+        XCTAssertEqual(cancel(&plain, navigation), [.settleRedeem(attempt: 5, .failed("Your account page asked you to sign in again. Please try again."))])
+    }
+
+    func testALeftoverLoginFromAttemptAOrAnUnrelatedOneNeverSettlesAttemptB() {
+        // Review round 4, finding B: a /login seen in decidePolicyFor used to settle whichever attempt was current.
+        var coordinator = SignInLoopCoordinator()
+        let first = FakeNavigation()
+        let second = FakeNavigation()
+        beginRedeem(&coordinator, attempt: 1, navigation: first)
+        beginRedeem(&coordinator, attempt: 2, navigation: second) // a new handoff on the same web view
+        // Attempt A's redirect to handoff_expired shows up late, after B began.
+        XCTAssertEqual(coordinator.navigationPolicy(for: URL(string: "https://grabcaramel.com/login?error=handoff_expired")!, isMainFrame: true), .cancelSignInDuringRedeem)
+        XCTAssertEqual(cancel(&coordinator, first), [], "A's cancellation is not the current navigation's")
+        XCTAssertEqual(acts(fail(&coordinator, first)), [])
+        // B lands: the refused /login was not B's.
+        XCTAssertEqual(coordinator.navigationFinished(ObjectIdentifier(second), at: profile), [.showLoaded, .readSessionCookie(attempt: 2)])
+        XCTAssertEqual(coordinator.cookieReadFinished(attempt: 2, hasSessionCookie: true), [.settleRedeem(attempt: 2, .landed)])
+    }
+
+    func testARedeemNavigationSupersededBeforeItLandsFailsInsteadOfWaitingForever() {
+        var coordinator = SignInLoopCoordinator()
+        let navigation = FakeNavigation()
+        beginRedeem(&coordinator, attempt: 1, navigation: navigation)
+        XCTAssertEqual(acts(cancel(&coordinator, navigation)), [.settleRedeem(attempt: 1, .failed("Your account page did not open. Please try again."))])
+        XCTAssertEqual(cancel(&coordinator, navigation), [], "with no redeem, a cancellation shows nothing")
+    }
+
+    func testAStaleCallbackDuringTheCookieReadChangesNothing() {
+        // Review round 4, finding C: the reading-cookie phase.
+        var coordinator = SignInLoopCoordinator()
+        let older = FakeNavigation()
+        let navigation = FakeNavigation()
+        XCTAssertEqual(coordinator.navigationStarted(ObjectIdentifier(older)), [.showLoading])
+        beginRedeem(&coordinator, attempt: 1, navigation: navigation)
+        XCTAssertEqual(coordinator.navigationFinished(ObjectIdentifier(navigation), at: profile), [.showLoaded, .readSessionCookie(attempt: 1)])
+        let lateFailure = fail(&coordinator, older)
+        XCTAssertEqual(acts(lateFailure), [], "no failure banner over the landed page")
+        XCTAssertTrue(logs(lateFailure))
+        XCTAssertEqual(acts(coordinator.navigationFinished(ObjectIdentifier(older), at: deals)), [])
+        XCTAssertEqual(coordinator.cookieReadFinished(attempt: 1, hasSessionCookie: true), [.settleRedeem(attempt: 1, .landed)])
+    }
+
+    func testAStaleCallbackWithNoRedeemChangesNothing() {
+        // Review round 4, finding C: the no-redeem phase.
+        var coordinator = SignInLoopCoordinator()
+        let older = FakeNavigation()
+        let newer = FakeNavigation()
+        _ = coordinator.navigationStarted(ObjectIdentifier(older))
+        _ = coordinator.navigationStarted(ObjectIdentifier(newer))
+        XCTAssertEqual(acts(coordinator.navigationFinished(ObjectIdentifier(older), at: deals)), [], "no .showLoaded while the newer page loads")
+        XCTAssertEqual(acts(fail(&coordinator, older)), [], "no .showFailure for a page the shopper left")
+        XCTAssertEqual(cancel(&coordinator, older), [])
+        XCTAssertEqual(acts(coordinator.navigationFinished(nil, at: deals)), [], "an unidentified navigation is not the current one")
+        XCTAssertEqual(coordinator.navigationFinished(ObjectIdentifier(newer), at: deals), [.showLoaded])
+        XCTAssertEqual(fail(&coordinator, newer), [.showFailure("offline (NSURLErrorDomain -1009)")])
+    }
+
+    func testAResetForgetsTheCurrentNavigation() {
+        var coordinator = SignInLoopCoordinator()
+        let old = FakeNavigation()
+        _ = coordinator.navigationStarted(ObjectIdentifier(old))
+        coordinator.resetToHome()
+        XCTAssertEqual(acts(coordinator.navigationFinished(ObjectIdentifier(old), at: deals)), [], "the replaced web view's page")
     }
 
     func testARedeemEndingOnAnUnexpectedPageOrWithoutTheCookieFails() {
@@ -1268,11 +1348,11 @@ final class SignInLoopCoordinatorTests: XCTestCase {
         let navigation = FakeNavigation()
         beginRedeem(&coordinator, attempt: 1, navigation: navigation)
         XCTAssertEqual(
-            coordinator.navigationFailed(ObjectIdentifier(navigation), domain: "NSURLErrorDomain", code: -1009, description: "failed at \(redeemURL.absoluteString)"),
+            fail(&coordinator, navigation, description: "failed at \(redeemURL.absoluteString)"),
             [.settleRedeem(attempt: 1, .failed("Could not open your account page (NSURLErrorDomain -1009). Check your connection and try again."))]
         )
         XCTAssertEqual(
-            coordinator.navigationFailed(ObjectIdentifier(navigation), domain: "NSURLErrorDomain", code: -1009, description: "offline"),
+            fail(&coordinator, navigation),
             [.showFailure("offline (NSURLErrorDomain -1009)")],
             "with no redeem in flight a failure is the page's own"
         )

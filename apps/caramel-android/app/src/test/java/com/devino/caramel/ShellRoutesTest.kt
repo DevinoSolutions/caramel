@@ -8,6 +8,7 @@ import com.devino.caramel.web.ShellIntents
 import com.devino.caramel.web.ShellRoutes
 import com.devino.caramel.web.ShellTab
 import com.devino.caramel.web.ShellUserAgent
+import com.devino.caramel.web.SignInLoopGuard
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -223,5 +224,76 @@ class ShellRoutesTest {
         assertEquals(IntentTarget.Load("$origin/support"), ShellIntents.resolve(view, "$origin/support", null, cb))
         // A URL the guard refuses is still refused, not turned into a home load.
         assertTrue(ShellIntents.resolve(view, "https://evil.com/coupons", null, cb) is IntentTarget.Refused)
+    }
+}
+
+/** SignInLoopGuard: the Android sign-in loop cap (T-10055), twin of the iOS SignInLoopCoordinator cap. */
+class SignInLoopGuardTest {
+    private val start = 1_000_000L
+    private val second = 1_000L
+
+    private fun parkedGuard(): SignInLoopGuard {
+        val guard = SignInLoopGuard()
+        repeat(SignInLoopGuard.MAX_AUTOMATIC_REQUESTS) { lap ->
+            assertEquals(SignInLoopGuard.Admission.ADMITTED, guard.automaticSignInRequest(start + lap * second))
+        }
+        assertEquals(SignInLoopGuard.Admission.PARKED_NOW, guard.automaticSignInRequest(start + 4 * second))
+        return guard
+    }
+
+    @Test
+    fun theFifthAutomaticRequestInAMinuteParksAndIsReportedOnce() {
+        val guard = parkedGuard()
+        assertTrue(guard.isParked)
+        repeat(20) { lap ->
+            assertEquals(SignInLoopGuard.Admission.PARKED, guard.automaticSignInRequest(start + (5 + lap) * second))
+        }
+    }
+
+    @Test
+    fun slowRequestsNeverPark() {
+        val guard = SignInLoopGuard()
+        repeat(20) { lap ->
+            assertEquals(SignInLoopGuard.Admission.ADMITTED, guard.automaticSignInRequest(start + lap * 20 * second))
+        }
+        assertFalse(guard.isParked)
+    }
+
+    @Test
+    fun theWindowSlides() {
+        val guard = SignInLoopGuard()
+        repeat(SignInLoopGuard.MAX_AUTOMATIC_REQUESTS) { lap -> guard.automaticSignInRequest(start + lap * second) }
+        assertEquals(SignInLoopGuard.Admission.ADMITTED, guard.automaticSignInRequest(start + SignInLoopGuard.WINDOW_MILLIS + 3_500))
+    }
+
+    @Test
+    fun theLatchSurvivesTimeAndAWebViewReset() {
+        // CaramelApp keeps one guard across WebView generations, so a reset is the same guard seeing more requests.
+        val guard = parkedGuard()
+        for (later in listOf(SignInLoopGuard.WINDOW_MILLIS + 5 * second, 3_600_000L, 86_400_000L)) {
+            assertEquals(SignInLoopGuard.Admission.PARKED, guard.automaticSignInRequest(start + later))
+            assertTrue(guard.isParked)
+            assertFalse(guard.admitsAutomaticNavigation())
+        }
+    }
+
+    @Test
+    fun aParkedShellRefusesNavigation() {
+        val guard = SignInLoopGuard()
+        assertTrue(guard.admitsAutomaticNavigation())
+        val parked = parkedGuard()
+        assertFalse(parked.admitsAutomaticNavigation())
+    }
+
+    @Test
+    fun aTapUnparksAndStartsTheCountOver() {
+        val guard = parkedGuard()
+        guard.userTapped()
+        assertFalse(guard.isParked)
+        assertTrue(guard.admitsAutomaticNavigation())
+        repeat(SignInLoopGuard.MAX_AUTOMATIC_REQUESTS) { lap ->
+            assertEquals(SignInLoopGuard.Admission.ADMITTED, guard.automaticSignInRequest(start + (6 + lap) * second))
+        }
+        assertEquals(SignInLoopGuard.Admission.PARKED_NOW, guard.automaticSignInRequest(start + 10 * second))
     }
 }

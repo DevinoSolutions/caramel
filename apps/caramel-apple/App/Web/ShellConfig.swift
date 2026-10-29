@@ -541,8 +541,9 @@ enum SignInLoopNavigation: Equatable {
     case cancelWhileParked
     /// Cancel: a redeem URL that is not the one issued for the redeem in flight (or was already used).
     case refuseUnissuedRedeemURL
-    /// Cancel: this navigation ends the redeem in flight; then carry out `effects`.
-    case endRedeem([SignInLoopEffect])
+    /// Cancel: a main-frame /login or /signup while the redeem is in flight. It settles nothing here (the
+    /// action carries no WKNavigation): the bound redeem navigation's own failure settles it.
+    case cancelSignInDuringRedeem
 }
 
 /// Every automatic sign-in decision of ONE tab, in one pure type (T-10055, CARAMEL-2Y): whether a load
@@ -563,8 +564,14 @@ enum SignInLoopNavigation: Equatable {
 ///
 /// Redeem attempts: the id comes from ShellRouter (unique for the app run) and the attempt is bound
 /// to the WKNavigation `load` returned for it (an ObjectIdentifier; WebShellModel keeps that object
-/// alive so the identifier cannot be reused). A finish, failure or cookie read of any other navigation
-/// or attempt is dropped instead of settling the redeem in flight.
+/// alive so the identifier cannot be reused). Only callbacks that carry that navigation settle it: its
+/// finish (then the cookie read, matched by attempt id) or its failure. A /login redirect is refused in
+/// decidePolicyFor, which carries no navigation, so it is only remembered there; the bound navigation's
+/// failure (the refused redirect cancels it) is what settles the attempt with that outcome.
+///
+/// Navigation identity: every finish or failure is matched against the tab's CURRENT main-frame
+/// navigation (the last one started). A late callback of an older navigation changes nothing, in
+/// every phase (no redeem, redeem in flight, cookie read).
 struct SignInLoopCoordinator {
     static let window: TimeInterval = 60
     static let maxAutomaticRequests = 4
@@ -577,6 +584,9 @@ struct SignInLoopCoordinator {
         var navigation: ObjectIdentifier?
         /// The navigation finished on a landing page and the cookie read is running.
         var readingCookie = false
+        /// A main-frame sign-in URL decidePolicyFor refused while this attempt was in flight, as the
+        /// outcome the bound navigation's failure settles with. `.expired` is never overwritten.
+        var refusedSignIn: RedeemOutcome?
     }
 
     /// Parked on "sign in" by the loop cap until the shopper taps.
@@ -585,6 +595,8 @@ struct SignInLoopCoordinator {
     /// Recreated by resetToHome, like the web view it guards.
     private var bounceGuard = BounceGuard()
     private var redeem: RedeemAttempt?
+    /// ObjectIdentifier of the tab's current main-frame WKNavigation (the last one started or issued).
+    private var currentNavigation: ObjectIdentifier?
 
     // MARK: Loads
 
@@ -684,6 +696,7 @@ struct SignInLoopCoordinator {
     mutating func resetToHome() {
         bounceGuard = BounceGuard()
         redeem = nil
+        currentNavigation = nil
     }
 
     // MARK: Redeem (T-7852)
@@ -696,6 +709,7 @@ struct SignInLoopCoordinator {
     }
 
     /// The redeem load for `attempt` was issued and returned `navigation` (nil when WebKit started none).
+    /// That navigation is now the tab's current one.
     mutating func redeemLoadIssued(attempt: Int, navigation: ObjectIdentifier?) -> [SignInLoopEffect] {
         guard redeem?.id == attempt else { return [.logError("A redeem load was issued for an attempt that is no longer current.")] }
         guard let navigation = navigation else {
@@ -703,12 +717,15 @@ struct SignInLoopCoordinator {
             return [.logError("WebKit started no navigation for the web-session redeem."), .settleRedeem(attempt: attempt, .failed("Could not open your account page. Please try again."))]
         }
         redeem?.navigation = navigation
+        currentNavigation = navigation
         return []
     }
 
-    /// Before AppLinkGuard: the parked tab's cancel, the one-time redeem URL, and the main-frame
-    /// navigations that end our redeem (the redeem route answers a dead code with a redirect to /login;
-    /// while the redeem is in flight that is the handoff failing, not a page asking to sign in).
+    /// Before AppLinkGuard: the parked tab's cancel, the one-time redeem URL, and the main-frame sign-in
+    /// pages while our redeem is in flight (the redeem route answers a dead code with a redirect to
+    /// /login; that is the handoff failing, not a page asking to sign in). Such a page is refused and
+    /// remembered on the attempt, and settles nothing here: a navigation action does not say which
+    /// navigation it belongs to, so a leftover or unrelated /login must not end the attempt in flight.
     mutating func navigationPolicy(for url: URL, isMainFrame: Bool) -> SignInLoopNavigation {
         if isParked && isMainFrame { return .cancelWhileParked }
         if WebSessionHandoff.isRedeemURL(url) {
@@ -720,24 +737,29 @@ struct SignInLoopCoordinator {
         case .proceed:
             return .guardDecides
         case .expired:
-            redeem = nil
-            return .endRedeem([.settleRedeem(attempt: attempt.id, .expired)])
+            redeem?.refusedSignIn = .expired
+            return .cancelSignInDuringRedeem
         case .signInBounce:
-            // Without ending the redeem here the cancel is swallowed as NSURLErrorCancelled and the
-            // shell would wait on the handoff forever.
-            redeem = nil
-            return .endRedeem([.settleRedeem(attempt: attempt.id, .failed("Your account page asked you to sign in again. Please try again."))])
+            if attempt.refusedSignIn != .expired {
+                redeem?.refusedSignIn = .failed("Your account page asked you to sign in again. Please try again.")
+            }
+            return .cancelSignInDuringRedeem
         }
     }
 
-    func navigationStarted() -> [SignInLoopEffect] {
-        isParked ? [] : [.showLoading]
+    /// `navigation` started: it is the tab's current main-frame navigation from now on.
+    mutating func navigationStarted(_ navigation: ObjectIdentifier?) -> [SignInLoopEffect] {
+        currentNavigation = navigation
+        return isParked ? [] : [.showLoading]
     }
 
     /// `navigation` finished at `url`. The redeem's own navigation worked when it ended on a page the
     /// handoff `next` allowlist covers (the 303 sets the cookie before it redirects); the cookie read
     /// then confirms the signed session cookie is really there.
     mutating func navigationFinished(_ navigation: ObjectIdentifier?, at url: URL?) -> [SignInLoopEffect] {
+        guard navigation == currentNavigation else {
+            return [.logError("Ignored a page that finished loading after a newer navigation started.")]
+        }
         guard !isParked else { return [] }
         guard let attempt = redeem, !attempt.readingCookie else { return [.showLoaded] }
         guard let navigation = navigation, navigation == attempt.navigation else {
@@ -747,6 +769,8 @@ struct SignInLoopCoordinator {
             redeem = nil
             return [.showLoaded, .logError("The web-session redeem ended on an unexpected page."), .settleRedeem(attempt: attempt.id, .failed("Your account page did not open as expected. Please try again."))]
         }
+        // The bound navigation landed, so a sign-in page refused meanwhile was not this redeem's.
+        redeem?.refusedSignIn = nil
         redeem?.readingCookie = true
         redeem?.issuedURL = nil
         return [.showLoaded, .readSessionCookie(attempt: attempt.id)]
@@ -764,17 +788,28 @@ struct SignInLoopCoordinator {
         return [.settleRedeem(attempt: attempt, .landed)]
     }
 
-    /// `navigation` failed (never a cancellation; the adapter drops those).
-    mutating func navigationFailed(_ navigation: ObjectIdentifier?, domain: String, code: Int, description: String) -> [SignInLoopEffect] {
+    /// `navigation` failed; `cancelled` for NSURLErrorCancelled (a navigation the policy refused, or one a
+    /// newer request superseded), which is never a failure to show.
+    mutating func navigationFailed(_ navigation: ObjectIdentifier?, domain: String, code: Int, description: String, cancelled: Bool) -> [SignInLoopEffect] {
+        guard navigation == currentNavigation else {
+            return cancelled ? [] : [.logError("Ignored a failed page load after a newer navigation started.")]
+        }
         if let attempt = redeem, !attempt.readingCookie {
             guard let navigation = navigation, navigation == attempt.navigation else {
                 return [.logError("Ignored a failed page load while a different navigation is the redeem in flight.")]
             }
             redeem = nil
+            // The redirect decidePolicyFor refused ended this navigation: settle with what it was.
+            if let refused = attempt.refusedSignIn { return [.settleRedeem(attempt: attempt.id, refused)] }
+            if cancelled {
+                // Superseded before it landed: fail it rather than leave the handoff waiting forever.
+                return [.logError("The web-session redeem navigation was cancelled before it landed."), .settleRedeem(attempt: attempt.id, .failed("Your account page did not open. Please try again."))]
+            }
             // Fixed text: the error's own description could quote the one-time redeem URL.
             return [.settleRedeem(attempt: attempt.id, .failed("Could not open your account page (\(domain) \(code)). Check your connection and try again."))]
         }
-        return isParked ? [] : [.showFailure("\(description) (\(domain) \(code))")]
+        if cancelled || isParked { return [] }
+        return [.showFailure("\(description) (\(domain) \(code))")]
     }
 
     /// The web view's content process died: a redeem in flight ends with it.
