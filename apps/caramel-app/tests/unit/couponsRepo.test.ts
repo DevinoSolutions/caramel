@@ -252,6 +252,34 @@ describe('listCoupons', () => {
         }
     })
 
+    it('both listing reads serve an HTML-escaped title and description as plain text', async () => {
+        const rows = [
+            {
+                ...couponFixture,
+                id: 1,
+                title: 'Books, music &amp; video games',
+                description:
+                    'Prices are shown with discounts applied.&lt;br&gt; &lt;br&gt; *Free Bypass Kit',
+            },
+        ]
+        mockRows(
+            sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
+            rows.map(withSupplierFlag),
+        )
+        mockRows(sql => sql.includes('COUNT(*)'), [storeAggregateRow(1)])
+
+        for (const read of [
+            () => listCoupons({ limit: 10, skip: 0 }),
+            () => listStoreCoupons('example.com', 10),
+        ]) {
+            const { coupons } = await read()
+            expect(coupons[0]?.title).toBe('Books, music & video games')
+            expect(coupons[0]?.description).toBe(
+                'Prices are shown with discounts applied. *Free Bypass Kit',
+            )
+        }
+    })
+
     it('an empty total row falls back to 0 (no coupons is legitimate, not drift)', async () => {
         mockRows(
             sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),

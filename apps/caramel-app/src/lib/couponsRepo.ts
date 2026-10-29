@@ -40,6 +40,7 @@
 // gates all stay in the calling route (`withRoute` config + the route body).
 import { Prisma } from '@/generated/prisma/client'
 import { STORE_CONFIG_STILL_SERVED_SQL } from '@/lib/catalog/applyCatalogRows'
+import { couponPlainText } from '@/lib/couponPlainText'
 import {
     FAILING_MIN_FAIL_WEIGHT,
     FAILING_WINDOW_DAYS,
@@ -463,13 +464,19 @@ export async function countStoreCodesWorkedWithinDays(
  * is usually nothing (couponVerificationText.ts has the prod vocabulary that
  * made this necessary), and a title that is only a button label or scraped
  * page chrome is replaced by one built from the row (couponTitleText.ts).
+ * The title and description are decoded to plain text first: the supplier
+ * stores some HTML-escaped (couponPlainText.ts).
  * Both listing reads go through it, so /api/coupons (the extension popup,
  * agents) and the SSR pages agree.
  */
 function forShoppers(rows: CouponListRow[]): CouponListRow[] {
     return rows.map(row => ({
         ...row,
-        title: shopperCouponTitle(row),
+        title: shopperCouponTitle({
+            ...row,
+            title: couponPlainText(row.title),
+        }),
+        description: couponPlainText(row.description),
         verificationMessage: shopperVerificationText(
             row.status,
             row.verificationMessage,
@@ -789,7 +796,13 @@ export async function listRecentlyWorkedCoupons(
         RecentlyWorkedCouponRowSchema,
         rawRows,
         'coupons.recently-worked',
-    ).map(row => ({ ...row, title: shopperCouponTitle(row) }))
+    ).map(row => ({
+        ...row,
+        title: shopperCouponTitle({
+            ...row,
+            title: couponPlainText(row.title),
+        }),
+    }))
 }
 
 /** api/sites/search-supported/route.ts POST — fixed LIMIT 20. The route's empty-query early return (`{sites:[]}` without querying) stays there; this fn assumes a non-empty `q`. */
