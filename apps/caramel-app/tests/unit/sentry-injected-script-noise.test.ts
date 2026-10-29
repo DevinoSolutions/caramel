@@ -112,6 +112,7 @@ describe("MetaMask's injected scripts/inpage.js never reaches Sentry", () => {
         'scripts/inpage.js',
         'chrome-extension://nkbihfbeogaeaoehlefnkodbefgpgknn/scripts/inpage.js',
         'https://grabcaramel.com/scripts/inpage.js?v=2',
+        'moz-extension://0b1c2d3e-4f50-6172-8394-a5b6c7d8e9f0/scripts/inpage.js',
     ])('drops the CARAMEL-3D rejection thrown from %s', filename => {
         expect(survivesTheBrowserFilters(metamaskRejectionFrom(filename))).toBe(
             false,
@@ -124,6 +125,8 @@ describe("MetaMask's injected scripts/inpage.js never reaches Sentry", () => {
         'https://grabcaramel.com/_next/static/chunks/inpage-abc.js',
         'app:///myscripts/inpage.js',
         'app:///scripts/inpage.json',
+        'https://grabcaramel.com/_next/static/chunks/scripts/inpage.js',
+        'https://grabcaramel.com/_next/static/chunks/main.js?source=/scripts/inpage.js',
     ])(
         'keeps a "Failed to connect to MetaMask" error thrown from %s',
         filename => {

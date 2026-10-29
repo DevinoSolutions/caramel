@@ -14,6 +14,10 @@
 // to MetaMask` / `No extension found with id: ...`, and window.onunhandledrejection
 // reported it as ours: CARAMEL-3D (2 events on /welcome, T-10410), every frame
 // `app:///scripts/inpage.js:12:4822 (Object.connect)` and the cause at `:12:4734`.
+// Unlike the executors pattern this one is ROOT-anchored (bare, or right after
+// `<scheme>://<host>/`): MetaMask serves it from the extension root, and an
+// any-location match would also drop a first-party URL such as
+// `/_next/static/chunks/scripts/inpage.js` or `main.js?source=/scripts/inpage.js`.
 //
 // `denyUrls` is matched against the URL of the frame that threw, so an error
 // from our own bundle keeps reporting even when its message is the same. The
@@ -22,5 +26,5 @@
 // Next.js frame rewrite, and an extension or page origin in front of it.
 export const INJECTED_SCRIPT_DENY_URLS: RegExp[] = [
     /(?:^|\/)executors\/\d+\.js(?:[?#:]|$)/,
-    /(?:^|\/)scripts\/inpage\.js(?:[?#:]|$)/,
+    /^(?:(?:https?|app|chrome-extension|moz-extension|safari-web-extension):\/\/[^/?#]*\/)?scripts\/inpage\.js(?:[?#:]|$)/,
 ]
