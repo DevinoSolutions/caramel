@@ -342,7 +342,7 @@ async function recordFailedIn(
     // reported. The catalog lookup only runs when something in the text looks
     // like a code, so a plain-English reason costs no extra query.
     const storedReason =
-        reason !== null && hasCodeShapedToken(reason, { shoutingWords: true })
+        reason !== null && hasCodeShapedToken(reason, { contextualCaps: true })
             ? redactStoreReason(reason, await readCatalogCode(couponId, tx))
             : reason
     // The aggregate upsert comes FIRST: its row lock serialises concurrent

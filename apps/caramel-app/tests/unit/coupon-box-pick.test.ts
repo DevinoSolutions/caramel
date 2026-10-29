@@ -370,6 +370,18 @@ describe('the pick', () => {
         expect(messages[1]!.content).toContain('[12] button "Remove [code]"')
     })
 
+    it('redacts an already-masked code chip (the extension sends "SAVE##") and zero-width splits', () => {
+        expect(scrubOutline('- [12] button "Remove SAVE##"')).toBe(
+            '- [12] button "Remove [code]"',
+        )
+        expect(scrubOutline('- [12] button "Remove save​10"')).toBe(
+            '- [12] button "Remove [code]"',
+        )
+        expect(scrubOutline('- text "Order Summary ## total"')).toBe(
+            '- text "Order Summary ## total"',
+        )
+    })
+
     it('masks an email whose local part carries digits as an email, not as a code', () => {
         expect(scrubOutline('- text "jane2@mail.example.com"')).toBe(
             '- text "[email]"',

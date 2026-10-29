@@ -110,6 +110,45 @@ describe('classify-cart scrubs cart_items before the model sees them', () => {
         expect(forwarded![0]).toHaveLength(160)
     })
 
+    it('scrubs BEFORE the 6-row cap: discount rows ahead of the 6th product do not take a slot', async () => {
+        await POST(
+            request({
+                domain: 'shop.example.com',
+                cart_items: [
+                    'Discount: SAVE10',
+                    'Coupon FALL20 applied',
+                    'Savings 10%',
+                    'p1',
+                    'p2',
+                    'p3',
+                    'p4',
+                    'p5',
+                    'p6',
+                    'p7',
+                ],
+            }),
+        )
+
+        expect(classifyMock.mock.calls[0]![0].cart_items).toEqual([
+            'p1',
+            'p2',
+            'p3',
+            'p4',
+            'p5',
+            'p6',
+        ])
+    })
+
+    it('redacts a mixed token that would cross the 160-char cut', async () => {
+        const row = `${'x'.repeat(156)} SAVE1234`
+        await POST(request({ domain: 'shop.example.com', cart_items: [row] }))
+
+        const forwarded = classifyMock.mock.calls[0]![0].cart_items![0]!
+        expect(forwarded).toHaveLength(160)
+        expect(forwarded).toBe(`${'x'.repeat(156)} [co`)
+        expect(forwarded).not.toMatch(/SAV|1234/)
+    })
+
     it('leaves cart_items absent when the body has none', async () => {
         await POST(request({ domain: 'shop.example.com' }))
 

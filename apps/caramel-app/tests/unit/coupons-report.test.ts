@@ -516,6 +516,32 @@ describe('POST /api/coupons/[id]/report — app-owned trust signal (W1)', () => 
             ).toBe(false)
         })
 
+        it('a code-shaped reason whose catalog lookup REJECTS is a 500, writes nothing, and the retry succeeds', async () => {
+            catalogCodes.set(KNOWN_COUPON, 'FALL20')
+            const reason = 'FALL20 cannot be combined with MYCODE5'
+            txMock.$queryRaw.mockRejectedValueOnce(new Error('db down'))
+
+            const failed = await POST(
+                reportRequest(KNOWN_COUPON, {
+                    outcome: 'failed',
+                    storeReason: reason,
+                }),
+            )
+
+            expect(failed.status).toBe(500)
+            // Only the failed lookup ran: no signal write, no reporter row.
+            expect(txMock.$queryRaw).toHaveBeenCalledTimes(1)
+            expect(txMock.$queryRaw.mock.calls[0]![0].sql).toContain(
+                'SELECT code FROM coupons',
+            )
+            expect(txMock.couponSignalReporter.upsert).not.toHaveBeenCalled()
+
+            // The dedupe slot was given back, so the retry counts and is redacted.
+            expect(await storedReasonFor(reason)).toBe(
+                'FALL20 cannot be combined with [code]',
+            )
+        })
+
         it('redacts for a signed-in reporter too (the transactional path)', async () => {
             signedInAs('user-1')
             catalogCodes.set(KNOWN_COUPON, 'FALL20')
