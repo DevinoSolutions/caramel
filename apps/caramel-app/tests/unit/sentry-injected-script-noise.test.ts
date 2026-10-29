@@ -85,6 +85,55 @@ describe('our own errors still report', () => {
     )
 })
 
+// T-10410: CARAMEL-3D is MetaMask's injected `scripts/inpage.js` rejecting with
+// `Failed to connect to MetaMask` (cause: `No extension found with id: ...`).
+const METAMASK_MESSAGE = 'Failed to connect to MetaMask'
+
+function metamaskRejectionFrom(filename: string): ErrorEvent {
+    const event = rejectionFrom(filename, METAMASK_MESSAGE)
+    const frame = {
+        filename,
+        function: 'Object.connect',
+        lineno: 12,
+        colno: 4822,
+    }
+    const [exception] = event.exception?.values ?? []
+    if (exception?.stacktrace === undefined) {
+        throw new Error('rejectionFrom fixture lost its stacktrace')
+    }
+    exception.type = 'i'
+    exception.stacktrace.frames = [frame, frame]
+    return event
+}
+
+describe("MetaMask's injected scripts/inpage.js never reaches Sentry", () => {
+    it.each([
+        'app:///scripts/inpage.js',
+        'scripts/inpage.js',
+        'chrome-extension://nkbihfbeogaeaoehlefnkodbefgpgknn/scripts/inpage.js',
+        'https://grabcaramel.com/scripts/inpage.js?v=2',
+    ])('drops the CARAMEL-3D rejection thrown from %s', filename => {
+        expect(survivesTheBrowserFilters(metamaskRejectionFrom(filename))).toBe(
+            false,
+        )
+    })
+
+    it.each([
+        'app:///_next/static/chunks/inpage.js',
+        'https://grabcaramel.com/_next/static/chunks/inpage.js',
+        'https://grabcaramel.com/_next/static/chunks/inpage-abc.js',
+        'app:///myscripts/inpage.js',
+        'app:///scripts/inpage.json',
+    ])(
+        'keeps a "Failed to connect to MetaMask" error thrown from %s',
+        filename => {
+            expect(
+                survivesTheBrowserFilters(metamaskRejectionFrom(filename)),
+            ).toBe(true)
+        },
+    )
+})
+
 describe('the browser init passes the list as denyUrls', () => {
     it('src/instrumentation-client.ts wires INJECTED_SCRIPT_DENY_URLS', () => {
         const source = readFileSync(
