@@ -79,6 +79,8 @@ final class WebShellModel: NSObject, ObservableObject {
     /// True from `openRedeem` until the redeem navigation lands, expires or fails.
     private var redeemInFlight = false
     private var bounceGuard = BounceGuard()
+    /// Counts sign-in requests for this tab. NOT reset by resetToHome: that is the point (T-10055).
+    private var signInBounceLimiter = SignInBounceLimiter()
     /// The one redeem URL the router issued: it may load once, and no other redeem URL may load at all.
     private var issuedRedeemURL: URL?
 
@@ -91,7 +93,7 @@ final class WebShellModel: NSObject, ObservableObject {
 
     private static func makeWebView() -> WKWebView {
         let configuration = WKWebViewConfiguration()
-        configuration.applicationNameForUserAgent = ShellUserAgent.applicationName(version: marketingVersion())
+        configuration.applicationNameForUserAgent = ShellUserAgent.applicationName(version: marketingVersion(), build: buildNumber())
         configuration.websiteDataStore = .default()
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
         return WKWebView(frame: .zero, configuration: configuration)
@@ -122,6 +124,13 @@ final class WebShellModel: NSObject, ObservableObject {
             preconditionFailure("CFBundleShortVersionString is missing from the app's Info.plist; the CaramelApp user agent cannot be built.")
         }
         return version
+    }
+
+    private static func buildNumber() -> String {
+        guard let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String, !build.isEmpty else {
+            preconditionFailure("CFBundleVersion is missing from the app's Info.plist; the CaramelBuild user agent token cannot be built.")
+        }
+        return build
     }
 
     // MARK: Loading
@@ -221,7 +230,14 @@ final class WebShellModel: NSObject, ObservableObject {
     }
 
     func retry() {
+        signInBounceLimiter.clear()
         open(lastRequestedURL ?? home)
+    }
+
+    /// The shopper tapped "Sign in" on the sign-in overlay: a person is asking, so the loop cap starts over.
+    func signInTapped() {
+        signInBounceLimiter.clear()
+        onSignInRequested()
     }
 
     @objc private func pullToRefresh() {
@@ -260,7 +276,18 @@ final class WebShellModel: NSObject, ObservableObject {
     ///    session the router runs the handoff for it, without one the shell shows "sign in" and stops;
     ///  - any other page is stepped back to only once per back URL and not twice within
     ///    BounceGuard.window, else the shell shows "sign in" and stops.
+    ///
+    /// All of that sits behind SignInBounceLimiter, which resetToHome does not reset: past
+    /// SignInBounceLimiter.maxRequests requests in a minute the shell does nothing but show "sign
+    /// in" (no step back, no handoff, no native sign-in pop-up) until the shopper taps.
     private func pageAskedForSignIn(stepBack: Bool) {
+        let verdict = signInBounceLimiter.record(at: Date())
+        if verdict != .allowed {
+            if verdict == .tripped { reportSignInLoopTripped() }
+            webView.stopLoading()
+            pageState = .needsSignIn
+            return
+        }
         let bouncedFrom = stepBack ? (webView.backForwardList.backItem?.url ?? lastRequestedURL) : (webView.url ?? lastRequestedURL)
         if let page = bouncedFrom, WebSessionHandoff.pageNeedsSession(page) {
             if webSessionRecovery(self, page) {
@@ -283,6 +310,14 @@ final class WebShellModel: NSObject, ObservableObject {
             Self.log.error("A page bounced to sign-in again; not stepping back into it.")
             pageState = .needsSignIn
         }
+    }
+
+    /// TODO(T-10055): sentry-cocoa is not linked into the app target (AlertsEngine carries the same
+    /// TODO(T-4905)), so a trip reaches only the unified log. Once Sentry is linked, add ONE breadcrumb
+    /// and ONE captureMessage here (this runs once per trip), tagged with the page and CFBundleVersion.
+    private func reportSignInLoopTripped() {
+        let page = (webView.url ?? lastRequestedURL)?.path ?? "unknown"
+        Self.log.fault("Sign-in loop stopped: more than \(SignInBounceLimiter.maxRequests) sign-in requests in \(Int(SignInBounceLimiter.window)) s on this tab (page \(page, privacy: .public)).")
     }
 
     private static func kind(of type: WKNavigationType) -> AppLinkGuard.NavigationKind {
@@ -509,7 +544,7 @@ struct WebShellView: View {
                 if model.pageState == .needsSignIn {
                     VStack(spacing: 12) {
                         Text("Sign in to see this page").font(.headline)
-                        Button("Sign in") { model.onSignInRequested() }
+                        Button("Sign in") { model.signInTapped() }
                             .buttonStyle(.borderedProminent)
                         Button("Try again") { model.retry() }
                     }

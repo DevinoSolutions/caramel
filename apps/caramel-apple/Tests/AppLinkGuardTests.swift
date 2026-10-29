@@ -238,7 +238,17 @@ final class AppLinkGuardTests: XCTestCase {
     }
 
     func testUserAgentContract() {
-        XCTAssertEqual(ShellUserAgent.applicationName(version: "1.6.0"), "CaramelApp/1.6.0 (ios)")
+        XCTAssertEqual(ShellUserAgent.applicationName(version: "1.6.0", build: "42"), "CaramelApp/1.6.0 (ios) CaramelBuild/42")
+    }
+
+    func testTheBuildIsASeparateTokenAfterTheCaramelAppOne() {
+        // The web matcher (detectSurface.ts) needs whitespace or the end right after "(ios)"; the build token provides it.
+        let name = ShellUserAgent.applicationName(version: "1.6.0", build: "42")
+        let app = #"(?:^|\s)CaramelApp/(\d+\.\d+\.\d+) \((ios|macos|android|fire)\)(?:\s|$)"#
+        let build = #"(?:^|\s)CaramelBuild/(\d+)(?:\s|$)"#
+        XCTAssertNotNil(name.range(of: app, options: .regularExpression))
+        XCTAssertNotNil(name.range(of: build, options: .regularExpression))
+        XCTAssertNotNil(("Mozilla/5.0 Mobile/15E148 " + name).range(of: app, options: .regularExpression))
     }
 }
 
@@ -883,6 +893,72 @@ final class BounceGuardTests: XCTestCase {
             XCTAssertFalse(WebSessionHandoff.pageNeedsSession(URL(string: "https://grabcaramel.com" + path)!), path)
         }
         XCTAssertFalse(WebSessionHandoff.pageNeedsSession(URL(string: "https://evil.com/profile")!))
+    }
+}
+
+/// SignInBounceLimiter: the cap that outlives resetToHome (T-10055).
+final class SignInBounceLimiterTests: XCTestCase {
+    private let start = Date(timeIntervalSince1970: 1_000_000)
+
+    private func fill(_ limiter: inout SignInBounceLimiter, count: Int) {
+        for lap in 0..<count {
+            _ = limiter.record(at: start.addingTimeInterval(Double(lap)))
+        }
+    }
+
+    func testTheFirstFourRequestsInAMinuteAreAllowed() {
+        var limiter = SignInBounceLimiter()
+        for lap in 0..<SignInBounceLimiter.maxRequests {
+            XCTAssertEqual(limiter.record(at: start.addingTimeInterval(Double(lap))), .allowed, "request \(lap + 1)")
+        }
+    }
+
+    func testARequestEverySecondTripsOnTheFifthAndStaysTripped() {
+        var limiter = SignInBounceLimiter()
+        var verdicts: [SignInBounceLimiter.Verdict] = []
+        for lap in 0..<8 {
+            verdicts.append(limiter.record(at: start.addingTimeInterval(Double(lap))))
+        }
+        XCTAssertEqual(verdicts, [.allowed, .allowed, .allowed, .allowed, .tripped, .stillTripped, .stillTripped, .stillTripped])
+    }
+
+    func testSlowRequestsNeverTrip() {
+        var limiter = SignInBounceLimiter()
+        for lap in 0..<20 {
+            XCTAssertEqual(limiter.record(at: start.addingTimeInterval(Double(lap) * 20)), .allowed, "a request every 20 s is a person")
+        }
+    }
+
+    func testTheWindowSlides() {
+        var limiter = SignInBounceLimiter()
+        fill(&limiter, count: SignInBounceLimiter.maxRequests)
+        XCTAssertEqual(limiter.record(at: start.addingTimeInterval(SignInBounceLimiter.window + 3.5)), .allowed, "all four earlier requests are older than the window")
+    }
+
+    func testAQuietMinuteEndsATrip() {
+        var limiter = SignInBounceLimiter()
+        fill(&limiter, count: SignInBounceLimiter.maxRequests + 1)
+        XCTAssertEqual(limiter.record(at: start.addingTimeInterval(SignInBounceLimiter.window + 10)), .allowed)
+    }
+
+    func testAShopperTapClearsTheCount() {
+        var limiter = SignInBounceLimiter()
+        fill(&limiter, count: SignInBounceLimiter.maxRequests + 1)
+        limiter.clear()
+        XCTAssertEqual(limiter.record(at: start.addingTimeInterval(6)), .allowed)
+    }
+
+    func testReplacingBounceGuardEveryLapDoesNotResetTheLimiter() {
+        // resetToHome swaps in a fresh BounceGuard but keeps the limiter.
+        var limiter = SignInBounceLimiter()
+        var guardrail = BounceGuard()
+        var last = SignInBounceLimiter.Verdict.allowed
+        for lap in 0...SignInBounceLimiter.maxRequests {
+            last = limiter.record(at: start.addingTimeInterval(Double(lap)))
+            guardrail = BounceGuard()
+        }
+        XCTAssertEqual(guardrail, BounceGuard())
+        XCTAssertEqual(last, .tripped)
     }
 }
 

@@ -40,13 +40,16 @@ extension ShellDestination {
 
 /// The user-agent contract with the web team (GetItDone T-7853): the shell
 /// appends `CaramelApp/<CFBundleShortVersionString> (ios)` to WebKit's own user
-/// agent through `WKWebViewConfiguration.applicationNameForUserAgent`.
+/// agent through `WKWebViewConfiguration.applicationNameForUserAgent`, then (T-10055) a
+/// SEPARATE `CaramelBuild/<CFBundleVersion>` token so analytics can tell which build
+/// misbehaved. The build is its own token so the web app's CaramelApp matcher
+/// (detectSurface.ts, layout.tsx) keeps matching on its own.
 enum ShellUserAgent {
     /// TODO(T-4905): "macos" once a macOS target exists (project.yml is iOS only).
     static let platform = "ios"
 
-    static func applicationName(version: String) -> String {
-        "CaramelApp/\(version) (\(platform))"
+    static func applicationName(version: String, build: String) -> String {
+        "CaramelApp/\(version) (\(platform)) CaramelBuild/\(build)"
     }
 }
 
@@ -464,6 +467,44 @@ struct BounceGuard: Equatable {
         if let previousAt = previousAt, now.timeIntervalSince(previousAt) < Self.window { return false }
         if previousURL == backURL { return false }
         return true
+    }
+}
+
+/// The hard cap on sign-in requests that survives `WebShellModel.resetToHome` (T-10055).
+/// BounceGuard is recreated on every reset, so a lap that ends in a session change (signed-out
+/// /profile, /login, native sheet, session change, reset, reload) handed it a clean slate each
+/// time. This one is owned by the WebShellModel itself and counts sign-in requests per tab over a
+/// sliding `window`; past `maxRequests` it reports "tripped" and the shell stops asking.
+/// 4 because a shopper needs at most one or two (tap a tab, cancel the sheet, tap again) and
+/// every real request waits on a human through an OAuth sheet, so a fifth within a minute is a
+/// machine; the loop this exists for ran about once a second, so it trips within ~5 s instead of
+/// running for days (19.6k pageviews 10-24..10-26). Pure; WebShellModel feeds it the clock.
+struct SignInBounceLimiter: Equatable {
+    static let window: TimeInterval = 60
+    static let maxRequests = 4
+
+    enum Verdict: Equatable {
+        case allowed
+        /// This request crossed the cap: the one to report.
+        case tripped
+        /// Over the cap and already reported for this run of requests.
+        case stillTripped
+    }
+
+    private var requestTimes: [Date] = []
+
+    /// Records one sign-in request at `now`. Requests older than `window` no longer count, so a
+    /// shopper who is left alone for a minute starts fresh.
+    mutating func record(at now: Date) -> Verdict {
+        requestTimes.removeAll { now.timeIntervalSince($0) >= Self.window }
+        requestTimes.append(now)
+        if requestTimes.count <= Self.maxRequests { return .allowed }
+        return requestTimes.count == Self.maxRequests + 1 ? .tripped : .stillTripped
+    }
+
+    /// A shopper tapped "Sign in" or "Try again": that is a person, not a loop.
+    mutating func clear() {
+        requestTimes.removeAll()
     }
 }
 

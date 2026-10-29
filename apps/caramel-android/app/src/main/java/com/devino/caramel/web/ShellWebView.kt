@@ -174,7 +174,7 @@ fun createShellWebView(context: Context, host: ShellHost): WebView {
     settings.javaScriptCanOpenWindowsAutomatically = false
     settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
     settings.setSafeBrowsingEnabled(true) // needs Google Play services: a no-op on Fire
-    settings.userAgentString = ShellUserAgent.append(settings.userAgentString, BuildConfig.VERSION_NAME, Build.MANUFACTURER)
+    settings.userAgentString = ShellUserAgent.append(settings.userAgentString, BuildConfig.VERSION_NAME, Build.MANUFACTURER, BuildConfig.VERSION_CODE)
     webView.webViewClient = ShellWebViewClient(host)
     return webView
 }

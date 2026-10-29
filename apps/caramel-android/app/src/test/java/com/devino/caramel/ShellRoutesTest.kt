@@ -91,13 +91,23 @@ class ShellRoutesTest {
     }
 
     @Test
-    fun userAgentSuffixNamesTheVersionAndPlatform() {
-        assertEquals(" CaramelApp/1.6.0 (android)", ShellUserAgent.suffix("1.6.0", "Google"))
-        assertEquals(" CaramelApp/1.6.0 (android)", ShellUserAgent.suffix("1.6.0", null))
-        assertEquals(" CaramelApp/1.6.0 (fire)", ShellUserAgent.suffix("1.6.0", "Amazon"))
-        assertEquals(" CaramelApp/1.6.0 (fire)", ShellUserAgent.suffix("1.6.0", "amazon"))
-        assertEquals(" CaramelApp/1.6.0 (android)", ShellUserAgent.suffix("1.6.0", "Amazonas Phones"))
-        assertEquals("Mozilla/5.0 (Linux; Android 14) CaramelApp/1.6.0 (android)", ShellUserAgent.append("Mozilla/5.0 (Linux; Android 14)", "1.6.0", "Google"))
+    fun userAgentSuffixNamesTheVersionPlatformAndBuild() {
+        assertEquals(" CaramelApp/1.6.0 (android) CaramelBuild/42", ShellUserAgent.suffix("1.6.0", "Google", 42))
+        assertEquals(" CaramelApp/1.6.0 (android) CaramelBuild/42", ShellUserAgent.suffix("1.6.0", null, 42))
+        assertEquals(" CaramelApp/1.6.0 (fire) CaramelBuild/42", ShellUserAgent.suffix("1.6.0", "Amazon", 42))
+        assertEquals(" CaramelApp/1.6.0 (fire) CaramelBuild/42", ShellUserAgent.suffix("1.6.0", "amazon", 42))
+        assertEquals(" CaramelApp/1.6.0 (android) CaramelBuild/42", ShellUserAgent.suffix("1.6.0", "Amazonas Phones", 42))
+        assertEquals("Mozilla/5.0 (Linux; Android 14) CaramelApp/1.6.0 (android) CaramelBuild/42", ShellUserAgent.append("Mozilla/5.0 (Linux; Android 14)", "1.6.0", "Google", 42))
+    }
+
+    @Test
+    fun theBuildIsASeparateTokenAfterTheCaramelAppOne() {
+        // The web matcher needs whitespace (or the end) right after "(<platform>)"; the build token's leading space gives it.
+        val userAgent = ShellUserAgent.append("Mozilla/5.0", "1.6.0", "Google", 7)
+        val appMatcher = Regex("""(?:^|\s)CaramelApp/(\d+\.\d+\.\d+) \((ios|macos|android|fire)\)(?:\s|$)""")
+        val buildMatcher = Regex("""(?:^|\s)CaramelBuild/(\d+)(?:\s|$)""")
+        assertEquals("android", appMatcher.find(userAgent)?.groupValues?.get(2))
+        assertEquals("7", buildMatcher.find(userAgent)?.groupValues?.get(1))
     }
 
     @Test
