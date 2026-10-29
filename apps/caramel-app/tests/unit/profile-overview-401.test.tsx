@@ -1,4 +1,8 @@
 // @vitest-environment jsdom
+import {
+    AUTH_REDIRECT_LIMIT,
+    resetAuthRedirectGuardForTests,
+} from '@/lib/auth/authRedirectGuard'
 import { useProfileOverview } from '@/lib/profile/useProfileOverview'
 import { cleanup, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -10,12 +14,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 // visit. A 401 now means "signed out": end the client session, send the user to
 // /login, report nothing as an error. Every other non-OK status keeps the
 // error path.
-const { endClientSessionMock, promptSupportMock, addBreadcrumbMock } =
-    vi.hoisted(() => ({
-        endClientSessionMock: vi.fn(),
-        promptSupportMock: vi.fn(),
-        addBreadcrumbMock: vi.fn(),
-    }))
+const {
+    endClientSessionMock,
+    promptSupportMock,
+    addBreadcrumbMock,
+    captureMessageMock,
+} = vi.hoisted(() => ({
+    endClientSessionMock: vi.fn(),
+    promptSupportMock: vi.fn(),
+    addBreadcrumbMock: vi.fn(),
+    captureMessageMock: vi.fn(),
+}))
 vi.mock('@/lib/auth/endClientSession', () => ({
     endClientSession: endClientSessionMock,
 }))
@@ -25,6 +34,7 @@ vi.mock('@/lib/feedback/promptSupportOnFailure', () => ({
 vi.mock('@sentry/nextjs', () => ({
     addBreadcrumb: addBreadcrumbMock,
     captureException: vi.fn(),
+    captureMessage: captureMessageMock,
 }))
 
 const fetchMock = vi.fn()
@@ -35,6 +45,9 @@ beforeEach(() => {
     endClientSessionMock.mockReset().mockResolvedValue(true)
     promptSupportMock.mockReset()
     addBreadcrumbMock.mockReset()
+    captureMessageMock.mockReset()
+    sessionStorage.clear()
+    resetAuthRedirectGuardForTests()
     fetchMock.mockReset()
     replaceMock.mockReset()
     vi.stubGlobal('fetch', fetchMock)
@@ -100,6 +113,30 @@ describe('useProfileOverview — 401 is a signed-out user (CARAMEL-N)', () => {
             expect(replaceMock).toHaveBeenCalledWith('/login?next=%2Fprofile'),
         )
         expect(promptSupportMock).not.toHaveBeenCalled()
+    })
+})
+
+describe('useProfileOverview — 401 inside a redirect loop (T-10055)', () => {
+    it('does not navigate again once the loop guard trips, and shows the error notice', async () => {
+        const now = Date.now()
+        sessionStorage.setItem(
+            'caramel:auth-redirects',
+            JSON.stringify(
+                Array.from({ length: AUTH_REDIRECT_LIMIT }, (_, i) => now - i),
+            ),
+        )
+        fetchMock.mockResolvedValueOnce(new Response(null, { status: 401 }))
+
+        const { result } = renderHook(() => useProfileOverview(true))
+
+        await waitFor(() => expect(result.current.status).toBe('error'))
+        expect(replaceMock).not.toHaveBeenCalled()
+        expect(captureMessageMock).toHaveBeenCalledTimes(1)
+        expect(captureMessageMock.mock.calls[0]?.[1]?.extra).toMatchObject({
+            to: '/login',
+            hasSession: true,
+            serverRejectedSession: true,
+        })
     })
 })
 

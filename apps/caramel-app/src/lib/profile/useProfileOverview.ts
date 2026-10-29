@@ -1,5 +1,6 @@
 'use client'
 
+import { guardAuthRedirect } from '@/lib/auth/authRedirectGuard'
 import { endClientSession } from '@/lib/auth/endClientSession'
 import { promptSupportOnFailure } from '@/lib/feedback/promptSupportOnFailure'
 import type { ProfileOverview } from '@/lib/profile/types'
@@ -78,6 +79,19 @@ export function useProfileOverview(enabled: boolean): UseProfileOverviewResult {
                     // who already navigated away must not be pulled back.
                     // Either way the navigation here is moot.
                     if (cancelled) return
+                    const allowed = guardAuthRedirect({
+                        from: window.location.pathname + window.location.hash,
+                        to: LOGIN_PATH,
+                        hasSession: true,
+                        sessionPending: false,
+                        serverRejectedSession: true,
+                    })
+                    if (!allowed) {
+                        // A loop (T-10055): stay put and show the error notice
+                        // rather than a skeleton that never resolves.
+                        setStatus('error')
+                        return
+                    }
                     // Stays in 'loading' (the page's skeleton) until the
                     // navigation lands: no error notice flashes first.
                     // replace, not assign: Back from /login must not land on a

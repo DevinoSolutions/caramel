@@ -4,6 +4,7 @@ import ProfileNav, {
     type ProfileNavItem,
 } from '@/components/profile/ProfileNav'
 import SectionSkeleton from '@/components/profile/SectionSkeleton'
+import { guardAuthRedirect } from '@/lib/auth/authRedirectGuard'
 import { useSession } from '@/lib/auth/client'
 import {
     noticeBodyClasses,
@@ -17,6 +18,7 @@ import {
 import type { FavoriteStoreSummary } from '@/lib/profile/types'
 import { useProfileOverview } from '@/lib/profile/useProfileOverview'
 import { useReducedMotion } from '@/lib/reducedMotion'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 import AccountDetailsCard from './sections/AccountDetailsCard'
@@ -41,6 +43,10 @@ export default function ProfilePageClient() {
 
     useEffect(() => setMounted(true), [])
 
+    // Set when the loop guard refused the redirect: the page shows a sign-in
+    // prompt in place instead of bouncing again (T-10055).
+    const [signInPath, setSignInPath] = useState<string | null>(null)
+
     useEffect(() => {
         if (mounted && !isPending && !session?.user) {
             // replace, not push: a pushed /login leaves this page behind it in
@@ -50,7 +56,19 @@ export default function ProfilePageClient() {
             // CARAMEL-30). `next` brings the shopper back here, fragment
             // included, once signed in.
             const here = window.location.pathname + window.location.hash
-            router.replace(`/login?next=${encodeURIComponent(here)}`)
+            const target = `/login?next=${encodeURIComponent(here)}`
+            const allowed = guardAuthRedirect({
+                from: here,
+                to: target,
+                hasSession: false,
+                sessionPending: false,
+                serverRejectedSession: false,
+            })
+            if (allowed) {
+                router.replace(target)
+            } else {
+                setSignInPath(target)
+            }
         }
     }, [mounted, session, isPending, router])
 
@@ -106,7 +124,26 @@ export default function ProfilePageClient() {
     }
 
     if (!session?.user) {
-        return null
+        if (!signInPath) return null
+        return (
+            <main className={pageShellClasses}>
+                <div className={pageContainerClasses}>
+                    <div role="alert" className={noticeClasses}>
+                        <p className={noticeTitleClasses}>
+                            Sign in to see your account
+                        </p>
+                        <p className={noticeBodyClasses}>
+                            We tried to open sign-in a few times and it kept
+                            bouncing back here, so we stopped. Sign in below to
+                            continue.
+                        </p>
+                        <Link href={signInPath} className={noticeButtonClasses}>
+                            Sign in
+                        </Link>
+                    </div>
+                </div>
+            </main>
+        )
     }
 
     const user = session.user
