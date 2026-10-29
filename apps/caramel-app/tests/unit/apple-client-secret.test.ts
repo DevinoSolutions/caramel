@@ -119,6 +119,17 @@ describe('getAppleClientSecret', () => {
         expect(exp - iat).toBeLessThanOrEqual(APPLE_MAX_SECRET_LIFETIME_SECONDS)
     })
 
+    it('signs for another client of the team (the iOS bundle id) as sub, cached apart from the Services ID', async () => {
+        const { getAppleClientSecret } = await loadHelper()
+        const app = getAppleClientSecret('com.devino.Caramel')
+        const web = getAppleClientSecret()
+
+        expect(decodeAndVerify(app).payload.sub).toBe('com.devino.Caramel')
+        expect(decodeAndVerify(web).payload.sub).toBe('com.test.signin')
+        expect(getAppleClientSecret('com.devino.Caramel')).toBe(app)
+        expect(getAppleClientSecret()).toBe(web)
+    })
+
     it('also accepts a real multi-line PEM value', async () => {
         envMock.APPLE_PRIVATE_KEY = pkcs8Pem
         const { getAppleClientSecret } = await loadHelper()

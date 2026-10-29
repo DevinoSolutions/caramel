@@ -8,8 +8,11 @@
 // Where the tokens come from: the `accounts` row for provider 'apple'. Both
 // Apple code exchanges persist them there — better-auth's web callback (it
 // stores access + refresh token, encrypted via `account.encryptOAuthTokens`)
-// and the extension/app mint (extensionOAuthSession.ts). Both exchange with the
-// same APPLE_CLIENT_ID, which is the client_id /auth/revoke needs.
+// and the extension/app mint (extensionOAuthSession.ts). /auth/revoke needs
+// the client the grant was issued to: APPLE_CLIENT_ID (the Services ID) for
+// every web flow, the iOS bundle id for the app's native sheet
+// (appleNativeSignIn.ts). The row's identity token is stored with the grant
+// it came from, so its `aud` names that client.
 //
 // The deletion cascades the accounts away, so the tokens are LOADED first
 // (loadAppleRevocationTargets) and REVOKED after the delete commits
@@ -21,6 +24,7 @@ import 'server-only'
 import * as Sentry from '@sentry/nextjs'
 
 import { getAppleClientSecret } from '@/lib/auth/appleClientSecret'
+import { APPLE_NATIVE_APP_CLIENT_ID } from '@/lib/auth/appleNativeSignIn'
 import { decryptOAuthToken } from '@/lib/auth/oauthTokenCrypto'
 import { env } from '@/lib/env'
 import prisma from '@/lib/prisma'
@@ -39,6 +43,8 @@ export type AppleRevocationOutcome = 'not_applicable' | 'revoked' | 'failed'
 export interface AppleRevocationTarget {
     refreshToken: string | null
     accessToken: string | null
+    /** Plain text, as both mints store it; only its `aud` is read. */
+    idToken: string | null
 }
 
 type AppleTokenTypeHint = 'refresh_token' | 'access_token'
@@ -49,8 +55,34 @@ export async function loadAppleRevocationTargets(
 ): Promise<AppleRevocationTarget[]> {
     return prisma.account.findMany({
         where: { userId, providerId: 'apple' },
-        select: { refreshToken: true, accessToken: true },
+        select: { refreshToken: true, accessToken: true, idToken: true },
     })
+}
+
+/** The client the stored grant belongs to: the iOS bundle id when the row's
+ * identity token was issued to it, the Services ID otherwise (every web
+ * flow, and rows from before the id token was read here). Our own stored
+ * token, not a credential being checked, so its payload is read unverified. */
+function grantClientId(idToken: string | null): string | undefined {
+    const payload = idToken?.split('.')[1]
+    if (payload) {
+        try {
+            const claims: unknown = JSON.parse(
+                Buffer.from(payload, 'base64url').toString('utf8'),
+            )
+            if (
+                typeof claims === 'object' &&
+                claims !== null &&
+                'aud' in claims &&
+                claims.aud === APPLE_NATIVE_APP_CLIENT_ID
+            ) {
+                return APPLE_NATIVE_APP_CLIENT_ID
+            }
+        } catch {
+            // Not a JWT we can read: the grant is a web flow's, as before.
+        }
+    }
+    return env.APPLE_CLIENT_ID
 }
 
 /** Apple's failure body is `{"error": "invalid_client"}`-shaped; the code is
@@ -102,7 +134,11 @@ async function revokeOne(target: AppleRevocationTarget): Promise<boolean> {
         return false
     }
 
+    // Revoking needs Apple configured even for an app grant: no
+    // APPLE_CLIENT_ID means no Apple sign-in and no key to sign with.
     const clientId = env.APPLE_CLIENT_ID
+        ? grantClientId(target.idToken)
+        : undefined
     if (!clientId) {
         reportRevocationFailure('apple_not_configured', { hint })
         return false
@@ -117,7 +153,7 @@ async function revokeOne(target: AppleRevocationTarget): Promise<boolean> {
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: new URLSearchParams({
                 client_id: clientId,
-                client_secret: getAppleClientSecret(),
+                client_secret: getAppleClientSecret(clientId),
                 token,
                 token_type_hint: hint,
             }),

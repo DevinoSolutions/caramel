@@ -220,4 +220,22 @@ extension CaramelAPI {
         let (data, _) = try await send("POST", "/api/extension/oauth", body: body)
         return try decode(OAuthSessionResult.self, from: data, method: "POST", path: "/api/extension/oauth")
     }
+    /// POST /api/extension/oauth/apple-id-token. Trades what Apple's native
+    /// sheet returned (NativeAppleSignIn) for a session bearer. `rawNonce` is
+    /// the nonce BEFORE hashing: the sheet was given its SHA-256, and the server
+    /// checks that hash is the one in the identity token. The authorization
+    /// code lets the server keep a revocable grant (account deletion revokes
+    /// it); the name only arrives on the first sign-in, so it is sent when
+    /// Apple gave one.
+    func appleIdTokenSignIn(_ credential: NativeAppleCredential) async throws -> OAuthSessionResult {
+        var fields = [
+            "idToken": credential.identityToken,
+            "nonce": credential.rawNonce,
+        ]
+        if let code = credential.authorizationCode { fields["authorizationCode"] = code }
+        if let name = credential.fullName { fields["name"] = name }
+        let path = "/api/extension/oauth/apple-id-token"
+        let (data, _) = try await send("POST", path, body: try JSONEncoder().encode(fields))
+        return try decode(OAuthSessionResult.self, from: data, method: "POST", path: path)
+    }
 }
