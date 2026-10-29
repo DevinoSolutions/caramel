@@ -96,6 +96,11 @@ beforeAll(async () => {
                 description: 'fixture',
                 rating: f.rating,
                 status: 'valid',
+                // One shared proof stamp: the store order puts proven codes
+                // freshest-first (couponsRepo proofTierSql), so sequential
+                // creates would rank by insertion time. Tied here, rating
+                // decides, which is the order this suite's sink cases assume.
+                updatedAt: new Date(now - DAY),
             },
         })
         if (f.signal) {
