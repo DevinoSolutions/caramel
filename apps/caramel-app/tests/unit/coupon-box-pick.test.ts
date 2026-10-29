@@ -370,6 +370,18 @@ describe('the pick', () => {
         expect(messages[1]!.content).toContain('[12] button "Remove [code]"')
     })
 
+    it('keeps masked page text the pick needs: pack sizes, durations, capitalized words', () => {
+        const outline = [
+            '- [3] button "#-in-# Pack"',
+            '- [4] button "##-Day Return"',
+            '- text "Total## Cart# A## ##in first purchase#"',
+        ].join('\n')
+        expect(scrubOutline(outline)).toBe(outline)
+        expect(scrubOutline('- [5] button "Remove SAVE# save##"')).toBe(
+            '- [5] button "Remove [code] [code]"',
+        )
+    })
+
     it('redacts an already-masked code chip (the extension sends "SAVE##") and zero-width splits', () => {
         expect(scrubOutline('- [12] button "Remove SAVE##"')).toBe(
             '- [12] button "Remove [code]"',

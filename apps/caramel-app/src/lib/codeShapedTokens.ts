@@ -57,7 +57,10 @@ const TOKEN = new RegExp(
     'gu',
 )
 const HAS_LETTER = new RegExp('\\p{L}', 'u')
-const HAS_DIGIT_OR_MASK = new RegExp('[\\p{N}#]', 'u')
+const HAS_DIGIT = new RegExp('\\p{N}', 'u')
+const HAS_MASK = /#/
+// A word plus mask, as page text has it ("Total##", "Cart#"): not a code.
+const CAPITALIZED_WORD_MASKED = new RegExp('^#*\\p{Lu}\\p{Ll}+#*$', 'u')
 const ORDINAL = /^\d+(?:st|nd|rd|th)$/i
 const NON_LETTERS = new RegExp('[^\\p{L}]', 'gu')
 
@@ -90,6 +93,7 @@ const QUOTED = new RegExp(
 )
 
 const MIN_TOKEN_LENGTH = 3
+const MIN_TOKEN_LETTERS = 3
 const MIN_CAPS_LETTERS = 3
 
 interface CodeRedactionOptions {
@@ -104,12 +108,22 @@ export function stripFormatChars(text: string): string {
     return text.replace(FORMAT_CHARS, '')
 }
 
+// Letters + REAL digits is a code. Letters + the extension's `#` mask only is a
+// code when it is one separator-free run of 3+ letters that is not a
+// Capitalized word and is either SHOUTED or masked twice: "SAVE#", "SAVE##" and
+// "save##" are, but "purchase#", "#-in-#" (2-in-1), "##-Day",
+// "##in", "Total##" and "Cart#" are page text the pick needs (the coupon-box
+// eval fixtures are full of them).
 function isMixedToken(token: string): boolean {
-    return (
-        HAS_LETTER.test(token) &&
-        HAS_DIGIT_OR_MASK.test(token) &&
-        !ORDINAL.test(token)
-    )
+    if (!HAS_LETTER.test(token) || ORDINAL.test(token)) return false
+    if (HAS_DIGIT.test(token)) return true
+    if (!HAS_MASK.test(token) || /[_-]/.test(token)) return false
+    const letters = token.replace(NON_LETTERS, '')
+    if (letters.length < MIN_TOKEN_LETTERS) return false
+    if (CAPITALIZED_WORD_MASKED.test(token)) return false
+    // A single mask after a lowercase word ("purchase#") is a sentence, two
+    // masks or shouting is a code ("save##", "SAVE#").
+    return letters === letters.toUpperCase() || token.split('#').length > 2
 }
 
 function redactMixedTokens(text: string): string {
