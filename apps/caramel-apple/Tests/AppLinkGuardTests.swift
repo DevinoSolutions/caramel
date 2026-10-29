@@ -250,6 +250,16 @@ final class AppLinkGuardTests: XCTestCase {
         XCTAssertNotNil(name.range(of: build, options: .regularExpression))
         XCTAssertNotNil(("Mozilla/5.0 Mobile/15E148 " + name).range(of: app, options: .regularExpression))
     }
+
+    func testADottedCFBundleVersionIsCarriedWholeAndStillMatchesTheWebPatterns() {
+        // CFBundleVersion may be period-separated ("42.1"); the web side keeps up to three numeric parts as a string.
+        let name = ShellUserAgent.applicationName(version: "1.6.0", build: "42.1")
+        XCTAssertEqual(name, "CaramelApp/1.6.0 (ios) CaramelBuild/42.1")
+        let app = #"(?:^|\s)CaramelApp/(\d+\.\d+\.\d+) \((ios|macos|android|fire)\)(?:\s|$)"#
+        let build = #"(?:^|\s)CaramelBuild/(\d+(?:\.\d+){0,2})(?:\s|$)"#
+        XCTAssertNotNil(name.range(of: app, options: .regularExpression))
+        XCTAssertNotNil(name.range(of: build, options: .regularExpression))
+    }
 }
 
 // MARK: - Native-to-web session handoff (T-7852)
@@ -948,17 +958,96 @@ final class SignInBounceLimiterTests: XCTestCase {
         XCTAssertEqual(limiter.record(at: start.addingTimeInterval(6)), .allowed)
     }
 
-    func testReplacingBounceGuardEveryLapDoesNotResetTheLimiter() {
-        // resetToHome swaps in a fresh BounceGuard but keeps the limiter.
+    func testIsTrippedCountsNothingAndFollowsTheWindow() {
         var limiter = SignInBounceLimiter()
-        var guardrail = BounceGuard()
-        var last = SignInBounceLimiter.Verdict.allowed
-        for lap in 0...SignInBounceLimiter.maxRequests {
-            last = limiter.record(at: start.addingTimeInterval(Double(lap)))
-            guardrail = BounceGuard()
+        fill(&limiter, count: SignInBounceLimiter.maxRequests)
+        XCTAssertFalse(limiter.isTripped(at: start.addingTimeInterval(5)))
+        _ = limiter.record(at: start.addingTimeInterval(4))
+        XCTAssertTrue(limiter.isTripped(at: start.addingTimeInterval(5)))
+        XCTAssertTrue(limiter.isTripped(at: start.addingTimeInterval(5)), "asking twice changes nothing")
+        XCTAssertFalse(limiter.isTripped(at: start.addingTimeInterval(SignInBounceLimiter.window + 10)))
+    }
+}
+
+/// SignInRecovery: the admission gate WebShellModel and ShellRouter delegate every automatic
+/// sign-in step to (T-10055). The model acts only on `.proceed`; `.stop` means no native pop-up,
+/// no step back and no handoff.
+final class SignInRecoveryTests: XCTestCase {
+    private let start = Date(timeIntervalSince1970: 1_000_000)
+
+    private func token(_ decision: SignInRecovery.Decision) -> Int? {
+        if case .proceed(let token) = decision { return token }
+        return nil
+    }
+
+    func testTheFifthRequestStopsEvenWithAResetToHomeBetweenEveryLap() {
+        var recovery = SignInRecovery()
+        var decisions: [SignInRecovery.Decision] = []
+        for lap in 0..<5 {
+            decisions.append(recovery.automaticRequest(at: start.addingTimeInterval(Double(lap))))
+            recovery.resetToHome()
         }
-        XCTAssertEqual(guardrail, BounceGuard())
-        XCTAssertEqual(last, .tripped)
+        XCTAssertTrue(decisions[0..<4].allSatisfy { token($0) != nil }, "the first four laps are admitted")
+        XCTAssertEqual(decisions[4], .stop(firstTime: true), "lap 5 gets no pop-up, no step back and no handoff")
+        XCTAssertEqual(recovery.automaticRequest(at: start.addingTimeInterval(5)), .stop(firstTime: false))
+    }
+
+    func testAContinuedStepIsRefusedOnceTheCapIsTrippedAndCountsNothing() {
+        var recovery = SignInRecovery()
+        for lap in 0..<4 {
+            XCTAssertNotNil(token(recovery.automaticRequest(at: start.addingTimeInterval(Double(lap)))))
+        }
+        XCTAssertNotNil(token(recovery.continueRecovery(at: start.addingTimeInterval(4))), "four requests: still allowed")
+        XCTAssertNotNil(token(recovery.continueRecovery(at: start.addingTimeInterval(4))), "checking does not spend the budget")
+        _ = recovery.automaticRequest(at: start.addingTimeInterval(4))
+        XCTAssertEqual(recovery.continueRecovery(at: start.addingTimeInterval(5)), .stop(firstTime: false))
+    }
+
+    func testAHandoffAdmittedBeforeTheTripIsStaleAfterIt() {
+        var recovery = SignInRecovery()
+        var admitted: [Int] = []
+        for lap in 0..<4 {
+            if let issued = token(recovery.automaticRequest(at: start.addingTimeInterval(Double(lap)))) { admitted.append(issued) }
+        }
+        let inFlight = admitted[3]
+        XCTAssertTrue(recovery.isCurrent(inFlight), "still current before the trip")
+        XCTAssertEqual(recovery.automaticRequest(at: start.addingTimeInterval(4)), .stop(firstTime: true))
+        XCTAssertFalse(recovery.isCurrent(inFlight), "its completion must be ignored")
+    }
+
+    func testAResetToHomeMakesPendingWorkStaleButKeepsTheCount() {
+        var recovery = SignInRecovery()
+        let pending = token(recovery.automaticRequest(at: start))!
+        recovery.resetToHome()
+        XCTAssertFalse(recovery.isCurrent(pending))
+        for lap in 1..<4 {
+            _ = recovery.automaticRequest(at: start.addingTimeInterval(Double(lap)))
+        }
+        XCTAssertEqual(recovery.automaticRequest(at: start.addingTimeInterval(4)), .stop(firstTime: true), "the reset did not clear the count")
+    }
+
+    func testAShopperTapRestoresAdmissionButNotStaleWork() {
+        var recovery = SignInRecovery()
+        var staleToken = 0
+        for lap in 0..<4 {
+            staleToken = token(recovery.automaticRequest(at: start.addingTimeInterval(Double(lap)))) ?? staleToken
+        }
+        XCTAssertEqual(recovery.automaticRequest(at: start.addingTimeInterval(4)), .stop(firstTime: true))
+        recovery.userTapped()
+        let fresh = token(recovery.automaticRequest(at: start.addingTimeInterval(5)))
+        XCTAssertNotNil(fresh, "after a tap the next request is admitted")
+        XCTAssertTrue(recovery.isCurrent(fresh!))
+        XCTAssertFalse(recovery.isCurrent(staleToken), "work admitted before the trip stays stale")
+        XCTAssertNotNil(token(recovery.continueRecovery(at: start.addingTimeInterval(5))))
+    }
+
+    func testRepeatedTripsReportOnlyTheRequestThatCrossedTheCap() {
+        var recovery = SignInRecovery()
+        var firstTimes = 0
+        for lap in 0..<30 {
+            if recovery.automaticRequest(at: start.addingTimeInterval(Double(lap) * 0.5)) == .stop(firstTime: true) { firstTimes += 1 }
+        }
+        XCTAssertEqual(firstTimes, 1)
     }
 }
 

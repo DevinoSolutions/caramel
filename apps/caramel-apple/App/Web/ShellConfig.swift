@@ -473,7 +473,7 @@ struct BounceGuard: Equatable {
 /// The hard cap on sign-in requests that survives `WebShellModel.resetToHome` (T-10055).
 /// BounceGuard is recreated on every reset, so a lap that ends in a session change (signed-out
 /// /profile, /login, native sheet, session change, reset, reload) handed it a clean slate each
-/// time. This one is owned by the WebShellModel itself and counts sign-in requests per tab over a
+/// time. This one lives inside SignInRecovery (owned by the WebShellModel, never recreated) and counts sign-in requests per tab over a
 /// sliding `window`; past `maxRequests` it reports "tripped" and the shell stops asking.
 /// 4 because a shopper needs at most one or two (tap a tab, cancel the sheet, tap again) and
 /// every real request waits on a human through an OAuth sheet, so a fifth within a minute is a
@@ -502,9 +502,74 @@ struct SignInBounceLimiter: Equatable {
         return requestTimes.count == Self.maxRequests + 1 ? .tripped : .stillTripped
     }
 
+    /// Whether the cap is currently exceeded, without counting a request.
+    func isTripped(at now: Date) -> Bool {
+        requestTimes.filter { now.timeIntervalSince($0) < Self.window }.count > Self.maxRequests
+    }
+
     /// A shopper tapped "Sign in" or "Try again": that is a person, not a loop.
     mutating func clear() {
         requestTimes.removeAll()
+    }
+}
+
+/// The one admission gate for every AUTOMATIC sign-in or recovery step of a tab (T-10055):
+/// the native sign-in pop-up, stepping the page back, and starting or continuing a web-session
+/// handoff/redeem. WebShellModel asks it before each such step and does nothing the answer
+/// forbids; ShellRouter asks the model before it starts a handoff or presents sign-in. A shopper's
+/// own tap is never gated: `userTapped` clears the cap.
+///
+/// It owns the SignInBounceLimiter and a `generation`, the token of "recovery work that is still
+/// wanted". Work admitted by `.proceed(token:)` may complete only while `isCurrent(token)`: a trip
+/// and a reset to home both advance the generation, so a handoff or redeem that was already in
+/// flight when the cap tripped (or when the web view was replaced) is dropped instead of finishing
+/// and presenting sign-in again. `resetToHome` advances the generation but, on purpose, never touches
+/// the limiter: resetting the web view every lap is how the loop outran BounceGuard.
+struct SignInRecovery: Equatable {
+    enum Decision: Equatable {
+        /// Run the automatic step; carry `token` on any work that completes later.
+        case proceed(token: Int)
+        /// Do nothing automatic: no pop-up, no step back, no handoff. `firstTime` is true for the
+        /// one request that tripped the cap (report that one).
+        case stop(firstTime: Bool)
+    }
+
+    private var limiter = SignInBounceLimiter()
+    private var generation = 0
+
+    /// A sign-in request from the page or the start of an automatic handoff. Counts toward the cap.
+    mutating func automaticRequest(at now: Date) -> Decision {
+        switch limiter.record(at: now) {
+        case .allowed:
+            return .proceed(token: generation)
+        case .tripped:
+            generation += 1
+            return .stop(firstTime: true)
+        case .stillTripped:
+            return .stop(firstTime: false)
+        }
+    }
+
+    /// A further automatic step of a recovery that was already admitted (the handoff a bounce
+    /// started, the native prompt after a failed handoff). Checks the cap, counts nothing.
+    func continueRecovery(at now: Date) -> Decision {
+        limiter.isTripped(at: now) ? .stop(firstTime: false) : .proceed(token: generation)
+    }
+
+    /// False for work admitted before a trip or a reset: it must be dropped, not finished.
+    func isCurrent(_ token: Int) -> Bool {
+        token == generation
+    }
+
+    /// The web view was replaced. Pending recovery work is stale; the cap keeps counting.
+    mutating func resetToHome() {
+        generation += 1
+    }
+
+    /// The shopper tapped "Sign in" or "Try again". Admission is restored. The generation is kept:
+    /// work that went stale at the trip stays stale.
+    mutating func userTapped() {
+        limiter.clear()
     }
 }
 

@@ -160,6 +160,24 @@ describe('CaramelBuild token', () => {
         }
     })
 
+    it('keeps a period-separated CFBundleVersion whole, as a string', () => {
+        for (const build of ['42', '42.1', '42.1.7']) {
+            const shell = detectAppShell(
+                `Mobile CaramelApp/1.6.0 (ios) CaramelBuild/${build} Safari`,
+            )
+            expect(shell?.build).toBe(build)
+        }
+    })
+
+    it('rejects a build with more than three parts or a dangling period', () => {
+        const base = 'Mobile CaramelApp/1.6.0 (ios)'
+        for (const build of ['1.2.3.4', '42.', '.5', '4..2']) {
+            expect(
+                detectAppShell(`${base} CaramelBuild/${build}`),
+            ).not.toHaveProperty('build')
+        }
+    })
+
     it('ignores a build token with no CaramelApp token', () => {
         expect(detectAppShell('Safari CaramelBuild/42')).toBeNull()
     })

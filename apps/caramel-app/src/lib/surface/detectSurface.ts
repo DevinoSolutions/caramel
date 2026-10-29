@@ -74,9 +74,13 @@ const APP_SHELL_RE =
  * analytics can tell which build looped. It is deliberately a second token, not
  * part of the CaramelApp one, so APP_SHELL_RE (and the inline copy in
  * app/layout.tsx) keep matching every shell build, old or new. Read only once
- * the CaramelApp token has matched.
+ * the CaramelApp token has matched. Up to three period-separated integers,
+ * because an iOS CFBundleVersion may read "42" or "42.1"; kept as the full
+ * string, never parsed to a number. Up to three period-separated integers,
+ * because an iOS CFBundleVersion may read "42" or "42.1"; kept as the full
+ * string, never parsed to a number.
  */
-const APP_BUILD_RE = /(?:^|\s)CaramelBuild\/(\d+)(?:\s|$)/
+const APP_BUILD_RE = /(?:^|\s)CaramelBuild\/(\d+(?:\.\d+){0,2})(?:\s|$)/
 
 export type AppShellInfo = {
     version: string

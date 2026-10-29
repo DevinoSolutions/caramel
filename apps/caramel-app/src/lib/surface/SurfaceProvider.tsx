@@ -12,7 +12,6 @@
 // script runs at document_idle, hydration can win the race on a warm cache),
 // so the stamp is observed, not just read once, and the window messages the
 // content script posts are listened for as well.
-import { withPosthog } from '@/lib/analytics/posthogBrowser'
 import {
     detectBrowser,
     detectPlatform,
@@ -20,7 +19,6 @@ import {
     type DevicePlatform,
 } from '@/lib/surface/detectPlatform'
 import {
-    appShellSuperProperties,
     detectAppShell,
     detectSurface,
     EXTENSION_MESSAGE_TYPES,
@@ -122,16 +120,11 @@ export function SurfaceProvider({ children }: { children: ReactNode }) {
         }
     }, [resolved, stamp, messageSeen])
 
-    // T-7853 / T-10055: register PostHog super properties so every event in the
-    // app-shell carries surface='app-shell', app_platform, app_shell_version
-    // and app_build. Goes through withPosthog, the one holder of the posthog-js
-    // instance (it is dynamically imported and is never put on `window`), so a
-    // registration made while the SDK loads is replayed instead of lost.
-    useEffect(() => {
-        if (value.surface !== 'app-shell' || !value.appShell) return
-        const properties = appShellSuperProperties(value.appShell)
-        withPosthog(posthog => posthog.register(properties))
-    }, [value.surface, value.appShell])
+    // The app-shell PostHog super properties (surface, app_platform,
+    // app_shell_version, app_build) are registered where PostHog is
+    // initialised (initPosthogInstance in analytics/identity.ts), not here: an
+    // effect in this provider can run before PostHog starts loading, and
+    // withPosthog drops work made before then.
 
     return (
         <SurfaceContext.Provider value={value}>

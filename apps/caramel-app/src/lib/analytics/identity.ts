@@ -16,6 +16,10 @@ import {
     onFirstActivity,
 } from '@/lib/afterPageLoad'
 import { APP_VERSION, clientEnv } from '@/lib/env.client'
+import {
+    appShellSuperProperties,
+    detectAppShell,
+} from '@/lib/surface/detectSurface'
 import * as Sentry from '@sentry/nextjs'
 import type { PostHog } from 'posthog-js'
 import { captureFirstTouch } from './firstTouch'
@@ -253,6 +257,15 @@ export function initPosthogInstance(
         environment: target.environment,
         platform: 'web',
     })
+
+    // T-10055: inside the native app shell every event also carries the
+    // shell's platform, version and build. Registered here, at init, because
+    // withPosthog drops tasks made before startPosthogLoad(): an effect in
+    // SurfaceProvider can run first and would lose the registration.
+    const appShell = detectAppShell(
+        typeof navigator === 'undefined' ? '' : String(navigator.userAgent),
+    )
+    if (appShell) posthog.register(appShellSuperProperties(appShell))
 
     if (isE2E) {
         const handshake = window.__CARAMEL_E2E__

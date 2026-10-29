@@ -66,6 +66,10 @@ final class WebShellModel: NSObject, ObservableObject {
     /// router is running the handoff for it (native session, no web session yet).
     var webSessionRecovery: (WebShellModel, URL) -> Bool = { _, _ in false }
 
+    /// Set by ShellRouter: this tab's sign-in loop cap just tripped, so the handoff/redeem it
+    /// hosts (and any load held behind it) is recovery work that must be dropped (T-10055).
+    var onSignInLoopTripped: (WebShellModel) -> Void = { _ in }
+
     /// The page this shell shows or is about to show (what a handoff should land on).
     var targetURL: URL { lastRequestedURL ?? home }
 
@@ -79,8 +83,9 @@ final class WebShellModel: NSObject, ObservableObject {
     /// True from `openRedeem` until the redeem navigation lands, expires or fails.
     private var redeemInFlight = false
     private var bounceGuard = BounceGuard()
-    /// Counts sign-in requests for this tab. NOT reset by resetToHome: that is the point (T-10055).
-    private var signInBounceLimiter = SignInBounceLimiter()
+    /// The admission gate for every automatic sign-in/recovery step of this tab. resetToHome keeps its
+    /// count on purpose: that is the point (T-10055).
+    private var signInRecovery = SignInRecovery()
     /// The one redeem URL the router issued: it may load once, and no other redeem URL may load at all.
     private var issuedRedeemURL: URL?
 
@@ -221,6 +226,8 @@ final class WebShellModel: NSObject, ObservableObject {
         redeemInFlight = false
         issuedRedeemURL = nil
         bounceGuard = BounceGuard()
+        // Pending recovery work goes stale; the sign-in loop cap keeps its count (T-10055).
+        signInRecovery.resetToHome()
         pageState = .idle
         // Not started: the visible tab's .task (loadHomeIfNeeded) loads home. Loading all four
         // shells eagerly would let a signed-out /profile redirect to /login and pop the native sign-in.
@@ -230,13 +237,13 @@ final class WebShellModel: NSObject, ObservableObject {
     }
 
     func retry() {
-        signInBounceLimiter.clear()
+        signInRecovery.userTapped()
         open(lastRequestedURL ?? home)
     }
 
     /// The shopper tapped "Sign in" on the sign-in overlay: a person is asking, so the loop cap starts over.
     func signInTapped() {
-        signInBounceLimiter.clear()
+        signInRecovery.userTapped()
         onSignInRequested()
     }
 
@@ -277,17 +284,11 @@ final class WebShellModel: NSObject, ObservableObject {
     ///  - any other page is stepped back to only once per back URL and not twice within
     ///    BounceGuard.window, else the shell shows "sign in" and stops.
     ///
-    /// All of that sits behind SignInBounceLimiter, which resetToHome does not reset: past
+    /// All of that sits behind SignInRecovery, which resetToHome does not reset: past
     /// SignInBounceLimiter.maxRequests requests in a minute the shell does nothing but show "sign
     /// in" (no step back, no handoff, no native sign-in pop-up) until the shopper taps.
     private func pageAskedForSignIn(stepBack: Bool) {
-        let verdict = signInBounceLimiter.record(at: Date())
-        if verdict != .allowed {
-            if verdict == .tripped { reportSignInLoopTripped() }
-            webView.stopLoading()
-            pageState = .needsSignIn
-            return
-        }
+        guard admitAutomaticRecovery(countsAsRequest: true) != nil else { return }
         let bouncedFrom = stepBack ? (webView.backForwardList.backItem?.url ?? lastRequestedURL) : (webView.url ?? lastRequestedURL)
         if let page = bouncedFrom, WebSessionHandoff.pageNeedsSession(page) {
             if webSessionRecovery(self, page) {
@@ -310,6 +311,42 @@ final class WebShellModel: NSObject, ObservableObject {
             Self.log.error("A page bounced to sign-in again; not stepping back into it.")
             pageState = .needsSignIn
         }
+    }
+
+    /// Admission for one AUTOMATIC sign-in or recovery step: a page asking for sign-in (counts as a
+    /// request), or the router starting a handoff for a page load (counts), or the router continuing a
+    /// recovery that was already admitted (`countsAsRequest: false`: checks the cap only). Returns the
+    /// token to carry on work that completes later (see isRecoveryCurrent), or nil when the cap forbids
+    /// the step: the tab then shows "sign in" and stops. A shopper tap never comes through here.
+    func admitAutomaticRecovery(countsAsRequest: Bool) -> Int? {
+        let now = Date()
+        let decision = countsAsRequest ? signInRecovery.automaticRequest(at: now) : signInRecovery.continueRecovery(at: now)
+        switch decision {
+        case .proceed(let token):
+            return token
+        case .stop(let firstTime):
+            stopForSignInLoop(firstTime: firstTime)
+            return nil
+        }
+    }
+
+    /// False for recovery work admitted before the cap tripped or before the web view was replaced.
+    func isRecoveryCurrent(_ token: Int) -> Bool {
+        signInRecovery.isCurrent(token)
+    }
+
+    /// True while an automatic native sign-in pop-up is allowed (the cap is not tripped). Counts nothing.
+    var allowsAutomaticSignInPrompt: Bool {
+        if case .proceed = signInRecovery.continueRecovery(at: Date()) { return true }
+        return false
+    }
+
+    private func stopForSignInLoop(firstTime: Bool) {
+        if firstTime { reportSignInLoopTripped() }
+        // Also ends a redeem this tab was loading, so it cannot set a cookie and land on a page that asks again.
+        stopLoading()
+        pageState = .needsSignIn
+        if firstTime { onSignInLoopTripped(self) }
     }
 
     /// TODO(T-10055): sentry-cocoa is not linked into the app target (AlertsEngine carries the same
