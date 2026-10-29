@@ -26,5 +26,5 @@
 // Next.js frame rewrite, and an extension or page origin in front of it.
 export const INJECTED_SCRIPT_DENY_URLS: RegExp[] = [
     /(?:^|\/)executors\/\d+\.js(?:[?#:]|$)/,
-    /^(?:(?:https?|app|chrome-extension|moz-extension|safari-web-extension):\/\/[^/?#]*\/)?scripts\/inpage\.js(?:[?#:]|$)/,
+    /^(?:(?:https?|app|chrome-extension|moz-extension|safari-web-extension):\/\/[^/?#]*\/|\/)?scripts\/inpage\.js(?:[?#:]|$)/,
 ]

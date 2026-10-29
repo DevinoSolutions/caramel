@@ -110,6 +110,7 @@ describe("MetaMask's injected scripts/inpage.js never reaches Sentry", () => {
     it.each([
         'app:///scripts/inpage.js',
         'scripts/inpage.js',
+        '/scripts/inpage.js',
         'chrome-extension://nkbihfbeogaeaoehlefnkodbefgpgknn/scripts/inpage.js',
         'https://grabcaramel.com/scripts/inpage.js?v=2',
         'moz-extension://0b1c2d3e-4f50-6172-8394-a5b6c7d8e9f0/scripts/inpage.js',
@@ -125,6 +126,7 @@ describe("MetaMask's injected scripts/inpage.js never reaches Sentry", () => {
         'https://grabcaramel.com/_next/static/chunks/inpage-abc.js',
         'app:///myscripts/inpage.js',
         'app:///scripts/inpage.json',
+        '/_next/static/chunks/scripts/inpage.js',
         'https://grabcaramel.com/_next/static/chunks/scripts/inpage.js',
         'https://grabcaramel.com/_next/static/chunks/main.js?source=/scripts/inpage.js',
     ])(
