@@ -193,6 +193,20 @@ export function initPosthogBrowser(): boolean {
     return true
 }
 
+/**
+ * T-10055: inside the native app shell every event also carries the shell's
+ * platform, version and build. Registered at init (withPosthog drops tasks made
+ * before startPosthogLoad(), so an effect elsewhere can run first and lose the
+ * registration) and again right after posthog.reset(), which clears every
+ * super property and does not rerun init.
+ */
+function registerAppShellSuperProperties(posthog: PostHog): void {
+    const appShell = detectAppShell(
+        typeof navigator === 'undefined' ? '' : String(navigator.userAgent),
+    )
+    if (appShell) posthog.register(appShellSuperProperties(appShell))
+}
+
 export function initPosthogInstance(
     posthog: PostHog,
     target: PosthogTarget,
@@ -258,14 +272,7 @@ export function initPosthogInstance(
         platform: 'web',
     })
 
-    // T-10055: inside the native app shell every event also carries the
-    // shell's platform, version and build. Registered here, at init, because
-    // withPosthog drops tasks made before startPosthogLoad(): an effect in
-    // SurfaceProvider can run first and would lose the registration.
-    const appShell = detectAppShell(
-        typeof navigator === 'undefined' ? '' : String(navigator.userAgent),
-    )
-    if (appShell) posthog.register(appShellSuperProperties(appShell))
+    registerAppShellSuperProperties(posthog)
 
     if (isE2E) {
         const handshake = window.__CARAMEL_E2E__
@@ -376,6 +383,7 @@ export function resetPosthogIdentity(): void {
     withPosthog(posthog => {
         try {
             posthog.reset()
+            registerAppShellSuperProperties(posthog)
             syncSentryPosthogContext(posthog)
         } catch (error) {
             reportIdentityFailure('posthog_reset', error)

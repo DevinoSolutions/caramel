@@ -1049,6 +1049,139 @@ final class SignInRecoveryTests: XCTestCase {
         }
         XCTAssertEqual(firstTimes, 1)
     }
+
+    func testAStopParksTheTabUntilATapOrAReset() {
+        var recovery = SignInRecovery()
+        for lap in 0..<5 {
+            _ = recovery.automaticRequest(at: start.addingTimeInterval(Double(lap)))
+        }
+        XCTAssertTrue(recovery.isStopped)
+        XCTAssertFalse(recovery.allowsAutomaticWork(at: start.addingTimeInterval(5)))
+        // A quiet minute lifts the cap but not the parked tab: another tab's handoff must not reopen it.
+        XCTAssertFalse(recovery.allowsAutomaticWork(at: start.addingTimeInterval(SignInBounceLimiter.window + 30)))
+        var tapped = recovery
+        tapped.userTapped()
+        XCTAssertFalse(tapped.isStopped)
+        XCTAssertTrue(tapped.allowsAutomaticWork(at: start.addingTimeInterval(6)))
+        var reset = recovery
+        reset.resetToHome()
+        XCTAssertFalse(reset.isStopped, "a replaced web view shows its own fresh page state")
+        XCTAssertFalse(reset.allowsAutomaticWork(at: start.addingTimeInterval(6)), "but the count survives the reset while the cap is still tripped")
+    }
+
+    func testAContinuedStepThatIsRefusedParksTheTabToo() {
+        var recovery = SignInRecovery()
+        for lap in 0...SignInBounceLimiter.maxRequests {
+            _ = recovery.automaticRequest(at: start.addingTimeInterval(Double(lap)))
+        }
+        recovery.userTapped()
+        for lap in 0...SignInBounceLimiter.maxRequests {
+            _ = recovery.automaticRequest(at: start.addingTimeInterval(10 + Double(lap)))
+        }
+        recovery.resetToHome()
+        XCTAssertFalse(recovery.isStopped)
+        XCTAssertEqual(recovery.continueRecovery(at: start.addingTimeInterval(16)), .stop(firstTime: false))
+        XCTAssertTrue(recovery.isStopped)
+    }
+
+    func testAnAdmittedRequestUnparksTheTabOnceTheWindowHasPassed() {
+        var recovery = SignInRecovery()
+        for lap in 0...SignInBounceLimiter.maxRequests {
+            _ = recovery.automaticRequest(at: start.addingTimeInterval(Double(lap)))
+        }
+        XCTAssertTrue(recovery.isStopped)
+        XCTAssertNotNil(token(recovery.automaticRequest(at: start.addingTimeInterval(SignInBounceLimiter.window + 30))))
+        XCTAssertFalse(recovery.isStopped)
+    }
+}
+
+/// RedeemAttempts: a redeem outcome belongs to the attempt that produced it (T-10055).
+final class RedeemAttemptsTests: XCTestCase {
+    func testAnEndedNavigationReportsItsAttemptOnce() {
+        var attempts = RedeemAttempts()
+        let first = attempts.begin()
+        XCTAssertTrue(attempts.isNavigating)
+        XCTAssertEqual(attempts.endNavigation(), first)
+        XCTAssertFalse(attempts.isNavigating)
+        XCTAssertNil(attempts.endNavigation(), "a second report of the same navigation is dropped")
+    }
+
+    func testAStaleCookieReadIsRejectedAfterAStopAndANewAttempt() {
+        var attempts = RedeemAttempts()
+        let old = attempts.begin()
+        XCTAssertEqual(attempts.startCookieRead(), old)
+        attempts.invalidate() // the loop cap tripped, or the tab was stopped or reset
+        let current = attempts.begin() // the retry's new handoff on the same web view
+        XCTAssertNotEqual(old, current, "ids never repeat")
+        XCTAssertFalse(attempts.finishCookieRead(old), "the old read must not settle the new handoff")
+        XCTAssertEqual(attempts.startCookieRead(), current)
+        XCTAssertTrue(attempts.finishCookieRead(current))
+        XCTAssertFalse(attempts.finishCookieRead(current), "and a result is delivered once")
+    }
+
+    func testANewAttemptInvalidatesTheOneBeforeIt() {
+        var attempts = RedeemAttempts()
+        let old = attempts.begin()
+        XCTAssertEqual(attempts.startCookieRead(), old)
+        let current = attempts.begin()
+        XCTAssertFalse(attempts.finishCookieRead(old))
+        XCTAssertEqual(attempts.endNavigation(), current)
+    }
+
+    func testInvalidateStopsEveryPhaseAndKeepsTheIdsCounting() {
+        var attempts = RedeemAttempts()
+        let first = attempts.begin()
+        attempts.invalidate()
+        XCTAssertFalse(attempts.isNavigating)
+        XCTAssertNil(attempts.endNavigation())
+        XCTAssertNil(attempts.startCookieRead())
+        XCTAssertGreaterThan(attempts.begin(), first)
+    }
+}
+
+/// The web view classes cannot be built in CaramelTests: the bundle is host-less and compiles only
+/// AppLinkGuard.swift and ShellConfig.swift, while WebShellModel.swift and ShellRouter.swift pull in
+/// SwiftUI views, AlertsEngine, SessionStore, the Keychain and the app's Info.plist. Pulling them in
+/// means a new CaramelTests source list in project.yml, and with it a regenerated, committed
+/// Caramel.xcodeproj (CI fails on drift) that has to be produced by XcodeGen on macOS. Until that
+/// lands, every decision they take lives in the pure types above, and this pin keeps the production
+/// files wired to them: it fails if the model recreates the recovery gate on reset, stops honouring a
+/// `.blocked` answer, or if the router stops asking each tab before it queues, replays or settles.
+/// TODO(T-10055): replace with @MainActor tests on the real WebShellModel/ShellRouter once the test
+/// target can compile them.
+final class SignInCapWiringPinTests: XCTestCase {
+    private func source(_ name: String) throws -> String {
+        let appleRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        return try String(contentsOf: appleRoot.appendingPathComponent("App/Web/\(name)"), encoding: .utf8)
+    }
+
+    private func count(of needle: String, in text: String) -> Int {
+        text.components(separatedBy: needle).count - 1
+    }
+
+    func testTheModelNeverRecreatesTheRecoveryGateAndResetsItThroughTheProductionMethod() throws {
+        let model = try source("WebShellModel.swift")
+        XCTAssertEqual(count(of: "SignInRecovery()", in: model), 1, "only the stored property's initial value")
+        XCTAssertEqual(count(of: "signInRecovery.resetToHome()", in: model), 1)
+        XCTAssertEqual(count(of: "RedeemAttempts()", in: model), 1, "attempt ids must keep counting across resets")
+    }
+
+    func testTheModelHonoursABlockedAnswerAndNeverOverwritesTheSignInScreen() throws {
+        let model = try source("WebShellModel.swift")
+        XCTAssertEqual(count(of: "case .blocked:", in: model), 2, "open() and the page-bounce recovery")
+        XCTAssertFalse(model.contains("webSessionGate(self, url) {"), "the gate answers with WebSessionGate, not a Bool")
+        XCTAssertEqual(count(of: "guard !signInRecovery.isStopped else { return }", in: model), 4)
+        XCTAssertEqual(count(of: "if !signInRecovery.isStopped { pageState = .loaded }", in: model), 1)
+    }
+
+    func testTheRouterAsksEachTabBeforeItQueuesReplaysOrRefreshesAndMatchesRedeemAttempts() throws {
+        let router = try source("ShellRouter.swift")
+        XCTAssertEqual(count(of: "guard model.allowsAutomaticWork else { return .blocked }", in: router), 1)
+        XCTAssertEqual(count(of: "guard entry.model.allowsAutomaticWork else { continue }", in: router), 1)
+        XCTAssertEqual(count(of: "guard handoff.redeemAttempt == attempt else {", in: router), 1)
+        let model = try source("WebShellModel.swift")
+        XCTAssertTrue(model.contains("guard didStartLoading, signInRecovery.allowsAutomaticWork(at: Date()) else { return }"), "reloadForWebSession() skips a parked tab")
+    }
 }
 
 /// RedeemNavigation: what a navigation means while the shell's own redeem is in flight.

@@ -513,18 +513,33 @@ struct SignInBounceLimiter: Equatable {
     }
 }
 
+/// What the router answers a page load or a recovery step (WebShellModel.webSessionGate and
+/// .webSessionRecovery). Three answers because "false" used to mean both "load it yourself" and
+/// "the loop cap stopped this", and the second must never load anything.
+enum WebSessionGate: Equatable {
+    /// Nothing to hand off (not signed in natively, or the web session is active): load the page now.
+    case allow
+    /// The router took over: it holds the load until the handoff has made a web session.
+    case held
+    /// The tab's sign-in loop cap forbids it. Load nothing, start nothing; the tab stays on "sign in".
+    case blocked
+}
+
 /// The one admission gate for every AUTOMATIC sign-in or recovery step of a tab (T-10055):
 /// the native sign-in pop-up, stepping the page back, and starting or continuing a web-session
 /// handoff/redeem. WebShellModel asks it before each such step and does nothing the answer
-/// forbids; ShellRouter asks the model before it starts a handoff or presents sign-in. A shopper's
-/// own tap is never gated: `userTapped` clears the cap.
+/// forbids; ShellRouter asks the model before it starts, queues, replays or refreshes anything for
+/// the tab. A shopper's own tap is never gated: `userTapped` clears the cap.
 ///
-/// It owns the SignInBounceLimiter and a `generation`, the token of "recovery work that is still
-/// wanted". Work admitted by `.proceed(token:)` may complete only while `isCurrent(token)`: a trip
-/// and a reset to home both advance the generation, so a handoff or redeem that was already in
-/// flight when the cap tripped (or when the web view was replaced) is dropped instead of finishing
-/// and presenting sign-in again. `resetToHome` advances the generation but, on purpose, never touches
-/// the limiter: resetting the web view every lap is how the loop outran BounceGuard.
+/// It owns the SignInBounceLimiter, a `generation` (the token of "recovery work that is still
+/// wanted") and `isStopped` (the tab is parked on its "sign in" screen). Work admitted by
+/// `.proceed(token:)` may complete only while `isCurrent(token)`: a trip and a reset to home both
+/// advance the generation, so a handoff or redeem already in flight when the cap tripped (or when
+/// the web view was replaced) is dropped instead of finishing and presenting sign-in again.
+/// `isStopped` latches on a stop and stays until the shopper taps (or the web view is replaced), so a
+/// late navigation callback or another tab's handoff cannot pull the tab off "sign in".
+/// `resetToHome` advances the generation but, on purpose, never touches the limiter: resetting the
+/// web view every lap is how the loop outran BounceGuard.
 struct SignInRecovery: Equatable {
     enum Decision: Equatable {
         /// Run the automatic step; carry `token` on any work that completes later.
@@ -536,24 +551,37 @@ struct SignInRecovery: Equatable {
 
     private var limiter = SignInBounceLimiter()
     private var generation = 0
+    /// The tab is parked on "sign in" because the cap stopped it; only a tap (or a reset) unparks it.
+    private(set) var isStopped = false
 
     /// A sign-in request from the page or the start of an automatic handoff. Counts toward the cap.
     mutating func automaticRequest(at now: Date) -> Decision {
         switch limiter.record(at: now) {
         case .allowed:
+            isStopped = false
             return .proceed(token: generation)
         case .tripped:
             generation += 1
+            isStopped = true
             return .stop(firstTime: true)
         case .stillTripped:
+            isStopped = true
             return .stop(firstTime: false)
         }
     }
 
     /// A further automatic step of a recovery that was already admitted (the handoff a bounce
     /// started, the native prompt after a failed handoff). Checks the cap, counts nothing.
-    func continueRecovery(at now: Date) -> Decision {
-        limiter.isTripped(at: now) ? .stop(firstTime: false) : .proceed(token: generation)
+    mutating func continueRecovery(at now: Date) -> Decision {
+        guard limiter.isTripped(at: now) else { return .proceed(token: generation) }
+        isStopped = true
+        return .stop(firstTime: false)
+    }
+
+    /// Whether the router may queue, replay or refresh a load for this tab on its own (nothing
+    /// counted): not parked on "sign in" and the cap not tripped.
+    func allowsAutomaticWork(at now: Date) -> Bool {
+        !isStopped && !limiter.isTripped(at: now)
     }
 
     /// False for work admitted before a trip or a reset: it must be dropped, not finished.
@@ -561,15 +589,69 @@ struct SignInRecovery: Equatable {
         token == generation
     }
 
-    /// The web view was replaced. Pending recovery work is stale; the cap keeps counting.
+    /// The web view was replaced. Pending recovery work is stale and the tab is no longer parked
+    /// (its page state is reset too); the cap keeps counting.
     mutating func resetToHome() {
         generation += 1
+        isStopped = false
     }
 
     /// The shopper tapped "Sign in" or "Try again". Admission is restored. The generation is kept:
     /// work that went stale at the trip stays stale.
     mutating func userTapped() {
         limiter.clear()
+        isStopped = false
+    }
+}
+
+/// Which redeem attempt (T-7852) an event belongs to. Every `openRedeem` begins an attempt with a
+/// new id, and each stop, reset, replacement of the web view or later attempt invalidates the
+/// earlier ones, so an outcome that arrives late (a cookie read that finishes after a trip, a retry
+/// and a new handoff on the same web view) is recognised by its id and dropped instead of settling
+/// the NEW handoff. The ids never repeat for the life of the model, resets included. Pure.
+struct RedeemAttempts: Equatable {
+    private var lastIssued = 0
+    private var navigatingID: Int?
+    private var readingID: Int?
+
+    /// True from `begin` until the redeem navigation ends: the shell is mid-redeem.
+    var isNavigating: Bool { navigatingID != nil }
+
+    /// A new redeem attempt; invalidates any earlier one.
+    mutating func begin() -> Int {
+        lastIssued += 1
+        navigatingID = lastIssued
+        readingID = nil
+        return lastIssued
+    }
+
+    /// The redeem navigation ended without a page (expired, bounced, failed, the web process died):
+    /// the id to report once, nil when there is no live attempt.
+    mutating func endNavigation() -> Int? {
+        let id = navigatingID
+        navigatingID = nil
+        return id
+    }
+
+    /// The redeem navigation finished on a page: the session cookie read starts. nil when stale.
+    mutating func startCookieRead() -> Int? {
+        guard let id = navigatingID else { return nil }
+        navigatingID = nil
+        readingID = id
+        return id
+    }
+
+    /// The cookie read for `id` finished. False when that attempt was invalidated meanwhile.
+    mutating func finishCookieRead(_ id: Int) -> Bool {
+        guard readingID == id else { return false }
+        readingID = nil
+        return true
+    }
+
+    /// Stop, reset or replacement of the web view: nothing in flight may report any more.
+    mutating func invalidate() {
+        navigatingID = nil
+        readingID = nil
     }
 }
 

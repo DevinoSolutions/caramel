@@ -9,15 +9,36 @@
 // in every state, because withPosthog drops work made while PostHog is `off`.
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const posthog = vi.hoisted(() => ({
-    init: vi.fn(),
-    register: vi.fn(),
-    capture: vi.fn(),
-    identify: vi.fn(),
-    startSessionRecording: vi.fn(),
-    get_session_id: () => 'session-1',
-    get_distinct_id: () => 'distinct-1',
-}))
+// MOCK: a fake PostHog client. Like the real SDK, reset() drops every
+// registered super property and the properties of a capture are the registered
+// ones merged under the event's own.
+const posthog = vi.hoisted(() => {
+    let registered: Record<string, unknown> = {}
+    const captured: Array<Record<string, unknown>> = []
+    return {
+        init: vi.fn(),
+        register: vi.fn((properties: Record<string, unknown>) => {
+            registered = { ...registered, ...properties }
+        }),
+        reset: vi.fn(() => {
+            registered = {}
+        }),
+        capture: vi.fn(
+            (_event: string, properties?: Record<string, unknown>) => {
+                captured.push({ ...registered, ...properties })
+            },
+        ),
+        captured,
+        clearState: () => {
+            registered = {}
+            captured.length = 0
+        },
+        identify: vi.fn(),
+        startSessionRecording: vi.fn(),
+        get_session_id: () => 'session-1',
+        get_distinct_id: () => 'distinct-1',
+    }
+})
 vi.mock('posthog-js', () => ({ default: posthog }))
 
 vi.mock('@sentry/nextjs', () => ({
@@ -61,6 +82,7 @@ describe('app-shell PostHog super properties', () => {
     beforeEach(() => {
         posthog.init.mockClear()
         posthog.register.mockClear()
+        posthog.clearState()
         // Not the landing route, whose PostHog load is deferred to idle time.
         window.history.pushState({}, '', '/coupons')
     })
@@ -92,5 +114,26 @@ describe('app-shell PostHog super properties', () => {
             expect(properties).not.toHaveProperty('surface')
             expect(properties).not.toHaveProperty('app_build')
         }
+    })
+
+    it('keeps the build on events captured after a logout reset (init -> reset -> capture)', async () => {
+        setUserAgent(
+            'Mozilla/5.0 (iPhone) Mobile/15E148 CaramelApp/1.6.0 (ios) CaramelBuild/42',
+        )
+        const identity = await freshIdentity()
+        identity.initPosthogBrowser()
+        await settle()
+        posthog.capture('before_logout')
+        identity.resetPosthogIdentity()
+        posthog.capture('after_logout')
+        expect(posthog.reset).toHaveBeenCalledTimes(1)
+        const [before, after] = posthog.captured
+        expect(before).toMatchObject({ app_build: '42', surface: 'app-shell' })
+        expect(after).toMatchObject({
+            app_build: '42',
+            app_shell_version: '1.6.0',
+            app_platform: 'ios',
+            surface: 'app-shell',
+        })
     })
 })
