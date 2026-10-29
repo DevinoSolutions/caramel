@@ -219,7 +219,7 @@ function PosterCoupon({
                     style={{ aspectRatio: spot.aspect }}
                 >
                     <div
-                        className="absolute inset-0 bg-gradient-to-br from-caramel via-orange-500 to-orange-600 shadow-caramel-lg"
+                        className="from-caramel shadow-caramel-lg absolute inset-0 bg-gradient-to-br via-orange-500 to-orange-600"
                         style={{
                             borderRadius: spot.radius,
                             ...ticketNotchMask(spot.notch, '50%'),
@@ -286,7 +286,7 @@ function HeroCouponPoster({
                 className="absolute inset-0 overflow-hidden transition-opacity duration-[900ms] ease-out"
                 style={{ opacity: fadeOut ? 0 : 1 }}
             >
-                <div className="absolute left-1/2 top-1/2 h-72 w-72 -translate-x-1/2 -translate-y-1/2 rounded-full bg-caramel/25 blur-3xl dark:bg-caramel/20" />
+                <div className="bg-caramel/25 dark:bg-caramel/20 absolute left-1/2 top-1/2 h-72 w-72 -translate-x-1/2 -translate-y-1/2 rounded-full blur-3xl" />
                 <div className="absolute left-[38%] top-[32%] h-36 w-36 -translate-x-1/2 -translate-y-1/2 rounded-full bg-orange-300/30 blur-2xl" />
             </div>
             {HERO_STATS.map((stat, index) => (
@@ -332,7 +332,7 @@ function StatCard({
                 delay: 0.5 + index * 0.12,
                 ease: revealEase,
             }}
-            className="relative w-32 rounded-2xl bg-gradient-to-br from-caramel to-orange-600 px-5 py-4 text-white shadow-caramel-lg md:w-28"
+            className="from-caramel shadow-caramel-lg relative w-32 rounded-2xl bg-gradient-to-br to-orange-600 px-5 py-4 text-white md:w-28"
             style={ticketNotchMask('0.55rem', '50%')}
         >
             <div className="text-3xl font-extrabold leading-none tracking-tight md:text-2xl">
@@ -434,7 +434,7 @@ export default function HeroSection() {
     return (
         <section
             ref={sectionRef}
-            className="relative mt-[5rem] flex min-h-screen flex-col justify-center overflow-hidden px-6 py-16 text-gray-800 dark:text-white sm:px-5"
+            className="relative mt-[5rem] flex min-h-screen flex-col justify-center overflow-hidden px-6 py-16 text-gray-800 sm:px-5 dark:text-white"
         >
             {/* Floating elements */}
             <div
@@ -516,7 +516,7 @@ export default function HeroSection() {
                         Full-width ancestors give it its final size from the
                         first frame; every loaded position is unchanged, since
                         both boxes centre their content on the same axis. */}
-                    <h1 className="hero-enter mb-6 flex flex-col items-start text-5xl font-bold tracking-tight lg:w-full lg:items-center lg:text-4xl md:text-3xl">
+                    <h1 className="hero-enter mb-6 flex flex-col items-start text-5xl font-bold tracking-tight md:text-3xl lg:w-full lg:items-center lg:text-4xl">
                         <div className="mb-4 text-gray-700 dark:text-white">
                             {HOME_HERO_COPY.welcome}
                         </div>
@@ -564,7 +564,7 @@ export default function HeroSection() {
                     </h1>
 
                     <p
-                        className="hero-enter mb-10 max-w-xl text-xl leading-relaxed text-gray-600 dark:text-gray-300 lg:mx-auto lg:max-w-2xl lg:text-lg md:text-base"
+                        className="hero-enter mb-10 max-w-xl text-xl leading-relaxed text-gray-600 md:text-base lg:mx-auto lg:max-w-2xl lg:text-lg dark:text-gray-300"
                         style={{ animationDelay: '0.4s' }}
                     >
                         {HOME_HERO_COPY.summaryStart}{' '}
@@ -572,7 +572,7 @@ export default function HeroSection() {
                             href="https://github.com/DevinoSolutions/caramel"
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="cursor-pointer rounded px-1 font-semibold text-caramel transition-colors duration-fast ease-motion-out hover:bg-orange-500/10"
+                            className="text-caramel duration-fast ease-motion-out cursor-pointer rounded px-1 font-semibold transition-colors hover:bg-orange-500/10"
                             whileHover={{
                                 backgroundColor: 'rgba(234, 105, 37, 0.1)',
                             }}
@@ -582,7 +582,7 @@ export default function HeroSection() {
                         {HOME_HERO_COPY.and}{' '}
                         <m.a
                             href="#why-not"
-                            className="cursor-pointer rounded px-1 font-semibold text-caramel transition-colors duration-fast ease-motion-out hover:bg-orange-500/10"
+                            className="text-caramel duration-fast ease-motion-out cursor-pointer rounded px-1 font-semibold transition-colors hover:bg-orange-500/10"
                             whileHover={{
                                 backgroundColor: 'rgba(234, 105, 37, 0.1)',
                             }}
@@ -592,7 +592,7 @@ export default function HeroSection() {
                         {HOME_HERO_COPY.summaryMain}
                         <m.a
                             href="#why-not"
-                            className="cursor-pointer rounded px-1 font-semibold text-caramel transition-colors duration-fast ease-motion-out hover:bg-orange-500/10"
+                            className="text-caramel duration-fast ease-motion-out cursor-pointer rounded px-1 font-semibold transition-colors hover:bg-orange-500/10"
                             whileHover={{
                                 backgroundColor: 'rgba(234, 105, 37, 0.1)',
                             }}
@@ -603,7 +603,7 @@ export default function HeroSection() {
                         {HOME_HERO_COPY.or}{' '}
                         <m.a
                             href="#why-not"
-                            className="cursor-pointer rounded px-1 font-semibold text-caramel transition-colors duration-fast ease-motion-out hover:bg-orange-500/10"
+                            className="text-caramel duration-fast ease-motion-out cursor-pointer rounded px-1 font-semibold transition-colors hover:bg-orange-500/10"
                             whileHover={{
                                 backgroundColor: 'rgba(234, 105, 37, 0.1)',
                             }}
@@ -617,13 +617,13 @@ export default function HeroSection() {
                         (stacked below md). The stats moved to the coupon cards
                         in the right column. */}
                     <div
-                        className="hero-enter flex flex-wrap items-center justify-start gap-3 lg:justify-center md:flex-col md:items-center"
+                        className="hero-enter flex flex-wrap items-center justify-start gap-3 md:flex-col md:items-center lg:justify-center"
                         style={{ animationDelay: '0.8s' }}
                     >
                         <InstallSurfaceGate className="contents">
                             <m.a
                                 href="#install-extension"
-                                className="rounded-full bg-gradient-to-r from-caramel to-orange-600 px-6 py-3 text-sm font-semibold text-black shadow-lg hover:from-orange-600 hover:to-caramel hover:shadow-xl md:w-full md:text-center"
+                                className="from-caramel hover:to-caramel rounded-full bg-gradient-to-r to-orange-600 px-6 py-3 text-sm font-semibold text-black shadow-lg hover:from-orange-600 hover:shadow-xl md:w-full md:text-center"
                                 initial={{
                                     boxShadow: '0 0 10px rgba(234,105,37,0.5)',
                                 }}
@@ -660,15 +660,15 @@ export default function HeroSection() {
                             href="https://github.com/DevinoSolutions/caramel"
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="group inline-flex items-center justify-center gap-2 rounded-full border-2 border-caramel/40 bg-transparent px-5 py-3 text-sm font-semibold text-caramel backdrop-blur-sm transition-colors duration-fast ease-motion-out hover:border-caramel hover:bg-caramel hover:text-white md:w-full"
+                            className="border-caramel/40 text-caramel duration-fast ease-motion-out hover:border-caramel hover:bg-caramel group inline-flex items-center justify-center gap-2 rounded-full border-2 bg-transparent px-5 py-3 text-sm font-semibold backdrop-blur-sm transition-colors hover:text-white md:w-full"
                             whileTap={{ scale: 0.98 }}
                         >
-                            <FaGithub className="h-4 w-4 transition-transform duration-base ease-motion-out motion-safe:group-hover:rotate-12" />
+                            <FaGithub className="duration-base ease-motion-out h-4 w-4 transition-transform motion-safe:group-hover:rotate-12" />
                             View Source Code
                         </m.a>
                         <m.a
                             href="#features"
-                            className="rounded-full border-2 border-gray-300/60 bg-transparent px-6 py-3 text-sm font-semibold text-gray-700 backdrop-blur-sm transition-colors duration-fast ease-motion-out hover:border-caramel hover:text-caramel dark:border-gray-600/60 dark:text-gray-300 md:w-full md:text-center"
+                            className="duration-fast ease-motion-out hover:border-caramel hover:text-caramel rounded-full border-2 border-gray-300/60 bg-transparent px-6 py-3 text-sm font-semibold text-gray-700 backdrop-blur-sm transition-colors md:w-full md:text-center dark:border-gray-600/60 dark:text-gray-300"
                             whileTap={{ scale: 0.98 }}
                         >
                             Why Choose Caramel?

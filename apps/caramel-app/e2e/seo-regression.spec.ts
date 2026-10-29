@@ -33,6 +33,8 @@ import { INDEXNOW_KEY, INDEXNOW_KEY_PATH } from '../src/lib/seo/indexnow'
 //   /compare/coupon-extensions 8111 (page body alone, renderToStaticMarkup,
 //                       2026-09-26; header+footer only add)  -> min 5600
 //   /honey-extension   7316 (local dev server, full page, 2026-10-05) -> min 5100
+//   /docs              4616 (page body alone, renderToStaticMarkup,
+//                       2026-10-24; header+footer only add)  -> min 3200
 // (/coupons is thin on purpose: the card grid is a client fetch; its server
 // HTML carries the shell copy + sidebar. If a route legitimately gains or
 // loses big copy, re-measure with the snippet in the PR that added this file
@@ -43,6 +45,7 @@ const ROUTES: ReadonlyArray<{ path: string; minVisibleChars: number }> = [
     { path: '/supported-stores', minVisibleChars: 320 },
     { path: '/apps', minVisibleChars: 900 },
     { path: '/faq', minVisibleChars: 300 },
+    { path: '/docs', minVisibleChars: 3200 },
     { path: '/agent-setup', minVisibleChars: 700 },
     { path: '/pricing', minVisibleChars: 1000 },
     { path: '/sources', minVisibleChars: 350 },

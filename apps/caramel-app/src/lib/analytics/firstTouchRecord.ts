@@ -68,8 +68,7 @@ export const firstTouchRecordSchema = z.object({
 export type FirstTouchRecord = z.infer<typeof firstTouchRecordSchema>
 
 export type FirstTouchParseResult =
-    | { ok: true; record: FirstTouchRecord }
-    | { ok: false; reason: string }
+    { ok: true; record: FirstTouchRecord } | { ok: false; reason: string }
 
 /** Validate an already-JSON-parsed value. Unknown keys are dropped. */
 export function parseFirstTouchRecord(value: unknown): FirstTouchParseResult {

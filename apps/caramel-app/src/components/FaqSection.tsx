@@ -23,16 +23,16 @@ export default function FaqSection(): React.JSX.Element {
         <section id="faq" className="relative overflow-hidden py-32">
             {/* Background hairlines — same section framing as the siblings. */}
             <div className="absolute inset-0">
-                <div className="absolute left-0 top-0 h-px w-full bg-gradient-to-r from-transparent via-caramel/20 to-transparent"></div>
-                <div className="absolute bottom-0 left-0 h-px w-full bg-gradient-to-r from-transparent via-caramel/20 to-transparent"></div>
+                <div className="via-caramel/20 absolute left-0 top-0 h-px w-full bg-gradient-to-r from-transparent to-transparent"></div>
+                <div className="via-caramel/20 absolute bottom-0 left-0 h-px w-full bg-gradient-to-r from-transparent to-transparent"></div>
             </div>
 
             <div className="relative z-10 mx-auto max-w-7xl px-6 lg:px-8">
                 <div className="mb-16 text-center">
-                    <h2 className="mb-8 text-5xl font-extrabold leading-tight tracking-tight text-caramel lg:text-4xl">
+                    <h2 className="text-caramel mb-8 text-5xl font-extrabold leading-tight tracking-tight lg:text-4xl">
                         {FAQ_COPY.heading}
                     </h2>
-                    <p className="mx-auto max-w-3xl text-xl leading-relaxed text-gray-600 dark:text-gray-300 lg:text-lg">
+                    <p className="mx-auto max-w-3xl text-xl leading-relaxed text-gray-600 lg:text-lg dark:text-gray-300">
                         {FAQ_COPY.summary}
                     </p>
                 </div>
@@ -48,16 +48,16 @@ export default function FaqSection(): React.JSX.Element {
                            already beats z-[1]; only opacity stops show-through. */
                         <details
                             key={item.question}
-                            className="group overflow-hidden rounded-2xl border border-caramel/20 bg-gray-50 bg-gradient-to-br from-caramel/5 via-orange-50/30 to-caramel/5 shadow-md transition-colors duration-150 open:border-caramel/60 hover:border-caramel/60 dark:border-caramel/30 dark:bg-darkBg dark:from-caramel/10 dark:via-orange-900/20 dark:to-caramel/10"
+                            className="border-caramel/20 from-caramel/5 to-caramel/5 open:border-caramel/60 hover:border-caramel/60 dark:border-caramel/30 dark:bg-darkBg dark:from-caramel/10 dark:to-caramel/10 group overflow-hidden rounded-2xl border bg-gray-50 bg-gradient-to-br via-orange-50/30 shadow-md transition-colors duration-150 dark:via-orange-900/20"
                         >
-                            <summary className="flex cursor-pointer list-none items-center justify-between gap-4 p-6 text-left text-lg font-bold tracking-tight text-gray-800 marker:hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/70 dark:text-white sm:p-4 sm:text-base [&::-webkit-details-marker]:hidden">
+                            <summary className="focus-visible:ring-caramel/70 flex cursor-pointer list-none items-center justify-between gap-4 p-6 text-left text-lg font-bold tracking-tight text-gray-800 marker:hidden focus-visible:outline-none focus-visible:ring-2 sm:p-4 sm:text-base dark:text-white [&::-webkit-details-marker]:hidden">
                                 {item.question}
                                 <FaChevronDown
                                     aria-hidden="true"
-                                    className="flex-shrink-0 text-caramel transition-transform duration-fast group-open:rotate-180"
+                                    className="text-caramel duration-fast shrink-0 transition-transform group-open:rotate-180"
                                 />
                             </summary>
-                            <p className="motion-faq-answer px-6 pb-6 text-base leading-relaxed text-gray-600 dark:text-gray-400 sm:px-4 sm:pb-4 sm:text-sm">
+                            <p className="motion-faq-answer px-6 pb-6 text-base leading-relaxed text-gray-600 sm:px-4 sm:pb-4 sm:text-sm dark:text-gray-400">
                                 {item.answer}
                             </p>
                         </details>
@@ -66,14 +66,14 @@ export default function FaqSection(): React.JSX.Element {
                         Weighing Caramel against Honey, SimplyCodes or Rakuten?{' '}
                         <Link
                             href={COMPARISON_PATH}
-                            className="font-semibold text-caramel hover:underline"
+                            className="text-caramel font-semibold hover:underline"
                         >
                             See the coupon extensions compared
                         </Link>
                         , or read{' '}
                         <Link
                             href={HONEY_GUIDE_PATH}
-                            className="font-semibold text-caramel hover:underline"
+                            className="text-caramel font-semibold hover:underline"
                         >
                             what changed with the Honey extension
                         </Link>
@@ -85,7 +85,7 @@ export default function FaqSection(): React.JSX.Element {
                             href={DISCORD_INVITE_URL}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="font-semibold text-caramel hover:underline"
+                            className="text-caramel font-semibold hover:underline"
                         >
                             <FaDiscord
                                 aria-hidden="true"
@@ -96,7 +96,7 @@ export default function FaqSection(): React.JSX.Element {
                         or{' '}
                         <Link
                             href="/support"
-                            className="font-semibold text-caramel hover:underline"
+                            className="text-caramel font-semibold hover:underline"
                         >
                             contact support
                         </Link>

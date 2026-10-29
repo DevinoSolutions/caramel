@@ -1,7 +1,8 @@
 import GrowthPromptCard from '@/components/growth/GrowthPromptCard'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import tailwindConfig from '../../tailwind.config'
 
 // This repo's Tailwind screens are MAX-width: `md:` means "<= 767px", not
 // "from 768px up". The growth card is a bottom-right corner card on desktop
@@ -31,11 +32,11 @@ function cardClasses(): Set<string> {
 
 describe('GrowthPromptCard responsive layout', () => {
     it('relies on max-width Tailwind screens (the premise of the class split)', () => {
-        const screens = tailwindConfig.theme?.screens as Record<
-            string,
-            { max?: string }
-        >
-        expect(screens.md).toEqual({ max: '767px' })
+        const css = readFileSync(
+            resolve(__dirname, '../../src/styles/globals.css'),
+            'utf8',
+        )
+        expect(css).toContain('@custom-variant md (@media (max-width: 767px))')
     })
 
     it('is the 22rem bottom-right corner card with NO breakpoint prefix (desktop)', () => {

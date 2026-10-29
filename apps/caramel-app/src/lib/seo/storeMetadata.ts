@@ -20,6 +20,7 @@
 // date the FAQ prints), and it appears only while that month is the current
 // one: a title never dates a list to a month it was not updated in.
 import type { StoreCouponFacts } from '@/lib/couponsRepo'
+import { storeIntentPilotFor } from '@/lib/seo/storeIntentPilot'
 import { parse } from 'tldts'
 
 // Google cuts titles at about 600px (roughly 60 characters) and descriptions
@@ -224,9 +225,13 @@ export function buildStoreTitle(input: StoreMetadataInput): string {
             : `${name} Coupons & Promo Codes`
         return fitting([`${empty}${SITE_SUFFIX}`, empty], TITLE_MAX)
     }
-    const head = uk
-        ? `${name} Discount Codes & Vouchers`
-        : `${name} Promo Codes & Coupons`
+    // T-7856 pilot (storeIntentPilot.ts): four stores lead with the term order
+    // their query uses. Every other store takes the default head.
+    const head =
+        storeIntentPilotFor(base)?.titleHead ??
+        (uk
+            ? `${name} Discount Codes & Vouchers`
+            : `${name} Promo Codes & Coupons`)
     const count = total.toLocaleString('en-US')
     const codes = total === 1 ? 'Code' : 'Codes'
     const month = updatedThisMonth(facts.lastUpdated, now)
@@ -286,8 +291,20 @@ export function buildStoreDescription(input: StoreMetadataInput): string {
     const action = one
         ? "Copy it, or let Caramel's free extension try it at checkout."
         : "Copy a code, or let Caramel's free extension try them at checkout."
+    // T-7856 pilot: say what the store is first, so "coursehero promo code"
+    // readers see Coursera is the online-course platform. Tried before the
+    // default candidates; they remain the fallback when it does not fit.
+    const descriptor = storeIntentPilotFor(base)?.descriptor
+    const described = descriptor
+        ? [
+              `${name}, ${descriptor}: ${count} ${full}${upTo}. ${action}`,
+              `${name}, ${descriptor}: ${count} ${short}${upTo}. ${action}`,
+              `${name}, ${descriptor}: ${count} ${short}${upTo}.`,
+          ]
+        : []
     return fitting(
         [
+            ...described,
             `${count} ${name} ${full} for ${base}${upTo}. ${action}`,
             `${count} ${name} ${full}${upTo}. ${action}`,
             `${count} ${name} ${short}${upTo}. ${action}`,

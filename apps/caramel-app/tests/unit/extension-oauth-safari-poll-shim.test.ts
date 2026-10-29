@@ -56,8 +56,7 @@ const { envMock, KNOWN_ORIGIN, BASE } = vi.hoisted(() => {
             BETTER_AUTH_URL: BASE,
             // oauthTokenCrypto.ts encrypts the stored access/refresh tokens.
             BETTER_AUTH_SECRET: 'safari-shim-test-auth-secret' as
-                | string
-                | undefined,
+                string | undefined,
             JWT_SECRET: undefined as string | undefined,
             CHROME_EXTENSION_ORIGIN: 'chrome-extension://known-chrome-id',
             FIREFOX_EXTENSION_ORIGIN: undefined as string | undefined,

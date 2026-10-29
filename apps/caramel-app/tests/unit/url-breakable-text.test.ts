@@ -6,10 +6,21 @@ import { describe, expect, it } from 'vitest'
 // layout proof lives in e2e/agent-setup.spec.ts; this pins the split rules.
 
 describe('urlBreakSegments', () => {
-    it('breaks after path slashes but never inside the scheme //', () => {
+    it('breaks after path slashes and after the scheme //, never between its slashes', () => {
         expect(
             urlBreakSegments('https://grabcaramel.com/agent-setup/prompt.md'),
-        ).toEqual(['https://grabcaramel.com/', 'agent-setup/', 'prompt.md'])
+        ).toEqual(['https://', 'grabcaramel.com/', 'agent-setup/', 'prompt.md'])
+    })
+
+    it('puts a long staging host in its own segment (T-6900)', () => {
+        expect(
+            urlBreakSegments('from https://dev.grabcaramel.com/agent-setup/x'),
+        ).toEqual([
+            'from https://',
+            'dev.grabcaramel.com/',
+            'agent-setup/',
+            'x',
+        ])
     })
 
     it('breaks after ? and & in a query string', () => {
@@ -18,7 +29,8 @@ describe('urlBreakSegments', () => {
                 'curl -s "https://grabcaramel.com/api/coupons?site=nike.com&limit=1"',
             ),
         ).toEqual([
-            'curl -s "https://grabcaramel.com/',
+            'curl -s "https://',
+            'grabcaramel.com/',
             'api/',
             'coupons?',
             'site=nike.com&',
@@ -33,10 +45,19 @@ describe('urlBreakSegments', () => {
             'ends with a slash/',
             '',
             'no url here',
+            'file:///a/b',
+            '//host/x',
+            'http:/x',
+            'https://',
+            'a https://a.com/ and http://b.org/p?q=1&r=2',
         ]
         for (const text of samples) {
             expect(urlBreakSegments(text).join('')).toBe(text)
         }
+    })
+
+    it('never breaks inside the /// of a file: URL', () => {
+        expect(urlBreakSegments('file:///a/b')).toEqual(['file:///a/', 'b'])
     })
 
     it('never leaves a leading slash alone on its own segment', () => {

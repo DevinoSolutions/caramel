@@ -28,8 +28,13 @@
 // point of the trust loop is to own this signal ourselves rather than mirror
 // (or mutate) the externally-owned catalog. Signals are keyed by the catalog
 // coupon id as a string, matching the app's Coupon.id: string.
+import type { Prisma, PrismaClient } from '@/generated/prisma/client'
 import type { ReportReporter } from '@/lib/couponReportDedupe'
-import { FAILING_WINDOW_MS, keepsFailing } from '@/lib/coupons'
+import {
+    FAILING_WINDOW_MS,
+    MAX_LOW_TRUST_FAIL_WEIGHT,
+    keepsFailing,
+} from '@/lib/coupons'
 import {
     writeFailedSignal,
     writeUsageSignal,
@@ -37,7 +42,6 @@ import {
 } from '@/lib/couponsRepo'
 import { env } from '@/lib/env'
 import prisma from '@/lib/prisma'
-import type { Prisma, PrismaClient } from '@prisma/client'
 import * as Sentry from '@sentry/nextjs'
 import { createHmac } from 'node:crypto'
 
@@ -59,10 +63,13 @@ export type CouponFailureWriter = Pick<
 >
 
 /**
- * How much one distinct reporter counts toward a failure quorum. A signed-in
- * account costs a verified email, an anonymous network costs a proxy address,
- * so an account counts double. coupons.ts FAILING_MIN_FAIL_WEIGHT /
- * KEEPS_FAILING_MIN_FAIL_WEIGHT are the thresholds these add up against.
+ * How much one distinct reporter counts toward a failure quorum. An ESTABLISHED
+ * signed-in account (accountReputation.ts: it has existed for a while) counts
+ * double an anonymous network. A signed-in account that is still young costs
+ * only a verified email, which is as cheap as a proxy address, so it counts as
+ * a network. coupons.ts FAILING_MIN_FAIL_WEIGHT / KEEPS_FAILING_MIN_FAIL_WEIGHT
+ * are the thresholds these add up against, and MAX_LOW_TRUST_FAIL_WEIGHT caps
+ * the weight-`network` reporters together (recomputeFailWeight).
  */
 export const REPORTER_WEIGHT = { account: 2, network: 1 } as const
 
@@ -96,7 +103,7 @@ export function reporterHash(reporter: ReportReporter): string {
 
 /** A reporter's weight toward a failure quorum. */
 export function reporterWeight(reporter: ReportReporter): number {
-    return reporter.kind === 'user'
+    return reporter.kind === 'user' && reporter.established
         ? REPORTER_WEIGHT.account
         : REPORTER_WEIGHT.network
 }
@@ -110,6 +117,15 @@ export function reporterWeight(reporter: ReportReporter): number {
  * Matches the T-4372 "2 distinct reporters" rule.
  */
 export const CLEARING_WORKED_WEIGHT = 2
+
+/**
+ * Most clearing weight the LOW-TRUST reporters (anonymous networks, young
+ * accounts) can add together, the mirror of coupons.ts MAX_LOW_TRUST_FAIL_WEIGHT:
+ * one below CLEARING_WORKED_WEIGHT, so no number of them clears a failure quorum
+ * and only an established account's success does. Without it two forged
+ * anonymous successes would undo a quorum of honest failures.
+ */
+export const MAX_LOW_TRUST_CLEARING_WEIGHT = CLEARING_WORKED_WEIGHT - 1
 
 /**
  * Recompute coupon_signals.fail_weight for a coupon from its reporter rows:
@@ -132,59 +148,107 @@ async function recomputeFailWeight(
         select: { outcome: true, weight: true, lastAt: true },
     })
     const worked = rows.filter(row => row.outcome === 'worked')
-    let total = 0
+    // Reporters at the account weight (or above: the 'legacy' seed rows weigh
+    // 2, 4 or 6) count in full. The weight-`network` reporters (anonymous
+    // networks, young accounts) are cheap to mint, so together they stop at
+    // MAX_LOW_TRUST_FAIL_WEIGHT: below the sink threshold, so a code can never
+    // be sunk without an established account behind it.
+    let trusted = 0
+    let lowTrust = 0
     for (const failure of rows) {
         if (failure.outcome !== 'failed') continue
-        const clearing = worked.reduce(
-            (sum, success) =>
-                success.lastAt >= failure.lastAt ? sum + success.weight : sum,
-            0,
-        )
-        if (clearing < CLEARING_WORKED_WEIGHT) total += failure.weight
+        let trustedClearing = 0
+        let lowTrustClearing = 0
+        for (const success of worked) {
+            if (success.lastAt < failure.lastAt) continue
+            if (success.weight >= REPORTER_WEIGHT.account) {
+                trustedClearing += success.weight
+            } else {
+                lowTrustClearing += success.weight
+            }
+        }
+        const clearing =
+            trustedClearing +
+            Math.min(lowTrustClearing, MAX_LOW_TRUST_CLEARING_WEIGHT)
+        if (clearing >= CLEARING_WORKED_WEIGHT) continue
+        if (failure.weight >= REPORTER_WEIGHT.account) trusted += failure.weight
+        else lowTrust += failure.weight
     }
     await tx.couponSignal.update({
         where: { couponId },
-        data: { failWeight: total },
+        data: {
+            failWeight: trusted + Math.min(lowTrust, MAX_LOW_TRUST_FAIL_WEIGHT),
+        },
     })
 }
 
 /**
- * A reporter said this coupon worked at checkout — stamp the last-worked time
- * (it drives "Verified"/"just worked", unchanged). Deliberately does NOT bump
- * workCount: a successful apply ALSO fires POST /api/coupons/increment
- * (→ recordUsage), which owns the counter. When the coupon carries a live
- * failure quorum (fail_weight > 0) the reporter's success is also recorded in
- * coupon_signal_reporters and the quorum recomputed, so a success clears
- * failures only once CLEARING_WORKED_WEIGHT of distinct reporters agree. A
- * coupon with no failures stores nothing about the reporter: a success older
- * than every failure never counts for anything. One transaction (a singleton
- * client is wrapped, a transaction client is joined).
+ * A reporter said this coupon worked at checkout. Whether that moves
+ * `lastWorkedAt` (the "Verified"/"just worked" stamp, which also lists the code
+ * in "Codes that just worked") depends on WHO says so, because the request is
+ * client-asserted and cheap to forge:
+ *   - an ESTABLISHED account (reporter.established) stamps on its own say-so,
+ *     unless `options.demote` says its daily stamp cap is spent
+ *     (checkoutWorkedStamp.ts workedStampCapSpent), in which case it counts as
+ *     low-trust for this report;
+ *   - a caller that already vetted the shopper passes `options.forceStamp` (the
+ *     checkout capture, checkoutWorkedStamp.ts) and stamps even for a young
+ *     account;
+ *   - a LOW-TRUST reporter (anonymous network, young account, demoted account)
+ *     NEVER moves `lastWorkedAt`, however many of them agree: three throwaway
+ *     addresses could otherwise keep a dead code Verified forever. The report is
+ *     accepted, the coupon's existence is checked, and nothing else is stored
+ *     (no reporter row), because nothing would ever read it.
+ * Deliberately does NOT bump workCount: a successful apply ALSO fires POST
+ * /api/coupons/increment (→ recordUsage), which owns the counter. When the
+ * coupon carries a live failure quorum (fail_weight > 0) a stamping reporter's
+ * success is also recorded and the quorum recomputed, so a success clears
+ * failures only once enough weight of distinct reporters agree. One transaction
+ * (a singleton client is wrapped, a transaction client is joined).
  *
- * Resolves true when the signal was written, false when `couponId` is not a
- * catalog row (couponsRepo.writeWorkedSignal folds that existence check into
- * its single upsert statement): nothing was written, and the caller owns the
- * unknown-coupon response.
+ * Resolves true when the coupon exists, false when `couponId` is not a catalog
+ * row (couponsRepo.writeWorkedSignal folds that existence check into its single
+ * upsert statement): nothing was written, and the caller owns the
+ * unknown-coupon response. True does NOT say the stamp moved: a low-trust report
+ * is accepted and not stamped, and the caller answers it exactly like any other.
  */
 export async function recordWorked(
     couponId: string,
     reporter: ReportReporter,
     client: CouponFailureWriter | PrismaClient = prisma,
+    options: { forceStamp?: boolean; demote?: boolean } = {},
 ): Promise<boolean> {
+    const lowTrust = isLowTrustWorked(reporter, options)
     if ('$transaction' in client) {
-        return client.$transaction(tx => recordWorkedIn(couponId, reporter, tx))
+        return client.$transaction(tx =>
+            recordWorkedIn(couponId, reporter, tx, lowTrust),
+        )
     }
-    return recordWorkedIn(couponId, reporter, client)
+    return recordWorkedIn(couponId, reporter, client, lowTrust)
+}
+
+function isLowTrustWorked(
+    reporter: ReportReporter,
+    options: { forceStamp?: boolean; demote?: boolean },
+): boolean {
+    if (options.forceStamp === true) return false
+    if (options.demote === true) return true
+    return !(reporter.kind === 'user' && reporter.established)
 }
 
 async function recordWorkedIn(
     couponId: string,
     reporter: ReportReporter,
     tx: CouponFailureWriter,
+    lowTrust: boolean,
 ): Promise<boolean> {
     const now = new Date()
-    const signal = await writeWorkedSignal(couponId, tx)
+    const signal = await writeWorkedSignal(couponId, tx, { stamp: !lowTrust })
     if (!signal) return false
-    if (signal.failWeight <= 0) return true
+    // A low-trust success stores nothing; a stamping reporter's success is only
+    // remembered while the coupon carries a failure quorum it can clear: a
+    // coupon with no failures stores nothing about the reporter.
+    if (lowTrust || signal.failWeight <= 0) return true
     const hash = reporterHash(reporter)
     const weight = reporterWeight(reporter)
     await tx.couponSignalReporter.upsert({

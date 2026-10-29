@@ -15,7 +15,7 @@ import {
     codeSharingAccepted,
     parseCodeSharingConsent,
 } from '../code-sharing-consent.js'
-import { trustedClick, trustedKey } from './_trusted-events.mjs'
+import { implOf, trustedClick, trustedKey } from './_trusted-events.mjs'
 
 // The runner's apply overlay as the runner makes it: marked as ours
 // (UI-helpers.js createCaramelShadowHost), which the page cannot do.
@@ -113,13 +113,7 @@ function trusted(event) {
 function installTrustedShim() {
     const flip = event => {
         if (!_asShopper.has(event)) return
-        const impl =
-            event[
-                Object.getOwnPropertySymbols(event).find(s =>
-                    String(s).includes('impl'),
-                )
-            ]
-        impl.isTrusted = true
+        implOf(event).isTrusted = true
     }
     for (const type of ['click', 'keydown', 'input'])
         window.addEventListener(type, flip, true)

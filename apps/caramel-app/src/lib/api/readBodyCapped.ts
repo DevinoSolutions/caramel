@@ -28,5 +28,7 @@ export async function readBodyCapped(
         }
         chunks.push(value)
     }
-    return { ok: true, text: Buffer.concat(chunks).toString('utf8') }
+    // TextDecoder drops a leading UTF-8 BOM like Request.json() does; a plain
+    // Buffer.toString('utf8') keeps it and JSON.parse then throws on it.
+    return { ok: true, text: new TextDecoder().decode(Buffer.concat(chunks)) }
 }

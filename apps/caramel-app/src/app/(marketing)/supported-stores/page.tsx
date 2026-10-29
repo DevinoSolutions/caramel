@@ -83,7 +83,7 @@ export default async function SupportedSitesPage() {
         addedLabel: formatStoreAddedLabel(row.added_at, now),
     }))
     return (
-        <main className="flex min-h-screen flex-col items-center px-6 pt-32 dark:bg-darkBg">
+        <main className="dark:bg-darkBg flex min-h-screen flex-col items-center px-6 pt-32">
             <SearchSection
                 initialTopSites={initialTopSites}
                 recentlyAddedStores={recentlyAddedStores}

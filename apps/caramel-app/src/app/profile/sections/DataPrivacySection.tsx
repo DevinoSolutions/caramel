@@ -2,6 +2,7 @@
 
 import ConfirmDialog from '@/components/profile/ConfirmDialog'
 import ProfileSection from '@/components/profile/ProfileSection'
+import { resetPosthogIdentity } from '@/lib/analytics/identity'
 import { promptSupportOnFailure } from '@/lib/feedback/promptSupportOnFailure'
 import {
     bodyTextClasses,
@@ -14,18 +15,12 @@ import type { ProfileOverview } from '@/lib/profile/types'
 import { useState } from 'react'
 import { toast } from 'sonner'
 
-// Export + danger zone.
-//
-// TODO: ACCOUNT deletion (removing the login itself) is deliberately NOT here.
-// It is a larger job — Better Auth session teardown, extension session
-// revocation, an email confirmation step — and shipping a "delete my data"
-// button that quietly also deleted the account would be the worst possible
-// version of it. The copy below is explicit that the account stays. A later PR
-// adds account deletion as its own control in this section.
-
-/** The literal string the server also requires in the request body. Typed on
- * a phone keyboard, so it is DELETE and not the account's email address. */
 const CONFIRM_WORD = 'DELETE'
+
+// Held in a constant: a class string that mixes the custom `xs` breakpoint with
+// standard ones sorts differently under the repo-root prettier (husky) and
+// apps/caramel-app (CI), and a constant is not sorted by either.
+const DANGER_ACTION_BUTTON_CLASS = `${dangerButtonClasses} mt-4 md:w-full xs:w-full`
 
 export default function DataPrivacySection({
     overview,
@@ -37,6 +32,7 @@ export default function DataPrivacySection({
     onDeleted: () => void
 }) {
     const [dialogOpen, setDialogOpen] = useState(false)
+    const [accountDialogOpen, setAccountDialogOpen] = useState(false)
     const [busy, setBusy] = useState(false)
 
     const savingsCount = overview?.savings.eventCount ?? 0
@@ -79,6 +75,36 @@ export default function DataPrivacySection({
             promptSupportOnFailure({
                 error,
                 operation: 'account_data_delete',
+            })
+        } finally {
+            setBusy(false)
+        }
+    }
+
+    async function deleteAccount() {
+        setBusy(true)
+        try {
+            const res = await fetch('/api/account/delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ confirm: CONFIRM_WORD }),
+            })
+            if (!res.ok) throw new Error(`Delete failed with ${res.status}`)
+            setAccountDialogOpen(false)
+            // The server has just deleted this id's PostHog person. Drop the
+            // browser's persisted distinct id before the redirect, or posthog-js
+            // keeps sending events under it and re-creates the person.
+            resetPosthogIdentity()
+            toast.success('Your account has been deleted.')
+            window.location.href = '/login'
+        } catch (error) {
+            toast.error(
+                "Couldn't delete your account. Nothing was removed — please try again.",
+            )
+            promptSupportOnFailure({
+                error,
+                operation: 'account_delete',
             })
         } finally {
             setBusy(false)
@@ -151,11 +177,30 @@ export default function DataPrivacySection({
                             type="button"
                             onClick={() => setDialogOpen(true)}
                             disabled={nothingToDelete}
-                            className={`${dangerButtonClasses} mt-4 md:w-full xs:w-full`}
+                            className={DANGER_ACTION_BUTTON_CLASS}
                         >
                             {nothingToDelete
                                 ? 'Nothing to delete'
                                 : 'Delete my data'}
+                        </button>
+                    </div>
+
+                    <div className="mt-6 border-t border-red-200 pt-6 dark:border-red-900/40">
+                        <p className="font-semibold text-gray-900 dark:text-white">
+                            Delete my account
+                        </p>
+                        <p className={`${bodyTextClasses} mt-1`}>
+                            Permanently removes your Caramel account, all your
+                            data, and signs you out everywhere. Any codes
+                            you&apos;ve submitted stay but lose your name. This
+                            can&apos;t be undone.
+                        </p>
+                        <button
+                            type="button"
+                            onClick={() => setAccountDialogOpen(true)}
+                            className={DANGER_ACTION_BUTTON_CLASS}
+                        >
+                            Delete my account
                         </button>
                     </div>
                 </div>
@@ -201,6 +246,39 @@ export default function DataPrivacySection({
                                 </>
                             )}
                             Your account stays, and Caramel keeps working.
+                        </p>
+                        <p className={`${bodyTextClasses} mt-3`}>
+                            Want a copy first?{' '}
+                            <a
+                                href="/api/account/export"
+                                download
+                                className="font-semibold underline underline-offset-2"
+                            >
+                                Download your data
+                            </a>{' '}
+                            before you delete.
+                        </p>
+                    </>
+                }
+            />
+
+            <ConfirmDialog
+                open={accountDialogOpen}
+                onClose={() => setAccountDialogOpen(false)}
+                onConfirm={deleteAccount}
+                title="Delete your Caramel account?"
+                confirmLabel="Delete my account"
+                typeToConfirm={CONFIRM_WORD}
+                tone="danger"
+                busy={busy}
+                body={
+                    <>
+                        <p className={bodyTextClasses}>
+                            This permanently deletes your account, signs you out
+                            of every device, and removes all your Caramel data
+                            (savings, followed stores, reports). Codes
+                            you&apos;ve submitted keep their text but lose your
+                            attribution.
                         </p>
                         <p className={`${bodyTextClasses} mt-3`}>
                             Want a copy first?{' '}

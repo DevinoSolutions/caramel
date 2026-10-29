@@ -55,11 +55,11 @@ function renderSection(overview: ProfileOverview | null) {
     )
 }
 
-/** The danger-zone button, as an HTMLButtonElement so `.disabled` can be read
- * directly — this repo's vitest setup carries no jest-dom matchers. */
+/** The DATA-delete button (not the account-delete one), as an
+ * HTMLButtonElement so `.disabled` can be read directly. */
 function deleteButton(): HTMLButtonElement {
     return screen.getByRole('button', {
-        name: /nothing to delete|delete my/i,
+        name: /nothing to delete|delete my data/i,
     }) as HTMLButtonElement
 }
 

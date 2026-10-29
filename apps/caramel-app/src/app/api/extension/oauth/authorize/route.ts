@@ -89,9 +89,7 @@ export const GET = withRoute(
     async ({ req }) => {
         const { searchParams } = new URL(req.url)
         const provider = searchParams.get('provider') as
-            | 'google'
-            | 'apple'
-            | null
+            'google' | 'apple' | null
         const redirectUri = searchParams.get('redirect_uri')
         // COMPATIBILITY SHIM (see createSignedState above) —
         // TODO(safari-shim-removal). Absent for Chrome/Firefox, which keeps

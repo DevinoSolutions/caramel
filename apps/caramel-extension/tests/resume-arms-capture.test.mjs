@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { tabHandoffBackground } from './_tab-handoff-background.mjs'
+import { implOf } from './_trusted-events.mjs'
 // The background's side of the per-tab handoffs (see the helper).
 const handoffs = tabHandoffBackground()
 
@@ -119,10 +120,7 @@ const trusted = event => {
 }
 function flipTrusted(event) {
     if (!_asShopper.has(event)) return
-    const implKey = Object.getOwnPropertySymbols(event).find(s =>
-        String(s).includes('impl'),
-    )
-    event[implKey].isTrusted = true
+    implOf(event).isTrusted = true
 }
 
 function setText(el, text) {

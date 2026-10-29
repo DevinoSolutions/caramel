@@ -37,9 +37,7 @@ import {
 } from './posthogBrowser'
 
 export type InstallAttributionResult =
-    | 'recorded'
-    | 'already_recorded'
-    | 'failed'
+    'recorded' | 'already_recorded' | 'failed'
 
 const BROWSER_GUARD_PREFIX = 'cm_ext_installed_browser:'
 const SERVER_GUARD_PREFIX = 'cm_ext_installed_server:'

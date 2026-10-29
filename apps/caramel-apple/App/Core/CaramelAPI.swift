@@ -124,28 +124,7 @@ struct CaramelAPI {
 // MARK: - Public catalog routes
 
 extension CaramelAPI {
-    /// GET /api/coupons/recently-worked
-    func recentlyWorked() async throws -> [RecentlyWorkedCoupon] {
-        let response: RecentlyWorkedResponse = try await get("/api/coupons/recently-worked")
-        return response.coupons
-    }
-
-    /// GET /api/sites/top-sites
-    func topStores() async throws -> [String] {
-        let response: SitesResponse = try await get("/api/sites/top-sites")
-        return response.sites.compactMap { $0 }
-    }
-
-    /// GET /api/coupons/stores?q=&limit= (empty `query` browses).
-    func storeOptions(query: String, limit: Int = 30) async throws -> [String] {
-        let response: SitesResponse = try await get(
-            "/api/coupons/stores",
-            query: [URLQueryItem(name: "q", value: query), URLQueryItem(name: "limit", value: String(limit))]
-        )
-        return response.sites.compactMap { $0 }
-    }
-
-    /// GET /api/coupons?site=&page=&limit=
+    /// GET /api/coupons?site=&page=&limit= (AlertsEngine reads only the total).
     func coupons(site: String, page: Int = 1, limit: Int = 50) async throws -> CouponsPage {
         try await get(
             "/api/coupons",
@@ -164,11 +143,6 @@ extension CaramelAPI {
     /// GET /api/extension/me
     func me(bearer: String) async throws -> MeResponse {
         try await get("/api/extension/me", bearer: bearer)
-    }
-
-    /// GET /api/account/overview
-    func overview(bearer: String) async throws -> OverviewResponse {
-        try await get("/api/account/overview", bearer: bearer)
     }
 
     /// GET /api/account/favorites

@@ -57,11 +57,7 @@ export const API = {
 } as const
 
 export type AgentId =
-    | 'claude-code'
-    | 'codex'
-    | 'cursor'
-    | 'opencode'
-    | 'github-copilot'
+    'claude-code' | 'codex' | 'cursor' | 'opencode' | 'github-copilot'
 
 export type AgentGuide = {
     id: AgentId

@@ -29,7 +29,7 @@ export default function SourceRefList({
                         key={id}
                         href={`#source-${n}`}
                         aria-label={`Source ${n}: ${COMPARISON_SOURCES[id].title}`}
-                        className="ml-0.5 align-super text-xs font-semibold text-caramel hover:underline"
+                        className="text-caramel ml-0.5 align-super text-xs font-semibold hover:underline"
                     >
                         [{n}]
                     </a>
@@ -58,7 +58,7 @@ export function SourceList({
                     >
                         <a
                             href={source.url}
-                            className="font-medium text-caramel hover:underline"
+                            className="text-caramel font-medium hover:underline"
                         >
                             {source.title}
                         </a>

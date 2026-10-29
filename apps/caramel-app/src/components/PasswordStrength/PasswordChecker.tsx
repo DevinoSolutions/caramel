@@ -33,7 +33,7 @@ const PasswordChecker = ({
     ]
 
     return (
-        <div className="w-full rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 dark:border-gray-700 dark:bg-darkBg">
+        <div className="dark:bg-darkBg w-full rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 dark:border-gray-700">
             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                 Password requirements
             </p>

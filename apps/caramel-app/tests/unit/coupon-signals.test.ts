@@ -214,6 +214,13 @@ describe('attachSignals (app-owned lastWorkedAt merge)', () => {
 
 describe('recordWorked (owns lastWorkedAt ONLY — W4-D2 split)', () => {
     const anon: ReportReporter = { kind: 'ip', ip: '203.0.113.9' }
+    // An ESTABLISHED account stamps on its own say-so; an anonymous network does
+    // not (see the low-trust tests below).
+    const established: ReportReporter = {
+        kind: 'user',
+        userId: 'user-1',
+        established: true,
+    }
 
     /**
      * A transaction client whose coupon_signals row carries `failWeight`
@@ -245,7 +252,7 @@ describe('recordWorked (owns lastWorkedAt ONLY — W4-D2 split)', () => {
 
     it('stamps lastWorkedAt on both insert and conflict in ONE statement, and NEVER touches workCount', async () => {
         const tx = txWith(0)
-        expect(await recordWorked('42', anon, tx as never)).toBe(true)
+        expect(await recordWorked('42', established, tx as never)).toBe(true)
 
         expect(tx.$queryRaw).toHaveBeenCalledTimes(1)
         const query = tx.$queryRaw.mock.calls[0]![0]
@@ -268,9 +275,73 @@ describe('recordWorked (owns lastWorkedAt ONLY — W4-D2 split)', () => {
         expect(tx.couponSignal.update).not.toHaveBeenCalled()
     })
 
-    it('a coupon with no failure quorum stores nothing about the reporter', async () => {
+    it('a LOW-TRUST report (anonymous network) NEVER stamps: the statement is the existence gate only, and nothing is stored about the reporter', async () => {
         const tx = txWith(0)
+        expect(await recordWorked('42', anon, tx as never)).toBe(true)
+
+        expect(tx.$queryRaw).toHaveBeenCalledTimes(1)
+        const query = tx.$queryRaw.mock.calls[0]![0]
+        expect(query.sql).not.toContain('last_worked_at')
+        expect(query.sql).toContain('updated_at = coupon_signals.updated_at')
+        expect(tx.couponSignalReporter.upsert).not.toHaveBeenCalled()
+        expect(tx.couponSignal.update).not.toHaveBeenCalled()
+    })
+
+    it('a low-trust report stores nothing even when the coupon carries a failure quorum (it could never clear one)', async () => {
+        const tx = txWith(4)
         await recordWorked('42', anon, tx as never)
+        await recordWorked(
+            '42',
+            { kind: 'user', userId: 'young', established: false },
+            tx as never,
+        )
+
+        expect(tx.couponSignalReporter.upsert).not.toHaveBeenCalled()
+        expect(tx.couponSignal.update).not.toHaveBeenCalled()
+        for (const call of tx.$queryRaw.mock.calls) {
+            expect(call[0].sql).not.toContain('last_worked_at')
+        }
+    })
+
+    it('demote (an established account past its daily stamp cap) is treated as low-trust: no stamp, no reporter row', async () => {
+        const tx = txWith(4)
+        await recordWorked('42', established, tx as never, { demote: true })
+
+        expect(tx.$queryRaw.mock.calls[0]![0].sql).not.toContain(
+            'last_worked_at',
+        )
+        expect(tx.couponSignalReporter.upsert).not.toHaveBeenCalled()
+    })
+
+    it('forceStamp wins over demote (the checkout policy has done its own cap check)', async () => {
+        const tx = txWith(0)
+        await recordWorked('42', established, tx as never, {
+            forceStamp: true,
+            demote: true,
+        })
+
+        expect(tx.$queryRaw.mock.calls[0]![0].sql).toContain(
+            'last_worked_at = EXCLUDED.last_worked_at',
+        )
+    })
+
+    it('forceStamp (the vetted checkout capture) stamps even for a young account', async () => {
+        const tx = txWith(0)
+        await recordWorked(
+            '42',
+            { kind: 'user', userId: 'u', established: false },
+            tx as never,
+            { forceStamp: true },
+        )
+
+        expect(tx.$queryRaw.mock.calls[0]![0].sql).toContain(
+            'last_worked_at = EXCLUDED.last_worked_at',
+        )
+    })
+
+    it('a coupon with no failure quorum stores nothing about an ESTABLISHED reporter', async () => {
+        const tx = txWith(0)
+        await recordWorked('42', established, tx as never)
 
         expect(tx.couponSignalReporter.upsert).not.toHaveBeenCalled()
         expect(tx.couponSignal.update).not.toHaveBeenCalled()
@@ -280,7 +351,7 @@ describe('recordWorked (owns lastWorkedAt ONLY — W4-D2 split)', () => {
         const tx = txWith(4)
         await recordWorked(
             '42',
-            { kind: 'user', userId: 'user-1' },
+            { kind: 'user', userId: 'user-1', established: true },
             tx as never,
         )
 

@@ -3,7 +3,7 @@ import net from 'node:net'
 
 // Outbound connections from the server: IPv4 first, and no 250 ms cut-off.
 //
-// Node 22 connects with "happy eyeballs" on by default: it tries each address
+// Node (20 and later) connects with "happy eyeballs" on by default: it tries each address
 // a hostname resolves to for `autoSelectFamilyAttemptTimeout` (250 ms), then
 // ABANDONS that attempt and moves to the next one. The production host has no
 // IPv6 route, so for a dual-stack provider (Google, OpenRouter behind

@@ -1,13 +1,13 @@
+import { cachedTopSites } from '@/lib/anonymousReadCaches'
 import { handleRouteError } from '@/lib/api/handleRouteError'
 import { withRoute } from '@/lib/api/withRoute'
-import { listTopSites } from '@/lib/couponsRepo'
 import { NextResponse } from 'next/server'
 
 export const GET = withRoute(
     { method: 'GET', routeName: 'sites/top-sites', rateLimit: 'read' },
     async ({ req }) => {
         try {
-            const rows = await listTopSites()
+            const rows = await cachedTopSites()
             // No .filter(Boolean) here — unlike stores/route.ts and
             // search-supported/route.ts, this pre-existing behavior is
             // preserved as-is (out of scope for F-001; a null GROUP BY site

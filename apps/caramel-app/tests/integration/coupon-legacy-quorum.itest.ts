@@ -54,6 +54,12 @@ async function runMigrationSeed() {
 }
 
 const reporter = (n: number) => ({ kind: 'ip', ip: `203.0.113.${n}` }) as const
+// An ESTABLISHED account: the only kind of success that clears a quorum.
+const establishedAccount = {
+    kind: 'user',
+    userId: 'itest-established-account',
+    established: true,
+} as const
 
 async function overlay(id: string) {
     const [row] = await attachSignals([{ id }])
@@ -155,8 +161,10 @@ describe('legacy sunk codes are grandfathered by the data migration (real pg)', 
         ).toBe(2)
     })
 
-    it('one anonymous success does NOT clear a legacy quorum; a second distinct reporter does, and later failures count afresh', async () => {
+    it('anonymous successes do NOT clear a legacy quorum however many; one established account does, and later failures count afresh', async () => {
         await recordWorked(COLLAPSED, reporter(2))
+        await recordWorked(COLLAPSED, reporter(6))
+        await recordWorked(COLLAPSED, reporter(7))
         expect(
             (
                 await prisma.couponSignal.findUniqueOrThrow({
@@ -165,7 +173,7 @@ describe('legacy sunk codes are grandfathered by the data migration (real pg)', 
             ).failWeight,
         ).toBe(6)
 
-        await recordWorked(COLLAPSED, reporter(3))
+        await recordWorked(COLLAPSED, establishedAccount)
         const cleared = await prisma.couponSignal.findUniqueOrThrow({
             where: { couponId: COLLAPSED },
         })
@@ -180,8 +188,8 @@ describe('legacy sunk codes are grandfathered by the data migration (real pg)', 
         expect(row.failWeight).toBe(1)
     })
 
-    it('a success on a code with no failure quorum stores nothing about its reporter', async () => {
-        await recordWorked(NOISE, reporter(5))
+    it('a success by an established account on a code with no failure quorum stores nothing about its reporter', async () => {
+        await recordWorked(NOISE, establishedAccount)
         expect(
             await prisma.couponSignalReporter.count({
                 where: { couponId: NOISE },

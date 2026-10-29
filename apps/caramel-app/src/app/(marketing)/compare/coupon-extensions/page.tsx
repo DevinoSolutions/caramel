@@ -82,10 +82,10 @@ export default function CompareCouponExtensionsPage() {
     }
 
     return (
-        <main className="relative min-h-screen px-6 pb-24 pt-32 dark:bg-darkBg lg:px-8">
+        <main className="dark:bg-darkBg relative min-h-screen px-6 pb-24 pt-32 lg:px-8">
             <article className="mx-auto max-w-5xl">
                 <header className="pb-10">
-                    <h1 className="mb-4 text-4xl font-extrabold tracking-tight text-gray-900 dark:text-white md:text-3xl">
+                    <h1 className="mb-4 text-4xl font-extrabold tracking-tight text-gray-900 md:text-3xl dark:text-white">
                         {COMPARISON_BODY.heading}
                     </h1>
                     <p className={`${bodyText} text-lg`}>
@@ -114,7 +114,7 @@ export default function CompareCouponExtensionsPage() {
                                 rewards, account, browsers, source code and
                                 sources, as checked on {checkedOn}
                             </caption>
-                            <thead className="bg-gray-50 text-gray-900 dark:bg-darkSurface dark:text-white">
+                            <thead className="dark:bg-darkSurface bg-gray-50 text-gray-900 dark:text-white">
                                 <tr>
                                     <th scope="col" className="px-4 py-3">
                                         {COMPARISON_BODY.tableLabels.name}
@@ -213,12 +213,12 @@ export default function CompareCouponExtensionsPage() {
                     <h2 id="compare-honey-heading" className={sectionHeading}>
                         {GUIDE_BODY.timelineHeading}
                     </h2>
-                    <ol className="space-y-4 border-l-2 border-caramel/30 pl-6">
+                    <ol className="border-caramel/30 space-y-4 border-l-2 pl-6">
                         {HONEY_TIMELINE.map(event => (
                             <li key={`${event.date}-${event.text}`}>
                                 <time
                                     dateTime={event.date}
-                                    className="block text-sm font-semibold text-caramel"
+                                    className="text-caramel block text-sm font-semibold"
                                 >
                                     {formatComparisonDate(
                                         new Date(`${event.date}T00:00:00Z`),
@@ -235,7 +235,7 @@ export default function CompareCouponExtensionsPage() {
                         {COMPARISON_BODY.honeyBefore}
                         <Link
                             href={HONEY_GUIDE_PATH}
-                            className="font-semibold text-caramel hover:underline"
+                            className="text-caramel font-semibold hover:underline"
                         >
                             {COMPARISON_BODY.honeyLink}
                         </Link>
@@ -264,14 +264,14 @@ export default function CompareCouponExtensionsPage() {
                         {COMPARISON_BODY.onwardBefore}
                         <Link
                             href="/faq"
-                            className="font-semibold text-caramel hover:underline"
+                            className="text-caramel font-semibold hover:underline"
                         >
                             {COMPARISON_BODY.faqLink}
                         </Link>
                         {COMPARISON_BODY.onwardBetween}
                         <Link
                             href="/coupons/stores"
-                            className="font-semibold text-caramel hover:underline"
+                            className="text-caramel font-semibold hover:underline"
                         >
                             {COMPARISON_BODY.directoryLink}
                         </Link>

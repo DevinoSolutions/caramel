@@ -65,6 +65,11 @@ export const metadata: Metadata = {
 }
 
 export const viewport: Viewport = {
+    // T-7853: viewport-fit=cover so the app shell's safe-area insets take
+    // effect on notched devices (the CSS rules in globals.css read
+    // env(safe-area-inset-*)). Browsers ignore viewport-fit on non-app
+    // surfaces, so this is harmless for regular visitors.
+    viewportFit: 'cover',
     themeColor: [
         { media: '(prefers-color-scheme: light)', color: '#ea6925' },
         { media: '(prefers-color-scheme: dark)', color: '#171210' },
@@ -78,6 +83,12 @@ export const viewport: Viewport = {
 // Tailwind `dark:` variant key off. ThemeContext reads the same class back on
 // its first client render, so DOM and React state can never disagree.
 const THEME_INIT_SCRIPT = `(function(){var d=false;try{d=localStorage.getItem('theme')==='dark'}catch(e){/* storage blocked (private mode) - fall back to light */}var c=document.documentElement.classList;c.add(d?'dark':'light');c.remove(d?'light':'dark')})()`
+
+// T-7853: detect the native app shell from the user agent BEFORE first paint,
+// so the CSS rule `html[data-app-shell] [data-shell-hide] { display: none }`
+// hides the marketing chrome without a flash. No server-side UA branching —
+// an inline script keeps store pages statically prerendered and CDN-cacheable.
+const APP_SHELL_DETECT_SCRIPT = `(function(){var m=navigator.userAgent.match(/(?:^|\\s)CaramelApp\\/\\d+\\.\\d+\\.\\d+ \\((ios|macos|android|fire)\\)(?:\\s|$)/);if(m)document.documentElement.dataset.appShell=m[1]})()`
 
 // Site-wide entity markup (classic rich results / knowledge graph only — the
 // facts AI engines quote live in visible copy, per the AEO rule). The bare
@@ -146,6 +157,11 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             <head>
                 <script
                     dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }}
+                />
+                <script
+                    dangerouslySetInnerHTML={{
+                        __html: APP_SHELL_DETECT_SCRIPT,
+                    }}
                 />
             </head>
             <body>

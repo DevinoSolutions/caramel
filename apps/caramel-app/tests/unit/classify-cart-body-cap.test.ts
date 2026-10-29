@@ -99,3 +99,45 @@ describe('classify-cart reads its body only up to the cap', () => {
         expect(classifyMock).toHaveBeenCalledTimes(1)
     })
 })
+
+describe('classify-cart never returns upstream error text (T-6228)', () => {
+    it('answers a fixed message for an OpenRouterError, keeps the detail in Sentry, and still 502s', async () => {
+        const { OpenRouterError } = await import('@/lib/openrouter')
+        const Sentry = await import('@sentry/nextjs')
+        const upstream = new OpenRouterError(
+            'openrouter 402: {"error":"insufficient credits on key sk-or-v1-abc, request req_123"}',
+        )
+        classifyMock.mockRejectedValueOnce(upstream)
+        vi.spyOn(console, 'error').mockImplementation(() => {})
+
+        const res = await POST(
+            request(JSON.stringify({ domain: 'shop.example.com' })),
+        )
+        expect(res.status).toBe(502)
+        const text = await res.text()
+        expect(JSON.parse(text)).toEqual({ error: 'classification failed' })
+        expect(text).not.toContain('insufficient credits')
+        expect(text).not.toContain('sk-or-v1')
+        expect(res.headers.get('x-request-id')).toBeTruthy()
+        // The detail is not lost: it goes to Sentry as the exception itself.
+        expect(Sentry.captureException).toHaveBeenCalledWith(
+            upstream,
+            expect.objectContaining({
+                tags: expect.objectContaining({ method: 'POST' }),
+            }),
+        )
+    })
+
+    it('answers the same fixed message for a non-OpenRouter failure, with status 500', async () => {
+        classifyMock.mockRejectedValueOnce(
+            new Error('OPENROUTER_API_KEY not set'),
+        )
+        vi.spyOn(console, 'error').mockImplementation(() => {})
+
+        const res = await POST(
+            request(JSON.stringify({ domain: 'shop.example.com' })),
+        )
+        expect(res.status).toBe(500)
+        expect(await res.json()).toEqual({ error: 'classification failed' })
+    })
+})

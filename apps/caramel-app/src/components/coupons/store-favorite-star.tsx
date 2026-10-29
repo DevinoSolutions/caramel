@@ -146,9 +146,9 @@ export default function StoreFavoriteStar({ store }: { store: string }) {
                 // viewports this page is most often read on. The focus ring
                 // comes free from globals.css's :focus-visible rule for
                 // buttons — no competing ring here.
-                className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 shadow-sm transition duration-200 hover:border-caramel hover:bg-caramel/5 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-700 dark:bg-darkBg dark:text-gray-200 dark:shadow-none dark:hover:border-caramel/60 dark:hover:bg-caramel/10"
+                className="hover:border-caramel hover:bg-caramel/5 dark:bg-darkBg dark:hover:border-caramel/60 dark:hover:bg-caramel/10 inline-flex min-h-[44px] min-w-[44px] items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 shadow-sm transition duration-200 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-700 dark:text-gray-200 dark:shadow-none"
             >
-                <Icon aria-hidden="true" className="h-4 w-4 text-caramel" />
+                <Icon aria-hidden="true" className="text-caramel h-4 w-4" />
                 {following ? 'Following' : 'Follow this store'}
             </button>
         </div>

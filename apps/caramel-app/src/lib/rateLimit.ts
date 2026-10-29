@@ -21,7 +21,7 @@ import { env } from '@/lib/env'
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { createHash, timingSafeEqual } from 'node:crypto'
-import { RateLimiterMemory, type RateLimiterRes } from 'rate-limiter-flexible'
+import { RateLimiterMemory, RateLimiterRes } from 'rate-limiter-flexible'
 
 export type LimitKind = 'read' | 'mutation' | 'telemetry'
 
@@ -100,6 +100,57 @@ export function isIngestAuthorized(req: NextRequest): boolean {
     const provided = createHash('sha256').update(auth).digest()
     const expected = createHash('sha256').update(`Bearer ${secret}`).digest()
     return timingSafeEqual(provided, expected)
+}
+
+// Failed-bearer budget: 10 wrong bearers per minute per client IP, then 429.
+// A supplier with a correct key never spends it (see checkBearerFailureLimit).
+const BEARER_FAILURE = { points: 10, duration: 60 }
+const bearerFailureLimiter = new RateLimiterMemory(BEARER_FAILURE)
+
+/**
+ * Counts one FAILED bearer check (ingest/* INGEST_API_KEY, coupons/expire
+ * COUPONS_ADMIN_SECRET) against the caller's IP. Call it ONLY after the
+ * bearer comparison failed; a request that presented the right bearer never
+ * gets here, so it neither spends the budget nor is ever answered 429 by it.
+ *
+ * Returns null while the IP is within its budget (the caller answers its
+ * normal 401), or a ready 429 once it is not. Either way the failure leaves a
+ * breadcrumb and an abuse count (abuseSignal.ts escalates a sustained run to
+ * Sentry + PostHog once), so a key-guessing run is visible, not just slow.
+ * The throttle is on the response: it cannot stop a correct guess from
+ * passing, which is why the secrets must be long and random (not verified
+ * here; see T-6230). It also keys on the exact IP string, so a caller with a
+ * whole IPv6 /64 gets a fresh budget per address: it slows guessing, key
+ * strength is what protects the endpoint.
+ *
+ * Unlike checkRateLimit this does NOT fail open: an unexpected limiter fault
+ * throws (a 500 to a caller who was already failing auth, reported to Sentry),
+ * rather than silently waving failed attempts through uncounted.
+ */
+export async function checkBearerFailureLimit(
+    req: NextRequest,
+): Promise<NextResponse | null> {
+    const ip = getClientIp(req)
+    try {
+        await bearerFailureLimiter.consume(ip, 1)
+        logAbuse(req, ip, 'bearer-auth-fail', 0)
+        return null
+    } catch (error) {
+        // consume() rejects with a RateLimiterRes when the budget is spent and
+        // with an Error for a real fault; only the first is a 429.
+        if (!(error instanceof RateLimiterRes)) throw error
+        const retryAfterSec = Math.max(1, Math.ceil(error.msBeforeNext / 1000))
+        logAbuse(req, ip, 'bearer-auth-fail', retryAfterSec)
+        const headers = new Headers()
+        headers.set('Retry-After', String(retryAfterSec))
+        return NextResponse.json(
+            {
+                error: 'Too many requests. Please slow down.',
+                retryAfter: retryAfterSec,
+            },
+            { status: 429, headers },
+        )
+    }
 }
 
 function buildHeaders(kind: LimitKind, res: RateLimiterRes | null): Headers {

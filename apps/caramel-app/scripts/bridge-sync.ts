@@ -13,7 +13,7 @@
 //
 // COUPONS_DATABASE_URL is the read-only connection string to that external DB —
 // OPTIONAL for the app itself (unset in local dev), REQUIRED for this job. It is
-// read straight from process.env: @/lib/prisma imports only @prisma/client (no
+// read straight from process.env: @/lib/prisma imports only the generated Prisma client (no
 // `server-only`, no @/lib/env), so importing applyCatalogRows does NOT boot the
 // zod env — the bridge deliberately does not depend on the app's env schema.
 //

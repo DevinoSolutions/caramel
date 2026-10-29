@@ -1,5 +1,10 @@
+import { consumeAnonymousWriteQuota } from '@/lib/anonymousWriteQuota'
 import { withRoute } from '@/lib/api/withRoute'
 import { sendEmail } from '@/lib/email'
+import {
+    assessSuggestionIntake,
+    hasControlCharacter,
+} from '@/lib/siteSuggestionIntake'
 import { SITE_SUGGESTION_OPS_EMAIL } from '@/lib/siteSuggestionNotices'
 import {
     normalizeSuggestedDomain,
@@ -28,11 +33,32 @@ import { z } from 'zod'
 // Strict — previously had NEITHER a rate limit NOR an origin gate despite
 // sending mail on every call (PLAN-F-007.md's flagged gap). `url` missing
 // now 422s instead of the old manual 400 "Missing url" (§Breaking).
+//
+// T-6224: `url` and `email` are interpolated into a plain-text mail one value
+// per line, and WHATWG URL parsing drops tab/CR/LF before validating, so a url
+// like "https://store.com/a<LF>Domain: evil.com" passed as a store while
+// forging extra lines in that mail. A control character in either is refused
+// (422), not stripped: no real URL or address contains one once trimmed.
 const SuggestBodySchema = z.object({
-    url: z.string().trim().min(1).max(2048),
+    url: z
+        .string()
+        .trim()
+        .min(1)
+        .max(2048)
+        .refine(value => !hasControlCharacter(value), {
+            message: 'must not contain control characters',
+        }),
     // Optional contact for an anonymous requester. Ignored when a session
     // supplies the email (the session wins — client identity is never trusted).
-    email: z.string().trim().email().max(320).optional(),
+    email: z
+        .string()
+        .trim()
+        .email()
+        .max(320)
+        .refine(value => !hasControlCharacter(value), {
+            message: 'must not contain control characters',
+        })
+        .optional(),
     // Defaults to 'web' because the /supported-stores form is the only caller
     // today; the extension may name itself when it grows a suggest form.
     source: SiteSuggestionSourceSchema.default('web'),
@@ -58,8 +84,44 @@ export const POST = withRoute(
             )
         }
 
+        // T-6224: one address cannot spend the shared daily budgets below.
+        const quota = await consumeAnonymousWriteQuota(req, 'sites/suggest')
+        if (!quota.allowed) {
+            return NextResponse.json(
+                {
+                    error: 'You have sent a lot of store requests. Please try again later.',
+                },
+                {
+                    status: 429,
+                    headers: { 'Retry-After': String(quota.retryAfterSec) },
+                },
+            )
+        }
+
         const userId = session?.user?.id ?? null
         const requesterEmail = session?.user?.email ?? body.email ?? null
+
+        // T-6224: anonymous-intake bounds (siteSuggestionIntake.ts). The same
+        // requester asking for the same store inside a day is ONE suggestion:
+        // answered ok, but no new row and no new mail. The body carries no id
+        // and no flag, so it does not confirm to a stranger that a given email
+        // asked for a given store.
+        const intake = await assessSuggestionIntake({
+            domain,
+            userId,
+            requesterEmail,
+        })
+        if (intake.kind === 'duplicate') {
+            return NextResponse.json({ ok: true, notified: false })
+        }
+        if (intake.kind === 'over_daily_cap') {
+            return NextResponse.json(
+                {
+                    error: 'We have received a lot of store requests today. Please try again tomorrow.',
+                },
+                { status: 429, headers: { 'Retry-After': '3600' } },
+            )
+        }
         const { id } = await recordSiteSuggestion({
             domain,
             rawUrl: body.url,
@@ -74,6 +136,12 @@ export const POST = withRoute(
         const requester = requesterEmail
             ? `${requesterEmail}${userId ? ` (user ${userId})` : ''}`
             : 'anonymous'
+        // Over the daily mail budget the row above is still the record; only
+        // the ops mail is withheld (the budget crossing is reported to Sentry
+        // once, in assessSuggestionIntake).
+        if (!intake.sendOpsMail) {
+            return NextResponse.json({ ok: true, id, notified: false })
+        }
         let notified = true
         try {
             // First line kept VERBATIM ("A user suggested a new site: <url>") —

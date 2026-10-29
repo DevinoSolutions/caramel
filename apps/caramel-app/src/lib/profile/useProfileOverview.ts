@@ -13,12 +13,7 @@ import { useCallback, useEffect, useState } from 'react'
 // signed-in user, and adding a cache layer for that would be more machinery
 // than the problem has.
 
-// Where a session the server no longer honours is sent to sign in again.
-// TODO: /login has no return-path support (it always lands on `/` after
-// sign-in, LoginPageClient.tsx; same note in AddCodeForm.tsx), so this cannot
-// bring the user back to /profile yet. Adding a vetted `next` param is its own
-// change (open-redirect surface).
-const LOGIN_PATH = '/login'
+const LOGIN_PATH = '/login?next=%2Fprofile'
 
 export type OverviewStatus = 'loading' | 'ready' | 'error'
 

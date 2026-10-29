@@ -17,6 +17,8 @@
 // Callers MUST gate on DATABASE_URL and skip when it is absent (deployed-site
 // e2e-push has no seedable DB).
 
+import { openTestPrisma } from './test-prisma'
+
 export interface SeedUserInput {
     baseURL: string
     email: string
@@ -68,18 +70,14 @@ export async function seedVerifiedUser({
 
     // 2. Flip email_verified so requireEmailVerification lets the user sign in.
     //
-    // ⚠️ @prisma/client MUST be imported lazily, here inside the function —
-    // NEVER at module top level. auth-flows.spec.ts imports this helper at
-    // collection time, and the e2e-push job runs against the DEPLOYED site
-    // without ever running `prisma generate` (correctly — it has no DB), so
-    // the GENERATED client (.prisma/client) is absent there BY DESIGN. A
-    // top-level import crashes the whole spec file at module load ("Cannot
-    // find module '.prisma/client/default'") before the test.skip(!SEEDABLE)
-    // gate can run — the skip gate protects execution, not imports. This
-    // dynamic import is only reached when DATABASE_URL is set (e2e-pr/local,
+    // ⚠️ The Prisma client is opened through openTestPrisma(), which imports
+    // the GENERATED client lazily, never at module top level. auth-flows.spec.ts
+    // imports this helper at collection time, and the e2e-push job runs
+    // against the DEPLOYED site without ever running `prisma generate`
+    // (correctly — it has no DB), so src/generated/prisma is absent there BY
+    // DESIGN. This call is only reached when DATABASE_URL is set (e2e-pr/local,
     // where the client IS generated).
-    const { PrismaClient } = await import('@prisma/client')
-    const prisma = new PrismaClient()
+    const prisma = await openTestPrisma()
     try {
         await prisma.user.update({
             where: { email },

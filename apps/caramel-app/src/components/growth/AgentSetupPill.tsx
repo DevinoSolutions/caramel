@@ -121,13 +121,13 @@ export default function AgentSetupPill({
     return (
         <div
             data-agent-setup-pill={surface}
-            className={`inline-flex max-w-full flex-wrap items-center justify-center gap-2 rounded-full border border-caramel/40 bg-white/80 py-1.5 pl-4 pr-2 text-sm text-gray-900 shadow-caramel-sm backdrop-blur-sm dark:bg-darkSurface dark:text-gray-100 ${className}`}
+            className={`border-caramel/40 shadow-caramel-sm dark:bg-darkSurface inline-flex max-w-full flex-wrap items-center justify-center gap-2 rounded-full border bg-white/80 py-1.5 pl-4 pr-2 text-sm text-gray-900 backdrop-blur-sm dark:text-gray-100 ${className}`}
         >
             <button
                 type="button"
                 onClick={() => void onCopy()}
                 aria-label={`Onboard your agent to ${APP_NAME}: copy the setup prompt`}
-                className="inline-flex items-center gap-2 rounded-full font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-caramel"
+                className="focus-visible:outline-caramel inline-flex items-center gap-2 rounded-full font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
             >
                 <span>Onboard your agent to {APP_NAME}</span>
                 {/* Fixed 16px box with both icons stacked: the swap is an
@@ -135,11 +135,11 @@ export default function AgentSetupPill({
                     label never shifts. Enter 180ms, revert 120ms. */}
                 <span className="relative h-4 w-4" aria-hidden="true">
                     <FiCopy
-                        className={`absolute inset-0 h-4 w-4 text-caramel transition-opacity duration-fast ease-motion-out ${copied ? 'opacity-0' : 'opacity-100'}`}
+                        className={`text-caramel duration-fast ease-motion-out absolute inset-0 h-4 w-4 transition-opacity ${copied ? 'opacity-0' : 'opacity-100'}`}
                     />
                     <FiCheck
                         data-copied-icon
-                        className={`absolute inset-0 h-4 w-4 text-green-600 transition-[opacity,transform] ease-motion-out ${copied ? 'opacity-100 duration-base' : 'opacity-0 duration-fast motion-safe:scale-[0.96]'}`}
+                        className={`ease-motion-out absolute inset-0 h-4 w-4 text-green-600 transition-[opacity,transform] ${copied ? 'duration-base opacity-100' : 'duration-fast opacity-0 motion-safe:scale-[0.96]'}`}
                     />
                 </span>
             </button>
@@ -157,7 +157,7 @@ export default function AgentSetupPill({
                         onClick={() =>
                             trackAgentSetupCopied({ surface, agent: guide.id })
                         }
-                        className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-gray-100 text-gray-700 transition-colors hover:bg-caramel hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-caramel dark:bg-white/10 dark:text-gray-200"
+                        className="hover:bg-caramel focus-visible:outline-caramel inline-flex h-7 w-7 items-center justify-center rounded-full bg-gray-100 text-gray-700 transition-colors hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 dark:bg-white/10 dark:text-gray-200"
                     >
                         <AgentGlyph id={guide.id} />
                     </Link>

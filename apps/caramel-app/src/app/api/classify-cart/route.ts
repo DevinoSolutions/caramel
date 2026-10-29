@@ -140,12 +140,15 @@ export const POST = withRoute(
                 )
             }
             console.error('[classify-cart] failed', error)
+            // A fixed message, never the error's own text: an OpenRouterError
+            // carries up to 200 chars of the provider's response (account,
+            // credit and rate-limit state, model id, request ids), and this
+            // route answers anyone who can forge an extension Origin (T-6228).
+            // The detail stays in Sentry, which handleRouteError reports it to.
+            // The extension only reads the status (`HTTP <status>`).
             return handleRouteError(error, {
                 req,
-                message:
-                    error instanceof Error
-                        ? error.message
-                        : 'classification failed',
+                message: 'classification failed',
                 status: error instanceof OpenRouterError ? 502 : 500,
             })
         }

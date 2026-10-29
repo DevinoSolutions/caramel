@@ -10,7 +10,7 @@ const Loader = ({ label }: LoaderProps) => {
             aria-label={label ?? 'Loading'}
             className="flex flex-col items-center gap-3"
         >
-            <div className="h-12 w-12 animate-spin rounded-full border-4 border-caramel/20 border-t-caramel dark:border-caramel/25 dark:border-t-caramelLight" />
+            <div className="border-caramel/20 border-t-caramel dark:border-caramel/25 dark:border-t-caramelLight h-12 w-12 animate-spin rounded-full border-4" />
             {label ? (
                 <p className="text-sm font-semibold text-gray-600 dark:text-gray-300">
                     {label}

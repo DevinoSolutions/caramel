@@ -28,7 +28,7 @@ let cached: ActiveClient | null = null
  * Resolve the server capture target: gate on the SERVER dataset (POSTHOG_DATASET),
  * take the host/token from the shared NEXT_PUBLIC project pair.
  */
-function resolveServerTarget(): PosthogTarget | null {
+export function resolveServerTarget(): PosthogTarget | null {
     return resolvePosthogTarget({
         dataset: env.POSTHOG_DATASET,
         productionHost: clientEnv.NEXT_PUBLIC_POSTHOG_HOST,

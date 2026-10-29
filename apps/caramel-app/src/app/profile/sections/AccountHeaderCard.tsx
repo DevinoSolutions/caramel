@@ -60,21 +60,21 @@ export default function AccountHeaderCard({
 
     return (
         <div className={headerBandClasses}>
-            <div className="flex items-center gap-6 p-8 md:p-6 xs:gap-4 xs:p-5">
-                <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-full bg-caramel text-2xl font-semibold text-white ring-4 ring-caramel/15 md:h-16 md:w-16 md:text-xl xs:h-14 xs:w-14 xs:text-lg">
+            <div className="xs:gap-4 xs:p-5 flex items-center gap-6 p-8 md:p-6">
+                <div className="bg-caramel ring-caramel/15 xs:h-14 xs:w-14 xs:text-lg flex h-20 w-20 shrink-0 items-center justify-center rounded-full text-2xl font-semibold text-white ring-4 md:h-16 md:w-16 md:text-xl">
                     {avatarLetter}
                 </div>
                 <div className="min-w-0">
-                    <h1 className="truncate text-2xl font-semibold text-gray-900 dark:text-gray-100 md:text-xl xs:text-lg">
+                    <h1 className="xs:text-lg truncate text-2xl font-semibold text-gray-900 md:text-xl dark:text-gray-100">
                         {displayName}
                     </h1>
                     {user.email ? (
-                        <p className="truncate text-gray-600 dark:text-gray-400 xs:text-sm">
+                        <p className="xs:text-sm truncate text-gray-600 dark:text-gray-400">
                             {user.email}
                         </p>
                     ) : null}
                     {since ? (
-                        <p className="mt-1 truncate text-sm text-gray-500 dark:text-gray-400 xs:text-xs">
+                        <p className="xs:text-xs mt-1 truncate text-sm text-gray-500 dark:text-gray-400">
                             Saving with Caramel since {since}
                         </p>
                     ) : null}
@@ -84,7 +84,7 @@ export default function AccountHeaderCard({
             {/* Chip shelf — a tinted footer of the same surface, not a second
                 card. Renders only when there is something true to say. */}
             {overview ? (
-                <div className="flex flex-wrap items-center gap-2 border-t border-gray-100 bg-gray-50/60 px-8 py-4 dark:border-gray-800 dark:bg-white/[0.03] md:px-6 xs:px-5 xs:py-3.5">
+                <div className="xs:px-5 xs:py-3.5 flex flex-wrap items-center gap-2 border-t border-gray-100 bg-gray-50/60 px-8 py-4 md:px-6 dark:border-gray-800 dark:bg-white/[0.03]">
                     {syncOn && topTotal && topTotal.minorUnits > 0 ? (
                         <span className={statChipClasses}>
                             <span className={statChipValueClasses}>

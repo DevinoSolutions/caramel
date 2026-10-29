@@ -6,7 +6,7 @@ import SwiftUI
 /// is the extension's own native-messaging ping: SafariWebExtensionHandler
 /// stamps `AppGroup.Key.extensionLastPingAt` and this reads it.
 ///
-/// TODO(T-4905): the extension does not send the ping yet (see
+/// TODO(T-5059): the extension does not send the ping yet (see
 /// SafariWebExtensionHandler), so `.detected` cannot happen today and
 /// onboarding relies on `.confirmedByUser`, which the shopper sets by hand.
 @MainActor

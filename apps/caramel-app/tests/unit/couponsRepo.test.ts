@@ -11,6 +11,7 @@ import {
     listRecentlyWorkedCoupons,
     listStoreCoupons,
     listStoreSitemapEntries,
+    MAX_REQUESTED_SOURCES,
     requestSource,
     submitShopperCoupon,
     writeFailedSignal,
@@ -49,6 +50,12 @@ let capturedValues: unknown[][] = []
 let executeRawResult = 0
 // Args every prisma.source.create() was called with (requestSource).
 let capturedSourceCreates: unknown[] = []
+// What the mocked prisma.source.findUnique / count answer (requestSource's
+// duplicate and queue-depth checks), plus the args they were asked with.
+let existingSourceRow: { id: string } | null = null
+let requestedSourceCount = 0
+let capturedSourceFinds: unknown[] = []
+let capturedSourceCounts: unknown[] = []
 // How many prisma.$transaction() calls were opened (submitShopperCoupon).
 let transactionCount = 0
 function mockRows(match: (sql: string) => boolean, rows: unknown[]) {
@@ -92,6 +99,14 @@ vi.mock('@/lib/prisma', () => {
                 capturedSourceCreates.push(arg)
                 return Promise.resolve({})
             },
+            findUnique: (arg: unknown) => {
+                capturedSourceFinds.push(arg)
+                return Promise.resolve(existingSourceRow)
+            },
+            count: (arg: unknown) => {
+                capturedSourceCounts.push(arg)
+                return Promise.resolve(requestedSourceCount)
+            },
         },
     }
     return { default: client }
@@ -103,6 +118,10 @@ beforeEach(() => {
     capturedValues = []
     executeRawResult = 0
     capturedSourceCreates = []
+    existingSourceRow = null
+    requestedSourceCount = 0
+    capturedSourceFinds = []
+    capturedSourceCounts = []
     transactionCount = 0
 })
 
@@ -338,8 +357,8 @@ describe('expireCoupons (write, app catalog via prisma.$executeRaw)', () => {
 })
 
 describe('requestSource (write, app sources INSERT via prisma.source.create)', () => {
-    it('creates a REQUESTED source row (empty websites[], minted id) and resolves void', async () => {
-        await expect(requestSource('example.com')).resolves.toBeUndefined()
+    it('creates a REQUESTED source row (empty websites[], minted id) and reports created', async () => {
+        await expect(requestSource('example.com')).resolves.toBe('created')
 
         expect(capturedSourceCreates).toHaveLength(1)
         const arg = capturedSourceCreates[0] as {
@@ -356,6 +375,37 @@ describe('requestSource (write, app sources INSERT via prisma.source.create)', (
         // id is minted app-side (Source.id has no DB default) — a non-empty string.
         expect(typeof arg.data.id).toBe('string')
         expect(arg.data.id.length).toBeGreaterThan(0)
+    })
+
+    it('T-6225: a host that already has a row (any status) is a duplicate and writes nothing', async () => {
+        existingSourceRow = { id: 'src-1' }
+
+        await expect(requestSource('example.com')).resolves.toBe('duplicate')
+
+        expect(capturedSourceCreates).toHaveLength(0)
+        // An exact match (the route lowercases the host) and NOT status-filtered.
+        expect(capturedSourceFinds).toEqual([
+            { where: { source: 'example.com' }, select: { id: true } },
+        ])
+    })
+
+    it('T-6225: at the REQUESTED cap the request is refused as queue_full and writes nothing', async () => {
+        requestedSourceCount = MAX_REQUESTED_SOURCES
+
+        await expect(requestSource('example.com')).resolves.toBe('queue_full')
+
+        expect(capturedSourceCreates).toHaveLength(0)
+        expect(capturedSourceCounts).toEqual([
+            { where: { status: 'REQUESTED' } },
+        ])
+    })
+
+    it('T-6225: one below the cap still creates', async () => {
+        requestedSourceCount = MAX_REQUESTED_SOURCES - 1
+
+        await expect(requestSource('example.com')).resolves.toBe('created')
+
+        expect(capturedSourceCreates).toHaveLength(1)
     })
 })
 
@@ -822,16 +872,43 @@ describe('submitShopperCoupon (THIRD sanctioned write: shopper-submitted codes)'
     })
 
     it('(b) returns the existing row and inserts nothing when the code is already listed', async () => {
-        mockRows(isDedupe, [{ id: '812345' }])
+        // A supplier row: nobody submitted it.
+        mockRows(isDedupe, [{ id: '812345', submittedByUserId: null }])
 
         await expect(submitShopperCoupon(ARGS)).resolves.toEqual({
             couponId: '812345',
             created: false,
+            submittedByUser: false,
         })
         expect(capturedQueries.some(isInsert)).toBe(false)
         // A duplicate is a hit, not a new submission: it must not burn the
         // shopper's daily allowance, so the cap is never even counted.
         expect(capturedQueries.some(isCap)).toBe(false)
+    })
+
+    it("(b) reports whether the already-listed row is this shopper's own (T-6222: only their own code may be vouched for freely)", async () => {
+        mockRows(isDedupe, [
+            { id: '900000000000000003', submittedByUserId: 'user-uuid-1' },
+        ])
+        await expect(submitShopperCoupon(ARGS)).resolves.toEqual({
+            couponId: '900000000000000003',
+            created: false,
+            submittedByUser: true,
+        })
+
+        rules = []
+        capturedQueries = []
+        mockRows(isKnownStoreProbe, [{ known: true }])
+        mockRows(isDedupe, [
+            { id: '900000000000000004', submittedByUserId: 'someone-else' },
+        ])
+        await expect(submitShopperCoupon(ARGS)).resolves.toMatchObject({
+            created: false,
+            submittedByUser: false,
+        })
+        // The lookup selects the submitter alongside the id.
+        const sql = capturedQueries[queryIndex(isDedupe)] ?? ''
+        expect(sql).toContain('submitted_by_user_id AS "submittedByUserId"')
     })
 
     it("(c) counts the shopper's submissions in the last 24h and throws ShopperSubmissionLimitError at the cap", async () => {
@@ -857,6 +934,7 @@ describe('submitShopperCoupon (THIRD sanctioned write: shopper-submitted codes)'
         await expect(submitShopperCoupon(ARGS)).resolves.toEqual({
             couponId: INSERTED_ID,
             created: true,
+            submittedByUser: true,
         })
     })
 
@@ -866,7 +944,11 @@ describe('submitShopperCoupon (THIRD sanctioned write: shopper-submitted codes)'
 
         const result = await submitShopperCoupon(ARGS)
 
-        expect(result).toEqual({ couponId: INSERTED_ID, created: true })
+        expect(result).toEqual({
+            couponId: INSERTED_ID,
+            created: true,
+            submittedByUser: true,
+        })
         const i = queryIndex(isInsert)
         const sql = capturedQueries[i] ?? ''
         expect(sql).toContain("nextval('shopper_coupon_id_seq')::text")

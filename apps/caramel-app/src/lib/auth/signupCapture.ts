@@ -16,6 +16,7 @@
 // which is not PII) and the function returns what actually happened, so the
 // caller can see and test it. A signup that loses its analytics is a Sentry
 // event; a signup that fails because analytics failed would be a worse bug.
+import { Prisma } from '@/generated/prisma/client'
 import {
     deriveFirstTouchSource,
     type FirstTouchRecord,
@@ -40,7 +41,6 @@ import type {
     SignupSurface,
 } from '@/lib/analytics/signupVocabulary'
 import prisma from '@/lib/prisma'
-import { Prisma } from '@prisma/client'
 import * as Sentry from '@sentry/nextjs'
 import 'server-only'
 

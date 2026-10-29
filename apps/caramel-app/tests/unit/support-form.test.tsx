@@ -165,7 +165,8 @@ describe('SupportForm — feedback_id lifecycle', () => {
         // because the submit button that had focus just unmounted.
         expect(card.getAttribute('role')).toBeNull()
         expect(card.getAttribute('tabindex')).toBe('-1')
-        expect(document.activeElement).toBe(card)
+        // Focus moves in a post-commit effect, so wait for it (T-7530).
+        await waitFor(() => expect(document.activeElement).toBe(card))
     })
 
     it('returns focus to the first form field when "Send another" restores the form', async () => {

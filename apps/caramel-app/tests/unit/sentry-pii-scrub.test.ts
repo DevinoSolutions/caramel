@@ -3,6 +3,7 @@ import {
     redactSensitiveText,
     scrubSentryBreadcrumb,
     scrubSentryEvent,
+    SENTRY_DATA_COLLECTION,
 } from '@/lib/sentryPiiScrub'
 import type { Breadcrumb, ErrorEvent, init } from '@sentry/nextjs'
 import * as Sentry from '@sentry/nextjs'
@@ -230,6 +231,7 @@ describe('scrubSentryEvent: transactions', () => {
                 span_id: 'c'.repeat(16),
                 trace_id: 'a'.repeat(32),
                 start_timestamp: 1,
+                status: 'ok',
                 description: `POST https://idp.example/token?code=SECRET-CODE`,
                 data: {
                     'http.url': 'https://idp.example/token?code=SECRET-CODE',
@@ -313,14 +315,40 @@ describe('Sentry init wiring', () => {
     const app = join(__dirname, '..', '..')
     const read = (file: string): string => readFileSync(join(app, file), 'utf8')
 
-    it('keeps sendDefaultPii off in every init', () => {
+    it('keeps the SDK data-collection baseline at the v10 sendDefaultPii-off level', () => {
+        // SDK v11's unset `dataCollection` default collects IPs, cookies,
+        // bodies, DB queries and GenAI payloads; this is the SDK's own
+        // documented "keep the v10 default" object. Loosen a field only with
+        // a reason in sentryPiiScrub.ts.
+        const sensitive = ['forwarded', '-ip', 'remote-', 'via', '-user']
+        expect(SENTRY_DATA_COLLECTION).toEqual({
+            userInfo: false,
+            cookies: false,
+            httpHeaders: {
+                request: { deny: sensitive },
+                response: { deny: sensitive },
+            },
+            httpBodies: [],
+            urlQueryParams: { deny: sensitive },
+            genAI: { inputs: false, outputs: false },
+            databaseQueryData: false,
+            queues: false,
+            graphQL: { document: false, variables: false },
+        })
+    })
+
+    it('passes the baseline and the static trace lifecycle to every init', () => {
         for (const file of [
             'sentry.common.config.ts',
             'src/instrumentation-client.ts',
         ]) {
             const source = read(file)
-            expect(source).not.toMatch(/sendDefaultPii:\s*true/)
-            expect(source).toMatch(/sendDefaultPii:\s*false/)
+            expect(source).toMatch(/dataCollection:\s*SENTRY_DATA_COLLECTION/)
+            // Under v11's default span streaming, beforeSendTransaction
+            // (and so the span-url scrub) never runs.
+            expect(source).toMatch(/traceLifecycle:\s*'static'/)
+            // The removed v10 flag must not come back as a silent no-op.
+            expect(source).not.toMatch(/sendDefaultPii\s*:/)
         }
     })
 

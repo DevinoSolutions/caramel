@@ -35,8 +35,7 @@ vi.mock('@/lib/prisma', () => ({ default: prismaMock }))
 const { envMock } = vi.hoisted(() => ({
     envMock: {
         CHROME_EXTENSION_ORIGIN: 'chrome-extension://known-id' as
-            | string
-            | undefined,
+            string | undefined,
         FIREFOX_EXTENSION_ORIGIN: undefined as string | undefined,
         SAFARI_EXTENSION_ORIGIN: undefined as string | undefined,
     },

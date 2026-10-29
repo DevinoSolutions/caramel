@@ -1,3 +1,4 @@
+import { safeReturnPath } from '@/lib/auth/safeReturnPath'
 import { BASE_URL } from '@/lib/env.client'
 import type { Metadata } from 'next'
 import LoginPageClient from './LoginPageClient'
@@ -61,19 +62,22 @@ export default async function Login({
         verified?: string
         error?: string | string[]
         provider?: string | string[]
+        next?: string
     }>
 }) {
-    const { verified, error, provider } = await searchParams
+    const { verified, error, provider, next } = await searchParams
     // `?provider=apple|google` is the extension deep-link (Safari/Firefox open
     // the login page preset to a provider). Normalize to the two real values
     // and ignore anything else, so a junk param can never auto-launch.
     const raw = Array.isArray(provider) ? provider[0] : provider
     const autoProvider = raw === 'google' || raw === 'apple' ? raw : undefined
+    const returnPath = safeReturnPath(next)
     return (
         <LoginPageClient
             verified={verified}
             error={error}
             autoProvider={autoProvider}
+            returnPath={returnPath}
         />
     )
 }

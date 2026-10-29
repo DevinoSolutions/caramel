@@ -16,8 +16,7 @@ import { z } from 'zod'
 const { envMock } = vi.hoisted(() => ({
     envMock: {
         CHROME_EXTENSION_ORIGIN: 'chrome-extension://known-id' as
-            | string
-            | undefined,
+            string | undefined,
         FIREFOX_EXTENSION_ORIGIN: undefined as string | undefined,
         SAFARI_EXTENSION_ORIGIN: undefined as string | undefined,
         COUPONS_ADMIN_SECRET: 'test-admin-secret' as string | undefined,

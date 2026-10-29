@@ -77,7 +77,7 @@ describe('AddCodeForm — signed out', () => {
         const link = await screen.findByRole('link', {
             name: 'Sign in to share a code',
         })
-        expect(link.getAttribute('href')).toBe('/login')
+        expect(link.getAttribute('href')).toMatch(/^\/login\?next=/)
         expect(link.getAttribute('rel')).toBe('nofollow')
         expect(screen.queryByLabelText('Coupon code')).toBeNull()
     })

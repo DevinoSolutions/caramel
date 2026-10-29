@@ -8,6 +8,7 @@ import {
 } from '@/lib/brandLinks'
 import { BASE_URL } from '@/lib/env.client'
 import { faqItems } from '@/lib/faqItems'
+import { DOCS_PATH } from '@/lib/marketing/docsContent'
 import {
     COMPARED_EXTENSIONS,
     COMPARISON_CHECKED_ON,
@@ -136,6 +137,8 @@ ${honeyGuideFaq}
 
 - [Home](${origin}/): what Caramel is and how it works.
 - [Pricing](${origin}/pricing): the plan structure — Caramel is free.
+- [Docs](${origin}${DOCS_PATH}): the documentation hub: install, how codes are
+  found and tested, privacy, support and the machine-readable resources.
 - [Coupon extensions compared](${origin}${COMPARISON_PATH}): Caramel next to
   Honey, Capital One Shopping, SimplyCodes, Rakuten and Coupert.
 - [The Honey extension, explained](${origin}${HONEY_GUIDE_PATH}): what PayPal

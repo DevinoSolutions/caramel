@@ -68,9 +68,9 @@ export default async function StoreDirectoryIndexPage() {
     }
 
     return (
-        <main className="relative min-h-screen px-6 pt-32 dark:bg-darkBg lg:px-8">
+        <main className="dark:bg-darkBg relative min-h-screen px-6 pt-32 lg:px-8">
             <header className="mx-auto max-w-4xl pb-10">
-                <h1 className="mb-4 text-4xl font-extrabold tracking-tight text-gray-900 dark:text-white md:text-3xl">
+                <h1 className="mb-4 text-4xl font-extrabold tracking-tight text-gray-900 md:text-3xl dark:text-white">
                     {DIRECTORY_BODY.heading}
                 </h1>
                 <p className="leading-relaxed text-gray-600 dark:text-gray-400">
@@ -89,7 +89,7 @@ export default async function StoreDirectoryIndexPage() {
                     >
                         {DIRECTORY_BODY.lettersHeading}
                     </h2>
-                    <ul className="grid grid-cols-3 gap-3 sm:grid-cols-2 [&>li>a]:flex [&>li>a]:items-baseline [&>li>a]:justify-between [&>li>a]:rounded-2xl [&>li>a]:border [&>li>a]:border-gray-100 [&>li>a]:bg-white [&>li>a]:px-4 [&>li>a]:py-3 [&>li>a]:shadow-sm [&>li>a]:transition hover:[&>li>a]:border-orange-200 hover:[&>li>a]:shadow-md dark:[&>li>a]:border-white/10 dark:[&>li>a]:bg-darkSurface">
+                    <ul className="dark:[&>li>a]:bg-darkSurface grid grid-cols-3 gap-3 sm:grid-cols-2 [&>li>a]:flex [&>li>a]:items-baseline [&>li>a]:justify-between [&>li>a]:rounded-2xl [&>li>a]:border [&>li>a]:border-gray-100 [&>li>a]:bg-white [&>li>a]:px-4 [&>li>a]:py-3 [&>li>a]:shadow-sm [&>li>a]:transition hover:[&>li>a]:border-orange-200 hover:[&>li>a]:shadow-md dark:[&>li>a]:border-white/10">
                         {buckets.map(bucket => (
                             <li key={bucket.letter}>
                                 <a href={directoryPath(bucket.letter)}>

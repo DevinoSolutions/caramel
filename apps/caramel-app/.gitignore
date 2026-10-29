@@ -49,3 +49,6 @@ next-env.d.ts
 /.lighthouseci/
 /lighthouse-reports/
 /lighthouse-reports-mobile/
+
+# Prisma 7 generated client (prisma generate; see prisma/schema.prisma)
+/src/generated/

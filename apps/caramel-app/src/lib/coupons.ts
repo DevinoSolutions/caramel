@@ -292,13 +292,28 @@ export function couponBadge(
  * Failure QUORUM needed before a code sinks, in reporter weight (not raw
  * reports): the sum of the weights of the DISTINCT reporters whose failure is
  * newer than the last success (couponSignals.ts recordFailed keeps it in
- * coupon_signals.fail_weight). An anonymous network weighs 1, a signed-in
- * account 2 (couponSignals.ts REPORTER_WEIGHT), so it takes 4 anonymous
- * networks, or 2 accounts, or an account plus 2 networks. One failed attempt is
+ * coupon_signals.fail_weight). An anonymous network (or a young account) weighs
+ * 1, an established signed-in account 2 (couponSignals.ts REPORTER_WEIGHT), and
+ * the weight-1 reporters together stop at MAX_LOW_TRUST_FAIL_WEIGHT (1), so it
+ * takes 2 established accounts. Anonymous networks, young accounts and one
+ * aged account plus any number of them can never sink a code. One failed attempt is
  * noise (a flaky checkout, a minimum-spend miss), and three forged anonymous
  * reports (the old threshold was 2 raw reports) must not be enough.
  */
 export const FAILING_MIN_FAIL_WEIGHT = 4
+
+/**
+ * Most failure weight the LOW-TRUST reporters of one coupon can add together:
+ * anonymous networks and accounts younger than COUPON_TRUST_MIN_ACCOUNT_AGE_DAYS
+ * (accountReputation.ts), each weighing 1. It is 1 on purpose: one established
+ * account (weight 2, couponSignals.ts REPORTER_WEIGHT) plus this pool must stay
+ * BELOW FAILING_MIN_FAIL_WEIGHT, so sinking a code takes two established
+ * accounts, and no number of anonymous networks or throwaway accounts, with or
+ * without a single aged account, can do it. couponSignals.ts
+ * recomputeFailWeight applies it; coupon-failure-quorum.test.ts pins the
+ * relationship to the account weight and the sink threshold.
+ */
+export const MAX_LOW_TRUST_FAIL_WEIGHT = 1
 
 /** A failure older than this no longer counts: codes get fixed and stores change. */
 export const FAILING_WINDOW_DAYS = 30
@@ -333,8 +348,8 @@ export function isRecentlyFailing(
 }
 
 /**
- * Failure quorum needed before a code is COLLAPSED (not merely sunk): two more
- * anonymous networks (or one more account) on top of what sinks it. Higher than
+ * Failure quorum needed before a code is COLLAPSED (not merely sunk): a third
+ * established account on top of the two that sink it. Higher than
  * FAILING_MIN_FAIL_WEIGHT because collapsing is the stronger presentation.
  */
 export const KEEPS_FAILING_MIN_FAIL_WEIGHT = 6

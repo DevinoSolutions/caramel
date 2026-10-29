@@ -106,6 +106,23 @@ vi.mock('@/lib/auth/appleTokenRevocation', () => ({
     revokeAppleGrants: revokeGrantsMock,
 }))
 
+// TEST DOUBLE for the PostHog person delete (its own behaviour is pinned in
+// posthog-person-deletion.test.ts). Here only the route's contract with it:
+// called AFTER the commit, only by the request that deleted, never fails the
+// request, and the outcome is in the response.
+const { deletePersonMock } = vi.hoisted(() => ({
+    deletePersonMock: vi.fn(
+        async (_userId: string) =>
+            'deleted' as 'deleted' | 'not_applicable' | 'failed',
+    ),
+}))
+vi.mock('@/lib/analytics/posthogPersonDeletion', () => ({
+    deletePosthogPerson: (userId: string) => {
+        callOrder.push('posthog')
+        return deletePersonMock(userId)
+    },
+}))
+
 const USER_ID = 'user-under-test'
 const USER_EMAIL = 'Shopper@Example.com'
 
@@ -120,6 +137,7 @@ function deleteRequest(body: unknown, headers: Record<string, string> = {}) {
 beforeEach(() => {
     vi.clearAllMocks()
     callOrder.length = 0
+    deletePersonMock.mockResolvedValue('deleted')
     loadTargetsMock.mockImplementation(async () => {
         callOrder.push('load')
         return []
@@ -146,6 +164,7 @@ describe('POST /api/account/delete', () => {
             deleted: true,
             scrubbed: { siteSuggestions: 2 },
             appleRevocation: 'not_applicable',
+            analyticsDeletion: 'deleted',
         })
         expect(prismaMock.user.deleteMany).toHaveBeenCalledWith({
             where: { id: USER_ID },
@@ -223,9 +242,54 @@ describe('POST /api/account/delete', () => {
             deleted: false,
             scrubbed: { siteSuggestions: 0 },
             appleRevocation: 'not_applicable',
+            analyticsDeletion: 'not_applicable',
         })
         // The winner of the race owns the revoke.
         expect(revokeGrantsMock).not.toHaveBeenCalled()
+    })
+
+    describe('PostHog person deletion (T-7505)', () => {
+        it('runs AFTER the transaction commits, for the session user id', async () => {
+            const res = await POST(deleteRequest({ confirm: 'DELETE' }))
+
+            expect(res.status).toBe(200)
+            expect(deletePersonMock).toHaveBeenCalledWith(USER_ID)
+            expect(callOrder).toEqual([
+                'load',
+                'transaction',
+                'revoke',
+                'posthog',
+            ])
+        })
+
+        it('is not called by the loser of a delete race, nor when the transaction fails', async () => {
+            transactionMock.mockResolvedValueOnce([
+                { count: 0 },
+                { count: 0 },
+                { count: 0 },
+            ])
+            const lost = await POST(deleteRequest({ confirm: 'DELETE' }))
+            expect(await lost.json()).toMatchObject({
+                analyticsDeletion: 'not_applicable',
+            })
+
+            transactionMock.mockRejectedValueOnce(new Error('db down'))
+            const failed = await POST(deleteRequest({ confirm: 'DELETE' }))
+            expect(failed.status).toBe(500)
+            expect(deletePersonMock).not.toHaveBeenCalled()
+        })
+
+        it('a failed PostHog delete never fails the request; the response says so', async () => {
+            deletePersonMock.mockResolvedValue('failed')
+
+            const res = await POST(deleteRequest({ confirm: 'DELETE' }))
+
+            expect(res.status).toBe(200)
+            expect(await res.json()).toMatchObject({
+                deleted: true,
+                analyticsDeletion: 'failed',
+            })
+        })
     })
 
     describe('Sign in with Apple revocation (T-5065)', () => {
@@ -250,7 +314,12 @@ describe('POST /api/account/delete', () => {
                 deleted: true,
                 appleRevocation: 'revoked',
             })
-            expect(callOrder).toEqual(['load', 'transaction', 'revoke'])
+            expect(callOrder).toEqual([
+                'load',
+                'transaction',
+                'revoke',
+                'posthog',
+            ])
             expect(loadTargetsMock).toHaveBeenCalledWith(USER_ID)
             expect(revokeGrantsMock).toHaveBeenCalledWith(appleTargets)
         })
@@ -275,6 +344,7 @@ describe('POST /api/account/delete', () => {
                 deleted: true,
                 scrubbed: { siteSuggestions: 2 },
                 appleRevocation: 'failed',
+                analyticsDeletion: 'deleted',
             })
         })
 

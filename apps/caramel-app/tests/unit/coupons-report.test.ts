@@ -1,5 +1,6 @@
 import { POST } from '@/app/api/coupons/[id]/report/route'
 import { resetReportDedupeForTests } from '@/lib/couponReportDedupe'
+import { resetReportVelocityForTests } from '@/lib/couponReportVelocity'
 import { NextRequest } from 'next/server'
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -52,6 +53,8 @@ const { prismaMock, txMock, reportRows, catalogIds, getSessionMock } =
             // against an in-memory reporters table, and in the integration suite
             // against real Postgres.
             $queryRaw: txSignalWrite,
+            // couponsRepo.lockShopperUser's pg_advisory_xact_lock statement.
+            $executeRaw: vi.fn(async () => 0),
             couponSignal: {
                 update: vi.fn(async () => ({})),
             },
@@ -67,19 +70,39 @@ const { prismaMock, txMock, reportRows, catalogIds, getSessionMock } =
                         where: {
                             couponId: string
                             userId: string | null
+                            outcome?: string
                             createdAt: { gte: Date }
                         }
                     }) => {
-                        const { couponId, userId, createdAt } = args.where
+                        const { couponId, userId, outcome, createdAt } =
+                            args.where
                         return (
                             rows.find(
                                 row =>
                                     row.couponId === couponId &&
                                     row.userId === userId &&
+                                    (outcome === undefined ||
+                                        row.outcome === outcome) &&
                                     row.createdAt >= createdAt.gte,
                             ) ?? null
                         )
                     },
+                ),
+                // workedStampCapSpent's daily count.
+                count: vi.fn(
+                    async (args: {
+                        where: {
+                            userId: string
+                            outcome: string
+                            createdAt: { gt: Date }
+                        }
+                    }) =>
+                        rows.filter(
+                            row =>
+                                row.userId === args.where.userId &&
+                                row.outcome === args.where.outcome &&
+                                row.createdAt > args.where.createdAt.gt,
+                        ).length,
                 ),
                 create: vi.fn(
                     async (args: {
@@ -162,7 +185,9 @@ function reportRequest(
 function signedInAs(userId: string) {
     getSessionMock.mockImplementation(async () => ({
         session: { id: `session-${userId}` },
-        user: { id: userId },
+        // An account old enough to be ESTABLISHED (accountReputation.ts): its
+        // "worked" stamps on its own say-so, a low-trust one does not.
+        user: { id: userId, createdAt: new Date('2026-01-01T00:00:00.000Z') },
     }))
 }
 
@@ -174,9 +199,12 @@ function anonymous() {
 
 beforeEach(() => {
     resetReportDedupeForTests()
+    resetReportVelocityForTests()
     prismaMock.$transaction.mockClear()
     txMock.$queryRaw.mockClear()
     txMock.couponSignalReporter.upsert.mockClear()
+    txMock.$executeRaw.mockClear()
+    txMock.couponReport.count.mockClear()
     txMock.couponSignalReporter.deleteMany.mockClear()
     txMock.couponSignal.update.mockClear()
     txMock.couponReport.findFirst.mockClear()
@@ -195,9 +223,10 @@ afterAll(() => {
 })
 
 describe('POST /api/coupons/[id]/report — app-owned trust signal (W1)', () => {
-    it('outcome "worked" → 200 {ok:true}, stamps lastWorkedAt ONLY (no workCount — increment owns that)', async () => {
+    it('outcome "worked" from an ESTABLISHED account → 200 {ok:true}, stamps lastWorkedAt ONLY (no workCount — increment owns that)', async () => {
+        signedInAs('user-1')
         const res = await POST(
-            reportRequest(KNOWN_COUPON, { outcome: 'worked' }),
+            reportRequest(KNOWN_COUPON, { outcome: 'worked' }, 'Bearer good'),
         )
 
         expect(res.status).toBe(200)
@@ -212,6 +241,187 @@ describe('POST /api/coupons/[id]/report — app-owned trust signal (W1)', () => 
         expect(query.sql).toContain('last_worked_at = EXCLUDED.last_worked_at')
         expect(query.sql).not.toContain('work_count')
         expect(query.sql).not.toContain('fail_count')
+    })
+
+    // T-6222 by another door: the report route's "worked" used to stamp
+    // last_worked_at for ANY caller, anonymous or forged. A low-trust reporter's
+    // report is accepted (same 200, same body) and the existence gate still
+    // runs, but the statement carries no stamp.
+    it.each([
+        ['an anonymous caller', undefined],
+        ['a YOUNG account', 'young'],
+    ] as const)(
+        'outcome "worked" from %s → 200 {ok:true} but the statement does NOT touch last_worked_at',
+        async (_who, kind) => {
+            if (kind === 'young') {
+                getSessionMock.mockImplementation(async () => ({
+                    session: { id: 'session-young' },
+                    user: { id: 'young-user', createdAt: new Date() },
+                }))
+            }
+            const res = await POST(
+                reportRequest(
+                    KNOWN_COUPON,
+                    { outcome: 'worked' },
+                    kind ? 'Bearer good' : undefined,
+                ),
+            )
+
+            expect(res.status).toBe(200)
+            expect(await res.json()).toEqual({ ok: true })
+            expect(txMock.$queryRaw).toHaveBeenCalledTimes(1)
+            const query = txMock.$queryRaw.mock.calls[0]![0]
+            expect(query.values).toEqual([KNOWN_COUPON, KNOWN_COUPON])
+            expect(query.sql).not.toContain('last_worked_at')
+            expect(query.sql).not.toContain('work_count')
+            // A low-trust success stores nothing about the reporter, and an
+            // anonymous / young caller never takes the shopper lock.
+            expect(txMock.couponSignalReporter.upsert).not.toHaveBeenCalled()
+            expect(txMock.$executeRaw).not.toHaveBeenCalled()
+        },
+    )
+
+    it('NO number of distinct anonymous "worked" reporters ever stamps last_worked_at (three IPs cannot keep a dead code Verified)', async () => {
+        for (let n = 1; n <= 5; n++) {
+            const res = await POST(
+                reportRequest(
+                    KNOWN_COUPON,
+                    { outcome: 'worked' },
+                    undefined,
+                    `203.0.113.${n}`,
+                ),
+            )
+            expect(await res.json()).toEqual({ ok: true })
+        }
+        expect(txMock.$queryRaw).toHaveBeenCalledTimes(5)
+        for (const call of txMock.$queryRaw.mock.calls) {
+            expect(call[0].sql).not.toContain('last_worked_at')
+        }
+    })
+
+    // N1: an established account's {worked} stamps on its own, so it shares the
+    // checkout capture's per-account daily cap (counted from coupon_reports).
+    describe('the per-account daily stamp cap on {worked} (established accounts)', () => {
+        const CAP = 30 // COUPON_WORKED_STAMPS_PER_USER_PER_DAY default
+        const seedStamps = (userId: string, count: number, ageMs = 60_000) => {
+            for (let n = 0; n < count; n++) {
+                reportRows.push({
+                    id: `seed-${userId}-${n}`,
+                    couponId: `9${n}`,
+                    userId,
+                    outcome: 'worked',
+                    createdAt: new Date(Date.now() - ageMs),
+                })
+            }
+        }
+        const worked = () =>
+            POST(
+                reportRequest(
+                    KNOWN_COUPON,
+                    { outcome: 'worked' },
+                    'Bearer good',
+                ),
+            )
+
+        it('under the cap it stamps, after taking the per-shopper lock', async () => {
+            signedInAs('user-1')
+            seedStamps('user-1', CAP - 1)
+
+            const res = await worked()
+
+            expect(await res.json()).toEqual({ ok: true })
+            expect(txMock.$executeRaw).toHaveBeenCalledTimes(1)
+            expect(txMock.$queryRaw.mock.calls[0]![0].sql).toContain(
+                'last_worked_at = EXCLUDED.last_worked_at',
+            )
+        })
+
+        it('AT the cap the report is still accepted (same 200 body) but counts as low-trust: the statement stamps nothing', async () => {
+            signedInAs('user-1')
+            seedStamps('user-1', CAP)
+
+            const res = await worked()
+
+            expect(res.status).toBe(200)
+            expect(await res.json()).toEqual({ ok: true })
+            expect(txMock.$queryRaw).toHaveBeenCalledTimes(1)
+            expect(txMock.$queryRaw.mock.calls[0]![0].sql).not.toContain(
+                'last_worked_at',
+            )
+            // A 404 for an unknown id is unchanged, and no reporter row is kept.
+            expect(txMock.couponSignalReporter.upsert).not.toHaveBeenCalled()
+        })
+
+        it('the count is per account and ignores stamps older than 24h', async () => {
+            signedInAs('user-1')
+            seedStamps('someone-else', CAP)
+            seedStamps('user-1', CAP, 25 * 60 * 60 * 1000)
+
+            await worked()
+
+            expect(txMock.$queryRaw.mock.calls[0]![0].sql).toContain(
+                'last_worked_at = EXCLUDED.last_worked_at',
+            )
+        })
+
+        it('a "failed" report earlier the same day does NOT hide the stamp from the cap: the worked attribution row is still written', async () => {
+            signedInAs('user-1')
+            await POST(
+                reportRequest(
+                    KNOWN_COUPON,
+                    { outcome: 'failed' },
+                    'Bearer good',
+                ),
+            )
+            await worked()
+
+            expect(
+                reportRows
+                    .filter(
+                        row =>
+                            row.userId === 'user-1' &&
+                            row.couponId === KNOWN_COUPON,
+                    )
+                    .map(row => row.outcome),
+            ).toEqual(['failed', 'worked'])
+        })
+
+        it('a "failed" report never takes the lock or reads the stamp count', async () => {
+            signedInAs('user-1')
+            seedStamps('user-1', CAP)
+
+            await POST(
+                reportRequest(
+                    KNOWN_COUPON,
+                    { outcome: 'failed' },
+                    'Bearer good',
+                ),
+            )
+
+            expect(txMock.$executeRaw).not.toHaveBeenCalled()
+            expect(txMock.couponReport.count).not.toHaveBeenCalled()
+        })
+
+        it('a YOUNG account never reads the count (it cannot stamp at all)', async () => {
+            getSessionMock.mockImplementation(async () => ({
+                session: { id: 'session-young' },
+                user: { id: 'young-user', createdAt: new Date() },
+            }))
+
+            await worked()
+
+            expect(txMock.couponReport.count).not.toHaveBeenCalled()
+        })
+    })
+
+    it('an unknown id from a low-trust "worked" is still a 404 that wrote no reporter row', async () => {
+        catalogIds.clear()
+        const res = await POST(
+            reportRequest(KNOWN_COUPON, { outcome: 'worked' }),
+        )
+
+        expect(res.status).toBe(404)
+        expect(txMock.couponSignalReporter.upsert).not.toHaveBeenCalled()
     })
 
     it('outcome "failed" with a storeReason → 200, upserts a fail signal carrying the reason', async () => {
@@ -590,7 +800,10 @@ describe('POST /api/coupons/[id]/report — anonymous behavior (characterization
     })
 
     it('a known id costs ONE signal statement: the existence check is folded into the write as a status-agnostic primary-key EXISTS, bound (never inlined), run after the dedupe', async () => {
-        await POST(reportRequest(KNOWN_COUPON, { outcome: 'worked' }))
+        signedInAs('user-1')
+        await POST(
+            reportRequest(KNOWN_COUPON, { outcome: 'worked' }, 'Bearer good'),
+        )
 
         // No lookup + write pair: exactly one statement, no reporter rows (the
         // coupon carries no failure quorum), no second write.
@@ -610,7 +823,7 @@ describe('POST /api/coupons/[id]/report — anonymous behavior (characterization
         txMock.$queryRaw.mockClear()
         prismaMock.$transaction.mockClear()
         const dup = await POST(
-            reportRequest(KNOWN_COUPON, { outcome: 'worked' }),
+            reportRequest(KNOWN_COUPON, { outcome: 'worked' }, 'Bearer good'),
         )
         expect(await dup.json()).toEqual({ ok: true, deduped: true })
         expect(txMock.$queryRaw).not.toHaveBeenCalled()
@@ -779,7 +992,7 @@ describe('POST /api/coupons/[id]/report — signed-in attribution (coupon_report
         expect(reportRows.map(row => row.userId)).toEqual(['user-1', 'user-1'])
     })
 
-    it('the dedup lookup is scoped to (this coupon, this user, midnight UTC) — nothing broader', async () => {
+    it('the dedup lookup is scoped to (this coupon, this user, this outcome, midnight UTC) — nothing broader', async () => {
         signedInAs('user-1')
         vi.setSystemTime(new Date('2026-08-09T18:30:45.123Z'))
 
@@ -795,6 +1008,7 @@ describe('POST /api/coupons/[id]/report — signed-in attribution (coupon_report
             where: {
                 couponId: KNOWN_COUPON,
                 userId: 'user-1',
+                outcome: 'worked',
                 createdAt: { gte: new Date('2026-08-09T00:00:00.000Z') },
             },
             select: { id: true },
@@ -855,5 +1069,136 @@ describe('POST /api/coupons/[id]/report — signed-in attribution (coupon_report
         expect(res.status).toBe(400)
         expect(prismaMock.$transaction).not.toHaveBeenCalled()
         expect(reportRows).toEqual([])
+    })
+})
+
+// T-6227: a per-COUPON velocity cap across ALL reporters, and the reporter's
+// weight following the account's age. The cap's own arithmetic (window, bounded
+// table, Sentry) is pinned in coupon-report-velocity.test.ts; here only the
+// route's wiring of it.
+describe('POST /api/coupons/[id]/report — per-coupon velocity cap and account reputation (T-6227)', () => {
+    // COUPON_REPORT_MAX_LOW_TRUST_PER_COUPON_PER_HOUR default: the anonymous
+    // callers below are low-trust, and have the smaller bucket.
+    const MAX = 5
+    const ip = (n: number) => `203.0.113.${n}`
+    const anonReport = (id: string, outcome: 'failed' | 'worked', n: number) =>
+        reportRequest(id, { outcome }, undefined, ip(n))
+
+    it.each(['failed', 'worked'] as const)(
+        'the %s report past the hourly cap is accepted but NOT counted, and answers exactly what a deduped repeat answers',
+        async outcome => {
+            for (let n = 1; n <= MAX; n++) {
+                const res = await POST(anonReport(KNOWN_COUPON, outcome, n))
+                expect(await res.json()).toEqual({ ok: true })
+            }
+            expect(txMock.$queryRaw).toHaveBeenCalledTimes(MAX)
+
+            const over = await POST(anonReport(KNOWN_COUPON, outcome, 200))
+
+            expect(over.status).toBe(200)
+            expect(await over.json()).toEqual({ ok: true, deduped: true })
+            expect(txMock.$queryRaw).toHaveBeenCalledTimes(MAX)
+        },
+    )
+
+    it('the cap is per coupon and per kind: a spent failed cap blocks neither worked reports nor another coupon', async () => {
+        for (let n = 1; n <= MAX; n++) {
+            await POST(anonReport(KNOWN_COUPON, 'failed', n))
+        }
+        const worked = await POST(anonReport(KNOWN_COUPON, 'worked', 100))
+        const other = await POST(anonReport('43', 'failed', 101))
+
+        expect(await worked.json()).toEqual({ ok: true })
+        expect(await other.json()).toEqual({ ok: true })
+    })
+
+    it('a swarm of low-trust reporters cannot starve an ESTABLISHED account: the buckets are separate', async () => {
+        for (let n = 1; n <= MAX + 3; n++) {
+            await POST(anonReport(KNOWN_COUPON, 'failed', n))
+        }
+        signedInAs('old-user')
+
+        const res = await POST(
+            reportRequest(KNOWN_COUPON, { outcome: 'failed' }, 'Bearer good'),
+        )
+
+        expect(await res.json()).toEqual({ ok: true })
+    })
+
+    it('an over-cap report gives the reporter its dedupe slot back: when the window rolls, the same IP counts', async () => {
+        for (let n = 1; n <= MAX; n++) {
+            await POST(anonReport(KNOWN_COUPON, 'failed', n))
+        }
+        await POST(anonReport(KNOWN_COUPON, 'failed', 150))
+        vi.setSystemTime(new Date('2026-08-09T13:30:00.000Z'))
+
+        const later = await POST(anonReport(KNOWN_COUPON, 'failed', 150))
+
+        expect(await later.json()).toEqual({ ok: true })
+    })
+
+    it('probing unknown ids spends no velocity: every probe is a 404, never a silent cap', async () => {
+        catalogIds.clear()
+        for (let n = 1; n <= MAX + 5; n++) {
+            const res = await POST(anonReport(KNOWN_COUPON, 'failed', n))
+            expect(res.status).toBe(404)
+        }
+    })
+
+    it('a failed write gives the velocity slot back as well', async () => {
+        txMock.$queryRaw.mockRejectedValueOnce(new Error('db down'))
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+        const failed = await POST(
+            reportRequest(KNOWN_COUPON, { outcome: 'failed' }),
+        )
+        expect(failed.status).toBe(500)
+        errorSpy.mockRestore()
+
+        for (let n = 1; n <= MAX; n++) {
+            const res = await POST(anonReport(KNOWN_COUPON, 'failed', n))
+            expect(await res.json()).toEqual({ ok: true })
+        }
+    })
+
+    function reporterWeightWritten(): number {
+        const calls = txMock.couponSignalReporter.upsert.mock
+            .calls as unknown as [{ create: { weight: number } }][]
+        return calls[calls.length - 1]![0].create.weight
+    }
+
+    function signedInWithAge(userId: string, createdAt: Date | undefined) {
+        getSessionMock.mockImplementation(async () => ({
+            session: { id: `session-${userId}` },
+            user: { id: userId, createdAt },
+        }))
+    }
+
+    it('an ESTABLISHED account (older than the age gate) reports a failure at the account weight', async () => {
+        signedInWithAge('old-user', new Date('2026-07-01T00:00:00.000Z'))
+        await POST(
+            reportRequest(KNOWN_COUPON, { outcome: 'failed' }, 'Bearer good'),
+        )
+        expect(reporterWeightWritten()).toBe(2)
+    })
+
+    it('a YOUNG account reports a failure at the anonymous-network weight', async () => {
+        signedInWithAge('new-user', new Date('2026-08-09T11:00:00.000Z'))
+        await POST(
+            reportRequest(KNOWN_COUPON, { outcome: 'failed' }, 'Bearer good'),
+        )
+        expect(reporterWeightWritten()).toBe(1)
+    })
+
+    it('an account whose age cannot be read gets no trust (weight of a network)', async () => {
+        signedInWithAge('unknown-age', undefined)
+        await POST(
+            reportRequest(KNOWN_COUPON, { outcome: 'failed' }, 'Bearer good'),
+        )
+        expect(reporterWeightWritten()).toBe(1)
+    })
+
+    it('an anonymous failure is the anonymous-network weight', async () => {
+        await POST(reportRequest(KNOWN_COUPON, { outcome: 'failed' }))
+        expect(reporterWeightWritten()).toBe(1)
     })
 })

@@ -19,7 +19,7 @@ import {
 //    PostHog baked → the ingestion tests skip themselves; only the deployment-
 //    safe render + UI-stub tests run.
 //
-// This file imports NO @prisma/client and touches the DB only through the app,
+// This file opens NO Prisma client and touches the DB only through the app,
 // so it is safe to COLLECT in both contexts.
 
 // One id for the whole run; scenario = each test's title. Timestamps are fine

@@ -1,4 +1,5 @@
 import { handleRouteError } from '@/lib/api/handleRouteError'
+import { withoutSearchText } from '@/lib/api/withoutSearchText'
 import { withRoute } from '@/lib/api/withRoute'
 import { attachSignals } from '@/lib/couponSignals'
 import { listCoupons } from '@/lib/couponsRepo'
@@ -119,8 +120,11 @@ export const GET = withRoute(
                 },
             )
         } catch (error) {
-            console.error('Error fetching coupons:', error)
-            return handleRouteError(error, {
+            // The typed search text must not reach the log or Sentry through
+            // an error message (withoutSearchText.ts).
+            const safeError = withoutSearchText(error, [search, keyWords])
+            console.error('Error fetching coupons:', safeError)
+            return handleRouteError(safeError, {
                 req,
                 message: 'Error fetching coupons.',
             })

@@ -6,15 +6,13 @@
 // supported-site/suggestion-form.tsx (caramel palette, rounded-3xl card,
 // rounded-full inputs, framer-motion whileTap, sonner toasts, dark mode).
 import { getLoadedPosthog } from '@/lib/analytics/posthogBrowser'
+import { SUPPORT_REPLY_PROMISE } from '@/lib/supportCopy'
 import { m } from 'framer-motion'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
 export type SupportFeedbackType =
-    | 'problem'
-    | 'feature_request'
-    | 'question'
-    | 'other'
+    'problem' | 'feature_request' | 'question' | 'other'
 
 const TYPE_OPTIONS: { value: SupportFeedbackType; label: string }[] = [
     { value: 'problem', label: 'Problem' },
@@ -185,7 +183,7 @@ export default function SupportForm({
             } else {
                 toast.success(
                     wantsReply
-                        ? "Thanks — we've received it. We'll get back to you soon."
+                        ? `Thanks — we've received it. ${SUPPORT_REPLY_PROMISE}`
                         : "Thanks — we've received it.",
                 )
             }
@@ -215,20 +213,20 @@ export default function SupportForm({
                 style={
                     reservedHeight ? { minHeight: reservedHeight } : undefined
                 }
-                className="flex w-full flex-col items-center justify-center gap-4 rounded-3xl border border-caramel/20 bg-gradient-to-br from-caramel/5 via-orange-50/20 to-caramel/5 p-8 text-center shadow-md focus:outline-none motion-safe:animate-motion-fade-up dark:border-caramel/30 dark:from-caramel/10 dark:via-orange-900/10 dark:to-caramel/10"
+                className="border-caramel/20 from-caramel/5 to-caramel/5 motion-safe:animate-motion-fade-up dark:border-caramel/30 dark:from-caramel/10 dark:to-caramel/10 flex w-full flex-col items-center justify-center gap-4 rounded-3xl border bg-gradient-to-br via-orange-50/20 p-8 text-center shadow-md focus:outline-none dark:via-orange-900/10"
             >
                 <p className="text-lg font-semibold text-gray-800 dark:text-gray-100">
                     Thanks for reaching out
                 </p>
                 <p className="text-sm text-gray-600 dark:text-gray-300">
                     We&apos;ve received your message
-                    {wantsReply ? ' and will reply soon.' : '.'}
+                    {wantsReply ? `. ${SUPPORT_REPLY_PROMISE}` : '.'}
                 </p>
                 <m.button
                     type="button"
                     whileTap={{ scale: 0.98 }}
                     onClick={() => setSubmitted(false)}
-                    className="rounded-full bg-gradient-to-r from-caramel to-orange-600 px-6 py-2 text-sm font-semibold text-white shadow transition-colors hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-900"
+                    className="from-caramel focus-visible:ring-caramel rounded-full bg-gradient-to-r to-orange-600 px-6 py-2 text-sm font-semibold text-white shadow transition-colors hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-900"
                 >
                     Send another
                 </m.button>
@@ -240,7 +238,7 @@ export default function SupportForm({
         <form
             ref={formRef}
             onSubmit={submit}
-            className="flex w-full flex-col gap-5 rounded-3xl border border-caramel/20 bg-gradient-to-br from-caramel/5 via-orange-50/20 to-caramel/5 p-8 shadow-md dark:border-caramel/30 dark:from-caramel/10 dark:via-orange-900/10 dark:to-caramel/10 sm:p-6"
+            className="border-caramel/20 from-caramel/5 to-caramel/5 dark:border-caramel/30 dark:from-caramel/10 dark:to-caramel/10 flex w-full flex-col gap-5 rounded-3xl border bg-gradient-to-br via-orange-50/20 p-8 shadow-md sm:p-6 dark:via-orange-900/10"
         >
             {/* Type — segmented control */}
             <fieldset className="flex flex-col gap-2">
@@ -256,10 +254,10 @@ export default function SupportForm({
                                 type="button"
                                 aria-pressed={active}
                                 onClick={() => setType(opt.value)}
-                                className={`rounded-full border-2 px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-900 ${
+                                className={`focus-visible:ring-caramel rounded-full border-2 px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-900 ${
                                     active
-                                        ? 'border-caramel bg-gradient-to-r from-caramel to-orange-600 text-white shadow'
-                                        : 'border-caramel/30 bg-white text-gray-700 hover:border-caramel dark:bg-gray-900 dark:text-gray-200 dark:hover:border-orange-400'
+                                        ? 'border-caramel from-caramel bg-gradient-to-r to-orange-600 text-white shadow'
+                                        : 'border-caramel/30 hover:border-caramel bg-white text-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:border-orange-400'
                                 }`}
                             >
                                 {opt.label}
@@ -284,7 +282,7 @@ export default function SupportForm({
                     required
                     placeholder="Tell us what happened, or what you'd like to see…"
                     aria-label="Your message"
-                    className="w-full resize-y rounded-2xl border-2 border-caramel/30 bg-white px-4 py-3 placeholder-gray-400 shadow-sm outline-none transition-colors focus:border-caramel dark:bg-gray-900 dark:text-white dark:placeholder-gray-500 dark:focus:border-orange-400"
+                    className="border-caramel/30 focus:border-caramel w-full resize-y rounded-2xl border-2 bg-white px-4 py-3 placeholder-gray-400 shadow-sm outline-none transition-colors dark:bg-gray-900 dark:text-white dark:placeholder-gray-500 dark:focus:border-orange-400"
                 />
                 <span className="text-right text-xs text-gray-500 dark:text-gray-400">
                     {message.length}/{MESSAGE_MAX}
@@ -310,7 +308,7 @@ export default function SupportForm({
                     maxLength={EXPECTED_MAX}
                     placeholder="The coupon should have applied at checkout…"
                     aria-label="Expected outcome"
-                    className="w-full rounded-full border-2 border-caramel/30 bg-white px-6 py-3 placeholder-gray-400 shadow-sm outline-none transition-colors focus:border-caramel dark:bg-gray-900 dark:text-white dark:placeholder-gray-500 dark:focus:border-orange-400"
+                    className="border-caramel/30 focus:border-caramel w-full rounded-full border-2 bg-white px-6 py-3 placeholder-gray-400 shadow-sm outline-none transition-colors dark:bg-gray-900 dark:text-white dark:placeholder-gray-500 dark:focus:border-orange-400"
                 />
             </label>
 
@@ -320,7 +318,7 @@ export default function SupportForm({
                     type="checkbox"
                     checked={wantsReply}
                     onChange={e => setWantsReply(e.target.checked)}
-                    className="h-4 w-4 rounded border-caramel/40 text-caramel focus-visible:ring-2 focus-visible:ring-caramel"
+                    className="border-caramel/40 text-caramel focus-visible:ring-caramel h-4 w-4 rounded focus-visible:ring-2"
                 />
                 <span className="text-sm text-gray-700 dark:text-gray-200">
                     I&apos;d like a reply
@@ -347,7 +345,7 @@ export default function SupportForm({
                         required
                         placeholder="you@example.com"
                         aria-label="Your email"
-                        className="w-full rounded-full border-2 border-caramel/30 bg-white px-6 py-3 placeholder-gray-400 shadow-sm outline-none transition-colors focus:border-caramel dark:bg-gray-900 dark:text-white dark:placeholder-gray-500 dark:focus:border-orange-400"
+                        className="border-caramel/30 focus:border-caramel w-full rounded-full border-2 bg-white px-6 py-3 placeholder-gray-400 shadow-sm outline-none transition-colors dark:bg-gray-900 dark:text-white dark:placeholder-gray-500 dark:focus:border-orange-400"
                     />
                 </label>
             ) : null}
@@ -379,20 +377,20 @@ export default function SupportForm({
                 type="submit"
                 disabled={loading}
                 whileTap={{ scale: 0.98 }}
-                className="rounded-full bg-gradient-to-r from-caramel to-orange-600 px-8 py-3 font-semibold text-white shadow transition-colors hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 dark:focus-visible:ring-offset-gray-900"
+                className="from-caramel focus-visible:ring-caramel rounded-full bg-gradient-to-r to-orange-600 px-8 py-3 font-semibold text-white shadow transition-colors hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 dark:focus-visible:ring-offset-gray-900"
             >
                 {/* Both labels share one grid cell so the button keeps the
                     wider width and only opacity changes between them. */}
                 <span className="grid">
                     <span
                         aria-hidden={loading}
-                        className={`col-start-1 row-start-1 transition-opacity duration-fast ease-motion-out ${loading ? 'opacity-0' : 'opacity-100'}`}
+                        className={`duration-fast ease-motion-out col-start-1 row-start-1 transition-opacity ${loading ? 'opacity-0' : 'opacity-100'}`}
                     >
                         Send feedback
                     </span>
                     <span
                         aria-hidden={!loading}
-                        className={`col-start-1 row-start-1 transition-opacity duration-fast ease-motion-out ${loading ? 'opacity-100' : 'opacity-0'}`}
+                        className={`duration-fast ease-motion-out col-start-1 row-start-1 transition-opacity ${loading ? 'opacity-100' : 'opacity-0'}`}
                     >
                         Sending…
                     </span>

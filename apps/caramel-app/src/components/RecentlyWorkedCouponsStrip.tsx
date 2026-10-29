@@ -48,7 +48,7 @@ export function RecentlyWorkedCouponsList({
                 <div className="mb-12 text-center">
                     <h2
                         id="just-worked-heading"
-                        className="mb-4 text-4xl font-extrabold leading-tight tracking-tight text-caramel lg:text-3xl"
+                        className="text-caramel mb-4 text-4xl font-extrabold leading-tight tracking-tight lg:text-3xl"
                     >
                         Codes that just worked
                     </h2>
@@ -57,7 +57,7 @@ export function RecentlyWorkedCouponsList({
                         applied successfully, newest first.
                     </p>
                 </div>
-                <ul className="grid grid-cols-4 gap-5 xl:grid-cols-3 lg:grid-cols-2 sm:grid-cols-1">
+                <ul className="grid grid-cols-4 gap-5 sm:grid-cols-1 lg:grid-cols-2 xl:grid-cols-3">
                     {shown.map(coupon => (
                         <RecentlyWorkedTile
                             key={coupon.id}
@@ -96,7 +96,7 @@ function RecentlyWorkedTile({
             <Link
                 href={`/coupons/${coupon.storeDomain}`}
                 prefetch={false}
-                className="group flex h-full flex-col rounded-3xl border border-orange-100 bg-gradient-to-br from-orange-50/50 via-white to-orange-50/40 p-5 shadow-md transition-all duration-200 hover:-translate-y-0.5 hover:border-orange-200 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel dark:border-orange-900/50 dark:from-darkSurface dark:via-darkSurface dark:to-darkSurface dark:hover:border-orange-800/70"
+                className="focus-visible:ring-caramel dark:from-darkSurface dark:via-darkSurface dark:to-darkSurface group flex h-full flex-col rounded-3xl border border-orange-100 bg-gradient-to-br from-orange-50/50 via-white to-orange-50/40 p-5 shadow-md transition-all duration-200 hover:-translate-y-0.5 hover:border-orange-200 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 dark:border-orange-900/50 dark:hover:border-orange-800/70"
             >
                 <div className="mb-3 flex items-start justify-between gap-3">
                     <span className="flex min-w-0 items-center gap-2.5">
@@ -112,7 +112,7 @@ function RecentlyWorkedTile({
                             {coupon.storeDomain}
                         </span>
                     </span>
-                    <span className="shrink-0 rounded-xl bg-gradient-to-br from-caramel to-orange-600 px-2.5 py-1 text-sm font-black text-white shadow-sm">
+                    <span className="from-caramel shrink-0 rounded-xl bg-gradient-to-br to-orange-600 px-2.5 py-1 text-sm font-black text-white shadow-sm">
                         {discount ? `${discount} off` : 'DEAL'}
                     </span>
                 </div>
@@ -120,7 +120,7 @@ function RecentlyWorkedTile({
                     {coupon.title}
                 </h3>
                 <div className="mt-auto flex flex-wrap items-center gap-2">
-                    <code className="rounded-lg border border-dashed border-caramel/50 px-2 py-0.5 font-mono text-sm font-bold text-caramel">
+                    <code className="border-caramel/50 text-caramel rounded-lg border border-dashed px-2 py-0.5 font-mono text-sm font-bold">
                         {coupon.code}
                     </code>
                     {badge && <CouponStatusBadge badge={badge} />}

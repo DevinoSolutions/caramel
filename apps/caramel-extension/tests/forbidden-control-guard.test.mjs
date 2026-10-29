@@ -123,6 +123,50 @@ describe('caramelIsForbiddenControl — how the control is labelled', () => {
         }
     })
 
+    it('refuses the other order-completing labels a drifted config can reach (T-6221)', () => {
+        for (const html of [
+            '<button id="b">Pay $24.99</button>',
+            '<button id="b">Pay £10</button>',
+            '<button id="b">Pay 24.99 USD</button>',
+            '<button id="b">Pay</button>',
+            '<button id="b">Secure pay</button>',
+            '<button id="b">Continue to payment</button>',
+            '<button id="b" aria-label="Continue to payment"></button>',
+            '<button id="b">Complete</button>',
+            '<button id="b">Complete order</button>',
+            '<button id="b">Complete purchase</button>',
+            '<input id="b" type="submit" value="Complete Purchase">',
+            '<button id="b">Review order</button>',
+            '<button id="b" name="complete"></button>',
+        ]) {
+            const btn = mount(html, '#b')
+            expect(
+                caramelIsForbiddenControl(btn),
+                `${html} must be refused`,
+            ).toBe(true)
+        }
+    })
+
+    it('does not refuse coupon controls that merely contain those letters', () => {
+        for (const html of [
+            '<button id="b">Apply</button>',
+            '<button id="b">Apply discount code</button>',
+            '<button id="b">Redeem gift card</button>',
+            '<button id="b">Have a promo code?</button>',
+            '<button id="b" aria-label="Payments accepted info"></button>',
+            '<button id="b" name="paypal-promo">Apply PayPal promo</button>',
+            '<input id="autocomplete-code" type="text">',
+            '<button id="b">Completed offers</button>',
+            '<button id="b">Repay later</button>',
+        ]) {
+            const btn = mount(html, '#b')
+            expect(
+                caramelIsForbiddenControl(btn),
+                `${html} must NOT be refused`,
+            ).toBe(false)
+        }
+    })
+
     it('refuses controls that destroy the cart or the session', () => {
         for (const label of [
             'Empty Cart',

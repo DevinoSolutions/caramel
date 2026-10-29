@@ -64,8 +64,8 @@ export default function OpenSourceSection() {
         <section id="opensource" className="relative overflow-hidden py-32">
             {/* Background Elements */}
             <div className="absolute inset-0">
-                <div className="absolute left-0 top-0 h-px w-full bg-gradient-to-r from-transparent via-caramel/20 to-transparent"></div>
-                <div className="absolute bottom-0 left-0 h-px w-full bg-gradient-to-r from-transparent via-caramel/20 to-transparent"></div>
+                <div className="via-caramel/20 absolute left-0 top-0 h-px w-full bg-gradient-to-r from-transparent to-transparent"></div>
+                <div className="via-caramel/20 absolute bottom-0 left-0 h-px w-full bg-gradient-to-r from-transparent to-transparent"></div>
             </div>
 
             <div className="relative z-10 mx-auto max-w-7xl px-6 lg:px-8">
@@ -77,10 +77,10 @@ export default function OpenSourceSection() {
                     transition={{ duration: 0.6, ease: 'easeOut' }}
                     className="mb-20 text-center"
                 >
-                    <h2 className="mb-8 bg-gradient-to-r from-caramel to-orange-600 bg-clip-text pb-1 text-5xl font-extrabold leading-tight tracking-tight text-transparent lg:text-4xl">
+                    <h2 className="from-caramel mb-8 bg-gradient-to-r to-orange-600 bg-clip-text pb-1 text-5xl font-extrabold leading-tight tracking-tight text-transparent lg:text-4xl">
                         {HOME_OPEN_SOURCE_COPY.heading}
                     </h2>
-                    <p className="mx-auto max-w-3xl text-xl leading-relaxed text-gray-600 dark:text-gray-300 lg:text-lg">
+                    <p className="mx-auto max-w-3xl text-xl leading-relaxed text-gray-600 lg:text-lg dark:text-gray-300">
                         {HOME_OPEN_SOURCE_COPY.summary}
                     </p>
                 </m.div>
@@ -93,7 +93,7 @@ export default function OpenSourceSection() {
                     transition={{ duration: 0.6, delay: 0.2, ease: 'easeOut' }}
                     className="mb-16"
                 >
-                    <h3 className="mb-8 text-center text-3xl font-extrabold tracking-tight text-gray-900 dark:text-white lg:text-2xl">
+                    <h3 className="mb-8 text-center text-3xl font-extrabold tracking-tight text-gray-900 lg:text-2xl dark:text-white">
                         {HOME_OPEN_SOURCE_COPY.securityHeading}
                     </h3>
                     {/* Deliberately COMPACT: this row supports the two richer
@@ -101,7 +101,7 @@ export default function OpenSourceSection() {
                         cards are quiet — small inline icon, tight padding, no
                         ambient icon/grid animation. Visual hierarchy, not a
                         third row of hero cards. */}
-                    <div className="grid grid-cols-4 gap-6 lg:grid-cols-2 sm:grid-cols-1">
+                    <div className="grid grid-cols-4 gap-6 sm:grid-cols-1 lg:grid-cols-2">
                         {securityFeatures.map((feature, index) => (
                             <m.div
                                 key={feature.title}
@@ -134,11 +134,11 @@ export default function OpenSourceSection() {
                                     entrance, a plain child owns the chrome and
                                     the hover. Same reason the icon scale below
                                     rides on its own inner span. */}
-                                <div className="group relative h-full overflow-hidden rounded-2xl border border-caramel/20 bg-gradient-to-br from-caramel/5 via-orange-50/30 to-caramel/5 p-5 transition-all duration-300 hover:-translate-y-1 hover:border-caramel/60 hover:shadow-[0_12px_32px_-8px_rgba(234,105,37,0.35)] dark:border-caramel/30 dark:from-caramel/10 dark:via-orange-900/20 dark:to-caramel/10">
+                                <div className="border-caramel/20 from-caramel/5 to-caramel/5 hover:border-caramel/60 dark:border-caramel/30 dark:from-caramel/10 dark:to-caramel/10 group relative h-full overflow-hidden rounded-2xl border bg-gradient-to-br via-orange-50/30 p-5 transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_12px_32px_-8px_rgba(234,105,37,0.35)] dark:via-orange-900/20">
                                     <div className="flex items-start gap-3">
                                         <span
                                             aria-hidden="true"
-                                            className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-caramel/10 text-lg text-caramel transition-transform duration-300 group-hover:scale-110 dark:bg-caramel/20"
+                                            className="bg-caramel/10 text-caramel dark:bg-caramel/20 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-lg transition-transform duration-300 group-hover:scale-110"
                                         >
                                             {feature.icon}
                                         </span>
@@ -165,10 +165,10 @@ export default function OpenSourceSection() {
                     transition={{ duration: 0.6, delay: 0.15, ease: 'easeOut' }}
                     className="mb-24"
                 >
-                    <h3 className="mb-12 text-center text-3xl font-extrabold tracking-tight text-gray-900 dark:text-white lg:text-2xl">
+                    <h3 className="mb-12 text-center text-3xl font-extrabold tracking-tight text-gray-900 lg:text-2xl dark:text-white">
                         {HOME_OPEN_SOURCE_COPY.communityHeading}
                     </h3>
-                    <div className="grid grid-cols-3 gap-8 lg:grid-cols-2 sm:grid-cols-1">
+                    <div className="grid grid-cols-3 gap-8 sm:grid-cols-1 lg:grid-cols-2">
                         {platforms.map((platform, index) => (
                             <m.a
                                 key={platform.name}
@@ -196,7 +196,7 @@ export default function OpenSourceSection() {
                                     damping: 15,
                                 }}
                             >
-                                <div className="group relative h-full overflow-hidden rounded-3xl border border-caramel/20 bg-gradient-to-br from-caramel/5 via-orange-50/30 to-caramel/5 p-8 transition-all duration-300 hover:-translate-y-1 hover:border-caramel/60 hover:shadow-[0_12px_32px_-8px_rgba(234,105,37,0.35)] dark:border-caramel/30 dark:from-caramel/10 dark:via-orange-900/20 dark:to-caramel/10 sm:p-6">
+                                <div className="border-caramel/20 from-caramel/5 to-caramel/5 hover:border-caramel/60 dark:border-caramel/30 dark:from-caramel/10 dark:to-caramel/10 group relative h-full overflow-hidden rounded-3xl border bg-gradient-to-br via-orange-50/30 p-8 transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_12px_32px_-8px_rgba(234,105,37,0.35)] sm:p-6 dark:via-orange-900/20">
                                     <div
                                         aria-hidden="true"
                                         className="absolute inset-0 opacity-5"
@@ -231,7 +231,7 @@ export default function OpenSourceSection() {
                                     </div>
                                     <div className="relative z-10 flex items-start gap-6 sm:flex-col sm:items-center sm:gap-4">
                                         <m.div
-                                            className="flex h-16 w-16 items-center justify-center rounded-2xl bg-caramel/10 text-2xl text-caramel dark:bg-caramel/20"
+                                            className="bg-caramel/10 text-caramel dark:bg-caramel/20 flex h-16 w-16 items-center justify-center rounded-2xl text-2xl"
                                             animate={
                                                 reduceMotion
                                                     ? undefined
@@ -252,13 +252,13 @@ export default function OpenSourceSection() {
                                             </span>
                                         </m.div>
                                         <div className="flex-1 sm:text-center">
-                                            <h3 className="mb-3 text-2xl font-bold text-gray-800 dark:text-white sm:text-xl">
+                                            <h3 className="mb-3 text-2xl font-bold text-gray-800 sm:text-xl dark:text-white">
                                                 {platform.name}
                                             </h3>
-                                            <p className="text-base leading-relaxed text-gray-600 dark:text-gray-400 sm:text-sm">
+                                            <p className="text-base leading-relaxed text-gray-600 sm:text-sm dark:text-gray-400">
                                                 {platform.desc}
                                             </p>
-                                            <span className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-caramel underline-offset-4 group-hover:underline">
+                                            <span className="text-caramel mt-4 inline-flex items-center gap-2 text-sm font-semibold underline-offset-4 group-hover:underline">
                                                 Open {platform.name}
                                                 <FaArrowRight
                                                     aria-hidden="true"
@@ -281,7 +281,7 @@ export default function OpenSourceSection() {
                     transition={{ duration: 0.6, delay: 0.15, ease: 'easeOut' }}
                     className="mb-24"
                 >
-                    <h3 className="mb-12 text-center text-3xl font-extrabold tracking-tight text-gray-900 dark:text-white lg:text-2xl">
+                    <h3 className="mb-12 text-center text-3xl font-extrabold tracking-tight text-gray-900 lg:text-2xl dark:text-white">
                         {HOME_OPEN_SOURCE_COPY.contributionHeading}
                     </h3>
                     <div className="grid grid-cols-2 gap-8 sm:grid-cols-1 sm:gap-6">
@@ -309,7 +309,7 @@ export default function OpenSourceSection() {
                                     damping: 15,
                                 }}
                             >
-                                <div className="group relative h-full overflow-hidden rounded-3xl border border-caramel/20 bg-gradient-to-br from-caramel/5 via-orange-50/30 to-caramel/5 p-8 transition-all duration-300 hover:-translate-y-1 hover:border-caramel/60 hover:shadow-[0_12px_32px_-8px_rgba(234,105,37,0.35)] dark:border-caramel/30 dark:from-caramel/10 dark:via-orange-900/20 dark:to-caramel/10 sm:p-6">
+                                <div className="border-caramel/20 from-caramel/5 to-caramel/5 hover:border-caramel/60 dark:border-caramel/30 dark:from-caramel/10 dark:to-caramel/10 group relative h-full overflow-hidden rounded-3xl border bg-gradient-to-br via-orange-50/30 p-8 transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_12px_32px_-8px_rgba(234,105,37,0.35)] sm:p-6 dark:via-orange-900/20">
                                     <div
                                         aria-hidden="true"
                                         className="absolute inset-0 opacity-5"
@@ -344,7 +344,7 @@ export default function OpenSourceSection() {
                                     </div>
                                     <div className="relative z-10 flex items-start gap-6 sm:flex-col sm:items-center sm:gap-4">
                                         <m.div
-                                            className="text-4xl text-caramel sm:text-3xl"
+                                            className="text-caramel text-4xl sm:text-3xl"
                                             animate={
                                                 reduceMotion
                                                     ? undefined
@@ -365,17 +365,17 @@ export default function OpenSourceSection() {
                                             </span>
                                         </m.div>
                                         <div className="flex-1 sm:text-center">
-                                            <h4 className="mb-3 text-2xl font-bold text-gray-800 dark:text-white sm:text-xl">
+                                            <h4 className="mb-3 text-2xl font-bold text-gray-800 sm:text-xl dark:text-white">
                                                 {contribution.title}
                                             </h4>
-                                            <p className="mb-6 text-base leading-relaxed text-gray-600 dark:text-gray-400 sm:text-sm">
+                                            <p className="mb-6 text-base leading-relaxed text-gray-600 sm:text-sm dark:text-gray-400">
                                                 {contribution.desc}
                                             </p>
                                             <m.a
                                                 href={contribution.href}
                                                 target="_blank"
                                                 rel="noopener noreferrer"
-                                                className="inline-flex items-center rounded-full bg-gradient-to-r from-caramel to-orange-600 px-6 py-3 text-sm font-semibold text-white shadow-md transition-all duration-200 hover:shadow-xl"
+                                                className="from-caramel inline-flex items-center rounded-full bg-gradient-to-r to-orange-600 px-6 py-3 text-sm font-semibold text-white shadow-md transition-all duration-200 hover:shadow-xl"
                                                 whileHover={{
                                                     scale: 1.05,
                                                     transition: {
@@ -400,7 +400,7 @@ export default function OpenSourceSection() {
                     whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true }}
                     transition={{ duration: 0.6, delay: 0.15, ease: 'easeOut' }}
-                    className="rounded-3xl bg-gradient-to-br from-caramel to-[#c9531a] p-12 text-center text-white shadow-2xl ring-1 ring-inset ring-white/20 dark:border dark:border-caramel/30 dark:bg-caramel/[0.12] dark:bg-none dark:ring-0 lg:p-8 sm:p-6"
+                    className="from-caramel dark:border-caramel/30 dark:bg-caramel/[0.12] rounded-3xl bg-gradient-to-br to-[#c9531a] p-12 text-center text-white shadow-2xl ring-1 ring-inset ring-white/20 sm:p-6 lg:p-8 dark:border dark:bg-none dark:ring-0"
                 >
                     <h3 className="mb-6 text-3xl font-semibold tracking-tight text-white lg:text-2xl">
                         {HOME_OPEN_SOURCE_COPY.actionHeading}
@@ -413,7 +413,7 @@ export default function OpenSourceSection() {
                             href={GITHUB_REPO_URL}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="inline-flex items-center rounded-full bg-white px-8 py-4 font-semibold text-caramel shadow-md transition-all duration-200 hover:bg-orange-50 hover:shadow-xl"
+                            className="text-caramel inline-flex items-center rounded-full bg-white px-8 py-4 font-semibold shadow-md transition-all duration-200 hover:bg-orange-50 hover:shadow-xl"
                             whileHover={{
                                 scale: 1.05,
                                 transition: { duration: 0.2 },
@@ -426,7 +426,7 @@ export default function OpenSourceSection() {
                             href={DISCORD_INVITE_URL}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="inline-flex items-center rounded-full border-2 border-white bg-transparent px-8 py-4 font-semibold text-white transition-all duration-200 hover:bg-white hover:text-caramel"
+                            className="hover:text-caramel inline-flex items-center rounded-full border-2 border-white bg-transparent px-8 py-4 font-semibold text-white transition-all duration-200 hover:bg-white"
                             whileHover={{
                                 scale: 1.05,
                                 transition: { duration: 0.2 },

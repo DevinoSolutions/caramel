@@ -79,9 +79,8 @@ describe('PostHog: deferred on the landing route only', () => {
         '%s loads posthog-js at mount and records from init',
         async pathname => {
             landOn(pathname)
-            const { initPosthogBrowser } = await import(
-                '@/lib/analytics/identity'
-            )
+            const { initPosthogBrowser } =
+                await import('@/lib/analytics/identity')
             expect(initPosthogBrowser()).toBe(true)
             await settle()
 
@@ -123,12 +122,10 @@ describe('PostHog: deferred on the landing route only', () => {
         vi.useFakeTimers({ toFake: ['Date'] })
         try {
             landOn('/')
-            const { initPosthogBrowser } = await import(
-                '@/lib/analytics/identity'
-            )
-            const { trackGrowthEvent } = await import(
-                '@/lib/analytics/growthEvents'
-            )
+            const { initPosthogBrowser } =
+                await import('@/lib/analytics/identity')
+            const { trackGrowthEvent } =
+                await import('@/lib/analytics/growthEvents')
             initPosthogBrowser()
 
             vi.setSystemTime(new Date('2026-09-26T10:00:00.000Z'))

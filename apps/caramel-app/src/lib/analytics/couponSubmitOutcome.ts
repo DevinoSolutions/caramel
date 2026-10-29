@@ -31,6 +31,10 @@ export const COUPON_SUBMIT_OUTCOMES = [
     'created',
     /** 200: the code already existed for that store (dedupe, created:false), no row written. */
     'already-listed',
+    /** 200: a checkout capture was listed but NOT stamped "worked": the account has no standing to vouch for a code somebody else listed (checkoutWorkedStamp.ts). */
+    'worked-stamp-gated',
+    /** 200: a checkout capture was listed but NOT stamped "worked": the account's daily stamp cap or the coupon's hourly velocity cap was spent. */
+    'worked-stamp-capped',
     /** 401: no usable session (withRoute's gate, or a session object without a user id). */
     'unauthenticated',
     /** 403 from withRoute's origin gate: a cross-origin web page. The handler never ran. */

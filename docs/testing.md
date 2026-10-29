@@ -68,12 +68,13 @@ retries: 2` and `forbidOnly` only under CI; locally it defaults to parallel
   specs against the _deployed_ dev site: NO `DATABASE_URL`, no generated prisma
   client, REAL catalog data. Collection happens in BOTH. So any spec that
   asserts specific DB content or touches the DB MUST gate itself on
-  `test.skip(!process.env.DATABASE_URL, …)` AND must never `import` from
-  `@prisma/client` at module top level (import it lazily inside the fn, or the
-  whole file crashes collection on `e2e-push`). Deployment-safe assertions
+  `test.skip(!process.env.DATABASE_URL, …)` AND must never import the generated
+  Prisma client at module top level (open it with `openTestPrisma()` from
+  `e2e/support/test-prisma.ts`, which imports lazily, or the whole file crashes
+  collection on `e2e-push`). Deployment-safe assertions
   (page shell, generic content presence) stay ungated so they cover pushes too.
   Live examples: `e2e/auth-flows.spec.ts` ("Login (real session)" group) and
-  the lazy-import comment in `e2e/support/seed-user.ts`. Two e2e-push reds were
+  the lazy-import comment in `e2e/support/test-prisma.ts`. Two e2e-push reds were
   caused by breaking exactly this rule (a top-level prisma import; a synthetic
   seed row asserted against the real deployed catalog).
 - **App-owned coupon catalog.** `pnpm dev` (and `db:migrate:deploy`) creates and

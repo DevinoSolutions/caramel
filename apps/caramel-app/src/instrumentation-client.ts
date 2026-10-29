@@ -2,7 +2,12 @@ import { defersAnalytics, onFirstActivity } from '@/lib/afterPageLoad'
 import { browserSignalsTrackingOptOut } from '@/lib/analytics/trackingOptOut'
 import { SENTRY_RELEASE } from '@/lib/buildInfo'
 import { INJECTED_SCRIPT_DENY_URLS } from '@/lib/sentryInjectedScriptNoise'
-import { scrubSentryBreadcrumb, scrubSentryEvent } from '@/lib/sentryPiiScrub'
+import {
+    SENTRY_DATA_COLLECTION,
+    scrubReplayRecordingEvent,
+    scrubSentryBreadcrumb,
+    scrubSentryEvent,
+} from '@/lib/sentryPiiScrub'
 import * as Sentry from '@sentry/nextjs'
 
 // Next.js only loads client instrumentation from `instrumentation-client.ts`.
@@ -52,6 +57,10 @@ function addReplay(): void {
                     // Added to Sentry's default block list. PostHog blocks
                     // `.ph-no-capture` by default; this mirrors it here.
                     block: ['.ph-no-capture'],
+                    // The network/navigation frames Replay records hold request
+                    // URLs, which beforeSend/beforeBreadcrumb never see: scrub
+                    // typed store-search text (?q=, ?search=) there too (T-7505).
+                    beforeAddRecordingEvent: scrubReplayRecordingEvent,
                 }),
             )
         })
@@ -84,11 +93,13 @@ if (process.env.NODE_ENV === 'production' && dsn) {
         // its throws are not ours (CARAMEL-Z, lib/sentryInjectedScriptNoise.ts).
         // Matched on the frame that threw, so our own errors still report.
         denyUrls: INJECTED_SCRIPT_DENY_URLS,
-        // The browser never sent default PII (the flag is off here as on the
-        // server, see sentry.common.config.ts), but the page URL, Referer and
-        // fetch / navigation breadcrumbs of the sign-in callback pages carry
-        // `?code=…&state=…`; strip those before they leave the browser.
-        sendDefaultPii: false,
+        // Same restrictive baseline and transaction model as the server, see
+        // sentry.common.config.ts. The page URL, Referer and fetch /
+        // navigation breadcrumbs of the sign-in callback pages still carry
+        // `?code=…&state=…`; the scrub strips those before they leave the
+        // browser.
+        dataCollection: SENTRY_DATA_COLLECTION,
+        traceLifecycle: 'static',
         beforeSend: scrubSentryEvent,
         beforeSendTransaction: scrubSentryEvent,
         beforeBreadcrumb: scrubSentryBreadcrumb,

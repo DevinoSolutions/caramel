@@ -46,7 +46,8 @@ struct OnboardingView: View {
                     Section {
                         Toggle("I turned Caramel on", isOn: confirmedBinding)
                     } footer: {
-                        Text("Caramel shows a check here by itself once it has run in Safari. Until then, tell us when you are done.")
+                        // TODO(T-5059): once the extension pings the app (native messaging), detect it here instead of relying on this manual toggle.
+                        Text("This app cannot see whether the extension is on. Turn this on when you have finished the steps above, so it is marked here.")
                     }
                 }
             }
@@ -77,7 +78,7 @@ struct OnboardingView: View {
             }
         case .notDetected:
             Label {
-                Text("Caramel is not on yet").font(.headline)
+                Text("Not turned on yet").font(.headline)
             } icon: {
                 Image(systemName: "exclamationmark.circle").foregroundStyle(.orange)
             }

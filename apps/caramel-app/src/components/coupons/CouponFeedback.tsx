@@ -138,7 +138,7 @@ export default function CouponFeedback({ couponId }: { couponId: string }) {
                             type="button"
                             disabled={busy}
                             onClick={() => void send(option)}
-                            className="rounded-full border border-orange-200 px-3 py-1 text-sm font-semibold text-gray-800 transition-colors hover:border-caramel hover:text-caramel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 dark:border-orange-900/60 dark:text-gray-200 dark:focus-visible:ring-offset-darkSurface"
+                            className="hover:border-caramel hover:text-caramel focus-visible:ring-caramel dark:focus-visible:ring-offset-darkSurface rounded-full border border-orange-200 px-3 py-1 text-sm font-semibold text-gray-800 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 dark:border-orange-900/60 dark:text-gray-200"
                         >
                             {label}
                         </button>

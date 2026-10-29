@@ -36,10 +36,10 @@ export default async function PopularStores({
                     <li key={row.site}>
                         <Link
                             href={`/coupons/${encodeURIComponent(row.site)}`}
-                            className="inline-flex items-center gap-2 rounded-full border border-gray-100 bg-white px-4 py-2 text-sm font-medium text-gray-800 shadow-sm transition hover:border-orange-200 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 dark:border-white/10 dark:bg-darkSurface dark:text-gray-100 dark:hover:border-orange-800/70 dark:focus-visible:ring-offset-darkSurface"
+                            className="focus-visible:ring-caramel dark:bg-darkSurface dark:focus-visible:ring-offset-darkSurface inline-flex items-center gap-2 rounded-full border border-gray-100 bg-white px-4 py-2 text-sm font-medium text-gray-800 shadow-sm transition hover:border-orange-200 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 dark:border-white/10 dark:text-gray-100 dark:hover:border-orange-800/70"
                         >
                             {row.site}
-                            <span className="rounded-full bg-caramel/10 px-2 py-0.5 text-xs font-semibold text-caramel dark:bg-caramel/20">
+                            <span className="bg-caramel/10 text-caramel dark:bg-caramel/20 rounded-full px-2 py-0.5 text-xs font-semibold">
                                 {row.coupon_count}{' '}
                                 {row.coupon_count === 1 ? 'code' : 'codes'}
                             </span>

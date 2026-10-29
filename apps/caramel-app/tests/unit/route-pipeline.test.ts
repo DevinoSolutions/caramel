@@ -55,18 +55,15 @@ const { envMock, OAUTH_STATE_SECRET, KNOWN_ORIGIN } = vi.hoisted(() => {
         KNOWN_ORIGIN,
         envMock: {
             EXTENSION_OAUTH_STATE_SECRET: OAUTH_STATE_SECRET as
-                | string
-                | undefined,
+                string | undefined,
             GOOGLE_CLIENT_ID: 'test-google-client-id' as string | undefined,
             GOOGLE_CLIENT_SECRET: 'test-google-client-secret' as
-                | string
-                | undefined,
+                string | undefined,
             APPLE_CLIENT_ID: 'test-apple-client-id' as string | undefined,
             BETTER_AUTH_URL: 'http://localhost:58000',
             // oauthTokenCrypto.ts encrypts the stored access/refresh tokens.
             BETTER_AUTH_SECRET: 'route-pipeline-test-auth-secret' as
-                | string
-                | undefined,
+                string | undefined,
             JWT_SECRET: undefined as string | undefined,
             CHROME_EXTENSION_ORIGIN: KNOWN_ORIGIN as string | undefined,
             FIREFOX_EXTENSION_ORIGIN: undefined as string | undefined,

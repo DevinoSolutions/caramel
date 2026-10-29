@@ -6,6 +6,7 @@ import {
     SAFARI_APP_STORE_URL,
 } from '@/lib/brandLinks'
 import { BASE_URL } from '@/lib/env.client'
+import { DOCS_PATH } from '@/lib/marketing/docsContent'
 import { COMPARISON_PATH } from '@/lib/seo/extensionComparison'
 import { HONEY_GUIDE_PATH } from '@/lib/seo/honeyExtensionGuide'
 
@@ -44,6 +45,8 @@ const LLMS_TXT = `# Caramel
   Firefox, Edge and Safari, what the installed extension does on each, and
   other Devino apps.
 - [FAQ](${origin}/faq): the questions shoppers actually ask, answered.
+- [Docs](${origin}${DOCS_PATH}): the documentation hub: install, how codes are
+  found and tested, privacy, support and the machine-readable resources.
 - [Coupon extensions compared](${origin}${COMPARISON_PATH}): Honey, Capital
   One Shopping, SimplyCodes, Rakuten, Coupert and Caramel side by side (price,
   how each makes money, rewards, accounts, browsers), every claim sourced.

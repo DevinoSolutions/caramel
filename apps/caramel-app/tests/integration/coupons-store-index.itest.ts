@@ -1,3 +1,4 @@
+import { Prisma } from '@/generated/prisma/client'
 import {
     countCouponsForStores,
     isKnownStore,
@@ -5,7 +6,6 @@ import {
     listStoreCoupons,
 } from '@/lib/couponsRepo'
 import prisma from '@/lib/prisma'
-import { Prisma } from '@prisma/client'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
 // Store-scoped coupon reads through the REAL onStoreSql (couponsRepo.ts) on a

@@ -1,5 +1,6 @@
 import {
     canAdvertiseInstall,
+    detectAppShell,
     detectSurface,
     EXTENSION_MESSAGE_TYPES,
     type SurfaceInput,
@@ -14,6 +15,8 @@ const web: SurfaceInput = {
     extensionMessageSeen: false,
     displayModeStandalone: false,
     navigatorStandalone: false,
+    userAgent:
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15',
 }
 
 describe('detectSurface', () => {
@@ -57,11 +60,59 @@ describe('detectSurface', () => {
         expect(EXTENSION_MESSAGE_TYPES.has('caramel-ext-hello')).toBe(true)
         expect(EXTENSION_MESSAGE_TYPES.has('caramel-ext-present')).toBe(true)
     })
+
+    it('is app-shell when the UA carries the CaramelApp suffix', () => {
+        expect(
+            detectSurface({
+                ...web,
+                userAgent:
+                    'Mozilla/5.0 (iPhone) Mobile/15E148 CaramelApp/1.6.0 (ios)',
+            }),
+        ).toBe('app-shell')
+    })
+
+    it('app-shell beats extension and pwa', () => {
+        expect(
+            detectSurface({
+                ...web,
+                extensionStamp: '1.4.18',
+                displayModeStandalone: true,
+                userAgent:
+                    'Mozilla/5.0 Mobile/15E148 CaramelApp/1.6.0 (android)',
+            }),
+        ).toBe('app-shell')
+    })
+})
+
+describe('detectAppShell', () => {
+    it('accepts all four platforms', () => {
+        for (const p of ['ios', 'macos', 'android', 'fire'] as const) {
+            const r = detectAppShell(`Test CaramelApp/1.6.0 (${p}) Safari`)
+            expect(r).toEqual({ version: '1.6.0', platform: p })
+        }
+    })
+
+    // T-7853 acceptance check 4
+    it('rejects a missing patch version', () => {
+        expect(detectAppShell('Test CaramelApp/1.6 (ios)')).toBeNull()
+    })
+
+    it('rejects a prefix without a word boundary', () => {
+        expect(detectAppShell('XCaramelApp/1.6.0 (ios)')).toBeNull()
+    })
+
+    it('rejects an unknown platform', () => {
+        expect(detectAppShell('Test CaramelApp/1.6.0 (windows)')).toBeNull()
+    })
 })
 
 describe('canAdvertiseInstall', () => {
     it('never advertises the extension to someone running it', () => {
         expect(canAdvertiseInstall('extension')).toBe(false)
+    })
+
+    it('never advertises the extension in the app shell', () => {
+        expect(canAdvertiseInstall('app-shell')).toBe(false)
     })
 
     it('advertises on the web and in the PWA, which has no extension', () => {

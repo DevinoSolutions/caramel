@@ -3,9 +3,9 @@
 // The last line of defence between this app and the self-hosted Sentry. Wired
 // as beforeSend + beforeSendTransaction + beforeBreadcrumb on every init
 // (sentry.common.config.ts for server and edge, instrumentation-client.ts for
-// the browser). It runs on top of `sendDefaultPii: false`, so a future flip of
-// that flag, a new integration or an `extra: { ... }` added at a call site
-// cannot start shipping credentials without a test failing.
+// the browser). It runs on top of SENTRY_DATA_COLLECTION (below), so a future
+// loosening of that baseline, a new integration or an `extra: { ... }` added at
+// a call site cannot start shipping credentials without a test failing.
 //
 // What never leaves the process: Authorization / Cookie / Set-Cookie headers,
 // Bearer tokens, OAuth `code` / `state` / `id_token` / `access_token` (and any
@@ -24,7 +24,12 @@
 // `sdkProcessingMetadata`) has getter-only fields and is not ours to rewrite,
 // and `sdkProcessingMetadata` is never entered at all. And a hook that fails
 // inside never lets the event through unscrubbed: it logs and drops it.
-import type { Breadcrumb, ErrorEvent, init } from '@sentry/nextjs'
+import type {
+    Breadcrumb,
+    ErrorEvent,
+    init,
+    replayIntegration,
+} from '@sentry/nextjs'
 
 // @sentry/nextjs re-exports ErrorEvent but not TransactionEvent; take the type
 // from the hook that receives it.
@@ -34,6 +39,48 @@ type TransactionEvent = Parameters<
     >
 >[0]
 type Scrubbable = ErrorEvent | TransactionEvent
+// The Replay integration's own hook, typed from its options (the frame types
+// are not re-exported by @sentry/nextjs).
+type BeforeAddRecordingEvent = NonNullable<
+    NonNullable<
+        Parameters<typeof replayIntegration>[0]
+    >['beforeAddRecordingEvent']
+>
+type DataCollection = NonNullable<
+    NonNullable<Parameters<typeof init>[0]>['dataCollection']
+>
+
+const SDK_SENSITIVE_HEADER_PARTS = [
+    'forwarded',
+    '-ip',
+    'remote-',
+    'via',
+    '-user',
+]
+
+/**
+ * What the SDK itself may collect, shared by every init. SDK v11 replaced
+ * `sendDefaultPii` with `dataCollection` and made the unset default
+ * PERMISSIVE (user IP, cookies, request/response bodies, DB queries, GenAI
+ * inputs/outputs). This is the SDK's documented "keep the v10 default"
+ * baseline, i.e. exactly what `sendDefaultPii: false` collected (T-5535 M5
+ * turned that flag off on purpose). tests/unit/sentry-pii-scrub.test.ts pins
+ * it, so leaving it out of an init or loosening a field fails a test.
+ */
+export const SENTRY_DATA_COLLECTION = {
+    userInfo: false,
+    cookies: false,
+    httpHeaders: {
+        request: { deny: SDK_SENSITIVE_HEADER_PARTS },
+        response: { deny: SDK_SENSITIVE_HEADER_PARTS },
+    },
+    httpBodies: [],
+    urlQueryParams: { deny: SDK_SENSITIVE_HEADER_PARTS },
+    genAI: { inputs: false, outputs: false },
+    databaseQueryData: false,
+    queues: false,
+    graphQL: { document: false, variables: false },
+} satisfies DataCollection
 
 export const FILTERED = '[Filtered]'
 const FILTERED_EMAIL = '[Filtered email]'
@@ -61,6 +108,15 @@ const SENSITIVE_PARAM_EXACT: ReadonlySet<string> = new Set([
     'hint',
     'user',
     'username',
+    // What a shopper TYPED into a store search (T-7505): /api/coupons/stores?q=,
+    // /api/coupons?search=&key_words=, and the `query` body field of
+    // /api/sites/search-supported. It can be a name, an address or anything else
+    // a person types, so it is personal data like the credentials above, and
+    // the policy promises it is not kept longer than the logs.
+    'q',
+    'search',
+    'key_words',
+    'query',
 ])
 
 /** Substrings that make a param or header name sensitive (`id_token`,
@@ -337,6 +393,24 @@ export function scrubSentryBreadcrumb(
         return breadcrumb
     } catch (error) {
         reportScrubFailure('beforeBreadcrumb', error)
+        return null
+    }
+}
+
+/** Replay's `beforeAddRecordingEvent`: the network and navigation frames Replay
+ * records (resource.fetch / resource.xhr / navigation descriptions and
+ * `data.url`, breadcrumb frames) carry request URLs, so `?q=` and `?search=`
+ * would reach Sentry through a replay even though beforeSend and
+ * beforeBreadcrumb never see them. Same helper as the event scrub. Replay's DOM
+ * snapshots (rrweb) are not passed to this hook; they are masked by the
+ * replayIntegration mask options instead. Returns null (drops this one
+ * recording event, not the replay) if scrubbing fails. */
+export const scrubReplayRecordingEvent: BeforeAddRecordingEvent = event => {
+    try {
+        scrubNode(event, 0)
+        return event
+    } catch (error) {
+        reportScrubFailure('beforeAddRecordingEvent', error)
         return null
     }
 }

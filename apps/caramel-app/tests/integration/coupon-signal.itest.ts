@@ -59,9 +59,55 @@ afterAll(async () => {
     await prisma.$disconnect()
 })
 
+// An ESTABLISHED account stamps lastWorkedAt on its own say-so; an anonymous
+// network or a young account NEVER does (tested below).
+const ESTABLISHED = {
+    kind: 'user',
+    userId: 'itest-established-account',
+    established: true,
+} as const
+
 describe('couponSignals (real prisma, live pg :58005)', () => {
+    it('LOW-TRUST worked reports NEVER stamp lastWorkedAt, however many distinct reporters, and store nothing about them (real pg)', async () => {
+        const anon = (n: number) =>
+            ({ kind: 'ip', ip: `203.0.113.${n}` }) as const
+        for (let n = 1; n <= 10; n++) {
+            expect(await recordWorked(WORKED_ID, anon(n))).toBe(true)
+        }
+        await recordWorked(WORKED_ID, {
+            kind: 'user',
+            userId: 'itest-young-account',
+            established: false,
+        })
+        // An established account over its daily cap is demoted to low-trust.
+        await recordWorked(WORKED_ID, ESTABLISHED, undefined, { demote: true })
+
+        const row = await prisma.couponSignal.findUniqueOrThrow({
+            where: { couponId: WORKED_ID },
+        })
+        // The existence gate created the row, but no stamp.
+        expect(row.lastWorkedAt).toBeNull()
+        expect(row.workCount).toBe(0)
+        expect(
+            await prisma.couponSignalReporter.count({
+                where: { couponId: WORKED_ID },
+            }),
+        ).toBe(0)
+    })
+
+    it('a low-trust worked report on an id that is not a catalog row writes no reporter row (real pg)', async () => {
+        expect(
+            await recordWorked(ABSENT_ID, { kind: 'ip', ip: '203.0.113.9' }),
+        ).toBe(false)
+        expect(
+            await prisma.couponSignalReporter.count({
+                where: { couponId: ABSENT_ID },
+            }),
+        ).toBe(0)
+    })
+
     it('recordWorked stamps lastWorkedAt and leaves workCount at 0 (W4-D2 split — increment owns the counter)', async () => {
-        await recordWorked(WORKED_ID, { kind: 'ip', ip: '203.0.113.77' })
+        await recordWorked(WORKED_ID, ESTABLISHED)
         const first = await prisma.couponSignal.findUnique({
             where: { couponId: WORKED_ID },
         })
@@ -70,7 +116,7 @@ describe('couponSignals (real prisma, live pg :58005)', () => {
 
         // A second worked-report re-stamps lastWorkedAt without ever bumping
         // workCount — recordUsage (POST /increment) is the only counter writer.
-        await recordWorked(WORKED_ID, { kind: 'ip', ip: '203.0.113.77' })
+        await recordWorked(WORKED_ID, ESTABLISHED)
         const second = await prisma.couponSignal.findUnique({
             where: { couponId: WORKED_ID },
         })
@@ -108,7 +154,7 @@ describe('couponSignals (real prisma, live pg :58005)', () => {
     })
 
     it('the raw upsert stamps UTC wall-clock times: Prisma reads lastWorkedAt, createdAt and updatedAt back as now, whatever the session timezone', async () => {
-        await recordWorked(WORKED_ID, { kind: 'ip', ip: '203.0.113.77' })
+        await recordWorked(WORKED_ID, ESTABLISHED)
         const row = await prisma.couponSignal.findUniqueOrThrow({
             where: { couponId: WORKED_ID },
         })
@@ -162,7 +208,7 @@ describe('couponSignals (real prisma, live pg :58005)', () => {
     })
 
     it('attachSignals returns lastWorkedAt (ISO) for a seeded id and null for an unseeded one', async () => {
-        await recordWorked(SEEDED_ID, { kind: 'ip', ip: '203.0.113.77' })
+        await recordWorked(SEEDED_ID, ESTABLISHED)
         const seeded = await prisma.couponSignal.findUnique({
             where: { couponId: SEEDED_ID },
         })

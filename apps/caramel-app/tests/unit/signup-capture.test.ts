@@ -1,3 +1,4 @@
+import { Prisma } from '@/generated/prisma/client'
 import {
     FIRST_TOUCH_COOKIE_NAME,
     serializeFirstTouchCookieValue,
@@ -13,7 +14,6 @@ import {
     classifySignupSurface,
     handleUserCreated,
 } from '@/lib/auth/signupHook'
-import { Prisma } from '@prisma/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // The better-auth `databaseHooks.user.create.after` path. Every collaborator

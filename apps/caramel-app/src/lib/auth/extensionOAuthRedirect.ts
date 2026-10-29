@@ -125,8 +125,7 @@ function hostOfRejectedUri(uri: string): string {
 }
 
 type RejectedRedirectRoute =
-    | 'extension/oauth/authorize'
-    | 'extension/oauth/redirect'
+    'extension/oauth/authorize' | 'extension/oauth/redirect'
 
 /** At most one Sentry event per route per window. /redirect is unauthenticated
  * and unthrottled by design (a provider callback), so anyone can loop on a bad

@@ -1,20 +1,36 @@
 import { NextRequest } from 'next/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-// The save route is anonymous, so a 500 body must not carry the internal
+// The save route answers untrusted callers, so a 500 body must not carry the internal
 // error text (driver, host:port, SQL fragment). The route answers a fixed
 // message; the real error goes to Sentry through handleRouteError.
 
-// MOCK (announced): the same four seams the route's own unit test mocks.
-const { envMock, knownMock, servedMock, insertMock } = vi.hoisted(() => ({
-    envMock: {} as Record<string, unknown>,
-    knownMock: vi.fn(async (): Promise<string[]> => ['shop-example.com']),
-    servedMock: vi.fn(async () => false),
-    insertMock: vi.fn(
-        async (): Promise<{ inserted: boolean }> => ({
+// MOCK (announced): the same seams the route's own unit test mocks (the
+// session, the proposals table, the catalog reads and the config write).
+const { envMock, knownMock, servedMock, insertMock, findProposalMock } =
+    vi.hoisted(() => ({
+        envMock: {} as Record<string, unknown>,
+        findProposalMock: vi.fn(
+            async (_args: unknown): Promise<unknown> => null,
+        ),
+        knownMock: vi.fn(async (): Promise<string[]> => ['shop-example.com']),
+        servedMock: vi.fn(async () => false),
+        insertMock: vi.fn(async (): Promise<{ inserted: boolean }> => ({
             inserted: true,
-        }),
-    ),
+        })),
+    }))
+vi.mock('@/lib/prisma', () => ({
+    default: { couponBoxProposal: { findUnique: findProposalMock } },
+}))
+vi.mock('@/lib/auth/auth', () => ({
+    auth: {
+        api: {
+            getSession: vi.fn(async () => ({
+                user: { id: 'user-1' },
+                session: { id: 's' },
+            })),
+        },
+    },
 }))
 vi.mock('@/lib/env', async importOriginal => {
     const actual = await importOriginal<typeof import('@/lib/env')>()
@@ -26,6 +42,7 @@ vi.mock('@/lib/couponsRepo', () => ({
     hasServedStoreConfig: servedMock,
 }))
 vi.mock('@/lib/catalog/applyCatalogRows', () => ({
+    AUTO_DETECT_CONFIG_MAX_AGE_DAYS: 30,
     insertAutoDetectedStoreConfig: insertMock,
 }))
 vi.mock('@/lib/supportedStoresCache', () => ({
@@ -35,6 +52,7 @@ vi.mock('@sentry/nextjs', () => ({
     addBreadcrumb: vi.fn(),
     captureException: vi.fn(),
     captureMessage: vi.fn(),
+    setUser: vi.fn(),
 }))
 vi.mock('@/lib/rateLimit', async importOriginal => {
     const actual = await importOriginal<typeof import('@/lib/rateLimit')>()
@@ -64,7 +82,7 @@ beforeEach(() => {
 
 describe('coupon-box-save 500 body', () => {
     it('a database failure answers 500 without the internal error text', async () => {
-        insertMock.mockImplementation(async () => {
+        findProposalMock.mockImplementation(async () => {
             throw new Error(INTERNAL)
         })
         const res = await post({

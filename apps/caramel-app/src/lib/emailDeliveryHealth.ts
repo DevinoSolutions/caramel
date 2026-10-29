@@ -108,11 +108,7 @@ export const DEFAULT_MAX_PAGES = 10
  * skipped    Sendly is not configured.
  */
 export type EmailDeliveryHealthStatus =
-    | 'ok'
-    | 'degraded'
-    | 'incomplete'
-    | 'error'
-    | 'skipped'
+    'ok' | 'degraded' | 'incomplete' | 'error' | 'skipped'
 
 export interface EmailDeliveryHealthReport {
     status: EmailDeliveryHealthStatus

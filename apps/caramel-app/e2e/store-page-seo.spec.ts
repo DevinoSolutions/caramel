@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { firstLinkedStoreDomain } from './support/stores'
+import { openTestPrisma } from './support/test-prisma'
 
 // Store pages (/coupons/<store>) carry nearly all of the site's search
 // impressions. These checks pin what a crawler and an answer engine read
@@ -125,10 +126,9 @@ test.describe('store page replaces junk catalog titles', () => {
 
     // TEST-ONLY catalog rows, announced: written straight to the hermetic DB
     // to reproduce the live junk titles, and deleted afterwards. Not an app
-    // write path; @prisma/client is imported lazily (e2e-push has no client).
+    // write path; the Prisma client is opened lazily via openTestPrisma (e2e-push has no client).
     test.beforeAll(async () => {
-        const { PrismaClient } = await import('@prisma/client')
-        const prisma = new PrismaClient()
+        const prisma = await openTestPrisma()
         try {
             await prisma.coupon.deleteMany({
                 where: { id: { in: JUNK_ROWS.map(row => row.id) } },
@@ -152,8 +152,7 @@ test.describe('store page replaces junk catalog titles', () => {
     })
 
     test.afterAll(async () => {
-        const { PrismaClient } = await import('@prisma/client')
-        const prisma = new PrismaClient()
+        const prisma = await openTestPrisma()
         try {
             await prisma.coupon.deleteMany({
                 where: { id: { in: JUNK_ROWS.map(row => row.id) } },

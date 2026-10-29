@@ -32,7 +32,7 @@ export default async function StoreLetterStrip({
             <h2 className="mb-4 text-2xl font-bold tracking-tight text-gray-900 dark:text-white">
                 {DIRECTORY_BODY.browseHeading}
             </h2>
-            <ul className="flex flex-wrap gap-2 [&>li>a[aria-current]]:bg-caramel [&>li>a[aria-current]]:text-white [&>li>a]:inline-flex [&>li>a]:min-w-10 [&>li>a]:justify-center [&>li>a]:rounded-full [&>li>a]:border [&>li>a]:border-gray-100 [&>li>a]:bg-white [&>li>a]:px-3 [&>li>a]:py-1.5 [&>li>a]:text-sm [&>li>a]:font-semibold [&>li>a]:text-gray-800 [&>li>a]:shadow-sm [&>li>a]:transition hover:[&>li>a]:border-orange-200 hover:[&>li>a]:shadow-md focus-visible:[&>li>a]:outline-none focus-visible:[&>li>a]:ring-2 focus-visible:[&>li>a]:ring-caramel dark:[&>li>a]:border-white/10 dark:[&>li>a]:bg-darkSurface dark:[&>li>a]:text-gray-100">
+            <ul className="[&>li>a[aria-current]]:bg-caramel focus-visible:[&>li>a]:ring-caramel dark:[&>li>a]:bg-darkSurface flex flex-wrap gap-2 [&>li>a[aria-current]]:text-white [&>li>a]:inline-flex [&>li>a]:min-w-10 [&>li>a]:justify-center [&>li>a]:rounded-full [&>li>a]:border [&>li>a]:border-gray-100 [&>li>a]:bg-white [&>li>a]:px-3 [&>li>a]:py-1.5 [&>li>a]:text-sm [&>li>a]:font-semibold [&>li>a]:text-gray-800 [&>li>a]:shadow-sm [&>li>a]:transition hover:[&>li>a]:border-orange-200 hover:[&>li>a]:shadow-md focus-visible:[&>li>a]:outline-none focus-visible:[&>li>a]:ring-2 dark:[&>li>a]:border-white/10 dark:[&>li>a]:text-gray-100">
                 {buckets.map(bucket => (
                     <li key={bucket.letter}>
                         <a

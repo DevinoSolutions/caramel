@@ -10,7 +10,7 @@
  * is gray-700/gray-300 on purpose.
  *
  * BREAKPOINT NOTE: this app's Tailwind screens are MAX-widths
- * (tailwind.config.ts) — unprefixed is the DESKTOP style and `md:`/`xs:` are
+ * (globals.css @custom-variant) — unprefixed is the DESKTOP style and `md:`/`xs:` are
  * the small-screen overrides. `p-8 md:p-6 xs:p-5` shrinks on phones; it does
  * not grow on desktop.
  */

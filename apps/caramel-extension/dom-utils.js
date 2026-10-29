@@ -76,6 +76,17 @@ export function waitForVisible(sel, timeout = 3000) {
 const CARAMEL_FORBIDDEN_CONTROL_RE =
     /\b(place\s+(your\s+)?order|pay\s+(now|today)|complete\s+(your\s+)?(order|purchase)|submit\s+order|confirm\s+(and\s+pay|order|purchase)|buy\s+now|proceed\s+to\s+(pay|checkout)|checkout\s+now|delete\s+account)\b|\b(remove|delete)\s+(this\s+)?(item|product|line|all|address|card|everything|from\s+(bag|cart|basket|order))\b|\b(empty|clear)\s+(your\s+)?(cart|bag|basket|trolley)\b|\b(log|sign)\s*out\b|\b(jetzt\s+kaufen|kauf(en)?\s+abschlie(ss|ß)en|zahlungspflichtig\s+bestellen|bestellung\s+abschicken|commander(\s+et\s+payer)?|payer\s+maintenant|valider\s+(la\s+)?commande|realizar\s+(el\s+)?pedido|comprar\s+ahora|pagar\s+ahora|finalizar\s+(la\s+)?compra|acquista\s+ora|procedi\s+al\s+pagamento)\b/i
 
+/* Order-completing labels the first regex does not cover (T-6221): the checkout
+ * steps that precede or finish the purchase. Matched on the joined label like
+ * the regex above. `complete` stands alone too ("Complete"), so it is a whole
+ * word only: "autocomplete" and "completed" do not match. */
+const CARAMEL_FORBIDDEN_CONTROL_EXTRA_RE =
+    /\bpay\s*(?:[$£€¥₹]|\d)|\bcontinue\s+to\s+payment\b|\bcomplete\b|\breview\s+order\b/i
+/* "Pay" as the WHOLE label, or ending one of the control's labels ("Secure
+ * pay"): checked per label because "end of string" means nothing on the joined
+ * text. */
+const CARAMEL_FORBIDDEN_LABEL_END_RE = /\bpay\s*$/i
+
 /* Every string a sighted or assistive-tech user would read as this control's
  * label. The guard used to read five properties; the QA sweep placed real
  * orders through three labelling patterns none of them covered — an icon
@@ -117,8 +128,14 @@ export function caramelIsForbiddenControl(el) {
     if (!el) return false
     // id/name attributes spell the same words with separators ("pay-now",
     // "submit_order"), so flatten those to spaces before matching.
-    return CARAMEL_FORBIDDEN_CONTROL_RE.test(
-        _caramelControlLabelParts(el).join(' ').replace(/[-_]+/g, ' '),
+    const parts = _caramelControlLabelParts(el).map(part =>
+        part.replace(/[-_]+/g, ' ').trim(),
+    )
+    const joined = parts.join(' ')
+    return (
+        CARAMEL_FORBIDDEN_CONTROL_RE.test(joined) ||
+        CARAMEL_FORBIDDEN_CONTROL_EXTRA_RE.test(joined) ||
+        parts.some(part => CARAMEL_FORBIDDEN_LABEL_END_RE.test(part))
     )
 }
 

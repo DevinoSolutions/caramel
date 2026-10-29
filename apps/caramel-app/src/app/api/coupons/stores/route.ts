@@ -1,4 +1,5 @@
 import { handleRouteError } from '@/lib/api/handleRouteError'
+import { withoutSearchText } from '@/lib/api/withoutSearchText'
 import { withRoute } from '@/lib/api/withRoute'
 import { listStoreOptions } from '@/lib/couponsRepo'
 import { NextResponse } from 'next/server'
@@ -28,8 +29,11 @@ export const GET = withRoute(
                 },
             )
         } catch (error) {
-            console.error('Failed to load store options:', error)
-            return handleRouteError(error, {
+            // The typed search text must not reach the log or Sentry through
+            // an error message (withoutSearchText.ts).
+            const safeError = withoutSearchText(error, [q])
+            console.error('Failed to load store options:', safeError)
+            return handleRouteError(safeError, {
                 req,
                 message: 'Failed to load store options',
             })

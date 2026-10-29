@@ -24,7 +24,7 @@ function Bullets({ items }: { items: ReactNode[] }) {
         <ul className="mb-4 space-y-2 text-gray-600 dark:text-gray-400">
             {items.map((item, i) => (
                 <li key={i} className="flex items-start gap-3">
-                    <span className="mt-2 h-2 w-2 flex-shrink-0 rounded-full bg-caramel"></span>
+                    <span className="mt-2 h-2 w-2 shrink-0 rounded-full bg-caramel"></span>
                     <span>{item}</span>
                 </li>
             ))}
@@ -38,7 +38,7 @@ function Para({ children }: { children: ReactNode }) {
 
 function Sub({ children }: { children: ReactNode }) {
     return (
-        <h3 className="mb-3 mt-2 text-lg font-semibold text-gray-900 dark:text-white">
+        <h3 className="mt-2 mb-3 text-lg font-semibold text-gray-900 dark:text-white">
             {children}
         </h3>
     )
@@ -568,7 +568,7 @@ const PrivacyPolicy = () => {
 
                         <div className="relative z-10">
                             <div className="mb-6 flex items-start gap-4">
-                                <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl bg-caramel/10 text-xl text-caramel dark:bg-caramel/20">
+                                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-caramel/10 text-xl text-caramel dark:bg-caramel/20">
                                     {section.icon}
                                 </div>
                                 <div className="flex-1">
@@ -608,7 +608,7 @@ const PrivacyPolicy = () => {
                             </p>
                             <a
                                 href="mailto:hello@devino.ca"
-                                className="inline-flex items-center gap-2 rounded-md font-semibold text-caramel transition-colors duration-200 hover:text-orange-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 dark:focus-visible:ring-offset-darkBg"
+                                className="inline-flex items-center gap-2 rounded-md font-semibold text-caramel transition-colors duration-200 hover:text-orange-600 focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 focus-visible:outline-none dark:focus-visible:ring-offset-darkBg"
                             >
                                 <FaEnvelope className="h-4 w-4" />
                                 hello@devino.ca
@@ -638,7 +638,7 @@ const PrivacyPolicy = () => {
                             </p>
                             <a
                                 href="mailto:hello@devino.ca"
-                                className="inline-flex items-center gap-2 rounded-md font-semibold text-caramel transition-colors duration-200 hover:text-orange-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 dark:focus-visible:ring-offset-darkBg"
+                                className="inline-flex items-center gap-2 rounded-md font-semibold text-caramel transition-colors duration-200 hover:text-orange-600 focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 focus-visible:outline-none dark:focus-visible:ring-offset-darkBg"
                             >
                                 <FaEnvelope className="h-4 w-4" />
                                 hello@devino.ca

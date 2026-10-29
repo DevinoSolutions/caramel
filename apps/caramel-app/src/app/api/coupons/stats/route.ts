@@ -1,13 +1,13 @@
+import { cachedCouponStats } from '@/lib/anonymousReadCaches'
 import { handleRouteError } from '@/lib/api/handleRouteError'
 import { withRoute } from '@/lib/api/withRoute'
-import { getCouponStats } from '@/lib/couponsRepo'
 import { NextResponse } from 'next/server'
 
 export const GET = withRoute(
     { method: 'GET', routeName: 'coupons/stats', rateLimit: 'read' },
     async ({ req }) => {
         try {
-            const { total, expired } = await getCouponStats()
+            const { total, expired } = await cachedCouponStats()
 
             return NextResponse.json(
                 {

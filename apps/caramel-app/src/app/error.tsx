@@ -31,7 +31,7 @@ export default function Error({
     }, [error])
 
     return (
-        <main className="flex min-h-screen flex-col items-center justify-center gap-4 bg-gray-50 px-6 text-center dark:bg-darkBg">
+        <main className="dark:bg-darkBg flex min-h-screen flex-col items-center justify-center gap-4 bg-gray-50 px-6 text-center">
             <Image
                 src="/logo-light.png"
                 alt=""
@@ -50,13 +50,13 @@ export default function Error({
             <div className="mt-2 flex gap-3">
                 <button
                     onClick={() => reset()}
-                    className="rounded-full bg-caramel px-6 py-2 font-semibold text-white shadow-sm transition-colors hover:bg-caramelLight focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 dark:focus-visible:ring-offset-darkBg"
+                    className="bg-caramel hover:bg-caramelLight focus-visible:ring-caramel dark:focus-visible:ring-offset-darkBg rounded-full px-6 py-2 font-semibold text-white shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
                 >
                     Try again
                 </button>
                 <Link
                     href="/"
-                    className="rounded-full border border-gray-300 px-6 py-2 font-semibold text-gray-700 transition-colors hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-caramel/60 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
+                    className="focus-visible:ring-caramel/60 rounded-full border border-gray-300 px-6 py-2 font-semibold text-gray-700 transition-colors hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
                 >
                     Go home
                 </Link>

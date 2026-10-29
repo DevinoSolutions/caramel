@@ -1,17 +1,25 @@
+import type { PrismaClient } from '@/generated/prisma/client'
+import { isEstablishedAccount } from '@/lib/accountReputation'
 import { withRoute } from '@/lib/api/withRoute'
+import { workedStampCapSpent } from '@/lib/checkoutWorkedStamp'
 import {
     admitReport,
     releaseReport,
     reporterFor,
 } from '@/lib/couponReportDedupe'
 import {
+    admitCouponReportVelocity,
+    releaseCouponReportVelocity,
+    velocityTierOf,
+} from '@/lib/couponReportVelocity'
+import {
     recordFailed,
     recordWorked,
     sweepExpiredReporters,
     type CouponFailureWriter,
 } from '@/lib/couponSignals'
+import { lockShopperUser } from '@/lib/couponsRepo'
 import prisma from '@/lib/prisma'
-import type { PrismaClient } from '@prisma/client'
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 
@@ -98,17 +106,42 @@ export const POST = withRoute(
         // anonymous callers. 'worked' and 'failed' have separate slots. A
         // duplicate is a 2xx no-op, never an error: the extension and the web
         // card must not show a failure for a harmless repeat.
-        const reporter = reporterFor(userId, req)
+        // An ESTABLISHED account weighs as an account toward a failure quorum, a
+        // young one as an anonymous network (accountReputation.ts).
+        const reporter = reporterFor(
+            userId,
+            req,
+            isEstablishedAccount(session?.user?.createdAt),
+        )
         if (!admitReport(body.outcome, reporter, id)) {
             return NextResponse.json({ ok: true, deduped: true })
         }
 
-        // An unknown id writes no signal and gives its dedupe slot back, so a
-        // forger probing random ids cannot fill the table with slots no report
-        // ever used. The slot is taken BEFORE the write so a tracked duplicate
-        // stays a database-free no-op.
-        const unknownCoupon = () => {
+        // The per-COUPON speed limit (couponReportVelocity.ts): however many
+        // distinct reporters there are, only a fixed number of reports of one
+        // kind per coupon per hour are counted (established accounts and
+        // low-trust reporters have separate buckets). Over it the report
+        // is accepted and dropped, answering exactly what a deduped repeat does,
+        // so the cap is not observable from outside. The reporter's dedupe slot
+        // goes back: nothing landed, so a later report of theirs may still count.
+        const tier = velocityTierOf(reporter)
+        if (!admitCouponReportVelocity(body.outcome, id, tier)) {
             releaseReport(body.outcome, reporter, id)
+            return NextResponse.json({ ok: true, deduped: true })
+        }
+
+        // Both slots are taken BEFORE the write so a tracked duplicate stays a
+        // database-free no-op; whatever does not land gives them back.
+        const giveSlotsBack = () => {
+            releaseReport(body.outcome, reporter, id)
+            releaseCouponReportVelocity(body.outcome, id, tier)
+        }
+
+        // An unknown id writes no signal and gives its slots back, so a forger
+        // probing random ids cannot fill the tables with slots no report ever
+        // used.
+        const unknownCoupon = () => {
+            giveSlotsBack()
             return NextResponse.json(
                 { error: 'Unknown coupon' },
                 { status: 404 },
@@ -120,9 +153,12 @@ export const POST = withRoute(
             // signed-in path can never end up writing a DIFFERENT signal than the
             // anonymous one. Resolves false when the id is not a catalog row
             // (nothing written).
-            const writeSignal = (client: CouponFailureWriter | PrismaClient) =>
+            const writeSignal = (
+                client: CouponFailureWriter | PrismaClient,
+                demote = false,
+            ) =>
                 body.outcome === 'worked'
-                    ? recordWorked(id, reporter, client)
+                    ? recordWorked(id, reporter, client, { demote })
                     : recordFailed(
                           id,
                           body.storeReason ?? null,
@@ -157,13 +193,34 @@ export const POST = withRoute(
                 // above, exactly as for an anonymous report. The per-day dedup
                 // below applies to the ATTRIBUTION ONLY, and survives a restart
                 // that empties the in-memory window.
-                if (!(await writeSignal(tx))) return false
+                //
+                // An ESTABLISHED account's "worked" stamps Verified on its own,
+                // so it shares the checkout capture's per-account daily cap
+                // (checkoutWorkedStamp.workedStampCapSpent, counted from the
+                // persisted coupon_reports rows, under the per-shopper advisory
+                // lock so concurrent reports cannot both read the same count).
+                // Past the cap the report is not refused: it is recorded as a
+                // low-trust one, which is accepted and moves nothing.
+                let demote = false
+                if (
+                    body.outcome === 'worked' &&
+                    reporter.kind === 'user' &&
+                    reporter.established
+                ) {
+                    await lockShopperUser(tx, userId)
+                    demote = await workedStampCapSpent(tx, userId)
+                }
+                if (!(await writeSignal(tx, demote))) return false
 
                 // coupon_reports.coupon_id carries a real FK to `coupons`; the
                 // signal write above just proved the row exists, so the insert
                 // below cannot raise a foreign-key violation.
 
-                // One attributed report per (user, coupon, UTC day). Postgres
+                // One attributed report per (user, coupon, outcome, UTC day).
+                // The OUTCOME is part of the key: without it a "failed" report
+                // earlier in the day would suppress the "worked" row, and the
+                // daily stamp cap (counted from these rows) would never see the
+                // stamp. Postgres
                 // cannot express a UNIQUE on date_trunc('day', created_at), so this
                 // is app-side by necessity; it rides the
                 // (coupon_id, user_id, created_at) index the table ships with. A
@@ -173,6 +230,7 @@ export const POST = withRoute(
                     where: {
                         couponId: id,
                         userId,
+                        outcome: body.outcome,
                         createdAt: { gte: startOfUtcDay(new Date()) },
                     },
                     select: { id: true },
@@ -189,9 +247,9 @@ export const POST = withRoute(
 
             return NextResponse.json({ ok: true })
         } catch (error) {
-            // The report never landed: free its slot so a retry is not deduped.
+            // The report never landed: free its slots so a retry is not deduped.
             // withRoute still routes the rethrown error to Sentry.
-            releaseReport(body.outcome, reporter, id)
+            giveSlotsBack()
             throw error
         }
     },

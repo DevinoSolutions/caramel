@@ -590,3 +590,101 @@ describe('StoreCouponsPage generateMetadata — canonical normalization + thin-p
         )
     })
 })
+
+// T-7856 store-intent pilot (src/lib/seo/storeIntentPilot.ts): four stores get
+// a query-matched H1 and a freshness note; every other store renders exactly
+// what it did. The worked count is its own aggregate (`AS worked`).
+describe('StoreCouponsPage — T-7856 store-intent pilot', () => {
+    type SectionProps = {
+        heroTitle: string
+        heroNote?: ReactElement<{
+            line: { codes: string; worked: string | null }
+            confusedWith?: { domain: string }
+        }>
+    }
+
+    async function renderSection(store: string): Promise<SectionProps> {
+        const mainEl = (await StoreCouponsPage({
+            params: { store },
+        })) as ReactElement<{ children: ReactElement[] }>
+        const section = mainEl.props.children.find(
+            c => (c as ReactElement)?.type !== 'script',
+        ) as ReactElement<SectionProps>
+        return section.props
+    }
+
+    function mockStore(site: string, total: number, worked?: number | Error) {
+        mockRows(
+            sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
+            [{ ...supplierRow, site }],
+        )
+        mockRows(
+            sql => sql.includes('COUNT(*)::int AS total'),
+            [storeAggregateRow(total)],
+        )
+        if (worked instanceof Error) {
+            rules.push({
+                match: sql => sql.includes('AS worked'),
+                rows: worked,
+            })
+        } else if (worked !== undefined) {
+            mockRows(sql => sql.includes('AS worked'), [{ worked }])
+        }
+    }
+
+    it('coursera.org: the query-matched H1, the freshness line and the Course Hero link', async () => {
+        mockStore('coursera.org', 20, 3)
+
+        const props = await renderSection('coursera.org')
+
+        expect(props.heroTitle).toBe('Coursera promo codes & discount codes')
+        expect(props.heroNote?.props.line.codes).toBe('20 codes')
+        expect(props.heroNote?.props.line.worked).toBe(
+            '3 worked in the last 7 days',
+        )
+        expect(props.heroNote?.props.confusedWith?.domain).toBe(
+            'coursehero.com',
+        )
+    })
+
+    it('omits the worked clause when no code worked in the window', async () => {
+        mockStore('dominos.com', 81, 0)
+
+        const props = await renderSection('dominos.com')
+
+        expect(props.heroTitle).toBe("Domino's coupons & promo codes")
+        expect(props.heroNote?.props.line.worked).toBeNull()
+        expect(props.heroNote?.props.confusedWith).toBeUndefined()
+    })
+
+    it('a failed worked count degrades loudly to no clause and still renders the page', async () => {
+        mockStore('anthropologie.com', 26, new Error('signals read timed out'))
+
+        const props = await renderSection('anthropologie.com')
+
+        expect(props.heroNote?.props.line.worked).toBeNull()
+        expect(captureException).toHaveBeenCalledWith(
+            expect.objectContaining({ message: 'signals read timed out' }),
+            { tags: { area: 'storePage.workedCount' } },
+        )
+    })
+
+    it('a non-pilot store keeps its H1, has no note, and never runs the worked count', async () => {
+        mockStore('example.com', 1, 5)
+        let workedQueries = 0
+        rules.unshift({
+            match: sql => {
+                const hit = sql.includes('AS worked')
+                if (hit) workedQueries += 1
+                return false
+            },
+            rows: [],
+        })
+
+        const props = await renderSection('example.com')
+
+        expect(props.heroTitle).toBe('Best Example coupon codes today')
+        expect(props.heroNote).toBeUndefined()
+        expect(workedQueries).toBe(0)
+    })
+})

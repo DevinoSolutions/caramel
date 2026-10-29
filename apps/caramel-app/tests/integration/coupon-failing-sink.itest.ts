@@ -183,7 +183,7 @@ describe('failing codes sink (real pg)', () => {
         expect(decorated).toHaveLength(6)
     })
 
-    it('a worked quorum lifts a failing code back to its ranking position and clears keepsFailing; one anonymous success alone does not', async () => {
+    it('a success by an established account lifts a failing code back to its ranking position and clears keepsFailing; anonymous successes alone do not', async () => {
         // A real failure row backing the fixture's weight 6, so the writers'
         // recompute has the reporter it would have in production.
         await prisma.couponSignalReporter.create({
@@ -196,6 +196,7 @@ describe('failing codes sink (real pg)', () => {
             },
         })
         await recordWorked('988000001', { kind: 'ip', ip: '203.0.113.50' })
+        await recordWorked('988000001', { kind: 'ip', ip: '203.0.113.52' })
         {
             const { coupons } = await listStoreCoupons(SITE, 20)
             const decorated = await attachSignals(coupons)
@@ -203,7 +204,11 @@ describe('failing codes sink (real pg)', () => {
             expect(decorated.some(c => c.keepsFailing)).toBe(true)
         }
 
-        await recordWorked('988000001', { kind: 'ip', ip: '203.0.113.51' })
+        await recordWorked('988000001', {
+            kind: 'user',
+            userId: 'itest-established-account',
+            established: true,
+        })
         const { coupons } = await listStoreCoupons(SITE, 20)
         const decorated = await attachSignals(coupons)
 

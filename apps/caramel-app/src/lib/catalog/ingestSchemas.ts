@@ -123,6 +123,27 @@ const IngestSourceSchema = z.object({
     created_at: z.coerce.date().optional(),
 })
 
+// Request-body ceiling for POST /api/ingest/catalog (withRoute maxBodyBytes),
+// the one route that takes a bulk push. It equals the ceiling Next itself
+// enforces on EVERY request body (next.config `experimental.proxyClientMaxBodySize`,
+// 4mb): past that, Next truncates the body before any route sees it, so a
+// larger number here would be a claim nothing honours. tests/unit/
+// withRoute-body-cap.test.ts reads next.config and fails if the two drift.
+// Sized from the real producer, measured 2026-10-20 (next.config comment): the
+// coupon pipeline pushes in chunks, a 1000-row store-config chunk is ~0.45 MB
+// (1 MB worst case), so 4 MiB keeps ~4x headroom. A push of more rows than that
+// in ONE request must be split by the producer (applyCatalogRows itself has no
+// row limit; its design maximum is 23k coupons, docs/INGEST.md). The cap sits
+// behind the INGEST_API_KEY bearer, so only the supplier (or a leaked key) can
+// reach it.
+export const INGEST_CATALOG_MAX_BODY_BYTES = 4 * 1024 * 1024
+
+// Array ceilings: ~4x the 23k design maximum for coupons, and far above any
+// real store/source count. They bound the work one push can ask for.
+const INGEST_COUPONS_MAX = 100_000
+const INGEST_STORE_CONFIGS_MAX = 50_000
+const INGEST_SOURCES_MAX = 50_000
+
 // The whole push. Each array defaults to [] so a producer can send only the
 // entity it changed (coupons-only, sources-only, …). `force` bypasses the
 // tombstone sanity gate (see applyCatalogRows). The `.refine` rejects a
@@ -131,9 +152,18 @@ const IngestSourceSchema = z.object({
 // point of the whole "no silent failures" rule.
 export const IngestCatalogPayloadSchema = z
     .object({
-        coupons: z.array(IngestCouponSchema).default([]),
-        storeConfigs: z.array(IngestStoreConfigSchema).default([]),
-        sources: z.array(IngestSourceSchema).default([]),
+        coupons: z
+            .array(IngestCouponSchema)
+            .max(INGEST_COUPONS_MAX)
+            .default([]),
+        storeConfigs: z
+            .array(IngestStoreConfigSchema)
+            .max(INGEST_STORE_CONFIGS_MAX)
+            .default([]),
+        sources: z
+            .array(IngestSourceSchema)
+            .max(INGEST_SOURCES_MAX)
+            .default([]),
         force: z.boolean().default(false),
     })
     .refine(

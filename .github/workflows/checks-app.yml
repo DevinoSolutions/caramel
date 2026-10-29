@@ -49,15 +49,15 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           run_install: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
 
       - name: Install dependencies
@@ -87,6 +87,13 @@ jobs:
         if: ${{ !cancelled() }}
         run: pnpm prettier-check:root
 
+      # knip resolves every import, and since Prisma 7 the client is generated
+      # into src/generated/prisma (gitignored), so it must exist first. No
+      # database needed: prisma.config.ts leaves the URL unset here.
+      - name: Generate Prisma Client
+        if: ${{ !cancelled() }}
+        run: pnpm --filter caramel-app exec prisma generate
+
       - name: Run knip
         if: ${{ !cancelled() }}
         working-directory: ./apps/caramel-app
@@ -105,15 +112,15 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           run_install: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
 
       - name: Install dependencies
@@ -123,10 +130,10 @@ jobs:
         run: pnpm doctor
 
       # Prisma client for typecheck + unit. Since W4 the coupon unit tests
-      # import @prisma/client (the `Prisma` namespace — Prisma.sql/Prisma.join)
-      # through the couponsRepo read layer, so the `unit` job needs the generated
-      # client present too or collection fails with "Cannot find module
-      # '.prisma/client/default'". (integration/e2e jobs generate explicitly.)
+      # import the generated client (the `Prisma` namespace — Prisma.sql/Prisma.join)
+      # through the couponsRepo read layer, so the `unit` job needs it generated
+      # (src/generated/prisma, gitignored) or collection fails with "Cannot find
+      # module '@/generated/prisma/client'". (integration/e2e jobs generate explicitly.)
       - name: Generate Prisma Client
         run: pnpm --filter caramel-app exec prisma generate
 
@@ -178,15 +185,15 @@ jobs:
           --health-retries 5
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           run_install: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
 
       - name: Install dependencies
@@ -221,15 +228,15 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           run_install: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
 
       - name: Install dependencies
@@ -286,19 +293,19 @@ jobs:
       SHADOW_DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/caramel_ci_shadow'
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           run_install: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
 
       - name: Cache Prisma engines
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/prisma
           key: ${{ runner.os }}-prisma-engines-${{ hashFiles('**/pnpm-lock.yaml') }}
@@ -323,8 +330,9 @@ jobs:
           psql "postgresql://postgres:postgres@localhost:5432/postgres" \
             -c "CREATE DATABASE caramel_ci_shadow;"
 
-      # Replays every migration into the shadow database and diffs the result
-      # against schema.prisma. Exit 2 = a schema.prisma change shipped without
+      # Replays every migration into the shadow database (SHADOW_DATABASE_URL,
+      # read by prisma.config.ts since Prisma 7) and diffs the result against
+      # schema.prisma. Exit 2 = a schema.prisma change shipped without
       # its migration (or a hand-edited migration). It fails the job.
       - name: Drift check (schema ⇄ migrations)
         working-directory: ./apps/caramel-app
@@ -332,8 +340,7 @@ jobs:
           set -euo pipefail
           npx prisma migrate diff \
             --from-migrations prisma/migrations \
-            --to-schema-datamodel prisma/schema.prisma \
-            --shadow-database-url "$SHADOW_DATABASE_URL" \
+            --to-schema prisma/schema.prisma \
             --exit-code
 
       # A migration that does not apply to an empty database is a broken
@@ -348,8 +355,7 @@ jobs:
           set -euo pipefail
           npx prisma migrate diff \
             --from-migrations prisma/migrations \
-            --to-url "$DATABASE_URL" \
-            --shadow-database-url "$SHADOW_DATABASE_URL" \
+            --to-config-datasource \
             --exit-code
 
   # ─────────────────────────────────────────────────────────────
@@ -383,15 +389,15 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           run_install: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
 
       - name: Install dependencies
@@ -438,11 +444,13 @@ jobs:
 
       - name: Upload test report
         uses: DevinoSolutions/artifact/upload@v1
-        if: ${{ !cancelled() }}
+        if: failure()
+        # T-7021: HTML report + traces only when the job failed; a flaky-but-green
+        # run (trace: on-first-retry) must not fill the artifact store.
         with:
           name: playwright-report-pr
           path: apps/caramel-app/playwright-report/
-          retention-days: 14
+          retention-days: 3
 
   # ─────────────────────────────────────────────────────────────
   # E2E & Visual Regression (push – deployed site baseline)
@@ -468,15 +476,15 @@ jobs:
       NEXT_PUBLIC_BASE_URL: ${{ github.ref == 'refs/heads/dev' && 'https://dev.grabcaramel.com' || 'https://grabcaramel.com' }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           run_install: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
 
       - name: Install dependencies
@@ -533,11 +541,13 @@ jobs:
 
       - name: Upload test report
         uses: DevinoSolutions/artifact/upload@v1
-        if: ${{ !cancelled() }}
+        if: failure()
+        # T-7021: HTML report + traces only when the job failed; a flaky-but-green
+        # run (trace: on-first-retry) must not fill the artifact store.
         with:
           name: playwright-report-push
           path: apps/caramel-app/playwright-report/
-          retention-days: 14
+          retention-days: 3
 
   # ─────────────────────────────────────────────────────────────
   # Lighthouse (PR – prod build, SEO/a11y budgets)
@@ -581,15 +591,15 @@ jobs:
       NEXT_PUBLIC_BASE_URL: https://grabcaramel.com
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           run_install: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
 
       - name: Install dependencies
@@ -634,7 +644,7 @@ jobs:
           path: |
             apps/caramel-app/lighthouse-reports/
             apps/caramel-app/lighthouse-reports-mobile/
-          retention-days: 14
+          retention-days: 3
 
   # ─────────────────────────────────────────────────────────────
   # One-root-compose build (F-016) — clean-volume build + boot + migrate proof
@@ -650,7 +660,7 @@ jobs:
     timeout-minutes: 25
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
 
