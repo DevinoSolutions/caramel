@@ -243,10 +243,11 @@ describe('/api/coupons — the sort that makes paging sound', () => {
         // row that was never sent.
         //
         // This is a store-scoped call (site=ebay.com), so the ranking is
-        // preceded by the recently-failing sink key (coupons-failing.test.ts
-        // pins that part); the total order underneath is unchanged.
+        // preceded by the recently-failing sink keys and the proof tier
+        // (coupons-failing.test.ts pins those); the total order underneath is
+        // unchanged.
         expect(listQuery().sql).toContain(
-            ') ASC, rating DESC, created_at DESC, id DESC',
+            ') DESC, rating DESC, created_at DESC, id DESC',
         )
     })
 })

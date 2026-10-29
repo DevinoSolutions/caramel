@@ -45,6 +45,7 @@ import {
     FAILING_MIN_FAIL_WEIGHT,
     FAILING_WINDOW_DAYS,
     KEEPS_FAILING_MIN_FAIL_WEIGHT,
+    PROVEN_COUPON_STATUSES,
     RESTRICTED_COUPON_STATUSES,
     VISIBLE_COUPON_STATUSES,
 } from '@/lib/coupons'
@@ -162,20 +163,47 @@ const failingSignalIdsSql = (minFailWeight: number) => Prisma.sql`(id IN (
 ))`
 
 /**
+ * Proof before rating, inside one store's list: codes the verification service
+ * proved working first (PROVEN_COUPON_STATUSES), then the restricted ones, then
+ * the unverified rest. `rating` is the SCRAPER SOURCE's score, and most sources
+ * leave it 0 (~144k of the catalog's rows on 2026-10-29), so on its own it ranked
+ * shopmicas.com's codes verified that morning (SARA12, ANGE12) below 20
+ * unverified or one-time ones rated 3.9-4. The extension fetches page 1 (20
+ * codes) and tries about 8, so it never reached them: "Auto-apply didn't stick"
+ * on a store holding 62 proven codes, while the same build applied SARA12
+ * ($50.00 -> $44.00) the moment it was served first. Across the catalog, 298 of
+ * the 1,697 stores holding a proven code ranked their first one below 8th.
+ *
+ * Among proven codes the most recently proven lead. `updated_at` is the
+ * pipeline row's own timestamp (the ingest's only-if-newer key) and a verdict
+ * is what moves it on a proven row, so it is the freshest proof we hold. The
+ * tier alone was not enough on shopmicas: its 20 highest-rated codes were also
+ * `valid`, but one-time referral codes last proven 2026-10-27, and they still
+ * filled page 1 ahead of the codes proven that day.
+ */
+const proofTierSql = () => {
+    const proven = Prisma.join([...PROVEN_COUPON_STATUSES])
+    return Prisma.sql`(status IN (${proven})) DESC, CASE WHEN status IN (${proven}) THEN updated_at END DESC NULLS LAST, (status IN (${Prisma.join([...RESTRICTED_COUPON_STATUSES])})) DESC`
+}
+
+/**
  * The order of ONE store's codes: recently-failing codes sink below the rest
  * (false sorts first), and the keeps-failing ones (collapsed by the page and the
- * popup) sink below those, each group in rankingOrderSql() order. Sunk, never
- * hidden: the visibility predicate is untouched. It lives in SQL, not as a
- * post-fetch sort, because these lists are paginated (store page: first 20, then
- * /api/coupons pages) and a sort after the fetch could only reorder one page —
- * a failing code on page 1 would still outrank a good one on page 2.
+ * popup) sink below those; inside each group proven codes lead (proofTierSql),
+ * then rankingOrderSql() breaks ties. A shopper's failure report outranks the
+ * pipeline's proof: a code proven yesterday that shoppers report failing today
+ * still sinks. Sunk, never hidden: the visibility predicate is untouched. It
+ * lives in SQL, not as a post-fetch sort, because these lists are paginated
+ * (store page: first 20, then /api/coupons pages) and a sort after the fetch
+ * could only reorder one page — a failing code on page 1 would still outrank a
+ * good one on page 2.
  *
  * Store-scoped reads only. A site-less listing (the /coupons browse/search
- * page) keeps rankingOrderSql() alone: the extra key would force a sort over
+ * page) keeps rankingOrderSql() alone: the extra keys would force a sort over
  * the whole catalog for a page nobody uses to apply codes.
  */
 const storeRankingOrderSql = () =>
-    Prisma.sql`${failingSinkSql()} ASC, ${keepsFailingSql()} ASC, ${rankingOrderSql()}`
+    Prisma.sql`${failingSinkSql()} ASC, ${keepsFailingSql()} ASC, ${proofTierSql()}, ${rankingOrderSql()}`
 
 /**
  * coupons/stats/route.ts's census predicate. Deliberately NOT
