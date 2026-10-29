@@ -298,10 +298,16 @@ describe('POST /api/coupons/submit — gates', () => {
 
     it('an extension-origin request is allowed through the origin gate', async () => {
         signedInAs('user-1')
+        envMock.SHOPPER_CODE_CAPTURE_ENABLED = true
 
         const res = await POST(
             submitRequest(
-                { site: 'ebay.com', code: 'SAVE10', source: 'manual' },
+                {
+                    site: 'ebay.com',
+                    code: 'SAVE10',
+                    source: 'checkout',
+                    consent: VALID_CONSENT,
+                },
                 { origin: 'chrome-extension://abcdefghijklmnop' },
             ),
         )
@@ -1108,6 +1114,22 @@ describe('POST /api/coupons/submit — outcome telemetry', () => {
         )
 
         expectOutcome('bad-origin', 'checkout', 403)
+    })
+
+    it("bad-origin: source 'manual' from an extension Origin is refused and writes nothing (T-9959 D)", async () => {
+        signedInAs('user-1')
+
+        const res = await POST(
+            submitRequest(
+                { site: 'ebay.com', code: SECRET_CODE, source: 'manual' },
+                { origin: 'chrome-extension://abcdefghijklmnop' },
+            ),
+        )
+
+        expect(res.status).toBe(403)
+        expect(await res.json()).toEqual({ error: 'manual-source-site-only' })
+        expect(submitShopperCouponMock).not.toHaveBeenCalled()
+        expectOutcome('bad-origin', 'manual', 403)
     })
 
     it('rate-limited and invalid-body: withRoute refusals are recorded too', async () => {

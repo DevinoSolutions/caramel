@@ -39,7 +39,7 @@ export const COUPON_SUBMIT_OUTCOMES = [
     'unauthenticated',
     /** 403 from withRoute's origin gate: a cross-origin web page. The handler never ran. */
     'origin-not-allowed',
-    /** 403 'checkout-source-extension-only': source 'checkout' sent with a non-extension Origin. */
+    /** 403 'checkout-source-extension-only' (source 'checkout' sent with a non-extension Origin) or 'manual-source-site-only' (source 'manual' sent with an extension Origin). */
     'bad-origin',
     /** 403 'capture-disabled': checkout capture is switched off (SHOPPER_CODE_CAPTURE_ENABLED). */
     'capture-disabled',

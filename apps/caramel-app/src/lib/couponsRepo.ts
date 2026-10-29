@@ -48,6 +48,7 @@ import {
     VISIBLE_COUPON_STATUSES,
 } from '@/lib/coupons'
 import {
+    CatalogCodeRowSchema,
     CatalogStoreNameRowSchema,
     CouponIdRowSchema,
     type CouponListRow,
@@ -1041,6 +1042,26 @@ export async function writeFailedSignal(
         },
         'coupon-signal.write-failed',
     )
+}
+
+/**
+ * The catalog code of coupon `couponId`, or null when it is not a catalog row.
+ * Read by couponSignals.redactedStoreReason so a store's failure text can keep
+ * the code being reported while every other code-shaped token is redacted.
+ * Status-agnostic, like the signal writers.
+ */
+export async function readCatalogCode(
+    couponId: string,
+    client: CouponSignalSqlClient = prisma,
+): Promise<string | null> {
+    const rows = parseCouponRows(
+        CatalogCodeRowSchema,
+        await client.$queryRaw(Prisma.sql`
+            SELECT code FROM coupons WHERE id = ${couponId}::text
+        `),
+        'coupon-signal.read-catalog-code',
+    )
+    return rows[0]?.code ?? null
 }
 
 /**

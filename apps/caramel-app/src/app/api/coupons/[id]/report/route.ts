@@ -49,7 +49,8 @@ import { z } from 'zod'
 const ReportBodySchema = z.object({
     outcome: z.enum(['worked', 'failed']),
     // Optional free-text a store/verifier attached to a failure. Bounded here
-    // (trim + max 200) so recordFailed can pass it straight through.
+    // (trim + max 200). It is the store's own text and may echo a shopper's
+    // code, so recordFailed redacts code-shaped tokens before storing it.
     storeReason: z.string().trim().max(200).optional(),
 })
 

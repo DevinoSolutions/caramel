@@ -2,6 +2,7 @@ import { handleRouteError } from '@/lib/api/handleRouteError'
 import { readBodyCapped } from '@/lib/api/readBodyCapped'
 import { withRoute } from '@/lib/api/withRoute'
 import { classifyCart, type CartSignals } from '@/lib/cartClassifier'
+import { scrubCartItems } from '@/lib/cartItemScrub'
 import {
     admitClassifyModelCall,
     ClassifyModelBudgetExceededError,
@@ -37,7 +38,19 @@ function sanitize(body: unknown): CartSignals | null {
         meta_description: str(b.meta_description, 400),
         og_site_name: str(b.og_site_name, 80),
         og_type: str(b.og_type, 40),
-        cart_items: arr(b.cart_items, 6, 160),
+        // Scrubbed BEFORE the caps below cut anything: a discount line or a code
+        // must not survive just because the cut landed mid-token (T-9959).
+        cart_items: arr(
+            Array.isArray(b.cart_items)
+                ? scrubCartItems(
+                      b.cart_items.filter(
+                          (x): x is string => typeof x === 'string',
+                      ),
+                  )
+                : b.cart_items,
+            6,
+            160,
+        ),
         platform_hints:
             b.platform_hints && typeof b.platform_hints === 'object'
                 ? (Object.fromEntries(

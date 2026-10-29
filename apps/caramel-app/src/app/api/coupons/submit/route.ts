@@ -198,6 +198,22 @@ const submitRoute = withRoute(
             }
         }
 
+        // 'manual' is the website's own form and skips the checkout consent
+        // proof by design. withRoute's `origin: true` also admits extension
+        // Origins, so without this an extension (or anything forging an
+        // extension Origin) could label a captured code 'manual' and bypass the
+        // consent gate below. Extension submissions are 'checkout' only.
+        if (body.source === 'manual' && isExtensionOrigin(req)) {
+            return respond(
+                req,
+                'bad-origin',
+                NextResponse.json(
+                    { error: 'manual-source-site-only' },
+                    { status: 403 },
+                ),
+            )
+        }
+
         if (body.source === 'checkout' && !env.SHOPPER_CODE_CAPTURE_ENABLED) {
             return respond(
                 req,

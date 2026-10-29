@@ -168,6 +168,11 @@ export const CouponSignalWriteRowSchema = z.object({
     failWeight: z.number().int(),
 })
 
+/** `SELECT code FROM coupons` — couponsRepo.readCatalogCode. */
+export const CatalogCodeRowSchema = z.object({
+    code: z.string(),
+})
+
 /** `SELECT (EXISTS(...) OR EXISTS(...)) AS known` — couponsRepo.isKnownStore. */
 export const KnownStoreRowSchema = z.object({
     known: z.boolean(),
