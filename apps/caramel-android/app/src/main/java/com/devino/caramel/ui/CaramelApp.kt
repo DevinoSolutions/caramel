@@ -136,8 +136,13 @@ fun CaramelApp(
     }
     // Every load goes through the sink guard (WebView.loadGuarded); a refusal is reported, not dropped. admitLoad refuses
     // a redeem URL the handoff did not issue, and any other load cancels a pending handoff (the latest tap wins).
-    val navigate: (String) -> Unit = { url ->
-        if (!container.webSession.admitLoad(url)) {
+    // [origin] says who asked: while the sign-in loop cap has parked the shell (T-10055), an AUTOMATIC load (home after a
+    // WebView rebuild or a session change, an incoming link, a late handoff's redeem URL) is skipped and the handoff dropped.
+    val navigate: (String, SignInLoopGuard.LoadOrigin) -> Unit = { url, origin ->
+        if (!signInLoop.admitsLoad(origin)) {
+            Log.w(TAG, "Skipped an automatic load: the shell is parked on sign-in until the shopper taps")
+            container.webSession.cancelPending()
+        } else if (!container.webSession.admitLoad(url)) {
             currentOnNotice("Caramel did not open a sign-in link because the app did not create it.")
         } else if (webViewHolder[0]?.loadGuarded(url) != true) {
             currentOnNotice("Caramel did not open a page because it is not on grabcaramel.com.")
@@ -147,7 +152,7 @@ fun CaramelApp(
     // What to do with a handoff attempt; a failure is already on screen through webSession.failure.
     val applyHandoffStep: (HandoffStep) -> Unit = { step ->
         when (step) {
-            is HandoffStep.Load -> navigate(step.redeemUrl)
+            is HandoffStep.Load -> navigate(step.redeemUrl, SignInLoopGuard.LoadOrigin.AUTOMATIC)
             HandoffStep.SignInRequired -> showSignIn = true
             is HandoffStep.Failed, HandoffStep.Superseded -> Unit
         }
@@ -289,22 +294,23 @@ fun CaramelApp(
     LaunchedEffect(webView, requestedUrl) {
         if (requestedUrl != null) {
             started = true
-            navigate(requestedUrl)
+            navigate(requestedUrl, SignInLoopGuard.LoadOrigin.AUTOMATIC)
             onRequestedUrlConsumed()
         } else if (!started) {
             started = true
-            navigate(ShellRoutes.homeUrl())
+            navigate(ShellRoutes.homeUrl(), SignInLoopGuard.LoadOrigin.AUTOMATIC)
         }
     }
 
     BackHandler(enabled = canGoBack) { webView.goBack() }
 
+    // Only ever called from a tap (a tab, Try again), after shopperTapped().
     val openTab: (ShellTab) -> Unit = { tab ->
         if (tab.needsWebSession && session.isSignedIn && !container.webSession.active) {
             // Signed in natively, no web session yet: link it first, landing on this tab.
             startHandoff(tab.startPath)
         } else {
-            navigate(ShellRoutes.urlFor(tab))
+            navigate(ShellRoutes.urlFor(tab), SignInLoopGuard.LoadOrigin.SHOPPER_TAP)
         }
     }
 
@@ -459,7 +465,8 @@ fun CaramelApp(
                                 modifier = Modifier.fillMaxWidth(),
                                 onClick = {
                                     showAccount = false
-                                    navigate(ShellRoutes.privacyUrl())
+                                    shopperTapped()
+                                    navigate(ShellRoutes.privacyUrl(), SignInLoopGuard.LoadOrigin.SHOPPER_TAP)
                                 },
                             ) { Text("Privacy policy") }
                         }

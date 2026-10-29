@@ -747,10 +747,18 @@ struct SignInLoopCoordinator {
         }
     }
 
-    /// `navigation` started: it is the tab's current main-frame navigation from now on.
+    /// `navigation` started: it is the tab's current main-frame navigation from now on. A different one
+    /// starting while the redeem's navigation is in flight supersedes it: the redeem fails now (so the
+    /// router fails or releases the loads held behind the handoff) instead of waiting on callbacks that
+    /// are no longer current and so would never settle it.
     mutating func navigationStarted(_ navigation: ObjectIdentifier?) -> [SignInLoopEffect] {
         currentNavigation = navigation
-        return isParked ? [] : [.showLoading]
+        var effects: [SignInLoopEffect] = []
+        if let attempt = redeem, !attempt.readingCookie, let bound = attempt.navigation, let navigation = navigation, navigation != bound {
+            redeem = nil
+            effects = [.logError("Another navigation replaced the web-session redeem before it landed."), .settleRedeem(attempt: attempt.id, .failed("Your account page did not open. Please try again."))]
+        }
+        return isParked ? effects : effects + [.showLoading]
     }
 
     /// `navigation` finished at `url`. The redeem's own navigation worked when it ended on a page the

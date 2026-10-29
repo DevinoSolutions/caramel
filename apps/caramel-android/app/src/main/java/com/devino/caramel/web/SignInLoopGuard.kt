@@ -25,6 +25,15 @@ class SignInLoopGuard {
         PARKED,
     }
 
+    /** Who asked for a load. */
+    enum class LoadOrigin {
+        /** A tap by the shopper (a tab, Try again, the privacy link); the tap has already called [userTapped]. */
+        SHOPPER_TAP,
+
+        /** Anything else: the home load after a WebView rebuild or session change, an incoming link, a handoff's redeem URL. */
+        AUTOMATIC,
+    }
+
     var isParked: Boolean = false
         private set
 
@@ -41,8 +50,8 @@ class SignInLoopGuard {
         return Admission.PARKED_NOW
     }
 
-    /** Whether a navigation or load the shopper did not tap for may run: false while parked. */
-    fun admitsAutomaticNavigation(): Boolean = !isParked
+    /** Whether a load from [origin] may run: an automatic one is refused while parked. */
+    fun admitsLoad(origin: LoadOrigin): Boolean = origin == LoadOrigin.SHOPPER_TAP || !isParked
 
     /** The shopper tapped (Sign in, Try again, a tab, a retry banner): unpark and start the count over. Call BEFORE the tap's own load. */
     fun userTapped() {

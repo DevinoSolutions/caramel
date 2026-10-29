@@ -1287,6 +1287,36 @@ final class SignInLoopCoordinatorTests: XCTestCase {
         XCTAssertEqual(cancel(&coordinator, navigation), [], "with no redeem, a cancellation shows nothing")
     }
 
+    func testAnotherNavigationStartingMidRedeemFailsTheRedeemAndReleasesTheHeldLoads() {
+        // Review round 5, item 1: start(A) -> start(B) -> cancel(A) -> finish(B) used to leave the redeem pending forever.
+        var coordinator = SignInLoopCoordinator()
+        let redeemNavigation = FakeNavigation()
+        let ordinary = FakeNavigation()
+        beginRedeem(&coordinator, attempt: 1, navigation: redeemNavigation)
+        let superseded = coordinator.navigationStarted(ObjectIdentifier(ordinary))
+        let failure = RedeemOutcome.failed("Your account page did not open. Please try again.")
+        XCTAssertEqual(acts(superseded), [.settleRedeem(attempt: 1, failure), .showLoading])
+        XCTAssertEqual(cancel(&coordinator, redeemNavigation), [], "A's late cancel is never applied to B")
+        XCTAssertEqual(acts(fail(&coordinator, redeemNavigation)), [])
+        XCTAssertEqual(coordinator.navigationFinished(ObjectIdentifier(ordinary), at: deals), [.showLoaded], "B is an ordinary page")
+
+        // What ShellRouter does with that settle: the handoff leaves .handingOff, so held loads are failed and new ones no longer wait.
+        var machine = WebSessionMachine()
+        XCTAssertTrue(machine.begin())
+        XCTAssertEqual(WebSessionContext.of(isSignedIn: true, wipesInFlight: 0, phase: machine.phase), .pending)
+        guard case .failed(let message) = failure else { return XCTFail("a failed outcome") }
+        XCTAssertEqual(machine.redeemNavigationFailed(message), .showError(message))
+        XCTAssertEqual(WebSessionContext.of(isSignedIn: true, wipesInFlight: 0, phase: machine.phase), .needed)
+    }
+
+    func testTheRedeemsOwnNavigationStartingDoesNotSupersedeIt() {
+        var coordinator = SignInLoopCoordinator()
+        let navigation = FakeNavigation()
+        beginRedeem(&coordinator, attempt: 1, navigation: navigation) // includes navigationStarted(navigation)
+        XCTAssertEqual(coordinator.navigationStarted(ObjectIdentifier(navigation)), [.showLoading])
+        XCTAssertEqual(coordinator.navigationFinished(ObjectIdentifier(navigation), at: profile), [.showLoaded, .readSessionCookie(attempt: 1)])
+    }
+
     func testAStaleCallbackDuringTheCookieReadChangesNothing() {
         // Review round 4, finding C: the reading-cookie phase.
         var coordinator = SignInLoopCoordinator()

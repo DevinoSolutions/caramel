@@ -273,16 +273,19 @@ class SignInLoopGuardTest {
         for (later in listOf(SignInLoopGuard.WINDOW_MILLIS + 5 * second, 3_600_000L, 86_400_000L)) {
             assertEquals(SignInLoopGuard.Admission.PARKED, guard.automaticSignInRequest(start + later))
             assertTrue(guard.isParked)
-            assertFalse(guard.admitsAutomaticNavigation())
+            assertFalse(guard.admitsLoad(SignInLoopGuard.LoadOrigin.AUTOMATIC))
         }
     }
 
     @Test
-    fun aParkedShellRefusesNavigation() {
+    fun aParkedShellRefusesAutomaticLoadsButNotATap() {
+        // The home load after a WebView rebuild or a session change, and a late handoff's redeem URL, are AUTOMATIC.
         val guard = SignInLoopGuard()
-        assertTrue(guard.admitsAutomaticNavigation())
+        assertTrue(guard.admitsLoad(SignInLoopGuard.LoadOrigin.AUTOMATIC))
         val parked = parkedGuard()
-        assertFalse(parked.admitsAutomaticNavigation())
+        assertFalse(parked.admitsLoad(SignInLoopGuard.LoadOrigin.AUTOMATIC))
+        assertTrue(parked.admitsLoad(SignInLoopGuard.LoadOrigin.SHOPPER_TAP))
+        assertTrue("a tap does not unpark by loading; userTapped does", parked.isParked)
     }
 
     @Test
@@ -290,7 +293,7 @@ class SignInLoopGuardTest {
         val guard = parkedGuard()
         guard.userTapped()
         assertFalse(guard.isParked)
-        assertTrue(guard.admitsAutomaticNavigation())
+        assertTrue(guard.admitsLoad(SignInLoopGuard.LoadOrigin.AUTOMATIC))
         repeat(SignInLoopGuard.MAX_AUTOMATIC_REQUESTS) { lap ->
             assertEquals(SignInLoopGuard.Admission.ADMITTED, guard.automaticSignInRequest(start + (6 + lap) * second))
         }
