@@ -1,5 +1,6 @@
 'use client'
 
+import { clearAuthRedirectCount } from '@/lib/auth/authRedirectGuard'
 import { endClientSession } from '@/lib/auth/endClientSession'
 import { promptSupportOnFailure } from '@/lib/feedback/promptSupportOnFailure'
 import type { ProfileOverview } from '@/lib/profile/types'
@@ -13,9 +14,14 @@ import { useCallback, useEffect, useState } from 'react'
 // signed-in user, and adding a cache layer for that would be more machinery
 // than the problem has.
 
-const LOGIN_PATH = '/login?next=%2Fprofile'
-
-export type OverviewStatus = 'loading' | 'ready' | 'error'
+/**
+ * - `ending-session`: the server answered 401; the stale client session is
+ *   being cleared. The page waits, so /login never sees that session.
+ * - `auth-required`: that sign-out has finished (or failed, already reported):
+ *   the page sends the shopper to sign in, whatever the client session says.
+ */
+export type OverviewStatus =
+    'loading' | 'ready' | 'error' | 'ending-session' | 'auth-required'
 
 export interface UseProfileOverviewResult {
     overview: ProfileOverview | null
@@ -41,9 +47,13 @@ export interface UseProfileOverviewResult {
  * A 401 that arrives anyway means the client believes it is signed in (the
  * session cookie is still there) while the server rejects that session —
  * expired or revoked. That is a signed-out user, not a fault: the hook clears
- * the client session and sends them to sign in, and neither reports an error
+ * the client session and reports `auth-required`, and neither reports an error
  * to Sentry (CARAMEL-N: one such user reported it on every visit) nor shows
  * the error notice. Any other non-OK status keeps the error path.
+ *
+ * The hook never navigates: ProfilePageClient owns the one move to /login, so
+ * a 401 and the session store emptying are a single transition that counts
+ * once against the redirect loop guard (T-10055).
  */
 export function useProfileOverview(enabled: boolean): UseProfileOverviewResult {
     const [overview, setOverview] = useState<ProfileOverview | null>(null)
@@ -69,20 +79,16 @@ export function useProfileOverview(enabled: boolean): UseProfileOverviewResult {
                         message:
                             'Overview returned 401 for a client-side session; ending it and redirecting to sign in',
                     })
+                    // Set before the sign-out is awaited: the page reads it as
+                    // the reason, even if the session store empties first.
+                    setStatus('ending-session')
                     // Failures here are reported inside endClientSession and
                     // must not strand the user on a page that cannot load.
                     await endClientSession()
-                    // Clearing the session flips the page's own signed-out
-                    // state, which disables this hook (cancelled) while
-                    // ProfilePageClient replaces itself with /login; and a user
-                    // who already navigated away must not be pulled back.
-                    // Either way the navigation here is moot.
-                    if (cancelled) return
-                    // Stays in 'loading' (the page's skeleton) until the
-                    // navigation lands: no error notice flashes first.
-                    // replace, not assign: Back from /login must not land on a
-                    // profile that sends the shopper straight back (CARAMEL-2Y).
-                    window.location.replace(LOGIN_PATH)
+                    // Not gated on `cancelled`: clearing the session disables
+                    // this hook (cleanup runs) while the page is still waiting
+                    // for this state. After an unmount it is a no-op.
+                    setStatus('auth-required')
                     return
                 }
                 if (!res.ok) {
@@ -91,6 +97,9 @@ export function useProfileOverview(enabled: boolean): UseProfileOverviewResult {
                     )
                 }
                 const data = (await res.json()) as ProfileOverview
+                // The server confirmed the session: earlier auth redirects
+                // are not a loop in progress.
+                clearAuthRedirectCount()
                 if (cancelled) return
                 setOverview(data)
                 setStatus('ready')
