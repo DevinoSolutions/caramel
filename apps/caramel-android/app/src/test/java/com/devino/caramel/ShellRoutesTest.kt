@@ -289,6 +289,15 @@ class SignInLoopGuardTest {
     }
 
     @Test
+    fun aSignInTapLetsTheHandoffThatFollowsLoad() {
+        // Parked, then Account & privacy > Sign in > Continue: each tap calls userTapped, so the handoff's
+        // redeem URL (an AUTOMATIC load once the sign-in lands) is admitted.
+        val guard = parkedGuard()
+        guard.userTapped()
+        assertTrue(guard.admitsLoad(SignInLoopGuard.LoadOrigin.AUTOMATIC))
+    }
+
+    @Test
     fun aTapUnparksAndStartsTheCountOver() {
         val guard = parkedGuard()
         guard.userTapped()

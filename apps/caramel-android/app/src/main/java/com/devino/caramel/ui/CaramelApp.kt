@@ -176,7 +176,9 @@ fun CaramelApp(
 
     // Signing in natively while a token is still set (the link fallback) signs the old one out first, so its web session
     // and its server session end before another account can sign in.
+    // A tap on Continue with Apple/Google (however the sheet opened) unparks first, so the handoff the sign-in starts may load.
     val signInWith: (OAuthProvider) -> Unit = { provider ->
+        shopperTapped()
         showSignIn = false
         scope.launch {
             val hadToken = container.session.token != null
@@ -438,6 +440,7 @@ fun CaramelApp(
                             AccountAction.SIGN_IN -> Button(
                                 modifier = Modifier.fillMaxWidth(),
                                 onClick = {
+                                    shopperTapped()
                                     showAccount = false
                                     showSignIn = true
                                 },
