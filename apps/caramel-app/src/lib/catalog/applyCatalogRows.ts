@@ -64,6 +64,7 @@
 // a genuinely large expiry is still possible by resending with force.
 import { Prisma } from '@/generated/prisma/client'
 import type { IngestCatalogPayload } from '@/lib/catalog/ingestSchemas'
+import { couponInputNamesOtherField } from '@/lib/catalog/storeConfigSanity'
 import { VISIBLE_COUPON_STATUSES, isReferralCoupon } from '@/lib/coupons'
 import prisma from '@/lib/prisma'
 
@@ -214,6 +215,27 @@ function logCouponOutcome(counts: CatalogCounts, mismatchedIds: string[]) {
             : ''
     console.warn(
         `[ingest/catalog] skippedIdMismatch=${mismatchedIds.length}: these ids hold a different coupon (site or code) in the catalog and were not written: ${named}${more}`,
+    )
+}
+
+/**
+ * Store configs in this push that are written but never served, because their
+ * coupon input names another field (storeConfigSanity.ts). Store names only.
+ */
+function logUnservedStoreConfigs(
+    storeConfigs: IngestCatalogPayload['storeConfigs'],
+) {
+    const unserved = storeConfigs
+        .filter(s => couponInputNamesOtherField(s.coupon_input_xpath))
+        .map(s => s.store_name)
+    if (unserved.length === 0) return
+    const named = unserved.slice(0, MISMATCH_LOG_ID_LIMIT).join(',')
+    const more =
+        unserved.length > MISMATCH_LOG_ID_LIMIT
+            ? ` (+${unserved.length - MISMATCH_LOG_ID_LIMIT} more)`
+            : ''
+    console.warn(
+        `[ingest/catalog] storeConfigsNotServed=${unserved.length}: the coupon input names a ZIP, email, search or gift-card field, so the extension gets no config for: ${named}${more}`,
     )
 }
 
@@ -629,6 +651,7 @@ export async function applyCatalogRows(
             },
         )
         logCouponOutcome(result.coupons, mismatchedIds)
+        logUnservedStoreConfigs(payload.storeConfigs)
         return result
     } catch (error) {
         if (error instanceof TombstoneGateError) {
