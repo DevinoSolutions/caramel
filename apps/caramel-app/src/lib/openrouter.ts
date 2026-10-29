@@ -28,10 +28,21 @@ export interface ChatOptions {
 
 export class OpenRouterError extends Error {
     status?: number
-    constructor(message: string, status?: number) {
+    /** True when the call was aborted by its own timeout (a slow upstream, not
+     * a defect here); lets callers report it as a warning, not an error. */
+    readonly timedOut: boolean
+    /** The underlying error (the tsconfig lib predates ES2022 `Error.cause`). */
+    readonly cause?: unknown
+    constructor(
+        message: string,
+        status?: number,
+        options: { timedOut?: boolean; cause?: unknown } = {},
+    ) {
         super(message)
         this.name = 'OpenRouterError'
         this.status = status
+        this.timedOut = options.timedOut ?? false
+        this.cause = options.cause
     }
 }
 

@@ -11,22 +11,26 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 // MOCK (announced): `chat` is the paid OpenRouter call — counting its calls IS
 // the thing under test (how many times a sender can make us pay).
-const { chatMock, captureMessageMock, reportRejectionMock } = vi.hoisted(
-    () => ({
-        chatMock: vi.fn(async () =>
-            JSON.stringify({ primary: 'apparel', confidence: 0.9 }),
-        ),
-        captureMessageMock: vi.fn(),
-        reportRejectionMock: vi.fn(async () => false),
-    }),
-)
+const {
+    chatMock,
+    captureMessageMock,
+    captureExceptionMock,
+    reportRejectionMock,
+} = vi.hoisted(() => ({
+    chatMock: vi.fn(async () =>
+        JSON.stringify({ primary: 'apparel', confidence: 0.9 }),
+    ),
+    captureMessageMock: vi.fn(),
+    captureExceptionMock: vi.fn(),
+    reportRejectionMock: vi.fn(async () => false),
+}))
 vi.mock('@/lib/openrouter', async importOriginal => {
     const actual = await importOriginal<typeof import('@/lib/openrouter')>()
     return { ...actual, chat: chatMock }
 })
 vi.mock('@sentry/nextjs', () => ({
     addBreadcrumb: vi.fn(),
-    captureException: vi.fn(),
+    captureException: captureExceptionMock,
     captureMessage: captureMessageMock,
 }))
 // MOCK (announced): abuseSignal's own throttling/PostHog fan-out is pinned in
@@ -49,6 +53,7 @@ import {
     ClassifyModelBudgetExceededError,
     resetClassifyModelBudgetForTests,
 } from '@/lib/classifyCartModelBudget'
+import { OpenRouterError } from '@/lib/openrouter'
 
 const FORGED_ORIGIN = 'chrome-extension://forgedforgedforgedforgedforgedfo'
 
@@ -73,6 +78,7 @@ beforeEach(() => {
     resetClassifyModelBudgetForTests()
     chatMock.mockClear()
     captureMessageMock.mockClear()
+    captureExceptionMock.mockClear()
     reportRejectionMock.mockClear()
 })
 
@@ -170,5 +176,47 @@ describe('classify-cart model-call budget', () => {
         for (let i = 0; i < CLASSIFY_MODEL_BUDGET.perClient * 2; i++) {
             expect(await refusalScope('v')).toBe('global')
         }
+    })
+})
+
+// CARAMEL-3E / T-10497: a model timeout is a grouped warning, not a new error
+// each release. The response stays 502 + 'classification failed' either way.
+describe('classify-cart model failures reach Sentry grouped by cause', () => {
+    it('a timed-out model call -> warning + timeout fingerprint, 502', async () => {
+        chatMock.mockRejectedValueOnce(
+            new DOMException('aborted', 'AbortError'),
+        )
+        const res = await forged('203.0.113.20')
+        expect(res.status).toBe(502)
+        expect(await res.json()).toEqual({ error: 'classification failed' })
+        expect(captureExceptionMock).toHaveBeenCalledTimes(1)
+        const [err, context] = captureExceptionMock.mock.calls[0] as [
+            OpenRouterError,
+            { level: string; fingerprint: string[] },
+        ]
+        expect(err).toBeInstanceOf(OpenRouterError)
+        expect(context.level).toBe('warning')
+        expect(context.fingerprint).toEqual([
+            'classify-cart',
+            'model_call',
+            'timeout',
+        ])
+    })
+
+    it('another OpenRouterError -> error fingerprint at default level, 502', async () => {
+        chatMock.mockRejectedValueOnce(new OpenRouterError('provider 500', 500))
+        const res = await forged('203.0.113.21')
+        expect(res.status).toBe(502)
+        expect(await res.json()).toEqual({ error: 'classification failed' })
+        const [, context] = captureExceptionMock.mock.calls[0] as [
+            unknown,
+            Record<string, unknown>,
+        ]
+        expect('level' in context).toBe(false)
+        expect(context.fingerprint).toEqual([
+            'classify-cart',
+            'model_call',
+            'error',
+        ])
     })
 })

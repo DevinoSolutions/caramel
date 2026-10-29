@@ -26,6 +26,9 @@ export const CATEGORY_ENUM = [
 
 export type Category = (typeof CATEGORY_ENUM)[number]
 
+// Abort deadline for the model call (eval-gated together with maxTokens).
+const CLASSIFY_TIMEOUT_MS = 7000
+
 export interface CartSignals {
     domain: string
     url_path?: string
@@ -269,12 +272,25 @@ export async function classifyCart(
             // another eval-gated run (evals/README.md §Codify).
             maxTokens: 600,
             temperature: 0,
-            timeoutMs: 7000,
+            timeoutMs: CLASSIFY_TIMEOUT_MS,
             // No paid-fallback headers: the 7 s abort is under MIN_PAID_PATH_DEADLINE_SECONDS (20 s) and the route is guest-reachable.
         })
     } catch (e) {
         if (e instanceof OpenRouterError) throw e
-        throw new OpenRouterError(`classify failed: ${(e as Error).message}`)
+        // openrouter.ts aborts the fetch at timeoutMs: flag it so the route
+        // reports a slow upstream as a warning (CARAMEL-3E, T-10497).
+        if (e instanceof Error && e.name === 'AbortError') {
+            throw new OpenRouterError(
+                `classify timed out after ${CLASSIFY_TIMEOUT_MS} ms`,
+                undefined,
+                { timedOut: true, cause: e },
+            )
+        }
+        throw new OpenRouterError(
+            `classify failed: ${(e as Error).message}`,
+            undefined,
+            { cause: e },
+        )
     }
     const value = parseResponse(raw, signals.domain)
     cache.set(key, value)
