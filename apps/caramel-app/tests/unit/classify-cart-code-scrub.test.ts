@@ -91,12 +91,18 @@ describe('classify-cart scrubs cart_items before the model sees them', () => {
         ['Code applied: X', []],
         ['Promo applied FALL20', []],
         ['You saved $5', []],
+        ['Discount applied', []],
+        ['Coupon applied', []],
         ['Savings planner $12.99', ['Savings planner $12.99']],
         ['Coupon organizer - $8', ['Coupon organizer - $8']],
         ['Savings planner Qty: 2 $12.99', ['Savings planner Qty: 2 $12.99']],
         ['Promontory hiking boots $89', ['Promontory hiking boots $89']],
         ['Promo-pack bundle', ['Promo-pack bundle']],
         ['Quantity: 2', ['Quantity: 2']],
+        [
+            'Coupon organizer with applied floral print',
+            ['Coupon organizer with applied floral print'],
+        ],
         ['Gift voucher holder', ['Gift voucher holder']],
     ])('cart row %j -> %j', async (row, expected) => {
         await POST(request({ domain: 'shop.example.com', cart_items: [row] }))

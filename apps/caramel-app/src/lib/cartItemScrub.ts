@@ -11,7 +11,7 @@
 //      immediately followed by ':' or a spaced dash, by a NEGATIVE or
 //      parenthesised amount ("-$5.00", "($5.00)", "-5%"), or by a code-like token
 //      and applied / removed / redeemed. Also dropped: a row that is only a
-//      negative amount, one that says "applied" next to a code / coupon / promo /
+//      negative amount, one that says "applied" right beside a code / coupon / promo /
 //      voucher / discount word, and "You saved <amount>" (it holds no code, so
 //      dropping it costs nothing and keeps the rule uniform).
 //      A label word elsewhere or with a price ("Savings planner $12.99",
@@ -47,8 +47,10 @@ const ONLY_NEGATIVE_AMOUNT = new RegExp(
     '^\\s*(?:[-–−]\\s?[$€£¥]?\\s?\\d[\\d.,]*\\s?[%$€£¥]?|\\(\\s?[$€£¥]?\\s?\\d[\\d.,]*\\s?[%$€£¥]?\\s?\\))\\s*$',
     'u',
 )
-const APPLIED = /\bapplied\b/i
-const DISCOUNT_WORD = /\b(?:code|coupon|promo|voucher|discount)\b/i
+// "applied" must sit right next to the discount word ("Coupon applied",
+// "applied promo"): "Coupon organizer with applied floral print" is a product.
+const APPLIED_ADJACENT =
+    /\b(?:code|coupon|promo|voucher|discount)\s+applied\b|\bapplied\s+(?:code|coupon|promo|voucher|discount)\b/i
 
 const CODE_LIKE = new RegExp(
     '^(?=[\\p{L}\\p{N}#_-]*\\p{L})(?=[\\p{L}\\p{N}#_-]*[\\p{N}#])[\\p{L}\\p{N}#_-]{3,}[!.,;]?$|^\\p{Lu}[\\p{Lu}_-]{2,}[!.,;]?$',
@@ -59,7 +61,7 @@ function isDiscountLine(item: string): boolean {
     if (STARTS_WITH_LABEL.test(item)) return true
     if (YOU_SAVED_AMOUNT.test(item)) return true
     if (ONLY_NEGATIVE_AMOUNT.test(item)) return true
-    if (APPLIED.test(item) && DISCOUNT_WORD.test(item)) return true
+    if (APPLIED_ADJACENT.test(item)) return true
     const token = LABEL_TOKEN_VERB.exec(item)?.[1]
     return token !== undefined && CODE_LIKE.test(token)
 }
