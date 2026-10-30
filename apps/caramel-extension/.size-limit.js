@@ -367,9 +367,14 @@ module.exports = [
         // subtotal rows in 17 more languages (Danish to Arabic), partial
         // totals refused ("Totale parziale"), and the won, yuan, rupiah,
         // hryvnia and koruna amounts. Measured 38.31 kB.
+        // 2026-10-30 (T-10535), raised 38.8 -> 41.3 kB: a toggle click from
+        // which no box is used is undone (the popup it opened closed by its
+        // own close control, Escape, or the toggle again), and the server's
+        // pick never clicks the toggle the rules already tried. Measured
+        // 38.36 -> 40.59 kB.
         // It is written only here: tests/finder-module-build.test.mjs reads
         // it.
-        limit: '38.8 KB',
+        limit: '41.3 KB',
         brotli: false,
     },
     {

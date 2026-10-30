@@ -1804,6 +1804,148 @@ function toggleRefused(el) {
     )
 }
 
+/* ------------------------------------------- undoing a click that found no box */
+// A toggle the finder clicked, from whose reveal no box was then used, must not
+// leave what it opened over the shopper's cart. A store's "Have a coupon
+// code?" can open an info popup that only says codes go in at checkout: the
+// run then ended on the copy-a-code card with that popup still covering the
+// cart. Before each click the overlays already showing are noted; one the
+// click opened is closed the way a shopper would: its own close control, else
+// Escape, else the toggle again when it now reports itself expanded.
+const DIALOG_SEL =
+    'dialog[open], [role="dialog"], [role="alertdialog"], [aria-modal="true"]'
+const OVERLAY_NAME_RE = /modal|popup|dialog|overlay|lightbox|drawer/i
+const CLOSE_NAME_RE = /\b(close|dismiss)\b/i
+const CLOSE_CLASS_RE = /(^|[\s_-])close($|[\s_-])/i
+const CLOSE_TEXT_RE = /^(close|dismiss|[×✕✖✗x])$/i
+
+const classOf = el =>
+    typeof el.className === 'string'
+        ? el.className
+        : el.getAttribute('class') || ''
+
+// Our own prompt and cards are never the store's overlay.
+const ownUi = el => !!el.closest('[id^="caramel"]')
+
+// A dialog, or anything pinned over the page (position: fixed), in view.
+function overlayShown(el) {
+    if (ownUi(el) || !visible(el)) return false
+    return el.matches(DIALOG_SEL) || styleOf(el).position === 'fixed'
+}
+
+// Where a popup lives: an element the page marks as a dialog, a direct child
+// of <body> (where most popup scripts put theirs), or one named like one.
+// Only these are styled, so a long page is not read element by element.
+function shownOverlays(doc) {
+    const out = new Set()
+    if (!doc.body) return out
+    const candidates = new Set(doc.querySelectorAll(DIALOG_SEL))
+    for (const el of doc.body.children) candidates.add(el)
+    for (const el of doc.body.getElementsByTagName('*'))
+        if (OVERLAY_NAME_RE.test(classOf(el) + ' ' + el.id)) candidates.add(el)
+    for (const el of candidates) if (overlayShown(el)) out.add(el)
+    return out
+}
+
+// What a click on `toggle` could change, noted before it is clicked.
+const beforeReveal = (doc, toggle) => ({
+    overlays: shownOverlays(doc),
+    expanded: toggle.getAttribute('aria-expanded'),
+})
+
+// The overlay's own close control: a control named close or dismiss (aria
+// label, title, class), or one whose whole text is "×".
+function closeControl(overlay) {
+    const controls = overlay.querySelectorAll(
+        'button, [role="button"], a, input[type="button"], [class*="close"], [class*="Close"]',
+    )
+    for (const el of controls) {
+        const named =
+            CLOSE_NAME_RE.test(ariaOf(el) || '') ||
+            CLOSE_NAME_RE.test(el.title || '') ||
+            CLOSE_CLASS_RE.test(classOf(el)) ||
+            CLOSE_TEXT_RE.test(norm(textOf(el) || el.value))
+        if (
+            named &&
+            visible(el) &&
+            !caramelIsForbiddenControl(el) &&
+            !navigatesAway(el) &&
+            !toggleRefused(el)
+        )
+            return el
+    }
+    return null
+}
+
+// Escape, as the key a shopper presses: popup scripts listen for it on the
+// page (keydown or keyup). A native <dialog> closes on the browser's own
+// Escape only, which a script's key event never reaches, so it is closed.
+function pressEscape(doc, overlays) {
+    const target = doc.activeElement || doc.body
+    const Key = doc.defaultView.KeyboardEvent
+    for (const type of ['keydown', 'keyup'])
+        target.dispatchEvent(
+            new Key(type, {
+                key: 'Escape',
+                code: 'Escape',
+                keyCode: 27,
+                which: 27,
+                bubbles: true,
+                cancelable: true,
+            }),
+        )
+    for (const o of overlays)
+        if (o.tagName === 'DIALOG' && o.open && typeof o.close === 'function')
+            o.close()
+}
+
+// Wait (briefly: a popup may fade out) until done() holds. true when it does.
+async function settles(done) {
+    for (let waited = 0; waited < 1000; waited += 100) {
+        if (done()) return true
+        await sleep(100)
+    }
+    return done()
+}
+
+/* Put back what clicking `toggle` opened, when no box from it is used. */
+async function undoReveal(doc, toggle, before) {
+    const now = [...shownOverlays(doc)].filter(el => !before.overlays.has(el))
+    // The outermost of each: closing it closes what it holds.
+    const opened = now.filter(el => !now.some(o => o !== el && o.contains(el)))
+    const expandedNow = () =>
+        before.expanded !== 'true' &&
+        toggle.getAttribute('aria-expanded') === 'true'
+    if (!opened.length && !expandedNow()) return
+    const showing = () => opened.filter(overlayShown)
+    const tried = []
+    for (const o of opened) {
+        if (!overlayShown(o)) continue
+        const x = closeControl(o)
+        if (!x) continue
+        tried.push('close')
+        x.click()
+        await settles(() => !overlayShown(o))
+    }
+    if (showing().length) {
+        tried.push('escape')
+        pressEscape(doc, showing())
+        await settles(() => !showing().length)
+    }
+    if (expandedNow() && (showing().length || !opened.length)) {
+        tried.push('toggle')
+        toggle.click()
+        await settles(() => !showing().length && !expandedNow())
+    }
+    const closed = !showing().length && !expandedNow()
+    log('FINDER_TOGGLE_UNDONE', {
+        how: closed ? tried.at(-1) || null : null,
+        tried,
+        closed,
+        overlays: opened.length,
+    })
+}
+
 /* Can the finder see a promo box on this page, without touching it?
  * Used by checkout detection, so it never clicks: a visible confident box, or a
  * reveal toggle, plus a readable total. */
@@ -1898,6 +2040,8 @@ export async function caramelDiscoveredRecord(rec, doc = document) {
     }
     let found = caramelDiscoverCouponBox(doc)
     const opened = found.inputVisible ? null : found.toggle
+    // Puts back what the toggle click opened, when no box from it is used.
+    let undo = null
     if (!found.inputVisible && found.toggle) {
         if (toggleRefused(found.toggle)) {
             log('AUTO_INSERT_REFUSED_CONTROL', {
@@ -1908,6 +2052,9 @@ export async function caramelDiscoveredRecord(rec, doc = document) {
         const toggle = found.toggle
         const check = checkboxOf(toggle)
         const wasChecked = check?.checked
+        // A checkbox is put back below, by its own checked state.
+        const before = check ? null : beforeReveal(doc, toggle)
+        if (before) undo = () => undoReveal(doc, toggle, before)
         toggle.click()
         for (let waited = 0; waited < 2500; waited += 250) {
             await sleep(250)
@@ -1927,7 +2074,17 @@ export async function caramelDiscoveredRecord(rec, doc = document) {
     }
     if (!found.inputVisible || !confident(found)) {
         log('FINDER_NO_BOX', { reasons: found.reasons })
-        return caramelPickedRecord(rec, doc)
+        // A click that showed no field at all opened nothing the server's
+        // pick could use either: the page is put back before the pick reads
+        // it. A field it did show is left for the pick, and put back only if
+        // the pick does not use it.
+        if (undo && !found.inputVisible) {
+            await undo()
+            undo = null
+        }
+        const picked = await caramelPickedRecord(rec, doc, opened)
+        if (!picked && undo) await undo()
+        return picked
     }
     log('FINDER_PICKED', { reasons: found.reasons })
     return savable(
@@ -2447,7 +2604,8 @@ async function askPick(domain, doc) {
 }
 
 // Called from caramelDiscoveredRecord, after the rules found no box.
-async function caramelPickedRecord(rec, doc) {
+// `clicked`: the toggle the rules already clicked this run, never clicked again.
+async function caramelPickedRecord(rec, doc, clicked = null) {
     if (!(await caramelCouponBoxLlmOn())) return null
     const domain = pickKey(rec.domain || doc.location?.hostname)
     if (!domain) return null
@@ -2462,7 +2620,7 @@ async function caramelPickedRecord(rec, doc) {
     }
     // Every pick's button is the box's own (in its form, or its small
     // panel): a far-away "Apply credit" is someone else's apply.
-    const got = await checkedPick(doc, picked, true)
+    const got = await checkedPick(doc, picked, true, clicked)
     if (!got) return null
     const { found, opened, total } = got
     log('FINDER_PICK_USED', {
@@ -2501,9 +2659,10 @@ async function caramelPickedRecord(rec, doc) {
 /* Check a box someone else named (the server's pick, or a pick kept from the
  * last page) on this page, before anything is touched. `picked` holds the
  * elements and whether the box applies on Enter; `own` asks that a button be
- * the box's own (in its form, or its small panel). Returns
- * { found, opened, total } or null. */
-async function checkedPick(doc, picked, own) {
+ * the box's own (in its form, or its small panel). `clicked` is a toggle the
+ * rules already clicked this run without finding a box: it is not clicked
+ * again. Returns { found, opened, total } or null. */
+async function checkedPick(doc, picked, own, clicked = null) {
     // The cart may have re-rendered while the server answered: the baseline is
     // the total as it is now, and with no readable total nothing can be
     // measured.
@@ -2532,9 +2691,15 @@ async function checkedPick(doc, picked, own) {
 
     let found = null
     let opened = null
+    let before = null
     if (input && visible(input)) {
         found = { input, button: buttonFor(input) }
+    } else if (toggle === clicked) {
+        // The rules' click on this toggle showed no box this run; a second
+        // click would only open (or shut) the same thing again.
+        log('FINDER_PICK_TOGGLE_TRIED', {})
     } else if (toggle) {
+        before = beforeReveal(doc, toggle)
         toggle.click()
         for (let waited = 0; waited < 2500 && !found; waited += 250) {
             await sleep(250)
@@ -2552,6 +2717,7 @@ async function checkedPick(doc, picked, own) {
         opened = toggle
     }
     if (!usableBox(found)) {
+        if (before) await undoReveal(doc, toggle, before)
         log('FINDER_PICK_UNUSABLE', {
             input: !!input,
             button: !!button,
